@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 217 33% 17%;
+    --card: 0 0% 100%;
+    --card-foreground: 217 33% 17%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 217 33% 17%;
+    --primary: 207 88% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 100% 96%;
+    --secondary-foreground: 207 88% 30%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 14% 40%;
+    --accent: 210 100% 96%;
+    --accent-foreground: 207 88% 30%;
+    --destructive: 6 78% 57%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 207 88% 36%;
+    --radius: 0.75rem;
+    --font-heading: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+    --font-stat: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+  h1, h2, h3, h4, h5 {
+    @apply font-heading;
+  }
+}
+
+@layer utilities {
+  .font-stat { font-family: var(--font-stat); }
+  .shadow-soft { box-shadow: 0 1px 2px rgba(16,42,67,0.04), 0 8px 24px rgba(16,42,67,0.05); }
+  .shadow-card { box-shadow: 0 1px 3px rgba(16,42,67,0.05); }
+  .shadow-float { box-shadow: 0 12px 40px rgba(11,92,173,0.12); }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .gradient-hero { background: linear-gradient(135deg, #0B5CAD 0%, #083D77 100%); }
+  .bg-panel-blue { background: #EDF6FF; }
+  .bg-highlight-yellow { background: #FFF8E6; }
+  .shadow-deep { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 10px 30px rgba(16, 42, 67, 0.06); }
+}
