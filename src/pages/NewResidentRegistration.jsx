@@ -3,13 +3,13 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, Check, User, Phone,
-  MapPin, Calendar, ChevronDown, Shield, Camera, FileText, Edit3, ShieldCheck, AlertCircle, CreditCard,
+  MapPin, Calendar, ChevronDown, Shield, Camera, FileText, Edit3,
 } from "lucide-react";
-import { LOGO_URL } from "@/lib/brand";
 import StepIndicator4 from "@/components/register/StepIndicator4";
 import { TextField, SelectField } from "@/components/register/FormFields";
 import FaceVerification from "@/components/register/FaceVerification";
 import UploadComponent from "@/components/register/UploadComponent";
+import { AgencyMark } from "@/components/landing/GovChrome";
 
 const BARANGAYS = ["San Jose", "San Isidro", "Old San Roque", "Sta. Cruz", "Bagong Silang", "San Antonio", "San Vicente", "Santo Niño"];
 
@@ -47,6 +47,7 @@ export default function NewResidentRegistration() {
   const [submitting, setSubmitting] = useState(false);
   const [barangayQuery, setBarangayQuery] = useState("");
   const [barangayOpen, setBarangayOpen] = useState(false);
+  /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
 
   // Check if there's transfer data in sessionStorage
@@ -140,27 +141,38 @@ export default function NewResidentRegistration() {
 
   return (
     <Shell>
-      <div className="w-full max-w-2xl">
-        <div className="text-center mb-6">
-          <img src={LOGO_URL} alt="KALUSAGAP" className="h-16 w-auto mx-auto mb-6" />
+      <div className="w-full">
+        <AgencyMark align="center" sealSize={44} />
+        <div className="gov-sheet mt-7 bg-white p-6 md:p-9">
           <StepIndicator4 current={step} completed={completed} />
         </div>
 
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-card border border-brand-border shadow-float p-5 md:p-6">
-
-          <div className="mb-6">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-7 h-7 rounded-lg bg-brand-blue/10 flex items-center justify-center">
-                <meta.icon className="w-4 h-4 text-brand-blue" strokeWidth={1.8} />
+        <motion.div
+          key={step}
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="gov-sheet mt-6 bg-white"
+        >
+          <div className="flex items-center justify-between gap-4 border-b border-brand-border bg-brand-paper px-7 py-5 md:px-9">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-brand-blue/20 bg-brand-light text-brand-blue">
+                <meta.icon className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </div>
-              <span className="text-xs font-body font-medium text-brand-gray">Step {step} of 4</span>
+              <div>
+                <h1 className="font-display text-[19px] font-bold leading-tight text-brand-dark md:text-[21px]">
+                  {meta.title}
+                </h1>
+                <p className="mt-0.5 text-[12px] text-brand-gray">{meta.subtitle}</p>
+              </div>
             </div>
-            <h1 className="text-lg md:text-xl font-heading font-semibold text-brand-ink tracking-tight">{meta.title}</h1>
-            <p className="mt-0.5 text-xs text-brand-gray">{meta.subtitle}</p>
+            <span className="hidden shrink-0 border border-brand-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-gov text-brand-gray sm:block">
+              Form A
+            </span>
           </div>
 
-          {/* STEP 1: Personal Information */}
+          <div className="px-7 py-7 md:px-9">
+            {/* STEP 1: Personal Information */}
           {step === 1 && (
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
@@ -203,23 +215,33 @@ export default function NewResidentRegistration() {
                 </button>
               </div>
               {form.password && (
-                <div className="bg-brand-bg rounded-card p-4 space-y-2">
+                <div className="border border-brand-border bg-brand-paper p-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-body font-medium text-brand-gray">Password Strength</span>
-                    <span className="text-xs font-stat font-bold" style={{ color: pwStrength.color }}>{pwStrength.label}</span>
+                    <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-brand-gray">
+                      Password Strength
+                    </span>
+                    <span className="font-stat text-[11.5px] font-bold uppercase tracking-[0.08em]" style={{ color: pwStrength.color }}>
+                      {pwStrength.label}
+                    </span>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="mt-2.5 flex gap-1">
                     {[0, 1, 2, 3, 4].map((i) => (
-                      <div key={i} className="flex-1 h-1.5 rounded-full overflow-hidden bg-brand-border">
-                        <motion.div initial={false} animate={{ width: i < pwStrength.score ? "100%" : "0%" }} transition={{ duration: 0.3 }} className="h-full rounded-full" style={{ background: pwStrength.color }} />
+                      <div key={i} className="h-1.5 flex-1 overflow-hidden bg-brand-border">
+                        <motion.div
+                          initial={false}
+                          animate={{ width: i < pwStrength.score ? "100%" : "0%" }}
+                          transition={{ duration: 0.3 }}
+                          className="h-full"
+                          style={{ background: pwStrength.color }}
+                        />
                       </div>
                     ))}
                   </div>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 pt-1">
+                  <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
                     {pwStrength.checks.map((c, i) => (
-                      <div key={i} className="flex items-center gap-1.5 text-xs">
-                        <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${c.pass ? "bg-brand-green/15" : "bg-brand-border"}`}>
-                          {c.pass && <Check className="w-2.5 h-2.5 text-brand-green" strokeWidth={3} />}
+                      <div key={i} className="flex items-center gap-2 text-[12px]">
+                        <div className={`flex h-3.5 w-3.5 items-center justify-center ${c.pass ? "bg-brand-green" : "border border-brand-rule bg-white"}`}>
+                          {c.pass && <Check className="h-2.5 w-2.5 text-white" strokeWidth={3.5} />}
                         </div>
                         <span className={c.pass ? "text-brand-ink" : "text-brand-gray"}>{c.label}</span>
                       </div>
@@ -234,9 +256,9 @@ export default function NewResidentRegistration() {
                 </button>
               </div>
 
-              <div className="border-t border-brand-border pt-6 mt-6">
-                <h3 className="font-semibold text-brand-ink mb-4">Contact Information</h3>
-                <div className="space-y-4">
+              <div className="mt-7 border-t border-brand-border pt-6">
+                <h3 className="gov-kicker text-brand-blue">Contact Information</h3>
+                <div className="mt-5 space-y-4">
                   <TextField label="Mobile Number" type="tel" icon={Phone} placeholder="09XX XXX XXXX" value={form.mobile} onChange={set("mobile")} error={errors.mobile} />
                   <div className="grid sm:grid-cols-2 gap-4">
                     <TextField label="Province" icon={MapPin} value={form.province} onChange={set("province")} />
@@ -246,27 +268,27 @@ export default function NewResidentRegistration() {
                     <label className="text-sm font-medium text-brand-ink">Barangay <span className="text-brand-danger">*</span></label>
                     <div className="relative mt-1.5">
                       <button type="button" onClick={() => setBarangayOpen(!barangayOpen)}
-                        className={`w-full flex items-center gap-2 bg-white border rounded-input px-3.5 py-2.5 text-sm transition-colors ${errors.barangay ? "border-brand-danger" : "border-brand-border focus:border-brand-blue"}`}>
+                        className={`w-full flex items-center gap-2 bg-white border px-3.5 py-2.5 text-[13.5px] transition-colors ${errors.barangay ? "border-brand-danger" : "border-brand-border focus:border-brand-blue"}`}>
                         <MapPin className="w-4 h-4 text-brand-gray shrink-0" />
                         <span className={form.barangay ? "text-brand-ink" : "text-brand-gray/50"}>{form.barangay || "Search and select your barangay"}</span>
                         <ChevronDown className="w-4 h-4 text-brand-gray ml-auto" />
                       </button>
                       {barangayOpen && (
-                        <div className="absolute z-20 mt-1 w-full bg-white border border-brand-border rounded-input shadow-float overflow-hidden">
-                          <div className="p-2 border-b border-brand-border">
+                        <div className="absolute z-20 mt-1 w-full border border-brand-border bg-white shadow-raise">
+                          <div className="border-b border-brand-border bg-brand-paper p-2">
                             <input autoFocus value={barangayQuery} onChange={(e) => setBarangayQuery(e.target.value)} placeholder="Type to search..."
-                              className="w-full bg-brand-bg border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue" />
+                              className="w-full border border-brand-border bg-white px-3 py-2 text-[13px] outline-none placeholder:text-brand-gray/45 focus:border-brand-blue" />
                           </div>
                           <div className="max-h-48 overflow-y-auto">
                             {filteredBarangays.map((b) => (
                               <button key={b} type="button" onClick={() => { setForm({ ...form, barangay: b }); setBarangayOpen(false); setBarangayQuery(""); setErrors({ ...errors, barangay: "" }); }}
-                                className="w-full text-left px-4 py-2.5 text-sm text-brand-ink hover:bg-brand-bg transition-colors">{b}</button>
+                                className="w-full border-b border-brand-border/50 px-4 py-2.5 text-left text-[13px] text-brand-ink transition-colors last:border-b-0 hover:bg-brand-paper">{b}</button>
                             ))}
                           </div>
                         </div>
                       )}
                     </div>
-                    {errors.barangay && <p className="mt-1 text-xs text-brand-danger">{errors.barangay}</p>}
+                    {errors.barangay && <p className="mt-1 text-[11.5px] text-brand-danger">{errors.barangay}</p>}
                   </div>
                   <div className="grid sm:grid-cols-2 gap-4">
                     <TextField label="Sitio / Purok" icon={MapPin} placeholder="Purok 5" value={form.sitio} onChange={set("sitio")} error={errors.sitio} />
@@ -280,16 +302,25 @@ export default function NewResidentRegistration() {
                 </div>
               </div>
 
-              <div className="space-y-2.5 pt-4">
-                <label className="flex items-start gap-2.5 text-sm text-brand-gray cursor-pointer">
-                  <input type="checkbox" checked={form.agree} onChange={(e) => { setForm({ ...form, agree: e.target.checked }); setErrors({ ...errors, agree: "" }); }} className="mt-0.5 rounded border-brand-border text-brand-blue" />
-                  <span>I agree to the <a href="#" className="text-brand-blue font-medium hover:underline">Terms and Conditions</a>.</span>
-                </label>
-                <label className="flex items-start gap-2.5 text-sm text-brand-gray cursor-pointer">
-                  <input type="checkbox" checked={form.agreePrivacy} onChange={(e) => { setForm({ ...form, agreePrivacy: e.target.checked }); setErrors({ ...errors, agree: "" }); }} className="mt-0.5 rounded border-brand-border text-brand-blue" />
-                  <span>I acknowledge the <a href="#" className="text-brand-blue font-medium hover:underline">Privacy Policy</a> and consent to the processing of my personal and health data.</span>
-                </label>
-                {errors.agree && <p className="text-xs text-brand-danger">{errors.agree}</p>}
+              <div className="mt-7 border border-brand-border bg-brand-paper p-5">
+                <h3 className="gov-kicker text-brand-blue">Declaration and Consent</h3>
+                <div className="mt-4 space-y-3">
+                  <label className="flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-brand-gray">
+                    <input type="checkbox" checked={form.agree} onChange={(e) => { setForm({ ...form, agree: e.target.checked }); setErrors({ ...errors, agree: "" }); }} className="mt-0.5 h-4 w-4 shrink-0 rounded-none border-brand-rule text-brand-blue focus:ring-brand-blue/30" />
+                    <span>
+                      I certify that the information provided is true and correct, and I agree to the{" "}
+                      <a href="#" className="font-semibold text-brand-blue underline decoration-brand-rule underline-offset-2">Terms and Conditions</a> of this portal.
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-brand-gray">
+                    <input type="checkbox" checked={form.agreePrivacy} onChange={(e) => { setForm({ ...form, agreePrivacy: e.target.checked }); setErrors({ ...errors, agree: "" }); }} className="mt-0.5 h-4 w-4 shrink-0 rounded-none border-brand-rule text-brand-blue focus:ring-brand-blue/30" />
+                    <span>
+                      Pursuant to the Data Privacy Act of 2012 (RA 10173), I consent to the collection and processing of my
+                      personal and health information for the delivery of municipal health services.
+                    </span>
+                  </label>
+                </div>
+                {errors.agree && <p className="mt-3 text-[12px] font-medium text-brand-danger">{errors.agree}</p>}
               </div>
             </div>
           )}
@@ -297,20 +328,21 @@ export default function NewResidentRegistration() {
           {/* STEP 3: Identity Verification */}
           {step === 3 && (
             <div className="space-y-4">
-              <div className="bg-brand-blue/5 border border-brand-blue/15 rounded-card p-4 flex items-start gap-3">
-                <div className="w-9 h-9 rounded-lg bg-brand-blue/10 flex items-center justify-center shrink-0">
-                  <Shield className="w-4 h-4 text-brand-blue" strokeWidth={1.8} />
+              <div className="flex items-start gap-3.5 border-l-2 border-brand-blue bg-brand-light px-4 py-4">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-brand-blue/25 bg-white">
+                  <Shield className="h-4 w-4 text-brand-blue" strokeWidth={1.8} />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-brand-ink">Identity Verification</p>
-                  <p className="text-xs text-brand-gray mt-0.5">
-                    Capture a selfie or upload a clear photo of your face. This will be reviewed by your assigned Barangay Health Worker before your account receives full access.
+                  <p className="text-[12.5px] font-bold uppercase tracking-[0.08em] text-brand-dark">Identity Verification</p>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-brand-gray">
+                    Capture a selfie or upload a clear photo of your face. This will be reviewed by your assigned Barangay
+                    Health Worker before your account receives full access.
                   </p>
                 </div>
               </div>
-              <div className="space-y-6">
+              <div className="space-y-7 pt-2">
                 <div>
-                  <h3 className="text-sm font-semibold text-brand-ink mb-3">Face Photo</h3>
+                  <h3 className="gov-kicker mb-3.5 text-brand-blue">Face Photo</h3>
                   <FaceVerification
                     captured={form.facePhoto}
                     onCapture={(f) => { setForm({ ...form, facePhoto: f }); setErrors({ ...errors, facePhoto: "" }); }}
@@ -319,14 +351,14 @@ export default function NewResidentRegistration() {
                   />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-brand-ink mb-3">Government ID</h3>
+                  <h3 className="gov-kicker mb-3.5 text-brand-blue">Government ID</h3>
                   <UploadComponent
                     label="Upload ID (SSS, UMID, Driver's License, etc.)"
                     file={form.idPhoto}
                     onFile={(f) => { setForm({ ...form, idPhoto: f }); setErrors({ ...errors, idPhoto: "" }); }}
                     onRemove={() => setForm({ ...form, idPhoto: null })}
                   />
-                  {errors.idPhoto && <p className="mt-1 text-xs text-brand-danger">{errors.idPhoto}</p>}
+                  {errors.idPhoto && <p className="mt-1 text-[11.5px] text-brand-danger">{errors.idPhoto}</p>}
                 </div>
               </div>
             </div>
@@ -355,43 +387,71 @@ export default function NewResidentRegistration() {
               ]} />
             </div>
           )}
+          </div>
+
+          {/* Navigation */}
+          <div className="flex items-center justify-between gap-4 border-t border-brand-border bg-brand-paper px-7 py-5 md:px-9">
+            {step > 1 ? (
+              <button
+                onClick={back}
+                className="flex items-center gap-2 text-[12.5px] font-bold uppercase tracking-[0.08em] text-brand-gray transition-colors hover:text-brand-blue"
+              >
+                <ArrowLeft className="h-4 w-4" /> Back
+              </button>
+            ) : (
+              <Link
+                to="/register"
+                className="flex items-center gap-2 text-[12.5px] font-bold uppercase tracking-[0.08em] text-brand-gray transition-colors hover:text-brand-blue"
+              >
+                <ArrowLeft className="h-4 w-4" /> Back to forms
+              </Link>
+            )}
+
+            {step < 4 ? (
+              <button
+                onClick={next}
+                className="group flex items-center gap-2.5 bg-brand-blue px-7 py-3 text-[12.5px] font-bold uppercase tracking-[0.11em] text-white transition-colors hover:bg-brand-dark"
+              >
+                Continue
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={submitting}
+                className="flex items-center gap-2.5 bg-brand-green px-7 py-3 text-[12.5px] font-bold uppercase tracking-[0.11em] text-white transition-colors hover:brightness-110 disabled:opacity-70"
+              >
+                {submitting ? (
+                  <>
+                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
+                      <Shield className="h-4 w-4" />
+                    </motion.div>
+                    Submitting
+                  </>
+                ) : (
+                  <>
+                    Submit Application <Check className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </motion.div>
 
-        {/* Navigation */}
-        <div className="flex items-center justify-between mt-7 pt-5 border-t border-brand-border">
-          {step > 1 ? (
-            <button onClick={back} className="flex items-center gap-2 text-sm font-body font-medium text-brand-gray hover:text-brand-ink transition-colors">
-              <ArrowLeft className="w-4 h-4" /> Back
-            </button>
-          ) : (
-            <Link to="/register" className="flex items-center gap-2 text-sm font-body font-medium text-brand-gray hover:text-brand-ink transition-colors">
-              <ArrowLeft className="w-4 h-4" /> Back to options
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <p className="text-[13px] text-brand-gray">
+            Already registered?{" "}
+            <Link
+              to="/login"
+              className="font-semibold text-brand-blue underline decoration-brand-rule underline-offset-4 hover:decoration-brand-blue"
+            >
+              Sign in to the portal
             </Link>
-          )}
-          {step < 4 ? (
-            <button onClick={next} className="flex items-center gap-2 bg-brand-blue text-white px-6 py-2.5 rounded-btn text-sm font-body font-medium hover:bg-brand-dark transition-colors shadow-soft">
-              Continue <ArrowRight className="w-4 h-4" />
-            </button>
-          ) : (
-            <button onClick={submit} disabled={submitting}
-              className="flex items-center gap-2 bg-brand-green text-white px-6 py-2.5 rounded-btn text-sm font-body font-medium hover:bg-brand-green/90 transition-colors shadow-soft disabled:opacity-70">
-              {submitting ? (
-                <>
-                  <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
-                    <Shield className="w-4 h-4" />
-                  </motion.div>
-                  Submitting...
-                </>
-              ) : (
-                <>Submit Registration <Check className="w-4 h-4" /></>
-              )}
-            </button>
-          )}
+          </p>
+          <p className="text-[11.5px] text-brand-gray/80">
+            No fees are collected for registration.
+          </p>
         </div>
-
-        <p className="mt-6 text-center text-sm text-brand-gray">
-          Already have an account? <Link to="/login" className="text-brand-blue font-medium hover:underline">Login</Link>
-        </p>
       </div>
     </Shell>
   );
@@ -399,34 +459,32 @@ export default function NewResidentRegistration() {
 
 function ReviewSection({ title, items, onEdit }) {
   return (
-    <div className="border border-brand-border rounded-card overflow-hidden">
-      <div className="flex items-center justify-between bg-brand-bg px-5 py-3 border-b border-brand-border">
-        <h3 className="text-sm font-heading font-semibold text-brand-ink">{title}</h3>
-        <button onClick={onEdit} className="flex items-center gap-1.5 text-xs text-brand-blue font-medium hover:underline">
-          <Edit3 className="w-3.5 h-3.5" /> Edit
+    <div className="border border-brand-border">
+      <div className="flex items-center justify-between border-b border-brand-border bg-brand-paper px-5 py-3">
+        <h3 className="text-[12px] font-bold uppercase tracking-[0.1em] text-brand-dark">{title}</h3>
+        <button
+          onClick={onEdit}
+          className="flex items-center gap-1.5 text-[11.5px] font-bold uppercase tracking-[0.08em] text-brand-blue transition-colors hover:text-brand-dark"
+        >
+          <Edit3 className="h-3.5 w-3.5" /> Edit
         </button>
       </div>
-      <div className="px-5 py-3 space-y-2">
+      <dl className="divide-y divide-brand-border/70">
         {items.map(([label, value]) => (
-          <div key={label} className="flex items-start gap-4 text-sm">
-            <span className="text-brand-gray w-36 shrink-0">{label}</span>
-            <span className="text-brand-ink font-medium">{value || "N/A"}</span>
+          <div key={label} className="flex items-start gap-4 px-5 py-3">
+            <dt className="w-40 shrink-0 text-[12.5px] text-brand-gray">{label}</dt>
+            <dd className="text-[13px] font-semibold text-brand-ink">{value || "N/A"}</dd>
           </div>
         ))}
-      </div>
+      </dl>
     </div>
   );
 }
 
 function Shell({ children }) {
   return (
-    <div className="w-full bg-gradient-to-br from-brand-bg via-brand-blue/5 to-brand-yellow/3 p-4 md:p-6">
-      <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-brand-blue/8 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
-      <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-brand-yellow/8 rounded-full blur-3xl translate-x-1/2 translate-y-1/2" />
-      <div className="absolute top-1/3 left-1/4 w-96 h-96 bg-brand-green/5 rounded-full blur-2xl" />
-      <div className="relative flex flex-col items-center justify-center px-4 py-8">
-        {children}
-      </div>
+    <div className="min-h-screen bg-paper">
+      <div className="mx-auto max-w-3xl px-5 py-10 md:px-8 md:py-14">{children}</div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 const db = { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
 
-export const LOGO_URL = new URL("../public/logo-removebg-preview.png", import.meta.url).href;
+export const LOGO_URL = new URL("../public/logo.png", import.meta.url).href;
 
 export const ROLES = {
   "resident-limited": { key: "resident-limited", label: "Resident (Pending)", name: "Juan Dela Cruz", basePath: "/app/resident-limited" },

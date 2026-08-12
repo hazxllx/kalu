@@ -16,14 +16,17 @@ export default function StatCard({ icon, label, value, tone = "accent", index = 
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05, duration: 0.4 }}
-      whileHover={{ y: -3 }}
-      className="bg-white rounded-card border border-brand-border shadow-card p-5"
+      whileHover={{ y: -2 }}
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card"
     >
-      <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${TONES[tone]}`}>
-        <Icon name={icon} className="w-5 h-5" strokeWidth={1.8} />
+      <div className="flex items-start justify-between gap-3">
+        <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${TONES[tone]}`}>
+          <Icon name={icon} className="w-5 h-5" strokeWidth={1.8} />
+        </div>
+        <div className="h-2.5 w-2.5 rounded-full bg-slate-200" />
       </div>
-      <p className="mt-4 text-3xl font-stat font-extrabold text-brand-ink tracking-tight">{value}</p>
-      <p className="mt-1 text-sm text-brand-gray">{label}</p>
+      <p className="mt-4 text-3xl font-stat font-extrabold text-slate-900 tracking-tight">{value}</p>
+      <p className="mt-1 text-sm text-slate-600">{label}</p>
     </motion.div>
   );
 }

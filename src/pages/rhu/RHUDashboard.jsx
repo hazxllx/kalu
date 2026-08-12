@@ -6,7 +6,7 @@ import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/Badge";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { barangayOverview, monthlyConsultations } from "@/lib/mockData";
-import { FileText, Calendar, Heart, BarChart3, Users, MapPin, Syringe, TrendingUp, ArrowRight, Eye } from "lucide-react";
+import { FileText, Calendar, Heart, BarChart3, Users, ArrowRight, Eye } from "lucide-react";
 
 const RECENT_REFERRALS = [
   { id: 1, resident: "Ana Villanueva", barangay: "San Jose", date: "July 10, 2026", status: "Pending" },

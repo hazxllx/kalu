@@ -1,7 +1,7 @@
 import React from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card } from "@/components/shared/Card";
-import { Shield, KeyRound, Terminal, Search, Download, Filter } from "lucide-react";
+import { Shield, KeyRound, Search, Download, Filter } from "lucide-react";
 
 const ROLES_DATA = [
   { name: "Resident", users: 12680, perms: "View own records, book appointments" },

@@ -2,7 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/shared/PageHeader";
 import StatusBadge from "@/components/shared/Badge";
-import { Stethoscope, Syringe, Heart, Shield } from "lucide-react";
+import { Stethoscope, Syringe, Shield } from "lucide-react";
 
 const RESIDENT_SERVICES = [
   {

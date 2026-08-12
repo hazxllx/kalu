@@ -1,6 +1,6 @@
 import React from "react";
 import { Card } from "@/components/shared/Card";
-import { FileHeart, ArrowRight, User, MapPin, Calendar, HeartPulse } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 const resident = {
   name: "Maria Santos",

@@ -3,9 +3,8 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card } from "@/components/shared/Card";
-import StatusBadge from "@/components/shared/Badge";
 import VerificationBadge from "@/components/shared/VerificationBadge";
-import { Search, ChevronRight, FileText, CheckCircle2, XCircle } from "lucide-react";
+import { Search, ChevronRight, CheckCircle2 } from "lucide-react";
 
 const PENDING = [
   { id: 1, name: "Juan Dela Cruz Reyes", barangay: "San Jose", registered: "July 5, 2026", ref: "KSG-2026-00428", status: "Pending" },

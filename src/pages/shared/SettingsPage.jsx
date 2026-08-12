@@ -5,7 +5,7 @@ import { ROLES } from "@/lib/brand";
 import VerificationBadge from "@/components/shared/VerificationBadge";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, MapPin, FileText,
-  Calendar, Monitor, Smartphone, LogOut, KeyRound,
+  Calendar, Monitor, Smartphone, LogOut,
 } from "lucide-react";
 
 function checkPasswordStrength(pw) {

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card } from "@/components/shared/Card";
-import { Search, User, Calendar, Clock, Activity, FileText, Save, X, Plus } from "lucide-react";
+import { Search, FileText, Save, X, Plus } from "lucide-react";
 
 const RESIDENTS = [
   { id: 1, name: "Ana Villanueva", age: 32, sex: "Female", barangay: "San Jose", bloodType: "B+", program: "Maternal Care", contact: "0917 123 4567", initials: "AV" },

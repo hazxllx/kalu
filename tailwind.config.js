@@ -6,16 +6,17 @@ module.exports = {
   	extend: {
   		borderRadius: {
   			lg: 'var(--radius)',
-  			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)',
-  			card: '18px',
-  			btn: '12px',
-  			input: '12px',
-  			table: '14px'
+  			md: 'calc(var(--radius) - 1px)',
+  			sm: 'calc(var(--radius) - 2px)',
+  			card: '4px',
+  			btn: '3px',
+  			input: '3px',
+  			table: '4px'
   		},
   		maxWidth: {
   			shell: '1440px',
-  			content: '1280px'
+  			content: '1240px',
+  			prose: '68ch'
   		},
   		colors: {
   			background: 'hsl(var(--background))',
@@ -30,18 +31,34 @@ module.exports = {
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',
+  			/* Institutional palette — deep government navy/blue over paper white.
+  			   Kept under the existing `brand.*` keys so every screen inherits it. */
   			brand: {
-  				blue: '#0B5CAD',
-  				dark: '#083D77',
-  				accent: '#2A7DE1',
-  				light: '#EDF6FF',
-  				bg: '#F8FBFF',
-  				yellow: '#F5B400',
-  				green: '#28B463',
-  				danger: '#E74C3C',
-  				gray: '#5B6472',
-  				ink: '#1E293B',
-  				border: '#E5EAF1'
+  				blue: '#0B4A8F',
+  				dark: '#072F5F',
+  				deep: '#051F3E',
+  				accent: '#1B6EC2',
+  				sky: '#4A90D9',
+  				light: '#EDF3FA',
+  				bg: '#F4F6FA',
+  				paper: '#FBFCFE',
+  				gold: '#B98A1E',
+  				goldlight: '#E4C35D',
+  				goldpale: '#FBF3DE',
+  				amber: '#7A5A12',
+  				yellow: '#B98A1E',
+  				green: '#1F7A4C',
+  				danger: '#B3202C',
+  				gray: '#54637A',
+  				ink: '#12263F',
+  				border: '#D6DEE8',
+  				rule: '#C3CEDC'
+  			},
+  			/* Philippine flag — reserved for official rules and seals only */
+  			flag: {
+  				blue: '#0038A8',
+  				red: '#CE1126',
+  				yellow: '#FCD116'
   			}
   		},
   		fontFamily: {
@@ -50,6 +67,10 @@ module.exports = {
   			display: ['var(--font-display)'],
   			stat: ['var(--font-stat)'],
   			mono: ['var(--font-mono)']
+  		},
+  		letterSpacing: {
+  			gov: '0.22em',
+  			seal: '0.32em'
   		},
   		keyframes: {
   			'accordion-down': { from: { height: '0' }, to: { height: 'var(--radix-accordion-content-height)' } },

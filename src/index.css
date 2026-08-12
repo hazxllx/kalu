@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -6,29 +6,32 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 217 33% 17%;
+    --foreground: 214 38% 13%;
     --card: 0 0% 100%;
-    --card-foreground: 217 33% 17%;
+    --card-foreground: 214 38% 13%;
     --popover: 0 0% 100%;
-    --popover-foreground: 217 33% 17%;
-    --primary: 207 88% 36%;
+    --popover-foreground: 214 38% 13%;
+    --primary: 210 86% 30%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 100% 96%;
-    --secondary-foreground: 207 88% 30%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 14% 40%;
-    --accent: 210 100% 96%;
-    --accent-foreground: 207 88% 30%;
-    --destructive: 6 78% 57%;
+    --secondary: 210 46% 96%;
+    --secondary-foreground: 210 86% 24%;
+    --muted: 210 33% 96%;
+    --muted-foreground: 215 17% 40%;
+    --accent: 210 46% 96%;
+    --accent-foreground: 210 86% 24%;
+    --destructive: 350 78% 43%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 207 88% 36%;
-    --radius: 0.75rem;
-    --font-heading: 'Poppins', ui-sans-serif, system-ui, sans-serif;
-    --font-body: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
-    --font-display: 'Poppins', ui-sans-serif, system-ui, sans-serif;
-    --font-stat: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+    --border: 213 26% 88%;
+    --input: 213 26% 88%;
+    --ring: 210 86% 30%;
+    --radius: 0.25rem;
+
+    /* Typography — institutional pairing.
+       Serif for display/authority, grotesque for interface legibility. */
+    --font-heading: 'Public Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'Public Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Libre Baskerville', 'Iowan Old Style', Georgia, serif;
+    --font-stat: 'Public Sans', ui-sans-serif, system-ui, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 }
@@ -37,23 +40,147 @@
   * {
     @apply border-border;
   }
+  html {
+    scroll-behavior: smooth;
+  }
   body {
     @apply bg-background text-foreground font-body antialiased;
+    font-feature-settings: "cv05" 1, "ss01" 1;
   }
   h1, h2, h3, h4, h5 {
     @apply font-heading;
   }
+  ::selection {
+    background: #0B4A8F;
+    color: #fff;
+  }
+  :focus-visible {
+    outline: 2px solid #0B4A8F;
+    outline-offset: 2px;
+  }
 }
 
 @layer utilities {
-  .font-stat { font-family: var(--font-stat); }
-  .shadow-soft { box-shadow: 0 1px 2px rgba(16,42,67,0.04), 0 8px 24px rgba(16,42,67,0.05); }
-  .shadow-card { box-shadow: 0 1px 3px rgba(16,42,67,0.05); }
-  .shadow-float { box-shadow: 0 12px 40px rgba(11,92,173,0.12); }
+  /* ---------- Type helpers ---------- */
+  .font-stat { font-family: var(--font-stat); font-variant-numeric: tabular-nums; }
+  .font-display { font-family: var(--font-display); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Eyebrow / kicker used above section headings on official pages */
+  .gov-kicker {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+  .tracking-gov { letter-spacing: 0.22em; }
+  .tracking-seal { letter-spacing: 0.32em; }
+
+  /* ---------- Official rules & dividers ---------- */
+  /* Philippine flag tricolour rule, used beneath mastheads */
+  .gov-flag-rule {
+    background: linear-gradient(
+      90deg,
+      #0038A8 0 33.333%,
+      #CE1126 33.333% 66.666%,
+      #FCD116 66.666% 100%
+    );
+  }
+  .gov-rule-gold { background: linear-gradient(90deg, #B98A1E 0%, #E4C35D 50%, #B98A1E 100%); }
+
+  /* Double rule under display headings — a print/broadsheet convention */
+  .gov-underline::after {
+    content: "";
+    display: block;
+    margin-top: 14px;
+    width: 68px;
+    height: 3px;
+    background: #0B4A8F;
+    box-shadow: 0 6px 0 -1px rgba(11, 74, 143, 0.28);
+  }
+  .gov-underline-light::after {
+    content: "";
+    display: block;
+    margin-top: 14px;
+    width: 68px;
+    height: 3px;
+    background: #E4C35D;
+    box-shadow: 0 6px 0 -1px rgba(228, 195, 93, 0.35);
+  }
+
+  /* ---------- Security-paper textures ---------- */
+  /* Fine engraved hatch, as found on official documents */
+  .gov-hatch {
+    background-image: repeating-linear-gradient(
+      135deg,
+      rgba(11, 74, 143, 0.05) 0 1px,
+      transparent 1px 7px
+    );
+  }
+  .gov-hatch-light {
+    background-image: repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.055) 0 1px,
+      transparent 1px 7px
+    );
+  }
+  /* Ledger grid for document panels */
+  .gov-grid {
+    background-image:
+      linear-gradient(rgba(11, 74, 143, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(11, 74, 143, 0.055) 1px, transparent 1px);
+    background-size: 30px 30px;
+  }
+  /* Concentric guilloche rings for dark institutional panels */
+  .gov-guilloche {
+    background-image:
+      repeating-radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.07) 0 1px, transparent 1px 11px),
+      repeating-radial-gradient(circle at 88% 96%, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 13px);
+  }
+
+  /* ---------- Surfaces ---------- */
+  .gov-sheet {
+    background: #fff;
+    border: 1px solid #D6DEE8;
+    box-shadow: 0 1px 0 0 rgba(16, 42, 67, 0.04);
+  }
+  .shadow-sheet { box-shadow: 0 1px 0 0 rgba(16, 42, 67, 0.05), 0 1px 2px rgba(16, 42, 67, 0.04); }
+  .shadow-raise { box-shadow: 0 1px 1px rgba(9, 30, 66, 0.05), 0 8px 22px -12px rgba(9, 30, 66, 0.35); }
+  .shadow-soft { box-shadow: 0 1px 2px rgba(16, 42, 67, 0.04), 0 8px 24px rgba(16, 42, 67, 0.05); }
+  .shadow-card { box-shadow: 0 1px 0 0 rgba(16, 42, 67, 0.05); }
+  .shadow-float { box-shadow: 0 10px 34px -18px rgba(9, 30, 66, 0.45), 0 1px 0 0 rgba(16, 42, 67, 0.05); }
+  .shadow-deep { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 10px 30px rgba(16, 42, 67, 0.06); }
+
+  /* ---------- Backgrounds ---------- */
+  .gradient-hero { background: linear-gradient(135deg, #0B4A8F 0%, #072F5F 100%); }
+  .gov-navy-panel { background: linear-gradient(158deg, #0A3A70 0%, #072B54 55%, #051F3E 100%); }
+  .bg-panel-blue { background: #EDF3FA; }
+  .bg-highlight-yellow { background: #FDF6E3; }
+  .bg-paper { background: #F4F6FA; }
+
+  /* ---------- Misc ---------- */
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-  .gradient-hero { background: linear-gradient(135deg, #0B5CAD 0%, #083D77 100%); }
-  .bg-panel-blue { background: #EDF6FF; }
-  .bg-highlight-yellow { background: #FFF8E6; }
-  .shadow-deep { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 10px 30px rgba(16, 42, 67, 0.06); }
+
+  .gov-link {
+    color: #0B4A8F;
+    text-decoration-line: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+    text-decoration-color: rgba(11, 74, 143, 0.35);
+  }
+  .gov-link:hover { text-decoration-color: #0B4A8F; }
+
+  .marquee-track {
+    animation: gov-marquee 38s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .marquee-track { animation: none; }
+  }
+}
+
+@keyframes gov-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
 }

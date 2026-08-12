@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card } from "@/components/shared/Card";
-import { FileText, TrendingUp, Download, Send, Check } from "lucide-react";
+import { TrendingUp, Download, Send, Check } from "lucide-react";
 import { monthlyConsultations } from "@/lib/mockData";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid } from "recharts";
 

@@ -12,8 +12,8 @@ export default function VerificationBadge({ status = "pending", size = "md", sho
   const isVerified = status === "verified" || status === "Verified" || status === "approved";
   const label = isVerified ? "Verified" : "Pending Verification";
   const tone = isVerified
-    ? "bg-brand-green/10 text-brand-green"
-    : "bg-brand-yellow/15 text-[#B07E00]";
+    ? "bg-emerald-50 text-emerald-700"
+    : "bg-amber-50 text-amber-700";
 
   return (
     <span className={`inline-flex items-center ${s.gap} ${s.pad} rounded-full ${s.text} font-body font-medium ${tone} ${className}`}>

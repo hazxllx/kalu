@@ -18,6 +18,7 @@ export default function Barangays() {
     bhw: "",
     status: "Active",
   });
+  /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
 
   const handleInputChange = (e) => {

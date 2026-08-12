@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import DataTable from "@/components/shared/DataTable";
 import StatusBadge from "@/components/shared/Badge";
-import { Card } from "@/components/shared/Card";
 import { Plus } from "lucide-react";
 import { tclsRecords } from "@/lib/mockData";
 

@@ -79,7 +79,7 @@ export default function FaceVerification({ captured, onCapture, onRemove, error 
 
   useEffect(() => {
     return () => stopCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   return (
@@ -90,22 +90,36 @@ export default function FaceVerification({ captured, onCapture, onRemove, error 
       <AnimatePresence mode="wait">
         {mode === "idle" && !captured && (
           <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <div className="bg-brand-bg border border-brand-border rounded-card p-8 text-center">
-              <div className="w-16 h-16 rounded-full bg-brand-blue/10 flex items-center justify-center mx-auto">
-                <Camera className="w-7 h-7 text-brand-blue" strokeWidth={1.8} />
+            <div className="border border-brand-border bg-brand-paper p-8 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center border border-brand-blue/25 bg-white">
+                <Camera className="h-7 w-7 text-brand-blue" strokeWidth={1.7} />
               </div>
-              <p className="mt-4 text-sm font-medium text-brand-ink">Face Verification Required</p>
-              <p className="mt-1 text-xs text-brand-gray max-w-sm mx-auto">
-                Take a selfie using your camera or upload a clear photo of your face. This will be reviewed by your assigned Barangay Health Worker.
+              <p className="mt-4 text-[13px] font-bold uppercase tracking-[0.08em] text-brand-dark">
+                Face Verification Required
               </p>
-              <div className="mt-5 flex justify-center">
-                <button type="button" onClick={startCamera} className="flex items-center justify-center gap-2 bg-brand-blue text-white px-6 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors">
-                  <Camera className="w-4 h-4" /> Open Camera
+              <p className="mx-auto mt-2 max-w-sm text-[12.5px] leading-relaxed text-brand-gray">
+                Take a selfie using your camera or upload a clear photo of your face.
+                This will be reviewed by your assigned Barangay Health Worker.
+              </p>
+              <div className="mt-6 flex flex-wrap justify-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={startCamera}
+                  className="flex items-center justify-center gap-2 bg-brand-blue px-6 py-2.5 text-[12px] font-bold uppercase tracking-[0.1em] text-white transition-colors hover:bg-brand-dark"
+                >
+                  <Camera className="h-4 w-4" /> Open Camera
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center justify-center gap-2 border border-brand-rule bg-white px-6 py-2.5 text-[12px] font-bold uppercase tracking-[0.1em] text-brand-dark transition-colors hover:border-brand-blue hover:text-brand-blue"
+                >
+                  <Upload className="h-4 w-4" /> Upload Photo
                 </button>
               </div>
               {cameraError && (
-                <p className="mt-3 text-xs text-brand-danger flex items-center justify-center gap-1.5">
-                  <AlertCircle className="w-3.5 h-3.5" /> {cameraError}
+                <p className="mt-4 flex items-center justify-center gap-1.5 text-[11.5px] text-brand-danger">
+                  <AlertCircle className="h-3.5 w-3.5" /> {cameraError}
                 </p>
               )}
             </div>
@@ -114,18 +128,18 @@ export default function FaceVerification({ captured, onCapture, onRemove, error 
 
         {mode === "camera" && (
           <motion.div key="camera" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <div className="bg-brand-ink rounded-card overflow-hidden relative">
-              <video ref={videoRef} autoPlay playsInline muted className="w-full aspect-[4/3] object-cover" />
+            <div className="relative overflow-hidden bg-brand-deep">
+              <video ref={videoRef} autoPlay playsInline muted className="aspect-[4/3] w-full object-cover" />
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-40 h-48 border-2 border-white/40 rounded-[50%]" />
+                <div className="w-40 h-48 border border-white/50 rounded-sm" />
               </div>
             </div>
-            <div className="mt-3 flex gap-2.5 justify-center">
-              <button type="button" onClick={capturePhoto} className="flex items-center justify-center gap-2 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors">
-                <Camera className="w-4 h-4" /> Capture Selfie
+            <div className="mt-4 flex flex-wrap justify-center gap-2.5">
+              <button type="button" onClick={capturePhoto} className="flex items-center justify-center gap-2 bg-brand-blue px-6 py-2.5 text-[12px] font-bold uppercase tracking-[0.1em] text-white transition-colors hover:bg-brand-dark">
+                <Camera className="h-4 w-4" /> Capture Selfie
               </button>
-              <button type="button" onClick={() => { stopCamera(); setMode("idle"); }} className="flex items-center justify-center gap-2 border border-brand-border bg-white text-brand-gray px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-bg transition-colors">
-                <X className="w-4 h-4" /> Cancel
+              <button type="button" onClick={() => { stopCamera(); setMode("idle"); }} className="flex items-center justify-center gap-2 border border-brand-rule bg-white px-6 py-2.5 text-[12px] font-bold uppercase tracking-[0.1em] text-brand-gray transition-colors hover:bg-brand-paper hover:text-brand-ink">
+                <X className="h-4 w-4" /> Cancel
               </button>
             </div>
           </motion.div>
@@ -133,31 +147,32 @@ export default function FaceVerification({ captured, onCapture, onRemove, error 
 
         {mode === "preview" && captured && previewUrl && (
           <motion.div key="preview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <div className="bg-brand-bg border border-brand-border rounded-card p-5">
+            <div className="border border-brand-border bg-brand-paper p-5">
               <div className="flex items-center gap-4">
                 <div className="relative shrink-0">
-                  <img src={previewUrl} alt="Face capture" className="w-20 h-20 rounded-card object-cover border-2 border-brand-green/30" />
-                  <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-brand-green flex items-center justify-center border-2 border-white">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+                  <img src={previewUrl} alt="Face capture" className="h-20 w-20 border-2 border-brand-green/40 object-cover" />
+                  <div className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center border-2 border-white bg-brand-green">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-white" strokeWidth={2.5} />
                   </div>
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-brand-ink">Face Captured</p>
-                    <span className="inline-flex items-center gap-1 text-xs font-body font-medium bg-brand-yellow/15 text-[#B07E00] rounded-full px-2 py-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-current" /> Pending Review
+                    <p className="text-[13px] font-bold text-brand-ink">Face Captured</p>
+                    <span className="inline-flex items-center gap-1 border border-brand-gold/40 bg-brand-goldpale px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-brand-amber">
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" /> Pending Review
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-brand-gray">{captured.name} &middot; {(captured.size / 1024).toFixed(0)} KB</p>
-                  <button type="button" onClick={retake} className="mt-2 flex items-center gap-1.5 text-xs text-brand-blue font-medium hover:underline">
-                    <RotateCcw className="w-3.5 h-3.5" /> Retake Photo
+                  <p className="mt-1 text-[12px] text-brand-gray">{captured.name} &middot; {(captured.size / 1024).toFixed(0)} KB</p>
+                  <button type="button" onClick={retake} className="mt-2 flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-[0.08em] text-brand-blue transition-colors hover:text-brand-dark">
+                    <RotateCcw className="h-3.5 w-3.5" /> Retake Photo
                   </button>
                 </div>
               </div>
-              <div className="mt-4 flex items-start gap-2 bg-white border border-brand-border rounded-btn px-3 py-2.5">
-                <ShieldCheck className="w-4 h-4 text-brand-blue shrink-0 mt-0.5" strokeWidth={1.8} />
-                <p className="text-xs text-brand-gray">
-                  Your photo will be reviewed by your assigned Barangay Health Worker. Account access remains limited until verification is complete.
+              <div className="mt-4 flex items-start gap-2.5 border border-brand-border bg-white px-3.5 py-3">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" strokeWidth={1.8} />
+                <p className="text-[12px] leading-relaxed text-brand-gray">
+                  Your photo will be reviewed by your assigned Barangay Health Worker.
+                  Account access remains limited until verification is complete.
                 </p>
               </div>
             </div>

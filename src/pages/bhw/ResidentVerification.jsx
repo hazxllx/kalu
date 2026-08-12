@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card } from "@/components/shared/Card";
-import StatusBadge from "@/components/shared/Badge";
 import VerificationBadge from "@/components/shared/VerificationBadge";
 import {
   ArrowLeft, User, MapPin, Calendar, Phone, Heart, FileText, ShieldCheck,

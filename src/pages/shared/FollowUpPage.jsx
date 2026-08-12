@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card } from "@/components/shared/Card";
-import { Search, Plus, Eye, Calendar, MapPin, User, Clock, Check, X, Edit2, RefreshCw, Cloud, CloudOff } from "lucide-react";
-import StatusBadge from "@/components/shared/Badge";
+import { Search, Plus, Eye, Calendar, MapPin, User, X, RefreshCw, Cloud, CloudOff } from "lucide-react";
 
 const FOLLOW_UPS = [
   {

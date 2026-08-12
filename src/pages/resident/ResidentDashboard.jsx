@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { CalendarClock, UserRound, ShieldCheck, Stethoscope, ShieldAlert, Activity } from "lucide-react";
+import { CalendarClock, ShieldCheck, Stethoscope, ShieldAlert, Activity } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Card } from "@/components/shared/Card";
 import StatusBadge from "@/components/shared/Badge";

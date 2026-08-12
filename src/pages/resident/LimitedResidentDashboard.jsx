@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import VerificationBanner from "@/components/shared/VerificationBanner";
-import VerificationBadge from "@/components/shared/VerificationBadge";
 
 const AVAILABLE = [
   { icon: Stethoscope, label: "Health Services", desc: "Browse available health services and schedules.", path: "/app/resident-limited/services", tone: "bg-brand-blue/10 text-brand-blue" },

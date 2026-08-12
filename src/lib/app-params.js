@@ -1,5 +1,18 @@
 const isNode = typeof window === 'undefined';
-const windowObj = isNode ? { localStorage: new Map() } : window;
+
+// Simple Storage-shaped fallback for server-side rendering, so every call
+// site can use the same getItem / setItem / removeItem interface.
+const createMemoryStorage = () => {
+	const store = new Map();
+	return {
+		getItem: (key) => store.has(key) ? store.get(key) : null,
+		setItem: (key, value) => store.set(key, String(value)),
+		removeItem: (key) => store.delete(key),
+		clear: () => store.clear(),
+	};
+};
+
+const windowObj = isNode ? { localStorage: createMemoryStorage() } : window;
 const storage = windowObj.localStorage;
 
 const toSnakeCase = (str) => {

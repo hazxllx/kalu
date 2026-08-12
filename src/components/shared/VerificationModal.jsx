@@ -10,6 +10,12 @@ const TIMELINE = [
   { label: "Verified", desc: "Account approved and activated.", status: "pending" },
 ];
 
+/**
+ * @param {Object} props
+ * @param {boolean} props.open
+ * @param {() => void} props.onClose
+ * @param {{ reference?: string, barangay?: string, submitted?: string, estimated?: string }} [props.data]
+ */
 export default function VerificationModal({ open, onClose, data = {} }) {
   return (
     <AnimatePresence>

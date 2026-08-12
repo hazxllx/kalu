@@ -21,11 +21,11 @@ export default function DashboardLayout({ roleKey }) {
   const [expandedGroups, setExpandedGroups] = useState({});
   const menuRef = useRef(null);
   const isResident = roleKey === "resident" || roleKey === "resident-limited";
-  const verified = roleKey === "resident"; // only verified residents show the check
+  const verified = roleKey === "resident";
 
   const notifications = NOTIFICATIONS[roleKey] || [];
   const unreadCount = notifications.filter((n) => !n.read).length;
-  const notificationsPath = roleKey === "resident-limited" 
+  const notificationsPath = roleKey === "resident-limited"
     ? "/app/resident-limited/announcements"
     : `/app/${roleKey}/notifications`;
 
@@ -41,18 +41,18 @@ export default function DashboardLayout({ roleKey }) {
   const profilePath = `${location.pathname.split("/").slice(0, 4).join("/")}/profile`;
 
   const NavList = () => (
-    <nav className="px-3 space-y-1">
+    <nav className="px-3 space-y-1.5">
       {items.map((it) => {
         if (it.locked) {
           return (
             <div
               key={it.label}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-btn text-sm text-brand-gray/50 cursor-not-allowed select-none"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-400 cursor-not-allowed select-none"
               title="Available after account verification"
             >
               <Icon name={it.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
               <span className="flex-1">{it.label}</span>
-              <Lock className="w-3.5 h-3.5 text-brand-gray/40" strokeWidth={1.8} />
+              <Lock className="w-3.5 h-3.5 text-slate-300" strokeWidth={1.8} />
             </div>
           );
         }
@@ -63,7 +63,7 @@ export default function DashboardLayout({ roleKey }) {
               <button
                 type="button"
                 onClick={() => setExpandedGroups((prev) => ({ ...prev, [it.label]: !openGroup }))}
-                className="flex w-full items-center gap-3 px-3 py-2.5 rounded-btn text-sm text-brand-gray hover:bg-slate-50 hover:text-brand-ink"
+                className="flex w-full items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               >
                 <Icon name={it.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
                 <span className="flex-1 text-left">{it.label}</span>
@@ -75,7 +75,7 @@ export default function DashboardLayout({ roleKey }) {
                     {it.children.map((child) => {
                       const active = location.pathname === child.path;
                       return (
-                        <Link key={child.path} to={child.path} onClick={() => setOpen(false)} className={`flex items-center gap-3 px-3 py-2 rounded-btn text-sm transition-colors ${active ? "bg-brand-light text-brand-blue font-medium" : "text-brand-gray hover:bg-slate-50 hover:text-brand-ink"}`}>
+                        <Link key={child.path} to={child.path} onClick={() => setOpen(false)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${active ? "bg-brand-light text-brand-blue font-medium" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}>
                           <Icon name={child.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
                           {child.label}
                         </Link>
@@ -93,10 +93,10 @@ export default function DashboardLayout({ roleKey }) {
             key={it.path}
             to={it.path}
             onClick={() => setOpen(false)}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-btn text-sm transition-colors ${
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
               active
                 ? "bg-brand-light text-brand-blue font-medium"
-                : "text-brand-gray hover:bg-slate-50 hover:text-brand-ink"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
             }`}
           >
             <Icon name={it.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
@@ -108,32 +108,30 @@ export default function DashboardLayout({ roleKey }) {
   );
 
   return (
-    <div className="min-h-screen bg-brand-bg">
-      {/* Sidebar - desktop */}
-      <aside className="hidden lg:flex fixed inset-y-0 left-0 w-64 flex-col bg-white border-r border-brand-border">
-        <div className="h-16 flex items-center px-5 border-b border-brand-border">
-          <img src={LOGO_URL} alt="KALUSAGAP" className="h-8 w-auto" />
+    <div className="min-h-screen bg-[color:#f5f7fa]">
+      <aside className="hidden lg:flex fixed inset-y-0 left-0 w-72 flex-col bg-white border-r border-slate-200">
+        <div className="h-20 flex items-center px-5 border-b border-slate-200">
+          <img src={LOGO_URL} alt="KALUSAGAP" className="h-9 w-auto" />
         </div>
         <div className="flex-1 overflow-y-auto py-5 no-scrollbar"><NavList /></div>
-        <div className="p-3 border-t border-brand-border">
-          <button onClick={() => navigate("/login")} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-btn text-sm text-brand-gray hover:bg-slate-50">
+        <div className="p-3 border-t border-slate-200">
+          <button onClick={() => navigate("/login")} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 hover:bg-slate-50">
             <LogOut className="w-[18px] h-[18px]" strokeWidth={1.8} /> Log out
           </button>
         </div>
       </aside>
 
-      {/* Mobile drawer */}
       <AnimatePresence>
         {open && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setOpen(false)} className="fixed inset-0 bg-black/30 z-40 lg:hidden" />
+              onClick={() => setOpen(false)} className="fixed inset-0 bg-slate-900/40 z-40 lg:hidden" />
             <motion.aside initial={{ x: -280 }} animate={{ x: 0 }} exit={{ x: -280 }}
               transition={{ type: "spring", damping: 26, stiffness: 240 }}
-              className="fixed inset-y-0 left-0 w-64 bg-white z-50 lg:hidden flex flex-col">
-              <div className="h-16 flex items-center justify-between px-5 border-b border-brand-border">
-                <img src={LOGO_URL} alt="KALUSAGAP" className="h-8 w-auto" />
-                <button onClick={() => setOpen(false)}><X className="w-5 h-5 text-brand-gray" /></button>
+              className="fixed inset-y-0 left-0 w-72 bg-white z-50 lg:hidden flex flex-col">
+              <div className="h-20 flex items-center justify-between px-5 border-b border-slate-200">
+                <img src={LOGO_URL} alt="KALUSAGAP" className="h-9 w-auto" />
+                <button onClick={() => setOpen(false)}><X className="w-5 h-5 text-slate-600" /></button>
               </div>
               <div className="flex-1 overflow-y-auto py-5"><NavList /></div>
             </motion.aside>
@@ -141,46 +139,44 @@ export default function DashboardLayout({ roleKey }) {
         )}
       </AnimatePresence>
 
-      <div className="lg:pl-64">
-        {/* Top bar */}
-        <header className="sticky top-0 z-30 h-16 bg-white/90 backdrop-blur border-b border-brand-border flex items-center gap-3 px-4 md:px-6">
-          <button onClick={() => setOpen(true)} className="lg:hidden text-brand-gray"><Menu className="w-6 h-6" /></button>
-          <div className="hidden md:flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 w-72">
-            <Search className="w-4 h-4 text-brand-gray" />
-            <input placeholder="Search residents, records..." className="bg-transparent text-sm outline-none w-full placeholder:text-brand-gray/70" />
+      <div className="lg:pl-72">
+        <header className="sticky top-0 z-30 h-16 bg-white/95 backdrop-blur border-b border-slate-200 flex items-center gap-3 px-4 md:px-6">
+          <button onClick={() => setOpen(true)} className="lg:hidden text-slate-600"><Menu className="w-6 h-6" /></button>
+          <div className="hidden md:flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 w-72">
+            <Search className="w-4 h-4 text-slate-500" />
+            <input placeholder="Search residents, records..." className="bg-transparent text-sm outline-none w-full placeholder:text-slate-400" />
           </div>
           <div className="ml-auto flex items-center gap-2 md:gap-4">
-            <Link to={notificationsPath} className="relative w-10 h-10 rounded-btn hover:bg-slate-50 flex items-center justify-center">
-              <Bell className="w-5 h-5 text-brand-gray" strokeWidth={1.8} />
+            <Link to={notificationsPath} className="relative w-10 h-10 rounded-xl hover:bg-slate-50 flex items-center justify-center">
+              <Bell className="w-5 h-5 text-slate-600" strokeWidth={1.8} />
               {unreadCount > 0 && (
                 <span className="absolute top-2 right-2 w-5 h-5 bg-brand-danger text-white text-xs rounded-full flex items-center justify-center font-medium">
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
             </Link>
-            <div ref={menuRef} className="relative flex items-center gap-2 pl-2 md:pl-3 md:border-l border-brand-border">
+            <div ref={menuRef} className="relative flex items-center gap-2 pl-2 md:pl-3 md:border-l border-slate-200">
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="flex items-center gap-2 rounded-btn hover:bg-slate-50 px-2 py-1.5 transition-colors"
+                className="flex items-center gap-2 rounded-xl hover:bg-slate-50 px-2 py-1.5 transition-colors"
               >
                 <div className="w-9 h-9 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-semibold font-heading">
                   {role.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
                 </div>
                 <div className="hidden md:block text-left">
                   <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-medium text-brand-ink leading-tight">{role.name}</p>
+                    <p className="text-sm font-medium text-slate-900 leading-tight">{role.name}</p>
                     {isResident && (
                       verified
                         ? <ShieldCheck className="w-3.5 h-3.5 text-brand-green" strokeWidth={2} />
                         : <ShieldAlert className="w-3.5 h-3.5 text-brand-yellow" strokeWidth={2} />
                     )}
                   </div>
-                  <p className="text-xs text-brand-gray">{role.label}</p>
+                  <p className="text-xs text-slate-500">{role.label}</p>
                 </div>
-                <ChevronDown className="hidden md:block w-4 h-4 text-brand-gray" />
+                <ChevronDown className="hidden md:block w-4 h-4 text-slate-500" />
               </button>
 
-              {/* Profile Dropdown */}
               <AnimatePresence>
                 {menuOpen && (
                   <motion.div
@@ -188,17 +184,16 @@ export default function DashboardLayout({ roleKey }) {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.97 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-full mt-2 w-72 bg-white rounded-card border border-brand-border shadow-float overflow-hidden z-50"
+                    className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl border border-slate-200 shadow-soft overflow-hidden z-50"
                   >
-                    {/* User card */}
-                    <div className="px-4 py-4 border-b border-brand-border bg-brand-bg">
+                    <div className="px-4 py-4 border-b border-slate-200 bg-slate-50">
                       <div className="flex items-center gap-3">
                         <div className="w-11 h-11 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-heading font-semibold">
                           {role.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-heading font-semibold text-brand-ink truncate">{role.name}</p>
+                            <p className="text-sm font-heading font-semibold text-slate-900 truncate">{role.name}</p>
                             {isResident && (
                               verified
                                 ? <ShieldCheck className="w-4 h-4 text-brand-green shrink-0" strokeWidth={2} />
@@ -210,11 +205,10 @@ export default function DashboardLayout({ roleKey }) {
                               <VerificationBadge status={verified ? "verified" : "pending"} size="sm" />
                             </div>
                           )}
-                          <p className="text-xs text-brand-gray mt-1 truncate">{role.name.split(" ")[0].toLowerCase()}@pili.gov.ph</p>
+                          <p className="text-xs text-slate-500 mt-1 truncate">{role.name.split(" ")[0].toLowerCase()}@pili.gov.ph</p>
                         </div>
                       </div>
                     </div>
-                    {/* Menu items */}
                     <div className="py-1.5">
                       {[
                         { icon: User, label: "Profile", to: profilePath },
@@ -225,13 +219,13 @@ export default function DashboardLayout({ roleKey }) {
                           key={item.label}
                           to={item.to}
                           onClick={() => setMenuOpen(false)}
-                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-brand-gray hover:bg-brand-bg hover:text-brand-ink transition-colors"
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
                         >
                           <item.icon className="w-4 h-4" strokeWidth={1.8} /> {item.label}
                         </Link>
                       ))}
                     </div>
-                    <div className="py-1.5 border-t border-brand-border">
+                    <div className="py-1.5 border-t border-slate-200">
                       <button
                         onClick={() => navigate("/login")}
                         className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-brand-danger hover:bg-brand-danger/5 transition-colors"
