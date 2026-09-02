@@ -1,0 +1,19 @@
+# Environment variables — never commit real credentials.
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules
+
+# Local JSON data store + generated dev-auth secret (file driver, dev only)
+/data
+.dev-auth-secret
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor files
+.DS_Store
+Thumbs.db

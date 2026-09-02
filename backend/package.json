@@ -1,0 +1,24 @@
+{
+  "name": "kalusagap-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KALUSAGAP API — Community Health Risk Monitoring and Early Intervention System",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
+    "cors": "2.8.5",
+    "dotenv": "16.4.7",
+    "express": "4.22.2"
+  },
+  "devDependencies": {
+    "nodemon": "3.1.10"
+  }
+}
