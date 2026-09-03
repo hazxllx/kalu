@@ -29,9 +29,18 @@ export const devSignIn = async ({ email, password }) => {
     email: account.email,
     name: account.name,
     role: account.role,
+    // Barangay-scoped roles carry their assignment in the session so every
+    // downstream query can filter on it (see config/scope.js).
+    barangay: account.barangay || null,
   };
 
-  const accessToken = signDevToken({ sub: user.id, role: user.role, email: user.email });
+  const accessToken = signDevToken({
+    sub: user.id,
+    role: user.role,
+    email: user.email,
+    name: user.name,
+    ...(user.barangay ? { barangay: user.barangay } : {}),
+  });
 
   return {
     user,

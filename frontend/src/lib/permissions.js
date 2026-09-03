@@ -313,6 +313,41 @@ export const PERMISSION_MODULES = Object.freeze([
     ],
   },
   {
+    id: 'services',
+    label: 'Health Services',
+    short: 'Services',
+    icon: 'Activity',
+    description: 'Barangay health station services — schedules, operating hours and availability.',
+    permissions: [
+      {
+        id: 'services.view',
+        label: 'View health services',
+        action: ACTION.VIEW,
+        description: 'See the services offered at the barangay health station.',
+      },
+      {
+        id: 'services.create',
+        label: 'Add health service',
+        action: ACTION.CREATE,
+        description: 'Add a new service to the barangay health station lineup.',
+      },
+      {
+        id: 'services.edit',
+        label: 'Edit health service',
+        action: ACTION.EDIT,
+        description: "Update a service's schedule, operating hours, description or status.",
+      },
+      {
+        id: 'services.delete',
+        label: 'Delete health service',
+        action: ACTION.DELETE,
+        description: 'Remove a service from the available health services.',
+        sensitive: true,
+        impact: 'remove health services from the barangay health station',
+      },
+    ],
+  },
+  {
     id: 'reports',
     label: 'Reports',
     short: 'Reports',
@@ -653,6 +688,7 @@ const DEFAULT_GRANTS = Object.freeze({
     'referrals.history.view',
     'followups.view',
     'followups.history.view',
+    'services.view',
     'reports.view',
     'reports.generate',
     'reports.export',
@@ -689,6 +725,10 @@ const DEFAULT_GRANTS = Object.freeze({
     'followups.complete',
     'followups.history.view',
     'followups.notify',
+    'services.view',
+    'services.create',
+    'services.edit',
+    'services.delete',
     'reports.view',
     'reports.analytics.view',
   ],
@@ -716,6 +756,7 @@ const DEFAULT_GRANTS = Object.freeze({
     'followups.complete',
     'followups.history.view',
     'followups.notify',
+    'services.view',
     'reports.view',
   ],
 
@@ -734,13 +775,14 @@ const DEFAULT_GRANTS = Object.freeze({
     'referrals.history.view',
     'followups.view',
     'followups.history.view',
+    'services.view',
     'reports.view',
   ],
 
   // DATA GATHERING ONLY. No consultation, no referral approval, no resident
   // directory management, no reports and no follow-up management unless an
   // administrator explicitly switches those on.
-  [ROLE.BHW]: ['residents.create', 'residents.edit'],
+  [ROLE.BHW]: ['residents.create', 'residents.edit', 'services.view'],
 
   // Own information only.
   [ROLE.RESIDENT]: [...RESIDENT_SELF_SERVICE],

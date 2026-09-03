@@ -5,7 +5,7 @@ import * as intakeService from '../services/intake.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
 
 export const searchResidents = async (req, res) => {
-  const residents = await intakeService.searchResidents({ q: req.query.q || '' });
+  const residents = await intakeService.searchResidents({ q: req.query.q || '', user: req.user });
   sendData(res, { residents });
 };
 

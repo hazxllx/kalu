@@ -1,7 +1,11 @@
 import React from "react";
 
-export function Card({ className = "", children }) {
-  return <div className={`rounded-2xl border border-slate-200 bg-white shadow-card ${className}`}>{children}</div>;
+export function Card({ className = "", children, ...props }) {
+  return (
+    <div className={`rounded-2xl border border-slate-200 bg-white shadow-card ${className}`} {...props}>
+      {children}
+    </div>
+  );
 }
 
 export function CardHeader({ title, subtitle, action }) {

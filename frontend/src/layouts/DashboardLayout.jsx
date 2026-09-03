@@ -50,72 +50,97 @@ export default function DashboardLayout({ roleKey }) {
   const settingsPath = `/${roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`}/settings`;
   const profilePath = `${location.pathname.split("/").slice(0, 4).join("/")}/profile`;
 
-  const NavList = () => (
-    <nav className="px-3 space-y-1.5">
-      {items.map((it) => {
-        if (it.locked) {
-          return (
-            <div
-              key={it.label}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-400 cursor-not-allowed select-none"
-              title="Available after account verification"
-            >
-              <Icon name={it.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
-              <span className="flex-1">{it.label}</span>
-              <Lock className="w-3.5 h-3.5 text-slate-300" strokeWidth={1.8} />
-            </div>
-          );
-        }
-        if (it.children) {
-          const openGroup = expandedGroups[it.label];
-          return (
-            <div key={it.label}>
-              <button
-                type="button"
-                onClick={() => setExpandedGroups((prev) => ({ ...prev, [it.label]: !openGroup }))}
-                className="flex w-full items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              >
-                <Icon name={it.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
-                <span className="flex-1 text-left">{it.label}</span>
-                <ChevronDown className={`w-4 h-4 transition-transform ${openGroup ? "rotate-180" : ""}`} />
-              </button>
-              <AnimatePresence initial={false}>
-                {openGroup && (
-                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-3 pt-1 space-y-1">
-                    {it.children.map((child) => {
-                      const active = location.pathname === child.path;
-                      return (
-                        <Link key={child.path} to={child.path} onClick={() => setOpen(false)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${active ? "bg-brand-light text-brand-blue font-medium" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}>
-                          <Icon name={child.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
-                          {child.label}
-                        </Link>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          );
-        }
-        const active = location.pathname === it.path;
+  const NavList = () => {
+    // Group consecutive items that share a `group` label under one small
+    // uppercase header; ungrouped items render flat, exactly as before.
+    const blocks = items.reduce((acc, it) => {
+      const last = acc[acc.length - 1];
+      if (it.group && last && last.group === it.group) {
+        last.items.push(it);
+      } else {
+        acc.push({ group: it.group || null, items: [it] });
+      }
+      return acc;
+    }, []);
+
+    const renderItem = (it) => {
+      if (it.locked) {
         return (
-          <Link
-            key={it.path}
-            to={it.path}
-            onClick={() => setOpen(false)}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
-              active
-                ? "bg-brand-light text-brand-blue font-medium"
-                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-            }`}
+          <div
+            key={it.label}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-400 cursor-not-allowed select-none"
+            title="Available after account verification"
           >
             <Icon name={it.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
-            {it.label}
-          </Link>
+            <span className="flex-1">{it.label}</span>
+            <Lock className="w-3.5 h-3.5 text-slate-300" strokeWidth={1.8} />
+          </div>
         );
-      })}
-    </nav>
-  );
+      }
+      if (it.children) {
+        const openGroup = expandedGroups[it.label];
+        return (
+          <div key={it.label}>
+            <button
+              type="button"
+              onClick={() => setExpandedGroups((prev) => ({ ...prev, [it.label]: !openGroup }))}
+              className="flex w-full items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            >
+              <Icon name={it.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
+              <span className="flex-1 text-left">{it.label}</span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${openGroup ? "rotate-180" : ""}`} />
+            </button>
+            <AnimatePresence initial={false}>
+              {openGroup && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-3 pt-1 space-y-1">
+                  {it.children.map((child) => {
+                    const active = location.pathname === child.path;
+                    return (
+                      <Link key={child.path} to={child.path} onClick={() => setOpen(false)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${active ? "bg-brand-light text-brand-blue font-medium" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}>
+                        <Icon name={child.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
+                        {child.label}
+                      </Link>
+                    );
+                  })}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        );
+      }
+      const active = location.pathname === it.path;
+      return (
+        <Link
+          key={it.path}
+          to={it.path}
+          onClick={() => setOpen(false)}
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
+            active
+              ? "bg-brand-light text-brand-blue font-medium"
+              : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          }`}
+        >
+          <Icon name={it.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
+          {it.label}
+        </Link>
+      );
+    };
+
+    return (
+      <nav className="px-3">
+        {blocks.map((block, i) => (
+          <div key={block.group || `block-${i}`} className={i === 0 ? "" : "mt-5"}>
+            {block.group && (
+              <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                {block.group}
+              </p>
+            )}
+            <div className="space-y-1">{block.items.map(renderItem)}</div>
+          </div>
+        ))}
+      </nav>
+    );
+  };
 
   /**
    * Sidebar identity block: logo mark plus the system name.

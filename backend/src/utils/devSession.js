@@ -50,7 +50,9 @@ export const signDevToken = (payload, expiresInSeconds = 60 * 60 * 12) => {
   const now = Math.floor(Date.now() / 1000);
   const body = { ...payload, iat: now, exp: now + expiresInSeconds };
   const encoded = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(body))}`;
-  const signature = crypto.createHmac('sha256', secret).update(encoded).digest('base64');
+  // Encode the RAW HMAC digest bytes (not the base64 text) so the signature
+  // round-trips through verifyDevToken's base64url decode.
+  const signature = crypto.createHmac('sha256', secret).update(encoded).digest();
   return `${encoded}.${b64url(signature)}`;
 };
 

@@ -18,6 +18,8 @@ const TONES = {
   Due: "bg-amber-50 text-amber-700",
   Monitoring: "bg-brand-accent/10 text-brand-accent",
   Healthy: "bg-emerald-50 text-emerald-700",
+  Available: "bg-emerald-50 text-emerald-700",
+  Unavailable: "bg-rose-50 text-rose-700",
   "Pending Sync": "bg-amber-100 text-amber-700",
 };
 

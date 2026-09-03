@@ -101,10 +101,10 @@ export const residents = [
 ];
 
 export const households = [
-  { id: "HH-201", address: "12 Mabini St., Brgy. San Jose", members: 5, riskScore: 34, income: "₱9,500/mo", water: "Level II - Communal", toilet: "Water-sealed", concerns: ["Hypertension", "Prenatal"], syncStatus: "Pending Sync" },
-  { id: "HH-202", address: "8 Rizal Ave., Brgy. San Isidro", members: 7, riskScore: 72, income: "₱6,200/mo", water: "Level I - Point Source", toilet: "Shared", concerns: ["Diabetes", "Malnutrition"] },
-  { id: "HH-203", address: "45 Bonifacio St., Brgy. Sta. Cruz", members: 4, riskScore: 28, income: "₱14,000/mo", water: "Level III - Piped", toilet: "Water-sealed", concerns: ["Senior Care"] },
-  { id: "HH-204", address: "3 Luna St., Brgy. Bagong Silang", members: 6, riskScore: 58, income: "₱7,800/mo", water: "Level II - Communal", toilet: "Water-sealed", concerns: ["Maternal", "TB Contact"] },
+  { id: "HH-201", head: "Juanito Santos", purok: "Purok 1", streetAddress: "12 Mabini St.", contact: "0917 555 0201", families: 1, collector: "Maria Cruz", hhStatus: "Ongoing", approval: "Not yet approved", lastUpdated: "2026-07-01", address: "12 Mabini St., Brgy. San Jose", members: 5, riskScore: 34, income: "₱9,500/mo", water: "Level II - Communal", toilet: "Water-sealed", concerns: ["Hypertension", "Prenatal"], syncStatus: "Pending Sync" },
+  { id: "HH-202", head: "Roberto Dela Cruz", purok: "Purok 3", streetAddress: "8 Rizal Ave.", contact: "0918 555 0102", families: 2, collector: "Grace Aquino", hhStatus: "Needs Update", approval: "Needs revision", lastUpdated: "2026-06-24", address: "8 Rizal Ave., Brgy. San Isidro", members: 7, riskScore: 72, income: "₱6,200/mo", water: "Level I - Point Source", toilet: "Shared", concerns: ["Diabetes", "Malnutrition"] },
+  { id: "HH-203", head: "Carmen Reyes", purok: "Purok 2", streetAddress: "45 Bonifacio St.", contact: "0919 555 0303", families: 1, collector: "Lourdes Ramos", hhStatus: "Approved", approval: "Approved", lastUpdated: "2026-07-03", address: "45 Bonifacio St., Brgy. Sta. Cruz", members: 4, riskScore: 28, income: "₱14,000/mo", water: "Level III - Piped", toilet: "Water-sealed", concerns: ["Senior Care"] },
+  { id: "HH-204", head: "Ana Villanueva", purok: "Purok 5", streetAddress: "3 Luna St.", contact: "0920 555 0404", families: 2, collector: "Maria Cruz", hhStatus: "Submitted", approval: "Not yet approved", lastUpdated: "2026-06-28", address: "3 Luna St., Brgy. Bagong Silang", members: 6, riskScore: 58, income: "₱7,800/mo", water: "Level II - Communal", toilet: "Water-sealed", concerns: ["Maternal", "TB Contact"] },
 ];
 
 // BHW metrics are community/household level only — no individual resident
@@ -140,8 +140,19 @@ export const healthServices = [
   { name: "Family Planning", schedule: "Wednesday 1:00 PM - 4:00 PM", personnel: "Midwife M. Dela Cruz", enrolled: 16, status: "Scheduled" },
   { name: "Pre-Natal", schedule: "Wednesday 9:00 AM - 12:00 PM", personnel: "Midwife M. Dela Cruz", enrolled: 24, status: "Ongoing" },
   { name: "Adolescent Health", schedule: "Friday 2:00 PM - 4:00 PM", personnel: "BHW M. Cruz", enrolled: 19, status: "Scheduled" },
-  { name: "HIV Screening (as scheduled)", schedule: "As Scheduled", personnel: "RHU Nurse", enrolled: 12, status: "Scheduled" },
-  { name: "Anti-Rabies Vaccination", schedule: "Emergency / As Needed", personnel: "RHU Nurse", enrolled: 8, status: "On Demand" },
+  { icon: "HIV Screening (as scheduled)", schedule: "As Scheduled", personnel: "RHU Nurse", enrolled: 12, status: "Scheduled" },
+  { icon: "Anti-Rabies Vaccination", schedule: "Emergency / As Needed", personnel: "RHU Nurse", enrolled: 8, status: "On Demand" },
+];
+
+// Barangay Health Station service registry — the manageable records behind
+// the Health Services page (add / edit / delete). `icon` is a key resolved
+// to a lucide icon by the page; statuses are the canonical
+// Available / Scheduled / Unavailable set.
+export const barangayServices = [
+  { id: "SVC-001", name: "Medical Consultation", days: "Monday – Friday", hours: "8:00 AM – 12:00 PM", description: "General consultation and assessment.", status: "Available", icon: "Stethoscope" },
+  { id: "SVC-002", name: "Immunization", days: "Tuesday & Thursday", hours: "1:00 PM – 3:00 PM", description: "Routine vaccination services.", status: "Scheduled", icon: "Syringe" },
+  { id: "SVC-003", name: "Cervical Screening", days: "Last Thursday of the month", hours: "8:00 AM – 12:00 PM", description: "Women's preventive screening services.", status: "Scheduled", icon: "Shield" },
+  { id: "SVC-004", name: "Distribution of Hypertension / Diabetic Medication", days: "Monday & Wednesday", hours: "8:00 AM – 12:00 PM", description: "Medication distribution for chronic disease management.", status: "Scheduled", icon: "Heart" },
 ];
 
 export const tclsRecords = [

@@ -48,7 +48,8 @@ export const MOCK_ACCOUNTS = [
     name: 'Barangay Health Supervisor',
     email: 'supervisor@kalusagap.test',
     password: 'Supervisor123!',
-    description: 'Barangay-level health supervision, resident monitoring, consultation, referrals, and follow-up management.',
+    barangay: 'San Isidro',
+    description: 'Barangay-level health supervision for San Isidro: resident monitoring, consultation, referrals, and follow-up management.',
   },
   {
     role: ROLE.RHU_PERSONNEL,

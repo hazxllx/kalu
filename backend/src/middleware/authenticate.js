@@ -47,7 +47,11 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     req.user = {
       id: payload.sub,
       email: payload.email || '',
+      name: payload.name || '',
       role: payload.role,
+      // Barangay assignment travels inside the signed session — it can never
+      // be supplied by the caller (see config/scope.js).
+      barangay: payload.barangay || null,
       accessToken: token,
       authMode: 'dev',
     };
@@ -63,11 +67,16 @@ export const authenticate = asyncHandler(async (req, res, next) => {
 
   const { user } = data;
   const role = user.app_metadata?.role || user.user_metadata?.role || null;
+  // Barangay assignment for barangay-scoped roles (e.g. Health Supervisor).
+  // Lives in the account metadata — never chosen by the caller.
+  const barangay =
+    user.app_metadata?.barangay || user.user_metadata?.barangay || null;
 
   req.user = {
     id: user.id,
     email: user.email,
     role,
+    barangay,
     accessToken: token,
     authMode: 'supabase',
   };

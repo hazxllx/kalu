@@ -68,6 +68,90 @@ const SEED_RESIDENTS = [
     permanentAddress: 'Zone 2, Talisay, Pili, Camarines Sur', cellphoneNo: '0921 567 8901',
     identityNo: '', barangay: 'Talisay',
   }),
+  // San Isidro — the barangay assigned to the Health Supervisor demo account.
+  residentSeed(6, {
+    lastName: 'Reyes', firstName: 'Carmen', middleName: 'Fuentes', suffix: '',
+    birthDate: '1968-06-02', birthPlace: 'Pili, Camarines Sur', sex: 'Female',
+    civilStatus: 'Married', religion: 'Roman Catholic', employmentStatus: 'Retired',
+    fatherName: 'Ernesto Fuentes', motherName: 'Lourdes Bautista', is4PsMember: true,
+    philhealthNo: '14-556677889-0', currentAddress: 'Purok 2, San Isidro, Pili, Camarines Sur',
+    permanentAddress: 'Purok 2, San Isidro, Pili, Camarines Sur', cellphoneNo: '0922 678 9012',
+    identityNo: '', barangay: 'San Isidro',
+  }),
+  residentSeed(7, {
+    lastName: 'Villanueva', firstName: 'Rodolfo', middleName: 'Dela Peña', suffix: '',
+    birthDate: '1979-01-25', birthPlace: 'Pili, Camarines Sur', sex: 'Male',
+    civilStatus: 'Married', religion: 'Roman Catholic', employmentStatus: 'Employed',
+    fatherName: 'Felix Villanueva', motherName: 'Norma Dela Peña', is4PsMember: false,
+    philhealthNo: '14-667788990-1', currentAddress: 'Purok 4, San Isidro, Pili, Camarines Sur',
+    permanentAddress: 'Purok 4, San Isidro, Pili, Camarines Sur', cellphoneNo: '0923 789 0123',
+    identityNo: '', barangay: 'San Isidro',
+  }),
+  residentSeed(8, {
+    lastName: 'Fuentes', firstName: 'Teresa', middleName: 'Amor', suffix: '',
+    birthDate: '1995-09-12', birthPlace: 'Pili, Camarines Sur', sex: 'Female',
+    civilStatus: 'Married', religion: 'Roman Catholic', employmentStatus: 'Employed',
+    fatherName: 'Danilo Amor', motherName: 'Sofia Cruz Amor', is4PsMember: true,
+    philhealthNo: '14-778899001-2', currentAddress: 'Purok 1, San Isidro, Pili, Camarines Sur',
+    permanentAddress: 'Purok 1, San Isidro, Pili, Camarines Sur', cellphoneNo: '0924 890 1234',
+    identityNo: '', barangay: 'San Isidro',
+  }),
+];
+
+/**
+ * Pending resident verifications. San Isidro requests belong to the Health
+ * Supervisor demo account (assigned to San Isidro — see config/devAccounts);
+ * the San Jose entry must never be visible to that account.
+ */
+const verificationSeed = (fields) => ({
+  status: 'Pending',
+  decision: null,
+  ...fields,
+});
+
+export const SEED_VERIFICATIONS = [
+  verificationSeed({
+    ref: 'KSG-2026-00428', name: 'Juan Dela Cruz Reyes', barangay: 'San Isidro',
+    registeredDate: '2026-07-05', contactNumber: '0917 123 4567', birthDate: '1994-03-14',
+    sex: 'Male', civilStatus: 'Married', address: 'Barangay San Isidro, Pili, Camarines Sur',
+    residencyStatus: 'Verified Resident', lengthOfResidency: '8 years', householdId: 'HH-2026-0184',
+    proofDocument: 'Barangay Certificate of Residency',
+  }),
+  verificationSeed({
+    ref: 'KSG-2026-00427', name: 'Maria Santos Lopez', barangay: 'San Isidro',
+    registeredDate: '2026-07-04', contactNumber: '0918 234 5678', birthDate: '1990-11-02',
+    sex: 'Female', civilStatus: 'Married', address: 'Purok 3, Barangay San Isidro, Pili, Camarines Sur',
+    residencyStatus: 'Verified Resident', lengthOfResidency: '12 years', householdId: 'HH-2026-0184',
+    proofDocument: 'Barangay Certificate of Residency',
+  }),
+  verificationSeed({
+    ref: 'KSG-2026-00425', name: 'Roberto Aguilar Cruz', barangay: 'San Isidro',
+    registeredDate: '2026-07-04', contactNumber: '0919 345 6789', birthDate: '1978-05-21',
+    sex: 'Male', civilStatus: 'Widowed', address: 'Purok 5, Barangay San Isidro, Pili, Camarines Sur',
+    residencyStatus: 'Verified Resident', lengthOfResidency: '15 years', householdId: 'HH-2026-0201',
+    proofDocument: 'Barangay Certificate of Residency',
+  }),
+  verificationSeed({
+    ref: 'KSG-2026-00421', name: 'Ana Patricia Lim', barangay: 'San Isidro',
+    registeredDate: '2026-07-03', contactNumber: '0920 456 7890', birthDate: '1998-08-17',
+    sex: 'Female', civilStatus: 'Single', address: 'Purok 1, Barangay San Isidro, Pili, Camarines Sur',
+    residencyStatus: 'Verified Resident', lengthOfResidency: '4 years', householdId: 'HH-2026-0212',
+    proofDocument: 'Barangay Certificate of Residency',
+  }),
+  verificationSeed({
+    ref: 'KSG-2026-00419', name: 'Fernando Garcia Jr.', barangay: 'San Isidro',
+    registeredDate: '2026-07-03', contactNumber: '0921 567 8901', birthDate: '1985-02-09',
+    sex: 'Male', civilStatus: 'Married', address: 'Purok 2, Barangay San Isidro, Pili, Camarines Sur',
+    residencyStatus: 'Verified Resident', lengthOfResidency: '6 years', householdId: 'HH-2026-0095',
+    proofDocument: 'Barangay Certificate of Residency',
+  }),
+  verificationSeed({
+    ref: 'KSG-2026-00416', name: 'Elena Bautista Ramos', barangay: 'San Jose',
+    registeredDate: '2026-07-02', contactNumber: '0922 678 9012', birthDate: '1972-09-30',
+    sex: 'Female', civilStatus: 'Married', address: 'Zone 4, Barangay San Jose, Pili, Camarines Sur',
+    residencyStatus: 'Verified Resident', lengthOfResidency: '20 years', householdId: 'HH-2026-0033',
+    proofDocument: 'Barangay Certificate of Residency',
+  }),
 ];
 
 const buildVitals = (vitals) => {
@@ -111,6 +195,52 @@ const SEED_VISITS = [
     submittedAt: '2026-08-22T00:45:00.000Z',
     createdAt: '2026-08-22T00:30:00.000Z', updatedAt: '2026-08-22T00:45:00.000Z',
   },
+  {
+    residentId: residentId(6),
+    recordedById: 'dev-health_supervisor', recordedByRole: 'health_supervisor', recordedByName: 'Maria Dela Cruz',
+    status: SUBMISSION_STATUS.SUBMITTED,
+    visitDate: '2026-08-28T08:30:00.000Z',
+    chiefComplaint: 'Hypertension follow-up — elevated blood pressure reading',
+    clinicalHistory:
+      'Known hypertensive on maintenance amlodipine 10 mg daily. Reports occasional headache and dizziness ' +
+      'in the mornings. Non-smoker, occasional salty diet.',
+    findings: 'BP elevated at 152/94 mmHg. Cardiac rate regular. No edema. Lungs clear.',
+    treatmentGiven: 'Continued amlodipine; low-sodium diet counseling; BP monitoring twice weekly.',
+    recommendation: 'Home BP log. Return in 2 weeks or sooner if BP exceeds 160/100.',
+    vitals: buildVitals({ bp: '152/94', hr: 88, rr: 18, o2sat: 98, temperature: 36.6, heightCm: 152, weightKg: 62 }),
+    submittedAt: '2026-08-28T08:50:00.000Z',
+    createdAt: '2026-08-28T08:30:00.000Z', updatedAt: '2026-08-28T08:50:00.000Z',
+  },
+  {
+    residentId: residentId(7),
+    recordedById: 'dev-health_supervisor', recordedByRole: 'health_supervisor', recordedByName: 'Maria Dela Cruz',
+    status: SUBMISSION_STATUS.SUBMITTED,
+    visitDate: '2026-08-30T09:00:00.000Z',
+    chiefComplaint: 'Diabetes monitoring — medication refill and counseling',
+    clinicalHistory:
+      'Type 2 diabetes mellitus diagnosed 4 years ago, on metformin 500 mg twice daily. Reports good ' +
+      'compliance. Occasional numbness of both feet.',
+    findings: 'BP 132/84 mmHg. No wounds on both feet; diminished sensation to light touch distally.',
+    treatmentGiven: 'Metformin refill; foot care counseling; advised daily walking.',
+    recommendation: 'Fasting blood sugar and HbA1c on next visit. Annual eye exam reminder.',
+    vitals: buildVitals({ bp: '132/84', hr: 80, rr: 18, o2sat: 98, temperature: 36.7, heightCm: 165, weightKg: 78 }),
+    submittedAt: '2026-08-30T09:20:00.000Z',
+    createdAt: '2026-08-30T09:00:00.000Z', updatedAt: '2026-08-30T09:20:00.000Z',
+  },
+  {
+    residentId: residentId(8),
+    recordedById: 'dev-health_supervisor', recordedByRole: 'health_supervisor', recordedByName: 'Maria Dela Cruz',
+    status: SUBMISSION_STATUS.SUBMITTED,
+    visitDate: '2026-09-02T10:00:00.000Z',
+    chiefComplaint: 'Prenatal check-up, second trimester',
+    clinicalHistory: 'G2P1, LMP approximately 19 weeks ago. Taking prenatal vitamins. No bleeding or contractions.',
+    findings: 'BP 118/76 mmHg. Fundic height consistent with dates. Fetal heart tones positive.',
+    treatmentGiven: 'Prenatal vitamins continued; iron and folate supplementation; tetanus toxoid schedule reviewed.',
+    recommendation: 'Monthly prenatal visit; ultrasound at 24 weeks.',
+    vitals: buildVitals({ bp: '118/76', hr: 84, rr: 18, o2sat: 99, temperature: 36.5, heightCm: 157, weightKg: 58 }),
+    submittedAt: '2026-09-02T10:25:00.000Z',
+    createdAt: '2026-09-02T10:00:00.000Z', updatedAt: '2026-09-02T10:25:00.000Z',
+  },
 ];
 
 export const seedLocalDataIfEmpty = async () => {
@@ -123,6 +253,7 @@ export const seedLocalDataIfEmpty = async () => {
       const id = submissionId(index + 1);
       data.visits.push({ id, createdAt: now, updatedAt: now, ...visit });
     });
+    SEED_VERIFICATIONS.forEach((verification) => data.verifications.push(JSON.parse(JSON.stringify(verification))));
     data.counters = {
       residents: SEED_RESIDENTS.length,
       submissions: SEED_VISITS.length,

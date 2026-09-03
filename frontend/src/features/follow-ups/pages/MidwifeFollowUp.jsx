@@ -1,7 +1,94 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { Search, Plus, Calendar, MapPin, User, X } from "lucide-react";
+import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
+import TimePicker from "@/components/common/TimePicker";
+import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2 } from "lucide-react";
+import { residents, systemUsers } from "@/services/mock/mockData";
+import { ROLES } from "@/lib/brand";
+import { useAuth } from "@/context/AuthContext";
+
+const FOLLOW_UP_TYPES = [
+  "General Check-up",
+  "Maternal Follow-up",
+  "Child Health Follow-up",
+  "Chronic Disease Follow-up",
+  "Medication Follow-up",
+  "Post-Consultation Follow-up",
+  "Other",
+];
+
+const FOLLOW_UP_LOCATIONS = ["Barangay Health Station", "RHU", "Home Visit", "Other"];
+
+const PERSONNEL_OPTIONS = systemUsers
+  .filter((u) => u.status === "Active" && ["Midwife", "Health Supervisor", "BHW"].includes(u.role))
+  .map((u) => u.name);
+
+const emptyScheduleForm = (personnel) => ({
+  date: new Date().toISOString().slice(0, 10),
+  time: "09:00",
+  type: "General Check-up",
+  reason: "",
+  location: "Barangay Health Station",
+  priority: "Medium",
+  notes: "",
+  personnel: personnel || "",
+});
+
+const inputCls = (error) =>
+  `w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue ${
+    error ? "border-red-400 bg-red-50/40" : "border-brand-border"
+  }`;
+
+const formatDate = (isoDate) => {
+  if (!isoDate) return "";
+  const d = new Date(`${isoDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+};
+
+const formatDateLong = (isoDate) => {
+  if (!isoDate) return "";
+  const d = new Date(`${isoDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+};
+
+const isPastDate = (isoDate) => {
+  if (!isoDate) return false;
+  const d = new Date(`${isoDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() < today.getTime();
+};
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const formatTime = (hhmm) => {
+  const [h, m] = String(hhmm || "").split(":");
+  if (!h || m === undefined) return "";
+  const hour = parseInt(h, 10);
+  if (Number.isNaN(hour)) return "";
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const hr12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hr12}:${m} ${ampm}`;
+};
+
+/**
+ * New follow-ups are saved as Scheduled — never Completed. They surface
+ * under "Today" or "Upcoming" depending on the scheduled date.
+ */
+const deriveStatus = (isoDate) => {
+  if (!isoDate) return "Scheduled";
+  const d = new Date(`${isoDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "Scheduled";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (d.getTime() === today.getTime()) return "Today";
+  if (d.getTime() > today.getTime()) return "Upcoming";
+  return "Scheduled";
+};
 
 const FOLLOW_UPS = [
   {
@@ -103,6 +190,7 @@ const PRIORITY_COLORS = {
 };
 
 export default function MidwifeFollowUp() {
+  const { user } = useAuth();
   const [followUps, setFollowUps] = useState(FOLLOW_UPS);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -114,6 +202,34 @@ export default function MidwifeFollowUp() {
   const [showRemarksModal, setShowRemarksModal] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [selectedFollowUp, setSelectedFollowUp] = useState(null);
+  const [selectedResident, setSelectedResident] = useState(null);
+  const [scheduleForm, setScheduleForm] = useState(() => emptyScheduleForm(""));
+  const [touched, setTouched] = useState({});
+  const [toast, setToast] = useState(null);
+
+  // Auto-assign the logged-in user where possible — the dashboard shell
+  // displays the role's display name, so prefer that for consistency.
+  const currentUserName =
+    (user?.role && ROLES[user.role] && ROLES[user.role].name) || user?.name || "";
+  const personnelOptions =
+    currentUserName && !PERSONNEL_OPTIONS.includes(currentUserName)
+      ? [currentUserName, ...PERSONNEL_OPTIONS]
+      : PERSONNEL_OPTIONS;
+  const defaultPersonnel = currentUserName || PERSONNEL_OPTIONS[0] || "";
+
+  // Escape closes the modal; lock background scrolling while it is open.
+  useEffect(() => {
+    if (!showScheduleModal) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") setShowScheduleModal(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [showScheduleModal]);
 
   const stats = {
     total: followUps.length,
@@ -190,6 +306,65 @@ export default function MidwifeFollowUp() {
     alert("Visit recorded successfully!");
   };
 
+  const openScheduleModal = () => {
+    setSelectedResident(null);
+    setTouched({});
+    setScheduleForm(emptyScheduleForm(defaultPersonnel));
+    setShowScheduleModal(true);
+  };
+
+  // Inline validation — fields are flagged once touched, not on every keystroke.
+  const scheduleErrors = {
+    resident: touched.resident && !selectedResident ? "Please select a resident." : "",
+    date: !scheduleForm.date
+      ? touched.date
+        ? "Please select a follow-up date."
+        : ""
+      : isPastDate(scheduleForm.date)
+        ? "Please select today or a future date."
+        : "",
+    time: touched.time && !scheduleForm.time ? "Please select a follow-up time." : "",
+    reason: touched.reason && !scheduleForm.reason.trim() ? "Please enter the reason for the follow-up." : "",
+  };
+
+  const canSchedule =
+    Boolean(selectedResident) &&
+    Boolean(scheduleForm.date) &&
+    !isPastDate(scheduleForm.date) &&
+    Boolean(scheduleForm.time) &&
+    Boolean(scheduleForm.reason.trim());
+
+  const handleSchedule = () => {
+    // Backstop — the primary button is disabled until the form is complete.
+    if (!canSchedule) {
+      setTouched({ resident: true, date: true, time: true, reason: true });
+      return;
+    }
+
+    const newFollowUp = {
+      id: followUps.reduce((acc, f) => Math.max(acc, f.id || 0), 0) + 1,
+      resident: selectedResident.name,
+      residentId: selectedResident.id,
+      age: selectedResident.age,
+      sex: selectedResident.gender,
+      barangay: selectedResident.barangay,
+      contact: "",
+      purpose: scheduleForm.reason.trim(),
+      type: scheduleForm.type,
+      assignedMidwife: scheduleForm.personnel || defaultPersonnel,
+      scheduledDate: formatDate(scheduleForm.date),
+      scheduledTime: formatTime(scheduleForm.time),
+      location: scheduleForm.location,
+      priority: scheduleForm.priority,
+      status: deriveStatus(scheduleForm.date),
+      remarks: scheduleForm.notes.trim(),
+    };
+    setFollowUps([newFollowUp, ...followUps]);
+    setShowScheduleModal(false);
+    setToast(`Follow-up scheduled successfully for ${newFollowUp.resident} on ${newFollowUp.scheduledDate}.`);
+    setTimeout(() => setToast(null), 4000);
+  };
+
   return (
     <>
       <PageHeader
@@ -198,13 +373,21 @@ export default function MidwifeFollowUp() {
         subtitle="Manage scheduled follow-up visits and monitor resident outcomes."
         action={
           <button
-            onClick={() => setShowScheduleModal(true)}
+            onClick={openScheduleModal}
             className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
           >
             <Plus className="w-4 h-4" /> Schedule Follow-up
           </button>
         }
       />
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-50 flex animate-in slide-in-from-bottom-2 items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">
+          <CheckCircle2 className="h-4 w-4 text-brand-green" />
+          <span className="text-sm text-white">{toast}</span>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -359,6 +542,230 @@ export default function MidwifeFollowUp() {
         </div>
       </Card>
 
+      {/* Schedule Follow-up Modal */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-label="Schedule Follow-up"
+            className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden"
+          >
+            {/* Fixed header */}
+            <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-light">
+                  <Calendar className="h-5 w-5 text-brand-blue" strokeWidth={1.8} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-ink">Schedule Follow-up</h3>
+                  <p className="text-xs text-brand-gray">Book the next follow-up visit for a resident</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink"
+                aria-label="Close modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Scrollable form body */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="space-y-5">
+                {/* RESIDENT */}
+                <section>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Resident</p>
+                  <div onBlur={() => setTouched((t) => ({ ...t, resident: true }))}>
+                    <ResidentSearchSelect
+                      residents={residents}
+                      value={selectedResident}
+                      onChange={setSelectedResident}
+                    />
+                  </div>
+                  {scheduleErrors.resident && (
+                    <p className="mt-1.5 text-xs text-red-600">{scheduleErrors.resident}</p>
+                  )}
+                  {selectedResident && (
+                    <div className="mt-3 flex items-center gap-3 rounded-btn border border-brand-border bg-brand-bg px-3.5 py-2.5">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-blue text-xs font-semibold text-white">
+                        {selectedResident.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-brand-ink">{selectedResident.name}</p>
+                        <p className="text-xs text-brand-gray">
+                          {selectedResident.id} · {selectedResident.age} yrs · {selectedResident.gender} ·{" "}
+                          {selectedResident.barangay}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </section>
+
+                {/* FOLLOW-UP DETAILS */}
+                <section>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Follow-up Details</p>
+                  <div className="space-y-3.5">
+                    <div className="grid gap-3.5 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-brand-ink">
+                          Follow-up Date <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          min={todayISO()}
+                          value={scheduleForm.date}
+                          onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })}
+                          onBlur={() => setTouched((t) => ({ ...t, date: true }))}
+                          className={inputCls(scheduleErrors.date)}
+                        />
+                        {scheduleErrors.date ? (
+                          <p className="mt-1 text-xs text-red-600">{scheduleErrors.date}</p>
+                        ) : (
+                          scheduleForm.date && (
+                            <p className="mt-1 text-xs text-brand-gray">{formatDateLong(scheduleForm.date)}</p>
+                          )
+                        )}
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-brand-ink">
+                          Follow-up Time <span className="text-red-500">*</span>
+                        </label>
+                        <TimePicker
+                          value={scheduleForm.time}
+                          onChange={(time) => setScheduleForm({ ...scheduleForm, time })}
+                          error={Boolean(scheduleErrors.time)}
+                        />
+                        {scheduleErrors.time && (
+                          <p className="mt-1 text-xs text-red-600">{scheduleErrors.time}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid gap-3.5 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-brand-ink">Follow-up Type</label>
+                        <select
+                          value={scheduleForm.type}
+                          onChange={(e) => setScheduleForm({ ...scheduleForm, type: e.target.value })}
+                          className={`${inputCls()} cursor-pointer`}
+                        >
+                          {FOLLOW_UP_TYPES.map((t) => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-brand-ink">Priority</label>
+                        <select
+                          value={scheduleForm.priority}
+                          onChange={(e) => setScheduleForm({ ...scheduleForm, priority: e.target.value })}
+                          className={`${inputCls()} cursor-pointer`}
+                        >
+                          <option>High</option>
+                          <option>Medium</option>
+                          <option>Low</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-brand-ink">
+                        Reason / Purpose <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Routine BP monitoring, post-consultation follow-up..."
+                        value={scheduleForm.reason}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, reason: e.target.value })}
+                        onBlur={() => setTouched((t) => ({ ...t, reason: true }))}
+                        className={inputCls(scheduleErrors.reason)}
+                      />
+                      {scheduleErrors.reason && (
+                        <p className="mt-1 text-xs text-red-600">{scheduleErrors.reason}</p>
+                      )}
+                    </div>
+                    <div className="grid gap-3.5 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-brand-ink">Location</label>
+                        <select
+                          value={scheduleForm.location}
+                          onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })}
+                          className={`${inputCls()} cursor-pointer`}
+                        >
+                          {FOLLOW_UP_LOCATIONS.map((l) => (
+                            <option key={l} value={l}>{l}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-brand-ink">Assigned Personnel</label>
+                        <select
+                          value={scheduleForm.personnel}
+                          onChange={(e) => setScheduleForm({ ...scheduleForm, personnel: e.target.value })}
+                          className={`${inputCls()} cursor-pointer`}
+                        >
+                          {personnelOptions.map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-xs text-brand-gray">Auto-assigned to you — change if needed.</p>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-brand-ink">Notes / Instructions</label>
+                      <textarea
+                        rows={3}
+                        placeholder="Add any instructions or additional information..."
+                        value={scheduleForm.notes}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })}
+                        className={`${inputCls()} resize-none`}
+                      />
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            {/* Status hint strip */}
+            <div className="shrink-0 border-t border-brand-border bg-brand-bg/60 px-6 py-2.5">
+              <p className="flex flex-wrap items-center gap-2 text-xs text-brand-gray">
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    STATUS_COLORS[deriveStatus(scheduleForm.date)]
+                  }`}
+                >
+                  {deriveStatus(scheduleForm.date)}
+                </span>
+                <span>
+                  Follow-ups are saved as Scheduled — appearing under Today or Upcoming based on the date.
+                </span>
+              </p>
+            </div>
+
+            {/* Fixed footer */}
+            <div className="flex shrink-0 justify-end gap-3 bg-white px-6 py-4">
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSchedule}
+                disabled={!canSchedule}
+                className={`px-4 py-2 rounded-btn text-sm font-medium transition-colors ${
+                  canSchedule
+                    ? "bg-brand-blue text-white hover:bg-brand-dark"
+                    : "cursor-not-allowed bg-brand-blue/50 text-white"
+                }`}
+              >
+                Schedule Follow-up
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* Detail Panel */}
       {showDetailPanel && selectedFollowUp && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -391,6 +798,12 @@ export default function MidwifeFollowUp() {
               </div>
 
               <div className="mb-4 space-y-3">
+                {selectedFollowUp.type && (
+                  <div>
+                    <p className="text-xs text-brand-gray mb-1">Follow-up Type</p>
+                    <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.type}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs text-brand-gray mb-1">Purpose</p>
                   <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.purpose}</p>

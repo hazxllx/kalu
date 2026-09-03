@@ -19,6 +19,9 @@ const toUser = (supabaseUser) => ({
   email: supabaseUser.email,
   name: supabaseUser.user_metadata?.name || supabaseUser.email,
   role: roleFromSupabaseUser(supabaseUser),
+  // Barangay assignment for barangay-scoped roles (e.g. Health Supervisor).
+  // Comes from the account metadata — never chosen by the user.
+  barangay: supabaseUser.app_metadata?.barangay || supabaseUser.user_metadata?.barangay || null,
 });
 
 export const AuthProvider = ({ children }) => {
@@ -101,7 +104,13 @@ export const AuthProvider = ({ children }) => {
       setAuthError({ message });
       throw new Error(message);
     }
-    const devUser = { id: `dev-${account.role}`, email: account.email, name: account.name, role: account.role };
+    const devUser = {
+      id: `dev-${account.role}`,
+      email: account.email,
+      name: account.name,
+      role: account.role,
+      barangay: account.barangay || null,
+    };
     try {
       localStorage.setItem(DEV_SESSION_KEY, JSON.stringify(devUser));
     } catch {

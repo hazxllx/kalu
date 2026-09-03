@@ -17,6 +17,7 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { computeBMI, isPlausibleVital } from '../utils/bmi.js';
 import { SUBMISSION_STATUS } from '../config/facility.js';
+import { assignedBarangay } from '../config/scope.js';
 
 const INTAKE_ROLES = ['bhw', 'rhu_personnel', 'health_supervisor'];
 
@@ -24,14 +25,28 @@ const isIntakeRole = (user) => user?.role && INTAKE_ROLES.includes(user.role);
 
 const editableStatusesForIntake = () => [SUBMISSION_STATUS.DRAFT];
 
-export const searchResidents = async ({ q = '' }) => {
-  return repository.searchResidents({ q, limit: 25 });
+/** True when the resident is visible to this caller under barangay scoping. */
+const withinBarangayScope = (user, resident) => {
+  const scope = assignedBarangay(user);
+  if (!scope) return true;
+  return String(resident?.barangay ?? '').trim().toLowerCase() === scope.toLowerCase();
+};
+
+export const searchResidents = async ({ q = '', user }) => {
+  const residents = await repository.searchResidents({ q, limit: 25 });
+  // Barangay-scoped callers only ever see residents of their own barangay —
+  // filtered here at the data-access layer, not in the UI.
+  const scope = assignedBarangay(user);
+  if (!scope) return residents;
+  return residents.filter((r) => withinBarangayScope(user, r));
 };
 
 export const getResidentForIntake = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
   const resident = await repository.getResident(id);
-  if (!resident) throw ApiError.notFound('Resident record not found');
+  if (!resident || !withinBarangayScope(user, resident)) {
+    throw ApiError.notFound('Resident record not found');
+  }
   return resident;
 };
 

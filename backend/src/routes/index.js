@@ -6,6 +6,8 @@ import healthRoutes from './health.routes.js';
 import intakeRoutes from './intake.routes.js';
 import phnRoutes, { phnReadsRouter } from './phnQueue.routes.js';
 import residentsRoutes from './residents.routes.js';
+import analyticsRoutes from './analytics.routes.js';
+import verificationsRoutes from './verifications.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -35,6 +37,9 @@ router.use('/phn', phnReadsRouter);           // authorized read-only review
 // Master resident records (PHN / Health Supervisor / MHO)
 router.use('/residents', residentsRoutes);
 
+// Resident verification review (Health Supervisor / PHN, barangay-scoped)
+router.use('/verifications', verificationsRoutes);
+
 // Account / system administration
 router.use('/users', createResourceRouter('users', { readRoles: FEATURE_ROLES.users }));
 
@@ -51,7 +56,9 @@ router.use('/follow-ups', createResourceRouter('follow-ups', { readRoles: FEATUR
 
 // Monitoring / aggregate information
 router.use('/reports', createResourceRouter('reports', { readRoles: FEATURE_ROLES.reports }));
-router.use('/analytics', createResourceRouter('analytics', { readRoles: FEATURE_ROLES.analytics }));
+
+// Early Warning analytics — barangay scope enforced from the session
+router.use('/analytics', analyticsRoutes);
 
 // Cross-cutting
 router.use('/notifications', createResourceRouter('notifications', { readRoles: FEATURE_ROLES.notifications }));
