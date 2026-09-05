@@ -22,11 +22,16 @@ const ensureDir = (dir) => {
 
 const emptyData = () => ({
   meta: { version: 1, driver: 'file' },
-  counters: { residents: 0, submissions: 0, referrals: 0 },
+  counters: { residents: 0, submissions: 0, referrals: 0, onboarding: 0 },
   residents: [],
   visits: [],
   referrals: [],
   verifications: [],
+  municipalityOnboarding: [],
+  municipalityOnboardingAudit: [],
+  municipalities: [],
+  rhus: [],
+  barangays: [],
 });
 
 class FileStore {
@@ -49,6 +54,25 @@ class FileStore {
     if (!this.data) this.data = emptyData();
     // Older store files predate the verifications collection.
     if (!Array.isArray(this.data.verifications)) this.data.verifications = [];
+    if (!Array.isArray(this.data.municipalityOnboarding)) this.data.municipalityOnboarding = [];
+    if (!Array.isArray(this.data.municipalityOnboardingAudit)) this.data.municipalityOnboardingAudit = [];
+    if (!Array.isArray(this.data.municipalities)) this.data.municipalities = [];
+    if (!Array.isArray(this.data.rhus)) this.data.rhus = [];
+    if (!Array.isArray(this.data.barangays)) this.data.barangays = [];
+    if (!this.data.counters || typeof this.data.counters !== 'object') this.data.counters = {};
+    if (!Number.isInteger(this.data.counters.onboarding)) this.data.counters.onboarding = 0;
+    this.data.residents.forEach((row) => {
+      if (!row.municipalityId) row.municipalityId = 'mun-pili';
+      if (!row.rhuId) row.rhuId = 'rhu-pili-main';
+    });
+    this.data.visits.forEach((row) => {
+      if (!row.municipalityId) row.municipalityId = 'mun-pili';
+      if (!row.rhuId) row.rhuId = 'rhu-pili-main';
+    });
+    this.data.referrals.forEach((row) => {
+      if (!row.municipalityId) row.municipalityId = 'mun-pili';
+      if (!row.rhuId) row.rhuId = 'rhu-pili-main';
+    });
   }
 
   /**
@@ -101,6 +125,17 @@ class FileStore {
     this.ensureLoaded();
     return this.data.verifications;
   }
+
+  get municipalityOnboarding() {
+    this.ensureLoaded();
+    return this.data.municipalityOnboarding;
+  }
+
+  get municipalityOnboardingAudit() {
+    this.ensureLoaded();
+    return this.data.municipalityOnboardingAudit;
+  }
+
 }
 
 export const store = new FileStore();

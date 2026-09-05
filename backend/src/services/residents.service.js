@@ -13,7 +13,7 @@
  */
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
-import { assignedBarangay } from '../config/scope.js';
+import { assignedBarangay, organizationScope } from '../config/scope.js';
 
 const EDITABLE_RESIDENT_KEYS = [
   'suffix',
@@ -51,7 +51,7 @@ const assertWithinScope = (user, resident) => {
 
 export const getResident = async ({ id, user }) => {
   if (!isReadRole(user)) throw ApiError.notFound('Resident record not found');
-  const resident = await repository.getResident(id);
+  const resident = await repository.getResident(id, organizationScope(user));
   if (!resident) throw ApiError.notFound('Resident record not found');
   assertWithinScope(user, resident);
   return resident;
@@ -60,7 +60,7 @@ export const getResident = async ({ id, user }) => {
 export const updateResident = async ({ id, patch = {}, user }) => {
   if (!isEditRole(user)) throw ApiError.forbidden('Your role is not permitted to edit resident records');
 
-  const existing = await repository.getResident(id);
+  const existing = await repository.getResident(id, organizationScope(user));
   if (!existing) throw ApiError.notFound('Resident record not found');
   assertWithinScope(user, existing);
 

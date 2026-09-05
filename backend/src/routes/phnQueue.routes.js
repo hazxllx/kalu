@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
+import { resolveOrganizationScope } from '../middleware/organizationScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import * as phnQueueController from '../controllers/phnQueue.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -18,7 +19,7 @@ import asyncHandler from '../utils/asyncHandler.js';
  * layer additionally prevents non-PHN roles from reading drafts.
  */
 const processing = Router();
-processing.use(authenticate);
+processing.use(authenticate, resolveOrganizationScope);
 processing.use(authorize(FEATURE_ROLES.phnProcessing));
 
 processing.get('/submissions', asyncHandler(phnQueueController.listQueue));
@@ -31,7 +32,7 @@ processing.put('/referrals/:id', asyncHandler(phnQueueController.updateReferral)
 processing.post('/referrals/:id/sync', asyncHandler(phnQueueController.syncReferral));
 
 const reads = Router();
-reads.use(authenticate);
+reads.use(authenticate, resolveOrganizationScope);
 reads.use(authorize(FEATURE_ROLES.referralRecords));
 
 reads.get('/submissions/:id', asyncHandler(phnQueueController.getSubmission));

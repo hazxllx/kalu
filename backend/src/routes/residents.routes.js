@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
+import { resolveOrganizationScope } from '../middleware/organizationScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import * as residentsController from '../controllers/residents.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -19,7 +20,7 @@ import asyncHandler from '../utils/asyncHandler.js';
  */
 const router = Router();
 
-router.use(authenticate, resolveBarangayScope);
+router.use(authenticate, resolveOrganizationScope, resolveBarangayScope);
 
 router.get('/:id', authorize(FEATURE_ROLES.referralRecords), asyncHandler(residentsController.getResident));
 router.put('/:id', authorize(['phn', 'health_supervisor']), asyncHandler(residentsController.updateResident));

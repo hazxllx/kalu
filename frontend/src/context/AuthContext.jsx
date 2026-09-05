@@ -19,6 +19,7 @@ const toUser = (supabaseUser) => ({
   email: supabaseUser.email,
   name: supabaseUser.user_metadata?.name || supabaseUser.email,
   role: roleFromSupabaseUser(supabaseUser),
+  municipalityId: supabaseUser.app_metadata?.municipality_id || supabaseUser.user_metadata?.municipality_id || null,
   // Barangay assignment for barangay-scoped roles (e.g. Health Supervisor).
   // Comes from the account metadata — never chosen by the user.
   barangay: supabaseUser.app_metadata?.barangay || supabaseUser.user_metadata?.barangay || null,
@@ -75,8 +76,8 @@ export const AuthProvider = ({ children }) => {
   }, [applyUser]);
 
   /**
-   * Log in with email + password. Returns the resolved role on success so the
-   * caller can redirect to the correct dashboard.
+  * Log in with email + password. Returns the resolved user so the caller can
+  * redirect using both role and municipality scope.
    */
   const login = useCallback(async ({ email, password }) => {
     setAuthError(null);
@@ -90,7 +91,7 @@ export const AuthProvider = ({ children }) => {
       }
       const nextUser = toUser(data.session.user);
       applyUser(nextUser, data.session);
-      return nextUser.role;
+      return nextUser;
     }
 
     // --- DEV FALLBACK (no Supabase configured) -----------------------------
@@ -104,20 +105,21 @@ export const AuthProvider = ({ children }) => {
       setAuthError({ message });
       throw new Error(message);
     }
-    const devUser = {
+    const nextUser = {
       id: `dev-${account.role}`,
       email: account.email,
       name: account.name,
       role: account.role,
+      municipalityId: account.municipalityId || null,
       barangay: account.barangay || null,
     };
     try {
-      localStorage.setItem(DEV_SESSION_KEY, JSON.stringify(devUser));
+      localStorage.setItem(DEV_SESSION_KEY, JSON.stringify(nextUser));
     } catch {
       /* storage may be unavailable */
     }
-    applyUser(devUser, { dev: true });
-    return devUser.role;
+    applyUser(nextUser, { dev: true });
+    return nextUser;
   }, [applyUser]);
 
   const logout = useCallback(async (shouldRedirect = true) => {
@@ -138,6 +140,7 @@ export const AuthProvider = ({ children }) => {
     user,
     session,
     role,
+    municipalityId: user?.municipalityId || null,
     isAuthenticated: Boolean(user),
     isLoadingAuth,
     authChecked,

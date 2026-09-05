@@ -21,6 +21,7 @@ import repository from '../repositories/index.js';
 import { computeBMI } from '../utils/bmi.js';
 import { FACILITY, SUBMISSION_STATUS, PHN_EDITABLE_STATUSES } from '../config/facility.js';
 import { validateVitals } from './intake.service.js';
+import { organizationScope } from '../config/scope.js';
 
 const isPHN = (user) => user?.role === 'phn';
 
@@ -43,11 +44,11 @@ export const listQueue = async ({ statuses = null, q = '', user } = {}) => {
   const effectiveStatuses = allowed && allowed.length
     ? allowed
     : [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.COMPLETED];
-  return repository.listVisits({ statuses: effectiveStatuses, q, limit: 100 });
+  return repository.listVisits({ statuses: effectiveStatuses, q, limit: 100, scope: organizationScope(user) });
 };
 
 export const viewSubmission = async ({ id, user }) => {
-  const submission = await repository.getVisit(id);
+  const submission = await repository.getVisit(id, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
 
   const canView =
@@ -104,7 +105,7 @@ const normalizePhnVisit = (visit = {}) => {
 
 export const updateSubmissionForPhn = async ({ id, patch = {}, user }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(id);
+  const submission = await repository.getVisit(id, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
   if (!PHN_EDITABLE_STATUSES.includes(submission.status)) {
     throw ApiError.forbidden('This submission is not open for PHN processing.');
@@ -127,7 +128,7 @@ const guardTransition = (submission, from, to) => {
 
 export const receiveSubmission = async ({ id, user }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(id);
+  const submission = await repository.getVisit(id, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
   guardTransition(submission, [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED], SUBMISSION_STATUS.RECEIVED);
   const now = new Date().toISOString();
@@ -136,7 +137,7 @@ export const receiveSubmission = async ({ id, user }) => {
 
 export const markInReview = async ({ id, user }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(id);
+  const submission = await repository.getVisit(id, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
   guardTransition(
     submission,
@@ -153,7 +154,7 @@ export const markInReview = async ({ id, user }) => {
 
 export const completeSubmission = async ({ id, user }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(id);
+  const submission = await repository.getVisit(id, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
   guardTransition(
     submission,
@@ -207,12 +208,12 @@ const normalizeReferralDraft = (draft = {}) => {
 
 export const createReferral = async ({ visitId, draft = {}, user }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(visitId);
+  const submission = await repository.getVisit(visitId, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
   if (!PHN_EDITABLE_STATUSES.includes(submission.status)) {
     throw ApiError.forbidden('The submission must be received and in review before a referral is generated.');
   }
-  const existingReferral = await repository.getReferralByVisitId(visitId);
+  const existingReferral = await repository.getReferralByVisitId(visitId, organizationScope(user));
   if (existingReferral) {
     throw ApiError.conflict('A referral has already been generated for this submission.');
   }
@@ -241,7 +242,7 @@ export const createReferral = async ({ visitId, draft = {}, user }) => {
 
 export const updateReferral = async ({ id, patch = {}, user }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const referral = await repository.getReferral(id);
+  const referral = await repository.getReferral(id, organizationScope(user));
   if (!referral) throw ApiError.notFound('Referral not found');
   const normalized = normalizeReferralDraft(patch);
   if (Object.prototype.hasOwnProperty.call(normalized, 'receivingFacility') && !normalized.receivingFacility) {
@@ -260,9 +261,9 @@ export const updateReferral = async ({ id, patch = {}, user }) => {
  */
 export const syncReferralSnapshots = async ({ id, user }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const referral = await repository.getReferral(id);
+  const referral = await repository.getReferral(id, organizationScope(user));
   if (!referral) throw ApiError.notFound('Referral not found');
-  const submission = await repository.getVisit(referral.visitId);
+  const submission = await repository.getVisit(referral.visitId, organizationScope(user));
   if (!submission) throw ApiError.notFound('Source submission not found');
   const updated = await repository.updateReferral(id, {
     patientSnapshot: withoutMeta(submission.resident || {}),
@@ -275,13 +276,13 @@ export const listReferrals = async ({ q = '', user } = {}) => {
   const canView =
     isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role);
   if (!canView) throw ApiError.forbidden();
-  return repository.listReferrals({ q, limit: 100 });
+  return repository.listReferrals({ q, limit: 100, scope: organizationScope(user) });
 };
 
 export const getReferral = async ({ id, user }) => {
   const canView = isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role);
   if (!canView) throw ApiError.notFound('Referral not found');
-  const referral = await repository.getReferral(id);
+  const referral = await repository.getReferral(id, organizationScope(user));
   if (!referral) throw ApiError.notFound('Referral not found');
   return referral;
 };
@@ -289,7 +290,7 @@ export const getReferral = async ({ id, user }) => {
 export const getReferralByVisitId = async ({ visitId, user }) => {
   const canView = isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role);
   if (!canView) throw ApiError.notFound('Referral not found');
-  const referral = await repository.getReferralByVisitId(visitId);
+  const referral = await repository.getReferralByVisitId(visitId, organizationScope(user));
   if (!referral) throw ApiError.notFound('Referral not found');
   return referral;
 };

@@ -17,7 +17,7 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { computeBMI, isPlausibleVital } from '../utils/bmi.js';
 import { SUBMISSION_STATUS } from '../config/facility.js';
-import { assignedBarangay } from '../config/scope.js';
+import { assignedBarangay, organizationScope } from '../config/scope.js';
 
 const INTAKE_ROLES = ['bhw', 'rhu_personnel', 'health_supervisor'];
 
@@ -33,7 +33,7 @@ const withinBarangayScope = (user, resident) => {
 };
 
 export const searchResidents = async ({ q = '', user }) => {
-  const residents = await repository.searchResidents({ q, limit: 25 });
+  const residents = await repository.searchResidents({ q, limit: 25, scope: organizationScope(user) });
   // Barangay-scoped callers only ever see residents of their own barangay —
   // filtered here at the data-access layer, not in the UI.
   const scope = assignedBarangay(user);
@@ -43,7 +43,7 @@ export const searchResidents = async ({ q = '', user }) => {
 
 export const getResidentForIntake = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
-  const resident = await repository.getResident(id);
+  const resident = await repository.getResident(id, organizationScope(user));
   if (!resident || !withinBarangayScope(user, resident)) {
     throw ApiError.notFound('Resident record not found');
   }
@@ -149,7 +149,7 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
 
   let residentRow = null;
   if (residentId) {
-    residentRow = await repository.getResident(residentId);
+    residentRow = await repository.getResident(residentId, organizationScope(user));
     if (!residentRow) throw ApiError.notFound('Resident record not found');
   } else if (resident) {
     const demographics = normalizeDemographics(resident);
@@ -160,7 +160,7 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
       lastName: demographics.lastName,
       firstName: demographics.firstName,
       middleName: demographics.middleName,
-      birthDate: demographics.birthDate,
+      birthDate: demographics.birthDate, scope: organizationScope(user),
     });
     if (existing) {
       throw ApiError.conflict(
@@ -169,7 +169,7 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
       );
     }
     const ids = await repository.nextResidentIds();
-    residentRow = await repository.insertResident({ id: ids.id, healthRecordNo: ids.healthRecordNo, ...demographics });
+    residentRow = await repository.insertResident({ id: ids.id, healthRecordNo: ids.healthRecordNo, municipalityId: user.municipalityId, rhuId: user.rhuId, ...demographics });
   } else {
     throw ApiError.badRequest('A resident must be selected or a new resident profile supplied.');
   }
@@ -186,18 +186,18 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
     ...normalized,
   };
 
-  return repository.insertVisit(submission);
+  return repository.insertVisit({ ...submission, municipalityId: user.municipalityId, rhuId: user.rhuId });
 };
 
 export const listMySubmissions = async ({ user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
-  const { rows } = await repository.listVisits({ submittedById: user.id, limit: 100 });
+  const { rows } = await repository.listVisits({ submittedById: user.id, limit: 100, scope: organizationScope(user) });
   return rows;
 };
 
 export const getSubmissionForIntake = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(id);
+  const submission = await repository.getVisit(id, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id) {
     // A submission recorded by someone else is not part of this user's intake.
@@ -208,7 +208,7 @@ export const getSubmissionForIntake = async ({ id, user }) => {
 
 export const updateSubmissionDraft = async ({ id, visit = {}, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(id);
+  const submission = await repository.getVisit(id, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id) throw ApiError.forbidden('You may only update submissions you created.');
   if (!editableStatusesForIntake().includes(submission.status)) {
@@ -222,7 +222,7 @@ export const updateSubmissionDraft = async ({ id, visit = {}, user }) => {
 
 export const submitSubmission = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(id);
+  const submission = await repository.getVisit(id, organizationScope(user));
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id) {
     throw ApiError.forbidden('You may only submit submissions you created.');

@@ -13,6 +13,7 @@
  * coding schema is connected.
  */
 import repository from '../repositories/index.js';
+import { organizationScope } from '../config/scope.js';
 
 const CONDITION_RULES = [
   { name: 'Hypertension', keywords: ['hypertension', 'blood pressure', 'elevated blood'] },
@@ -63,14 +64,14 @@ const lastTwelveMonths = (reference) => {
   return months;
 };
 
-export const getEarlyWarning = async ({ barangay = null } = {}) => {
+export const getEarlyWarning = async ({ barangay = null, user } = {}) => {
   const now = new Date();
 
   // --- load the source records, then filter to the caller's barangay -------
   const [visitPage, referralPage, allResidents] = await Promise.all([
-    repository.listVisits({ limit: 5000 }),
-    repository.listReferrals({ limit: 5000 }),
-    repository.searchResidents({ q: '', limit: 5000 }),
+    repository.listVisits({ limit: 5000, scope: organizationScope(user) }),
+    repository.listReferrals({ limit: 5000, scope: organizationScope(user) }),
+    repository.searchResidents({ q: '', limit: 5000, scope: organizationScope(user) }),
   ]);
   const visits = visitPage.rows;
   const referrals = referralPage.rows;

@@ -10,7 +10,8 @@
   },
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "seed:onboarding": "node src/scripts/seedDevelopmentOnboarding.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

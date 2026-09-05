@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
+import { resolveOrganizationScope } from '../middleware/organizationScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import { getEarlyWarning } from '../controllers/analytics.controller.js';
 
@@ -16,6 +17,6 @@ import { getEarlyWarning } from '../controllers/analytics.controller.js';
  */
 const router = Router();
 
-router.get('/early-warning', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getEarlyWarning);
+router.get('/early-warning', authenticate, authorize(FEATURE_ROLES.analytics), resolveOrganizationScope, resolveBarangayScope, getEarlyWarning);
 
 export default router;

@@ -1,4 +1,5 @@
 import { Route, Routes, Navigate } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 
 import DashboardLayout from '@/layouts/DashboardLayout';
 import NotFoundPage from '@/pages/NotFoundPage';
@@ -8,7 +9,10 @@ import { ROUTE_ROLES } from '@/lib/roles';
 
 // Landing + public entry points
 import Landing from '@/features/landing/pages/Landing';
+import PublicLanding from '@/features/public/pages/PublicLanding';
 import Login from '@/features/authentication/pages/Login';
+import MunicipalityRegistration from '@/features/municipality-registration/pages/MunicipalityRegistration';
+import MunicipalityVerification from '@/features/municipality-registration/pages/MunicipalityVerification';
 
 // Registration
 import RegistrationTypeSelection from '@/features/registration/pages/RegistrationTypeSelection';
@@ -76,9 +80,19 @@ import SettingsPage from '@/features/settings/pages/SettingsPage';
  *   bhw              — DATA COLLECTION ONLY (household profiling / community data)
  *   resident         — own profile, records, services, notifications
  */
+const ApprovedPiliEntry = () => {
+  const { isAuthenticated, isLoadingAuth, authChecked, municipalityId } = useAuth();
+  if (isLoadingAuth || !authChecked) return null;
+  if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: '/pili' }} />;
+  return municipalityId === 'mun-pili' ? <Landing /> : <Navigate to="/unauthorized" replace />;
+};
+
 const AppRoutes = () => (
   <Routes>
-    <Route path="/" element={<Landing />} />
+    <Route path="/" element={<PublicLanding />} />
+    <Route path="/municipality-registration" element={<MunicipalityRegistration />} />
+    <Route path="/municipality-verification/:token" element={<MunicipalityVerification />} />
+    <Route path="/pili" element={<ApprovedPiliEntry />} />
     <Route path="/login" element={<Login />} />
     <Route path="/register" element={<RegistrationTypeSelection />} />
     <Route path="/register/new/step-1" element={<NewResidentRegistration />} />

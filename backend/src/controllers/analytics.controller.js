@@ -12,7 +12,7 @@ import { sendData } from '../utils/apiResponse.js';
  */
 export const getEarlyWarning = async (req, res) => {
   const barangay = req.assignedBarangay || (typeof req.query.barangay === 'string' ? req.query.barangay.trim() : '') || null;
-  const data = await analyticsService.getEarlyWarning({ barangay });
+  const data = await analyticsService.getEarlyWarning({ barangay, user: req.user });
   sendData(res, data);
 };
 

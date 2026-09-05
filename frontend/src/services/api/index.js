@@ -13,3 +13,4 @@ export { residentsApi } from './residentsApi';
 export { healthRecordsApi } from './healthRecordsApi';
 export { consultationsApi } from './consultationsApi';
 export { referralsApi } from './referralsApi';
+export { municipalityOnboardingApi } from './municipalityOnboardingApi';

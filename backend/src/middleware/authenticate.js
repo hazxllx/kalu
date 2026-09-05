@@ -52,6 +52,9 @@ export const authenticate = asyncHandler(async (req, res, next) => {
       // Barangay assignment travels inside the signed session — it can never
       // be supplied by the caller (see config/scope.js).
       barangay: payload.barangay || null,
+      municipalityId: payload.municipalityId || null,
+      rhuId: payload.rhuId || null,
+      barangayId: payload.barangayId || null,
       accessToken: token,
       authMode: 'dev',
     };
@@ -71,12 +74,18 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   // Lives in the account metadata — never chosen by the caller.
   const barangay =
     user.app_metadata?.barangay || user.user_metadata?.barangay || null;
+  const municipalityId = user.app_metadata?.municipality_id || null;
+  const rhuId = user.app_metadata?.rhu_id || null;
+  const barangayId = user.app_metadata?.barangay_id || null;
 
   req.user = {
     id: user.id,
     email: user.email,
     role,
     barangay,
+    municipalityId,
+    rhuId,
+    barangayId,
     accessToken: token,
     authMode: 'supabase',
   };

@@ -26,4 +26,10 @@ export const assignedBarangay = (user) => {
   return barangay || null;
 };
 
-export default { BARANGAY_SCOPED_ROLES, assignedBarangay };
+export const organizationScope = (user) => ({
+  municipalityId: user?.municipalityId || null,
+  rhuId: user?.rhuId || null,
+  barangayId: user?.barangayId || null,
+});
+
+export default { BARANGAY_SCOPED_ROLES, assignedBarangay, organizationScope };

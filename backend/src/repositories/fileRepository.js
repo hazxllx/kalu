@@ -12,6 +12,9 @@ import { residentId, healthRecordNo, submissionId, referralId } from './ids.js';
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
 const normalizeText = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+const inScope = (row, scope = {}) => (!scope.municipalityId || row.municipalityId === scope.municipalityId)
+  && (!scope.rhuId || !row.rhuId || row.rhuId === scope.rhuId)
+  && (!scope.barangayId || !row.barangayId || row.barangayId === scope.barangayId);
 
 const attachResidentToVisit = (visit, residentsById) => ({
   ...visit,
@@ -67,18 +70,18 @@ export const fileRepository = {
   nextReferralId: () => store.mutate((data) => nextReferral(data)),
 
   // ----- residents ---------------------------------------------------------
-  searchResidents: async ({ q = '', limit = 20 } = {}) => {
-    const residents = store.residents.filter((r) => matchesQuery(r, q)).slice(0, limit);
+  searchResidents: async ({ q = '', limit = 20, scope } = {}) => {
+    const residents = store.residents.filter((r) => inScope(r, scope) && matchesQuery(r, q)).slice(0, limit);
     return clone(residents);
   },
 
-  findResidentByIdentity: async ({ lastName, firstName, middleName, birthDate } = {}) => {
+  findResidentByIdentity: async ({ lastName, firstName, middleName, birthDate, scope } = {}) => {
     const last = normalizeText(lastName);
     const first = normalizeText(firstName);
     const mid = normalizeText(middleName);
     const dob = String(birthDate || '');
     const match = store.residents.find(
-      (r) =>
+      (r) => inScope(r, scope) &&
         normalizeText(r.lastName) === last &&
         normalizeText(r.firstName) === first &&
         (mid ? normalizeText(r.middleName) === mid : true) &&
@@ -87,8 +90,8 @@ export const fileRepository = {
     return match ? clone(match) : null;
   },
 
-  getResident: async (id) => {
-    const found = store.residents.find((r) => r.id === id);
+  getResident: async (id, scope) => {
+    const found = store.residents.find((r) => r.id === id && inScope(r, scope));
     return found ? clone(found) : null;
   },
 
@@ -130,16 +133,16 @@ export const fileRepository = {
     });
   },
 
-  getVisit: async (id) => {
-    const found = store.visits.find((v) => v.id === id);
+  getVisit: async (id, scope) => {
+    const found = store.visits.find((v) => v.id === id && inScope(v, scope));
     if (!found) return null;
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
     return attachResidentToVisit(clone(found), residentsById);
   },
 
-  listVisits: async ({ q = '', statuses = null, submittedById = null, residentId = null, limit = 100, offset = 0 } = {}) => {
+  listVisits: async ({ q = '', statuses = null, submittedById = null, residentId = null, limit = 100, offset = 0, scope } = {}) => {
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
-    let rows = store.visits.map((v) => attachResidentToVisit(clone(v), residentsById));
+    let rows = store.visits.filter((v) => inScope(v, scope)).map((v) => attachResidentToVisit(clone(v), residentsById));
 
     if (statuses && statuses.length) rows = rows.filter((v) => statuses.includes(v.status));
     if (submittedById) rows = rows.filter((v) => v.recordedById === submittedById);
@@ -180,15 +183,15 @@ export const fileRepository = {
     });
   },
 
-  getReferral: async (id) => {
-    const found = store.referrals.find((r) => r.id === id);
+  getReferral: async (id, scope) => {
+    const found = store.referrals.find((r) => r.id === id && inScope(r, scope));
     if (!found) return null;
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
     return attachResidentToReferral(clone(found), residentsById);
   },
 
-  getReferralByVisitId: async (visitId) => {
-    const found = store.referrals.find((r) => r.visitId === visitId);
+  getReferralByVisitId: async (visitId, scope) => {
+    const found = store.referrals.find((r) => r.visitId === visitId && inScope(r, scope));
     if (!found) return null;
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
     return attachResidentToReferral(clone(found), residentsById);
@@ -205,9 +208,9 @@ export const fileRepository = {
     });
   },
 
-  listReferrals: async ({ q = '', residentId = null, limit = 100, offset = 0 } = {}) => {
+  listReferrals: async ({ q = '', residentId = null, limit = 100, offset = 0, scope } = {}) => {
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
-    let rows = store.referrals.map((r) => attachResidentToReferral(clone(r), residentsById));
+    let rows = store.referrals.filter((r) => inScope(r, scope)).map((r) => attachResidentToReferral(clone(r), residentsById));
     if (residentId) rows = rows.filter((r) => r.residentId === residentId);
     if (q) {
       const query = normalizeText(q);

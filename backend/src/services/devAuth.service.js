@@ -29,6 +29,9 @@ export const devSignIn = async ({ email, password }) => {
     email: account.email,
     name: account.name,
     role: account.role,
+    municipalityId: account.municipalityId,
+    rhuId: account.rhuId,
+    barangayId: account.barangayId || null,
     // Barangay-scoped roles carry their assignment in the session so every
     // downstream query can filter on it (see config/scope.js).
     barangay: account.barangay || null,
@@ -40,6 +43,9 @@ export const devSignIn = async ({ email, password }) => {
     email: user.email,
     name: user.name,
     ...(user.barangay ? { barangay: user.barangay } : {}),
+    municipalityId: user.municipalityId,
+    rhuId: user.rhuId,
+    ...(user.barangayId ? { barangayId: user.barangayId } : {}),
   });
 
   return {

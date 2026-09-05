@@ -24,9 +24,10 @@ export default function Login() {
     setError("");
     setSubmitting(true);
     try {
-      const role = await login({ email, password });
+      const authenticatedUser = await login({ email, password });
       const from = location.state?.from;
-      navigate(from || homeForRole(role), { replace: true });
+      const municipalityHome = authenticatedUser.municipalityId === "mun-pili" ? "/pili" : null;
+      navigate(from || municipalityHome || homeForRole(authenticatedUser.role), { replace: true });
     } catch (err) {
       setError(err.message || "Unable to sign in. Please check your credentials.");
     } finally {
@@ -35,7 +36,7 @@ export default function Login() {
   };
 
   // Demo helper: populate the form only. The user still clicks "Sign In".
-  const useAccount = (account) => {
+  const fillAccount = (account) => {
     setEmail(account.email);
     setPassword(account.password);
     setError("");
@@ -168,30 +169,12 @@ export default function Login() {
                 </p>
               </form>
 
-              {/* Demo access — collapsed, secondary */}
               <div className="mt-5 rounded-lg border border-brand-border bg-brand-paper">
-                <button
-                  type="button"
-                  onClick={() => setDemoOpen((v) => !v)}
-                  aria-expanded={demoOpen}
-                  aria-controls="demo-accounts-panel"
-                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-brand-light/50"
-                >
-                  <span className="flex items-center gap-2.5">
-                    <Users className="h-4 w-4 text-brand-blue" strokeWidth={2} />
-                    <span>
-                      <span className="block text-[11.5px] font-bold uppercase tracking-gov text-brand-ink">Demo Access</span>
-                      <span className="block text-[11px] text-brand-gray">Try a prepared test account</span>
-                    </span>
-                  </span>
-                  <ChevronDown
-                    className={`h-4 w-4 shrink-0 text-brand-gray transition-transform duration-200 ${demoOpen ? "rotate-180" : ""}`}
-                    strokeWidth={2}
-                  />
+                <button type="button" onClick={() => setDemoOpen((v) => !v)} aria-expanded={demoOpen} aria-controls="demo-accounts-panel" className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-brand-light/50">
+                  <span className="flex items-center gap-2.5"><Users className="h-4 w-4 text-brand-blue" strokeWidth={2} /><span><span className="block text-[11.5px] font-bold uppercase tracking-gov text-brand-ink">Demo Access</span><span className="block text-[11px] text-brand-gray">Try a prepared test account</span></span></span>
+                  <ChevronDown className={`h-4 w-4 shrink-0 text-brand-gray transition-transform duration-200 ${demoOpen ? "rotate-180" : ""}`} strokeWidth={2} />
                 </button>
-
-                {demoOpen && (
-                  <div id="demo-accounts-panel" className="border-t border-brand-border px-4 pb-3 pt-3">
+                {demoOpen && <div id="demo-accounts-panel" className="border-t border-brand-border px-4 pb-3 pt-3">
                     <p className="mb-2 text-[10px] font-bold uppercase tracking-gov text-brand-gray">
                       For development and presentation only
                     </p>
@@ -200,7 +183,7 @@ export default function Login() {
                         <li key={acc.email}>
                           <button
                             type="button"
-                            onClick={() => useAccount(acc)}
+                            onClick={() => fillAccount(acc)}
                             className="flex w-full items-center justify-between gap-2 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-left transition-colors hover:border-brand-blue hover:bg-brand-light/60"
                           >
                             <span className="truncate text-[11.5px] font-semibold text-brand-ink">{acc.label}</span>
@@ -213,8 +196,7 @@ export default function Login() {
                       Fills the form only — click <span className="font-semibold">Sign In</span> to continue.
                       {!isSupabaseConfigured && " Any password is accepted locally."}
                     </p>
-                  </div>
-                )}
+                </div>}
               </div>
             </div>
 

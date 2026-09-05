@@ -45,6 +45,9 @@ const RESIDENT_TO_DB = {
   cellphoneNo: 'cellphone_no',
   identityNo: 'identity_no',
   barangay: 'barangay',
+  municipalityId: 'municipality_id',
+  rhuId: 'rhu_id',
+  barangayId: 'barangay_id',
 };
 
 const DB_TO_RESIDENT = Object.fromEntries(Object.entries(RESIDENT_TO_DB).map(([k, v]) => [v, k]));
@@ -191,6 +194,13 @@ const throwOnError = (error, fallback) => {
   }
 };
 
+const applyScope = (query, scope = {}) => {
+  if (scope.municipalityId) query = query.eq('municipality_id', scope.municipalityId);
+  if (scope.rhuId) query = query.eq('rhu_id', scope.rhuId);
+  if (scope.barangayId) query = query.eq('barangay_id', scope.barangayId);
+  return query;
+};
+
 const counterRpc = async (name) => {
   const supabase = getServiceClient();
   const { data, error } = await supabase.rpc('increment_counter', { counter_name: name });
@@ -217,9 +227,10 @@ export const supabaseRepository = {
   },
 
   // ----- residents ----------------------------------------------------------
-  async searchResidents({ q = '', limit = 20 } = {}) {
+  async searchResidents({ q = '', limit = 20, scope } = {}) {
     const supabase = getServiceClient();
     let query = supabase.from(TABLES.residents).select('*').order('created_at', { ascending: false }).limit(limit);
+    query = applyScope(query, scope);
     if (q) {
       const term = String(q).trim();
       query = query.or(
@@ -231,13 +242,14 @@ export const supabaseRepository = {
     return (data || []).map(residentFromRow);
   },
 
-  async findResidentByIdentity({ lastName, firstName, middleName, birthDate } = {}) {
+  async findResidentByIdentity({ lastName, firstName, middleName, birthDate, scope } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.residents)
       .select('*')
       .ilike('last_name', String(lastName || '').trim())
       .ilike('first_name', String(firstName || '').trim());
+    query = applyScope(query, scope);
     if (middleName) query = query.ilike('middle_name', String(middleName).trim());
     if (birthDate) query = query.eq('birth_date', birthDate);
     const { data, error } = await query.limit(5);
@@ -251,9 +263,11 @@ export const supabaseRepository = {
     return exact ? residentFromRow(exact) : rows[0] ? residentFromRow(rows[0]) : null;
   },
 
-  async getResident(id) {
+  async getResident(id, scope) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase.from(TABLES.residents).select('*').eq('id', id).maybeSingle();
+    let query = supabase.from(TABLES.residents).select('*').eq('id', id);
+    query = applyScope(query, scope);
+    const { data, error } = await query.maybeSingle();
     throwOnError(error, 'Could not fetch resident');
     return residentFromRow(data);
   },
@@ -286,25 +300,27 @@ export const supabaseRepository = {
     return { ...visitFromRow(data), resident };
   },
 
-  async getVisit(id) {
+  async getVisit(id, scope) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from(TABLES.visits)
       .select(`*, resident:residents(${SELECT_RESIDENT})`)
-      .eq('id', id)
-      .maybeSingle();
+      .eq('id', id);
+    query = applyScope(query, scope);
+    const { data, error } = await query.maybeSingle();
     throwOnError(error, 'Could not fetch submission');
     if (!data) return null;
     return { ...visitFromRow(data), resident: residentFromRow(data.resident) };
   },
 
-  async listVisits({ q = '', statuses = null, submittedById = null, residentId = null, limit = 100, offset = 0 } = {}) {
+  async listVisits({ q = '', statuses = null, submittedById = null, residentId = null, limit = 100, offset = 0, scope } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.visits)
       .select(`*, resident:residents(${SELECT_RESIDENT})`, { count: 'exact' })
       .order('updated_at', { ascending: false })
       .range(offset, offset + limit - 1);
+    query = applyScope(query, scope);
     if (statuses && statuses.length) query = query.in('status', statuses);
     if (submittedById) query = query.eq('recorded_by_id', submittedById);
     if (residentId) query = query.eq('resident_id', residentId);
@@ -344,25 +360,27 @@ export const supabaseRepository = {
     return { ...referralFromRow(data), resident };
   },
 
-  async getReferral(id) {
+  async getReferral(id, scope) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from(TABLES.referrals)
       .select(`*, resident:residents(${SELECT_RESIDENT})`)
-      .eq('id', id)
-      .maybeSingle();
+      .eq('id', id);
+    query = applyScope(query, scope);
+    const { data, error } = await query.maybeSingle();
     throwOnError(error, 'Could not fetch referral');
     if (!data) return null;
     return { ...referralFromRow(data), resident: residentFromRow(data.resident) };
   },
 
-  async getReferralByVisitId(visitId) {
+  async getReferralByVisitId(visitId, scope) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from(TABLES.referrals)
       .select(`*, resident:residents(${SELECT_RESIDENT})`)
-      .eq('visit_id', visitId)
-      .maybeSingle();
+      .eq('visit_id', visitId);
+    query = applyScope(query, scope);
+    const { data, error } = await query.maybeSingle();
     throwOnError(error, 'Could not fetch referral');
     if (!data) return null;
     return { ...referralFromRow(data), resident: residentFromRow(data.resident) };
@@ -381,13 +399,14 @@ export const supabaseRepository = {
     return { ...referralFromRow(data), resident: residentFromRow(data.resident) };
   },
 
-  async listReferrals({ q = '', residentId = null, limit = 100, offset = 0 } = {}) {
+  async listReferrals({ q = '', residentId = null, limit = 100, offset = 0, scope } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.referrals)
       .select(`*, resident:residents(${SELECT_RESIDENT})`, { count: 'exact' })
       .order('updated_at', { ascending: false })
       .range(offset, offset + limit - 1);
+    query = applyScope(query, scope);
     if (residentId) query = query.eq('resident_id', residentId);
     if (q) {
       const term = String(q).trim();

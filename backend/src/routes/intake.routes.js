@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
+import { resolveOrganizationScope } from '../middleware/organizationScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import * as intakeController from '../controllers/intake.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -27,7 +28,7 @@ const router = Router();
 const intake = FEATURE_ROLES.intake;
 const intakeSubmit = FEATURE_ROLES.intakeSubmit;
 
-router.use(authenticate, resolveBarangayScope);
+router.use(authenticate, resolveOrganizationScope, resolveBarangayScope);
 
 router.get('/residents/search', authorize(intake), asyncHandler(intakeController.searchResidents));
 router.get('/residents/:id', authorize(intake), asyncHandler(intakeController.getResident));

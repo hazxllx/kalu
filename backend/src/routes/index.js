@@ -9,6 +9,7 @@ import residentsRoutes from './residents.routes.js';
 import analyticsRoutes from './analytics.routes.js';
 import verificationsRoutes from './verifications.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
+import municipalityOnboardingRoutes from './municipalityOnboarding.routes.js';
 
 /**
  * API route index — every endpoint is mounted here under `/api`.
@@ -28,6 +29,7 @@ router.use('/health', healthRoutes);
 
 // Authentication
 router.use('/auth', authRoutes);
+router.use('/municipality-onboarding', municipalityOnboardingRoutes);
 
 // Resident -> RHU -> PHN submission workflow
 router.use('/intake', intakeRoutes);          // BHW / RHU personnel intake
