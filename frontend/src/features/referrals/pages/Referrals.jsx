@@ -4,9 +4,16 @@ import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { residents } from "@/services/mock/mockData";
+import { phnReferrals, phnResidents, REFERRAL_STATUSES } from "@/services/mock/mockPhnData";
+import {
+  filterRowsByScope,
+  phnFilterOptions,
+  rowMatchesOption,
+  scopeLabel,
+} from "@/lib/phnScope";
 import { ROLES } from "@/lib/brand";
 import { useAuth } from "@/context/AuthContext";
-import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, CheckCircle2, Download } from "lucide-react";
+import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, CheckCircle2, Download, Trash2 } from "lucide-react";
 
 const REFERRALS = [
   {
@@ -15,7 +22,7 @@ const REFERRALS = [
     resident: "Ana Villanueva",
     age: 32,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     date: "July 10, 2026",
     reason: "High-risk Pregnancy",
     facility: "RHU Pili",
@@ -29,7 +36,7 @@ const REFERRALS = [
     resident: "Maria Santos",
     age: 28,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Antonio",
     date: "July 8, 2026",
     reason: "Abnormal Ultrasound Findings",
     facility: "Bicol Medical Center",
@@ -43,7 +50,7 @@ const REFERRALS = [
     resident: "Grace Aquino",
     age: 24,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "Old San Roque",
     date: "July 5, 2026",
     reason: "Postpartum Follow-up",
     facility: "RHU Pili",
@@ -67,43 +74,56 @@ const PRIORITY_COLORS = {
   Low: "bg-brand-green/10 text-brand-green",
 };
 
-const STATUS_COLORS = {
-  Pending: "bg-brand-accent/10 text-brand-accent",
-  Accepted: "bg-brand-blue/10 text-brand-blue",
-  Completed: "bg-brand-green/10 text-brand-green",
-  Cancelled: "bg-brand-gray/10 text-brand-gray",
-};
-
-export default function Referrals() {
+export default function Referrals({ roleKey } = {}) {
   const { user } = useAuth();
-  const [referrals, setReferrals] = useState(REFERRALS);
+  const isPhn = roleKey === "phn";
+
+  const statusOptions = isPhn
+    ? REFERRAL_STATUSES
+    : ["For Review", "Pending", "Accepted", "Follow-up Required", "Completed", "Cancelled"];
+
+  // PHN scope: seed only the referrals the signed-in PHN may see (RHU-level
+  // plus, if assigned, their own barangay). Other roles keep their dataset.
+  const [referrals, setReferrals] = useState(() =>
+    isPhn ? filterRowsByScope(phnReferrals, user) : REFERRALS
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
+  const [barangayFilter, setBarangayFilter] = useState("All");
   const [showNewReferralModal, setShowNewReferralModal] = useState(false);
   const [showViewDetailsModal, setShowViewDetailsModal] = useState(false);
   const [showEditReferralModal, setShowEditReferralModal] = useState(false);
   const [showUpdateStatusModal, setShowUpdateStatusModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedReferral, setSelectedReferral] = useState(null);
   const [toast, setToast] = useState(null);
   const [newStatus, setNewStatus] = useState("");
   const [selectedResident, setSelectedResident] = useState(null);
   const [newReferralForm, setNewReferralForm] = useState(emptyReferralForm);
   const [submittedReferral, setSubmittedReferral] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [formErrors, setFormErrors] = useState({});
+  const [residentPool] = useState(
+    isPhn ? filterRowsByScope(phnResidents, user) : residents
+  );
+
+  const filterOptions = phnFilterOptions(user);
 
   const filteredReferrals = referrals.filter((r) => {
     const matchesSearch = searchQuery === "" || r.resident.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "All" || r.status === statusFilter;
     const matchesPriority = priorityFilter === "All" || r.priority === priorityFilter;
-    return matchesSearch && matchesStatus && matchesPriority;
+    const matchesBarangay = rowMatchesOption(r, barangayFilter, user);
+    return matchesSearch && matchesStatus && matchesPriority && matchesBarangay;
   });
 
-  // Prevent background-page scrolling while any modal is open.
   const anyModalOpen =
     showNewReferralModal ||
     showViewDetailsModal ||
     showEditReferralModal ||
     showUpdateStatusModal ||
+    showDeleteConfirm ||
     Boolean(submittedReferral);
 
   useEffect(() => {
@@ -114,25 +134,20 @@ export default function Referrals() {
     };
   }, [anyModalOpen]);
 
-  // Escape closes the New Referral modal.
   useEffect(() => {
-    if (!showNewReferralModal) return undefined;
+    if (!anyModalOpen) return undefined;
     const onKey = (e) => {
-      if (e.key === "Escape") setShowNewReferralModal(false);
+      if (e.key !== "Escape") return;
+      setShowNewReferralModal(false);
+      setShowViewDetailsModal(false);
+      setShowEditReferralModal(false);
+      setShowUpdateStatusModal(false);
+      setShowDeleteConfirm(false);
+      setSubmittedReferral(null);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [showNewReferralModal]);
-
-  // Escape closes the submission success modal.
-  useEffect(() => {
-    if (!submittedReferral) return undefined;
-    const onKey = (e) => {
-      if (e.key === "Escape") setSubmittedReferral(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [submittedReferral]);
+  }, [anyModalOpen]);
 
   const showToast = (message) => {
     setToast(message);
@@ -146,6 +161,13 @@ export default function Referrals() {
 
   const handleEditReferral = (referral) => {
     setSelectedReferral(referral);
+    setEditForm({
+      reason: referral.reason || "",
+      facility: referral.facility || "RHU Pili",
+      priority: referral.priority || "High",
+      notes: referral.notes || "",
+    });
+    setFormErrors({});
     setShowEditReferralModal(true);
   };
 
@@ -162,10 +184,32 @@ export default function Referrals() {
     setShowUpdateStatusModal(false);
     setSelectedReferral(null);
     setNewStatus("");
-    showToast("Status updated successfully.");
+    showToast("Referral updated successfully.");
+  };
+
+  const handleDeleteRequest = (referral) => {
+    setSelectedReferral(referral);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleConfirmDelete = () => {
+    setReferrals((prev) => prev.filter((r) => r.id !== selectedReferral.id));
+    setShowDeleteConfirm(false);
+    setSelectedReferral(null);
+    showToast("Referral deleted successfully.");
+  };
+
+  const validateNewReferral = () => {
+    const errors = {};
+    if (!selectedResident) errors.resident = "Please select a resident.";
+    if (!newReferralForm.reason.trim()) errors.reason = "Referral reason is required.";
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSaveReferral = () => {
+    if (!validateNewReferral()) return;
+
     const now = new Date();
     const seq =
       referrals.reduce((acc, r) => {
@@ -189,7 +233,7 @@ export default function Referrals() {
         : "",
       createdAt: now.toISOString(),
       facility: newReferralForm.facility,
-      reason: newReferralForm.reason,
+      reason: newReferralForm.reason.trim(),
       priority: newReferralForm.priority,
       notes: newReferralForm.notes,
       referringPersonnel: user ? user.name : "",
@@ -199,25 +243,28 @@ export default function Referrals() {
     };
     setReferrals([newReferral, ...referrals]);
     setShowNewReferralModal(false);
+    setSelectedResident(null);
     setSubmittedReferral(newReferral);
-    showToast("Referral submitted successfully.");
+    showToast("Referral added successfully.");
   };
 
   const handleDownloadPdf = async (referral) => {
     try {
-      // Lazy-load jsPDF (and the PDF generator) so the heavy PDF libraries
-      // stay out of the main bundle until a download is requested.
       const { downloadReferralPdf } = await import("../lib/referralPdf");
-      await downloadReferralPdf(referral, { residents });
+      await downloadReferralPdf(referral, { residents: residentPool });
       showToast("Referral PDF downloaded.");
     } catch {
       showToast("Could not generate the referral PDF.");
     }
   };
 
-  const handleSaveEditReferral = (updatedData) => {
+  const handleSaveEditReferral = () => {
+    if (!editForm.reason.trim()) {
+      setFormErrors({ reason: "Referral reason is required." });
+      return;
+    }
     setReferrals((prev) =>
-      prev.map((r) => (r.id === selectedReferral.id ? { ...r, ...updatedData } : r))
+      prev.map((r) => (r.id === selectedReferral.id ? { ...r, ...editForm, reason: editForm.reason.trim() } : r))
     );
     setShowEditReferralModal(false);
     setSelectedReferral(null);
@@ -228,13 +275,18 @@ export default function Referrals() {
     <>
       <PageHeader
         crumbs={["Home", "Referrals"]}
-        title="Referrals"
-        subtitle="Manage resident referrals to RHU and higher-level healthcare facilities."
+        title={isPhn ? "Referral Coordination" : "Referrals"}
+        subtitle={
+          isPhn
+            ? "Review, validate, and coordinate referrals from San Isidro, San Antonio and Old San Roque."
+            : "Manage resident referrals to RHU and higher-level healthcare facilities."
+        }
         action={
           <button
             onClick={() => {
               setSelectedResident(null);
               setNewReferralForm(emptyReferralForm());
+              setFormErrors({});
               setShowNewReferralModal(true);
             }}
             className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
@@ -266,15 +318,23 @@ export default function Referrals() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <select
+              value={barangayFilter}
+              onChange={(e) => setBarangayFilter(e.target.value)}
+              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
+            >
+              {filterOptions.map((b) => (
+                <option key={b} value={b}>{b === "All" ? "All Barangays" : b}</option>
+              ))}
+            </select>
+            <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
             >
               <option value="All">All Statuses</option>
-              <option value="Pending">Pending</option>
-              <option value="Accepted">Accepted</option>
-              <option value="Completed">Completed</option>
-              <option value="Cancelled">Cancelled</option>
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
             </select>
             <select
               value={priorityFilter}
@@ -312,7 +372,7 @@ export default function Referrals() {
                 <tr key={r.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
                   <td className="px-4 py-3 text-sm font-medium text-brand-ink">{r.resident}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{r.age}</td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{r.barangay}</td>
+                  <td className="px-4 py-3 text-sm text-brand-ink">{isPhn ? scopeLabel(r, user) : r.barangay}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{r.date}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{r.reason}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{r.facility}</td>
@@ -333,16 +393,14 @@ export default function Referrals() {
                       >
                         <Eye className="w-4 h-4" />
                       </button>
-                      {r.status === "Pending" && (
-                        <button
-                          onClick={() => handleEditReferral(r)}
-                          className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
-                          title="Edit Referral"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      )}
-                      {r.status !== "Completed" && r.status !== "Cancelled" && (
+                      <button
+                        onClick={() => handleEditReferral(r)}
+                        className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
+                        title="Edit Referral"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      {r.status !== "Completed" && (
                         <button
                           onClick={() => handleUpdateStatus(r)}
                           className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
@@ -351,10 +409,24 @@ export default function Referrals() {
                           <RefreshCw className="w-4 h-4" />
                         </button>
                       )}
+                      <button
+                        onClick={() => handleDeleteRequest(r)}
+                        className="p-1.5 text-brand-danger hover:bg-brand-danger/10 rounded transition-colors"
+                        title="Delete Referral"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </td>
                 </tr>
               ))}
+              {filteredReferrals.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-brand-gray">
+                    No referrals match the selected filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -381,16 +453,22 @@ export default function Referrals() {
               </button>
             </div>
 
-            {/* Scrollable form body — only the fields scroll when needed */}
+            {/* Scrollable form body */}
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <div className="space-y-3.5">
                 <div>
-                  <label className="text-sm font-medium text-brand-ink block mb-1.5">Select Resident</label>
+                  <label className="text-sm font-medium text-brand-ink block mb-1.5">
+                    Select Resident <span className="text-brand-danger">*</span>
+                  </label>
                   <ResidentSearchSelect
-                    residents={residents}
+                    residents={residentPool}
                     value={selectedResident}
-                    onChange={setSelectedResident}
+                    onChange={(r) => {
+                      setSelectedResident(r);
+                      if (formErrors.resident) setFormErrors((prev) => ({ ...prev, resident: "" }));
+                    }}
                   />
+                  {formErrors.resident && <p className="text-xs text-brand-danger mt-1">{formErrors.resident}</p>}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">Referral Date</label>
@@ -414,14 +492,22 @@ export default function Referrals() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-brand-ink block mb-1.5">Referral Reason</label>
+                  <label className="text-sm font-medium text-brand-ink block mb-1.5">
+                    Referral Reason <span className="text-brand-danger">*</span>
+                  </label>
                   <input
                     type="text"
                     placeholder="Enter reason..."
                     value={newReferralForm.reason}
-                    onChange={(e) => setNewReferralForm({ ...newReferralForm, reason: e.target.value })}
-                    className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
+                    onChange={(e) => {
+                      setNewReferralForm({ ...newReferralForm, reason: e.target.value });
+                      if (formErrors.reason) setFormErrors((prev) => ({ ...prev, reason: "" }));
+                    }}
+                    className={`w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue ${
+                      formErrors.reason ? "border-brand-danger" : "border-brand-border"
+                    }`}
                   />
+                  {formErrors.reason && <p className="text-xs text-brand-danger mt-1">{formErrors.reason}</p>}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">Priority</label>
@@ -448,7 +534,7 @@ export default function Referrals() {
               </div>
             </div>
 
-            {/* Fixed footer — actions always visible */}
+            {/* Fixed footer */}
             <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
               <button
                 onClick={() => setShowNewReferralModal(false)}
@@ -527,7 +613,7 @@ export default function Referrals() {
       )}
 
       {/* Edit Referral Modal */}
-      {showEditReferralModal && selectedReferral && (
+      {showEditReferralModal && selectedReferral && editForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="p-6">
@@ -551,17 +637,10 @@ export default function Referrals() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-brand-ink block mb-1.5">Referral Date</label>
-                  <input
-                    type="date"
-                    defaultValue={selectedReferral.date}
-                    className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-                  />
-                </div>
-                <div>
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">Receiving Facility</label>
                   <select
-                    defaultValue={selectedReferral.facility}
+                    value={editForm.facility}
+                    onChange={(e) => setEditForm({ ...editForm, facility: e.target.value })}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                   >
                     <option>RHU Pili</option>
@@ -570,17 +649,27 @@ export default function Referrals() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-brand-ink block mb-1.5">Referral Reason</label>
+                  <label className="text-sm font-medium text-brand-ink block mb-1.5">
+                    Referral Reason <span className="text-brand-danger">*</span>
+                  </label>
                   <input
                     type="text"
-                    defaultValue={selectedReferral.reason}
-                    className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
+                    value={editForm.reason}
+                    onChange={(e) => {
+                      setEditForm({ ...editForm, reason: e.target.value });
+                      if (formErrors.reason) setFormErrors((prev) => ({ ...prev, reason: "" }));
+                    }}
+                    className={`w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue ${
+                      formErrors.reason ? "border-brand-danger" : "border-brand-border"
+                    }`}
                   />
+                  {formErrors.reason && <p className="text-xs text-brand-danger mt-1">{formErrors.reason}</p>}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">Priority</label>
                   <select
-                    defaultValue={selectedReferral.priority}
+                    value={editForm.priority}
+                    onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                   >
                     <option>High</option>
@@ -592,7 +681,8 @@ export default function Referrals() {
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">Notes</label>
                   <textarea
                     rows={3}
-                    defaultValue={selectedReferral.notes}
+                    value={editForm.notes}
+                    onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none"
                   />
                 </div>
@@ -605,7 +695,7 @@ export default function Referrals() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => handleSaveEditReferral({})}
+                  onClick={handleSaveEditReferral}
                   className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
                 >
                   Save Changes
@@ -671,7 +761,7 @@ export default function Referrals() {
               </div>
             </div>
 
-            {/* Fixed footer — Download PDF always available */}
+            {/* Fixed footer */}
             <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
               <button
                 onClick={() => setShowViewDetailsModal(false)}
@@ -716,10 +806,9 @@ export default function Referrals() {
                     onChange={(e) => setNewStatus(e.target.value)}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                   >
-                    <option value="Pending">Pending</option>
-                    <option value="Accepted">Accepted</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Cancelled">Cancelled</option>
+                    {statusOptions.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -735,6 +824,39 @@ export default function Referrals() {
                   className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
                 >
                   Update
+                </button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && selectedReferral && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-danger/10 shrink-0">
+                  <Trash2 className="h-5 w-5 text-brand-danger" />
+                </div>
+                <h3 className="text-lg font-semibold text-brand-ink">Delete this referral?</h3>
+              </div>
+              <p className="text-sm text-brand-gray">
+                Referral for {selectedReferral.resident} ({selectedReferral.barangay}) will be removed. This action cannot be undone.
+              </p>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-danger text-white hover:opacity-90 transition-colors"
+                >
+                  Delete
                 </button>
               </div>
             </div>

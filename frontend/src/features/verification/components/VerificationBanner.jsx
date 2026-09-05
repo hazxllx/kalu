@@ -12,7 +12,7 @@ export default function VerificationBanner() {
 
   const details = [
     { icon: ShieldAlert, label: "Verification Status", value: "Pending Verification" },
-    { icon: MapPin, label: "Assigned Barangay", value: "San Jose" },
+    { icon: MapPin, label: "Assigned Barangay", value: "San Isidro" },
     { icon: Calendar, label: "Registration Date", value: "July 5, 2026" },
     { icon: Clock, label: "Estimated Review", value: "1-3 business days" },
     { icon: FileText, label: "Reference Number", value: "KSG-2026-00428" },

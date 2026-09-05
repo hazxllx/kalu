@@ -35,11 +35,11 @@ export default function TransferRegistration() {
         mobile: "09123456789",
         province: "Camarines Sur",
         municipality: "Pili",
-        barangay: "San Jose",
+        barangay: "San Isidro",
         sitio: "Purok 5",
         street: "Mabini St.",
         houseNo: "123",
-        landmark: "Near San Jose Chapel",
+        landmark: "Near San Isidro Chapel",
         occupation: "Farmer",
         previousHealthRecord: file.name,
       };

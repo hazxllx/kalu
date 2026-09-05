@@ -9,7 +9,7 @@ const FOLLOW_UPS = [
     resident: "Juan Dela Cruz",
     age: 45,
     sex: "Male",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0917 123 4567",
     purpose: "Blood Pressure Monitoring",
     assignedBHW: "Maria Cruz",
@@ -25,7 +25,7 @@ const FOLLOW_UPS = [
     resident: "Maria Santos",
     age: 28,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0918 234 5678",
     purpose: "Prenatal Follow-up",
     assignedBHW: "Maria Cruz",
@@ -41,7 +41,7 @@ const FOLLOW_UPS = [
     resident: "Pedro Reyes",
     age: 52,
     sex: "Male",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0919 345 6789",
     purpose: "Diabetes Monitoring",
     assignedBHW: "Maria Cruz",
@@ -57,7 +57,7 @@ const FOLLOW_UPS = [
     resident: "Ana Villanueva",
     age: 32,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0920 456 7890",
     purpose: "Postnatal Check-up",
     assignedBHW: "Grace Aquino",
@@ -73,7 +73,7 @@ const FOLLOW_UPS = [
     resident: "Carlos Mendoza",
     age: 38,
     sex: "Male",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0921 567 8901",
     purpose: "Hypertension Follow-up",
     assignedBHW: "Grace Aquino",
@@ -89,7 +89,7 @@ const FOLLOW_UPS = [
     resident: "Elena Garcia",
     age: 25,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0922 678 9012",
     purpose: "Immunization Follow-up",
     assignedBHW: "Maria Cruz",
@@ -159,11 +159,18 @@ export default function FollowUpPage() {
   };
 
   const handleReschedule = (id) => {
-    alert("Reschedule modal would open here");
+    const target = followUps.find((f) => f.id === id);
+    if (target) {
+      setFollowUps((prev) => prev.map((f) => (f.id === id ? { ...f, status: "Scheduled" } : f)));
+      setToast(`Follow-up rescheduled for ${target.resident}.`);
+      setTimeout(() => setToast(null), 3000);
+    }
   };
 
   const handleCancel = (id) => {
     setFollowUps((prev) => prev.filter((f) => f.id !== id));
+    setToast("Follow-up cancelled.");
+    setTimeout(() => setToast(null), 3000);
   };
 
   const handleSync = () => {
@@ -592,7 +599,14 @@ export default function FollowUpPage() {
                       </button>
                     </div>
                     <button
-                      onClick={() => alert("Update notes modal would open here")}
+                      onClick={() => {
+                        setSelectedFollowUp({ ...selectedFollowUp, notes: selectedFollowUp.notes || "Notes updated." });
+                        setFollowUps((prev) =>
+                          prev.map((f) => (f.id === selectedFollowUp.id ? { ...f, notes: f.notes || "Notes updated." } : f))
+                        );
+                        setToast("Notes updated successfully.");
+                        setTimeout(() => setToast(null), 3000);
+                      }}
                       className="w-full mt-2 px-3 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
                     >
                       Update Notes
@@ -600,7 +614,13 @@ export default function FollowUpPage() {
                   </>
                 ) : (
                   <button
-                    onClick={() => alert("Update notes modal would open here")}
+                    onClick={() => {
+                      setFollowUps((prev) =>
+                        prev.map((f) => (f.id === selectedFollowUp.id ? { ...f, notes: f.notes || "Notes updated." } : f))
+                      );
+                      setToast("Notes updated successfully.");
+                      setTimeout(() => setToast(null), 3000);
+                    }}
                     className="w-full px-3 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
                   >
                     Update Notes

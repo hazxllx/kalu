@@ -96,7 +96,7 @@ const FOLLOW_UPS = [
     resident: "Ana Villanueva",
     age: 32,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0917 123 4567",
     purpose: "Prenatal Check-up",
     assignedMidwife: "Maria Dela Cruz",
@@ -112,7 +112,7 @@ const FOLLOW_UPS = [
     resident: "Maria Santos",
     age: 28,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0918 234 5678",
     purpose: "Postnatal Check-up",
     assignedMidwife: "Maria Dela Cruz",
@@ -128,7 +128,7 @@ const FOLLOW_UPS = [
     resident: "Elena Garcia",
     age: 25,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0919 345 6789",
     purpose: "Immunization Follow-up",
     assignedMidwife: "Maria Dela Cruz",
@@ -144,7 +144,7 @@ const FOLLOW_UPS = [
     resident: "Carmen Reyes",
     age: 30,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0920 456 7890",
     purpose: "High-Risk Pregnancy Monitoring",
     assignedMidwife: "Grace Aquino",
@@ -160,7 +160,7 @@ const FOLLOW_UPS = [
     resident: "Lourdes Mendoza",
     age: 35,
     sex: "Female",
-    barangay: "San Jose",
+    barangay: "San Isidro",
     contact: "0921 567 8901",
     purpose: "Tetanus Toxoid Booster",
     assignedMidwife: "Grace Aquino",
@@ -276,7 +276,7 @@ export default function MidwifeFollowUp() {
     );
     setShowCompleteConfirm(false);
     setSelectedFollowUp(null);
-    alert("Follow-up marked as completed!");
+    setToast("Follow-up marked as completed."); setTimeout(() => setToast(null), 3000);
   };
 
   const handleStatusUpdate = (newStatus) => {
@@ -285,7 +285,7 @@ export default function MidwifeFollowUp() {
     );
     setShowUpdateStatusModal(false);
     setSelectedFollowUp(null);
-    alert(`Status updated to ${newStatus}`);
+    setToast(`Status updated to ${newStatus}.`); setTimeout(() => setToast(null), 3000);
   };
 
   const handleSaveRemarks = (remarks) => {
@@ -294,7 +294,7 @@ export default function MidwifeFollowUp() {
     );
     setShowRemarksModal(false);
     setSelectedFollowUp(null);
-    alert("Remarks saved successfully!");
+    setToast("Remarks saved successfully."); setTimeout(() => setToast(null), 3000);
   };
 
   const handleSaveVisit = (visitData) => {
@@ -303,7 +303,7 @@ export default function MidwifeFollowUp() {
     );
     setShowRecordVisitModal(false);
     setSelectedFollowUp(null);
-    alert("Visit recorded successfully!");
+    setToast("Visit recorded successfully."); setTimeout(() => setToast(null), 3000);
   };
 
   const openScheduleModal = () => {

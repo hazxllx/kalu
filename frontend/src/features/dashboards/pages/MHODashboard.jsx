@@ -6,16 +6,16 @@ import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 
 const STATS = [
-  { icon: Map, tone: "bg-brand-blue/10 text-brand-blue", label: "Total Barangays", value: "6" },
-  { icon: Users, tone: "bg-brand-accent/10 text-brand-accent", label: "Registered Residents", value: "12,845" },
+  { icon: Map, tone: "bg-brand-blue/10 text-brand-blue", label: "Total Barangays", value: "3" },
+  { icon: Users, tone: "bg-brand-accent/10 text-brand-accent", label: "Registered Residents", value: "1,248" },
   { icon: Stethoscope, tone: "bg-brand-green/10 text-brand-green", label: "Total Consultations", value: "3,420" },
   { icon: Send, tone: "bg-brand-yellow/15 text-[#B07E00]", label: "Total Referrals", value: "186" },
   { icon: ShieldAlert, tone: "bg-brand-danger/10 text-brand-danger", label: "High-Risk Residents", value: "47" },
 ];
 
 const ACTIVITY = [
-  { type: "Referral", title: "New referral from Barangay San Jose", desc: "Resident referred to Bicol Regional Training and Teaching Hospital", time: "2 hours ago", badge: "Pending" },
-  { type: "Consultation", title: "Consultation records submitted", desc: "Barangay Sta. Cruz submitted 12 consultation records", time: "5 hours ago", badge: "Received" },
+  { type: "Referral", title: "New referral from San Isidro", desc: "Resident referred to Bicol Regional Training and Teaching Hospital", time: "2 hours ago", badge: "Pending" },
+  { type: "Consultation", title: "Consultation records submitted", desc: "Barangay San Antonio submitted 12 consultation records", time: "5 hours ago", badge: "Received" },
   { type: "Alert", title: "High-risk resident identified", desc: "Hypertension Stage 2 — Barangay San Isidro", time: "8 hours ago", badge: "High" },
   { type: "Referral", title: "Referral status updated", desc: "Barangay San Antonio referral marked as Accepted", time: "1 day ago", badge: "Accepted" },
   { type: "Report", title: "Monthly municipal report available", desc: "June 2026 municipal health summary is ready for review", time: "2 days ago", badge: "Completed" },

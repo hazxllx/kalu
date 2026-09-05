@@ -1,12 +1,12 @@
 import React, { useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { Search, FileText, Save, X, Plus } from "lucide-react";
+import { Search, FileText, Save, X, Plus, CheckCircle2 } from "lucide-react";
 
 const RESIDENTS = [
-  { id: 1, name: "Ana Villanueva", age: 32, sex: "Female", barangay: "San Jose", bloodType: "B+", program: "Maternal Care", contact: "0917 123 4567", initials: "AV" },
-  { id: 2, name: "Maria Santos", age: 28, sex: "Female", barangay: "San Jose", bloodType: "O+", program: "Prenatal Care", contact: "0918 234 5678", initials: "MS" },
-  { id: 3, name: "Elena Garcia", age: 25, sex: "Female", barangay: "San Jose", bloodType: "A+", program: "Maternal Care", contact: "0919 345 6789", initials: "EG" },
+  { id: 1, name: "Ana Villanueva", age: 32, sex: "Female", barangay: "San Isidro", bloodType: "B+", program: "Maternal Care", contact: "0917 123 4567", initials: "AV" },
+  { id: 2, name: "Maria Santos", age: 28, sex: "Female", barangay: "San Isidro", bloodType: "O+", program: "Prenatal Care", contact: "0918 234 5678", initials: "MS" },
+  { id: 3, name: "Elena Garcia", age: 25, sex: "Female", barangay: "San Isidro", bloodType: "A+", program: "Maternal Care", contact: "0919 345 6789", initials: "EG" },
 ];
 
 export default function TreatmentConsultation() {
@@ -39,16 +39,22 @@ export default function TreatmentConsultation() {
     r.barangay.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const [toast, setToast] = useState(null);
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 3000);
+  };
+
   const handleSave = () => {
-    alert("Consultation saved successfully!");
+    showToast("Consultation saved successfully.");
   };
 
   const handleUpdate = () => {
-    alert("Consultation updated successfully!");
+    showToast("Consultation updated successfully.");
   };
 
   const handleCancel = () => {
-    alert("Changes cancelled.");
+    showToast("Changes cancelled.");
   };
 
   return (
@@ -88,6 +94,14 @@ export default function TreatmentConsultation() {
           </button>
         }
       />
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-4 right-4 bg-brand-ink text-white px-4 py-3 rounded-btn shadow-lg flex items-center gap-2 z-50 animate-in slide-in-from-bottom-2">
+          <CheckCircle2 className="w-4 h-4 text-brand-green" />
+          <span className="text-sm">{toast}</span>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-5">
         {/* Left Panel - Resident Search */}

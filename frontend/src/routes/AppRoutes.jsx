@@ -29,6 +29,10 @@ import MidwifeDashboard from '@/features/dashboards/pages/MidwifeDashboard';
 import RHUDashboard from '@/features/dashboards/pages/RHUDashboard';
 import MHODashboard from '@/features/dashboards/pages/MHODashboard';
 import AdminDashboard from '@/features/dashboards/pages/AdminDashboard';
+import PHNDashboard from '@/features/dashboards/pages/PHNDashboard';
+import PhnAssessments from '@/features/consultations/pages/PhnAssessments';
+import PhnHealthRecords from '@/features/health-records/pages/PhnHealthRecords';
+import PhnHealthServices from '@/features/health-services/pages/PhnHealthServices';
 
 // Domain features
 import ResidentsPage from '@/features/residents/pages/ResidentsPage';
@@ -41,6 +45,7 @@ import M1Records from '@/features/health-records/pages/M1Records';
 import Immunization from '@/features/health-records/pages/Immunization';
 import ResidentFollowUps from '@/features/follow-ups/pages/ResidentFollowUps';
 import MidwifeFollowUp from '@/features/follow-ups/pages/MidwifeFollowUp';
+import PhnFollowUps from '@/features/follow-ups/pages/PhnFollowUps';
 import Referrals from '@/features/referrals/pages/Referrals';
 import MHOReferrals from '@/features/referrals/pages/MHOReferrals';
 import Appointments from '@/features/appointments/pages/Appointments';
@@ -133,12 +138,13 @@ const AppRoutes = () => (
     <Route element={<ProtectedRoute allow={ROUTE_ROLES.phn} />}>
       <Route path="/app/phn" element={<DashboardLayout roleKey="phn" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
-        <Route path="dashboard" element={<MidwifeDashboard />} />
-        <Route path="record" element={<HealthRecord />} />
-        <Route path="consultations" element={<ConsultationsPage />} />
-        <Route path="referrals" element={<Referrals />} />
-        <Route path="followups" element={<ResidentFollowUps />} />
-        <Route path="reports" element={<ReportsPage />} />
+        <Route path="dashboard" element={<PHNDashboard />} />
+        <Route path="record" element={<PhnHealthRecords />} />
+        <Route path="consultations" element={<PhnAssessments />} />
+        <Route path="referrals" element={<Referrals roleKey="phn" />} />
+        <Route path="followups" element={<PhnFollowUps />} />
+        <Route path="services" element={<PhnHealthServices />} />
+        <Route path="reports" element={<ReportsPage roleKey="phn" />} />
         <Route path="notifications" element={<NotificationsPage roleKey="phn" />} />
         <Route path="settings" element={<SettingsPage roleKey="phn" />} />
       </Route>

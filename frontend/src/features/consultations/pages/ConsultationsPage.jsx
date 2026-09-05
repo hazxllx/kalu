@@ -31,7 +31,7 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
                 </div>
               </div>
               <div className="mt-4 space-y-1.5 text-sm text-brand-gray">
-                <p>Barangay: <span className="text-brand-ink">San Jose</span></p>
+                <p>Barangay: <span className="text-brand-ink">San Isidro</span></p>
                 <p>Blood Type: <span className="text-brand-ink">B+</span></p>
                 <p>Last Visit: <span className="text-brand-ink">July 2, 2026</span></p>
               </div>

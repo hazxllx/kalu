@@ -36,11 +36,23 @@ export const MOCK_ACCOUNTS = [
   },
   {
     role: ROLE.PHN,
-    label: 'Public Health Nurse',
-    name: 'Public Health Nurse',
+    label: 'Public Health Nurse (RHU)',
+    name: 'Ana Villanueva',
     email: 'phn@kalusagap.test',
-    password: 'Phn123!',
-    description: 'Health records, assessments, referrals, and follow-ups.',
+    password: 'phn123',
+    // No barangay assignment — RHU-level data access only.
+    assignedBarangay: null,
+    description: 'RHU-level public health nursing: records, assessments, referrals, and follow-ups (no barangay assignment).',
+  },
+  {
+    role: ROLE.PHN,
+    label: 'Public Health Nurse (San Isidro)',
+    name: 'Maria Reyes',
+    email: 'phn.sanisidro@kalusagap.test',
+    password: 'phn123',
+    // Assigned to San Isidro — RHU-level + San Isidro data access only.
+    assignedBarangay: 'San Isidro',
+    description: 'Public health nursing for San Isidro: resident records, assessments, referrals, and follow-ups.',
   },
   {
     role: ROLE.HEALTH_SUPERVISOR,

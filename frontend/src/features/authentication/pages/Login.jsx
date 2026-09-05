@@ -35,7 +35,7 @@ export default function Login() {
   };
 
   // Demo helper: populate the form only. The user still clicks "Sign In".
-  const useAccount = (account) => {
+  const fillDemoAccount = (account) => {
     setEmail(account.email);
     setPassword(account.password);
     setError("");
@@ -200,7 +200,7 @@ export default function Login() {
                         <li key={acc.email}>
                           <button
                             type="button"
-                            onClick={() => useAccount(acc)}
+                            onClick={() => fillDemoAccount(acc)}
                             className="flex w-full items-center justify-between gap-2 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-left transition-colors hover:border-brand-blue hover:bg-brand-light/60"
                           >
                             <span className="truncate text-[11.5px] font-semibold text-brand-ink">{acc.label}</span>

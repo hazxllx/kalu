@@ -431,7 +431,7 @@ export default function HealthTrends() {
       <div className="grid lg:grid-cols-3 gap-5 mt-5">
         <Card className="lg:col-span-2 p-6">
           <h3 className="font-semibold text-brand-ink mb-1">Monthly Consultation Count by Barangay</h3>
-          <p className="text-xs text-brand-gray mb-4">Comparison across 6 barangays</p>
+          <p className="text-xs text-brand-gray mb-4">Comparison across the three assigned barangays</p>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={d.barangayComparison} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
@@ -500,7 +500,7 @@ export default function HealthTrends() {
                 <YAxis tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="sanJose" name="San Jose" stroke="#0B5CAD" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="sanAntonio" name="San Antonio" stroke="#0B5CAD" strokeWidth={2} dot={{ r: 3 }} />
                 <Line type="monotone" dataKey="sanIsidro" name="San Isidro" stroke="#2A7DE1" strokeWidth={2} dot={{ r: 3 }} />
                 <Line type="monotone" dataKey="oldSanRoque" name="Old San Roque" stroke="#E74C3C" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
@@ -531,7 +531,7 @@ export default function HealthTrends() {
                 <YAxis tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="sanJose" name="San Jose" stroke="#0B5CAD" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="sanAntonio" name="San Antonio" stroke="#0B5CAD" strokeWidth={2} dot={{ r: 3 }} />
                 <Line type="monotone" dataKey="sanIsidro" name="San Isidro" stroke="#2A7DE1" strokeWidth={2} dot={{ r: 3 }} />
                 <Line type="monotone" dataKey="oldSanRoque" name="Old San Roque" stroke="#E74C3C" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
@@ -567,7 +567,7 @@ export default function HealthTrends() {
                 <YAxis tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#F8FBFF" }} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="sanJose" name="San Jose" fill="#0B5CAD" stackId="a" barSize={20} />
+                <Bar dataKey="sanAntonio" name="San Antonio" fill="#0B5CAD" stackId="a" barSize={20} />
                 <Bar dataKey="sanIsidro" name="San Isidro" fill="#2A7DE1" stackId="a" barSize={20} />
                 <Bar dataKey="oldSanRoque" name="Old San Roque" fill="#E74C3C" stackId="a" barSize={20} />
               </BarChart>
@@ -584,7 +584,7 @@ export default function HealthTrends() {
                 <YAxis tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#F8FBFF" }} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="sanJose" name="San Jose" fill="#0B5CAD" stackId="a" barSize={20} />
+                <Bar dataKey="sanAntonio" name="San Antonio" fill="#0B5CAD" stackId="a" barSize={20} />
                 <Bar dataKey="sanIsidro" name="San Isidro" fill="#2A7DE1" stackId="a" barSize={20} />
                 <Bar dataKey="oldSanRoque" name="Old San Roque" fill="#E74C3C" stackId="a" barSize={20} />
               </BarChart>

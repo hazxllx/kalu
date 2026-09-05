@@ -4,9 +4,14 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { Bell } from "lucide-react";
 import { NOTIFICATIONS, ICONS, CATEGORIES } from "@/services/mock/notificationData";
+import { filterRowsByScope } from "@/lib/phnScope";
+import { useAuth } from "@/context/AuthContext";
 
 export default function NotificationsPage({ crumbs = ["Home", "Notifications"], roleKey = "resident" }) {
-  const [notifications, setNotifications] = useState(NOTIFICATIONS[roleKey] || []);
+  const { user } = useAuth();
+  const [notifications, setNotifications] = useState(() =>
+    filterRowsByScope(NOTIFICATIONS[roleKey] || [], user)
+  );
   const [filter, setFilter] = useState("all");
 
   const filteredNotifications = notifications.filter((n) => {
@@ -14,8 +19,6 @@ export default function NotificationsPage({ crumbs = ["Home", "Notifications"], 
     if (filter === "unread") return !n.read;
     return n.category === filter;
   });
-
-  const unreadCount = notifications.filter((n) => !n.read).length;
 
   const markAsRead = (id) => {
     setNotifications((prev) =>

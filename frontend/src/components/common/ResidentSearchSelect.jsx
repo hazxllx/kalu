@@ -3,7 +3,7 @@ import { Search, X, User, Check } from "lucide-react";
 
 const SEARCH_DEBOUNCE_MS = 250;
 
-/** Secondary identifying info, e.g. "RES-1024 · 34 yrs · San Jose". */
+/** Secondary identifying info, e.g. "RES-1024 · 34 yrs · San Isidro". */
 const residentMeta = (r) =>
   [
     r.id,

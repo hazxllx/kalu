@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ROLES } from "@/lib/brand";
-import VerificationBadge from "@/features/verification/components/VerificationBadge";
+import { phnCoverageLabel } from "@/lib/phnScope";
+import { useAuth } from "@/context/AuthContext";import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, MapPin, FileText,
   Calendar, Monitor, Smartphone, LogOut,
@@ -22,6 +23,7 @@ function checkPasswordStrength(pw) {
 
 export default function SettingsPage({ roleKey = "resident" }) {
   const role = ROLES[roleKey];
+  const { user } = useAuth();
   const [showCur, setShowCur] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -31,10 +33,27 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
   const isResident = roleKey === "resident";
 
+  const displayName = user?.name || role.name;
+  const displayEmail = user?.email || `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`;
+
+  // PHN coverage reflects the signed-in account's barangay assignment:
+  //   - no assignment → "RHU"
+  //   - assigned → "San Isidro + RHU" (never implies all three barangays).
+  const isPhn = roleKey === "phn";
+  const coverageValue = isPhn ? phnCoverageLabel(user) : "San Isidro";
+  const coverageLabel = isPhn ? "Coverage" : "Assigned Barangay";
+
   const handleSave = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
     setPw({ current: "", new: "", confirm: "" });
+  };
+
+  const [profileSaved, setProfileSaved] = useState(false);
+
+  const handleProfileSave = () => {
+    setProfileSaved(true);
+    setTimeout(() => setProfileSaved(false), 2500);
   };
 
   return (
@@ -47,20 +66,28 @@ export default function SettingsPage({ roleKey = "resident" }) {
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4 sm:mb-5">Profile Information</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
-              { label: "Full Name", value: role.name },
+              { label: "Full Name", value: displayName },
               { label: "Role", value: role.label },
-              { label: "Email", value: `${role.name.split(" ")[0].toLowerCase()}@pili.gov.ph` },
+              { label: "Email", value: displayEmail },
               { label: "Contact Number", value: "0917 123 4567" },
-              { label: "Barangay", value: "San Jose" },
+              { label: coverageLabel, value: coverageValue },
               { label: "Municipality", value: "Pili, Camarines Sur" },
             ].map((f) => (
               <div key={f.label}>
                 <label className="text-sm font-medium text-brand-ink">{f.label}</label>
-                <input defaultValue={f.value} className="mt-1.5 w-full bg-white border border-brand-border rounded-input px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue" />
+                <input defaultValue={f.value} className="mt-1.5 w-full bg-white border border-brand-border rounded-input px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue" readOnly />
               </div>
             ))}
           </div>
-          <button className="mt-4 sm:mt-6 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors">Save Changes</button>
+          <button
+            onClick={handleProfileSave}
+            className="mt-4 sm:mt-6 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
+          >
+            Save Changes
+          </button>
+          {profileSaved && (
+            <span className="ml-3 text-sm text-brand-green">Profile updated successfully.</span>
+          )}
         </Card>
 
         {/* Security: Change Password */}
@@ -158,9 +185,9 @@ export default function SettingsPage({ roleKey = "resident" }) {
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { label: "Registered Email", value: `${role.name.split(" ")[0].toLowerCase()}@pili.gov.ph`, icon: Mail },
+              { label: "Registered Email", value: displayEmail, icon: Mail },
               { label: "Registration Date", value: "January 15, 2026", icon: Calendar },
-              { label: "Assigned Barangay", value: "San Jose", icon: MapPin },
+              { label: coverageLabel, value: coverageValue, icon: MapPin },
               { label: "Reference Number", value: "KSG-2026-00012", icon: FileText },
               { label: "Verification Status", value: isResident ? "Verified" : "N/A", icon: ShieldCheck, badge: isResident },
             ].map((f) => (
@@ -205,10 +232,24 @@ export default function SettingsPage({ roleKey = "resident" }) {
                   <p className="text-xs text-brand-gray">Safari on iOS 17 — Last login: July 4, 2026, 6:15 PM</p>
                 </div>
               </div>
-              <button className="text-xs font-medium text-brand-danger hover:underline shrink-0">Logout</button>
+              <button
+                onClick={() => {
+                  setProfileSaved(true);
+                  setTimeout(() => setProfileSaved(false), 2500);
+                }}
+                className="text-xs font-medium text-brand-danger hover:underline shrink-0"
+              >
+                Logout
+              </button>
             </div>
           </div>
-          <button className="mt-4 sm:mt-5 flex items-center gap-2 border border-brand-border text-brand-gray px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-bg transition-colors">
+          <button
+            onClick={() => {
+              setProfileSaved(true);
+              setTimeout(() => setProfileSaved(false), 2500);
+            }}
+            className="mt-4 sm:mt-5 flex items-center gap-2 border border-brand-border text-brand-gray px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-bg transition-colors"
+          >
             <LogOut className="w-4 h-4" /> Logout Other Devices
           </button>
         </Card>

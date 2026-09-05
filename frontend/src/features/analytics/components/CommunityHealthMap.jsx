@@ -6,7 +6,7 @@ import { Users, AlertTriangle, Stethoscope, Syringe, CalendarCheck, Activity } f
 const MAP_IMAGE = "/background-map.png";
 
 const STATUS_COLOR = {
-  "San Jose": "#28B463",
+  "San Antonio": "#28B463",
   "San Isidro": "#2A7DE1",
   "Old San Roque": "#E67E22",
 };

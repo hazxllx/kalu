@@ -14,7 +14,7 @@ const advisories = [
 const assurances = [
   { icon: ShieldCheck, title: "Data Privacy Act", copy: "Records handled under R.A. 10173." },
   { icon: FileCheck2, title: "Verified Access", copy: "Accounts confirmed by your BHW." },
-  { icon: Users, title: "Barangay-Linked", copy: "Connected to all 26 barangays." },
+  { icon: Users, title: "Barangay-Linked", copy: "Connected to our three barangays." },
 ];
 
 export default function Hero() {

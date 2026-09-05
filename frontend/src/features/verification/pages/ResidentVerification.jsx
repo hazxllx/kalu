@@ -14,14 +14,14 @@ import {
 const RESIDENT = {
   name: "Juan Dela Cruz Reyes",
   email: "juan.reyes@email.com",
-  barangay: "San Jose",
+  barangay: "San Isidro",
   registered: "July 5, 2026",
   ref: "KSG-2026-00428",
   age: 34,
   sex: "Male",
   civilStatus: "Married",
   mobile: "0917 234 5678",
-  address: "Purok 5, Mabini St., San Jose, Pili, Camarines Sur",
+  address: "Purok 5, Mabini St., San Isidro, Pili, Camarines Sur",
   documents: [
     { name: "National ID — Front", type: "image" },
     { name: "National ID — Back", type: "image" },

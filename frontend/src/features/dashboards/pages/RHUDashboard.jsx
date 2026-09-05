@@ -9,11 +9,11 @@ import { barangayOverview, monthlyConsultations } from "@/services/mock/mockData
 import { FileText, Calendar, Heart, BarChart3, Users, ArrowRight, Eye } from "lucide-react";
 
 const RECENT_REFERRALS = [
-  { id: 1, resident: "Ana Villanueva", barangay: "San Jose", date: "July 10, 2026", status: "Pending" },
-  { id: 2, resident: "Maria Santos", barangay: "San Jose", date: "July 8, 2026", status: "Accepted" },
-  { id: 3, resident: "Grace Aquino", barangay: "Cadlan", date: "July 5, 2026", status: "Completed" },
-  { id: 4, resident: "Carmen Reyes", barangay: "San Jose", date: "July 3, 2026", status: "Referred to Another Facility" },
-  { id: 5, resident: "Lourdes Mendoza", barangay: "Cadlan", date: "July 1, 2026", status: "Pending" },
+  { id: 1, resident: "Ana Villanueva", barangay: "San Isidro", date: "July 10, 2026", status: "Pending" },
+  { id: 2, resident: "Maria Santos", barangay: "San Isidro", date: "July 8, 2026", status: "Accepted" },
+  { id: 3, resident: "Grace Aquino", barangay: "San Antonio", date: "July 5, 2026", status: "Completed" },
+  { id: 4, resident: "Carmen Reyes", barangay: "San Isidro", date: "July 3, 2026", status: "Referred to Another Facility" },
+  { id: 5, resident: "Lourdes Mendoza", barangay: "San Antonio", date: "July 1, 2026", status: "Pending" },
 ];
 
 const QUICK_ACTIONS = [
@@ -24,12 +24,9 @@ const QUICK_ACTIONS = [
 ];
 
 const BARANGAY_HEALTH_SUMMARY = [
-  { barangay: "San Jose", residents: "2,140", highRisk: "34", vaccination: "91%" },
-  { barangay: "Cadlan", residents: "1,865", highRisk: "19", vaccination: "88%" },
-  { barangay: "Talisay", residents: "1,542", highRisk: "28", vaccination: "92%" },
-  { barangay: "Anis", residents: "1,234", highRisk: "15", vaccination: "87%" },
-  { barangay: "Maysuram", residents: "987", highRisk: "12", vaccination: "85%" },
-  { barangay: "Curry", residents: "1,077", highRisk: "17", vaccination: "90%" },
+  { barangay: "San Isidro", residents: "2,140", highRisk: "34", vaccination: "91%" },
+  { barangay: "San Antonio", residents: "1,865", highRisk: "19", vaccination: "88%" },
+  { barangay: "Old San Roque", residents: "1,542", highRisk: "28", vaccination: "92%" },
 ];
 
 const HEALTH_PROGRAMS = [
@@ -55,8 +52,8 @@ const STATUS_COLORS = {
 };
 
 const stats = [
-  { icon: "Map", label: "Barangays", value: "6", tone: "accent" },
-  { icon: "Users", label: "Total Residents", value: "12,845", tone: "blue" },
+  { icon: "Map", label: "Barangays", value: "3", tone: "accent" },
+  { icon: "Users", label: "Total Residents", value: "1,248", tone: "blue" },
   { icon: "AlertTriangle", label: "High Risk Cases", value: "215", tone: "danger" },
   { icon: "Syringe", label: "Vaccination Coverage", value: "89%", tone: "green" },
 ];

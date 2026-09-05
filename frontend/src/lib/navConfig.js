@@ -49,6 +49,7 @@ export const NAV = {
     { label: "Assessments", icon: "ClipboardList", path: "/app/phn/consultations", permission: "consultation.requests.view" },
     { label: "Referrals", icon: "Send", path: "/app/phn/referrals", permission: "referrals.view" },
     { label: "Follow-ups", icon: "CalendarClock", path: "/app/phn/followups", permission: "followups.view" },
+    { label: "Health Services", icon: "Stethoscope", path: "/app/phn/services" },
     { label: "Reports", icon: "BarChart3", path: "/app/phn/reports", permission: "reports.view" },
     { label: "Notifications", icon: "Bell", path: "/app/phn/notifications" },
     { label: "Settings", icon: "Settings", path: "/app/phn/settings" },

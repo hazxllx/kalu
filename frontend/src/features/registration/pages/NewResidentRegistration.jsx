@@ -11,7 +11,7 @@ import FaceVerification from "@/features/registration/components/FaceVerificatio
 import UploadComponent from "@/features/registration/components/UploadComponent";
 import { AgencyMark } from "@/components/branding/GovChrome";
 
-const BARANGAYS = ["San Jose", "San Isidro", "Old San Roque", "Sta. Cruz", "Bagong Silang", "San Antonio", "San Vicente", "Santo Niño"];
+const BARANGAYS = ["San Isidro", "San Antonio", "Old San Roque"];
 
 function calcAge(dob) {
   if (!dob) return "";
@@ -296,7 +296,7 @@ export default function NewResidentRegistration() {
                   </div>
                   <div className="grid sm:grid-cols-2 gap-4">
                     <TextField label="House Number" icon={MapPin} optional placeholder="Leave blank if not applicable" value={form.houseNo} onChange={set("houseNo")} />
-                    <TextField label="Nearest Landmark" icon={MapPin} optional placeholder="Near San Jose Chapel" value={form.landmark} onChange={set("landmark")} />
+                    <TextField label="Nearest Landmark" icon={MapPin} optional placeholder="Near San Isidro Chapel" value={form.landmark} onChange={set("landmark")} />
                   </div>
                   <TextField label="Occupation" icon={User} optional placeholder="Farmer" value={form.occupation} onChange={set("occupation")} />
                 </div>

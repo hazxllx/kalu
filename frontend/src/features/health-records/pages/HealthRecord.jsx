@@ -31,7 +31,7 @@ export default function HealthRecord() {
       <Card className="p-5 mb-6">
         <div className="grid md:grid-cols-2 xl:grid-cols-6 gap-4 text-sm">
           <div><p className="text-brand-gray">Resident Name</p><p className="font-semibold text-brand-ink">Maria Santos</p></div>
-          <div><p className="text-brand-gray">Barangay</p><p className="font-semibold text-brand-ink">San Jose</p></div>
+          <div><p className="text-brand-gray">Barangay</p><p className="font-semibold text-brand-ink">San Isidro</p></div>
           <div><p className="text-brand-gray">Birthday</p><p className="font-semibold text-brand-ink">March 12, 1992</p></div>
           <div><p className="text-brand-gray">Age</p><p className="font-semibold text-brand-ink">34</p></div>
           <div><p className="text-brand-gray">Sex</p><p className="font-semibold text-brand-ink">Female</p></div>

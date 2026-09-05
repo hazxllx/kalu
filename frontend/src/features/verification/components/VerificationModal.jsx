@@ -57,7 +57,7 @@ export default function VerificationModal({ open, onClose, data = {} }) {
                 <div className="grid grid-cols-2 gap-3 mb-6">
                   {[
                     { label: "Reference Number", value: data.reference || "KSG-2026-00428" },
-                    { label: "Assigned Barangay", value: data.barangay || "San Jose" },
+                    { label: "Assigned Barangay", value: data.barangay || "San Isidro" },
                     { label: "Submission Date", value: data.submitted || "July 5, 2026" },
                     { label: "Estimated Review", value: data.estimated || "2-3 business days" },
                   ].map((item) => (

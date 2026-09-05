@@ -42,7 +42,7 @@ export default function VerificationStatus() {
           <div className="mt-5 grid grid-cols-2 gap-3">
             {[
               { icon: Calendar, label: "Registration Date", value: "July 5, 2026" },
-              { icon: MapPin, label: "Assigned Barangay", value: "San Jose" },
+              { icon: MapPin, label: "Assigned Barangay", value: "San Isidro" },
               { icon: FileText, label: "Reference Number", value: "KSG-2026-00428" },
               { icon: Clock, label: "Estimated Review", value: "2-3 business days" },
             ].map((item) => (

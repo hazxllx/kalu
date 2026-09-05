@@ -14,15 +14,32 @@ const DEV_SESSION_KEY = 'kalusagap.dev.session';
 const roleFromSupabaseUser = (user) =>
   user?.app_metadata?.role || user?.user_metadata?.role || null;
 
-const toUser = (supabaseUser) => ({
-  id: supabaseUser.id,
-  email: supabaseUser.email,
-  name: supabaseUser.user_metadata?.name || supabaseUser.email,
-  role: roleFromSupabaseUser(supabaseUser),
-  // Barangay assignment for barangay-scoped roles (e.g. Health Supervisor).
-  // Comes from the account metadata — never chosen by the user.
-  barangay: supabaseUser.app_metadata?.barangay || supabaseUser.user_metadata?.barangay || null,
-});
+const toUser = (supabaseUser) => {
+  const metadata = supabaseUser?.app_metadata || {};
+  const userMetadata = supabaseUser?.user_metadata || {};
+  return {
+    id: supabaseUser.id,
+    email: supabaseUser.email,
+    name: userMetadata?.name || supabaseUser.email,
+    role: roleFromSupabaseUser(supabaseUser),
+    // Barangay assignment for barangay-scoped roles (e.g. Health Supervisor,
+    // or a PHN assigned to a specific barangay). Comes from the account
+    // metadata — never chosen by the user. `barangay` is kept as a backward
+    // compatible alias used by other roles.
+    assignedBarangay:
+      metadata?.assignedBarangay ||
+      userMetadata?.assignedBarangay ||
+      metadata?.barangay ||
+      userMetadata?.barangay ||
+      null,
+    barangay:
+      metadata?.assignedBarangay ||
+      userMetadata?.assignedBarangay ||
+      metadata?.barangay ||
+      userMetadata?.barangay ||
+      null,
+  };
+};
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -105,11 +122,12 @@ export const AuthProvider = ({ children }) => {
       throw new Error(message);
     }
     const devUser = {
-      id: `dev-${account.role}`,
+      id: `dev-${account.role}${account.assignedBarangay ? `-${account.assignedBarangay}` : ''}`,
       email: account.email,
       name: account.name,
       role: account.role,
-      barangay: account.barangay || null,
+      assignedBarangay: account.assignedBarangay ?? account.barangay ?? null,
+      barangay: account.assignedBarangay ?? account.barangay ?? null,
     };
     try {
       localStorage.setItem(DEV_SESSION_KEY, JSON.stringify(devUser));

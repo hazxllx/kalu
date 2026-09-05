@@ -27,7 +27,7 @@ const concernSummary = Object.entries(
 export default function BHWDashboard() {
   return (
     <>
-      <PageHeader crumbs={["Home", "Dashboard"]} title="Good morning, Maria" subtitle="Here's what needs your attention today in Barangay San Jose." />
+      <PageHeader crumbs={["Home", "Dashboard"]} title="Good morning, Maria" subtitle="Here's what needs your attention today in San Isidro." />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4 mb-6">
         {bhwDashboard.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
       </div>

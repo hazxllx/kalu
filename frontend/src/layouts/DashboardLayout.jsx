@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
+import { Outlet, useLocation, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Bell, Menu, X, LogOut, ChevronDown, User, Settings,
@@ -10,14 +10,14 @@ import VerificationBadge from "@/features/verification/components/VerificationBa
 import { LOGO_URL, ROLES } from "@/lib/brand";
 import { NAV, filterNavByPermission } from "@/lib/navConfig";
 import { NOTIFICATIONS } from "@/services/mock/notificationData";
+import { filterRowsByScope } from "@/lib/phnScope";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 
 export default function DashboardLayout({ roleKey }) {
   const role = ROLES[roleKey];
-  const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const { can } = usePermissions();
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -33,7 +33,19 @@ export default function DashboardLayout({ roleKey }) {
   // that privilege from the role; everything else behaves exactly as before.
   const items = useMemo(() => filterNavByPermission(NAV[roleKey] || [], can), [roleKey, can]);
 
-  const notifications = NOTIFICATIONS[roleKey] || [];
+  // The profile should reflect the signed-in user (two different PHN demo
+  // accounts exist, each with its own name/coverage), falling back to the
+  // role's placeholder only when no user is available.
+  const displayName = user?.name || role.name;
+  const displayEmail = user?.email || `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`;
+  const initials = displayName
+    .split(" ")
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  const notifications = filterRowsByScope(NOTIFICATIONS[roleKey] || [], user);
   const unreadCount = notifications.filter((n) => !n.read).length;
   const notificationsPath = roleKey === "resident-limited"
     ? "/app/resident-limited/announcements"
@@ -217,11 +229,11 @@ export default function DashboardLayout({ roleKey }) {
                 className="flex items-center gap-2 rounded-xl hover:bg-slate-50 px-2 py-1.5 transition-colors"
               >
                 <div className="w-9 h-9 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-semibold font-heading">
-                  {role.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                  {initials}
                 </div>
                 <div className="hidden md:block text-left">
                   <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-medium text-slate-900 leading-tight">{role.name}</p>
+                    <p className="text-sm font-medium text-slate-900 leading-tight">{displayName}</p>
                     {isResident && (
                       verified
                         ? <ShieldCheck className="w-3.5 h-3.5 text-brand-green" strokeWidth={2} />
@@ -245,11 +257,11 @@ export default function DashboardLayout({ roleKey }) {
                     <div className="px-4 py-4 border-b border-slate-200 bg-slate-50">
                       <div className="flex items-center gap-3">
                         <div className="w-11 h-11 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-heading font-semibold">
-                          {role.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                          {initials}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-heading font-semibold text-slate-900 truncate">{role.name}</p>
+                            <p className="text-sm font-heading font-semibold text-slate-900 truncate">{displayName}</p>
                             {isResident && (
                               verified
                                 ? <ShieldCheck className="w-4 h-4 text-brand-green shrink-0" strokeWidth={2} />
@@ -261,7 +273,7 @@ export default function DashboardLayout({ roleKey }) {
                               <VerificationBadge status={verified ? "verified" : "pending"} size="sm" />
                             </div>
                           )}
-                          <p className="text-xs text-slate-500 mt-1 truncate">{role.name.split(" ")[0].toLowerCase()}@pili.gov.ph</p>
+                          <p className="text-xs text-slate-500 mt-1 truncate">{displayEmail}</p>
                         </div>
                       </div>
                     </div>

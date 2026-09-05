@@ -5,14 +5,14 @@ import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 
 const REFERRALS = [
-  { resident: "Maria Santos", barangay: "San Jose", facility: "RHU Pili", date: "2026-07-05", status: "Pending", personnel: "Nurse R. Dela Cruz" },
+  { resident: "Maria Santos", barangay: "San Isidro", facility: "RHU Pili", date: "2026-07-05", status: "Pending", personnel: "Nurse R. Dela Cruz" },
   { resident: "Juan Dela Cruz", barangay: "San Isidro", facility: "RHU Pili", date: "2026-07-04", status: "Accepted", personnel: "Nurse R. Dela Cruz" },
-  { resident: "Ana Garcia", barangay: "Sta. Cruz", facility: "RHU Pili", date: "2026-07-03", status: "Completed", personnel: "Midwife M. Lopez" },
-  { resident: "Roberto Lim", barangay: "San Jose", facility: "RHU Pili", date: "2026-07-02", status: "Pending", personnel: "Nurse R. Dela Cruz" },
+  { resident: "Ana Garcia", barangay: "San Antonio", facility: "RHU Pili", date: "2026-07-03", status: "Completed", personnel: "Midwife M. Lopez" },
+  { resident: "Roberto Lim", barangay: "San Isidro", facility: "RHU Pili", date: "2026-07-02", status: "Pending", personnel: "Nurse R. Dela Cruz" },
   { resident: "Carmen Reyes", barangay: "San Antonio", facility: "RHU Pili", date: "2026-06-30", status: "Accepted", personnel: "Midwife M. Lopez" },
 ];
 
-const BARANGAYS = ["All", "San Jose", "San Isidro", "Sta. Cruz", "San Antonio", "San Vicente", "Santo Nio"];
+const BARANGAYS = ["All", "San Isidro", "San Antonio", "Old San Roque"];
 const STATUSES = ["All", "Pending", "Accepted", "Completed"];
 
 export default function MHOReferrals() {

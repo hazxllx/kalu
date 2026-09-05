@@ -2,8 +2,8 @@
 
 export const stats = {
   landing: [
-    { label: "Barangays Connected", value: "6" },
-    { label: "Residents", value: "12,845" },
+    { label: "Barangays Connected", value: "3" },
+    { label: "Residents", value: "1,248" },
     { label: "Follow-ups Completed", value: "2,450" },
     { label: "Record Accuracy", value: "95%" },
     { label: "Resident Satisfaction", value: "98%" },
@@ -71,7 +71,7 @@ export const recentMedicalRecords = [
 
 export const healthAnnouncements = [
   { icon: "Syringe", title: "Free Immunization Drive", desc: "Catch-up immunization for children ages 0-5 this July at the Barangay Health Center.", date: "Jul 12, 2026", tone: "blue" },
-  { icon: "ShieldCheck", title: "Dengue Prevention Campaign", desc: "Community cleanup and fogging operations scheduled for Barangay San Jose.", date: "Jul 10, 2026", tone: "green" },
+  { icon: "ShieldCheck", title: "Dengue Prevention Campaign", desc: "Community cleanup and fogging operations scheduled for San Isidro.", date: "Jul 10, 2026", tone: "green" },
   { icon: "HeartPulse", title: "Hypertension Awareness Month", desc: "Free BP screening every Friday. Walk-ins welcome at the health station.", date: "Jul 05, 2026", tone: "yellow" },
 ];
 
@@ -86,25 +86,25 @@ export const appointments = [
 export const notifications = [
   { icon: "CalendarClock", title: "Follow-up Reminder", desc: "Your prenatal follow-up is on August 15 at 9:00 AM.", time: "2h ago", tone: "accent" },
   { icon: "Syringe", title: "Vaccination Reminder", desc: "Child immunization schedule due next week.", time: "1d ago", tone: "green" },
-  { icon: "AlertTriangle", title: "Health Advisory", desc: "Dengue prevention drive this Saturday in Barangay San Jose.", time: "3d ago", tone: "yellow" },
+  { icon: "AlertTriangle", title: "Health Advisory", desc: "Dengue prevention drive this Saturday in San Isidro.", time: "3d ago", tone: "yellow" },
 ];
 
 export const residents = [
-  { id: "R-1024", name: "Maria Santos", age: 28, gender: "Female", risk: "Low", barangay: "San Jose", status: "Active", program: "Maternal Care" },
+  { id: "R-1024", name: "Maria Santos", age: 28, gender: "Female", risk: "Low", barangay: "San Isidro", status: "Active", program: "Maternal Care" },
   { id: "R-1025", name: "Juan Dela Cruz", age: 54, gender: "Male", risk: "High", barangay: "San Isidro", status: "Active", program: "Hypertension" },
-  { id: "R-1026", name: "Rosa Bautista", age: 67, gender: "Female", risk: "Medium", barangay: "Sta. Cruz", status: "Active", program: "Senior Care" },
-  { id: "R-1027", name: "Pedro Reyes", age: 3, gender: "Male", risk: "Low", barangay: "San Jose", status: "Active", program: "Child Health" },
-  { id: "R-1028", name: "Ana Villanueva", age: 32, gender: "Female", risk: "High", barangay: "Bagong Silang", status: "Active", program: "Maternal Care" },
-  { id: "R-1029", name: "Carlos Mendoza", age: 61, gender: "Male", risk: "High", barangay: "San Isidro", status: "Active", program: "Diabetes" },
-  { id: "R-1030", name: "Liza Gonzales", age: 45, gender: "Female", risk: "Medium", barangay: "Sta. Cruz", status: "Inactive", program: "TB Monitoring" },
-  { id: "R-1031", name: "Miguel Torres", age: 22, gender: "Male", risk: "Low", barangay: "San Jose", status: "Active", program: "Family Planning" },
+  { id: "R-1026", name: "Rosa Bautista", age: 67, gender: "Female", risk: "Medium", barangay: "San Antonio", status: "Active", program: "Senior Care" },
+  { id: "R-1027", name: "Pedro Reyes", age: 3, gender: "Male", risk: "Low", barangay: "San Isidro", status: "Active", program: "Child Health" },
+  { id: "R-1028", name: "Ana Villanueva", age: 32, gender: "Female", risk: "High", barangay: "Old San Roque", status: "Active", program: "Maternal Care" },
+  { id: "R-1029", name: "Carlos Mendoza", age: 61, gender: "Male", risk: "High", barangay: "San Antonio", status: "Active", program: "Diabetes" },
+  { id: "R-1030", name: "Liza Gonzales", age: 45, gender: "Female", risk: "Medium", barangay: "Old San Roque", status: "Inactive", program: "TB Monitoring" },
+  { id: "R-1031", name: "Miguel Torres", age: 22, gender: "Male", risk: "Low", barangay: "Old San Roque", status: "Active", program: "Family Planning" },
 ];
 
 export const households = [
-  { id: "HH-201", head: "Juanito Santos", purok: "Purok 1", streetAddress: "12 Mabini St.", contact: "0917 555 0201", families: 1, collector: "Maria Cruz", hhStatus: "Ongoing", approval: "Not yet approved", lastUpdated: "2026-07-01", address: "12 Mabini St., Brgy. San Jose", members: 5, riskScore: 34, income: "₱9,500/mo", water: "Level II - Communal", toilet: "Water-sealed", concerns: ["Hypertension", "Prenatal"], syncStatus: "Pending Sync" },
-  { id: "HH-202", head: "Roberto Dela Cruz", purok: "Purok 3", streetAddress: "8 Rizal Ave.", contact: "0918 555 0102", families: 2, collector: "Grace Aquino", hhStatus: "Needs Update", approval: "Needs revision", lastUpdated: "2026-06-24", address: "8 Rizal Ave., Brgy. San Isidro", members: 7, riskScore: 72, income: "₱6,200/mo", water: "Level I - Point Source", toilet: "Shared", concerns: ["Diabetes", "Malnutrition"] },
-  { id: "HH-203", head: "Carmen Reyes", purok: "Purok 2", streetAddress: "45 Bonifacio St.", contact: "0919 555 0303", families: 1, collector: "Lourdes Ramos", hhStatus: "Approved", approval: "Approved", lastUpdated: "2026-07-03", address: "45 Bonifacio St., Brgy. Sta. Cruz", members: 4, riskScore: 28, income: "₱14,000/mo", water: "Level III - Piped", toilet: "Water-sealed", concerns: ["Senior Care"] },
-  { id: "HH-204", head: "Ana Villanueva", purok: "Purok 5", streetAddress: "3 Luna St.", contact: "0920 555 0404", families: 2, collector: "Maria Cruz", hhStatus: "Submitted", approval: "Not yet approved", lastUpdated: "2026-06-28", address: "3 Luna St., Brgy. Bagong Silang", members: 6, riskScore: 58, income: "₱7,800/mo", water: "Level II - Communal", toilet: "Water-sealed", concerns: ["Maternal", "TB Contact"] },
+  { id: "HH-201", head: "Juanito Santos", purok: "Purok 1", streetAddress: "12 Mabini St.", contact: "0917 555 0201", families: 1, collector: "Maria Cruz", hhStatus: "Ongoing", approval: "Not yet approved", lastUpdated: "2026-07-01", address: "12 Mabini St., San Isidro", members: 5, riskScore: 34, income: "₱9,500/mo", water: "Level II - Communal", toilet: "Water-sealed", concerns: ["Hypertension", "Prenatal"], syncStatus: "Pending Sync" },
+  { id: "HH-202", head: "Roberto Dela Cruz", purok: "Purok 3", streetAddress: "8 Rizal Ave.", contact: "0918 555 0102", families: 2, collector: "Grace Aquino", hhStatus: "Needs Update", approval: "Needs revision", lastUpdated: "2026-06-24", address: "8 Rizal Ave., San Isidro", members: 7, riskScore: 72, income: "₱6,200/mo", water: "Level I - Point Source", toilet: "Shared", concerns: ["Diabetes", "Malnutrition"] },
+  { id: "HH-203", head: "Carmen Reyes", purok: "Purok 2", streetAddress: "45 Bonifacio St.", contact: "0919 555 0303", families: 1, collector: "Lourdes Ramos", hhStatus: "Approved", approval: "Approved", lastUpdated: "2026-07-03", address: "45 Bonifacio St., San Antonio", members: 4, riskScore: 28, income: "₱14,000/mo", water: "Level III - Piped", toilet: "Water-sealed", concerns: ["Senior Care"] },
+  { id: "HH-204", head: "Ana Villanueva", purok: "Purok 5", streetAddress: "3 Luna St.", contact: "0920 555 0404", families: 2, collector: "Maria Cruz", hhStatus: "Submitted", approval: "Not yet approved", lastUpdated: "2026-06-28", address: "3 Luna St., Old San Roque", members: 6, riskScore: 58, income: "₱7,800/mo", water: "Level II - Communal", toilet: "Water-sealed", concerns: ["Maternal", "TB Contact"] },
 ];
 
 // BHW metrics are community/household level only — no individual resident
@@ -205,15 +205,15 @@ export const ageDistribution = [
 ];
 
 export const vaccinationCoverage = [
-  { name: "San Jose", value: 96 }, { name: "San Isidro", value: 88 },
-  { name: "Sta. Cruz", value: 92 }, { name: "Bagong Silang", value: 79 },
+  { name: "San Isidro", value: 96 },
+  { name: "San Antonio", value: 88 },
+  { name: "Old San Roque", value: 92 },
 ];
 
 export const barangayOverview = [
-  { name: "San Jose", residents: 2450, highRisk: 42, coverage: "96%" },
-  { name: "San Isidro", residents: 2120, highRisk: 68, coverage: "88%" },
-  { name: "Sta. Cruz", residents: 1980, highRisk: 31, coverage: "92%" },
-  { name: "Bagong Silang", residents: 2310, highRisk: 74, coverage: "79%" },
+  { name: "San Isidro", residents: 2450, highRisk: 42, coverage: "96%" },
+  { name: "San Antonio", residents: 2120, highRisk: 68, coverage: "88%" },
+  { name: "Old San Roque", residents: 1980, highRisk: 31, coverage: "92%" },
 ];
 
 export const adminStats = [
@@ -232,19 +232,19 @@ export const auditLogs = [
 ];
 
 export const systemUsers = [
-  { name: "Maria Cruz", email: "m.cruz@pili.gov.ph", role: "BHW", barangay: "San Jose", status: "Active" },
+  { name: "Maria Cruz", email: "m.cruz@pili.gov.ph", role: "BHW", barangay: "San Isidro", status: "Active" },
   { name: "Maria Dela Cruz", email: "m.delacruz@pili.gov.ph", role: "Midwife", barangay: "Municipal", status: "Active" },
   { name: "Antonio Reyes", email: "a.reyes@pili.gov.ph", role: "RHU Personnel", barangay: "Municipal", status: "Active" },
-  { name: "Lourdes Ramos", email: "l.ramos@pili.gov.ph", role: "BHW", barangay: "Sta. Cruz", status: "Active" },
+  { name: "Lourdes Ramos", email: "l.ramos@pili.gov.ph", role: "BHW", barangay: "San Antonio", status: "Active" },
   { name: "Jose Ramirez", email: "j.ramirez@pili.gov.ph", role: "Administrator", barangay: "Municipal", status: "Active" },
-  { name: "Grace Aquino", email: "g.aquino@pili.gov.ph", role: "BHW", barangay: "San Isidro", status: "Inactive" },
+  { name: "Grace Aquino", email: "g.aquino@pili.gov.ph", role: "BHW", barangay: "Old San Roque", status: "Inactive" },
 ];
 
 // === RHU Analytics: Community Health Map & Trends ===
 
 export const highlightedBarangays = [
   {
-    name: "San Jose",
+    name: "San Antonio",
     color: "#28B463",
     trend: "Healthy",
     healthStatus: "Healthy",
@@ -387,12 +387,12 @@ export const highlightedBarangays = [
 ];
 
 export const comparisonMonthlyConsultations = [
-  { month: "Jan", "San Jose": 120, "San Isidro": 98, "Old San Roque": 145 },
-  { month: "Feb", "San Jose": 135, "San Isidro": 112, "Old San Roque": 138 },
-  { month: "Mar", "San Jose": 128, "San Isidro": 105, "Old San Roque": 152 },
-  { month: "Apr", "San Jose": 145, "San Isidro": 118, "Old San Roque": 168 },
-  { month: "May", "San Jose": 152, "San Isidro": 125, "Old San Roque": 185 },
-  { month: "Jun", "San Jose": 168, "San Isidro": 142, "Old San Roque": 213 },
+  { month: "Jan", "San Antonio": 120, "San Isidro": 98, "Old San Roque": 145 },
+  { month: "Feb", "San Antonio": 135, "San Isidro": 112, "Old San Roque": 138 },
+  { month: "Mar", "San Antonio": 128, "San Isidro": 105, "Old San Roque": 152 },
+  { month: "Apr", "San Antonio": 145, "San Isidro": 118, "Old San Roque": 168 },
+  { month: "May", "San Antonio": 152, "San Isidro": 125, "Old San Roque": 185 },
+  { month: "Jun", "San Antonio": 168, "San Isidro": 142, "Old San Roque": 213 },
 ];
 
 export const diseaseDonutData = [
@@ -404,52 +404,52 @@ export const diseaseDonutData = [
 ];
 
 export const comparisonFollowUpTrend = [
-  { month: "Jan", "San Jose": 88, "San Isidro": 82, "Old San Roque": 76 },
-  { month: "Feb", "San Jose": 90, "San Isidro": 84, "Old San Roque": 78 },
-  { month: "Mar", "San Jose": 91, "San Isidro": 85, "Old San Roque": 79 },
-  { month: "Apr", "San Jose": 92, "San Isidro": 86, "Old San Roque": 80 },
-  { month: "May", "San Jose": 93, "San Isidro": 87, "Old San Roque": 81 },
-  { month: "Jun", "San Jose": 94, "San Isidro": 88, "Old San Roque": 82 },
+  { month: "Jan", "San Antonio": 88, "San Isidro": 82, "Old San Roque": 76 },
+  { month: "Feb", "San Antonio": 90, "San Isidro": 84, "Old San Roque": 78 },
+  { month: "Mar", "San Antonio": 91, "San Isidro": 85, "Old San Roque": 79 },
+  { month: "Apr", "San Antonio": 92, "San Isidro": 86, "Old San Roque": 80 },
+  { month: "May", "San Antonio": 93, "San Isidro": 87, "Old San Roque": 81 },
+  { month: "Jun", "San Antonio": 94, "San Isidro": 88, "Old San Roque": 82 },
 ];
 
 export const comparisonVaccinationCoverage = [
-  { name: "San Jose", value: 96 },
-  { name: "San Isidro", value: 91 },
+  { name: "San Isidro", value: 96 },
+  { name: "San Antonio", value: 91 },
   { name: "Old San Roque", value: 89 },
 ];
 
 export const comparisonReferralCompletion = [
-  { name: "San Jose", value: 83 },
+  { name: "San Antonio", value: 83 },
   { name: "San Isidro", value: 76 },
   { name: "Old San Roque", value: 68 },
 ];
 
 export const comparisonMaternalTrend = [
-  { month: "Jan", "San Jose": 88, "San Isidro": 82, "Old San Roque": 72 },
-  { month: "Feb", "San Jose": 90, "San Isidro": 83, "Old San Roque": 74 },
-  { month: "Mar", "San Jose": 89, "San Isidro": 84, "Old San Roque": 73 },
-  { month: "Apr", "San Jose": 91, "San Isidro": 85, "Old San Roque": 76 },
-  { month: "May", "San Jose": 92, "San Isidro": 85, "Old San Roque": 77 },
-  { month: "Jun", "San Jose": 92, "San Isidro": 85, "Old San Roque": 78 },
+  { month: "Jan", "San Antonio": 88, "San Isidro": 82, "Old San Roque": 72 },
+  { month: "Feb", "San Antonio": 90, "San Isidro": 83, "Old San Roque": 74 },
+  { month: "Mar", "San Antonio": 89, "San Isidro": 84, "Old San Roque": 73 },
+  { month: "Apr", "San Antonio": 91, "San Isidro": 85, "Old San Roque": 76 },
+  { month: "May", "San Antonio": 92, "San Isidro": 85, "Old San Roque": 77 },
+  { month: "Jun", "San Antonio": 92, "San Isidro": 85, "Old San Roque": 78 },
 ];
 
 export const comparisonChildHealth = [
-  { name: "San Jose", value: 96 },
-  { name: "San Isidro", value: 89 },
+  { name: "San Isidro", value: 96 },
+  { name: "San Antonio", value: 89 },
   { name: "Old San Roque", value: 84 },
 ];
 
 export const comparisonSeniorTrend = [
-  { month: "Jan", "San Jose": 84, "San Isidro": 78, "Old San Roque": 70 },
-  { month: "Feb", "San Jose": 85, "San Isidro": 79, "Old San Roque": 71 },
-  { month: "Mar", "San Jose": 86, "San Isidro": 80, "Old San Roque": 72 },
-  { month: "Apr", "San Jose": 87, "San Isidro": 81, "Old San Roque": 73 },
-  { month: "May", "San Jose": 87, "San Isidro": 82, "Old San Roque": 74 },
-  { month: "Jun", "San Jose": 88, "San Isidro": 82, "Old San Roque": 74 },
+  { month: "Jan", "San Antonio": 84, "San Isidro": 78, "Old San Roque": 70 },
+  { month: "Feb", "San Antonio": 85, "San Isidro": 79, "Old San Roque": 71 },
+  { month: "Mar", "San Antonio": 86, "San Isidro": 80, "Old San Roque": 72 },
+  { month: "Apr", "San Antonio": 87, "San Isidro": 81, "Old San Roque": 73 },
+  { month: "May", "San Antonio": 87, "San Isidro": 82, "Old San Roque": 74 },
+  { month: "Jun", "San Antonio": 88, "San Isidro": 82, "Old San Roque": 74 },
 ];
 
 export const comparisonProgramParticipation = [
-  { name: "San Jose", value: 91 },
+  { name: "San Antonio", value: 91 },
   { name: "San Isidro", value: 84 },
   { name: "Old San Roque", value: 76 },
 ];
@@ -486,7 +486,7 @@ export const healthStatusSummary = [
 
 export const recentHealthAlerts = [
   { icon: "AlertTriangle", msg: "Increase in hypertension cases detected in Old San Roque.", time: "2 hours ago", level: "warning" },
-  { icon: "Syringe", msg: "Vaccination coverage reached 96% in San Jose.", time: "5 hours ago", level: "success" },
+  { icon: "Syringe", msg: "Vaccination coverage reached 96% in San Isidro.", time: "5 hours ago", level: "success" },
   { icon: "CalendarCheck", msg: "Follow-up completion improved in San Isidro.", time: "1 day ago", level: "info" },
   { icon: "Accessibility", msg: "Senior citizen monitoring completed this week.", time: "2 days ago", level: "info" },
   { icon: "HeartPulse", msg: "Dengue prevention campaign launched in Old San Roque.", time: "3 days ago", level: "warning" },

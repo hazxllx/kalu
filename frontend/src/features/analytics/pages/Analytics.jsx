@@ -17,7 +17,7 @@ import {
   comparisonProgramParticipation, healthStatusSummary, recentHealthAlerts,
 } from "@/services/mock/mockData";
 
-const CHART_COLORS = { "San Jose": "#28B463", "San Isidro": "#2A7DE1", "Old San Roque": "#E67E22" };
+const CHART_COLORS = { "San Antonio": "#28B463", "San Isidro": "#2A7DE1", "Old San Roque": "#E67E22" };
 const DONUT_COLORS = ["#0B5CAD", "#2A7DE1", "#28B463", "#F5B400", "#E74C3C"];
 const tooltipStyle = { borderRadius: 12, border: "1px solid #E5EAF1", fontSize: 12, fontFamily: "DM Sans" };
 const tickStyle = { fill: "#5B6472", fontSize: 12, fontFamily: "DM Sans" };
@@ -42,7 +42,7 @@ function ChartCard({ title, subtitle, children, delay = 0 }) {
 function AreaGradients({ idPrefix }) {
   return (
     <defs>
-      {["San Jose", "San Isidro", "Old San Roque"].map((name, i) => (
+      {["San Antonio", "San Isidro", "Old San Roque"].map((name, i) => (
         <linearGradient key={i} id={`grad-${idPrefix}-${i}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={CHART_COLORS[name]} stopOpacity={0.25} />
           <stop offset="100%" stopColor={CHART_COLORS[name]} stopOpacity={0} />
@@ -111,7 +111,7 @@ export default function Analytics() {
               <YAxis axisLine={false} tickLine={false} tick={tickStyle} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={legendStyle} />
-              <Line type="monotone" dataKey="San Jose" stroke={CHART_COLORS["San Jose"]} strokeWidth={2.5} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="San Antonio" stroke={CHART_COLORS["San Antonio"]} strokeWidth={2.5} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="San Isidro" stroke={CHART_COLORS["San Isidro"]} strokeWidth={2.5} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="Old San Roque" stroke={CHART_COLORS["Old San Roque"]} strokeWidth={2.5} dot={{ r: 3 }} />
             </LineChart>
@@ -137,7 +137,7 @@ export default function Analytics() {
               <YAxis axisLine={false} tickLine={false} tick={tickStyle} domain={[60, 100]} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={legendStyle} />
-              <Area type="monotone" dataKey="San Jose" stroke={CHART_COLORS["San Jose"]} strokeWidth={2} fill="url(#grad-fu-0)" />
+              <Area type="monotone" dataKey="San Antonio" stroke={CHART_COLORS["San Antonio"]} strokeWidth={2} fill="url(#grad-fu-0)" />
               <Area type="monotone" dataKey="San Isidro" stroke={CHART_COLORS["San Isidro"]} strokeWidth={2} fill="url(#grad-fu-1)" />
               <Area type="monotone" dataKey="Old San Roque" stroke={CHART_COLORS["Old San Roque"]} strokeWidth={2} fill="url(#grad-fu-2)" />
             </AreaChart>
@@ -178,7 +178,7 @@ export default function Analytics() {
               <YAxis axisLine={false} tickLine={false} tick={tickStyle} domain={[60, 100]} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={legendStyle} />
-              <Area type="monotone" dataKey="San Jose" stroke={CHART_COLORS["San Jose"]} strokeWidth={2} fill="url(#grad-mh-0)" />
+              <Area type="monotone" dataKey="San Antonio" stroke={CHART_COLORS["San Antonio"]} strokeWidth={2} fill="url(#grad-mh-0)" />
               <Area type="monotone" dataKey="San Isidro" stroke={CHART_COLORS["San Isidro"]} strokeWidth={2} fill="url(#grad-mh-1)" />
               <Area type="monotone" dataKey="Old San Roque" stroke={CHART_COLORS["Old San Roque"]} strokeWidth={2} fill="url(#grad-mh-2)" />
             </AreaChart>
@@ -205,7 +205,7 @@ export default function Analytics() {
               <YAxis axisLine={false} tickLine={false} tick={tickStyle} domain={[60, 100]} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={legendStyle} />
-              <Line type="monotone" dataKey="San Jose" stroke={CHART_COLORS["San Jose"]} strokeWidth={2.5} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="San Antonio" stroke={CHART_COLORS["San Antonio"]} strokeWidth={2.5} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="San Isidro" stroke={CHART_COLORS["San Isidro"]} strokeWidth={2.5} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="Old San Roque" stroke={CHART_COLORS["Old San Roque"]} strokeWidth={2.5} dot={{ r: 3 }} />
             </LineChart>

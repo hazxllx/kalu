@@ -4,7 +4,7 @@ import { ArrowRight } from "lucide-react";
 
 const resident = {
   name: "Maria Santos",
-  barangay: "San Jose",
+  barangay: "San Isidro",
   birthday: "March 12, 1992",
   age: "34",
   sex: "Female",
