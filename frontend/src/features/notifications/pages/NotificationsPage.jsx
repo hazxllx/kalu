@@ -1,37 +1,47 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { Bell } from "lucide-react";
-import { NOTIFICATIONS, ICONS, CATEGORIES } from "@/services/mock/notificationData";
+import { ICONS, CATEGORIES } from "@/services/mock/notificationData";
+import {
+  useWorkflowStore,
+  markNotificationRead,
+  markRoleNotificationsRead,
+  clearRoleNotifications,
+} from "@/services/mock/mockWorkflowStore";
 import { filterRowsByScope } from "@/lib/phnScope";
 import { useAuth } from "@/context/AuthContext";
 
 export default function NotificationsPage({ crumbs = ["Home", "Notifications"], roleKey = "resident" }) {
   const { user } = useAuth();
-  const [notifications, setNotifications] = useState(() =>
-    filterRowsByScope(NOTIFICATIONS[roleKey] || [], user)
-  );
+  const store = useWorkflowStore();
   const [filter, setFilter] = useState("all");
 
-  const filteredNotifications = notifications.filter((n) => {
+  // Notifications live in the shared workflow store so triage → PHN hand-offs
+  // and "mark as read" actions stay consistent with the bell count and survive
+  // page navigation. PHN scope rules are applied before anything renders.
+  const roleNotifications = useMemo(
+    () => filterRowsByScope(store.notifications[roleKey] || [], user),
+    [store.notifications, roleKey, user]
+  );
+
+  const filteredNotifications = roleNotifications.filter((n) => {
     if (filter === "all") return true;
     if (filter === "unread") return !n.read;
     return n.category === filter;
   });
 
   const markAsRead = (id) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+    markNotificationRead(roleKey, id);
   };
 
   const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    markRoleNotificationsRead(roleKey);
   };
 
   const clearAll = () => {
-    setNotifications([]);
+    clearRoleNotifications(roleKey);
   };
 
   const getCategoryColor = (category) => {
@@ -46,9 +56,10 @@ export default function NotificationsPage({ crumbs = ["Home", "Notifications"], 
   const groupNotifications = (notifs) => {
     const groups = { today: [], yesterday: [], earlier: [] };
     notifs.forEach((n) => {
-      if (n.time.includes("hour") || n.time.includes("minute")) {
+      const t = String(n.time || "").toLowerCase();
+      if (t.includes("now") || t.includes("hour") || t.includes("minute")) {
         groups.today.push(n);
-      } else if (n.time.includes("day") && !n.time.includes("days")) {
+      } else if ((t.includes("day") && !t.includes("days")) || t.includes("yesterday")) {
         groups.yesterday.push(n);
       } else {
         groups.earlier.push(n);
@@ -59,7 +70,7 @@ export default function NotificationsPage({ crumbs = ["Home", "Notifications"], 
 
   const grouped = groupNotifications(filteredNotifications);
 
-  if (notifications.length === 0) {
+  if (roleNotifications.length === 0) {
     return (
       <>
         <PageHeader crumbs={crumbs} title="Notifications" subtitle="Stay updated on reminders, alerts, and advisories." />

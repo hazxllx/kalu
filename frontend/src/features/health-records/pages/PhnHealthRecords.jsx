@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { phnResidents } from "@/services/mock/mockPhnData";
+import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
+import { consultationLocationFor } from "@/lib/consultationLocations";
+import PhnCheckupWorkbench from "@/features/consultations/components/PhnCheckupWorkbench";
 import {
   filterRowsByScope,
-  getPHNScope,
   isPHN,
   normalizeBarangay,
   phnDefaultBarangay,
@@ -13,7 +15,7 @@ import {
   scopeLabel,
 } from "@/lib/phnScope";
 import { useAuth } from "@/context/AuthContext";
-import { Search, Plus, Eye, Edit2, Trash2, X, CheckCircle2 } from "lucide-react";
+import { Search, Plus, Eye, Edit2, Trash2, X, CheckCircle2, ClipboardCheck, ArrowRight } from "lucide-react";
 
 const LAST_VISITS = [
   "September 5, 2026",
@@ -46,6 +48,12 @@ const RISK_COLORS = {
   Low: "bg-brand-green/10 text-brand-green",
 };
 
+const CHECKUP_STATUS_TONES = {
+  "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
+  "In Check-up": "bg-brand-blue/10 text-brand-blue",
+  "Consultation Completed": "bg-brand-green/10 text-brand-green",
+};
+
 const STATUS_COLORS = {
   Active: "bg-brand-blue/10 text-brand-blue",
   Inactive: "bg-brand-gray/10 text-brand-gray",
@@ -73,13 +81,77 @@ const emptyForm = () => ({
   notes: "",
 });
 
+const WorkflowStep = ({ title, sub, children }) => (
+  <div className="flex gap-3">
+    <div className="flex flex-col items-center">
+      <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-blue/10">
+        <span className="h-1.5 w-1.5 rounded-full bg-brand-blue" />
+      </span>
+      {children && <span className="mt-1 h-full w-px bg-brand-border" />}
+    </div>
+    <div className="min-w-0 flex-1 pb-4">
+      <p className="text-sm font-medium text-brand-ink">{title}</p>
+      {sub && <p className="text-xs text-brand-gray mt-0.5">{sub}</p>}
+      {children}
+    </div>
+  </div>
+);
+
 export default function PhnHealthRecords() {
   const { user } = useAuth();
-  const scope = getPHNScope(user);
   const phn = isPHN(user);
-  // Seed from the subset this PHN is allowed to see; stats, search and
-  // filters all operate on these rows only.
-  const [records, setRecords] = useState(() => filterRowsByScope(RECORDS, user));
+  const workflow = useWorkflowStore();
+
+  // Triaged/check-up patients are matched by name so the record shows the live
+  // status of the RHU → PHN workflow without storing a second patient list.
+  const visiblePatients = useMemo(
+    () => filterRowsByScope(workflow.patients, user),
+    [workflow.patients, user]
+  );
+  const patientByName = useMemo(() => {
+    const map = {};
+    visiblePatients.forEach((p) => {
+      map[p.patient] = p;
+    });
+    return map;
+  }, [visiblePatients]);
+
+  const visibleReferrals = useMemo(
+    () => filterRowsByScope(workflow.referrals, user),
+    [workflow.referrals, user]
+  );
+  const visibleFollowUps = useMemo(
+    () => filterRowsByScope(workflow.followUps, user),
+    [workflow.followUps, user]
+  );
+  const visibleServices = useMemo(
+    () => filterRowsByScope(workflow.services, user),
+    [workflow.services, user]
+  );
+
+  // Build the row set once on mount: base resident records + any triaged
+  // patients not already in the resident registry.
+  const [records, setRecords] = useState(() => {
+    const base = filterRowsByScope(RECORDS, user);
+    const known = new Set(base.map((r) => r.resident));
+    const extras = visiblePatients
+      .filter((p) => !known.has(p.patient))
+      .map((p, i) => ({
+        id: 1000 + i,
+        recordNo: `HR-2026-${String(120 + i).padStart(4, "0")}`,
+        resident: p.patient,
+        age: p.age,
+        sex: p.sex,
+        barangay: p.barangay,
+        program: "Routine Monitoring",
+        lastVisit: p.visitDate || p.triage?.date || LAST_VISITS[0],
+        risk: p.checkup?.riskLevel || "Low",
+        status: "Active",
+        notes: p.triage?.notes || "Triaged at the RHU.",
+      }));
+    return [...base, ...extras];
+  });
+
   const [searchQuery, setSearchQuery] = useState("");
   const [barangayFilter, setBarangayFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -87,7 +159,9 @@ export default function PhnHealthRecords() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showCheckupModal, setShowCheckupModal] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [checkupPatient, setCheckupPatient] = useState(null);
   const [form, setForm] = useState(() => ({ ...emptyForm(), barangay: phnDefaultBarangay(user) }));
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
@@ -100,7 +174,7 @@ export default function PhnHealthRecords() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const anyModalOpen = showAddModal || showEditModal || showViewModal || showDeleteConfirm;
+  const anyModalOpen = showAddModal || showEditModal || showViewModal || showDeleteConfirm || showCheckupModal;
 
   useEffect(() => {
     if (!anyModalOpen) return undefined;
@@ -111,6 +185,7 @@ export default function PhnHealthRecords() {
       setShowEditModal(false);
       setShowViewModal(false);
       setShowDeleteConfirm(false);
+      setShowCheckupModal(false);
     };
     document.addEventListener("keydown", onKey);
     return () => {
@@ -138,7 +213,7 @@ export default function PhnHealthRecords() {
   const validate = () => {
     const next = {};
     if (!form.resident.trim()) next.resident = "Resident name is required.";
-    if (!form.barangay) next.barangay = "Scope is required.";
+    if (!form.barangay) next.barangay = "Barangay is required.";
     if (!form.age || Number.isNaN(Number(form.age)) || Number(form.age) < 0) next.age = "A valid age is required.";
     if (!form.program) next.program = "Program is required.";
     setErrors(next);
@@ -217,6 +292,97 @@ export default function PhnHealthRecords() {
     new Set([...filterRowsByScope(phnResidents, user).map((r) => r.name), ...records.map((r) => r.resident)])
   ).sort();
 
+  const livePatientFor = (record) => patientByName[record.resident] || null;
+
+  // The workflow visible in a health record:
+  //   Patient Information → Triage → PHN Check-up → Findings → Outcomes.
+  const renderWorkflow = (record) => {
+    const patient = patientByName[record.resident];
+    const hasAny =
+      Boolean(patient) ||
+      visibleReferrals.some((r) => r.resident === record.resident) ||
+      visibleFollowUps.some((f) => f.resident === record.resident) ||
+      visibleServices.some((s) => (s.name || "").includes(record.resident) || (s.notes || "").includes(record.resident));
+
+    if (!hasAny) {
+      return (
+        <p className="rounded-btn bg-brand-bg/60 border border-brand-border px-3 py-3 text-sm text-brand-gray">
+          No triage or check-up records on file yet.
+        </p>
+      );
+    }
+
+    return (
+      <div className="mt-1">
+        {patient?.triage && (
+          <WorkflowStep
+            title="Triage"
+            sub={`${patient.triage.date || ""} · ${patient.triage.personnel || "RHU Personnel"}`}
+          >
+            <p className="mt-1 text-xs text-brand-gray">
+              {patient.reason || patient.triage.chiefComplaint} — BP {patient.triage.bloodPressure || "—"}, T {patient.triage.temperature ? `${patient.triage.temperature}°C` : "—"}
+            </p>
+          </WorkflowStep>
+        )}
+        {patient?.status === "Consultation Completed" && patient?.checkup && (
+          <WorkflowStep
+            title="PHN Check-up"
+            sub={`${patient.checkup.completedAt || ""} · ${patient.checkup.completedBy || ""}`}
+          >
+            <p className="mt-1 text-xs text-brand-gray">
+              Status: Consultation Completed · Risk: {patient.checkup.riskLevel || "—"}
+              {patient.checkup.riskReason ? ` · ${patient.checkup.riskReason}` : ""}
+            </p>
+            <div className="mt-2 rounded-btn border border-brand-border px-3 py-2">
+              <p className="text-xs text-brand-gray mb-0.5">Assessment / Findings</p>
+              <p className="text-sm text-brand-ink">{patient.checkup.assessment}</p>
+              {patient.checkup.healthConcern && (
+                <p className="mt-1 text-xs text-brand-gray">
+                  Health concern: <span className="text-brand-ink">{patient.checkup.healthConcern}</span>
+                </p>
+              )}
+              {patient.checkup.clinicalNotes && (
+                <p className="mt-1 text-xs text-brand-gray">
+                  Clinical notes: <span className="text-brand-ink">{patient.checkup.clinicalNotes}</span>
+                </p>
+              )}
+              {patient.checkup.recommendations && (
+                <p className="mt-1 text-xs text-brand-gray">
+                  Recommendations: <span className="text-brand-ink">{patient.checkup.recommendations}</span>
+                </p>
+              )}
+            </div>
+          </WorkflowStep>
+        )}
+        {visibleReferrals
+          .filter((r) => r.resident === record.resident)
+          .map((r) => (
+            <WorkflowStep key={`r-${r.id}`} title="Referral" sub={`${r.date || ""} → ${r.facility || ""}`}>
+              <p className="mt-1 text-xs text-brand-gray">
+                {r.reason} — <span className="text-brand-ink">{r.status}</span>
+              </p>
+            </WorkflowStep>
+          ))}
+        {visibleFollowUps
+          .filter((f) => f.resident === record.resident)
+          .map((f) => (
+            <WorkflowStep key={`f-${f.id}`} title="Follow-up" sub={`${f.dueDate || ""} · ${f.time || ""}`}>
+              <p className="mt-1 text-xs text-brand-gray">
+                {f.purpose} — <span className="text-brand-ink">{f.status}</span>
+              </p>
+            </WorkflowStep>
+          ))}
+        {visibleServices
+          .filter((s) => (s.name || "").includes(record.resident) || (s.notes || "").includes(record.resident))
+          .map((s) => (
+            <WorkflowStep key={`s-${s.id}`} title={s.name.includes(record.resident) ? "Monitoring / Health Service" : "Monitoring / Health Service"} sub={`${s.date || ""} · ${s.personnel || ""}`}>
+              <p className="mt-1 text-xs text-brand-gray">{s.notes || s.name}</p>
+            </WorkflowStep>
+          ))}
+      </div>
+    );
+  };
+
   const formFields = (
     <>
       <div>
@@ -272,7 +438,7 @@ export default function PhnHealthRecords() {
         </div>
       </div>
       <div>
-          <label className="text-sm font-medium text-brand-ink block mb-1.5">Scope <span className="text-brand-danger">*</span></label>
+          <label className="text-sm font-medium text-brand-ink block mb-1.5">Barangay <span className="text-brand-danger">*</span></label>
           <select
             value={form.barangay}
             onChange={(e) => {
@@ -339,14 +505,21 @@ export default function PhnHealthRecords() {
     </>
   );
 
+  const viewPatient = selected ? patientByName[selected.resident] || null : null;
+  const viewLocation = consultationLocationFor(
+    viewPatient
+      ? { ...viewPatient, barangay: viewPatient.residenceBarangay || viewPatient.barangay }
+      : { barangay: selected?.barangay || null }
+  );
+
   return (
     <>
       <PageHeader
         crumbs={["Home", "Health Records"]}
         title="Health Records"
         subtitle={
-          phn && scope && scope.level === "barangay"
-            ? `Health records for RHU-level residents and ${scope.assignedBarangay}.`
+          phn
+            ? "Health records within your assigned coverage."
             : "Health records for RHU-level residents."
         }
         action={
@@ -356,7 +529,7 @@ export default function PhnHealthRecords() {
               setErrors({});
               setShowAddModal(true);
             }}
-            className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
+            className="flex items-center gap-2 border border-brand-blue/40 bg-white text-brand-blue px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-light transition-colors"
           >
             <Plus className="w-4 h-4" /> Add Record
           </button>
@@ -411,7 +584,7 @@ export default function PhnHealthRecords() {
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
             >
               {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? "All Scopes" : b}</option>
+                <option key={b} value={b}>{b === "All" ? "All Accessible" : b === "RHU" ? "RHU-level" : b}</option>
               ))}
             </select>
             <select
@@ -434,73 +607,99 @@ export default function PhnHealthRecords() {
             <thead className="bg-brand-bg border-b border-brand-border">
               <tr>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Resident</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Scope</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Barangay</th>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Program</th>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Last Visit</th>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Risk</th>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Status</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Check-up</th>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-brand-blue text-white flex items-center justify-center text-xs font-semibold">
-                        {r.resident.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+              {filtered.map((r) => {
+                const live = livePatientFor(r);
+                return (
+                  <tr key={r.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-brand-blue text-white flex items-center justify-center text-xs font-semibold">
+                          {r.resident.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-brand-ink">{r.resident}</p>
+                          <p className="text-xs text-brand-gray">{r.sex} · {r.age}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-brand-ink">{r.resident}</p>
-                        <p className="text-xs text-brand-gray">{r.sex} · {r.age}</p>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-brand-ink">{scopeLabel(r, user)}</td>
+                    <td className="px-4 py-3 text-sm text-brand-ink">{r.program}</td>
+                    <td className="px-4 py-3 text-sm text-brand-ink whitespace-nowrap">{live?.triage?.date || r.lastVisit}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${RISK_COLORS[live?.checkup?.riskLevel || r.risk]}`}>{live?.checkup?.riskLevel || r.risk}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[r.status]}`}>{r.status}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {live ? (
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${CHECKUP_STATUS_TONES[live.status] || "bg-slate-100 text-slate-600"}`}>
+                          <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+                          {live.status}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-brand-gray">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setSelected(r);
+                            setShowViewModal(true);
+                          }}
+                          className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
+                          title="View"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        {live?.status === "Consultation Completed" && (
+                          <button
+                            onClick={() => {
+                              setCheckupPatient(live);
+                              setShowCheckupModal(true);
+                            }}
+                            className="flex items-center gap-1 p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
+                            title="View completed check-up"
+                          >
+                            <ClipboardCheck className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => openEdit(r)}
+                          className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
+                          title="Edit"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelected(r);
+                            setShowDeleteConfirm(true);
+                          }}
+                          className="p-1.5 text-brand-danger hover:bg-brand-danger/10 rounded transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{scopeLabel(r, user)}</td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{r.program}</td>
-                  <td className="px-4 py-3 text-sm text-brand-ink whitespace-nowrap">{r.lastVisit}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${RISK_COLORS[r.risk]}`}>{r.risk}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[r.status]}`}>{r.status}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => {
-                          setSelected(r);
-                          setShowViewModal(true);
-                        }}
-                        className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
-                        title="View"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => openEdit(r)}
-                        className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
-                        title="Edit"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSelected(r);
-                          setShowDeleteConfirm(true);
-                        }}
-                        className="p-1.5 text-brand-danger hover:bg-brand-danger/10 rounded transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-brand-gray">
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-brand-gray">
                     No health records match the selected filters.
                   </td>
                 </tr>
@@ -555,7 +754,7 @@ export default function PhnHealthRecords() {
       {/* View Modal */}
       {showViewModal && selected && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center justify-between mb-5">
                 <h3 className="text-base font-semibold text-brand-ink">Health Record Details</h3>
@@ -563,14 +762,15 @@ export default function PhnHealthRecords() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <div>
-                  <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Resident Information</h4>
+                  <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Patient Information</h4>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <p className="text-brand-gray">Name: <span className="text-brand-ink">{selected.resident}</span></p>
                     <p className="text-brand-gray">Age: <span className="text-brand-ink">{selected.age}</span></p>
                     <p className="text-brand-gray">Sex: <span className="text-brand-ink">{selected.sex}</span></p>
-                    <p className="text-brand-gray">Barangay: <span className="text-brand-ink">{scopeLabel(selected, user)}</span></p>
+                    <p className="text-brand-gray">Barangay: <span className="text-brand-ink">{viewPatient?.residenceBarangay || selected.barangay || "—"}</span></p>
+                    <p className="text-brand-gray">Consultation Location: <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-blue/10 px-2 py-0.5 text-xs font-medium text-brand-blue"><span className="leading-snug">{viewLocation}</span></span></p>
                   </div>
                 </div>
                 <div>
@@ -589,6 +789,12 @@ export default function PhnHealthRecords() {
                     <p className="text-sm text-brand-ink">{selected.notes}</p>
                   </div>
                 )}
+                <div>
+                  <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    Patient Workflow <ArrowRight className="w-3 h-3" />
+                  </h4>
+                  {renderWorkflow(selected)}
+                </div>
               </div>
               <div className="mt-6 pt-4 border-t border-brand-border flex justify-end gap-3">
                 <button
@@ -610,6 +816,15 @@ export default function PhnHealthRecords() {
             </div>
           </Card>
         </div>
+      )}
+
+      {/* Completed check-up viewer */}
+      {showCheckupModal && checkupPatient && (
+        <PhnCheckupWorkbench
+          patient={checkupPatient}
+          user={user}
+          onClose={() => setShowCheckupModal(false)}
+        />
       )}
 
       {/* Delete Confirmation */}

@@ -8,17 +8,20 @@ import StatusBadge from "@/components/common/StatusBadge";
 import {
   REFERRAL_STATUSES,
   barangayCommunity,
-  phnCheckupQueue,
-  phnReferrals,
-  phnFollowUps,
   phnAlerts,
-  phnHealthServices,
 } from "@/services/mock/mockPhnData";
-import { filterRowsByScope, getPHNScope, isPHN } from "@/lib/phnScope";
+import {
+  CHECKUP_STATUS,
+  useWorkflowStore,
+  startPatientCheckup,
+  patchReferral,
+  workflowHelpers,
+} from "@/services/mock/mockWorkflowStore";
+import { filterRowsByScope, getPHNScope, isPHN, scopeLabel } from "@/lib/phnScope";
+import { riskOfPatient } from "@/lib/riskRules";
 import { useAuth } from "@/context/AuthContext";
 import {
-  Users, Activity, CalendarClock, ClipboardCheck, TrendingUp,
-  X, CheckCircle2, MapPin, ChevronRight, Clock, Bell, UserPlus,
+  Users, Activity, CalendarClock, ClipboardList, X, CheckCircle2, MapPin, ChevronRight, Clock, Bell, UserPlus,
 } from "lucide-react";
 
 const REFERRAL_STATUS_TONES = {
@@ -39,8 +42,14 @@ const FOLLOWUP_STATUS_TONES = {
 
 const QUEUE_STATUS_TONES = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
-  Waiting: "bg-brand-yellow/15 text-[#B07E00]",
-  Completed: "bg-emerald-50 text-emerald-700",
+  "In Check-up": "bg-brand-blue/10 text-brand-blue",
+  "Consultation Completed": "bg-emerald-50 text-emerald-700",
+};
+
+const RISK_TONES = {
+  High: "bg-brand-danger/10 text-brand-danger",
+  Medium: "bg-brand-yellow/15 text-[#B07E00]",
+  Low: "bg-brand-green/10 text-brand-green",
 };
 
 const ALERT_LEVELS = {
@@ -49,10 +58,10 @@ const ALERT_LEVELS = {
 };
 
 const QUICK_ACTIONS = [
-  { icon: UserPlus, label: "Check-up Queue", path: "/app/phn/dashboard#queue" },
-  { icon: ClipboardCheck, label: "Review Referrals", path: "/app/phn/referrals" },
+  { icon: UserPlus, label: "PHN Check-ups", path: "/app/phn/consultations" },
+  { icon: ClipboardList, label: "Review Referrals", path: "/app/phn/referrals" },
   { icon: CalendarClock, label: "View Follow-ups", path: "/app/phn/followups" },
-  { icon: TrendingUp, label: "View Reports", path: "/app/phn/reports" },
+  { icon: Activity, label: "View Reports", path: "/app/phn/reports" },
 ];
 
 const welcomeFor = (user) => {
@@ -77,12 +86,27 @@ export default function PHNDashboard() {
   const welcome = welcomeFor(user);
   const subtitle = subtitleFor(user);
 
-  // Local mock state, seeded from the scope-visible subset so every section
-  // and summary count is computed from data this PHN may actually see.
-  const [queue, setQueue] = useState(() => filterRowsByScope(phnCheckupQueue, user));
-  const [referrals, setReferrals] = useState(() => filterRowsByScope(phnReferrals, user));
-  const [followUps] = useState(() => filterRowsByScope(phnFollowUps, user));
-  const [services] = useState(() => filterRowsByScope(phnHealthServices, user));
+  const store = useWorkflowStore();
+
+  // Every collection is re-filtered by the signed-in PHN's scope before render
+  // so dashboard counts can never leak another barangay's data.
+  const allPatients = useMemo(() => filterRowsByScope(store.patients, user), [store.patients, user]);
+  const visibleQueue = useMemo(
+    () => allPatients.filter((p) => p.status === CHECKUP_STATUS.WAITING),
+    [allPatients]
+  );
+  const visibleInCheckup = useMemo(
+    () => allPatients.filter((p) => p.status === CHECKUP_STATUS.IN_CHECKUP),
+    [allPatients]
+  );
+  const visibleCompleted = useMemo(
+    () => allPatients.filter((p) => p.status === CHECKUP_STATUS.COMPLETED),
+    [allPatients]
+  );
+  const visibleReferrals = useMemo(() => filterRowsByScope(store.referrals, user), [store.referrals, user]);
+  const visibleFollowUps = useMemo(() => filterRowsByScope(store.followUps, user), [store.followUps, user]);
+  const visibleAlerts = useMemo(() => filterRowsByScope(phnAlerts, user), [user]);
+  const visibleServices = useMemo(() => filterRowsByScope(store.services, user), [store.services, user]);
 
   const [barangayDetail, setBarangayDetail] = useState(null);
   const [reviewReferral, setReviewReferral] = useState(null);
@@ -115,19 +139,15 @@ export default function PHNDashboard() {
     };
   }, [anyModalOpen]);
 
-  const visibleReferrals = useMemo(() => filterRowsByScope(referrals, user), [referrals, user]);
-  const visibleFollowUps = useMemo(() => filterRowsByScope(followUps, user), [followUps, user]);
-  const visibleQueue = useMemo(() => filterRowsByScope(queue, user), [queue, user]);
-  const visibleAlerts = useMemo(() => filterRowsByScope(phnAlerts, user), [user]);
-  const visibleServices = useMemo(() => filterRowsByScope(services, user), [services, user]);
-
   // Overview table is only meaningful for a barangay-assigned PHN — it lists
-  // their own assigned barangay only. Unassigned PHNs see an RHU activity
-  // panel instead (never the three-barangay breakdown).
+  // their own assigned barangay only. Unassigned PHNs see a compact check-up
+  // summary instead.
   const communityRows = useMemo(() => {
     if (scope && scope.level === "barangay") {
       const row = barangayCommunity.find((b) => b.name === scope.assignedBarangay) || barangayCommunity[0];
-      const brgyActive = visibleQueue.filter((q) => q.barangay === scope.assignedBarangay).length;
+      const brgyActive = allPatients.filter(
+        (p) => p.barangay === scope.assignedBarangay && p.status !== CHECKUP_STATUS.COMPLETED
+      ).length;
       return [
         {
           ...row,
@@ -138,34 +158,55 @@ export default function PHNDashboard() {
       ];
     }
     return [];
-  }, [scope, visibleQueue, visibleReferrals, visibleFollowUps]);
+  }, [scope, allPatients, visibleReferrals, visibleFollowUps]);
 
   const stats = useMemo(() => {
-    const priority = visibleQueue.filter((q) => q.status === "Waiting for PHN").length;
+    const today = workflowHelpers.todayLong();
     return [
-      { icon: "Users", label: assigned ? `Patients in ${assigned}` : "RHU Patients", value: String(visibleQueue.length), tone: "blue" },
-      { icon: "Activity", label: "Awaiting PHN Check-up", value: String(priority), tone: "accent" },
+      {
+        icon: "Users",
+        label: "Patients for Check-up",
+        value: String(visibleQueue.length),
+        tone: "accent",
+        onClick: () => navigate("/app/phn/consultations"),
+      },
+      {
+        icon: "Activity",
+        label: "In Check-up",
+        value: String(visibleInCheckup.length),
+        tone: "blue",
+        onClick: () => navigate("/app/phn/consultations"),
+      },
+      {
+        icon: "CalendarCheck",
+        label: "Completed Today",
+        value: String(visibleCompleted.filter((p) => p.checkup?.completedAt === today).length),
+        tone: "green",
+        onClick: () => navigate("/app/phn/consultations"),
+      },
       {
         icon: "Send",
         label: "Pending Referrals",
         value: String(visibleReferrals.filter((r) => r.status !== "Completed").length),
         tone: "yellow",
+        onClick: () => navigate("/app/phn/referrals"),
       },
       {
         icon: "CalendarClock",
         label: "Follow-ups Due",
         value: String(visibleFollowUps.filter((f) => f.status === "Scheduled" || f.status === "Due Today" || f.status === "Overdue").length),
         tone: "blue",
+        onClick: () => navigate("/app/phn/followups"),
       },
-      { icon: "Stethoscope", label: "Health Services Today", value: String(visibleServices.length), tone: "green" },
       {
-        icon: "AlertTriangle",
-        label: "Active Alerts",
-        value: String(visibleAlerts.length),
-        tone: "danger",
+        icon: "Stethoscope",
+        label: "Health Services Today",
+        value: String(visibleServices.length),
+        tone: "green",
+        onClick: () => navigate("/app/phn/services"),
       },
     ];
-  }, [visibleQueue, visibleReferrals, visibleFollowUps, visibleServices, visibleAlerts, assigned]);
+  }, [visibleQueue, visibleInCheckup, visibleCompleted, visibleReferrals, visibleFollowUps, visibleServices, navigate]);
 
   const dueFollowUps = visibleFollowUps
     .filter((f) => f.status === "Due Today" || f.status === "Overdue" || (f.status === "Scheduled" && f.dueDate === "Tomorrow"))
@@ -178,17 +219,16 @@ export default function PHNDashboard() {
 
   const handleReferralStatusSave = () => {
     if (!reviewReferral || !referralStatus) return;
-    setReferrals((prev) => prev.map((r) => (r.id === reviewReferral.id ? { ...r, status: referralStatus } : r)));
+    patchReferral(reviewReferral.id, { status: referralStatus });
     setReviewReferral(null);
     setReferralStatus("");
     showToast("Referral updated successfully.");
   };
 
   const startCheckup = (patient) => {
-    setQueue((prev) =>
-      prev.map((q) => (q.id === patient.id ? { ...q, status: "Completed", completedBy: user?.name || "PHN" } : q))
-    );
-    showToast("Check-up started for " + patient.patient + ".");
+    startPatientCheckup(patient.id, user?.name);
+    showToast("Check-up started.");
+    navigate("/app/phn/consultations", { state: { openCheckup: patient.id } });
   };
 
   return (
@@ -227,22 +267,28 @@ export default function PHNDashboard() {
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 mb-6">
         {stats.map((s, i) => (
-          <StatCard key={s.label} {...s} index={i} />
+          <StatCard
+            key={s.label}
+            icon={s.icon}
+            label={s.label}
+            value={s.value}
+            tone={s.tone}
+            index={i}
+            onClick={s.onClick}
+          />
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-        {/* Patient check-up queue — scope-filtered */}
+        {/* Patients for Check-up — single queue source, scope-filtered */}
         <Card id="queue" className="p-4 sm:p-6 lg:col-span-2 scroll-mt-24">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h3 className="font-semibold text-brand-ink text-sm sm:text-base">
-                {assigned ? `Patients for Check-up (${assigned})` : "RHU Patient Activity"}
+                {assigned ? `Patients for Check-up (${assigned})` : "Patients for Check-up"}
               </h3>
               <p className="text-xs text-brand-gray mt-0.5">
-                {assigned
-                  ? "Patients in your assigned barangay plus RHU-level patients awaiting PHN consultation."
-                  : "RHU-level patients awaiting PHN consultation."}
+                Patients who completed triage and are waiting for PHN consultation.
               </p>
             </div>
             <Users className="w-4 h-4 text-brand-gray shrink-0" />
@@ -252,49 +298,54 @@ export default function PHNDashboard() {
               <thead>
                 <tr className="bg-brand-bg border-b border-brand-border text-left">
                   <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Patient</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Scope</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Barangay</th>
                   <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Reason for Visit</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Risk</th>
                   <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Status</th>
                   <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleQueue.map((q) => (
-                  <tr key={q.id} className="border-b border-brand-border last:border-0 hover:bg-brand-bg/50 transition-colors">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-brand-ink">{q.patient}</p>
-                      <p className="text-xs text-brand-gray">{q.age} yrs · {q.sex}</p>
-                    </td>
-                    <td className="px-4 py-3 text-brand-ink">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${q.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>
-                        {q.barangay || "RHU"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-brand-ink">{q.reason}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${QUEUE_STATUS_TONES[q.status] || "bg-slate-100 text-slate-600"}`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
-                        {q.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {q.status === "Waiting for PHN" ? (
+                {visibleQueue.map((q) => {
+                  const risk = riskOfPatient(q);
+                  return (
+                    <tr key={q.id} className="border-b border-brand-border last:border-0 hover:bg-brand-bg/50 transition-colors">
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-brand-ink">{q.patient}</p>
+                        <p className="text-xs text-brand-gray">{q.age} yrs · {q.sex}</p>
+                      </td>
+                      <td className="px-4 py-3 text-brand-ink">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${q.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>
+                          {scopeLabel(q, user)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-brand-ink">{q.reason || q.triage?.chiefComplaint}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${RISK_TONES[risk.level] || RISK_TONES.Low}`}>
+                          {risk.level}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${QUEUE_STATUS_TONES[q.status] || "bg-slate-100 text-slate-600"}`}>
+                          <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+                          {q.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
                         <button
                           onClick={() => startCheckup(q)}
                           className="text-sm font-medium text-brand-blue hover:underline whitespace-nowrap"
                         >
                           Start Check-up
                         </button>
-                      ) : (
-                        <span className="text-xs text-brand-gray">Checked</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {visibleQueue.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-brand-gray">
-                      No patients in the check-up queue for your scope.
+                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-brand-gray">
+                      No patients are waiting for check-up within your scope.
                     </td>
                   </tr>
                 )}
@@ -303,7 +354,7 @@ export default function PHNDashboard() {
           </div>
         </Card>
 
-        {/* Community overview (assigned PHN only) or RHU summary */}
+        {/* Right rail — assigned: community overview; unassigned: check-up progress */}
         <Card className="p-4 sm:p-6 h-fit">
           {assigned ? (
             <>
@@ -348,22 +399,29 @@ export default function PHNDashboard() {
           ) : (
             <>
               <div className="flex items-center justify-between gap-3 mb-4">
-                <h3 className="font-semibold text-brand-ink text-sm sm:text-base">RHU Patient Activity</h3>
+                <div>
+                  <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Check-up Progress</h3>
+                  <p className="text-xs text-brand-gray mt-0.5">RHU-level check-up activity today</p>
+                </div>
                 <Activity className="w-4 h-4 text-brand-gray shrink-0" />
               </div>
               <div className="space-y-3">
-                {visibleQueue.length === 0 && (
-                  <p className="text-sm text-brand-gray py-4 text-center">No RHU-level patients waiting.</p>
-                )}
-                {visibleQueue.slice(0, 5).map((q) => (
-                  <div key={q.id} className="flex items-center justify-between gap-2 border border-brand-border rounded-btn px-4 py-3">
-                    <div className="min-w-0">
-                      <p className="font-medium text-brand-ink text-sm truncate">{q.patient}</p>
-                      <p className="text-xs text-brand-gray truncate">{q.reason}</p>
-                    </div>
-                    <span className="shrink-0 text-xs font-medium text-brand-accent bg-brand-accent/10 px-2.5 py-1 rounded-full">Waiting for PHN</span>
+                {[
+                  { label: "Waiting for PHN", value: visibleQueue.length, tone: "text-brand-accent bg-brand-accent/10" },
+                  { label: "In Check-up", value: visibleInCheckup.length, tone: "text-brand-blue bg-brand-blue/10" },
+                  { label: "Consultation Completed", value: visibleCompleted.length, tone: "text-brand-green bg-brand-green/10" },
+                ].map((row) => (
+                  <div key={row.label} className="flex items-center justify-between rounded-btn bg-brand-bg/60 border border-brand-border px-4 py-3">
+                    <span className="text-sm text-brand-ink">{row.label}</span>
+                    <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${row.tone}`}>{row.value}</span>
                   </div>
                 ))}
+                <button
+                  onClick={() => navigate("/app/phn/consultations")}
+                  className="mt-1 text-sm font-medium text-brand-blue hover:underline"
+                >
+                  Open PHN Check-ups
+                </button>
               </div>
             </>
           )}
@@ -492,13 +550,7 @@ export default function PHNDashboard() {
         {QUICK_ACTIONS.map((a) => (
           <button
             key={a.label}
-            onClick={() => {
-              if (a.path.includes("#queue")) {
-                document.getElementById("queue")?.scrollIntoView({ behavior: "smooth" });
-              } else {
-                navigate(a.path);
-              }
-            }}
+            onClick={() => navigate(a.path)}
             className="flex items-center justify-center gap-2 border border-brand-border rounded-btn px-4 py-3 text-sm font-medium text-brand-ink hover:border-brand-blue hover:bg-brand-light transition-colors"
           >
             <a.icon className="w-4 h-4 text-brand-blue" /> {a.label}
@@ -575,7 +627,7 @@ export default function PHNDashboard() {
                       <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Patient Information</h4>
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         <p className="text-brand-gray">Name: <span className="text-brand-ink">{reviewReferral.resident}</span></p>
-                        <p className="text-brand-gray">Scope: <span className="text-brand-ink">{reviewReferral.barangay || "RHU"}</span></p>
+                        <p className="text-brand-gray">Barangay: <span className="text-brand-ink">{reviewReferral.barangay || "RHU"}</span></p>
                         <p className="text-brand-gray">Age: <span className="text-brand-ink">{reviewReferral.age}</span></p>
                         <p className="text-brand-gray">Referral No.: <span className="text-brand-ink">{reviewReferral.referralNo}</span></p>
                       </div>

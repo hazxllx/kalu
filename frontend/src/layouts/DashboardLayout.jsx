@@ -9,7 +9,7 @@ import Icon from "@/components/common/Icon";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { LOGO_URL, ROLES } from "@/lib/brand";
 import { NAV, filterNavByPermission } from "@/lib/navConfig";
-import { NOTIFICATIONS } from "@/services/mock/notificationData";
+import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
 import { filterRowsByScope } from "@/lib/phnScope";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -45,7 +45,10 @@ export default function DashboardLayout({ roleKey }) {
     .join("")
     .toUpperCase();
 
-  const notifications = filterRowsByScope(NOTIFICATIONS[roleKey] || [], user);
+  const workflow = useWorkflowStore();
+  // Notifications come from the shared workflow store (kept in sync with the
+  // Notifications page) and are always filtered to the signed-in PHN's scope.
+  const notifications = filterRowsByScope(workflow.notifications[roleKey] || [], user);
   const unreadCount = notifications.filter((n) => !n.read).length;
   const notificationsPath = roleKey === "resident-limited"
     ? "/app/resident-limited/announcements"

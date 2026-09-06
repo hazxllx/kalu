@@ -1,10 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { FOLLOWUP_STATUSES, phnFollowUps, phnResidents } from "@/services/mock/mockPhnData";
+import { FOLLOWUP_STATUSES, phnResidents } from "@/services/mock/mockPhnData";
+import {
+  useWorkflowStore,
+  addFollowUp,
+  patchFollowUp,
+  removeFollowUp,
+} from "@/services/mock/mockWorkflowStore";
 import {
   filterRowsByScope,
-  getPHNScope,
   isPHN,
   normalizeBarangay,
   phnDefaultBarangay,
@@ -44,9 +50,16 @@ const emptyForm = () => ({
 
 export default function PhnFollowUps() {
   const { user } = useAuth();
-  const scope = getPHNScope(user);
+  const location = useLocation();
+  const navigate = useNavigate();
   const phn = isPHN(user);
-  const [followUps, setFollowUps] = useState(() => filterRowsByScope(phnFollowUps, user));
+  const workflow = useWorkflowStore();
+  // Shared workflow store so a follow-up scheduled from a completed check-up
+  // immediately reflects on the dashboard counts and mock state.
+  const followUps = useMemo(
+    () => filterRowsByScope(workflow.followUps, user),
+    [workflow.followUps, user]
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [barangayFilter, setBarangayFilter] = useState("All");
@@ -60,6 +73,7 @@ export default function PhnFollowUps() {
   const [errors, setErrors] = useState({});
   const [newStatus, setNewStatus] = useState("");
   const [toast, setToast] = useState(null);
+  const [fromCheckupDraft, setFromCheckupDraft] = useState(false);
 
   const filterOptions = phnFilterOptions(user);
   const writableBarangays = phnWritableBarangays(user);
@@ -68,6 +82,37 @@ export default function PhnFollowUps() {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
   };
+
+  // "Schedule Follow-up" from a completed check-up pre-fills the patient and
+  // relevant check-up information.
+  useEffect(() => {
+    const draft = location.state?.followUpDraft;
+    if (!draft) return undefined;
+    const notes = [
+      draft.consultationLocation ? `Consultation Location: ${draft.consultationLocation}` : "",
+      draft.reason ? `Reason for visit: ${draft.reason}` : "",
+      draft.findings ? `PHN findings: ${draft.findings}` : "",
+      draft.recommendations ? `Recommendations: ${draft.recommendations}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    setForm({
+      resident: draft.resident || "",
+      barangay: draft.barangay || phnDefaultBarangay(user),
+      purpose: "Follow-up after PHN check-up",
+      dueDate: "Today",
+      time: "09:00",
+      assignedTo: user?.name || "PHN",
+      priority: draft.riskLevel || "Medium",
+      status: "Scheduled",
+      notes,
+    });
+    setErrors({});
+    setFromCheckupDraft(true);
+    setShowAddModal(true);
+    navigate(location.pathname, { replace: true, state: null });
+    return undefined;
+  }, [location.state, location.pathname, navigate, user]);
 
   const anyModalOpen = showAddModal || showEditModal || showViewModal || showDeleteConfirm || showStatusModal;
 
@@ -109,7 +154,7 @@ export default function PhnFollowUps() {
   const validate = () => {
     const next = {};
     if (!form.resident.trim()) next.resident = "Resident name is required.";
-    if (!form.barangay) next.barangay = "Scope is required.";
+    if (!form.barangay) next.barangay = "Barangay is required.";
     if (!form.purpose.trim()) next.purpose = "Purpose is required.";
     if (!form.dueDate.trim()) next.dueDate = "Due date is required.";
     setErrors(next);
@@ -118,8 +163,9 @@ export default function PhnFollowUps() {
 
   const handleAdd = () => {
     if (!validate()) return;
+    const baseIdList = workflow.followUps;
     const newFollowUp = {
-      id: followUps.reduce((acc, f) => Math.max(acc, f.id || 0), 0) + 1,
+      id: baseIdList.reduce((acc, f) => Math.max(acc, f.id || 0), 0) + 1,
       resident: form.resident.trim(),
       barangay: normalizeBarangay(form.barangay),
       purpose: form.purpose.trim(),
@@ -130,11 +176,12 @@ export default function PhnFollowUps() {
       status: form.status,
       notes: form.notes.trim(),
     };
-    setFollowUps([newFollowUp, ...followUps]);
+    addFollowUp(newFollowUp);
     setShowAddModal(false);
     setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
     setErrors({});
-    showToast("Follow-up added successfully.");
+    showToast(fromCheckupDraft ? "Follow-up scheduled successfully." : "Follow-up added successfully.");
+    setFromCheckupDraft(false);
   };
 
   const openEdit = (f) => {
@@ -156,9 +203,11 @@ export default function PhnFollowUps() {
 
   const handleEdit = () => {
     if (!validate()) return;
-    setFollowUps((prev) =>
-      prev.map((f) => (f.id === selected.id ? { ...f, ...form, barangay: normalizeBarangay(form.barangay), notes: form.notes.trim() } : f))
-    );
+    patchFollowUp(selected.id, {
+      ...form,
+      barangay: normalizeBarangay(form.barangay),
+      notes: form.notes.trim(),
+    });
     setShowEditModal(false);
     setSelected(null);
     setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
@@ -167,14 +216,14 @@ export default function PhnFollowUps() {
   };
 
   const handleConfirmDelete = () => {
-    setFollowUps((prev) => prev.filter((f) => f.id !== selected.id));
+    removeFollowUp(selected.id);
     setShowDeleteConfirm(false);
     setSelected(null);
     showToast("Follow-up deleted successfully.");
   };
 
   const handleStatusUpdate = () => {
-    setFollowUps((prev) => prev.map((f) => (f.id === selected.id ? { ...f, status: newStatus } : f)));
+    patchFollowUp(selected.id, { status: newStatus });
     setShowStatusModal(false);
     setSelected(null);
     showToast("Follow-up status updated successfully.");
@@ -345,16 +394,13 @@ export default function PhnFollowUps() {
       <PageHeader
         crumbs={["Home", "Follow-ups"]}
         title="Follow-up Monitoring"
-        subtitle={
-          phn && scope && scope.level === "barangay"
-            ? `Monitor follow-ups for RHU-level residents and ${scope.assignedBarangay}.`
-            : "Monitor RHU-level follow-ups."
-        }
+        subtitle={phn ? "Monitor follow-ups within your assigned coverage." : "Monitor RHU-level follow-ups."}
         action={
           <button
             onClick={() => {
               setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
               setErrors({});
+              setFromCheckupDraft(false);
               setShowAddModal(true);
             }}
             className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
@@ -413,7 +459,7 @@ export default function PhnFollowUps() {
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
             >
               {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? "All Scopes" : b}</option>
+                <option key={b} value={b}>{b === "All" ? "All Accessible" : b === "RHU" ? "RHU-level" : b}</option>
               ))}
             </select>
             <select

@@ -1,372 +1,209 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { phnAssessments } from "@/services/mock/mockPhnData";
 import {
-  filterRowsByScope,
-  getPHNScope,
-  isPHN,
-  normalizeBarangay,
-  phnDefaultBarangay,
-  phnFilterOptions,
-  phnWritableBarangays,
-  rowMatchesOption,
-  scopeLabel,
-} from "@/lib/phnScope";
+  CHECKUP_STATUS,
+  useWorkflowStore,
+  startPatientCheckup,
+  completePatientCheckup,
+  setCheckupOutcome,
+  workflowHelpers,
+} from "@/services/mock/mockWorkflowStore";
+import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
+import { filterRowsByScope, phnFilterOptions, rowMatchesOption, scopeLabel } from "@/lib/phnScope";
+import { riskOfPatient } from "@/lib/riskRules";
+import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
-import { Search, Plus, Eye, Edit2, Trash2, X, CheckCircle2, ClipboardList } from "lucide-react";
+import { Search, CheckCircle2, Users, ClipboardCheck, UserCheck, AlertTriangle } from "lucide-react";
 
-const STATUS_COLORS = {
-  "For Review": "bg-brand-yellow/15 text-[#B07E00]",
-  Validated: "bg-brand-green/10 text-brand-green",
-  "Needs Update": "bg-brand-danger/10 text-brand-danger",
+const EMPTY_STATE = {
+  "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
+  "In Check-up": "bg-brand-blue/10 text-brand-blue",
+  "Consultation Completed": "bg-brand-green/10 text-brand-green",
 };
 
-const ASSESSMENT_TYPES = [
-  "Prenatal Assessment",
-  "Postnatal Assessment",
-  "TB Symptom Screening",
-  "NCD Risk Assessment",
-  "Diabetes Assessment",
-  "Growth Monitoring",
-  "General Assessment",
-];
+const RISK_TONES = {
+  High: "bg-brand-danger/10 text-brand-danger",
+  Medium: "bg-brand-yellow/15 text-[#B07E00]",
+  Low: "bg-brand-green/10 text-brand-green",
+};
 
-const ASSESSMENT_STATUSES = ["For Review", "Validated", "Needs Update"];
+const OUTCOME_MAP = {
+  referral: "Referral Required",
+  followup: "Follow-up Required",
+  monitoring: "Continue Monitoring",
+  service: "Health Service Needed",
+};
 
-const emptyForm = () => ({
-  resident: "",
-  age: "",
-  barangay: "",
-  date: new Date().toISOString().slice(0, 10),
-  type: "General Assessment",
-  findings: "",
-  assessedBy: "",
-  status: "For Review",
-  notes: "",
+const RiskBadge = ({ level }) => (
+  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${RISK_TONES[level] || RISK_TONES.Low}`}>
+    {level}
+  </span>
+);
+
+const buildDraftBase = (patient) => ({
+  resident: patient?.patient || "",
+  age: patient?.age ?? "",
+  sex: patient?.sex || "",
+  barangay: patient?.barangay || null,
+  consultationLocation: consultationLocationFor(patient || {}),
+  reason: patient?.reason || patient?.triage?.chiefComplaint || "",
+  findings: patient?.checkup?.assessment || "",
+  riskLevel: patient?.checkup?.riskLevel || "",
+  clinicalNotes: patient?.checkup?.clinicalNotes || "",
+  recommendations: patient?.checkup?.recommendations || "",
+  visitDate: patient?.visitDate || "",
 });
 
-export default function PhnAssessments() {
+export default function PhnCheckups() {
   const { user } = useAuth();
-  const scope = getPHNScope(user);
-  const phn = isPHN(user);
-  const [assessments, setAssessments] = useState(() => filterRowsByScope(phnAssessments, user));
+  const navigate = useNavigate();
+  const location = useLocation();
+  const store = useWorkflowStore();
+
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [barangayFilter, setBarangayFilter] = useState("All");
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showViewModal, setShowViewModal] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState(() => ({ ...emptyForm(), barangay: phnDefaultBarangay(user) }));
-  const [errors, setErrors] = useState({});
+  const [activePatientId, setActivePatientId] = useState(null);
   const [toast, setToast] = useState(null);
 
-  const filterOptions = phnFilterOptions(user);
-  const writableBarangays = phnWritableBarangays(user);
+  const visiblePatients = useMemo(
+    () => filterRowsByScope(store.patients, user),
+    [store.patients, user]
+  );
 
   const showToast = (message) => {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
   };
 
-  const anyModalOpen = showAddModal || showEditModal || showViewModal || showDeleteConfirm;
-
-  useEffect(() => {
-    if (!anyModalOpen) return undefined;
-    document.body.style.overflow = "hidden";
-    const onKey = (e) => {
-      if (e.key !== "Escape") return;
-      setShowAddModal(false);
-      setShowEditModal(false);
-      setShowViewModal(false);
-      setShowDeleteConfirm(false);
+  const stats = useMemo(() => {
+    const today = workflowHelpers.todayLong();
+    return {
+      waiting: visiblePatients.filter((p) => p.status === CHECKUP_STATUS.WAITING).length,
+      inCheckup: visiblePatients.filter((p) => p.status === CHECKUP_STATUS.IN_CHECKUP).length,
+      priority: visiblePatients.filter((p) => riskOfPatient(p).level === "High").length,
+      completed: visiblePatients.filter(
+        (p) => p.status === CHECKUP_STATUS.COMPLETED && p.checkup?.completedAt === today
+      ).length,
     };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = "";
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [anyModalOpen]);
+  }, [visiblePatients]);
 
-  const stats = useMemo(
-    () => ({
-      total: assessments.length,
-      forReview: assessments.filter((a) => a.status === "For Review").length,
-      validated: assessments.filter((a) => a.status === "Validated").length,
-    }),
-    [assessments]
-  );
-
-  const filtered = assessments.filter((a) => {
-    const matchesSearch = searchQuery === "" || a.resident.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "All" || a.status === statusFilter;
-    const matchesBarangay = rowMatchesOption(a, barangayFilter, user);
+  const filtered = visiblePatients.filter((p) => {
+    const matchesSearch =
+      searchQuery === "" || p.patient.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter === "All" || p.status === statusFilter;
+    const matchesBarangay = rowMatchesOption(p, barangayFilter, user);
     return matchesSearch && matchesStatus && matchesBarangay;
   });
 
-  const formatDate = (value) => {
-    if (!value) return "";
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return value;
-    return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-  };
+  const completedToday = useMemo(() => {
+    const today = workflowHelpers.todayLong();
+    return visiblePatients
+      .filter((p) => p.status === CHECKUP_STATUS.COMPLETED && p.checkup?.completedAt === today)
+      .sort((a, b) => String(b.checkup?.completedAt || "").localeCompare(String(a.checkup?.completedAt || "")));
+  }, [visiblePatients]);
 
-  const validate = () => {
-    const next = {};
-    if (!form.resident.trim()) next.resident = "Resident name is required.";
-    if (!form.barangay) next.barangay = "Scope is required.";
-    if (!form.type) next.type = "Assessment type is required.";
-    if (!form.findings.trim()) next.findings = "Findings are required.";
-    if (!form.date) next.date = "Date is required.";
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
+  const filterOptions = phnFilterOptions(user);
 
-  const handleAdd = () => {
-    if (!validate()) return;
-    const newAssessment = {
-      id: assessments.reduce((acc, a) => Math.max(acc, a.id || 0), 0) + 1,
-      resident: form.resident.trim(),
-      age: form.age ? Number(form.age) : undefined,
-      barangay: normalizeBarangay(form.barangay),
-      date: formatDate(form.date),
-      type: form.type,
-      findings: form.findings.trim(),
-      assessedBy: form.assessedBy.trim() || user?.name || "PHN",
-      status: form.status,
-      notes: form.notes.trim(),
-    };
-    setAssessments([newAssessment, ...assessments]);
-    setShowAddModal(false);
-    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
-    setErrors({});
-    showToast("Assessment added successfully.");
-  };
-
-  const openEdit = (a) => {
-    setSelected(a);
-    setForm({
-      resident: a.resident,
-      age: a.age !== undefined ? String(a.age) : "",
-      barangay: a.barangay || "RHU",
-      date: a.date,
-      type: a.type,
-      findings: a.findings,
-      assessedBy: a.assessedBy,
-      status: a.status,
-      notes: a.notes || "",
-    });
-    setErrors({});
-    setShowEditModal(true);
-  };
-
-  const handleEdit = () => {
-    if (!validate()) return;
-    setAssessments((prev) =>
-      prev.map((a) =>
-        a.id === selected.id
-          ? { ...a, ...form, resident: form.resident.trim(), barangay: normalizeBarangay(form.barangay), findings: form.findings.trim(), notes: form.notes.trim(), date: form.date }
-          : a
-      )
-    );
-    setShowEditModal(false);
-    setSelected(null);
-    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
-    setErrors({});
-    showToast("Assessment updated successfully.");
-  };
-
-  const handleConfirmDelete = () => {
-    setAssessments((prev) => prev.filter((a) => a.id !== selected.id));
-    setShowDeleteConfirm(false);
-    setSelected(null);
-    showToast("Assessment deleted successfully.");
-  };
-
-  const handleStatusUpdate = (assessment, status) => {
-    setAssessments((prev) => prev.map((a) => (a.id === assessment.id ? { ...a, status } : a)));
-    if (selected && selected.id === assessment.id) {
-      setSelected({ ...selected, status });
+  // Allow other pages (e.g. the PHN dashboard "Start Check-up" action) to
+  // deep-open the consultation workbench for a patient.
+  useEffect(() => {
+    const openId = location.state?.openCheckup;
+    if (openId && visiblePatients.some((p) => p.id === openId)) {
+      setActivePatientId(openId);
+      navigate(location.pathname, { replace: true });
     }
-    showToast("Assessment status updated successfully.");
+  }, [location.state, location.pathname, navigate, visiblePatients]);
+
+  useEffect(() => {
+    if (toast) {
+      const t = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [toast]);
+
+  const activePatient = activePatientId
+    ? store.patients.find((p) => p.id === activePatientId) || null
+    : null;
+
+  const handleStart = (patient) => {
+    startPatientCheckup(patient.id, user?.name);
+    showToast("Check-up started.");
+    setActivePatientId(patient.id);
   };
 
-  const formFields = (
-    <>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="text-sm font-medium text-brand-ink block mb-1.5">Resident <span className="text-brand-danger">*</span></label>
-          <input
-            type="text"
-            placeholder="Resident name..."
-            value={form.resident}
-            onChange={(e) => {
-              setForm({ ...form, resident: e.target.value });
-              if (errors.resident) setErrors((prev) => ({ ...prev, resident: "" }));
-            }}
-            className={`w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue ${
-              errors.resident ? "border-brand-danger" : "border-brand-border"
-            }`}
-          />
-          {errors.resident && <p className="text-xs text-brand-danger mt-1">{errors.resident}</p>}
-        </div>
-        <div>
-          <label className="text-sm font-medium text-brand-ink block mb-1.5">Age</label>
-          <input
-            type="number"
-            min="0"
-            placeholder="Age..."
-            value={form.age}
-            onChange={(e) => setForm({ ...form, age: e.target.value })}
-            className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-          />
-        </div>
-      </div>
-      <div>
-        <label className="text-sm font-medium text-brand-ink block mb-1.5">Barangay <span className="text-brand-danger">*</span></label>
-        <select
-          value={form.barangay}
-          onChange={(e) => {
-            setForm({ ...form, barangay: e.target.value });
-            if (errors.barangay) setErrors((prev) => ({ ...prev, barangay: "" }));
-          }}
-          className={`w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue ${
-            errors.barangay ? "border-brand-danger" : "border-brand-border"
-          }`}
-        >
-          {writableBarangays.map((b) => (
-            <option key={b} value={b}>{b === "RHU" ? "RHU (no barangay)" : b}</option>
-          ))}
-        </select>
-        {errors.barangay && <p className="text-xs text-brand-danger mt-1">{errors.barangay}</p>}
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="text-sm font-medium text-brand-ink block mb-1.5">Date <span className="text-brand-danger">*</span></label>
-          <input
-            type="date"
-            value={form.date}
-            onChange={(e) => {
-              setForm({ ...form, date: e.target.value });
-              if (errors.date) setErrors((prev) => ({ ...prev, date: "" }));
-            }}
-            className={`w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue ${
-              errors.date ? "border-brand-danger" : "border-brand-border"
-            }`}
-          />
-          {errors.date && <p className="text-xs text-brand-danger mt-1">{errors.date}</p>}
-        </div>
-        <div>
-          <label className="text-sm font-medium text-brand-ink block mb-1.5">Assessment Type <span className="text-brand-danger">*</span></label>
-          <select
-            value={form.type}
-            onChange={(e) => setForm({ ...form, type: e.target.value })}
-            className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-          >
-            {ASSESSMENT_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <div>
-        <label className="text-sm font-medium text-brand-ink block mb-1.5">Findings <span className="text-brand-danger">*</span></label>
-        <textarea
-          rows={3}
-          placeholder="Assessment findings..."
-          value={form.findings}
-          onChange={(e) => {
-            setForm({ ...form, findings: e.target.value });
-            if (errors.findings) setErrors((prev) => ({ ...prev, findings: "" }));
-          }}
-          className={`w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none ${
-            errors.findings ? "border-brand-danger" : "border-brand-border"
-          }`}
-        />
-        {errors.findings && <p className="text-xs text-brand-danger mt-1">{errors.findings}</p>}
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="text-sm font-medium text-brand-ink block mb-1.5">Assessed By</label>
-          <input
-            type="text"
-            placeholder="Personnel name..."
-            value={form.assessedBy}
-            onChange={(e) => setForm({ ...form, assessedBy: e.target.value })}
-            className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium text-brand-ink block mb-1.5">Status</label>
-          <select
-            value={form.status}
-            onChange={(e) => setForm({ ...form, status: e.target.value })}
-            className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-          >
-            {ASSESSMENT_STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <div>
-        <label className="text-sm font-medium text-brand-ink block mb-1.5">Notes</label>
-        <textarea
-          rows={2}
-          placeholder="Additional notes..."
-          value={form.notes}
-          onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none"
-        />
-      </div>
-    </>
-  );
+  const handleContinue = (patient) => {
+    setActivePatientId(patient.id);
+  };
+
+  const handleView = (patient) => {
+    setActivePatientId(patient.id);
+  };
+
+  const handleComplete = (patientId, recorded) => {
+    completePatientCheckup(patientId, recorded, user?.name);
+    showToast("Check-up completed successfully.");
+  };
+
+  const handleOutcome = (kind) => {
+    if (!activePatient) return;
+    const patient = activePatient;
+    const outcome = OUTCOME_MAP[kind] || "No Further Action";
+    setCheckupOutcome(patient.id, outcome);
+    const base = buildDraftBase({ ...patient, checkup: { ...(patient.checkup || {}), outcome } });
+    setActivePatientId(null);
+    if (kind === "referral") {
+      navigate("/app/phn/referrals", { state: { referralDraft: base } });
+    } else if (kind === "followup") {
+      navigate("/app/phn/followups", { state: { followUpDraft: base } });
+    } else if (kind === "monitoring" || kind === "service") {
+      navigate("/app/phn/services", { state: { serviceDraft: { ...base, kind } } });
+    }
+  };
+
+  const actionLabel = (p) => {
+    if (p.status === CHECKUP_STATUS.WAITING) return "Start Check-up";
+    if (p.status === CHECKUP_STATUS.IN_CHECKUP) return "Continue Check-up";
+    return "View Check-up";
+  };
+
+  const handleAction = (p) => {
+    if (p.status === CHECKUP_STATUS.WAITING) handleStart(p);
+    else if (p.status === CHECKUP_STATUS.IN_CHECKUP) handleContinue(p);
+    else handleView(p);
+  };
 
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Assessments"]}
-        title="Assessment Review"
-        subtitle={
-          phn && scope && scope.level === "barangay"
-            ? `Review assessments for RHU-level residents and ${scope.assignedBarangay}.`
-            : "Review RHU-level assessments."
-        }
-        action={
-          <button
-            onClick={() => {
-              setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
-              setErrors({});
-              setShowAddModal(true);
-            }}
-            className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Add Assessment
-          </button>
-        }
+        crumbs={["Home", "PHN Check-ups"]}
+        title="PHN Check-ups"
+        subtitle="Conduct and manage patient check-ups within your assigned coverage."
       />
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-brand-ink text-white px-4 py-3 rounded-btn shadow-lg flex items-center gap-2 z-50 animate-in slide-in-from-bottom-2">
+        <div className="fixed bottom-4 right-4 z-[60] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg animate-in slide-in-from-bottom-2">
           <CheckCircle2 className="w-4 h-4 text-brand-green" />
           <span className="text-sm">{toast}</span>
         </div>
       )}
 
       {/* Summary Cards */}
-      <div className="grid sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Total Assessments", value: stats.total, tone: "bg-brand-blue/10 text-brand-blue" },
-          { label: "For Review", value: stats.forReview, tone: "bg-brand-yellow/15 text-[#B07E00]" },
-          { label: "Validated", value: stats.validated, tone: "bg-brand-green/10 text-brand-green" },
+          { label: "Waiting for PHN", value: stats.waiting, icon: Users, tone: "bg-brand-accent/10 text-brand-accent" },
+          { label: "In Check-up", value: stats.inCheckup, icon: ClipboardCheck, tone: "bg-brand-blue/10 text-brand-blue" },
+          { label: "Priority Cases", value: stats.priority, icon: AlertTriangle, tone: "bg-brand-danger/10 text-brand-danger" },
+          { label: "Completed Today", value: stats.completed, icon: UserCheck, tone: "bg-brand-green/10 text-brand-green" },
         ].map((stat) => (
           <Card key={stat.label} className="p-5">
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${stat.tone}`}>
-                <ClipboardList className="w-5 h-5" />
+                <stat.icon className="w-5 h-5" />
               </div>
               <div>
                 <p className="text-sm text-brand-gray">{stat.label}</p>
@@ -385,7 +222,7 @@ export default function PhnAssessments() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search resident..."
+              placeholder="Search patient..."
               className="bg-transparent text-sm outline-none w-full placeholder:text-brand-gray/70"
             />
           </div>
@@ -396,7 +233,7 @@ export default function PhnAssessments() {
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
             >
               {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? "All Scopes" : b}</option>
+                <option key={b} value={b}>{b === "All" ? "All Accessible" : b === "RHU" ? "RHU-level" : b}</option>
               ))}
             </select>
             <select
@@ -405,7 +242,7 @@ export default function PhnAssessments() {
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
             >
               <option value="All">All Statuses</option>
-              {ASSESSMENT_STATUSES.map((s) => (
+              {Object.values(CHECKUP_STATUS).map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
@@ -413,73 +250,71 @@ export default function PhnAssessments() {
         </div>
       </Card>
 
-      {/* Assessment Table */}
+      {/* Check-ups Table */}
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-brand-bg border-b border-brand-border">
               <tr>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Resident</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Patient</th>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Barangay</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Date</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Type</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Findings</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Assessed By</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Reason for Visit</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Risk</th>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Status</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Actions</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Action</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((a) => (
-                <tr key={a.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
-                  <td className="px-4 py-3 text-sm font-medium text-brand-ink">{a.resident}</td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{scopeLabel(a, user)}</td>
-                  <td className="px-4 py-3 text-sm text-brand-ink whitespace-nowrap">{a.date}</td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{a.type}</td>
-                  <td className="px-4 py-3 text-sm text-brand-ink max-w-[220px]">
-                    <span className="block truncate" title={a.findings}>{a.findings}</span>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{a.assessedBy}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[a.status]}`}>{a.status}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
+              {filtered.map((p) => {
+                const risk = riskOfPatient(p);
+                return (
+                  <tr key={p.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-brand-blue text-white flex items-center justify-center text-xs font-semibold">
+                          {p.patient.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-brand-ink">{p.patient}</p>
+                          <p className="text-xs text-brand-gray">{p.age} yrs · {p.sex}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${p.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>
+                        {scopeLabel(p, user)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-brand-ink">{p.reason || p.triage?.chiefComplaint}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <RiskBadge level={risk.level} />
+                        <span className="text-[11px] text-brand-gray max-w-[150px] truncate" title={risk.reason}>
+                          {risk.reason}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${CHECKUP_STATUS_TONES[p.status] || EMPTY_STATE[p.status] || "bg-slate-100 text-slate-600"}`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+                        {p.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
                       <button
-                        onClick={() => {
-                          setSelected(a);
-                          setShowViewModal(true);
-                        }}
-                        className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
-                        title="View"
+                        onClick={() => handleAction(p)}
+                        className="text-sm font-medium text-brand-blue hover:underline whitespace-nowrap"
                       >
-                        <Eye className="w-4 h-4" />
+                        {actionLabel(p)}
                       </button>
-                      <button
-                        onClick={() => openEdit(a)}
-                        className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors"
-                        title="Edit"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSelected(a);
-                          setShowDeleteConfirm(true);
-                        }}
-                        className="p-1.5 text-brand-danger hover:bg-brand-danger/10 rounded transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-brand-gray">
-                    No assessments match the selected filters.
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-brand-gray">
+                    No check-ups match the selected filters.
                   </td>
                 </tr>
               )}
@@ -488,161 +323,70 @@ export default function PhnAssessments() {
         </div>
       </Card>
 
-      {/* Add / Edit Modal */}
-      {(showAddModal || showEditModal) && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-brand-ink">{showAddModal ? "Add Assessment" : "Edit Assessment"}</h3>
-                <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setShowEditModal(false);
-                    setErrors({});
-                  }}
-                  className="text-brand-gray hover:text-brand-ink"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="space-y-4">{formFields}</div>
-              <div className="flex justify-end gap-3 mt-6">
-                <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setShowEditModal(false);
-                    setErrors({});
-                  }}
-                  className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={showAddModal ? handleAdd : handleEdit}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
-                >
-                  {showAddModal ? "Add Assessment" : "Save Changes"}
-                </button>
-              </div>
-            </div>
-          </Card>
+      {/* Today's Completed Check-ups */}
+      <Card className="p-4 sm:p-6 mt-5">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Today's Completed Check-ups</h3>
+            <p className="text-xs text-brand-gray mt-0.5">Recently completed PHN consultations.</p>
+          </div>
+          <UserCheck className="w-4 h-4 text-brand-gray shrink-0" />
         </div>
-      )}
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-brand-bg border-b border-brand-border text-left">
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Patient</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Reason</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Risk</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Outcome</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {completedToday.map((p) => (
+                <tr key={p.id} className="border-b border-brand-border last:border-0">
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-brand-ink">{p.patient}</p>
+                    <p className="text-xs text-brand-gray">{scopeLabel(p, user)}</p>
+                  </td>
+                  <td className="px-4 py-3 text-brand-ink">{p.reason || p.triage?.chiefComplaint}</td>
+                  <td className="px-4 py-3"><RiskBadge level={riskOfPatient(p).level} /></td>
+                  <td className="px-4 py-3 text-brand-ink">{p.checkup?.outcome || "No Further Action"}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => handleView(p)}
+                      className="text-sm font-medium text-brand-blue hover:underline whitespace-nowrap"
+                    >
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {completedToday.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-brand-gray">
+                    No completed check-ups today.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
-      {/* View Modal */}
-      {showViewModal && selected && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="text-base font-semibold text-brand-ink">Assessment Details</h3>
-                <button onClick={() => setShowViewModal(false)} className="text-brand-gray hover:text-brand-ink">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Resident</h4>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <p className="text-brand-gray">Name: <span className="text-brand-ink">{selected.resident}</span></p>
-                    {selected.age !== undefined && (
-                      <p className="text-brand-gray">Age: <span className="text-brand-ink">{selected.age}</span></p>
-                    )}
-                    <p className="text-brand-gray">Barangay: <span className="text-brand-ink">{scopeLabel(selected, user)}</span></p>
-                  </div>
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Assessment</h4>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <p className="text-brand-gray">Type: <span className="text-brand-ink">{selected.type}</span></p>
-                    <p className="text-brand-gray">Date: <span className="text-brand-ink">{selected.date}</span></p>
-                    <p className="text-brand-gray">Assessed by: <span className="text-brand-ink">{selected.assessedBy}</span></p>
-                    <p className="text-brand-gray">Status: <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[selected.status]}`}>{selected.status}</span></p>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-brand-gray mb-1">Findings</p>
-                  <p className="text-sm text-brand-ink">{selected.findings}</p>
-                </div>
-                {selected.notes && (
-                  <div>
-                    <p className="text-xs text-brand-gray mb-1">Notes</p>
-                    <p className="text-sm text-brand-ink">{selected.notes}</p>
-                  </div>
-                )}
-                <div className="pt-4 border-t border-brand-border">
-                  <p className="text-xs text-brand-gray mb-2">Update Status</p>
-                  <div className="flex gap-2">
-                    {ASSESSMENT_STATUSES.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => handleStatusUpdate(selected, s)}
-                        className={`px-3 py-1.5 rounded-btn text-xs font-medium transition-colors ${
-                          selected.status === s
-                            ? "bg-brand-blue text-white"
-                            : "text-brand-gray hover:bg-brand-bg border border-brand-border"
-                        }`}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="mt-6 pt-4 border-t border-brand-border flex justify-end gap-3">
-                <button
-                  onClick={() => setShowViewModal(false)}
-                  className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    openEdit(selected);
-                  }}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
-                >
-                  Edit
-                </button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Delete Confirmation */}
-      {showDeleteConfirm && selected && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
-            <div className="p-6">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-danger/10 shrink-0">
-                  <Trash2 className="h-5 w-5 text-brand-danger" />
-                </div>
-                <h3 className="text-lg font-semibold text-brand-ink">Delete this assessment?</h3>
-              </div>
-              <p className="text-sm text-brand-gray">
-                Assessment for {selected.resident} ({scopeLabel(selected, user)}) will be removed. This action cannot be undone.
-              </p>
-              <div className="flex justify-end gap-3 mt-6">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleConfirmDelete}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-danger text-white hover:opacity-90 transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </Card>
-        </div>
+      {/* Check-up workbench (start / continue / view) */}
+      {activePatient && (
+        <PhnCheckupWorkbench
+          patient={activePatient}
+          onClose={() => setActivePatientId(null)}
+          onComplete={(recorded) => handleComplete(activePatient.id, recorded)}
+          onOutcome={
+            activePatient.status === CHECKUP_STATUS.COMPLETED && activePatient.checkup
+              ? handleOutcome
+              : undefined
+          }
+        />
       )}
     </>
   );

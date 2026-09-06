@@ -42,11 +42,12 @@ export const NAV = {
     { label: "Notifications", icon: "Bell", path: "/app/bhw/notifications" },
     { label: "Settings", icon: "Settings", path: "/app/bhw/settings" },
   ],
-  // Public Health Nurse: health records, assessments, referrals, follow-ups.
+  // Public Health Nurse: triage hand-off check-ups, health records, referrals,
+  // follow-ups, health services.
   phn: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/phn/dashboard" },
     { label: "Health Records", icon: "FileHeart", path: "/app/phn/record", permission: "residents.profile.view" },
-    { label: "Assessments", icon: "ClipboardList", path: "/app/phn/consultations", permission: "consultation.requests.view" },
+    { label: "PHN Check-ups", icon: "ClipboardList", path: "/app/phn/consultations", permission: "consultation.requests.view" },
     { label: "Referrals", icon: "Send", path: "/app/phn/referrals", permission: "referrals.view" },
     { label: "Follow-ups", icon: "CalendarClock", path: "/app/phn/followups", permission: "followups.view" },
     { label: "Health Services", icon: "Stethoscope", path: "/app/phn/services" },
@@ -83,6 +84,7 @@ export const NAV = {
   // are pending the verified requirements; monitoring pages remain available.
   rhu_personnel: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/rhu_personnel/dashboard" },
+    { label: "Triage", icon: "Activity", path: "/app/rhu_personnel/triage", permission: "triage.view" },
     { label: "Resident Records", icon: "Users", path: "/app/rhu_personnel/residents", permission: "residents.directory.view" },
     { label: "Barangays", icon: "Map", path: "/app/rhu_personnel/barangays" },
     { label: "Reports", icon: "FileText", path: "/app/rhu_personnel/reports", permission: "reports.view" },

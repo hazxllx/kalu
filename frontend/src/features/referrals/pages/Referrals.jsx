@@ -1,10 +1,17 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { residents } from "@/services/mock/mockData";
-import { phnReferrals, phnResidents, REFERRAL_STATUSES } from "@/services/mock/mockPhnData";
+import { phnResidents, REFERRAL_STATUSES } from "@/services/mock/mockPhnData";
+import {
+  useWorkflowStore,
+  addReferral,
+  patchReferral,
+  removeReferral,
+} from "@/services/mock/mockWorkflowStore";
 import {
   filterRowsByScope,
   phnFilterOptions,
@@ -76,16 +83,22 @@ const PRIORITY_COLORS = {
 
 export default function Referrals({ roleKey } = {}) {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const isPhn = roleKey === "phn";
 
   const statusOptions = isPhn
     ? REFERRAL_STATUSES
     : ["For Review", "Pending", "Accepted", "Follow-up Required", "Completed", "Cancelled"];
 
-  // PHN scope: seed only the referrals the signed-in PHN may see (RHU-level
-  // plus, if assigned, their own barangay). Other roles keep their dataset.
-  const [referrals, setReferrals] = useState(() =>
-    isPhn ? filterRowsByScope(phnReferrals, user) : REFERRALS
+  // The PHN reads/writes the shared workflow store so referrals created from a
+  // completed check-up and pending-referral counts stay in sync. Every other
+  // role keeps its original local dataset unchanged.
+  const workflow = useWorkflowStore();
+  const [localReferrals, setLocalReferrals] = useState(REFERRALS);
+  const referrals = useMemo(
+    () => (isPhn ? filterRowsByScope(workflow.referrals, user) : localReferrals),
+    [isPhn, workflow.referrals, user, localReferrals]
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -117,6 +130,40 @@ export default function Referrals({ roleKey } = {}) {
     const matchesBarangay = rowMatchesOption(r, barangayFilter, user);
     return matchesSearch && matchesStatus && matchesPriority && matchesBarangay;
   });
+
+  // "Create Referral" from a completed PHN check-up arrives through router
+  // state and pre-fills the patient + check-up details so nothing is re-typed.
+  useEffect(() => {
+    const draft = location.state?.referralDraft;
+    if (!draft || !isPhn) return undefined;
+    const resident = {
+      id: draft.resident || `DRAFT-${Date.now()}`,
+      name: draft.resident,
+      age: draft.age,
+      gender: draft.sex,
+      barangay: draft.barangay || null,
+    };
+    const notes = [
+      draft.consultationLocation ? `Consultation Location: ${draft.consultationLocation}` : "",
+      draft.findings ? `PHN Findings: ${draft.findings}` : "",
+      draft.riskLevel ? `Risk Level: ${draft.riskLevel}` : "",
+      draft.clinicalNotes ? `Clinical Notes: ${draft.clinicalNotes}` : "",
+      draft.recommendations ? `Recommendations: ${draft.recommendations}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    setSelectedResident(resident);
+    setNewReferralForm({
+      date: new Date().toISOString().slice(0, 10),
+      facility: "RHU Pili",
+      reason: draft.reason || draft.findings || "",
+      priority: draft.riskLevel || "High",
+      notes,
+    });
+    setFormErrors({});
+    setShowNewReferralModal(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, isPhn, location.pathname, navigate]);
 
   const anyModalOpen =
     showNewReferralModal ||
@@ -178,9 +225,14 @@ export default function Referrals({ roleKey } = {}) {
   };
 
   const handleStatusUpdate = () => {
-    setReferrals((prev) =>
-      prev.map((r) => (r.id === selectedReferral.id ? { ...r, status: newStatus } : r))
-    );
+    if (!selectedReferral) return;
+    if (isPhn) {
+      patchReferral(selectedReferral.id, { status: newStatus });
+    } else {
+      setLocalReferrals((prev) =>
+        prev.map((r) => (r.id === selectedReferral.id ? { ...r, status: newStatus } : r))
+      );
+    }
     setShowUpdateStatusModal(false);
     setSelectedReferral(null);
     setNewStatus("");
@@ -193,7 +245,12 @@ export default function Referrals({ roleKey } = {}) {
   };
 
   const handleConfirmDelete = () => {
-    setReferrals((prev) => prev.filter((r) => r.id !== selectedReferral.id));
+    if (!selectedReferral) return;
+    if (isPhn) {
+      removeReferral(selectedReferral.id);
+    } else {
+      setLocalReferrals((prev) => prev.filter((r) => r.id !== selectedReferral.id));
+    }
     setShowDeleteConfirm(false);
     setSelectedReferral(null);
     showToast("Referral deleted successfully.");
@@ -211,13 +268,14 @@ export default function Referrals({ roleKey } = {}) {
     if (!validateNewReferral()) return;
 
     const now = new Date();
+    const baseList = isPhn ? workflow.referrals : localReferrals;
     const seq =
-      referrals.reduce((acc, r) => {
+      baseList.reduce((acc, r) => {
         const match = /(\d+)\s*$/.exec(String(r.referralNo || ""));
         return match ? Math.max(acc, parseInt(match[1], 10)) : acc;
       }, 0) + 1;
     const newReferral = {
-      id: referrals.reduce((acc, r) => Math.max(acc, r.id || 0), 0) + 1,
+      id: baseList.reduce((acc, r) => Math.max(acc, r.id || 0), 0) + 1,
       referralNo: `RH-${now.getFullYear()}-${String(seq).padStart(6, "0")}`,
       resident: selectedResident ? selectedResident.name : "",
       residentId: selectedResident ? selectedResident.id : undefined,
@@ -241,11 +299,16 @@ export default function Referrals({ roleKey } = {}) {
         user && user.role && ROLES[user.role] ? ROLES[user.role].label : user ? user.role : "",
       status: "Pending",
     };
-    setReferrals([newReferral, ...referrals]);
+    if (isPhn) {
+      addReferral(newReferral);
+      showToast("Referral created successfully.");
+    } else {
+      setLocalReferrals([newReferral, ...localReferrals]);
+      showToast("Referral added successfully.");
+    }
     setShowNewReferralModal(false);
     setSelectedResident(null);
     setSubmittedReferral(newReferral);
-    showToast("Referral added successfully.");
   };
 
   const handleDownloadPdf = async (referral) => {
@@ -263,9 +326,13 @@ export default function Referrals({ roleKey } = {}) {
       setFormErrors({ reason: "Referral reason is required." });
       return;
     }
-    setReferrals((prev) =>
-      prev.map((r) => (r.id === selectedReferral.id ? { ...r, ...editForm, reason: editForm.reason.trim() } : r))
-    );
+    if (isPhn) {
+      patchReferral(selectedReferral.id, { ...editForm, reason: editForm.reason.trim() });
+    } else {
+      setLocalReferrals((prev) =>
+        prev.map((r) => (r.id === selectedReferral.id ? { ...r, ...editForm, reason: editForm.reason.trim() } : r))
+      );
+    }
     setShowEditReferralModal(false);
     setSelectedReferral(null);
     showToast("Referral updated successfully.");
@@ -278,7 +345,7 @@ export default function Referrals({ roleKey } = {}) {
         title={isPhn ? "Referral Coordination" : "Referrals"}
         subtitle={
           isPhn
-            ? "Review, validate, and coordinate referrals from San Isidro, San Antonio and Old San Roque."
+            ? "Coordinate referrals within your assigned coverage."
             : "Manage resident referrals to RHU and higher-level healthcare facilities."
         }
         action={
@@ -323,7 +390,7 @@ export default function Referrals({ roleKey } = {}) {
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
             >
               {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? "All Barangays" : b}</option>
+                <option key={b} value={b}>{b === "All" ? (isPhn ? "All Accessible" : "All Barangays") : b === "RHU" ? "RHU-level" : b}</option>
               ))}
             </select>
             <select
@@ -572,7 +639,9 @@ export default function Referrals({ roleKey } = {}) {
               </div>
               <h3 className="text-lg font-semibold text-brand-ink">Referral Submitted Successfully</h3>
               <p className="mt-1 text-sm text-brand-gray">
-                The referral has been saved and routed to the RHU Public Health Nurse for review.
+                {isPhn
+                  ? "The referral has been saved to Referral Coordination for monitoring."
+                  : "The referral has been saved and routed to the RHU Public Health Nurse for review."}
               </p>
               <div className="mt-4 rounded-btn border border-brand-border bg-brand-bg px-4 py-3">
                 <p className="text-xs uppercase tracking-wide text-brand-gray">Referral No.</p>

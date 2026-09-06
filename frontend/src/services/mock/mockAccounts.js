@@ -55,6 +55,16 @@ export const MOCK_ACCOUNTS = [
     description: 'Public health nursing for San Isidro: resident records, assessments, referrals, and follow-ups.',
   },
   {
+    role: ROLE.PHN,
+    label: 'Public Health Nurse (San Antonio)',
+    name: 'Carla Torres',
+    email: 'phn.sanantonio@kalusagap.test',
+    password: 'phn123',
+    // Assigned to San Antonio — RHU-level + San Antonio data access only.
+    assignedBarangay: 'San Antonio',
+    description: 'Public health nursing for San Antonio: resident records, assessments, referrals, and follow-ups.',
+  },
+  {
     role: ROLE.HEALTH_SUPERVISOR,
     label: 'Health Supervisor',
     name: 'Barangay Health Supervisor',

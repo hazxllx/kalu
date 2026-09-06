@@ -1,11 +1,17 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
-import { SERVICE_STATUSES, phnHealthServices } from "@/services/mock/mockPhnData";
+import { SERVICE_STATUSES } from "@/services/mock/mockPhnData";
+import {
+  useWorkflowStore,
+  addService,
+  patchService,
+  removeService,
+} from "@/services/mock/mockWorkflowStore";
 import {
   filterRowsByScope,
-  getPHNScope,
   isPHN,
   normalizeBarangay,
   phnDefaultBarangay,
@@ -92,9 +98,16 @@ const formatDate = (isoDate) => {
 
 export default function PhnHealthServices() {
   const { user } = useAuth();
-  const scope = getPHNScope(user);
+  const location = useLocation();
+  const navigate = useNavigate();
   const phn = isPHN(user);
-  const [services, setServices] = useState(() => filterRowsByScope(phnHealthServices, user));
+  const workflow = useWorkflowStore();
+  // Shared store keeps coordinated services/monitoring entries consistent with
+  // the dashboard "Health Services Today" count.
+  const services = useMemo(
+    () => filterRowsByScope(workflow.services, user),
+    [workflow.services, user]
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [barangayFilter, setBarangayFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -105,6 +118,7 @@ export default function PhnHealthServices() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [viewTarget, setViewTarget] = useState(null);
   const [toast, setToast] = useState(null);
+  const [fromCheckupDraft, setFromCheckupDraft] = useState(false);
 
   const filterOptions = phnFilterOptions(user);
   const writableBarangays = phnWritableBarangays(user);
@@ -113,6 +127,38 @@ export default function PhnHealthServices() {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
   };
+
+  // "Continue Monitoring" / "Coordinate Health Service" from a completed
+  // check-up pre-fills a patient-scoped service record.
+  useEffect(() => {
+    const draft = location.state?.serviceDraft;
+    if (!draft) return undefined;
+    const monitoring = draft.kind === "monitoring";
+    const notes = [
+      draft.resident ? `Patient: ${draft.resident}` : "",
+      draft.consultationLocation ? `Consultation Location: ${draft.consultationLocation}` : "",
+      draft.reason ? `Reason for visit: ${draft.reason}` : "",
+      draft.findings ? `PHN findings: ${draft.findings}` : "",
+      draft.recommendations ? `Recommendations: ${draft.recommendations}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    setEditingService(null);
+    setForm({
+      name: monitoring ? `${draft.resident} — Monitoring` : `${draft.resident} — Health Service`,
+      date: new Date().toISOString().slice(0, 10),
+      time: "09:00",
+      barangay: draft.barangay || phnDefaultBarangay(user),
+      personnel: user?.name || "PHN",
+      status: "Scheduled",
+      notes,
+    });
+    setErrors({});
+    setFromCheckupDraft(true);
+    setShowFormModal(true);
+    navigate(location.pathname, { replace: true, state: null });
+    return undefined;
+  }, [location.state, location.pathname, navigate, user]);
 
   const anyModalOpen = showFormModal || Boolean(deleteTarget) || Boolean(viewTarget);
 
@@ -143,7 +189,7 @@ export default function PhnHealthServices() {
     const next = {};
     if (!form.name.trim()) next.name = "Service name is required.";
     if (!form.date) next.date = "Date is required.";
-    if (!form.barangay) next.barangay = "Scope is required.";
+    if (!form.barangay) next.barangay = "Barangay is required.";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -151,7 +197,7 @@ export default function PhnHealthServices() {
   const handleAdd = () => {
     if (!validate()) return;
     const newService = {
-      id: nextServiceId(services),
+      id: nextServiceId(workflow.services),
       name: form.name.trim(),
       barangay: normalizeBarangay(form.barangay),
       date: formatDate(form.date),
@@ -161,11 +207,12 @@ export default function PhnHealthServices() {
       count: form.status === "Completed" ? "0 completed" : "0 scheduled",
       notes: form.notes.trim(),
     };
-    setServices([newService, ...services]);
+    addService(newService);
     setShowFormModal(false);
     setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
     setErrors({});
-    showToast("Health service added successfully.");
+    showToast(fromCheckupDraft ? "Health service coordinated successfully." : "Health service added successfully.");
+    setFromCheckupDraft(false);
   };
 
   const openEdit = (s) => {
@@ -180,16 +227,17 @@ export default function PhnHealthServices() {
       notes: s.notes || "",
     });
     setErrors({});
+    setFromCheckupDraft(false);
     setShowFormModal(true);
   };
 
   const handleEdit = () => {
     if (!validate()) return;
-    setServices((prev) =>
-      prev.map((s) =>
-        s.id === editingService.id ? { ...s, ...form, barangay: normalizeBarangay(form.barangay), notes: form.notes.trim() } : s
-      )
-    );
+    patchService(editingService.id, {
+      ...form,
+      barangay: normalizeBarangay(form.barangay),
+      notes: form.notes.trim(),
+    });
     setShowFormModal(false);
     setEditingService(null);
     setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
@@ -198,13 +246,13 @@ export default function PhnHealthServices() {
   };
 
   const handleConfirmDelete = () => {
-    setServices((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+    removeService(deleteTarget.id);
     setDeleteTarget(null);
     showToast("Health service deleted successfully.");
   };
 
   const handleStatusUpdate = (service, status) => {
-    setServices((prev) => prev.map((s) => (s.id === service.id ? { ...s, status } : s)));
+    patchService(service.id, { status });
     if (viewTarget && viewTarget.id === service.id) setViewTarget({ ...viewTarget, status });
     showToast("Health service status updated successfully.");
   };
@@ -214,17 +262,14 @@ export default function PhnHealthServices() {
       <PageHeader
         crumbs={["Home", "Health Services"]}
         title="Health Services"
-        subtitle={
-          phn && scope && scope.level === "barangay"
-            ? `Health services for the RHU and ${scope.assignedBarangay}.`
-            : "RHU-level health services."
-        }
+        subtitle={phn ? "Coordinate and schedule health services within your assigned coverage." : "RHU-level health services."}
         action={
           <button
             onClick={() => {
               setEditingService(null);
               setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
               setErrors({});
+              setFromCheckupDraft(false);
               setShowFormModal(true);
             }}
             className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
@@ -261,7 +306,7 @@ export default function PhnHealthServices() {
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
             >
               {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? "All Scopes" : b === "RHU" ? "RHU" : b}</option>
+                <option key={b} value={b}>{b === "All" ? "All Accessible" : b === "RHU" ? "RHU-level" : b}</option>
               ))}
             </select>
             <select

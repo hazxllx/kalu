@@ -25,12 +25,13 @@ import ResidentVerification from '@/features/verification/pages/ResidentVerifica
 import ResidentDashboard from '@/features/dashboards/pages/ResidentDashboard';
 import LimitedResidentDashboard from '@/features/dashboards/pages/LimitedResidentDashboard';
 import BHWDashboard from '@/features/dashboards/pages/BHWDashboard';
-import MidwifeDashboard from '@/features/dashboards/pages/MidwifeDashboard';
+import HealthSupervisorDashboard from '@/features/dashboards/pages/HealthSupervisorDashboard';
 import RHUDashboard from '@/features/dashboards/pages/RHUDashboard';
 import MHODashboard from '@/features/dashboards/pages/MHODashboard';
 import AdminDashboard from '@/features/dashboards/pages/AdminDashboard';
 import PHNDashboard from '@/features/dashboards/pages/PHNDashboard';
-import PhnAssessments from '@/features/consultations/pages/PhnAssessments';
+import RhuTriage from '@/features/triage/pages/RhuTriage';
+import PhnCheckups from '@/features/consultations/pages/PhnAssessments';
 import PhnHealthRecords from '@/features/health-records/pages/PhnHealthRecords';
 import PhnHealthServices from '@/features/health-services/pages/PhnHealthServices';
 
@@ -140,7 +141,7 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<PHNDashboard />} />
         <Route path="record" element={<PhnHealthRecords />} />
-        <Route path="consultations" element={<PhnAssessments />} />
+        <Route path="consultations" element={<PhnCheckups />} />
         <Route path="referrals" element={<Referrals roleKey="phn" />} />
         <Route path="followups" element={<PhnFollowUps />} />
         <Route path="services" element={<PhnHealthServices />} />
@@ -156,7 +157,7 @@ const AppRoutes = () => (
     <Route element={<ProtectedRoute allow={ROUTE_ROLES.health_supervisor} />}>
       <Route path="/app/health_supervisor" element={<DashboardLayout roleKey="health_supervisor" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
-        <Route path="dashboard" element={<MidwifeDashboard />} />
+        <Route path="dashboard" element={<HealthSupervisorDashboard />} />
         <Route path="residents" element={<ResidentsPage />} />
         <Route path="verifications" element={<PendingVerifications />} />
         <Route path="verification/review" element={<ResidentVerification />} />
@@ -183,6 +184,7 @@ const AppRoutes = () => (
       <Route path="/app/rhu_personnel" element={<DashboardLayout roleKey="rhu_personnel" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<RHUDashboard />} />
+        <Route path="triage" element={<RhuTriage />} />
         <Route path="residents" element={<ResidentsPage />} />
         <Route path="barangays" element={<Barangays />} />
         <Route path="reports" element={<ReportsPage />} />
