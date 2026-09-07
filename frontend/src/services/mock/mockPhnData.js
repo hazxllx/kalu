@@ -108,6 +108,14 @@ export const phnCheckupQueue = [
   { id: 6, patient: "Andres Banaag", age: 60, sex: "Male", barangay: "San Isidro", consultationLocation: "RHU", reason: "Diabetes medication review", status: "Waiting for PHN", queuedAt: "10:15 AM", notes: "San Isidro resident; diabetes review conducted at the RHU main." },
   { id: 7, patient: "Kris Marquez", age: 22, sex: "Female", barangay: "San Isidro", consultationLocation: "San Isidro Barangay Health Center", reason: "Immunization follow-up", status: "Waiting for PHN", queuedAt: "10:30 AM", notes: "Referred by BHW Grace Aquino." },
   { id: 8, patient: "Juan Dela Cruz", age: 45, sex: "Male", barangay: "San Antonio", consultationLocation: "RHU", reason: "Hypertension medication review", status: "Waiting for PHN", queuedAt: "10:45 AM", notes: "San Antonio resident; consultation conducted at the RHU." },
+  // San Isidro check-up completed earlier today (shows in the dashboard and
+  // "Today's Completed Check-ups" list for the San Isidro coverage).
+  { id: 9, patient: "Rosa Bautista", age: 67, sex: "Female", barangay: "San Isidro", consultationLocation: "San Isidro Barangay Health Center", reason: "Senior care BP review", status: "Consultation Completed", queuedAt: "8:15 AM", notes: "San Isidro senior-care patient; hypertension review at the San Isidro Barangay Health Center." },
+  // RHU-level patients (barangay = null) — seen at the RHU main. These are the
+  // records shown when the PHN switches coverage to RHU.
+  { id: 10, patient: "Lourdes Villanueva", age: 52, sex: "Female", barangay: null, consultationLocation: "RHU", reason: "Hypertension medication review", status: "Waiting for PHN", queuedAt: "9:10 AM", notes: "RHU-level patient; hypertension review at the RHU main." },
+  { id: 11, patient: "Manuel Fernandez", age: 47, sex: "Male", barangay: null, consultationLocation: "RHU", reason: "Diabetes follow-up", status: "Waiting for PHN", queuedAt: "9:40 AM", notes: "RHU-level patient; diabetes follow-up at the RHU main." },
+  { id: 12, patient: "Nena Dizon", age: 68, sex: "Female", barangay: null, consultationLocation: "RHU", reason: "Senior care check-up", status: "Consultation Completed", queuedAt: "8:50 AM", notes: "RHU-level senior-care patient; check-up completed at the RHU main." },
 ];
 
 /** Residents monitored across the RHU (barangay = null means RHU-level). */
@@ -126,6 +134,11 @@ export const phnResidents = [
   // or, for Andres, at the RHU main).
   { id: "R-2101", name: "Rosa Dimagiba", age: 34, gender: "Female", barangay: "San Isidro", risk: "Medium", status: "Active", program: "Hypertension" },
   { id: "R-2102", name: "Andres Banaag", age: 60, gender: "Male", barangay: "San Isidro", risk: "High", status: "Active", program: "Diabetes" },
+  // RHU-level residents (barangay = null) — monitored/seen at the RHU main.
+  // These populate the RHU coverage: records, check-ups, referrals, follow-ups.
+  { id: "R-2201", name: "Lourdes Villanueva", age: 52, gender: "Female", barangay: null, risk: "Medium", status: "Active", program: "Hypertension" },
+  { id: "R-2202", name: "Manuel Fernandez", age: 47, gender: "Male", barangay: null, risk: "High", status: "Active", program: "Diabetes" },
+  { id: "R-2203", name: "Nena Dizon", age: 68, gender: "Female", barangay: null, risk: "Medium", status: "Active", program: "Senior Care" },
 ];
 
 /**
@@ -151,6 +164,10 @@ export const phnReferrals = [
   { id: 10, referralNo: "RH-2026-000310", resident: "Sofia Reyes", age: 7, sex: "Female", barangay: "Old San Roque", date: "September 5, 2026", reason: "Nutrition follow-up", facility: "RHU Pili", priority: "Medium", status: "For Review", referringPersonnel: "BHW G. Aquino", notes: "Growth monitoring shows slow weight gain." },
   { id: 11, referralNo: "RH-2026-000311", resident: "Carmen Flores", age: 72, sex: "Female", barangay: "Old San Roque", date: "September 3, 2026", reason: "Hypertension", facility: "RHU Pili", priority: "Medium", status: "Follow-up Required", referringPersonnel: "BHW L. Ramos", notes: "BP above target; needs medication review." },
   { id: 12, referralNo: "RH-2026-000312", resident: "Pedro Reyes", age: 3, sex: "Male", barangay: "Old San Roque", date: "September 1, 2026", reason: "Immunization catch-up", facility: "RHU Pili", priority: "Low", status: "Completed", referringPersonnel: "Midwife M. Dela Cruz", notes: "Catch-up series completed." },
+  // RHU-level referrals (barangay = null) — patients seen at the RHU main.
+  { id: 13, referralNo: "RH-2026-000313", resident: "Lourdes Villanueva", age: 52, sex: "Female", barangay: null, date: "September 4, 2026", reason: "Hypertension medication review", facility: "RHU Pili", priority: "Medium", status: "For Review", referringPersonnel: "RHU Personnel A. Reyes", notes: "RHU-level patient; hypertension review at the RHU main." },
+  { id: 14, referralNo: "RH-2026-000314", resident: "Manuel Fernandez", age: 47, sex: "Male", barangay: null, date: "September 4, 2026", reason: "Diabetes management review", facility: "Bicol Medical Center", priority: "High", status: "Pending", referringPersonnel: "Midwife M. Dela Cruz", notes: "RHU-level diabetes follow-up; FBS trending upward on the current regimen." },
+  { id: 15, referralNo: "RH-2026-000315", resident: "Nena Dizon", age: 68, sex: "Female", barangay: null, date: "September 2, 2026", reason: "Senior care assessment", facility: "RHU Pili", priority: "Medium", status: "Completed", referringPersonnel: "PHN A. Villanueva", notes: "Senior care assessment completed at the RHU main." },
 ];
 
 /** Follow-ups monitored by the PHN (null barangay = RHU-level). */
@@ -167,6 +184,10 @@ export const phnFollowUps = [
   { id: 9, resident: "Rosa Dimagiba", age: 34, sex: "Female", barangay: "San Isidro", purpose: "BP Re-check Follow-up", dueDate: "Today", time: "2:30 PM", assignedTo: "PHN A. Villanueva", priority: "Medium", status: "Due Today", notes: "San Isidro resident; re-check at the San Isidro Barangay Health Center." },
   // San Isidro resident — diabetes follow-up conducted at the RHU main.
   { id: 10, resident: "Andres Banaag", age: 60, sex: "Male", barangay: "San Isidro", purpose: "RHU Diabetes Follow-up", dueDate: "Tomorrow", time: "9:30 AM", assignedTo: "PHN A. Villanueva", priority: "High", status: "Scheduled", notes: "San Isidro resident; diabetes follow-up conducted at the RHU main." },
+  // RHU-level follow-ups (barangay = null) — follow-up care at the RHU main.
+  { id: 11, resident: "Lourdes Villanueva", age: 52, sex: "Female", barangay: null, purpose: "RHU Hypertension Follow-up", dueDate: "Today", time: "11:30 AM", assignedTo: "PHN A. Villanueva", priority: "Medium", status: "Due Today", notes: "RHU-level patient; re-check BP and medication adherence at the RHU main." },
+  { id: 12, resident: "Manuel Fernandez", age: 47, sex: "Male", barangay: null, purpose: "RHU Diabetes Follow-up", dueDate: "Tomorrow", time: "9:00 AM", assignedTo: "PHN A. Villanueva", priority: "High", status: "Scheduled", notes: "RHU-level diabetes monitoring; FBS check at the RHU main." },
+  { id: 13, resident: "Nena Dizon", age: 68, sex: "Female", barangay: null, purpose: "RHU Senior Care Follow-up", dueDate: "Today", time: "3:00 PM", assignedTo: "PHN A. Villanueva", priority: "Medium", status: "Due Today", notes: "Post-check-up follow-up at the RHU main." },
 ];
 
 /**
@@ -179,6 +200,10 @@ export const phnAlerts = [
   { id: 3, type: "Follow-up concern", level: "warning", barangay: "Old San Roque", cases: 4, detected: "September 5, 2026", description: "Several overdue follow-ups among NCD patients, mostly hypertension and diabetes.", status: "Action Needed", recommendedAction: "Coordinate with assigned BHWs to reach residents and reschedule missed follow-ups." },
   // RHU-level alert (visible to unassigned PHN)
   { id: 4, type: "Elevated RHU consultation volume", level: "warning", barangay: null, cases: 26, detected: "September 5, 2026", description: "RHU consultation volume is above the weekly average; mostly respiratory complaints.", status: "Monitoring", recommendedAction: "Monitor staffing and medicine stock; escalate to the MHO if the trend continues." },
+  // San Isidro alert (visible under San Isidro coverage).
+  { id: 5, type: "Diarrheal cases above baseline", level: "warning", barangay: "San Isidro", cases: 7, detected: "September 6, 2026", description: "Seven diarrheal cases logged from San Isidro in the last three days, above the usual baseline.", status: "Monitoring", recommendedAction: "Remind households on water sanitation and handwashing; coordinate with the sanitary inspector." },
+  // RHU-level alert (visible under RHU coverage).
+  { id: 6, type: "Elevated RHU referral volume", level: "critical", barangay: null, cases: 9, detected: "September 6, 2026", description: "Nine RHU-level referrals pending review in the last two days.", status: "Action Needed", recommendedAction: "Prioritize referral reviews and coordinate receiving facilities for urgent cases." },
 ];
 
 /** Health services (null barangay = RHU-level service at the RHU main). */
@@ -191,6 +216,8 @@ export const phnHealthServices = [
   // RHU-level services (RHU main)
   { id: "SVC-106", name: "RHU General Consultation", barangay: null, count: "10 scheduled", personnel: "PHN A. Villanueva", date: "Today", time: "8:00 AM", status: "Ongoing", notes: "Walk-in consultations at the RHU main." },
   { id: "SVC-107", name: "RHU NCD Clinic", barangay: null, count: "6 scheduled", personnel: "PHN A. Villanueva", date: "Today", time: "1:00 PM", status: "Scheduled", notes: "RHU-level hypertension and diabetes clinic." },
+  { id: "SVC-108", name: "RHU Family Planning Clinic", barangay: null, count: "5 scheduled", personnel: "PHN A. Villanueva", date: "Today", time: "10:30 AM", status: "Scheduled", notes: "RHU-level family planning counseling at the RHU main." },
+  { id: "SVC-109", name: "San Isidro BP Screening", barangay: "San Isidro", count: "20 completed", personnel: "BHW G. Aquino", date: "Today", time: "7:30 AM", status: "Completed", notes: "Community-based blood pressure screening in San Isidro." },
 ];
 
 /** Assessments logged by field personnel, reviewed by the PHN. */
@@ -206,6 +233,9 @@ export const phnAssessments = [
   { id: 8, resident: "Rosa Dimagiba", age: 34, barangay: "San Isidro", date: "September 5, 2026", type: "BP Re-check", findings: "BP 145/92 at BHS.", assessedBy: "RHU Personnel A. Reyes", status: "For Review", notes: "San Isidro resident; BP re-check at the San Isidro Barangay Health Center." },
   // San Isidro resident — assessed at the RHU main (consultation location: RHU).
   { id: 9, resident: "Andres Banaag", age: 60, barangay: "San Isidro", date: "September 4, 2026", type: "Diabetes Review", findings: "FBS 170 mg/dL.", assessedBy: "RHU Personnel A. Reyes", status: "Validated", notes: "San Isidro resident; diabetes review conducted at the RHU main." },
+  // RHU-level assessments (barangay = null) — patients seen at the RHU main.
+  { id: 10, resident: "Lourdes Villanueva", age: 52, barangay: null, date: "September 5, 2026", type: "NCD Risk Assessment", findings: "BP 150/92; last refill more than 60 days ago.", assessedBy: "RHU Personnel A. Reyes", status: "For Review", notes: "RHU-level hypertension patient." },
+  { id: 11, resident: "Manuel Fernandez", age: 47, barangay: null, date: "September 4, 2026", type: "Diabetes Review", findings: "FBS 185 mg/dL on the current regimen.", assessedBy: "RHU Personnel A. Reyes", status: "For Review", notes: "RHU-level diabetes patient." },
 ];
 
 /** PHN notifications (scope-sensitive; barangay null = RHU-level event). */

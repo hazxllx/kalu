@@ -134,7 +134,7 @@ export default function HealthTrends() {
         {/* Summary */}
         <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5">
           {cards.map((c) => (
-            <div key={c.label} className="bg-white rounded-card border border-brand-border shadow-card p-5">
+            <div key={c.label} className="rounded-2xl border border-slate-200 bg-white shadow-card p-5">
               <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${c.tone}`}>
                 <c.icon className="w-5 h-5" strokeWidth={1.8} />
               </div>
@@ -314,7 +314,7 @@ export default function HealthTrends() {
         {d.summary.map((s, i) => {
           const icon = SUMMARY_ICONS[i % SUMMARY_ICONS.length];
           return (
-            <div key={s.label} className="bg-white rounded-card border border-brand-border shadow-card p-5">
+            <div key={s.label} className="rounded-2xl border border-slate-200 bg-white shadow-card p-5">
               <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${icon.tone}`}>
                 <icon.icon className="w-5 h-5" strokeWidth={1.8} />
               </div>
@@ -375,7 +375,7 @@ export default function HealthTrends() {
       {/* Summary Status Cards */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 mt-6">
         {d.statusCards.map((c) => (
-          <div key={c.title} className="bg-white rounded-card border border-brand-border shadow-card p-5">
+          <div key={c.title} className="rounded-2xl border border-slate-200 bg-white shadow-card p-5">
             <div className="flex items-center gap-2 mb-3">
               <span className={`w-2 h-2 rounded-full ${c.dot}`} />
               <h4 className="font-semibold text-brand-ink text-sm">{c.title}</h4>

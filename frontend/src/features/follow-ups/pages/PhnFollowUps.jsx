@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import StatCard from "@/components/common/StatCard";
+import CoverageSelector from "@/components/common/CoverageSelector";
 import { FOLLOWUP_STATUSES, phnResidents } from "@/services/mock/mockPhnData";
 import {
   useWorkflowStore,
@@ -14,13 +16,12 @@ import {
   isPHN,
   normalizeBarangay,
   phnDefaultBarangay,
-  phnFilterOptions,
   phnWritableBarangays,
-  rowMatchesOption,
   scopeLabel,
 } from "@/lib/phnScope";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
-import { Search, Plus, Eye, Edit2, Trash2, RefreshCw, X, CheckCircle2, Calendar, Clock } from "lucide-react";
+import { Search, Plus, Eye, Edit2, Trash2, RefreshCw, X, CheckCircle2 } from "lucide-react";
 
 const STATUS_COLORS = {
   Scheduled: "bg-brand-blue/10 text-brand-blue",
@@ -50,33 +51,33 @@ const emptyForm = () => ({
 
 export default function PhnFollowUps() {
   const { user } = useAuth();
+  const { coverage } = usePhnCoverage();
   const location = useLocation();
   const navigate = useNavigate();
   const phn = isPHN(user);
   const workflow = useWorkflowStore();
   // Shared workflow store so a follow-up scheduled from a completed check-up
-  // immediately reflects on the dashboard counts and mock state.
+  // immediately reflects on the dashboard counts and mock state. Rows are
+  // limited to the PHN's active coverage (assigned barangay or RHU).
   const followUps = useMemo(
-    () => filterRowsByScope(workflow.followUps, user),
-    [workflow.followUps, user]
+    () => filterRowsByScope(workflow.followUps, user, coverage),
+    [workflow.followUps, user, coverage]
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [barangayFilter, setBarangayFilter] = useState("All");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState(() => ({ ...emptyForm(), barangay: phnDefaultBarangay(user) }));
+  const [form, setForm] = useState(() => ({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) }));
   const [errors, setErrors] = useState({});
   const [newStatus, setNewStatus] = useState("");
   const [toast, setToast] = useState(null);
   const [fromCheckupDraft, setFromCheckupDraft] = useState(false);
 
-  const filterOptions = phnFilterOptions(user);
-  const writableBarangays = phnWritableBarangays(user);
+  const writableBarangays = phnWritableBarangays(user, coverage);
 
   const showToast = (message) => {
     setToast(message);
@@ -98,7 +99,7 @@ export default function PhnFollowUps() {
       .join("\n");
     setForm({
       resident: draft.resident || "",
-      barangay: draft.barangay || phnDefaultBarangay(user),
+      barangay: draft.barangay || phnDefaultBarangay(user, coverage),
       purpose: "Follow-up after PHN check-up",
       dueDate: "Today",
       time: "09:00",
@@ -112,7 +113,7 @@ export default function PhnFollowUps() {
     setShowAddModal(true);
     navigate(location.pathname, { replace: true, state: null });
     return undefined;
-  }, [location.state, location.pathname, navigate, user]);
+  }, [location.state, location.pathname, navigate, user, coverage]);
 
   const anyModalOpen = showAddModal || showEditModal || showViewModal || showDeleteConfirm || showStatusModal;
 
@@ -147,8 +148,7 @@ export default function PhnFollowUps() {
   const filtered = followUps.filter((f) => {
     const matchesSearch = searchQuery === "" || f.resident.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "All" || f.status === statusFilter;
-    const matchesBarangay = rowMatchesOption(f, barangayFilter, user);
-    return matchesSearch && matchesStatus && matchesBarangay;
+    return matchesSearch && matchesStatus;
   });
 
   const validate = () => {
@@ -178,7 +178,7 @@ export default function PhnFollowUps() {
     };
     addFollowUp(newFollowUp);
     setShowAddModal(false);
-    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
+    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) });
     setErrors({});
     showToast(fromCheckupDraft ? "Follow-up scheduled successfully." : "Follow-up added successfully.");
     setFromCheckupDraft(false);
@@ -210,7 +210,7 @@ export default function PhnFollowUps() {
     });
     setShowEditModal(false);
     setSelected(null);
-    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
+    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) });
     setErrors({});
     showToast("Follow-up updated successfully.");
   };
@@ -240,7 +240,7 @@ export default function PhnFollowUps() {
 
   const residentOptions = Array.from(
     new Set([
-      ...filterRowsByScope(phnResidents, user).map((r) => r.name),
+      ...filterRowsByScope(phnResidents, user, coverage).map((r) => r.name),
       ...followUps.map((f) => f.resident),
     ])
   ).sort();
@@ -394,11 +394,12 @@ export default function PhnFollowUps() {
       <PageHeader
         crumbs={["Home", "Follow-ups"]}
         title="Follow-up Monitoring"
-        subtitle={phn ? "Monitor follow-ups within your assigned coverage." : "Monitor RHU-level follow-ups."}
+        subtitle={phn ? "Monitor and complete resident follow-ups." : "Monitor RHU-level follow-ups."}
+        meta={phn ? <CoverageSelector mode="tag" /> : null}
         action={
           <button
             onClick={() => {
-              setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
+              setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) });
               setErrors({});
               setFromCheckupDraft(false);
               setShowAddModal(true);
@@ -419,24 +420,21 @@ export default function PhnFollowUps() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Due Today", value: stats.dueToday, icon: Clock, tone: "bg-brand-accent/10 text-brand-accent" },
-          { label: "Overdue", value: stats.overdue, icon: X, tone: "bg-brand-danger/10 text-brand-danger" },
-          { label: "Scheduled", value: stats.scheduled, icon: Calendar, tone: "bg-brand-blue/10 text-brand-blue" },
-          { label: "Completed", value: stats.completed, icon: CheckCircle2, tone: "bg-brand-green/10 text-brand-green" },
+          { label: "Due Today", value: stats.dueToday, icon: "CalendarClock", tone: "accent", index: 0 },
+          { label: "Overdue", value: stats.overdue, icon: "AlertCircle", tone: "danger", index: 1 },
+          { label: "Scheduled", value: stats.scheduled, icon: "CalendarDays", tone: "blue", index: 2 },
+          { label: "Completed", value: stats.completed, icon: "CheckCircle2", tone: "green", index: 3 },
         ].map((stat) => (
-          <Card key={stat.label} className="p-5">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${stat.tone}`}>
-                <stat.icon className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-sm text-brand-gray">{stat.label}</p>
-                <p className="text-2xl font-semibold text-brand-ink mt-0.5">{stat.value}</p>
-              </div>
-            </div>
-          </Card>
+          <StatCard
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            icon={stat.icon}
+            tone={stat.tone}
+            index={stat.index}
+          />
         ))}
       </div>
 
@@ -453,15 +451,6 @@ export default function PhnFollowUps() {
             />
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <select
-              value={barangayFilter}
-              onChange={(e) => setBarangayFilter(e.target.value)}
-              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
-            >
-              {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? "All Accessible" : b === "RHU" ? "RHU-level" : b}</option>
-              ))}
-            </select>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}

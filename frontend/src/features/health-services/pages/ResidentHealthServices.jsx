@@ -44,7 +44,7 @@ export default function HealthServices() {
       <div className="grid sm:grid-cols-2 gap-4 sm:gap-5">
         {RESIDENT_SERVICES.map((s, i) => (
           <motion.div key={s.name} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-            className="bg-white rounded-card border border-brand-border shadow-card p-4 sm:p-5 h-full flex flex-col">
+            className="rounded-2xl border border-slate-200 bg-white shadow-card p-4 sm:p-5 h-full flex flex-col">
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-3 flex-1">
                 <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl ${s.iconBg} flex items-center justify-center shrink-0`}>

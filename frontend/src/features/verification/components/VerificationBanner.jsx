@@ -22,7 +22,7 @@ export default function VerificationBanner() {
     <motion.div
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-card border border-brand-yellow/30 shadow-card overflow-hidden"
+      className="bg-white rounded-2xl border border-brand-yellow/30 shadow-card overflow-hidden"
     >
       <div className="bg-brand-yellow/10 border-b border-brand-yellow/20 px-6 py-5 flex items-start gap-4">
         <div className="w-11 h-11 rounded-xl bg-brand-yellow/20 flex items-center justify-center shrink-0">

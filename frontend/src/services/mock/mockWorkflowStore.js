@@ -37,7 +37,9 @@ export const CHECKUP_STATUS = Object.freeze({
   COMPLETED: "Consultation Completed",
 });
 
-const STORAGE_KEY = "kalusagap.workflow.v1";
+// v2: mock data extended with barangay-vs-RHU coverage records (San Isidro +
+// RHU). Bumped so existing v1 demo snapshots rebuild from the new seeds.
+const STORAGE_KEY = "kalusagap.workflow.v2";
 
 /** Triage snapshot reused for the demo patients already in the check-up queue. */
 const SEED_TRIAGE = {
@@ -118,9 +120,81 @@ const SEED_TRIAGE = {
     notes: "Referred by BHW Grace Aquino for catch-up immunization.",
     personnel: "RHU Personnel A. Reyes",
   },
+  "Rosa Bautista": {
+    chiefComplaint: "Senior care BP review",
+    temperature: "36.7",
+    bloodPressure: "150/90",
+    pulseRate: "82",
+    respiratoryRate: "19",
+    oxygenSaturation: "97",
+    weight: "60",
+    notes: "San Isidro senior-care patient; BP review at the San Isidro Barangay Health Center.",
+    personnel: "RHU Personnel A. Reyes",
+  },
+  "Lourdes Villanueva": {
+    chiefComplaint: "Hypertension medication review",
+    temperature: "36.6",
+    bloodPressure: "152/94",
+    pulseRate: "86",
+    respiratoryRate: "19",
+    oxygenSaturation: "97",
+    weight: "64",
+    notes: "RHU-level patient; hypertension review at the RHU main.",
+    personnel: "RHU Personnel A. Reyes",
+  },
+  "Manuel Fernandez": {
+    chiefComplaint: "Diabetes follow-up",
+    temperature: "36.8",
+    bloodPressure: "132/84",
+    pulseRate: "78",
+    respiratoryRate: "18",
+    oxygenSaturation: "96",
+    weight: "81",
+    notes: "RHU-level patient; diabetes follow-up at the RHU main.",
+    personnel: "RHU Personnel A. Reyes",
+  },
+  "Nena Dizon": {
+    chiefComplaint: "Senior care check-up",
+    temperature: "36.5",
+    bloodPressure: "138/86",
+    pulseRate: "80",
+    respiratoryRate: "18",
+    oxygenSaturation: "98",
+    weight: "55",
+    notes: "RHU-level senior-care patient; check-up at the RHU main.",
+    personnel: "RHU Personnel A. Reyes",
+  },
 };
 
 const SEED_VISIT_DATE = "September 5, 2026";
+
+/**
+ * Pre-completed PHN check-ups for seeded patients that enter the store with
+ * status "Consultation Completed" (so the demo shows completed check-ups for
+ * both the barangay and the RHU coverage on first load).
+ */
+const SEED_CHECKUPS = {
+  "Rosa Bautista": {
+    assessment: "BP 150/90 at the San Isidro Barangay Health Center. Medication tolerated, no orthostatic symptoms reported.",
+    healthConcern: "Hypertension",
+    riskLevel: "Medium",
+    riskReason: "Elderly patient with elevated BP reading; needs monitoring.",
+    clinicalNotes: "Encouraged salt reduction and consistent adherence to maintenance medication.",
+    recommendations: "Re-check BP in two weeks; continue current maintenance dose.",
+    outcome: "Follow-up Required",
+    completedBy: "PHN M. Reyes",
+  },
+  "Nena Dizon": {
+    assessment: "Senior care check-up at the RHU main. BP 138/86, no acute complaints reported.",
+    healthConcern: "Routine Monitoring",
+    riskLevel: "Low",
+    riskReason: "Stable vitals; routine senior-care monitoring.",
+    clinicalNotes: "Counseled on diet, exercise, and fall prevention.",
+    recommendations: "Continue maintenance care; schedule next senior-care review.",
+    outcome: "Continue Monitoring",
+    completedBy: "PHN A. Villanueva",
+  },
+};
 
 const seedPatients = () =>
   phnCheckupQueue.map((q) => {
@@ -135,6 +209,21 @@ const seedPatients = () =>
       notes: q.notes || "Sent to PHN after RHU triage.",
       personnel: "RHU Personnel A. Reyes",
     };
+    const completed = q.status === CHECKUP_STATUS.COMPLETED;
+    const completedToday = new Date().toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    const checkup = completed
+      ? {
+          ...(SEED_CHECKUPS[q.patient] || {}),
+          consultationLocation: q.consultationLocation || consultationLocationFor(q),
+          outcome: SEED_CHECKUPS[q.patient]?.outcome || "No Further Action",
+          completedBy: SEED_CHECKUPS[q.patient]?.completedBy || "PHN",
+          completedAt: completedToday,
+        }
+      : undefined;
     return {
       id: q.id,
       residentId: `RES-${String(2000 + q.id)}`,
@@ -145,11 +234,11 @@ const seedPatients = () =>
       residenceBarangay: q.barangay || null,
       consultationLocation: q.consultationLocation || consultationLocationFor(q),
       reason: q.reason,
-      status: CHECKUP_STATUS.WAITING,
+      status: q.status || CHECKUP_STATUS.WAITING,
       queuedAt: q.queuedAt,
       visitDate: SEED_VISIT_DATE,
       triage: { date: SEED_VISIT_DATE, ...triage },
-      checkup: undefined,
+      checkup,
       source: "seed",
     };
   });
@@ -419,6 +508,9 @@ export const sendToPhnQueue = (patient) => {
       respiratoryRate: patient.respiratoryRate || null,
       oxygenSaturation: patient.oxygenSaturation || null,
       weight: patient.weight || null,
+      heightCm: patient.heightCm || null,
+      bmi: patient.bmi || null,
+      bloodSugar: patient.bloodSugar || null,
       notes: patient.notes || "",
       personnel: patient.personnel || "RHU Personnel",
     },

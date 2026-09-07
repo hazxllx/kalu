@@ -11,6 +11,14 @@ import { BARANGAYS, BARANGAY_FILTERS, isBarangay } from "@/lib/barangays";
  * The PHN must NEVER see another barangay's data, and an unassigned PHN must
  * NOT automatically see any barangay-specific data.
  *
+ * PHN COVERAGE SELECTOR
+ * A barangay-assigned PHN switches their working coverage between two scopes:
+ *   - their assigned barangay (e.g. "San Isidro") — barangay-level coverage
+ *   - "RHU" — Rural Health Unit / broader coverage
+ * When the assigned barangay coverage is active only that barangay's rows are
+ * shown; when "RHU" is active only RHU-level rows (no barangay) are shown.
+ * An unassigned PHN only ever has the "RHU" coverage.
+ *
  * These helpers are frontend demonstration only — the real authorization
  * layer must live on the backend.
  */
@@ -42,6 +50,77 @@ export const getPHNScope = (user) => {
 /** True when the authenticated user is a PHN. */
 export const isPHN = (user) => Boolean(user && user.role === ROLE.PHN);
 
+/** Barangay the PHN is assigned to, or null when they are an RHU-only PHN. */
+export const phnAssignedBarangay = (user) => {
+  const scope = getPHNScope(user);
+  return scope && scope.level === PHN_SCOPE_BARANGAY ? scope.assignedBarangay : null;
+};
+
+/* --------------------------- Coverage selector --------------------------- */
+
+/**
+ * Selectable coverages for a PHN, in display order.
+ *   - barangay PHN → [{ assigned barangay }, { RHU }]
+ *   - RHU-only PHN → [{ RHU }]
+ *   - any other role → [] (no coverage concept)
+ * A barangay coverage is identified by the barangay name itself; "RHU" is the
+ * RHU-level coverage (the `RHU_OPTION` sentinel already used across the app).
+ */
+export const coverageOptions = (user) => {
+  if (!isPHN(user)) return [];
+  const brgy = phnAssignedBarangay(user);
+  const options = [];
+  if (brgy) {
+    options.push({ value: brgy, kind: "barangay", label: brgy, hint: `${brgy} — barangay-level coverage` });
+  }
+  options.push({ value: RHU_OPTION, kind: "rhu", label: "RHU", hint: "RHU — Rural Health Unit, broader coverage" });
+  return options;
+};
+
+/** Default coverage for a PHN: the assigned barangay, else RHU. Non-PHN → null. */
+export const defaultCoverage = (user) => {
+  if (!isPHN(user)) return null;
+  return phnAssignedBarangay(user) || RHU_OPTION;
+};
+
+/**
+ * Normalize a requested coverage to one the PHN may actually use.
+ * A barangay PHN may pick their assigned barangay or RHU; an RHU-only PHN can
+ * only ever resolve to RHU. Any other value falls back to the user's default
+ * coverage so a PHN can never land on a scope they are not authorized for.
+ */
+export const resolveCoverage = (user, value) => {
+  if (!isPHN(user)) return null;
+  if (value === RHU_OPTION) return RHU_OPTION;
+  const brgy = phnAssignedBarangay(user);
+  if (brgy && value === brgy) return brgy;
+  return defaultCoverage(user);
+};
+
+/** True when a data row belongs to the given coverage value. */
+export const rowInCoverage = (row, coverageValue) => {
+  if (coverageValue === RHU_OPTION) return !isBarangay(row && row.barangay);
+  return row?.barangay === coverageValue;
+};
+
+/** Human label used in UI text ("San Isidro" / "RHU"). */
+export const coverageTitleLabel = (coverage) => (coverage === RHU_OPTION ? "RHU" : coverage || "RHU");
+
+/** One-line description shown next to the coverage selector. */
+export const coverageSubtitle = (coverage) =>
+  coverage === RHU_OPTION
+    ? "Rural Health Unit (RHU) — broader coverage"
+    : `Barangay-level coverage — ${coverage}`;
+
+/** Filter rows to the active coverage of a PHN (any other role sees everything). */
+export const filterRowsByCoverage = (rows, user, coverage) => {
+  if (!Array.isArray(rows)) return [];
+  if (!isPHN(user)) return rows;
+  const c = resolveCoverage(user, coverage);
+  if (c === null) return rows;
+  return rows.filter((row) => rowInCoverage(row, c));
+};
+
 /**
  * True when a data row is visible to the given user under PHN scope rules.
  *
@@ -64,9 +143,20 @@ export const isVisibleToUser = (row, user) => {
   return scope.level === PHN_SCOPE_BARANGAY && brgy === scope.assignedBarangay;
 };
 
-/** Filter a list of rows down to what the user may see. */
-export const filterRowsByScope = (rows, user) =>
-  Array.isArray(rows) ? rows.filter((row) => isVisibleToUser(row, user)) : [];
+/**
+ * Filter a list of rows down to what the user may see.
+ *
+ * When `coverage` is provided the PHN rows are limited to that coverage
+ * (assigned barangay OR RHU). When omitted the legacy behavior is preserved:
+ * a barangay PHN sees RHU-level rows + their own barangay rows (used by
+ * screens that have not opted into the coverage selector).
+ */
+export const filterRowsByScope = (rows, user, coverage) => {
+  if (coverage !== undefined && coverage !== null) {
+    return filterRowsByCoverage(rows, user, coverage);
+  }
+  return Array.isArray(rows) ? rows.filter((row) => isVisibleToUser(row, user)) : [];
+};
 
 /** Display coverage string for a PHN ("RHU" or "RHU + San Isidro"). */
 export const phnCoverageLabel = (user) => {
@@ -101,23 +191,35 @@ export const RHU_OPTION = "RHU";
 
 /**
  * Barangay options for a NEW/EDITED record owned by a PHN.
- *   - unassigned PHN → only "RHU" (saved as barangay: null)
- *   - assigned PHN   → "RHU" + their assigned barangay
+ *   - with `coverage`: only the active coverage's scope (write where you work)
+ *   - without `coverage`: unassigned PHN → only "RHU"; assigned PHN →
+ *     "RHU" + their assigned barangay (legacy combined behavior)
  *   - any other role → the full three-barangay list (unchanged behavior)
  */
-export const phnWritableBarangays = (user) => {
+export const phnWritableBarangays = (user, coverage) => {
   const scope = getPHNScope(user);
   if (!scope) return [...BARANGAYS];
-  if (scope.level === PHN_SCOPE_RHU) return [RHU_OPTION];
-  return [RHU_OPTION, scope.assignedBarangay];
+  if (coverage === undefined || coverage === null) {
+    if (scope.level === PHN_SCOPE_RHU) return [RHU_OPTION];
+    return [RHU_OPTION, scope.assignedBarangay];
+  }
+  const c = resolveCoverage(user, coverage);
+  return c === RHU_OPTION ? [RHU_OPTION] : [c];
 };
 
-/** Default barangay for a new record ("" for non-PHN forms). */
-export const phnDefaultBarangay = (user) => {
+/**
+ * Default barangay for a new record.
+ *   - with `coverage`: the active coverage's scope
+ *   - without `coverage`: "" for non-PHN forms; the old RHU/assigned default
+ */
+export const phnDefaultBarangay = (user, coverage) => {
   const scope = getPHNScope(user);
   if (!scope) return "";
-  if (scope.level === PHN_SCOPE_RHU) return RHU_OPTION;
-  return scope.assignedBarangay;
+  if (coverage === undefined || coverage === null) {
+    if (scope.level === PHN_SCOPE_RHU) return RHU_OPTION;
+    return scope.assignedBarangay;
+  }
+  return resolveCoverage(user, coverage) || RHU_OPTION;
 };
 
 /** Convert the RHU_OPTION sentinel back to a stored barangay (null). */

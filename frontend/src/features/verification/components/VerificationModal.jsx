@@ -33,7 +33,7 @@ export default function VerificationModal({ open, onClose, data = {} }) {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-card shadow-float w-full max-w-lg max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-2xl shadow-float w-full max-w-lg max-h-[90vh] overflow-y-auto"
             >
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-5 border-b border-brand-border">

@@ -65,7 +65,7 @@ export default function TransferRegistration() {
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-card border border-brand-border shadow-float p-6 md:p-8"
+          className="rounded-2xl border border-slate-200 bg-white shadow-float p-6 md:p-8"
         >
           <h1 className="text-xl md:text-2xl font-semibold text-brand-ink tracking-tight mb-1">
             Transfer from Another Barangay
@@ -85,7 +85,7 @@ export default function TransferRegistration() {
             </p>
 
             {error && (
-              <div className="mb-5 bg-brand-danger/10 border border-brand-danger/20 rounded-card p-3 flex items-start gap-2">
+              <div className="mb-5 bg-brand-danger/10 border border-brand-danger/20 rounded-2xl p-3 flex items-start gap-2">
                 <AlertCircle className="w-5 h-5 text-brand-danger shrink-0 mt-0.5" />
                 <p className="text-sm text-brand-danger">{error}</p>
               </div>
@@ -99,7 +99,7 @@ export default function TransferRegistration() {
             />
           </div>
 
-          <div className="bg-brand-blue/5 border border-brand-blue/15 rounded-card p-4 mb-8">
+          <div className="bg-brand-blue/5 border border-brand-blue/15 rounded-2xl p-4 mb-8">
             <p className="text-xs text-brand-gray">
               <strong className="text-brand-ink">Supported formats:</strong> PNG, JPG, JPEG, PDF
               <br />

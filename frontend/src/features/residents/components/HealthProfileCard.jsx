@@ -28,27 +28,27 @@ export default function HealthProfileCard() {
         </button>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div className="rounded-card border border-brand-border bg-brand-bg p-4">
+        <div className="rounded-2xl border border-brand-border bg-brand-bg p-4">
           <p className="text-xs text-brand-gray">Birthday</p>
           <p className="mt-2 font-semibold text-brand-ink">{resident.birthday}</p>
         </div>
-        <div className="rounded-card border border-brand-border bg-brand-bg p-4">
+        <div className="rounded-2xl border border-brand-border bg-brand-bg p-4">
           <p className="text-xs text-brand-gray">Age</p>
           <p className="mt-2 font-semibold text-brand-ink">{resident.age}</p>
         </div>
-        <div className="rounded-card border border-brand-border bg-brand-bg p-4">
+        <div className="rounded-2xl border border-brand-border bg-brand-bg p-4">
           <p className="text-xs text-brand-gray">Sex</p>
           <p className="mt-2 font-semibold text-brand-ink">{resident.sex}</p>
         </div>
-        <div className="rounded-card border border-brand-border bg-brand-bg p-4">
+        <div className="rounded-2xl border border-brand-border bg-brand-bg p-4">
           <p className="text-xs text-brand-gray">Blood Type</p>
           <p className="mt-2 font-semibold text-brand-ink">{resident.bloodType}</p>
         </div>
-        <div className="rounded-card border border-brand-border bg-brand-bg p-4">
+        <div className="rounded-2xl border border-brand-border bg-brand-bg p-4">
           <p className="text-xs text-brand-gray">Last Visit</p>
           <p className="mt-2 font-semibold text-brand-ink">{resident.lastVisit}</p>
         </div>
-        <div className="rounded-card border border-brand-border bg-brand-bg p-4">
+        <div className="rounded-2xl border border-brand-border bg-brand-bg p-4">
           <p className="text-xs text-brand-gray">Assigned Health Worker</p>
           <p className="mt-2 font-semibold text-brand-ink">{resident.assignedHealthWorker}</p>
         </div>

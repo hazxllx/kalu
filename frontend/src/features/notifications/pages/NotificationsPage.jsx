@@ -11,19 +11,22 @@ import {
   clearRoleNotifications,
 } from "@/services/mock/mockWorkflowStore";
 import { filterRowsByScope } from "@/lib/phnScope";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
 
 export default function NotificationsPage({ crumbs = ["Home", "Notifications"], roleKey = "resident" }) {
   const { user } = useAuth();
+  const { coverage } = usePhnCoverage();
   const store = useWorkflowStore();
   const [filter, setFilter] = useState("all");
 
   // Notifications live in the shared workflow store so triage → PHN hand-offs
   // and "mark as read" actions stay consistent with the bell count and survive
-  // page navigation. PHN scope rules are applied before anything renders.
+  // page navigation. PHN scope/coverage rules are applied before anything
+  // renders; other roles keep their existing behavior.
   const roleNotifications = useMemo(
-    () => filterRowsByScope(store.notifications[roleKey] || [], user),
-    [store.notifications, roleKey, user]
+    () => filterRowsByScope(store.notifications[roleKey] || [], user, coverage),
+    [store.notifications, roleKey, user, coverage]
   );
 
   const filteredNotifications = roleNotifications.filter((n) => {

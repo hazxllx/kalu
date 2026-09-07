@@ -172,7 +172,7 @@ export default function ResidentVerification() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-card shadow-float w-full max-w-md p-6"
+              className="bg-white rounded-2xl shadow-float w-full max-w-md p-6"
             >
               <div className="flex items-start gap-4">
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${

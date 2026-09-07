@@ -29,7 +29,7 @@ export default function MHODashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-5">
         {STATS.map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-            className="bg-white rounded-card border border-brand-border shadow-card p-4 sm:p-5">
+            className="rounded-2xl border border-slate-200 bg-white shadow-card p-4 sm:p-5">
             <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center ${s.tone}`}>
               <s.icon className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.8} />
             </div>

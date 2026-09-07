@@ -39,7 +39,7 @@ export default function HealthStatusSummary({ summary }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1, duration: 0.4 }}
             whileHover={{ y: -4 }}
-            className={`rounded-card border p-6 ${STATUS_BG[s.status]} ${STATUS_BORDER[s.status]}`}
+            className={`rounded-2xl border p-6 ${STATUS_BG[s.status]} ${STATUS_BORDER[s.status]}`}
           >
             <div className="flex items-center justify-between mb-4">
               <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${STATUS_ICON_BG[s.status]}`}>

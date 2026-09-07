@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import StatCard from "@/components/common/StatCard";
 import { phnResidents } from "@/services/mock/mockPhnData";
 import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
 import { consultationLocationFor } from "@/lib/consultationLocations";
@@ -10,10 +11,11 @@ import {
   isPHN,
   normalizeBarangay,
   phnDefaultBarangay,
-  phnFilterOptions,
   phnWritableBarangays,
   scopeLabel,
 } from "@/lib/phnScope";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
+import CoverageSelector from "@/components/common/CoverageSelector";
 import { useAuth } from "@/context/AuthContext";
 import { Search, Plus, Eye, Edit2, Trash2, X, CheckCircle2, ClipboardCheck, ArrowRight } from "lucide-react";
 
@@ -99,14 +101,15 @@ const WorkflowStep = ({ title, sub, children }) => (
 
 export default function PhnHealthRecords() {
   const { user } = useAuth();
+  const { coverage } = usePhnCoverage();
   const phn = isPHN(user);
   const workflow = useWorkflowStore();
 
   // Triaged/check-up patients are matched by name so the record shows the live
   // status of the RHU → PHN workflow without storing a second patient list.
   const visiblePatients = useMemo(
-    () => filterRowsByScope(workflow.patients, user),
-    [workflow.patients, user]
+    () => filterRowsByScope(workflow.patients, user, coverage),
+    [workflow.patients, user, coverage]
   );
   const patientByName = useMemo(() => {
     const map = {};
@@ -117,24 +120,26 @@ export default function PhnHealthRecords() {
   }, [visiblePatients]);
 
   const visibleReferrals = useMemo(
-    () => filterRowsByScope(workflow.referrals, user),
-    [workflow.referrals, user]
+    () => filterRowsByScope(workflow.referrals, user, coverage),
+    [workflow.referrals, user, coverage]
   );
   const visibleFollowUps = useMemo(
-    () => filterRowsByScope(workflow.followUps, user),
-    [workflow.followUps, user]
+    () => filterRowsByScope(workflow.followUps, user, coverage),
+    [workflow.followUps, user, coverage]
   );
   const visibleServices = useMemo(
-    () => filterRowsByScope(workflow.services, user),
-    [workflow.services, user]
+    () => filterRowsByScope(workflow.services, user, coverage),
+    [workflow.services, user, coverage]
   );
 
-  // Build the row set once on mount: base resident records + any triaged
-  // patients not already in the resident registry.
-  const [records, setRecords] = useState(() => {
-    const base = filterRowsByScope(RECORDS, user);
+  // The master list keeps every record the PHN can own (both the resident
+  // registry rows and any triaged patients). The active coverage decides which
+  // of those rows are actually rendered, so switching coverage does not lose
+  // records that were created under the other coverage.
+  const [masterRecords, setMasterRecords] = useState(() => {
+    const base = RECORDS.map((r) => ({ ...r }));
     const known = new Set(base.map((r) => r.resident));
-    const extras = visiblePatients
+    const extras = workflow.patients
       .filter((p) => !known.has(p.patient))
       .map((p, i) => ({
         id: 1000 + i,
@@ -152,8 +157,12 @@ export default function PhnHealthRecords() {
     return [...base, ...extras];
   });
 
+  const records = useMemo(
+    () => filterRowsByScope(masterRecords, user, coverage),
+    [masterRecords, user, coverage]
+  );
+
   const [searchQuery, setSearchQuery] = useState("");
-  const [barangayFilter, setBarangayFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -162,12 +171,11 @@ export default function PhnHealthRecords() {
   const [showCheckupModal, setShowCheckupModal] = useState(false);
   const [selected, setSelected] = useState(null);
   const [checkupPatient, setCheckupPatient] = useState(null);
-  const [form, setForm] = useState(() => ({ ...emptyForm(), barangay: phnDefaultBarangay(user) }));
+  const [form, setForm] = useState(() => ({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) }));
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
 
-  const filterOptions = phnFilterOptions(user);
-  const writableBarangays = phnWritableBarangays(user);
+  const writableBarangays = phnWritableBarangays(user, coverage);
 
   const showToast = (message) => {
     setToast(message);
@@ -205,9 +213,8 @@ export default function PhnHealthRecords() {
 
   const filtered = records.filter((r) => {
     const matchesSearch = searchQuery === "" || r.resident.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesBarangay = barangayFilter === "All" || (barangayFilter === "RHU" ? !r.barangay : r.barangay === barangayFilter);
     const matchesStatus = statusFilter === "All" || r.status === statusFilter;
-    return matchesSearch && matchesBarangay && matchesStatus;
+    return matchesSearch && matchesStatus;
   });
 
   const validate = () => {
@@ -223,8 +230,8 @@ export default function PhnHealthRecords() {
   const handleAdd = () => {
     if (!validate()) return;
     const newRecord = {
-      id: records.reduce((acc, r) => Math.max(acc, r.id || 0), 0) + 1,
-      recordNo: `HR-2026-${String(110 + records.length).padStart(4, "0")}`,
+      id: masterRecords.reduce((acc, r) => Math.max(acc, r.id || 0), 0) + 1,
+      recordNo: `HR-2026-${String(110 + masterRecords.length).padStart(4, "0")}`,
       resident: form.resident.trim(),
       age: Number(form.age),
       sex: form.sex,
@@ -235,9 +242,9 @@ export default function PhnHealthRecords() {
       lastVisit: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
       notes: form.notes.trim(),
     };
-    setRecords([newRecord, ...records]);
+    setMasterRecords((prev) => [newRecord, ...prev]);
     setShowAddModal(false);
-    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
+    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) });
     setErrors({});
     showToast("Health record added successfully.");
   };
@@ -260,7 +267,7 @@ export default function PhnHealthRecords() {
 
   const handleEdit = () => {
     if (!validate()) return;
-    setRecords((prev) =>
+    setMasterRecords((prev) =>
       prev.map((r) =>
         r.id === selected.id
           ? {
@@ -276,20 +283,23 @@ export default function PhnHealthRecords() {
     );
     setShowEditModal(false);
     setSelected(null);
-    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
+    setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) });
     setErrors({});
     showToast("Health record updated successfully.");
   };
 
   const handleConfirmDelete = () => {
-    setRecords((prev) => prev.filter((r) => r.id !== selected.id));
+    setMasterRecords((prev) => prev.filter((r) => r.id !== selected.id));
     setShowDeleteConfirm(false);
     setSelected(null);
     showToast("Health record deleted successfully.");
   };
 
   const residentOptions = Array.from(
-    new Set([...filterRowsByScope(phnResidents, user).map((r) => r.name), ...records.map((r) => r.resident)])
+    new Set([
+      ...filterRowsByScope(phnResidents, user, coverage).map((r) => r.name),
+      ...records.map((r) => r.resident),
+    ])
   ).sort();
 
   const livePatientFor = (record) => patientByName[record.resident] || null;
@@ -519,17 +529,18 @@ export default function PhnHealthRecords() {
         title="Health Records"
         subtitle={
           phn
-            ? "Health records within your assigned coverage."
+            ? "Maintain resident health records across the care workflow."
             : "Health records for RHU-level residents."
         }
+        meta={phn ? <CoverageSelector mode="tag" /> : null}
         action={
           <button
             onClick={() => {
-              setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user) });
+              setForm({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) });
               setErrors({});
               setShowAddModal(true);
             }}
-            className="flex items-center gap-2 border border-brand-blue/40 bg-white text-brand-blue px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-light transition-colors"
+            className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
           >
             <Plus className="w-4 h-4" /> Add Record
           </button>
@@ -545,23 +556,20 @@ export default function PhnHealthRecords() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         {[
-          { label: "Total Records", value: stats.total, tone: "bg-brand-blue/10 text-brand-blue" },
-          { label: "Active", value: stats.active, tone: "bg-brand-green/10 text-brand-green" },
-          { label: "High Risk", value: stats.highRisk, tone: "bg-brand-danger/10 text-brand-danger" },
+          { label: "Total Records", value: stats.total, icon: "FileText", tone: "blue", index: 0 },
+          { label: "Active", value: stats.active, icon: "Users", tone: "green", index: 1 },
+          { label: "High Risk", value: stats.highRisk, icon: "AlertTriangle", tone: "danger", index: 2 },
         ].map((stat) => (
-          <Card key={stat.label} className="p-5">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${stat.tone}`}>
-                <Search className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-sm text-brand-gray">{stat.label}</p>
-                <p className="text-2xl font-semibold text-brand-ink mt-0.5">{stat.value}</p>
-              </div>
-            </div>
-          </Card>
+          <StatCard
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            icon={stat.icon}
+            tone={stat.tone}
+            index={stat.index}
+          />
         ))}
       </div>
 
@@ -578,15 +586,6 @@ export default function PhnHealthRecords() {
             />
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <select
-              value={barangayFilter}
-              onChange={(e) => setBarangayFilter(e.target.value)}
-              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
-            >
-              {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? "All Accessible" : b === "RHU" ? "RHU-level" : b}</option>
-              ))}
-            </select>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}

@@ -2,10 +2,9 @@ import React, { useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ROLES } from "@/lib/brand";
-import { phnCoverageLabel } from "@/lib/phnScope";
 import { useAuth } from "@/context/AuthContext";import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import {
-  Lock, Eye, EyeOff, Check, ShieldCheck, Mail, MapPin, FileText,
+  Lock, Eye, EyeOff, Check, ShieldCheck, Mail, FileText,
   Calendar, Monitor, Smartphone, LogOut,
 } from "lucide-react";
 
@@ -36,12 +35,18 @@ export default function SettingsPage({ roleKey = "resident" }) {
   const displayName = user?.name || role.name;
   const displayEmail = user?.email || `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`;
 
-  // PHN coverage reflects the signed-in account's barangay assignment:
-  //   - no assignment → "RHU"
-  //   - assigned → "San Isidro + RHU" (never implies all three barangays).
+  // Settings is an account page, not a workspace page — the working PHN
+  // coverage is managed where it affects data (the dashboard), so it is not
+  // shown here. The profile shows the generic profile fields only.
   const isPhn = roleKey === "phn";
-  const coverageValue = isPhn ? phnCoverageLabel(user) : "San Isidro";
-  const coverageLabel = isPhn ? "Coverage" : "Assigned Barangay";
+  const profileFields = [
+    { label: "Full Name", value: displayName },
+    { label: "Role", value: role.label },
+    { label: "Email", value: displayEmail },
+    { label: "Contact Number", value: "0917 123 4567" },
+    ...(isPhn ? [] : [{ label: "Assigned Barangay", value: "San Isidro" }]),
+    { label: "Municipality", value: "Pili, Camarines Sur" },
+  ];
 
   const handleSave = () => {
     setSaved(true);
@@ -65,14 +70,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
         <Card className="p-4 sm:p-6">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4 sm:mb-5">Profile Information</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {[
-              { label: "Full Name", value: displayName },
-              { label: "Role", value: role.label },
-              { label: "Email", value: displayEmail },
-              { label: "Contact Number", value: "0917 123 4567" },
-              { label: coverageLabel, value: coverageValue },
-              { label: "Municipality", value: "Pili, Camarines Sur" },
-            ].map((f) => (
+            {profileFields.map((f) => (
               <div key={f.label}>
                 <label className="text-sm font-medium text-brand-ink">{f.label}</label>
                 <input defaultValue={f.value} className="mt-1.5 w-full bg-white border border-brand-border rounded-input px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue" readOnly />
@@ -139,7 +137,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
           {/* Password strength meter */}
           {pw.new && (
-            <div className="mt-4 bg-brand-bg rounded-card p-4 max-w-2xl">
+            <div className="mt-4 bg-brand-bg rounded-2xl p-4 max-w-2xl">
               <div className="flex gap-1 mb-3">
                 {[0, 1, 2, 3, 4].map((i) => (
                   <div key={i} className="flex-1 h-1.5 rounded-full overflow-hidden bg-brand-border">
@@ -187,7 +185,6 @@ export default function SettingsPage({ roleKey = "resident" }) {
             {[
               { label: "Registered Email", value: displayEmail, icon: Mail },
               { label: "Registration Date", value: "January 15, 2026", icon: Calendar },
-              { label: coverageLabel, value: coverageValue, icon: MapPin },
               { label: "Reference Number", value: "KSG-2026-00012", icon: FileText },
               { label: "Verification Status", value: isResident ? "Verified" : "N/A", icon: ShieldCheck, badge: isResident },
             ].map((f) => (

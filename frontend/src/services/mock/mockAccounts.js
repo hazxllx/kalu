@@ -66,8 +66,8 @@ export const MOCK_ACCOUNTS = [
   },
   {
     role: ROLE.HEALTH_SUPERVISOR,
-    label: 'Health Supervisor',
-    name: 'Barangay Health Supervisor',
+    label: 'Barangay Health Supervisor',
+    name: 'Maria Dela Cruz',
     email: 'supervisor@kalusagap.test',
     password: 'Supervisor123!',
     barangay: 'San Isidro',
@@ -76,7 +76,7 @@ export const MOCK_ACCOUNTS = [
   {
     role: ROLE.RHU_PERSONNEL,
     label: 'RHU Personnel',
-    name: 'RHU Personnel',
+    name: 'Antonio Reyes',
     email: 'rhu@kalusagap.test',
     password: 'Rhu123!',
     description: 'Triage and case routing.',

@@ -12,6 +12,7 @@ import { NAV, filterNavByPermission } from "@/lib/navConfig";
 import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
 import { filterRowsByScope } from "@/lib/phnScope";
 import { useAuth } from "@/context/AuthContext";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { usePermissions } from "@/context/PermissionsContext";
 
 export default function DashboardLayout({ roleKey }) {
@@ -19,6 +20,7 @@ export default function DashboardLayout({ roleKey }) {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { can } = usePermissions();
+  const { coverage } = usePhnCoverage();
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
@@ -47,8 +49,9 @@ export default function DashboardLayout({ roleKey }) {
 
   const workflow = useWorkflowStore();
   // Notifications come from the shared workflow store (kept in sync with the
-  // Notifications page) and are always filtered to the signed-in PHN's scope.
-  const notifications = filterRowsByScope(workflow.notifications[roleKey] || [], user);
+  // Notifications page) and are always filtered to the signed-in PHN's active
+  // coverage (assigned barangay or RHU); other roles are unaffected.
+  const notifications = filterRowsByScope(workflow.notifications[roleKey] || [], user, coverage);
   const unreadCount = notifications.filter((n) => !n.read).length;
   const notificationsPath = roleKey === "resident-limited"
     ? "/app/resident-limited/announcements"
@@ -66,6 +69,18 @@ export default function DashboardLayout({ roleKey }) {
   const profilePath = `${location.pathname.split("/").slice(0, 4).join("/")}/profile`;
 
   const NavList = () => {
+    // An item is active when its path matches exactly OR when the current
+    // location is a child page of that module (e.g. `/app/bhw/households/new`
+    // keeps "Household Profiling" highlighted instead of leaving no active
+    // item — and never highlights Dashboard).
+    const isItemActive = (item) => {
+      if (!item.path || item.path === "#") return false;
+      return (
+        location.pathname === item.path ||
+        location.pathname.startsWith(`${item.path}/`)
+      );
+    };
+
     // Group consecutive items that share a `group` label under one small
     // uppercase header; ungrouped items render flat, exactly as before.
     const blocks = items.reduce((acc, it) => {
@@ -109,7 +124,7 @@ export default function DashboardLayout({ roleKey }) {
               {openGroup && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-3 pt-1 space-y-1">
                   {it.children.map((child) => {
-                    const active = location.pathname === child.path;
+                    const active = isItemActive(child);
                     return (
                       <Link key={child.path} to={child.path} onClick={() => setOpen(false)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${active ? "bg-brand-light text-brand-blue font-medium" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}>
                         <Icon name={child.icon} className="w-[18px] h-[18px]" strokeWidth={1.8} />
@@ -123,7 +138,7 @@ export default function DashboardLayout({ roleKey }) {
           </div>
         );
       }
-      const active = location.pathname === it.path;
+      const active = isItemActive(it);
       return (
         <Link
           key={it.path}
@@ -235,15 +250,15 @@ export default function DashboardLayout({ roleKey }) {
                   {initials}
                 </div>
                 <div className="hidden md:block text-left">
+                  <p className="text-sm font-medium text-slate-900 leading-tight">{displayName}</p>
                   <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-medium text-slate-900 leading-tight">{displayName}</p>
                     {isResident && (
                       verified
                         ? <ShieldCheck className="w-3.5 h-3.5 text-brand-green" strokeWidth={2} />
                         : <ShieldAlert className="w-3.5 h-3.5 text-brand-yellow" strokeWidth={2} />
                     )}
+                    <p className="text-xs text-slate-500">{role.label}</p>
                   </div>
-                  <p className="text-xs text-slate-500">{role.label}</p>
                 </div>
                 <ChevronDown className="hidden md:block w-4 h-4 text-slate-500" />
               </button>
@@ -263,13 +278,14 @@ export default function DashboardLayout({ roleKey }) {
                           {initials}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-heading font-semibold text-slate-900 truncate">{displayName}</p>
+                          <p className="text-sm font-heading font-semibold text-slate-900 truncate">{displayName}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
                             {isResident && (
                               verified
                                 ? <ShieldCheck className="w-4 h-4 text-brand-green shrink-0" strokeWidth={2} />
                                 : <ShieldAlert className="w-4 h-4 text-brand-yellow shrink-0" strokeWidth={2} />
                             )}
+                            <p className="text-xs text-slate-500 truncate">{role.label}</p>
                           </div>
                           {isResident && (
                             <div className="mt-1">

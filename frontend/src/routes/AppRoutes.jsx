@@ -38,6 +38,7 @@ import PhnHealthServices from '@/features/health-services/pages/PhnHealthService
 // Domain features
 import ResidentsPage from '@/features/residents/pages/ResidentsPage';
 import Households from '@/features/households/pages/Households';
+import AddHouseholdPage from '@/features/households/pages/AddHouseholdPage';
 import ConsultationsPage from '@/features/consultations/pages/ConsultationsPage';
 import TreatmentConsultation from '@/features/consultations/pages/TreatmentConsultation';
 import HealthRecord from '@/features/health-records/pages/HealthRecord';
@@ -55,7 +56,6 @@ import MidwifeHealthServices from '@/features/health-services/pages/MidwifeHealt
 import Programs from '@/features/health-services/pages/Programs';
 import NotificationsPage from '@/features/notifications/pages/NotificationsPage';
 import ReportsPage from '@/features/reports/pages/ReportsPage';
-import Analytics from '@/features/analytics/pages/Analytics';
 import HealthTrends from '@/features/analytics/pages/HealthTrends';
 import Barangays from '@/features/analytics/pages/Barangays';
 import UserManagement from '@/features/users/pages/UserManagement';
@@ -169,6 +169,7 @@ const AppRoutes = () => (
         <Route path="immunization" element={<Immunization />} />
         <Route path="referrals" element={<Referrals />} />
         <Route path="households" element={<Households />} />
+        <Route path="households/new" element={<AddHouseholdPage />} />
         <Route path="trends" element={<HealthTrends />} />
         <Route path="barangays" element={<Barangays />} />
         <Route path="reports" element={<ReportsPage />} />
@@ -186,12 +187,13 @@ const AppRoutes = () => (
         <Route path="dashboard" element={<RHUDashboard />} />
         <Route path="triage" element={<RhuTriage />} />
         <Route path="residents" element={<ResidentsPage />} />
-        <Route path="barangays" element={<Barangays />} />
-        <Route path="reports" element={<ReportsPage />} />
-        <Route path="analytics" element={<Analytics />} />
         <Route path="programs" element={<Programs />} />
         <Route path="notifications" element={<NotificationsPage roleKey="rhu_personnel" />} />
         <Route path="settings" element={<SettingsPage roleKey="rhu_personnel" />} />
+        {/* Barangays/Reports/Analytics are no longer part of the RHU Personnel
+            role; any removed or unknown RHU sub-path falls back to the role
+            dashboard so a user is never stranded on an inaccessible page. */}
+        <Route path="*" element={<Navigate to="dashboard" replace />} />
       </Route>
     </Route>
 
@@ -203,6 +205,7 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<BHWDashboard />} />
         <Route path="households" element={<Households />} />
+        <Route path="households/new" element={<AddHouseholdPage />} />
         <Route path="notifications" element={<NotificationsPage roleKey="bhw" />} />
         <Route path="settings" element={<SettingsPage roleKey="bhw" />} />
       </Route>

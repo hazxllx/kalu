@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import StatCard from "@/components/common/StatCard";
 import {
   CHECKUP_STATUS,
   useWorkflowStore,
@@ -11,11 +12,13 @@ import {
   workflowHelpers,
 } from "@/services/mock/mockWorkflowStore";
 import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
-import { filterRowsByScope, phnFilterOptions, rowMatchesOption, scopeLabel } from "@/lib/phnScope";
+import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
+import CoverageSelector from "@/components/common/CoverageSelector";
 import { riskOfPatient } from "@/lib/riskRules";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
-import { Search, CheckCircle2, Users, ClipboardCheck, UserCheck, AlertTriangle } from "lucide-react";
+import { Search, CheckCircle2, UserCheck } from "lucide-react";
 
 const EMPTY_STATE = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
@@ -58,19 +61,19 @@ const buildDraftBase = (patient) => ({
 
 export default function PhnCheckups() {
   const { user } = useAuth();
+  const { coverage } = usePhnCoverage();
   const navigate = useNavigate();
   const location = useLocation();
   const store = useWorkflowStore();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [barangayFilter, setBarangayFilter] = useState("All");
   const [activePatientId, setActivePatientId] = useState(null);
   const [toast, setToast] = useState(null);
 
   const visiblePatients = useMemo(
-    () => filterRowsByScope(store.patients, user),
-    [store.patients, user]
+    () => filterRowsByScope(store.patients, user, coverage),
+    [store.patients, user, coverage]
   );
 
   const showToast = (message) => {
@@ -94,8 +97,7 @@ export default function PhnCheckups() {
     const matchesSearch =
       searchQuery === "" || p.patient.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "All" || p.status === statusFilter;
-    const matchesBarangay = rowMatchesOption(p, barangayFilter, user);
-    return matchesSearch && matchesStatus && matchesBarangay;
+    return matchesSearch && matchesStatus;
   });
 
   const completedToday = useMemo(() => {
@@ -104,8 +106,6 @@ export default function PhnCheckups() {
       .filter((p) => p.status === CHECKUP_STATUS.COMPLETED && p.checkup?.completedAt === today)
       .sort((a, b) => String(b.checkup?.completedAt || "").localeCompare(String(a.checkup?.completedAt || "")));
   }, [visiblePatients]);
-
-  const filterOptions = phnFilterOptions(user);
 
   // Allow other pages (e.g. the PHN dashboard "Start Check-up" action) to
   // deep-open the consultation workbench for a patient.
@@ -181,7 +181,8 @@ export default function PhnCheckups() {
       <PageHeader
         crumbs={["Home", "PHN Check-ups"]}
         title="PHN Check-ups"
-        subtitle="Conduct and manage patient check-ups within your assigned coverage."
+        subtitle="Conduct and manage patient check-ups and assessments."
+        meta={<CoverageSelector mode="tag" />}
       />
 
       {/* Toast */}
@@ -193,24 +194,21 @@ export default function PhnCheckups() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Waiting for PHN", value: stats.waiting, icon: Users, tone: "bg-brand-accent/10 text-brand-accent" },
-          { label: "In Check-up", value: stats.inCheckup, icon: ClipboardCheck, tone: "bg-brand-blue/10 text-brand-blue" },
-          { label: "Priority Cases", value: stats.priority, icon: AlertTriangle, tone: "bg-brand-danger/10 text-brand-danger" },
-          { label: "Completed Today", value: stats.completed, icon: UserCheck, tone: "bg-brand-green/10 text-brand-green" },
+          { label: "Waiting for PHN", value: stats.waiting, icon: "Users", tone: "accent", index: 0 },
+          { label: "In Check-up", value: stats.inCheckup, icon: "ClipboardCheck", tone: "blue", index: 1 },
+          { label: "Priority Cases", value: stats.priority, icon: "AlertTriangle", tone: "danger", index: 2 },
+          { label: "Completed Today", value: stats.completed, icon: "UserCheck", tone: "green", index: 3 },
         ].map((stat) => (
-          <Card key={stat.label} className="p-5">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${stat.tone}`}>
-                <stat.icon className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-sm text-brand-gray">{stat.label}</p>
-                <p className="text-2xl font-semibold text-brand-ink mt-0.5">{stat.value}</p>
-              </div>
-            </div>
-          </Card>
+          <StatCard
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            icon={stat.icon}
+            tone={stat.tone}
+            index={stat.index}
+          />
         ))}
       </div>
 
@@ -227,15 +225,6 @@ export default function PhnCheckups() {
             />
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <select
-              value={barangayFilter}
-              onChange={(e) => setBarangayFilter(e.target.value)}
-              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
-            >
-              {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? "All Accessible" : b === "RHU" ? "RHU-level" : b}</option>
-              ))}
-            </select>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}

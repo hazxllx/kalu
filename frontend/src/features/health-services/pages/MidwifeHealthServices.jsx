@@ -225,7 +225,7 @@ export default function HealthServicesPage() {
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="bg-white rounded-card border border-brand-border shadow-card p-4 sm:p-5 h-full flex flex-col"
+                className="rounded-2xl border border-slate-200 bg-white shadow-card p-4 sm:p-5 h-full flex flex-col"
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="flex items-center gap-3 flex-1 min-w-0">

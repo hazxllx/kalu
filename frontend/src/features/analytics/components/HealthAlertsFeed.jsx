@@ -10,7 +10,7 @@ const LEVEL_COLOR = {
 
 export default function HealthAlertsFeed({ alerts }) {
   return (
-    <div className="bg-white rounded-card border border-brand-border shadow-card p-6">
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-card p-6">
       <div className="relative pl-2">
         <div className="absolute left-[15px] top-2 bottom-2 w-px bg-brand-border" />
         <div className="space-y-5">

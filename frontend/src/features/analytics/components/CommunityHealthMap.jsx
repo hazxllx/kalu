@@ -24,7 +24,7 @@ export default function CommunityHealthMap({ barangays, onSelect }) {
 
   return (
     <div className="relative">
-      <div className="relative rounded-card overflow-hidden" style={{ background: "#E8F0F7" }}>
+      <div className="relative rounded-2xl overflow-hidden" style={{ background: "#E8F0F7" }}>
         <img
           src={MAP_IMAGE}
           alt="Municipality Health Map"
@@ -78,7 +78,7 @@ export default function CommunityHealthMap({ barangays, onSelect }) {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.92 }}
                 transition={{ duration: 0.15 }}
-                className="absolute z-20 pointer-events-none bg-white rounded-card shadow-float border border-brand-border p-4 w-56"
+                className="absolute z-20 pointer-events-none bg-white rounded-2xl shadow-float border border-brand-border p-4 w-56"
                 style={{ left, top }}
               >
                 <div className="flex items-center gap-2 mb-3 pb-3 border-b border-brand-border">

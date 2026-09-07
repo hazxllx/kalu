@@ -1,16 +1,23 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { TrendingUp, Download, Send, Check, CheckCircle2, X } from "lucide-react";
-import { phnMonthlyTrend } from "@/services/mock/mockPhnData";
+import {
+  phnMonthlyTrend,
+  phnResidents,
+  phnReferrals,
+  phnFollowUps,
+  phnHealthServices,
+} from "@/services/mock/mockPhnData";
 import {
   filterRowsByScope,
-  getPHNScope,
   normalizeBarangay,
   phnDefaultBarangay,
   phnWritableBarangays,
   scopeLabel,
 } from "@/lib/phnScope";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
+import CoverageSelector from "@/components/common/CoverageSelector";
 import { useAuth } from "@/context/AuthContext";
 import { monthlyConsultations } from "@/services/mock/mockData";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid, Legend } from "recharts";
@@ -51,29 +58,25 @@ const STATUS_COLORS = {
 
 const REPORT_TYPE_LABELS = ["Health Records", "Referrals", "Follow-ups", "Health Services", "Community Health Trends"];
 
-// RHU-level summary placeholders used for the unassigned PHN; counts shown are
-// scope-neutral RHU aggregates (no barangay-specific figures are revealed).
-const summaryCardsForScope = [
-  { label: "RHU Consultations (Month)", value: "92" },
-  { label: "RHU Referrals", value: "4" },
-  { label: "RHU Follow-ups Due", value: "7" },
-  { label: "RHU Health Services Today", value: "2" },
-];
-
 export default function ReportsPage({ roleKey = "midwife" }) {
   const { user } = useAuth();
+  const { coverage } = usePhnCoverage();
   const isPhn = roleKey === "phn";
-  const scope = getPHNScope(user);
-  const assigned = scope && scope.level === "barangay" ? scope.assignedBarangay : null;
+  const coverageLabel = coverage ? (coverage === "RHU" ? "RHU" : coverage) : null;
+  const rhuCoverage = coverage === "RHU";
 
   const reportTypes = isPhn
     ? REPORT_TYPE_LABELS
     : ["Monthly Maternal Report", "Follow-up Report", "Referral Report", "Immunization Report"];
 
-  // Seed only the reports this PHN is allowed to see.
-  const [reports, setReports] = useState(() => (isPhn ? filterRowsByScope(PHN_REPORTS, user) : REPORTS));
+  // The master list keeps every report the PHN can own; the coverage selector
+  // decides which rows are visible (barangay reports vs RHU reports).
+  const [reports, setReports] = useState(() => (isPhn ? [...PHN_REPORTS] : [...REPORTS]));
+  const scopedReports = useMemo(
+    () => (isPhn ? filterRowsByScope(reports, user, coverage) : reports),
+    [isPhn, reports, user, coverage]
+  );
   const [selectedReportType, setSelectedReportType] = useState("All");
-  const [barangayFilter, setBarangayFilter] = useState("All");
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [reportToSubmit, setReportToSubmit] = useState(null);
@@ -82,15 +85,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const [reportForm, setReportForm] = useState(() => ({
     reportType: "",
     period: "",
-    barangay: phnDefaultBarangay(user),
+    barangay: phnDefaultBarangay(user, coverage),
   }));
 
-  const writableBarangays = phnWritableBarangays(user);
-  const filterBarangayOptions = isPhn
-    ? assigned
-      ? ["All", "RHU", assigned]
-      : ["All"]
-    : ["All"];
+  const writableBarangays = phnWritableBarangays(user, coverage);
 
   const showToast = (message) => {
     setToast(message);
@@ -114,14 +112,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     };
   }, [anyModalOpen]);
 
-  const filteredReports = reports.filter((r) => {
+  const filteredReports = scopedReports.filter((r) => {
     const matchesType = selectedReportType === "All" || r.type === selectedReportType;
-    if (!isPhn) return matchesType;
-    const scopeOfRow = scopeLabel(r, user);
-    const matchesBarangay =
-      barangayFilter === "All" ||
-      (barangayFilter === "RHU" ? scopeOfRow === "RHU" : scopeOfRow === barangayFilter);
-    return matchesType && matchesBarangay;
+    return matchesType;
   });
 
   const handleGenerateReport = () => {
@@ -142,7 +135,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     };
     setReports([newReport, ...reports]);
     setShowGenerateModal(false);
-    setReportForm({ reportType: "", period: "", barangay: phnDefaultBarangay(user) });
+    setReportForm({ reportType: "", period: "", barangay: phnDefaultBarangay(user, coverage) });
     showToast("Report generated successfully.");
   };
 
@@ -166,17 +159,38 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     showToast("Report submitted successfully.");
   };
 
-  // Chart shows only the series this PHN may see (rhu + assigned barangay).
+  // Chart shows only the series matching the active coverage (the assigned
+  // barangay, or the RHU when the PHN switches to RHU coverage).
   const trendData = isPhn ? phnMonthlyTrend : monthlyConsultations;
-  const chartSeries = isPhn
-    ? ["rhu"].concat(assigned ? [assigned] : [])
-    : [];
+  const chartSeries = isPhn ? [rhuCoverage ? "rhu" : coverageLabel || "rhu"] : [];
   const seriesConfig = {
     rhu: { fill: "#0B5CAD" },
     "San Isidro": { fill: "#2A7DE1" },
     "San Antonio": { fill: "#F5B400" },
     "Old San Roque": { fill: "#E67E22" },
   };
+
+  // Report summary reflects the active coverage so switching between the
+  // barangay and the RHU changes the figures shown.
+  const scopeSummary = useMemo(() => {
+    if (!isPhn) return summaryCards;
+    const rowsOf = (list) => filterRowsByScope(list, user, coverage);
+    const residentsCount = rowsOf(phnResidents).length;
+    const priorityCases = rowsOf(phnResidents).filter((r) => r.risk === "High").length;
+    const pendingReferrals = rowsOf(phnReferrals).filter((r) => r.status !== "Completed").length;
+    const followUpsDue = rowsOf(phnFollowUps).filter(
+      (f) => f.status === "Due Today" || f.status === "Overdue" || f.status === "Scheduled"
+    ).length;
+    const servicesToday = rowsOf(phnHealthServices).length;
+    const label = rhuCoverage ? "RHU-level" : `${coverageLabel} barangay`;
+    return [
+      { label: `${label} Residents Monitored`, value: String(residentsCount) },
+      { label: `${label} Pending Referrals`, value: String(pendingReferrals) },
+      { label: `${label} Follow-ups Due`, value: String(followUpsDue) },
+      { label: `${label} Services Today`, value: String(servicesToday) },
+      { label: `${label} Priority Cases`, value: String(priorityCases) },
+    ];
+  }, [isPhn, coverage, coverageLabel, rhuCoverage, user]);
 
   // A PHN works at the RHU — reports are submitted upward to the MHO, while
   // barangay-level roles submit theirs to the RHU.
@@ -191,11 +205,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         title="Reports"
         subtitle={
           isPhn
-            ? assigned
-              ? `Generate and review reports for ${assigned} and the RHU.`
-              : "Generate and review RHU-level reports."
+            ? "Generate and review community health reports."
             : "Generate and submit monthly health reports to the RHU."
         }
+        meta={isPhn ? <CoverageSelector mode="tag" /> : null}
       />
 
       {/* Toast */}
@@ -209,7 +222,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       <div className="grid lg:grid-cols-3 gap-5 mb-6">
         <Card className="p-6 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-brand-ink">{isPhn ? "Active Health Cases by Barangay" : "Monthly Consultations"}</h3>
+            <h3 className="font-semibold text-brand-ink">{isPhn ? (rhuCoverage ? "RHU Health Cases Trend" : `${coverageLabel} Health Cases Trend`) : "Monthly Consultations"}</h3>
             <span className="flex items-center gap-1 text-sm text-brand-green"><TrendingUp className="w-4 h-4" /> {isPhn ? "+6%" : "+17%"}</span>
           </div>
           <ResponsiveContainer width="100%" height={220}>
@@ -243,17 +256,12 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         </Card>
         <Card className="p-6 h-fit">
           <h3 className="font-semibold text-brand-ink mb-4">Report Summary</h3>
-          {(isPhn ? summaryCardsForScope : summaryCards).map((s) => (
+          {(isPhn ? scopeSummary : summaryCards).map((s) => (
             <div key={s.label} className="flex justify-between py-3 border-b border-brand-border last:border-0">
               <span className="text-sm text-brand-gray">{s.label}</span>
               <span className="font-stat font-bold text-brand-ink">{s.value}</span>
             </div>
           ))}
-          {isPhn && (
-            <p className="text-xs text-brand-gray mt-3">
-              {assigned ? `Scope: ${assigned} + RHU` : "Scope: RHU"}
-            </p>
-          )}
         </Card>
       </div>
 
@@ -272,17 +280,6 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
-            {isPhn && (
-              <select
-                value={barangayFilter}
-                onChange={(e) => setBarangayFilter(e.target.value)}
-                className="w-full sm:w-auto bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
-              >
-                {filterBarangayOptions.map((b) => (
-                  <option key={b} value={b}>{b === "All" ? "All Scopes" : b}</option>
-                ))}
-              </select>
-            )}
             <button
               onClick={() => {
                 setFormErrors({});
@@ -431,7 +428,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                 <button
                   onClick={() => {
                     setShowGenerateModal(false);
-                    setReportForm({ reportType: "", period: "", barangay: phnDefaultBarangay(user) });
+                    setReportForm({ reportType: "", period: "", barangay: phnDefaultBarangay(user, coverage) });
                     setFormErrors({});
                   }}
                   className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"

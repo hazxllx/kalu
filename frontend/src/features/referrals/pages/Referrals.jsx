@@ -18,6 +18,8 @@ import {
   rowMatchesOption,
   scopeLabel,
 } from "@/lib/phnScope";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
+import CoverageSelector from "@/components/common/CoverageSelector";
 import { ROLES } from "@/lib/brand";
 import { useAuth } from "@/context/AuthContext";
 import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, CheckCircle2, Download, Trash2 } from "lucide-react";
@@ -83,6 +85,7 @@ const PRIORITY_COLORS = {
 
 export default function Referrals({ roleKey } = {}) {
   const { user } = useAuth();
+  const { coverage } = usePhnCoverage();
   const location = useLocation();
   const navigate = useNavigate();
   const isPhn = roleKey === "phn";
@@ -93,12 +96,13 @@ export default function Referrals({ roleKey } = {}) {
 
   // The PHN reads/writes the shared workflow store so referrals created from a
   // completed check-up and pending-referral counts stay in sync. Every other
-  // role keeps its original local dataset unchanged.
+  // role keeps its original local dataset unchanged. PHN rows are limited to
+  // the active coverage (assigned barangay or RHU).
   const workflow = useWorkflowStore();
   const [localReferrals, setLocalReferrals] = useState(REFERRALS);
   const referrals = useMemo(
-    () => (isPhn ? filterRowsByScope(workflow.referrals, user) : localReferrals),
-    [isPhn, workflow.referrals, user, localReferrals]
+    () => (isPhn ? filterRowsByScope(workflow.referrals, user, coverage) : localReferrals),
+    [isPhn, workflow.referrals, user, coverage, localReferrals]
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -117,8 +121,9 @@ export default function Referrals({ roleKey } = {}) {
   const [submittedReferral, setSubmittedReferral] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [formErrors, setFormErrors] = useState({});
-  const [residentPool] = useState(
-    isPhn ? filterRowsByScope(phnResidents, user) : residents
+  const residentPool = useMemo(
+    () => (isPhn ? filterRowsByScope(phnResidents, user, coverage) : residents),
+    [isPhn, user, coverage]
   );
 
   const filterOptions = phnFilterOptions(user);
@@ -127,7 +132,9 @@ export default function Referrals({ roleKey } = {}) {
     const matchesSearch = searchQuery === "" || r.resident.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "All" || r.status === statusFilter;
     const matchesPriority = priorityFilter === "All" || r.priority === priorityFilter;
-    const matchesBarangay = rowMatchesOption(r, barangayFilter, user);
+    // Coverage (selected on the page header) already scopes PHN lists to a
+    // single scope; the barangay dropdown filter only applies to other roles.
+    const matchesBarangay = isPhn ? true : rowMatchesOption(r, barangayFilter, user);
     return matchesSearch && matchesStatus && matchesPriority && matchesBarangay;
   });
 
@@ -343,11 +350,8 @@ export default function Referrals({ roleKey } = {}) {
       <PageHeader
         crumbs={["Home", "Referrals"]}
         title={isPhn ? "Referral Coordination" : "Referrals"}
-        subtitle={
-          isPhn
-            ? "Coordinate referrals within your assigned coverage."
-            : "Manage resident referrals to RHU and higher-level healthcare facilities."
-        }
+        subtitle="Manage resident referrals to RHU and higher-level healthcare facilities."
+        meta={isPhn ? <CoverageSelector mode="tag" /> : null}
         action={
           <button
             onClick={() => {
@@ -384,15 +388,17 @@ export default function Referrals({ roleKey } = {}) {
             />
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <select
-              value={barangayFilter}
-              onChange={(e) => setBarangayFilter(e.target.value)}
-              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
-            >
-              {filterOptions.map((b) => (
-                <option key={b} value={b}>{b === "All" ? (isPhn ? "All Accessible" : "All Barangays") : b === "RHU" ? "RHU-level" : b}</option>
-              ))}
-            </select>
+            {!isPhn && (
+              <select
+                value={barangayFilter}
+                onChange={(e) => setBarangayFilter(e.target.value)}
+                className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
+              >
+                {filterOptions.map((b) => (
+                  <option key={b} value={b}>{b === "All" ? (isPhn ? "All Accessible" : "All Barangays") : b === "RHU" ? "RHU-level" : b}</option>
+                ))}
+              </select>
+            )}
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}

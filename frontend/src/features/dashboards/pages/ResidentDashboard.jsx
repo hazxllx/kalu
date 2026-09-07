@@ -32,7 +32,7 @@ export default function ResidentDashboard() {
 
       {!verified && (
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-          <div className="bg-brand-yellow/10 border border-brand-yellow/20 rounded-card p-5 flex items-start gap-4">
+          <div className="bg-brand-yellow/10 border border-brand-yellow/20 rounded-2xl p-5 flex items-start gap-4">
             <div className="w-10 h-10 rounded-xl bg-brand-yellow/20 flex items-center justify-center shrink-0">
               <ShieldAlert className="w-5 h-5 text-[#B07E00]" strokeWidth={1.8} />
             </div>
@@ -56,7 +56,7 @@ export default function ResidentDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {cards.map((c, i) => (
           <motion.div key={c.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
-            className="bg-white rounded-card border border-brand-border shadow-card p-4 sm:p-5">
+            className="rounded-2xl border border-slate-200 bg-white shadow-card p-4 sm:p-5">
             <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center ${c.tone}`}><c.icon className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.8} /></div>
             <p className="mt-3 sm:mt-4 text-xs text-brand-gray uppercase tracking-wide">{c.label}</p>
             <p className="mt-1 text-lg sm:text-xl font-semibold text-brand-ink">{c.main}</p>

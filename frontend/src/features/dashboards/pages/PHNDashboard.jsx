@@ -17,7 +17,9 @@ import {
   patchReferral,
   workflowHelpers,
 } from "@/services/mock/mockWorkflowStore";
-import { filterRowsByScope, getPHNScope, isPHN, scopeLabel } from "@/lib/phnScope";
+import { filterRowsByScope, scopeLabel, RHU_OPTION } from "@/lib/phnScope";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
+import CoverageSelector from "@/components/common/CoverageSelector";
 import { riskOfPatient } from "@/lib/riskRules";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -69,28 +71,25 @@ const welcomeFor = (user) => {
   return `Welcome, Nurse ${first}`;
 };
 
-const subtitleFor = (user) => {
-  const scope = getPHNScope(user);
-  if (scope && scope.level === "barangay") {
-    return `Today's health summary for ${scope.assignedBarangay} and the Rural Health Unit.`;
-  }
-  return "Today's RHU health summary.";
-};
-
 export default function PHNDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const scope = getPHNScope(user);
-  const isPhn = isPHN(user);
-  const assigned = scope && scope.level === "barangay" ? scope.assignedBarangay : null;
+  // Active coverage drives every number and list on this page. A barangay PHN
+  // works with their assigned barangay by default and can switch to RHU.
+  const { coverage } = usePhnCoverage();
+  const rhuCoverage = coverage === RHU_OPTION;
+  const assigned = !rhuCoverage ? coverage : null;
   const welcome = welcomeFor(user);
-  const subtitle = subtitleFor(user);
+  const subtitle = "Today's health summary across check-ups, referrals, follow-ups, and community services.";
 
   const store = useWorkflowStore();
 
-  // Every collection is re-filtered by the signed-in PHN's scope before render
-  // so dashboard counts can never leak another barangay's data.
-  const allPatients = useMemo(() => filterRowsByScope(store.patients, user), [store.patients, user]);
+  // Every collection is re-filtered by the signed-in PHN's active coverage
+  // before render so the dashboard can never leak another scope's data.
+  const allPatients = useMemo(
+    () => filterRowsByScope(store.patients, user, coverage),
+    [store.patients, user, coverage]
+  );
   const visibleQueue = useMemo(
     () => allPatients.filter((p) => p.status === CHECKUP_STATUS.WAITING),
     [allPatients]
@@ -103,10 +102,22 @@ export default function PHNDashboard() {
     () => allPatients.filter((p) => p.status === CHECKUP_STATUS.COMPLETED),
     [allPatients]
   );
-  const visibleReferrals = useMemo(() => filterRowsByScope(store.referrals, user), [store.referrals, user]);
-  const visibleFollowUps = useMemo(() => filterRowsByScope(store.followUps, user), [store.followUps, user]);
-  const visibleAlerts = useMemo(() => filterRowsByScope(phnAlerts, user), [user]);
-  const visibleServices = useMemo(() => filterRowsByScope(store.services, user), [store.services, user]);
+  const visibleReferrals = useMemo(
+    () => filterRowsByScope(store.referrals, user, coverage),
+    [store.referrals, user, coverage]
+  );
+  const visibleFollowUps = useMemo(
+    () => filterRowsByScope(store.followUps, user, coverage),
+    [store.followUps, user, coverage]
+  );
+  const visibleAlerts = useMemo(
+    () => filterRowsByScope(phnAlerts, user, coverage),
+    [user, coverage]
+  );
+  const visibleServices = useMemo(
+    () => filterRowsByScope(store.services, user, coverage),
+    [store.services, user, coverage]
+  );
 
   const [barangayDetail, setBarangayDetail] = useState(null);
   const [reviewReferral, setReviewReferral] = useState(null);
@@ -139,26 +150,26 @@ export default function PHNDashboard() {
     };
   }, [anyModalOpen]);
 
-  // Overview table is only meaningful for a barangay-assigned PHN — it lists
-  // their own assigned barangay only. Unassigned PHNs see a compact check-up
-  // summary instead.
+  // Overview table is only meaningful when the PHN's active coverage is their
+  // assigned barangay — it lists that barangay only. When the RHU coverage is
+  // active the right rail shows an RHU check-up progress summary instead.
   const communityRows = useMemo(() => {
-    if (scope && scope.level === "barangay") {
-      const row = barangayCommunity.find((b) => b.name === scope.assignedBarangay) || barangayCommunity[0];
+    if (assigned) {
+      const row = barangayCommunity.find((b) => b.name === assigned) || barangayCommunity[0];
       const brgyActive = allPatients.filter(
-        (p) => p.barangay === scope.assignedBarangay && p.status !== CHECKUP_STATUS.COMPLETED
+        (p) => p.barangay === assigned && p.status !== CHECKUP_STATUS.COMPLETED
       ).length;
       return [
         {
           ...row,
           activeCases: row.activeCases + brgyActive,
-          referrals: visibleReferrals.filter((r) => r.barangay === scope.assignedBarangay && r.status !== "Completed").length,
-          followUps: visibleFollowUps.filter((f) => f.barangay === scope.assignedBarangay && f.status !== "Completed" && f.status !== "Cancelled").length,
+          referrals: visibleReferrals.filter((r) => r.barangay === assigned && r.status !== "Completed").length,
+          followUps: visibleFollowUps.filter((f) => f.barangay === assigned && f.status !== "Completed" && f.status !== "Cancelled").length,
         },
       ];
     }
     return [];
-  }, [scope, allPatients, visibleReferrals, visibleFollowUps]);
+  }, [assigned, allPatients, visibleReferrals, visibleFollowUps]);
 
   const stats = useMemo(() => {
     const today = workflowHelpers.todayLong();
@@ -237,17 +248,8 @@ export default function PHNDashboard() {
         crumbs={["Home", "Dashboard"]}
         title={welcome}
         subtitle={subtitle}
+        meta={<CoverageSelector />}
       />
-
-      {/* Coverage chip */}
-      {isPhn && (
-        <div className="-mt-3 mb-5 flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-border bg-white px-3 py-1 text-xs font-medium text-brand-gray">
-            <MapPin className="w-3.5 h-3.5 text-brand-blue" />
-            Coverage: {scope.level === "barangay" ? `${scope.assignedBarangay} + RHU` : "RHU"}
-          </span>
-        </div>
-      )}
 
       {/* Toast */}
       <AnimatePresence>
@@ -285,7 +287,7 @@ export default function PHNDashboard() {
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h3 className="font-semibold text-brand-ink text-sm sm:text-base">
-                {assigned ? `Patients for Check-up (${assigned})` : "Patients for Check-up"}
+                {assigned ? `Patients for Check-up (${assigned})` : "Patients for Check-up (RHU)"}
               </h3>
               <p className="text-xs text-brand-gray mt-0.5">
                 Patients who completed triage and are waiting for PHN consultation.
@@ -345,7 +347,7 @@ export default function PHNDashboard() {
                 {visibleQueue.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-sm text-brand-gray">
-                      No patients are waiting for check-up within your scope.
+                      No patients are waiting for check-up within the active coverage.
                     </td>
                   </tr>
                 )}
@@ -354,7 +356,7 @@ export default function PHNDashboard() {
           </div>
         </Card>
 
-        {/* Right rail — assigned: community overview; unassigned: check-up progress */}
+        {/* Right rail — barangay coverage: community overview; RHU coverage: check-up progress */}
         <Card className="p-4 sm:p-6 h-fit">
           {assigned ? (
             <>
@@ -517,7 +519,7 @@ export default function PHNDashboard() {
               );
             })}
             {visibleAlerts.length === 0 && (
-              <p className="text-sm text-brand-gray py-6 text-center">No alerts within your scope.</p>
+              <p className="text-sm text-brand-gray py-6 text-center">No alerts within the active coverage.</p>
             )}
           </div>
         </Card>
@@ -539,7 +541,7 @@ export default function PHNDashboard() {
               </div>
             ))}
             {visibleServices.length === 0 && (
-              <p className="text-sm text-brand-gray py-6 text-center">No health services today within your scope.</p>
+              <p className="text-sm text-brand-gray py-6 text-center">No health services today within the active coverage.</p>
             )}
           </div>
         </Card>
@@ -738,7 +740,7 @@ export default function PHNDashboard() {
                 <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
                   <div>
                     <h3 className="text-base font-semibold text-brand-ink">Today's Health Services</h3>
-                    <p className="text-xs text-brand-gray mt-0.5">{assigned ? `RHU + ${assigned}` : "RHU-level services"}</p>
+                    <p className="text-xs text-brand-gray mt-0.5">{assigned ? `Services for ${assigned}` : "RHU-level services"}</p>
                   </div>
                   <button onClick={() => setServicesModal(false)} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink" aria-label="Close modal">
                     <X className="w-4 h-4" />

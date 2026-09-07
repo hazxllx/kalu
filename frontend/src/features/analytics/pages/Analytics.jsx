@@ -76,7 +76,7 @@ export default function Analytics() {
                   key={b.name}
                   onClick={() => setSelected(b)}
                   whileHover={{ y: -3 }}
-                  className="w-full flex items-center justify-between bg-white border border-brand-border rounded-card p-4 text-left shadow-card hover:shadow-deep transition-shadow"
+                  className="w-full flex items-center justify-between bg-white border border-brand-border rounded-2xl p-4 text-left shadow-card hover:shadow-deep transition-shadow"
                 >
                   <div className="flex items-center gap-3">
                     <span className="w-3 h-3 rounded-full" style={{ background: b.color }} />

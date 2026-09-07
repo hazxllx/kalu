@@ -5,6 +5,7 @@ import { BrowserRouter as Router } from 'react-router-dom';
 import { queryClientInstance } from '@/lib/query-client';
 import { AuthProvider } from '@/context/AuthContext';
 import { PermissionsProvider } from '@/context/PermissionsContext';
+import { PhnCoverageProvider } from '@/context/PhnCoverageContext';
 import ScrollToTop from '@/routes/ScrollToTop';
 import AppRoutes from '@/routes/AppRoutes';
 
@@ -15,15 +16,17 @@ import AppRoutes from '@/routes/AppRoutes';
 function App() {
   return (
     <AuthProvider>
-      <PermissionsProvider>
-        <QueryClientProvider client={queryClientInstance}>
-          <Router>
-            <ScrollToTop />
-            <AppRoutes />
-          </Router>
-          <Toaster />
-        </QueryClientProvider>
-      </PermissionsProvider>
+      <PhnCoverageProvider>
+        <PermissionsProvider>
+          <QueryClientProvider client={queryClientInstance}>
+            <Router>
+              <ScrollToTop />
+              <AppRoutes />
+            </Router>
+            <Toaster />
+          </QueryClientProvider>
+        </PermissionsProvider>
+      </PhnCoverageProvider>
     </AuthProvider>
   );
 }

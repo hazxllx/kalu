@@ -46,7 +46,7 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
           </div>
           <div className="space-y-3">
             {history.map((item) => (
-              <div key={item.date} className="border border-brand-border rounded-card p-4">
+              <div key={item.date} className="border border-brand-border rounded-2xl p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-semibold text-brand-ink">{item.date}</p>
                   <span className="text-xs text-brand-green bg-brand-green/10 px-2.5 py-1 rounded-full">{item.status}</span>

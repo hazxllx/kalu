@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useLocation, useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -22,20 +23,15 @@ import {
   ChevronsUpDown,
   ClipboardList,
 } from "lucide-react";
-import { households as initialHouseholds, systemUsers } from "@/services/mock/mockData";
-import { useAuth } from "@/context/AuthContext";
 import HHBadge from "../components/HHBadge";
-import AddHouseholdModal from "../components/AddHouseholdModal";
+import { useHouseholds, useHouseholdSyncStatus, householdStore } from "@/services/mock/householdStore";
 import {
   HH_STATUSES,
   APPROVAL_STATUSES,
   PUROKS,
   BHW_NAMES,
   riskFromScore,
-  nextHouseholdId,
 } from "../lib/householdOptions";
-
-const ACTIVE_BHWS = systemUsers.filter((u) => u.role === "BHW" && u.status === "Active").map((u) => u.name);
 
 const COLUMNS = [
   { key: "id", label: "Household ID", filter: "text", placeholder: "Filter ID..." },
@@ -138,38 +134,38 @@ function ColumnFilter({ type = "list", options = [], value, onChange, placeholde
 }
 
 export default function Households() {
-  const { user } = useAuth();
-  const [syncStatus, setSyncStatus] = useState("offline");
-  const [householdList, setHouseholdList] = useState(initialHouseholds);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const householdList = useHouseholds();
+  const syncStatus = useHouseholdSyncStatus();
   const [toast, setToast] = useState(null);
-  const [modalOpen, setModalOpen] = useState(false);
   const [view, setView] = useState("table");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState({ key: "id", dir: "asc" });
   const [filters, setFilters] = useState(EMPTY_FILTERS);
 
-  const defaultCollector =
-    user?.role === "bhw" && user?.name ? user.name : ACTIVE_BHWS[0] || "Maria Cruz";
-  const bhwOptions = bhwOptionsFor(defaultCollector);
-  const nextId = nextHouseholdId(householdList);
+  // After the dedicated Add Household page saves, it returns here with the
+  // new household already in the shared store; surface the success toast once.
+  useEffect(() => {
+    const message = location.state?.hhToast;
+    if (!message) return undefined;
+    setToast(message);
+    const timer = setTimeout(() => setToast(null), 3000);
+    window.history.replaceState({}, "");
+    return () => clearTimeout(timer);
+  }, [location.state]);
 
   const handleSync = () => {
-    setSyncStatus("syncing");
+    householdStore.setSync("syncing");
     setTimeout(() => {
-      setSyncStatus("connected");
-      setHouseholdList((prev) => prev.map((h) => ({ ...h, syncStatus: null })));
+      householdStore.markAllSynced();
+      householdStore.setSync("connected");
       setToast("Synchronization Complete - All pending records have been uploaded successfully.");
       setTimeout(() => setToast(null), 3000);
     }, 2000);
   };
 
-  const handleSaveHousehold = (hh) => {
-    const tagged = syncStatus === "offline" ? { ...hh, syncStatus: "Pending Sync" } : hh;
-    setHouseholdList((prev) => [tagged, ...prev]);
-    setModalOpen(false);
-    setToast(`Household ${hh.id} added successfully`);
-    setTimeout(() => setToast(null), 3000);
-  };
+  const openAddPage = () => navigate(`${location.pathname.replace(/\/+$/, "")}/new`);
 
   const setFilter = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
 
@@ -224,12 +220,12 @@ export default function Households() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Household Profiling"]}
+        crumbs={["Household Profiling"]}
         title="Household Profiling"
         subtitle="Household conditions and risk classification across the barangay."
         action={
           <button
-            onClick={() => setModalOpen(true)}
+            onClick={openAddPage}
             className="flex items-center gap-2 bg-brand-blue px-5 py-2.5 text-sm font-medium text-white rounded-btn transition-colors hover:bg-brand-dark"
           >
             <Plus className="h-4 w-4" /> Add Household
@@ -490,27 +486,6 @@ export default function Households() {
           )}
         </div>
       )}
-
-      {/* Add New Household slide-over */}
-      <AnimatePresence>
-        {modalOpen && (
-          <AddHouseholdModal
-            open={modalOpen}
-            onClose={() => setModalOpen(false)}
-            onSave={handleSaveHousehold}
-            householdId={nextId}
-            bhwOptions={bhwOptions}
-            defaultCollector={defaultCollector}
-          />
-        )}
-      </AnimatePresence>
     </>
   );
-}
-
-function bhwOptionsFor(defaultCollector) {
-  const base = ACTIVE_BHWS.length > 0 ? ACTIVE_BHWS : BHW_NAMES;
-  return defaultCollector && !base.includes(defaultCollector)
-    ? [defaultCollector, ...base]
-    : base;
 }
