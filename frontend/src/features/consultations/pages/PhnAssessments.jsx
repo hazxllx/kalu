@@ -14,7 +14,6 @@ import {
 import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
 import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
-import CoverageSelector from "@/components/common/CoverageSelector";
 import { riskOfPatient } from "@/lib/riskRules";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
@@ -182,7 +181,6 @@ export default function PhnCheckups() {
         crumbs={["Home", "PHN Check-ups"]}
         title="PHN Check-ups"
         subtitle="Conduct and manage patient check-ups and assessments."
-        meta={<CoverageSelector mode="tag" />}
       />
 
       {/* Toast */}

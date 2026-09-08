@@ -19,7 +19,6 @@ import {
   scopeLabel,
 } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
-import CoverageSelector from "@/components/common/CoverageSelector";
 import { ROLES } from "@/lib/brand";
 import { useAuth } from "@/context/AuthContext";
 import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, CheckCircle2, Download, Trash2 } from "lucide-react";
@@ -351,7 +350,6 @@ export default function Referrals({ roleKey } = {}) {
         crumbs={["Home", "Referrals"]}
         title={isPhn ? "Referral Coordination" : "Referrals"}
         subtitle="Manage resident referrals to RHU and higher-level healthcare facilities."
-        meta={isPhn ? <CoverageSelector mode="tag" /> : null}
         action={
           <button
             onClick={() => {

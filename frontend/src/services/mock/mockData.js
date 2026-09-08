@@ -98,6 +98,14 @@ export const residents = [
   { id: "R-1029", name: "Carlos Mendoza", age: 61, gender: "Male", risk: "High", barangay: "San Antonio", status: "Active", program: "Diabetes" },
   { id: "R-1030", name: "Liza Gonzales", age: 45, gender: "Female", risk: "Medium", barangay: "Old San Roque", status: "Inactive", program: "TB Monitoring" },
   { id: "R-1031", name: "Miguel Torres", age: 22, gender: "Male", risk: "Low", barangay: "Old San Roque", status: "Active", program: "Family Planning" },
+  // Additional San Isidro residents enrolled across the target health
+  // programs (used by the Target Client List and program workflows).
+  { id: "R-2101", name: "Rosa Dimagiba", age: 34, gender: "Female", risk: "Medium", barangay: "San Isidro", status: "Active", program: "Hypertension" },
+  { id: "R-2102", name: "Andres Banaag", age: 60, gender: "Male", risk: "High", barangay: "San Isidro", status: "Active", program: "Diabetes" },
+  { id: "R-2103", name: "Elena Garcia", age: 25, gender: "Female", risk: "Low", barangay: "San Isidro", status: "Active", program: "Maternal Care" },
+  { id: "R-2104", name: "Marites Ramos", age: 41, gender: "Female", risk: "Medium", barangay: "San Isidro", status: "Active", program: "TB Monitoring" },
+  { id: "R-2105", name: "Kris Marquez", age: 22, gender: "Female", risk: "Low", barangay: "San Isidro", status: "Active", program: "Family Planning" },
+  { id: "R-2106", name: "Conchita Ramos", age: 70, gender: "Female", risk: "Medium", barangay: "San Isidro", status: "Active", program: "Senior Care" },
 ];
 
 export const households = [
@@ -188,6 +196,24 @@ export const immunizations = [
   { child: "Baby Torres", vaccine: "BCG", status: "Completed", nextDose: "—", completed: 1 },
   { child: "Sofia Reyes", vaccine: "Measles (MCV1)", status: "Missed", nextDose: "2026-07-08", completed: 3 },
   { child: "Liam Gonzales", vaccine: "OPV (2nd)", status: "Due", nextDose: "2026-07-16", completed: 1 },
+  // Additional records so the dashboard summary reflects real due / missed
+  // children, sessions and coverage across the community.
+  { child: "Aira Santos", vaccine: "Pentavalent (1st)", status: "Due", nextDose: "2026-07-20", completed: 0 },
+  { child: "Jose Santos", vaccine: "Measles (MCV2)", status: "Due", nextDose: "2026-07-22", completed: 4 },
+  { child: "Miguel Santos", vaccine: "OPV (3rd)", status: "Due", nextDose: "2026-07-24", completed: 3 },
+  { child: "Diana Lopez", vaccine: "Pentavalent (2nd)", status: "Due", nextDose: "2026-07-26", completed: 1 },
+  { child: "Kristine Cruz", vaccine: "BCG", status: "Completed", nextDose: "—", completed: 1 },
+  { child: "Kristine Cruz", vaccine: "HepB", status: "Completed", nextDose: "—", completed: 1 },
+  { child: "Paolo Reyes", vaccine: "Measles (MCV1)", status: "Missed", nextDose: "2026-07-28", completed: 2 },
+  { child: "Liam Gonzales", vaccine: "Measles (MCV1)", status: "Missed", nextDose: "2026-09-01", completed: 0 },
+  { child: "Sofia Reyes", vaccine: "BCG", status: "Completed", nextDose: "—", completed: 1 },
+  { child: "Baby Torres", vaccine: "HepB", status: "Completed", nextDose: "—", completed: 1 },
+];
+
+export const immunizationSessions = [
+  { id: "IMM-0714", date: "2026-07-14", time: "9:00 AM - 12:00 PM", venue: "San Isidro Barangay Health Station", vaccines: "Pentavalent, OPV, MMR", status: "Upcoming" },
+  { id: "IMM-0720", date: "2026-07-20", time: "8:00 AM - 11:00 AM", venue: "San Isidro Barangay Health Station", vaccines: "Pentavalent, IPV", status: "Upcoming" },
+  { id: "IMM-0724", date: "2026-07-24", time: "1:00 PM - 3:00 PM", venue: "San Isidro Barangay Health Station", vaccines: "OPV, MMR", status: "Upcoming" },
 ];
 
 export const monthlyConsultations = [

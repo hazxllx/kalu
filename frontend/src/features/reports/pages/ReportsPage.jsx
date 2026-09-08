@@ -17,7 +17,6 @@ import {
   scopeLabel,
 } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
-import CoverageSelector from "@/components/common/CoverageSelector";
 import { useAuth } from "@/context/AuthContext";
 import { monthlyConsultations } from "@/services/mock/mockData";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid, Legend } from "recharts";
@@ -205,10 +204,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         title="Reports"
         subtitle={
           isPhn
-            ? "Generate and review community health reports."
+            ? "Generate and review RHU-level health reports."
             : "Generate and submit monthly health reports to the RHU."
         }
-        meta={isPhn ? <CoverageSelector mode="tag" /> : null}
       />
 
       {/* Toast */}

@@ -12,7 +12,8 @@ export default function VerificationBadge({ status = "pending", size = "md", sho
   const normalized = String(status).toLowerCase();
   const isVerified = normalized === "verified" || normalized === "approved";
   const isRejected = normalized === "rejected";
-  const label = isVerified ? "Verified" : isRejected ? "Rejected" : "Pending Verification";
+  const isReturned = normalized.includes("return");
+  const label = isVerified ? "Verified" : isReturned ? "Returned for Correction" : isRejected ? "Rejected" : "Pending Verification";
   const tone = isVerified
     ? "bg-emerald-50 text-emerald-700"
     : isRejected

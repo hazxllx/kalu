@@ -20,6 +20,7 @@ import RegistrationSuccess from '@/features/registration/pages/RegistrationSucce
 import VerificationStatus from '@/features/verification/pages/VerificationStatus';
 import PendingVerifications from '@/features/verification/pages/PendingVerifications';
 import ResidentVerification from '@/features/verification/pages/ResidentVerification';
+import HouseholdVerifications from '@/features/verification/pages/HouseholdVerifications';
 
 // Role dashboards
 import ResidentDashboard from '@/features/dashboards/pages/ResidentDashboard';
@@ -161,6 +162,7 @@ const AppRoutes = () => (
         <Route path="residents" element={<ResidentsPage />} />
         <Route path="verifications" element={<PendingVerifications />} />
         <Route path="verification/review" element={<ResidentVerification />} />
+        <Route path="household-verifications" element={<HouseholdVerifications />} />
         <Route path="consultations" element={<TreatmentConsultation />} />
         <Route path="tcls" element={<TCLS />} />
         <Route path="m1" element={<M1Records />} />
@@ -186,7 +188,6 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<RHUDashboard />} />
         <Route path="triage" element={<RhuTriage />} />
-        <Route path="residents" element={<ResidentsPage />} />
         <Route path="programs" element={<Programs />} />
         <Route path="notifications" element={<NotificationsPage roleKey="rhu_personnel" />} />
         <Route path="settings" element={<SettingsPage roleKey="rhu_personnel" />} />

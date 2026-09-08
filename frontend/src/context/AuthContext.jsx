@@ -22,10 +22,10 @@ const toUser = (supabaseUser) => {
     email: supabaseUser.email,
     name: userMetadata?.name || supabaseUser.email,
     role: roleFromSupabaseUser(supabaseUser),
-    // Barangay assignment for barangay-scoped roles (e.g. Health Supervisor,
-    // or a PHN assigned to a specific barangay). Comes from the account
-    // metadata — never chosen by the user. `barangay` is kept as a backward
-    // compatible alias used by other roles.
+    // Barangay assignment for the barangay-scoped Health Supervisor role.
+    // Comes from the account metadata — never chosen by the user. `barangay`
+    // is kept as a backward compatible alias used by other roles. PHNs are
+    // RHU-based and are never assigned a barangay.
     assignedBarangay:
       metadata?.assignedBarangay ||
       userMetadata?.assignedBarangay ||

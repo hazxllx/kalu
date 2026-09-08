@@ -123,6 +123,35 @@ export const PERMISSION_MODULES = Object.freeze([
     ],
   },
   {
+    id: 'households',
+    label: 'Household Profiling',
+    short: 'Households',
+    icon: 'Home',
+    description: 'Household profiling records and barangay verification of household information.',
+    permissions: [
+      {
+        id: 'households.view',
+        label: 'View household profiles',
+        action: ACTION.VIEW,
+        description: 'Browse and search household profiling records.',
+      },
+      {
+        id: 'households.create',
+        label: 'Create household profile',
+        action: ACTION.CREATE,
+        description: 'Add a new household profile during data collection.',
+      },
+      {
+        id: 'households.verify',
+        label: 'Verify household information',
+        action: ACTION.APPROVE,
+        description: 'Review and verify household profiling information for the assigned barangay.',
+        sensitive: true,
+        impact: 'verify household profiling records',
+      },
+    ],
+  },
+  {
     id: 'consultation',
     label: 'Consultation',
     short: 'Consultation',
@@ -703,6 +732,8 @@ const DEFAULT_GRANTS = Object.freeze({
     'residents.edit',
     'residents.registration.approve',
     'residents.transfer.approve',
+    'households.view',
+    'households.verify',
     'consultation.requests.view',
     'consultation.conduct',
     'consultation.findings.record',
@@ -733,13 +764,11 @@ const DEFAULT_GRANTS = Object.freeze({
     'reports.analytics.view',
   ],
 
-  // Health records, assessments, referrals, follow-ups (mirrors the API's
-  // FEATURE_ROLES map for `phn`).
+  // RHU-based public health nursing: records, assessments, referrals, follow-ups
+  // (mirrors the API's FEATURE_ROLES map for `phn`). PHNs are NOT assigned to a
+  // barangay and do NOT own the resident directory or resident verification —
+  // those belong to the Health Supervisor.
   [ROLE.PHN]: [
-    'residents.directory.view',
-    'residents.profile.view',
-    'residents.edit',
-    'residents.registration.approve',
     'consultation.requests.view',
     'consultation.conduct',
     'consultation.findings.record',
@@ -760,10 +789,11 @@ const DEFAULT_GRANTS = Object.freeze({
     'reports.view',
   ],
 
-  // Triage and case routing.
+  // Triage intake and case routing at the RHU. RHU Personnel do NOT have access
+  // to the resident directory — resident records are owned by the barangay
+  // Health Supervisor / municipal roles. Their triage flow only ever searches
+  // residents as a reference and never opens the directory page.
   [ROLE.RHU_PERSONNEL]: [
-    'residents.directory.view',
-    'residents.profile.view',
     'consultation.requests.view',
     'consultation.history.view',
     'triage.view',

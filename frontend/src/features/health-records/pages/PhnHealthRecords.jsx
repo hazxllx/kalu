@@ -15,7 +15,6 @@ import {
   scopeLabel,
 } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
-import CoverageSelector from "@/components/common/CoverageSelector";
 import { useAuth } from "@/context/AuthContext";
 import { Search, Plus, Eye, Edit2, Trash2, X, CheckCircle2, ClipboardCheck, ArrowRight } from "lucide-react";
 
@@ -532,7 +531,6 @@ export default function PhnHealthRecords() {
             ? "Maintain resident health records across the care workflow."
             : "Health records for RHU-level residents."
         }
-        meta={phn ? <CoverageSelector mode="tag" /> : null}
         action={
           <button
             onClick={() => {

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ROLES } from "@/lib/brand";
+import { getAssignedBarangay } from "@/lib/barangayScope";
 import { useAuth } from "@/context/AuthContext";import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, FileText,
@@ -35,16 +36,20 @@ export default function SettingsPage({ roleKey = "resident" }) {
   const displayName = user?.name || role.name;
   const displayEmail = user?.email || `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`;
 
-  // Settings is an account page, not a workspace page — the working PHN
-  // coverage is managed where it affects data (the dashboard), so it is not
-  // shown here. The profile shows the generic profile fields only.
+  // Settings is an account page — the working scope is not shown as a picker.
+  // Only the barangay-assigned Health Supervisor (and BHW accounts that carry
+  // a barangay) displays an "Assigned Barangay"; PHN / RHU Personnel are RHU
+  // based and show no barangay.
   const isPhn = roleKey === "phn";
+  const isRhuPersonnel = roleKey === "rhu_personnel";
+  const assignedBarangay = getAssignedBarangay(user) || (user?.barangay || "");
+  const showAssignedBarangay = !isPhn && !isRhuPersonnel && Boolean(assignedBarangay);
   const profileFields = [
     { label: "Full Name", value: displayName },
     { label: "Role", value: role.label },
     { label: "Email", value: displayEmail },
     { label: "Contact Number", value: "0917 123 4567" },
-    ...(isPhn ? [] : [{ label: "Assigned Barangay", value: "San Isidro" }]),
+    ...(showAssignedBarangay ? [{ label: "Assigned Barangay", value: assignedBarangay }] : []),
     { label: "Municipality", value: "Pili, Camarines Sur" },
   ];
 

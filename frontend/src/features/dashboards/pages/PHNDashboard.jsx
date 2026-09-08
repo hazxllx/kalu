@@ -7,7 +7,6 @@ import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import {
   REFERRAL_STATUSES,
-  barangayCommunity,
   phnAlerts,
 } from "@/services/mock/mockPhnData";
 import {
@@ -17,13 +16,12 @@ import {
   patchReferral,
   workflowHelpers,
 } from "@/services/mock/mockWorkflowStore";
-import { filterRowsByScope, scopeLabel, RHU_OPTION } from "@/lib/phnScope";
+import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
-import CoverageSelector from "@/components/common/CoverageSelector";
 import { riskOfPatient } from "@/lib/riskRules";
 import { useAuth } from "@/context/AuthContext";
 import {
-  Users, Activity, CalendarClock, ClipboardList, X, CheckCircle2, MapPin, ChevronRight, Clock, Bell, UserPlus,
+  Users, Activity, CalendarClock, ClipboardList, X, CheckCircle2, ChevronRight, Clock, Bell, UserPlus,
 } from "lucide-react";
 
 const REFERRAL_STATUS_TONES = {
@@ -74,18 +72,17 @@ const welcomeFor = (user) => {
 export default function PHNDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  // Active coverage drives every number and list on this page. A barangay PHN
-  // works with their assigned barangay by default and can switch to RHU.
+  // PHNs are RHU-based personnel. The dashboard always reflects the RHU
+  // workflow — patients may come from any barangay (BHWs / health centers
+  // refer them to the RHU), so no row is hidden by residence barangay.
   const { coverage } = usePhnCoverage();
-  const rhuCoverage = coverage === RHU_OPTION;
-  const assigned = !rhuCoverage ? coverage : null;
   const welcome = welcomeFor(user);
   const subtitle = "Today's health summary across check-ups, referrals, follow-ups, and community services.";
 
   const store = useWorkflowStore();
 
-  // Every collection is re-filtered by the signed-in PHN's active coverage
-  // before render so the dashboard can never leak another scope's data.
+  // Every collection below is the RHU workflow (already RHU-scoped by the
+  // datasets feeding the pages); counts are rendered straight from them.
   const allPatients = useMemo(
     () => filterRowsByScope(store.patients, user, coverage),
     [store.patients, user, coverage]
@@ -119,7 +116,6 @@ export default function PHNDashboard() {
     [store.services, user, coverage]
   );
 
-  const [barangayDetail, setBarangayDetail] = useState(null);
   const [reviewReferral, setReviewReferral] = useState(null);
   const [referralStatus, setReferralStatus] = useState("");
   const [alertDetail, setAlertDetail] = useState(null);
@@ -131,14 +127,13 @@ export default function PHNDashboard() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const anyModalOpen = Boolean(barangayDetail || reviewReferral || alertDetail || servicesModal);
+  const anyModalOpen = Boolean(reviewReferral || alertDetail || servicesModal);
 
   useEffect(() => {
     if (!anyModalOpen) return undefined;
     document.body.style.overflow = "hidden";
     const onKey = (e) => {
       if (e.key !== "Escape") return;
-      setBarangayDetail(null);
       setReviewReferral(null);
       setAlertDetail(null);
       setServicesModal(false);
@@ -150,27 +145,8 @@ export default function PHNDashboard() {
     };
   }, [anyModalOpen]);
 
-  // Overview table is only meaningful when the PHN's active coverage is their
-  // assigned barangay — it lists that barangay only. When the RHU coverage is
-  // active the right rail shows an RHU check-up progress summary instead.
-  const communityRows = useMemo(() => {
-    if (assigned) {
-      const row = barangayCommunity.find((b) => b.name === assigned) || barangayCommunity[0];
-      const brgyActive = allPatients.filter(
-        (p) => p.barangay === assigned && p.status !== CHECKUP_STATUS.COMPLETED
-      ).length;
-      return [
-        {
-          ...row,
-          activeCases: row.activeCases + brgyActive,
-          referrals: visibleReferrals.filter((r) => r.barangay === assigned && r.status !== "Completed").length,
-          followUps: visibleFollowUps.filter((f) => f.barangay === assigned && f.status !== "Completed" && f.status !== "Cancelled").length,
-        },
-      ];
-    }
-    return [];
-  }, [assigned, allPatients, visibleReferrals, visibleFollowUps]);
-
+  // PHNs are RHU-based — the right rail always shows the RHU check-up
+  // progress summary.
   const stats = useMemo(() => {
     const today = workflowHelpers.todayLong();
     return [
@@ -248,7 +224,6 @@ export default function PHNDashboard() {
         crumbs={["Home", "Dashboard"]}
         title={welcome}
         subtitle={subtitle}
-        meta={<CoverageSelector />}
       />
 
       {/* Toast */}
@@ -286,9 +261,9 @@ export default function PHNDashboard() {
         <Card id="queue" className="p-4 sm:p-6 lg:col-span-2 scroll-mt-24">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
-              <h3 className="font-semibold text-brand-ink text-sm sm:text-base">
-                {assigned ? `Patients for Check-up (${assigned})` : "Patients for Check-up (RHU)"}
-              </h3>
+          <h3 className="font-semibold text-brand-ink text-sm sm:text-base">
+            Patients for Check-up (RHU)
+          </h3>
               <p className="text-xs text-brand-gray mt-0.5">
                 Patients who completed triage and are waiting for PHN consultation.
               </p>
@@ -347,7 +322,7 @@ export default function PHNDashboard() {
                 {visibleQueue.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-sm text-brand-gray">
-                      No patients are waiting for check-up within the active coverage.
+                      No patients are waiting for check-up.
                     </td>
                   </tr>
                 )}
@@ -356,77 +331,33 @@ export default function PHNDashboard() {
           </div>
         </Card>
 
-        {/* Right rail — barangay coverage: community overview; RHU coverage: check-up progress */}
+        {/* Right rail — RHU check-up progress */}
         <Card className="p-4 sm:p-6 h-fit">
-          {assigned ? (
-            <>
-              <div className="flex items-center justify-between gap-3 mb-4">
-                <div>
-                  <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Community Health Overview</h3>
-                  <p className="text-xs text-brand-gray mt-0.5">{assigned}</p>
-                </div>
-                <MapPin className="w-4 h-4 text-brand-gray shrink-0" />
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Check-up Progress</h3>
+              <p className="text-xs text-brand-gray mt-0.5">RHU-level check-up activity today</p>
+            </div>
+            <Activity className="w-4 h-4 text-brand-gray shrink-0" />
+          </div>
+          <div className="space-y-3">
+            {[
+              { label: "Waiting for PHN", value: visibleQueue.length, tone: "text-brand-accent bg-brand-accent/10" },
+              { label: "In Check-up", value: visibleInCheckup.length, tone: "text-brand-blue bg-brand-blue/10" },
+              { label: "Consultation Completed", value: visibleCompleted.length, tone: "text-brand-green bg-brand-green/10" },
+            ].map((row) => (
+              <div key={row.label} className="flex items-center justify-between rounded-btn bg-brand-bg/60 border border-brand-border px-4 py-3">
+                <span className="text-sm text-brand-ink">{row.label}</span>
+                <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${row.tone}`}>{row.value}</span>
               </div>
-              <div className="overflow-x-auto -mx-1">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-brand-bg border-b border-brand-border text-left">
-                      <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Metric</th>
-                      <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide text-right">Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {communityRows.length > 0 &&
-                      [
-                        { label: "Active Cases", value: communityRows[0].activeCases },
-                        { label: "Pending Referrals", value: communityRows[0].referrals },
-                        { label: "Follow-ups", value: communityRows[0].followUps },
-                        { label: "Priority Cases", value: communityRows[0].priorityCases },
-                      ].map((m) => (
-                        <tr key={m.label} className="border-b border-brand-border last:border-0">
-                          <td className="px-4 py-2.5 text-brand-ink">{m.label}</td>
-                          <td className="px-4 py-2.5 text-right font-semibold text-brand-ink">{m.value}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-              <button
-                onClick={() => setBarangayDetail(communityRows[0])}
-                className="mt-4 text-sm font-medium text-brand-blue hover:underline"
-              >
-                View Details
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-3 mb-4">
-                <div>
-                  <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Check-up Progress</h3>
-                  <p className="text-xs text-brand-gray mt-0.5">RHU-level check-up activity today</p>
-                </div>
-                <Activity className="w-4 h-4 text-brand-gray shrink-0" />
-              </div>
-              <div className="space-y-3">
-                {[
-                  { label: "Waiting for PHN", value: visibleQueue.length, tone: "text-brand-accent bg-brand-accent/10" },
-                  { label: "In Check-up", value: visibleInCheckup.length, tone: "text-brand-blue bg-brand-blue/10" },
-                  { label: "Consultation Completed", value: visibleCompleted.length, tone: "text-brand-green bg-brand-green/10" },
-                ].map((row) => (
-                  <div key={row.label} className="flex items-center justify-between rounded-btn bg-brand-bg/60 border border-brand-border px-4 py-3">
-                    <span className="text-sm text-brand-ink">{row.label}</span>
-                    <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${row.tone}`}>{row.value}</span>
-                  </div>
-                ))}
-                <button
-                  onClick={() => navigate("/app/phn/consultations")}
-                  className="mt-1 text-sm font-medium text-brand-blue hover:underline"
-                >
-                  Open PHN Check-ups
-                </button>
-              </div>
-            </>
-          )}
+            ))}
+            <button
+              onClick={() => navigate("/app/phn/consultations")}
+              className="mt-1 text-sm font-medium text-brand-blue hover:underline"
+            >
+              Open PHN Check-ups
+            </button>
+          </div>
         </Card>
       </div>
 
@@ -519,7 +450,7 @@ export default function PHNDashboard() {
               );
             })}
             {visibleAlerts.length === 0 && (
-              <p className="text-sm text-brand-gray py-6 text-center">No alerts within the active coverage.</p>
+                  <p className="text-sm text-brand-gray py-6 text-center">No alerts at the RHU right now.</p>
             )}
           </div>
         </Card>
@@ -541,7 +472,7 @@ export default function PHNDashboard() {
               </div>
             ))}
             {visibleServices.length === 0 && (
-              <p className="text-sm text-brand-gray py-6 text-center">No health services today within the active coverage.</p>
+                  <p className="text-sm text-brand-gray py-6 text-center">No health services today at the RHU.</p>
             )}
           </div>
         </Card>
@@ -559,51 +490,6 @@ export default function PHNDashboard() {
           </button>
         ))}
       </div>
-
-      {/* Barangay Details Modal (assigned PHN only) */}
-      <AnimatePresence>
-        {barangayDetail && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setBarangayDetail(null)}>
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              className="w-full max-w-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Card role="dialog" aria-modal="true" aria-label={`${barangayDetail.name} details`} className="overflow-hidden">
-                <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
-                  <div>
-                    <h3 className="text-base font-semibold text-brand-ink">Barangay {barangayDetail.name}</h3>
-                    <p className="text-xs text-brand-gray mt-0.5">Community health summary</p>
-                  </div>
-                  <button onClick={() => setBarangayDetail(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink" aria-label="Close modal">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="px-6 py-4">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    {[
-                      { label: "Active Cases", value: barangayDetail.activeCases },
-                      { label: "Pending Referrals", value: barangayDetail.referrals },
-                      { label: "Follow-ups Due", value: barangayDetail.followUps },
-                      { label: "Priority Cases", value: barangayDetail.priorityCases },
-                    ].map((row) => (
-                      <div key={row.label} className="rounded-btn bg-brand-bg px-3 py-2.5">
-                        <p className="text-[11px] text-brand-gray uppercase tracking-wide">{row.label}</p>
-                        <p className="mt-0.5 font-semibold text-brand-ink">{row.value}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
-                  <button onClick={() => setBarangayDetail(null)} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Close</button>
-                </div>
-              </Card>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Review Referral Modal */}
       <AnimatePresence>
@@ -740,7 +626,7 @@ export default function PHNDashboard() {
                 <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
                   <div>
                     <h3 className="text-base font-semibold text-brand-ink">Today's Health Services</h3>
-                    <p className="text-xs text-brand-gray mt-0.5">{assigned ? `Services for ${assigned}` : "RHU-level services"}</p>
+                    <p className="text-xs text-brand-gray mt-0.5">RHU-level services</p>
                   </div>
                   <button onClick={() => setServicesModal(false)} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink" aria-label="Close modal">
                     <X className="w-4 h-4" />

@@ -226,7 +226,11 @@ export default function HealthSupervisorDashboard() {
       <PageHeader
         crumbs={["Home", "Dashboard"]}
         title="Health Monitoring"
-        subtitle="Monitor health cases, services, referrals, follow-ups, and community health alerts."
+        subtitle={
+          scope && scope.level === "barangay"
+            ? `Barangay ${scope.assignedBarangay} — monitor health cases, services, referrals, follow-ups, and community health alerts for your assigned barangay.`
+            : "Monitor health cases, services, referrals, follow-ups, and community health alerts."
+        }
       />
 
       {/* Summary cards */}

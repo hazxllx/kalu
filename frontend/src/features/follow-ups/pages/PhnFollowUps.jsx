@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
-import CoverageSelector from "@/components/common/CoverageSelector";
 import { FOLLOWUP_STATUSES, phnResidents } from "@/services/mock/mockPhnData";
 import {
   useWorkflowStore,
@@ -395,7 +394,6 @@ export default function PhnFollowUps() {
         crumbs={["Home", "Follow-ups"]}
         title="Follow-up Monitoring"
         subtitle={phn ? "Monitor and complete resident follow-ups." : "Monitor RHU-level follow-ups."}
-        meta={phn ? <CoverageSelector mode="tag" /> : null}
         action={
           <button
             onClick={() => {

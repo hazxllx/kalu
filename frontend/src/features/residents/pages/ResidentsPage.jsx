@@ -105,7 +105,6 @@ export default function ResidentsPage() {
   const residents = useResidents();
 
   const [q, setQ] = useState("");
-  const [brgyFilter, setBrgyFilter] = useState("All");
   const [programFilter, setProgramFilter] = useState("All");
   const [riskFilter, setRiskFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -122,33 +121,37 @@ export default function ResidentsPage() {
     return Array.from(new Set([...PROGRAM_OPTIONS, ...used]));
   }, [residents]);
 
-  // Respect role/coverage: a barangay-assigned Health Supervisor may only
-  // register residents in their own barangay; RHU Personnel and supervisors
-  // with municipal scope may use any barangay.
-  const allowedBarangays = useMemo(() => {
-    const scope = getSupervisorScope(user);
-    if (!scope) return [...BARANGAYS];
-    if (scope.level === HS_SCOPE.BARANGAY) return [scope.assignedBarangay];
-    return [...BARANGAYS];
-  }, [user]);
+  // The Resident Directory is owned by the Health Supervisor. Its rows are
+  // always scoped to the supervisor's assigned barangay — no cross-barangay
+  // data is shown and no barangay picker is offered.
+  const scope = getSupervisorScope(user);
+  const scopedBarangays = scope && scope.level === HS_SCOPE.BARANGAY
+    ? [scope.assignedBarangay]
+    : [...BARANGAYS];
+
+  const scopedResidents = useMemo(
+    () => residents.filter((r) => scopedBarangays.includes(r.barangay)),
+    [residents, scopedBarangays]
+  );
+
+  const allowedBarangays = scopedBarangays;
 
   const showToast = (message) => {
     setToast(message);
     setTimeout(() => setToast(null), 3200);
   };
 
-  const rows = residents.filter((r) => {
+  const rows = scopedResidents.filter((r) => {
     const term = q.trim().toLowerCase();
     const matchesQ =
       term === "" ||
       (r.name || "").toLowerCase().includes(term) ||
       (r.barangay || "").toLowerCase().includes(term) ||
       (r.id || "").toLowerCase().includes(term);
-    const matchesBrgy = brgyFilter === "All" || r.barangay === brgyFilter;
     const matchesProgram = programFilter === "All" || r.program === programFilter;
     const matchesRisk = riskFilter === "All" || r.risk === riskFilter;
     const matchesStatus = statusFilter === "All" || r.status === statusFilter;
-    return matchesQ && matchesBrgy && matchesProgram && matchesRisk && matchesStatus;
+    return matchesQ && matchesProgram && matchesRisk && matchesStatus;
   });
 
   const openAdd = () => {
@@ -242,7 +245,11 @@ export default function ResidentsPage() {
       <PageHeader
         crumbs={["Home", "Residents"]}
         title="Resident Directory"
-        subtitle="Search, filter, and manage residents in your area."
+        subtitle={
+          scope && scope.level === HS_SCOPE.BARANGAY
+            ? `Search, filter, and manage residents in Barangay ${scope.assignedBarangay}.`
+            : "Search, filter, and manage residents in your area."
+        }
         action={
           <div className="flex items-center gap-3">
             <button className="hidden sm:flex items-center gap-2 border border-brand-border bg-white px-4 py-2.5 rounded-btn text-sm font-medium text-brand-ink hover:border-brand-blue transition-colors">
@@ -269,16 +276,6 @@ export default function ResidentsPage() {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2">
-            <select
-              value={brgyFilter}
-              onChange={(e) => setBrgyFilter(e.target.value)}
-              className="bg-transparent text-sm outline-none"
-            >
-              <option>All</option>
-              {BARANGAYS.map((b) => <option key={b}>{b}</option>)}
-            </select>
-          </div>
           <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2">
             <select
               value={programFilter}
@@ -341,7 +338,7 @@ export default function ResidentsPage() {
         }}
       />
       <p className="mt-4 text-sm text-brand-gray">
-        Showing {rows.length} of {residents.length} residents
+        Showing {rows.length} of {scopedResidents.length} residents
       </p>
 
       {/* Add Resident Modal */}

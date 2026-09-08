@@ -19,7 +19,6 @@ import {
   scopeLabel,
 } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
-import CoverageSelector from "@/components/common/CoverageSelector";
 import { useAuth } from "@/context/AuthContext";
 import {
   Stethoscope,
@@ -262,7 +261,6 @@ export default function PhnHealthServices() {
         crumbs={["Home", "Health Services"]}
         title="Health Services"
         subtitle={phn ? "Coordinate and schedule health services for your community." : "RHU-level health services."}
-        meta={phn ? <CoverageSelector mode="tag" /> : null}
         action={
           <button
             onClick={() => {

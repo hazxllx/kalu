@@ -6,7 +6,7 @@ import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { barangayOverview, monthlyConsultations } from "@/services/mock/mockData";
-import { FileText, Calendar, Heart, BarChart3, Users, ArrowRight, Eye } from "lucide-react";
+import { FileText, Calendar, Heart, BarChart3, ArrowRight, Eye, Activity, HeartPulse } from "lucide-react";
 
 const RECENT_REFERRALS = [
   { id: 1, resident: "Ana Villanueva", barangay: "San Isidro", date: "July 10, 2026", status: "Pending" },
@@ -17,10 +17,10 @@ const RECENT_REFERRALS = [
 ];
 
 const QUICK_ACTIONS = [
-  { icon: Users, label: "Resident Records", description: "View and manage resident health records", path: "/app/rhu_personnel/residents" },
-  { icon: Calendar, label: "Health Programs", description: "Manage health programs and initiatives", path: "/app/rhu_personnel/programs" },
-  { icon: Heart, label: "Analytics", description: "Review community health analytics", path: "/app/rhu_personnel/analytics" },
-  { icon: BarChart3, label: "Generate Reports", description: "Generate health reports and analytics", path: "/app/rhu_personnel/reports" },
+  { icon: Activity, label: "Triage", description: "Send a patient to the PHN for check-up", path: "/app/rhu_personnel/triage" },
+  { icon: HeartPulse, label: "Health Programs", description: "Manage health programs and initiatives", path: "/app/rhu_personnel/programs" },
+  { icon: FileText, label: "Referrals", description: "Review RHU referral activity", path: "/app/rhu_personnel/dashboard" },
+  { icon: Calendar, label: "Notifications", description: "Check your notifications", path: "/app/rhu_personnel/notifications" },
 ];
 
 const BARANGAY_HEALTH_SUMMARY = [

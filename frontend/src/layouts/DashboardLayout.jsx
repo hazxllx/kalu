@@ -35,9 +35,8 @@ export default function DashboardLayout({ roleKey }) {
   // that privilege from the role; everything else behaves exactly as before.
   const items = useMemo(() => filterNavByPermission(NAV[roleKey] || [], can), [roleKey, can]);
 
-  // The profile should reflect the signed-in user (two different PHN demo
-  // accounts exist, each with its own name/coverage), falling back to the
-  // role's placeholder only when no user is available.
+  // The profile reflects the signed-in demo user (name/role per account),
+  // falling back to the role's placeholder only when no user is available.
   const displayName = user?.name || role.name;
   const displayEmail = user?.email || `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`;
   const initials = displayName

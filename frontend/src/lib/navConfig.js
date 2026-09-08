@@ -46,7 +46,7 @@ export const NAV = {
   // follow-ups, health services.
   phn: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/phn/dashboard" },
-    { label: "Health Records", icon: "FileHeart", path: "/app/phn/record", permission: "residents.profile.view" },
+    { label: "Health Records", icon: "FileHeart", path: "/app/phn/record" },
     { label: "PHN Check-ups", icon: "ClipboardList", path: "/app/phn/consultations", permission: "consultation.requests.view" },
     { label: "Referrals", icon: "Send", path: "/app/phn/referrals", permission: "referrals.view" },
     { label: "Follow-ups", icon: "CalendarClock", path: "/app/phn/followups", permission: "followups.view" },
@@ -56,15 +56,17 @@ export const NAV = {
     { label: "Settings", icon: "Settings", path: "/app/phn/settings" },
   ],
   // Health Supervisor: barangay-level nurse/midwife. Owns resident
-  // verification, resident directory, health records, consultation, referrals,
-  // follow-ups and barangay community monitoring / early warning. The demo
-  // account is assigned to Barangay San Isidro — its Early Warning module and
-  // barangay-sensitive data are scoped to that assignment (see
-  // `@/lib/barangayScope` and the API's barangay-scope middleware).
+  // verification, resident directory, household verification, health records,
+  // consultation, referrals, follow-ups and barangay community monitoring /
+  // early warning. The demo account is assigned to Barangay San Isidro — its
+  // Early Warning module and barangay-sensitive data are scoped to that
+  // assignment (see `@/lib/barangayScope` and the API's barangay-scope
+  // middleware).
   health_supervisor: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/health_supervisor/dashboard", group: "Main" },
     { label: "Resident Directory", icon: "Users", path: "/app/health_supervisor/residents", permission: "residents.directory.view", group: "Main" },
     { label: "Verifications", icon: "ShieldCheck", path: "/app/health_supervisor/verifications", permission: "residents.registration.approve", group: "Main" },
+    { label: "Household Verifications", icon: "Home", path: "/app/health_supervisor/household-verifications", permission: "households.verify", group: "Main" },
     { label: "Consultation", icon: "Stethoscope", path: "/app/health_supervisor/consultations", permission: "consultation.conduct", group: "Health Services" },
     { label: "Records", icon: "ClipboardList", group: "Health Services", children: [
       { label: "TCLS", icon: "ClipboardList", path: "/app/health_supervisor/tcls" },
@@ -82,10 +84,11 @@ export const NAV = {
   ],
   // RHU Personnel: triage. Dedicated Triage Queue / Triage Assessment screens
   // are pending the verified requirements; monitoring pages remain available.
+  // RHU Personnel do not have a Resident Directory entry — residents are owned
+  // by the barangay Health Supervisor.
   rhu_personnel: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/rhu_personnel/dashboard" },
     { label: "Triage", icon: "Activity", path: "/app/rhu_personnel/triage", permission: "triage.view" },
-    { label: "Resident Records", icon: "Users", path: "/app/rhu_personnel/residents", permission: "residents.directory.view" },
     { label: "Health Programs", icon: "HeartPulse", path: "/app/rhu_personnel/programs" },
     { label: "Notifications", icon: "Bell", path: "/app/rhu_personnel/notifications" },
     { label: "Settings", icon: "Settings", path: "/app/rhu_personnel/settings" },
