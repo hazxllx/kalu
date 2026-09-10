@@ -34,6 +34,49 @@
     --font-stat: 'Public Sans', ui-sans-serif, system-ui, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
+
+  /* Dark mode — HSL tokens mirror the KALUSAGAP institutional palette on
+     deep navy surfaces so every semantic color keeps working in dark.
+
+     Layered surface hierarchy (L1 deepest → L6 lightest):
+       --background        L1 page
+       --sidebar           L2 navigation
+       --header            L2 top bar
+       --card              L3 primary cards
+       --card-nested       L4 nested / info boxes
+       --input             L5 fields
+       --hover             L6 hover
+       --active            blue-tinted active */
+  .dark {
+    --background: 217 38% 7%;
+    --foreground: 214 32% 95%;
+    --card: 216 34% 11%;
+    --card-foreground: 214 32% 95%;
+    --popover: 216 34% 12%;
+    --popover-foreground: 214 32% 95%;
+    --primary: 210 86% 58%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 216 30% 16%;
+    --secondary-foreground: 214 32% 92%;
+    --muted: 216 28% 15%;
+    --muted-foreground: 214 18% 74%;
+    --accent: 216 28% 18%;
+    --accent-foreground: 214 32% 92%;
+    --destructive: 350 74% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 22% 20%;
+    --input: 215 24% 16%;
+    --ring: 210 86% 58%;
+
+  /* L2 sidebar / top header */
+  --sidebar: 217 40% 9%;
+  /* L4 nested surface */
+  --card-nested: 216 30% 15%;
+  /* L6 hover surface */
+  --hover: 216 28% 19%;
+  /* L7 active (blue-tinted) */
+  --active: 210 45% 22%;
+  }
 }
 
 @layer base {
@@ -158,6 +201,13 @@
   .shadow-float { box-shadow: 0 10px 34px -18px rgba(9, 30, 66, 0.45), 0 1px 0 0 rgba(16, 42, 67, 0.05); }
   .shadow-deep { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 10px 30px rgba(16, 42, 67, 0.06); }
 
+  /* Dark-mode adjustments for the fixed light surfaces (navy institutional
+     panels keep their own palette on every theme). */
+  .dark .gov-sheet { background: #101c2c; border-color: #2a3a52; }
+  .dark .shadow-card { box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.25); }
+  .dark .gov-hatch { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 7px); }
+  .dark .gov-grid { background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px); }
+
   /* ---------- Backgrounds ---------- */
   .gradient-hero { background: linear-gradient(135deg, #0B4A8F 0%, #072F5F 100%); }
   .gov-navy-panel { background: linear-gradient(158deg, #0A3A70 0%, #072B54 55%, #051F3E 100%); }
@@ -189,4 +239,159 @@
 @keyframes gov-marquee {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
+}
+
+/* ===========================================================================
+   DARK MODE — utility remap
+   ---------------------------------------------------------------------------
+   KALUSAGAP surfaces are built from `brand.*` and neutral slate utilities.
+   Instead of rewriting every component, we remap those tokens when the `.dark`
+   class is present. This keeps the existing design language (institutional
+   blues, same radius/spacing) while making every screen readable in dark.
+   =========================================================================== */
+.dark body { background: hsl(var(--background)); color: hsl(var(--foreground)); }
+
+/* ============================ TEXT HIERARCHY ============================ */
+/* Page / section titles, card titles, numbers — near-white */
+.dark .text-slate-900, .dark .text-slate-800,
+.dark .text-brand-ink, .dark .text-brand-dark { color: hsl(var(--foreground)); }
+
+/* Body text — light gray */
+.dark .text-slate-700, .dark .text-slate-600,
+.dark .text-brand-gray { color: hsl(var(--muted-foreground)); }
+
+/* Secondary / metadata — muted light gray */
+.dark .text-slate-500, .dark .text-slate-400 { color: hsl(214 18% 70%); }
+.dark .text-slate-300 { color: hsl(214 18% 78%); }
+
+/* ========================== SURFACE HIERARCHY =========================== */
+/* L3 — primary cards (page surfaces lifted off the background) */
+.dark .bg-white { background-color: hsl(var(--card)); }
+.dark .bg-white\/95 { background-color: hsl(var(--card) / 0.95); }
+.dark .bg-brand-paper { background-color: hsl(var(--card)); }
+.dark .bg-brand-paper\/50 { background-color: hsl(var(--card) / 0.5); }
+.dark .bg-brand-paper\/60 { background-color: hsl(var(--card) / 0.6); }
+
+/* L4 — nested / info / highlight boxes */
+.dark .bg-slate-50, .dark .bg-slate-100,
+.dark .bg-brand-bg { background-color: hsl(var(--card-nested)); }
+.dark .bg-slate-200 { background-color: hsl(var(--border)); }
+.dark .bg-brand-light { background-color: hsl(var(--card-nested)); }
+.dark .bg-brand-light\/50 { background-color: hsl(var(--card-nested) / 0.6); }
+.dark .bg-brand-light\/60 { background-color: hsl(var(--card-nested) / 0.7); }
+.dark .bg-brand-light\/70 { background-color: hsl(var(--card-nested) / 0.8); }
+
+/* L5 — inputs */
+.dark .bg-brand-border { background-color: hsl(var(--input)); }
+
+/* L6 — hover */
+.dark .hover\:bg-slate-50:hover { background-color: hsl(var(--hover)); }
+
+/* L7 — blue-tinted active */
+.dark .bg-brand-blue\/5 { background-color: hsl(210 86% 58% / 0.12); }
+.dark .bg-brand-blue\/10 { background-color: hsl(210 86% 58% / 0.16); }
+.dark .bg-brand-blue\/15 { background-color: hsl(210 86% 58% / 0.2); }
+
+/* ============================= BORDER SYSTEM ============================= */
+.dark .border-slate-200, .dark .border-slate-300,
+.dark .border-brand-border, .dark .border-brand-rule { border-color: hsl(var(--border)); }
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-brand-border > :not([hidden]) ~ :not([hidden]) { border-color: hsl(var(--border)); }
+.dark .border-brand-blue\/20 { border-color: hsl(210 86% 58% / 0.25); }
+.dark .border-brand-blue\/30 { border-color: hsl(210 86% 58% / 0.35); }
+.dark .border-brand-blue\/40 { border-color: hsl(210 86% 58% / 0.45); }
+
+/* ============================== SEMANTIC ================================ */
+.dark .text-brand-blue { color: hsl(210 86% 66%); }
+.dark .bg-brand-blue { background-color: hsl(210 86% 46%); }
+.dark .bg-brand-dark { background-color: hsl(var(--primary)); }
+.dark .bg-brand-goldpale { background-color: hsl(42 60% 14% / 0.55); }
+
+/* ============================== FORMS =================================== */
+.dark input, .dark select, .dark textarea { color-scheme: dark; }
+/* Placeholders: muted but readable (lighter than disabled, darker than text) */
+.dark input::placeholder, .dark textarea::placeholder { color: hsl(214 16% 62%); }
+
+/* Dropdowns / popovers use the popover surface (slightly lighter than cards) */
+.dark .bg-popover, .dark .bg-white\/95, .dark [role="listbox"], .dark [role="menu"] {
+  background-color: hsl(var(--popover));
+  border-color: hsl(var(--border));
+}
+/* Absolute dropdown panels rendered by the shared searchable selects */
+.dark .absolute.bg-white.shadow-float {
+  background-color: hsl(var(--popover));
+  border-color: hsl(var(--border));
+  box-shadow: 0 10px 34px -18px rgba(0, 0, 0, 0.7), 0 1px 0 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Table headers rendered with bg-brand-bg already remapped above; keep hover
+   subtle on dark (L6 hover surface). */
+.dark tbody tr:hover { background-color: hsl(var(--hover)) !important; }
+
+/* Status / success / error / warning translucent washes —
+   dark tinted background + brighter text + (used via small indicator) */
+.dark .bg-emerald-50 { background-color: hsl(150 45% 16% / 0.55); }
+.dark .bg-emerald-100 { background-color: hsl(150 40% 20%); }
+.dark .text-emerald-600, .dark .text-emerald-700 { color: hsl(150 55% 64%); }
+.dark .border-emerald-200 { border-color: hsl(150 40% 30%); }
+.dark .border-emerald-300 { border-color: hsl(150 40% 36%); }
+
+.dark .bg-rose-50 { background-color: hsl(350 50% 18% / 0.55); }
+.dark .text-rose-600, .dark .text-rose-700 { color: hsl(350 70% 72%); }
+.dark .border-rose-200 { border-color: hsl(350 45% 34%); }
+
+.dark .bg-amber-50 { background-color: hsl(42 50% 16% / 0.55); }
+.dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800 { color: hsl(42 60% 68%); }
+.dark .border-amber-200 { border-color: hsl(42 45% 34%); }
+
+.dark .bg-orange-50 { background-color: hsl(25 55% 18% / 0.55); }
+.dark .text-orange-600, .dark .text-orange-700 { color: hsl(25 70% 66%); }
+.dark .border-orange-200 { border-color: hsl(25 45% 34%); }
+
+.dark .bg-red-50\/40 { background-color: hsl(0 60% 18% / 0.5); }
+.dark .text-red-600 { color: hsl(350 72% 70%); }
+
+.dark .bg-brand-danger\/5 { background-color: hsl(350 74% 60% / 0.14); }
+.dark .bg-brand-danger\/10 { background-color: hsl(350 74% 60% / 0.2); }
+.dark .bg-brand-green\/10 { background-color: hsl(150 55% 50% / 0.2); }
+.dark .bg-brand-green\/15 { background-color: hsl(150 55% 50% / 0.24); }
+.dark .bg-brand-yellow\/10 { background-color: hsl(42 60% 60% / 0.22); }
+.dark .bg-brand-yellow\/15 { background-color: hsl(42 60% 60% / 0.26); }
+.dark .bg-brand-accent\/10 { background-color: hsl(210 70% 58% / 0.2); }
+.dark .text-brand-green { color: hsl(150 55% 62%); }
+.dark .text-brand-danger { color: hsl(350 72% 70%); }
+.dark .text-brand-accent { color: hsl(210 70% 68%); }
+.dark .text-brand-amber { color: hsl(42 60% 68%); }
+
+/* Gold accent stays legible on dark (institutional gold, not pale) */
+.dark .text-brand-gold { color: hsl(42 62% 64%); }
+.dark .text-\[\#B07E00\] { color: hsl(42 62% 64%); }
+.dark .border-brand-gold\/40 { border-color: hsl(42 62% 55% / 0.5); }
+.dark .border-brand-gold\/20 { border-color: hsl(42 62% 55% / 0.3); }
+
+/* Dark toast / ink surfaces should lift off the dark page */
+.dark .bg-brand-ink { background-color: hsl(216 34% 15%); }
+.dark .shadow-float { box-shadow: 0 10px 34px -18px rgba(0, 0, 0, 0.7), 0 1px 0 0 rgba(255, 255, 255, 0.05); }
+
+/* Inputs & controls */
+.dark .bg-brand-border { background-color: hsl(var(--input)); }
+.dark .border-slate-400 { border-color: hsl(214 18% 60%); }
+
+/* Sidebar / navigation hover + active */
+.dark .hover\:bg-slate-50:hover { background-color: hsl(var(--hover)); }
+.dark .hover\:text-slate-900:hover { color: hsl(var(--foreground)); }
+
+/* L7 active nav: blue-tinted dark surface */
+.dark .bg-brand-light { background-color: hsl(var(--card-nested)); }
+
+/* ===========================================================================
+   RESPONSIVE SAFEGUARDS
+   ---------------------------------------------------------------------------
+   Wide data tables live inside `overflow-x-auto` wrappers (contained
+   horizontal scrolling); the page itself never scrolls sideways because
+   `html/body { overflow-x: hidden }`. On touch devices make those table
+   scroll regions fluid.
+   =========================================================================== */
+@media (max-width: 640px) {
+  .overflow-x-auto { -webkit-overflow-scrolling: touch; }
 }

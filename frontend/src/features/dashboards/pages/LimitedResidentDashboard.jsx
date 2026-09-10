@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import VerificationBanner from "@/features/verification/components/VerificationBanner";
+import { useAuth } from "@/context/AuthContext";
 
 const AVAILABLE = [
   { icon: Stethoscope, label: "Health Services", desc: "Browse available health services and schedules.", path: "/app/resident-limited/services", tone: "bg-brand-blue/10 text-brand-blue" },
@@ -22,11 +23,13 @@ const LOCKED = [
 ];
 
 export default function LimitedResidentDashboard() {
+  const { user } = useAuth();
+  const first = (user?.name || "Resident").split(" ")[0];
   return (
     <>
       <PageHeader
         crumbs={["Home", "Dashboard"]}
-        title="Welcome, Juan"
+        title={`Welcome, ${first}`}
         subtitle="Your account is pending verification. Some features are temporarily locked."
       />
 

@@ -29,10 +29,10 @@ export const MOCK_ACCOUNTS = [
   {
     role: ROLE.MHO,
     label: 'Municipal Health Officer',
-    name: 'Municipal Health Officer',
+    name: 'Dr. Maria L. Santos',
     email: 'mho@kalusagap.test',
     password: 'Mho123!',
-    description: 'Municipal monitoring, reports, health statistics, and referral oversight.',
+    description: 'Municipal Health Officer demo account — municipality-wide reporting, analytics, and oversight for Pili, Camarines Sur.',
   },
   {
     role: ROLE.PHN,
@@ -70,28 +70,20 @@ export const MOCK_ACCOUNTS = [
     description: 'Data collection and household/community profiling.',
   },
   {
-    role: ROLE.RESIDENT,
-    label: 'Resident 1',
-    name: 'Maria Santos',
-    email: 'resident1@kalusagap.test',
-    password: 'Resident123!',
-    description: 'Resident self-service: own profile, records, services, and notifications.',
-  },
-  {
-    role: ROLE.RESIDENT,
-    label: 'Resident 2',
-    name: 'Juan Dela Cruz',
-    email: 'resident2@kalusagap.test',
-    password: 'Resident123!',
-    description: 'Resident self-service: own profile, records, services, and notifications.',
-  },
-  {
-    role: ROLE.RESIDENT,
-    label: 'Resident 3',
+    role: ROLE.RESIDENT_LIMITED,
+    label: 'Resident — Unverified',
     name: 'Grace Aquino',
-    email: 'resident3@kalusagap.test',
+    email: 'resident.unverified@kalusagap.test',
     password: 'Resident123!',
-    description: 'Resident self-service: own profile, records, services, and notifications.',
+    description: 'Resident demo with a pending verification state — identity review is required before full resident access.',
+  },
+  {
+    role: ROLE.RESIDENT,
+    label: 'Resident — Verified',
+    name: 'Maria Santos',
+    email: 'resident.verified@kalusagap.test',
+    password: 'Resident123!',
+    description: 'Resident demo with a verified identity — full resident self-service access.',
   },
 ];
 

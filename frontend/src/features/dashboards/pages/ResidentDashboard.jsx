@@ -7,6 +7,7 @@ import StatusBadge from "@/components/common/StatusBadge";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationModal from "@/features/verification/components/VerificationModal";
 import { residentDashboard, residentTimeline } from "@/services/mock/mockData";
+import { useAuth } from "@/context/AuthContext";
 
 const timelineColor = {
   green: "bg-brand-green", accent: "bg-brand-accent", blue: "bg-brand-blue",
@@ -14,8 +15,11 @@ const timelineColor = {
 };
 
 export default function ResidentDashboard() {
+  const { user } = useAuth();
   const [verifyModal, setVerifyModal] = useState(false);
   const verified = true;
+  const displayName = user?.name || "Maria Santos";
+  const first = displayName.split(" ")[0];
   const cards = [
     { icon: CalendarClock, tone: "bg-brand-accent/10 text-brand-accent", label: "Upcoming Follow-up", main: residentDashboard.followUp.date, sub: `${residentDashboard.followUp.time} · ${residentDashboard.followUp.place}` },
     { icon: ShieldCheck, tone: "bg-brand-green/10 text-brand-green", label: "Health Risk Level", main: residentDashboard.risk, sub: "Stable — keep it up!" },
@@ -26,7 +30,7 @@ export default function ResidentDashboard() {
     <>
       <PageHeader
         crumbs={["Home", "Dashboard"]}
-        title={<span className="flex items-center gap-3">Welcome back, Maria Santos <VerificationBadge status={verified ? "verified" : "pending"} /></span>}
+        title={<span className="flex items-center gap-3">Welcome back, {first} <VerificationBadge status={verified ? "verified" : "pending"} /></span>}
         subtitle="Here's an overview of your health at a glance."
       />
 

@@ -115,6 +115,16 @@ export const NOTIFICATIONS = {
       category: "success",
       read: true,
     },
+    {
+      id: 5,
+      icon: "AlertTriangle",
+      title: "New Household Risk Cluster",
+      desc: "The Villanueva Household has accumulated multiple health-monitoring indicators and now needs intervention.",
+      time: "Just now",
+      category: "warning",
+      read: false,
+      link: "/app/bhw/households/risk-clusters",
+    },
   ],
   midwife: [
     {
@@ -134,6 +144,16 @@ export const NOTIFICATIONS = {
       time: "3 hours ago",
       category: "warning",
       read: false,
+    },
+    {
+      id: 3,
+      icon: "AlertTriangle",
+      title: "Household Risk Cluster Detected",
+      desc: "The Villanueva Household is now flagged for priority review — multiple risk indicators have clustered.",
+      time: "Just now",
+      category: "warning",
+      read: false,
+      link: "/app/health_supervisor/households/risk-clusters",
     },
     {
       id: 3,

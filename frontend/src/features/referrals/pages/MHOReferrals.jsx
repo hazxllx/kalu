@@ -32,7 +32,7 @@ export default function MHOReferrals() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Referrals"]}
+        crumbs={["Referrals"]}
         title="Referral Monitoring"
         subtitle="Monitor referrals across all barangays in the municipality"
       />

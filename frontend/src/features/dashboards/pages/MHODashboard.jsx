@@ -1,9 +1,11 @@
-import React from "react";
+import React, { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Map, Users, Stethoscope, Send, ShieldAlert, Activity } from "lucide-react";
+import { Map, Users, Stethoscope, Send, ShieldAlert, Activity, ClipboardList, ChevronRight } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
+import { useMunicipalSubmissions } from "@/services/mock/municipalSubmissionsStore";
 
 const STATS = [
   { icon: Map, tone: "bg-brand-blue/10 text-brand-blue", label: "Total Barangays", value: "3" },
@@ -22,9 +24,22 @@ const ACTIVITY = [
 ];
 
 export default function MHODashboard() {
+  const submissions = useMunicipalSubmissions();
+  const submissionStatus = useMemo(() => {
+    const tcl = submissions.filter((s) => s.type === "TCL");
+    const m1 = submissions.filter((s) => s.type === "M1");
+    return {
+      tclSubmitted: tcl.filter((s) => s.period === "September 2026").length,
+      m1Submitted: m1.filter((s) => s.period === "September 2026").length,
+      pending: submissions.filter((s) => s.reviewStatus === "Pending Review" || s.status === "Under Review").length,
+      needsCorrection: submissions.filter((s) => s.reviewStatus === "Needs Correction" || s.reviewStatus === "Returned").length,
+      totalBarangays: 3,
+    };
+  }, [submissions]);
+
   return (
     <>
-      <PageHeader crumbs={["Home", "Dashboard"]} title="Municipal Health Dashboard" subtitle="Municipality of Pili, Camarines Sur" />
+      <PageHeader crumbs={["Dashboard"]} title="Municipal Health Dashboard" subtitle="Municipality of Pili, Camarines Sur" />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-5">
         {STATS.map((s, i) => (
@@ -38,6 +53,25 @@ export default function MHODashboard() {
           </motion.div>
         ))}
       </div>
+
+      {/* Submission status */}
+      <Link to="/app/mho/submissions" className="mt-6 mb-6 block rounded-2xl border border-slate-200 bg-white p-4 hover:border-brand-blue/40 transition-colors dark:border-border dark:bg-card">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue">
+            <ClipboardList className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-brand-ink">Submission Status</p>
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-gray">
+              <span>TCL {submissionStatus.tclSubmitted} / {submissionStatus.totalBarangays} submitted</span>
+              <span>M1 {submissionStatus.m1Submitted} / {submissionStatus.totalBarangays} submitted</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-yellow" /> {submissionStatus.pending} pending review</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-accent" /> {submissionStatus.needsCorrection} needs correction</span>
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 shrink-0 text-brand-gray" />
+        </div>
+      </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mt-6">
         <Card className="lg:col-span-2 p-4 sm:p-6">

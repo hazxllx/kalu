@@ -14,6 +14,10 @@ import Login from '@/features/authentication/pages/Login';
 import RegistrationTypeSelection from '@/features/registration/pages/RegistrationTypeSelection';
 import NewResidentRegistration from '@/features/registration/pages/NewResidentRegistration';
 import TransferRegistration from '@/features/registration/pages/TransferRegistration';
+import MunicipalityRegistration from '@/features/registration/pages/MunicipalityRegistration';
+import MunicipalityApplications from '@/features/registration/pages/MunicipalityApplications';
+import MunicipalSubmissions from '@/features/submissions/pages/MunicipalSubmissions';
+import MunicipalHealthReports from '@/features/reports/pages/MunicipalHealthReports';
 import RegistrationSuccess from '@/features/registration/pages/RegistrationSuccess';
 
 // Verification
@@ -40,6 +44,10 @@ import PhnHealthServices from '@/features/health-services/pages/PhnHealthService
 import ResidentsPage from '@/features/residents/pages/ResidentsPage';
 import Households from '@/features/households/pages/Households';
 import AddHouseholdPage from '@/features/households/pages/AddHouseholdPage';
+import HouseholdRiskClusters from '@/features/households/pages/HouseholdRiskClusters';
+import HouseholdRiskOverview from '@/features/households/pages/HouseholdRiskOverview';
+import HouseholdRiskDetail from '@/features/households/pages/HouseholdRiskDetail';
+import RiskRuleConfig from '@/features/households/pages/RiskRuleConfig';
 import ConsultationsPage from '@/features/consultations/pages/ConsultationsPage';
 import TreatmentConsultation from '@/features/consultations/pages/TreatmentConsultation';
 import HealthRecord from '@/features/health-records/pages/HealthRecord';
@@ -90,6 +98,7 @@ const AppRoutes = () => (
     <Route path="/register" element={<RegistrationTypeSelection />} />
     <Route path="/register/new/step-1" element={<NewResidentRegistration />} />
     <Route path="/register/transfer" element={<TransferRegistration />} />
+    <Route path="/register/municipality" element={<MunicipalityRegistration />} />
     <Route path="/registration-success" element={<RegistrationSuccess />} />
     <Route path="/verification-status" element={<VerificationStatus />} />
     <Route path="/unauthorized" element={<UnauthorizedPage />} />
@@ -130,7 +139,11 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<MHODashboard />} />
         <Route path="trends" element={<HealthTrends />} />
+        <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
+        <Route path="households/:id" element={<HouseholdRiskDetail />} />
+        <Route path="submissions" element={<MunicipalSubmissions />} />
         <Route path="referrals" element={<MHOReferrals />} />
+        <Route path="reports" element={<MunicipalHealthReports />} />
         <Route path="notifications" element={<NotificationsPage roleKey="mho" />} />
         <Route path="settings" element={<SettingsPage roleKey="mho" />} />
       </Route>
@@ -142,6 +155,8 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<PHNDashboard />} />
         <Route path="record" element={<PhnHealthRecords />} />
+        <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
+        <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="consultations" element={<PhnCheckups />} />
         <Route path="referrals" element={<Referrals roleKey="phn" />} />
         <Route path="followups" element={<PhnFollowUps />} />
@@ -172,6 +187,9 @@ const AppRoutes = () => (
         <Route path="referrals" element={<Referrals />} />
         <Route path="households" element={<Households />} />
         <Route path="households/new" element={<AddHouseholdPage />} />
+        <Route path="households/risk-clusters" element={<HouseholdRiskClusters />} />
+        <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
+        <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="trends" element={<HealthTrends />} />
         <Route path="barangays" element={<Barangays />} />
         <Route path="reports" element={<ReportsPage />} />
@@ -207,6 +225,8 @@ const AppRoutes = () => (
         <Route path="dashboard" element={<BHWDashboard />} />
         <Route path="households" element={<Households />} />
         <Route path="households/new" element={<AddHouseholdPage />} />
+        <Route path="households/risk-clusters" element={<HouseholdRiskClusters />} />
+        <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="notifications" element={<NotificationsPage roleKey="bhw" />} />
         <Route path="settings" element={<SettingsPage roleKey="bhw" />} />
       </Route>
@@ -218,6 +238,8 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<UserManagement />} />
+        <Route path="risk-rules" element={<RiskRuleConfig />} />
+        <Route path="municipality-applications" element={<MunicipalityApplications />} />
         <Route path="roles" element={<SystemManagementPage variant="roles" />} />
         {/* Privilege & permission management (admin only). */}
         <Route path="permissions" element={<RolePermissionsPage />} />

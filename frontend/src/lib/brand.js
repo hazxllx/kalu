@@ -14,6 +14,6 @@ export const ROLES = {
   health_supervisor: { key: "health_supervisor", label: "Barangay Health Supervisor", name: "Maria Dela Cruz", basePath: "/app/health_supervisor" },
   phn: { key: "phn", label: "Public Health Nurse", name: "Ana Villanueva", basePath: "/app/phn" },
   rhu_personnel: { key: "rhu_personnel", label: "RHU Personnel", name: "Antonio Reyes", basePath: "/app/rhu_personnel" },
-  mho: { key: "mho", label: "Municipal Health Officer", name: "Dr. Carmen Bautista", basePath: "/app/mho" },
+  mho: { key: "mho", label: "Municipal Health Officer", name: "Dr. Maria L. Santos", basePath: "/app/mho" },
   admin: { key: "admin", label: "System Administrator", name: "Jose Ramirez", basePath: "/app/admin" },
 };

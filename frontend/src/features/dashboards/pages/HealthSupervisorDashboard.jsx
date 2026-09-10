@@ -4,6 +4,8 @@ import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
 import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
+import { useHouseholdRiskClusters } from "@/services/mock/householdRiskStore";
+import { RISK_LEVELS } from "@/lib/householdRisk";
 import { phnAlerts, barangayCommunity } from "@/services/mock/mockPhnData";
 import {
   filterSupervisorRows,
@@ -12,7 +14,8 @@ import {
 } from "@/lib/supervisorScope";
 import { riskOfPatient } from "@/lib/riskRules";
 import { useAuth } from "@/context/AuthContext";
-import { X, ChevronRight, Eye } from "lucide-react";
+import { Link } from "react-router-dom";
+import { X, ChevronRight, Eye, AlertTriangle } from "lucide-react";
 
 const RISK_TONES = {
   High: "bg-brand-danger/10 text-brand-danger",
@@ -242,6 +245,9 @@ export default function HealthSupervisorDashboard() {
         <StatCard icon="Bell" label="Health Alerts" value={stats.alerts} tone="blue" />
       </div>
 
+      {/* Household Risk Clusters — early intervention */}
+      <RiskClusterStrip />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Cases Requiring Attention */}
         <Card className="p-4 sm:p-6 lg:col-span-2 h-fit">
@@ -433,4 +439,29 @@ export default function HealthSupervisorDashboard() {
       )}
     </>
   );
+
+  function RiskClusterStrip() {
+    const risk = useHouseholdRiskClusters();
+    const counts = {
+      priority: risk.filter((c) => c.risk.level === RISK_LEVELS.PRIORITY).length,
+      intervention: risk.filter((c) => c.risk.level === RISK_LEVELS.INTERVENTION).length,
+      monitor: risk.filter((c) => c.risk.level === RISK_LEVELS.MONITOR).length,
+    };
+    return (
+      <Link to="/app/health_supervisor/households/risk-clusters" className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-brand-blue/40 transition-colors">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue">
+          <AlertTriangle className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-brand-ink">Household Risk Clusters</p>
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-gray">
+            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-danger" /> {counts.priority} Priority Review</span>
+            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-accent" /> {counts.intervention} Needs Intervention</span>
+            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-yellow" /> {counts.monitor} Monitor</span>
+          </p>
+        </div>
+        <ChevronRight className="h-4 w-4 shrink-0 text-brand-gray" />
+      </Link>
+    );
+  }
 }

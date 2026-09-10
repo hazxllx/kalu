@@ -115,7 +115,7 @@ export default function HealthTrends() {
     return (
       <>
         <PageHeader
-          crumbs={["Home", "Health Trends"]}
+          crumbs={["Health Trends"]}
           title="Health Trends"
           subtitle={`Health overview for Barangay ${assignedBarangay}`}
           action={
@@ -304,7 +304,7 @@ export default function HealthTrends() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Health Trends"]}
+        crumbs={["Health Trends"]}
         title="Health Trends"
         subtitle="Municipal health overview across all barangays"
         action={periodSelect}

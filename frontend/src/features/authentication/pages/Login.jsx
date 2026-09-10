@@ -197,13 +197,13 @@ export default function Login() {
                     </p>
                     <ul className="grid gap-1.5 sm:grid-cols-2">
                       {MOCK_ACCOUNTS.map((acc) => (
-                        <li key={acc.email}>
+                        <li key={acc.email} className="min-w-0">
                           <button
                             type="button"
                             onClick={() => fillDemoAccount(acc)}
-                            className="flex w-full items-center justify-between gap-2 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-left transition-colors hover:border-brand-blue hover:bg-brand-light/60"
+                            className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-left transition-colors hover:border-brand-blue hover:bg-brand-light/60"
                           >
-                            <span className="truncate text-[11.5px] font-semibold text-brand-ink">{acc.label}</span>
+                            <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-brand-ink">{acc.label}</span>
                             <ArrowRight className="h-3 w-3 shrink-0 text-brand-blue" strokeWidth={2.2} />
                           </button>
                         </li>

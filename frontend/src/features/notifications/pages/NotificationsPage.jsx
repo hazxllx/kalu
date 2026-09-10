@@ -14,7 +14,7 @@ import { filterRowsByScope } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
 
-export default function NotificationsPage({ crumbs = ["Home", "Notifications"], roleKey = "resident" }) {
+export default function NotificationsPage({ crumbs = ["Notifications"], roleKey = "resident" }) {
   const { user } = useAuth();
   const { coverage } = usePhnCoverage();
   const store = useWorkflowStore();

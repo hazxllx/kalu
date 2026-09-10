@@ -13,6 +13,23 @@
     <link rel="icon" type="image/png" href="./src/assets/images/logo.png" />
     <link rel="apple-touch-icon" href="./src/assets/images/logo.png" />
     <title>KALUSAGAP — Municipal Health Office | Pili, Camarines Sur</title>
+    <script>
+      // Apply the saved theme before first paint to avoid any light/dark flash.
+      // Light Mode is the default — the OS preference is never used unless the
+      // user explicitly chose "system".
+      (function () {
+        try {
+          var stored = localStorage.getItem('kalusagap.theme');
+          var dark = false;
+          if (stored === 'dark') dark = true;
+          else if (stored === 'system') dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          // no saved preference → Light (dark stays false)
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {
+          /* ignore */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

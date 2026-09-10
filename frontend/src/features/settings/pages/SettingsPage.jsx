@@ -3,10 +3,12 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ROLES } from "@/lib/brand";
 import { getAssignedBarangay } from "@/lib/barangayScope";
-import { useAuth } from "@/context/AuthContext";import VerificationBadge from "@/features/verification/components/VerificationBadge";
+import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/context/ThemeContext";
+import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, FileText,
-  Calendar, Monitor, Smartphone, LogOut,
+  Calendar, Monitor, Smartphone, LogOut, Sun, Moon, MonitorCog, Palette,
 } from "lucide-react";
 
 function checkPasswordStrength(pw) {
@@ -24,6 +26,7 @@ function checkPasswordStrength(pw) {
 export default function SettingsPage({ roleKey = "resident" }) {
   const role = ROLES[roleKey];
   const { user } = useAuth();
+  const { theme, setTheme } = useTheme();
   const [showCur, setShowCur] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -31,7 +34,8 @@ export default function SettingsPage({ roleKey = "resident" }) {
   const [saved, setSaved] = useState(false);
   const pwStrength = checkPasswordStrength(pw.new);
 
-  const isResident = roleKey === "resident";
+  const isResident = roleKey === "resident" || roleKey === "resident-limited";
+  const isVerifiedResident = roleKey === "resident";
 
   const displayName = user?.name || role.name;
   const displayEmail = user?.email || `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`;
@@ -68,7 +72,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
   return (
     <>
-      <PageHeader crumbs={["Home", "Settings"]} title="Settings" subtitle="Manage your account security and information." />
+      <PageHeader crumbs={["Settings"]} title="Settings" subtitle="Manage your account security and information." />
 
       <div className="space-y-5">
         {/* Profile Information */}
@@ -181,6 +185,48 @@ export default function SettingsPage({ roleKey = "resident" }) {
           </div>
         </Card>
 
+        {/* Appearance */}
+        <Card className="p-4 sm:p-6">
+          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-1 flex items-center gap-2">
+            <Palette className="w-4 h-4 text-brand-blue" strokeWidth={1.8} /> Appearance
+          </h3>
+          <p className="text-xs text-brand-gray mb-4">
+            Choose how KALUSAGAP looks on this device. Your selection is saved automatically.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl">
+            {[
+              { key: "light", label: "Light", icon: Sun, copy: "Bright, paper-white interface" },
+              { key: "dark", label: "Dark", icon: Moon, copy: "Low-glare navy interface" },
+              { key: "system", label: "System Default", icon: MonitorCog, copy: "Follows your device setting" },
+            ].map((opt) => {
+              const active = theme === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setTheme(opt.key)}
+                  className={`rounded-btn border p-4 text-left transition-colors ${
+                    active
+                      ? "border-brand-blue bg-brand-light/60"
+                      : "border-brand-border bg-white hover:border-brand-blue/60"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <opt.icon className="h-4 w-4 text-brand-blue" strokeWidth={1.8} />
+                    <span className="text-sm font-medium text-brand-ink">{opt.label}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-brand-gray">{opt.copy}</p>
+                  {active && (
+                    <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-blue">
+                      <Check className="w-3 h-3" /> Active
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+
         {/* Account Information */}
         <Card className="p-4 sm:p-6">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4 sm:mb-5 flex items-center gap-2">
@@ -191,7 +237,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
               { label: "Registered Email", value: displayEmail, icon: Mail },
               { label: "Registration Date", value: "January 15, 2026", icon: Calendar },
               { label: "Reference Number", value: "KSG-2026-00012", icon: FileText },
-              { label: "Verification Status", value: isResident ? "Verified" : "N/A", icon: ShieldCheck, badge: isResident },
+              { label: "Verification Status", value: isResident ? (isVerifiedResident ? "Verified" : "Pending Verification") : "N/A", icon: ShieldCheck, badge: isResident },
             ].map((f) => (
               <div key={f.label} className="bg-brand-bg rounded-btn p-4">
                 <div className="flex items-center gap-1.5 mb-1">
@@ -199,7 +245,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
                   <p className="text-[11px] text-brand-gray uppercase tracking-wide">{f.label}</p>
                 </div>
                 {f.badge
-                  ? <VerificationBadge status="verified" size="sm" />
+                  ? <VerificationBadge status={isVerifiedResident ? "verified" : "pending"} size="sm" />
                   : <p className="text-sm font-medium text-brand-ink">{f.value}</p>}
               </div>
             ))}
