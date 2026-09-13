@@ -12,7 +12,7 @@ const history = [
 export default function ConsultationsPage({ showResidentSearch = true }) {
   return (
     <>
-      <PageHeader crumbs={["Home", "Consultations"]} title="Consultation History" subtitle="View completed consultations recorded for residents in your barangay." />
+      <PageHeader crumbs={["Consultations"]} title="Consultation History" subtitle="View completed consultations recorded for residents in your barangay." />
 
       <div className="grid lg:grid-cols-3 gap-5">
         {showResidentSearch && (

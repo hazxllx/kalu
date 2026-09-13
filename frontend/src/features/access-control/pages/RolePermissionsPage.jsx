@@ -307,7 +307,7 @@ export default function RolePermissionsPage() {
     return (
       <>
         <PageHeader
-          crumbs={["Home", "Access Control", "Role & Permissions"]}
+          crumbs={["Access Control", "Role & Permissions"]}
           title="Role & Permissions"
           subtitle="Administrator-only area."
         />
@@ -328,7 +328,7 @@ export default function RolePermissionsPage() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Access Control", "Role & Permissions"]}
+        crumbs={["Access Control", "Role & Permissions"]}
         title="Role & Permissions"
         subtitle="Grant or remove privileges per role. Nothing is fixed — every action below is switched on or off deliberately."
         action={

@@ -18,6 +18,8 @@ import MunicipalityRegistration from '@/features/registration/pages/Municipality
 import MunicipalityApplications from '@/features/registration/pages/MunicipalityApplications';
 import MunicipalSubmissions from '@/features/submissions/pages/MunicipalSubmissions';
 import MunicipalHealthReports from '@/features/reports/pages/MunicipalHealthReports';
+import MedicalCertificates from '@/features/certificates/pages/MedicalCertificates';
+import CertificateComposer from '@/features/certificates/pages/CertificateComposer';
 import RegistrationSuccess from '@/features/registration/pages/RegistrationSuccess';
 
 // Verification
@@ -55,7 +57,9 @@ import TCLS from '@/features/health-records/pages/TCLS';
 import M1Records from '@/features/health-records/pages/M1Records';
 import Immunization from '@/features/health-records/pages/Immunization';
 import ResidentFollowUps from '@/features/follow-ups/pages/ResidentFollowUps';
+import ResidentFollowUpCalendar from '@/features/follow-ups/pages/ResidentFollowUpCalendar';
 import MidwifeFollowUp from '@/features/follow-ups/pages/MidwifeFollowUp';
+import FollowUpCalendar from '@/features/follow-ups/pages/FollowUpCalendar';
 import PhnFollowUps from '@/features/follow-ups/pages/PhnFollowUps';
 import Referrals from '@/features/referrals/pages/Referrals';
 import MHOReferrals from '@/features/referrals/pages/MHOReferrals';
@@ -112,6 +116,7 @@ const AppRoutes = () => (
         <Route path="consultations" element={<ConsultationsPage showResidentSearch={false} />} />
         <Route path="referrals" element={<Referrals />} />
         <Route path="followups" element={<ResidentFollowUps />} />
+        <Route path="followup-calendar" element={<ResidentFollowUpCalendar />} />
         <Route path="appointments" element={<Appointments />} />
         <Route path="services" element={<ResidentHealthServices />} />
         <Route path="notifications" element={<NotificationsPage roleKey="resident" />} />
@@ -143,6 +148,8 @@ const AppRoutes = () => (
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="submissions" element={<MunicipalSubmissions />} />
         <Route path="referrals" element={<MHOReferrals />} />
+        <Route path="certificates/new" element={<CertificateComposer />} />
+        <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="reports" element={<MunicipalHealthReports />} />
         <Route path="notifications" element={<NotificationsPage roleKey="mho" />} />
         <Route path="settings" element={<SettingsPage roleKey="mho" />} />
@@ -161,6 +168,8 @@ const AppRoutes = () => (
         <Route path="referrals" element={<Referrals roleKey="phn" />} />
         <Route path="followups" element={<PhnFollowUps />} />
         <Route path="services" element={<PhnHealthServices />} />
+        <Route path="certificates/new" element={<CertificateComposer />} />
+        <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="reports" element={<ReportsPage roleKey="phn" />} />
         <Route path="notifications" element={<NotificationsPage roleKey="phn" />} />
         <Route path="settings" element={<SettingsPage roleKey="phn" />} />
@@ -182,6 +191,7 @@ const AppRoutes = () => (
         <Route path="tcls" element={<TCLS />} />
         <Route path="m1" element={<M1Records />} />
         <Route path="followups" element={<MidwifeFollowUp />} />
+        <Route path="followup-calendar" element={<FollowUpCalendar />} />
         <Route path="services" element={<MidwifeHealthServices />} />
         <Route path="immunization" element={<Immunization />} />
         <Route path="referrals" element={<Referrals />} />
@@ -206,6 +216,8 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<RHUDashboard />} />
         <Route path="triage" element={<RhuTriage />} />
+        <Route path="certificates/new" element={<CertificateComposer />} />
+        <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="programs" element={<Programs />} />
         <Route path="notifications" element={<NotificationsPage roleKey="rhu_personnel" />} />
         <Route path="settings" element={<SettingsPage roleKey="rhu_personnel" />} />

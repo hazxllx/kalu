@@ -524,7 +524,7 @@ export default function PhnHealthRecords() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Health Records"]}
+        crumbs={["Health Records"]}
         title="Health Records"
         subtitle={
           phn

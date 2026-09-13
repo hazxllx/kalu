@@ -97,7 +97,7 @@ export default function FollowUps() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Follow-ups"]}
+        crumbs={["Follow-ups"]}
         title="Follow-up Schedule"
         subtitle="View your upcoming and completed follow-up appointments with your Barangay Health Worker."
       />

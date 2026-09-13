@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTriangle } from "lucide-react";
+import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTriangle, FileText } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import { calculateRiskLevel } from "@/lib/riskRules";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
+import { useAuth } from "@/context/AuthContext";
+import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
 
 export const CHECKUP_STATUS_TONES = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
@@ -82,6 +84,8 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const [recommendations, setRecommendations] = useState("");
   const [errors, setErrors] = useState({});
   const [justCompleted, setJustCompleted] = useState(false);
+  const [certOpen, setCertOpen] = useState(false);
+  const { user } = useAuth();
 
   const completed = Boolean(patient?.checkup) || patient?.status === "Consultation Completed";
   const checkup = patient?.checkup;
@@ -128,9 +132,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       }),
     [patient, healthConcern, assessment, clinicalNotes, recommendations]
   );
-
-  const displayedLevel = checkup?.riskLevel || autoRisk.level;
-  const displayedReason = checkup?.riskReason || autoRisk.reason;
 
   const validate = () => {
     const next = {};
@@ -183,6 +184,12 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
         className="flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
       >
         <Stethoscope className="w-3.5 h-3.5" /> Coordinate Health Service
+      </button>
+      <button
+        onClick={() => setCertOpen(true)}
+        className="flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+      >
+        <FileText className="w-3.5 h-3.5" /> Medical Certificate
       </button>
     </div>
   );
@@ -428,6 +435,24 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
           </div>
         </Card>
       </div>
+
+      {/* Medical Certificate (prepared by the PHN, submitted for MHO review) */}
+      {certOpen && patient && (
+        <MedicalCertificateModal
+          mode="create"
+          patient={{
+            patientId: patient.residentId || String(patient.id),
+            patient: patient.patient,
+            age: patient.age ?? "",
+            sex: patient.sex || "",
+            barangay: residenceBarangay || "RHU",
+            address: residenceBarangay || "RHU",
+          }}
+          currentUser={user?.name || "Public Health Nurse"}
+          currentUserRole="Public Health Nurse"
+          onClose={() => setCertOpen(false)}
+        />
+      )}
     </div>
   );
 }

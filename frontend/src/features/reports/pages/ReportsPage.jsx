@@ -200,7 +200,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Reports"]}
+        crumbs={["Reports"]}
         title="Reports"
         subtitle={
           isPhn

@@ -391,7 +391,7 @@ export default function PhnFollowUps() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Follow-ups"]}
+        crumbs={["Follow-ups"]}
         title="Follow-up Monitoring"
         subtitle={phn ? "Monitor and complete resident follow-ups." : "Monitor RHU-level follow-ups."}
         action={

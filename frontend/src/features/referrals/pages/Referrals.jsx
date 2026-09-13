@@ -347,7 +347,7 @@ export default function Referrals({ roleKey } = {}) {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Referrals"]}
+        crumbs={["Referrals"]}
         title={isPhn ? "Referral Coordination" : "Referrals"}
         subtitle="Manage resident referrals to RHU and higher-level healthcare facilities."
         action={

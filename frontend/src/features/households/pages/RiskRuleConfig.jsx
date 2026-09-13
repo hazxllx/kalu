@@ -50,7 +50,7 @@ export default function RiskRuleConfig() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Admin", "Early Intervention Rules"]}
+        crumbs={["Admin", "Early Intervention Rules"]}
         title="Early Intervention Rules"
         subtitle="Configure household risk indicators, weights, thresholds, and escalation conditions."
         action={

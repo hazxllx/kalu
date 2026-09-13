@@ -37,7 +37,7 @@ const RolesOverview = () => {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Roles"]}
+        crumbs={["Roles"]}
         title="Roles"
         subtitle="System roles, their responsibilities and how much of the permission catalogue each one currently holds."
         action={
@@ -120,7 +120,7 @@ const RolesOverview = () => {
 
 const SystemLogs = () => (
   <>
-    <PageHeader crumbs={["Home", "Logs"]} title="System Logs" subtitle="Review recent administrator and user activity." />
+    <PageHeader crumbs={["Logs"]} title="System Logs" subtitle="Review recent administrator and user activity." />
     <Card className="p-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
         <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-input px-3.5 py-2.5 w-full md:max-w-sm">

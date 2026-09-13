@@ -81,7 +81,7 @@ export default function Barangays() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Barangays"]}
+        crumbs={["Barangays"]}
         title="Barangays"
         subtitle="Health profile of every connected barangay."
         action={

@@ -368,7 +368,7 @@ export default function MidwifeFollowUp() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Follow-ups"]}
+        crumbs={["Follow-ups"]}
         title="Follow-up Management"
         subtitle="Manage scheduled follow-up visits and monitor resident outcomes."
         action={

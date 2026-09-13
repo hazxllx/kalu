@@ -178,7 +178,7 @@ export default function PhnCheckups() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "PHN Check-ups"]}
+        crumbs={["PHN Check-ups"]}
         title="PHN Check-ups"
         subtitle="Conduct and manage patient check-ups and assessments."
       />

@@ -41,7 +41,6 @@ export default function UploadComponent({ label, optional = false, file, onFile,
   };
 
   const isImage = file?.type?.startsWith("image/");
-  const isPdf = file?.name?.toLowerCase().endsWith(".pdf");
 
   return (
     <div>

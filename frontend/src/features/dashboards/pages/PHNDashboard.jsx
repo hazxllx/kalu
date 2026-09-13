@@ -221,7 +221,7 @@ export default function PHNDashboard() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Dashboard"]}
+        crumbs={["Dashboard"]}
         title={welcome}
         subtitle={subtitle}
       />

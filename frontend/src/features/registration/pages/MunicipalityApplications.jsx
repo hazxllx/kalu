@@ -54,7 +54,7 @@ export default function MunicipalityApplications() {
 
   return (    <>
       <PageHeader
-        crumbs={["Home", "Admin", "Municipality Applications"]}
+        crumbs={["Admin", "Municipality Applications"]}
         title="Municipality Applications"
         subtitle="Review and verify municipality / LGU registration applications."
         action={

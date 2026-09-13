@@ -21,7 +21,7 @@ export default function Appointments() {
 
   return (
     <>
-      <PageHeader crumbs={["Home", "Appointments"]} title="Appointments" subtitle="Track your upcoming, completed, and missed visits."
+      <PageHeader crumbs={["Appointments"]} title="Appointments" subtitle="Track your upcoming, completed, and missed visits."
         action={<button className="bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors shadow-soft">Book Appointment</button>} />
 
       <Card className="p-1.5 inline-flex gap-1 mb-6">

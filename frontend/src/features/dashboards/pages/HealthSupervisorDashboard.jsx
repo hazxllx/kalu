@@ -227,7 +227,7 @@ export default function HealthSupervisorDashboard() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Dashboard"]}
+        crumbs={["Dashboard"]}
         title="Health Monitoring"
         subtitle={
           scope && scope.level === "barangay"

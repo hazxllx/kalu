@@ -44,7 +44,7 @@ export default function ResidentVerification() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Dashboard", "Verifications", "Review"]}
+        crumbs={["Dashboard", "Verifications", "Review"]}
         title="Resident Verification"
         subtitle="Review the resident's submitted information and uploaded documents."
         action={

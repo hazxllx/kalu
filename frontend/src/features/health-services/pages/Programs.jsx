@@ -17,7 +17,7 @@ const programs = [
 export default function Programs() {
   return (
     <>
-      <PageHeader crumbs={["Home", "Health Programs"]} title="Health Programs" subtitle="Municipal health programs and their coverage." />
+      <PageHeader crumbs={["Health Programs"]} title="Health Programs" subtitle="Municipal health programs and their coverage." />
       <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-5">
         {programs.map((p, i) => (
           <motion.div key={p.name} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>

@@ -19,7 +19,7 @@ export default function UserManagement() {
   ];
   return (
     <>
-      <PageHeader crumbs={["Home", "User Management"]} title="User Management" subtitle="Manage system users, roles, and access."
+      <PageHeader crumbs={["User Management"]} title="User Management" subtitle="Manage system users, roles, and access."
         action={<button className="flex items-center gap-2 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"><UserPlus className="w-4 h-4" /> Add User</button>} />
       <Card className="p-4 mb-5">
         <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2">

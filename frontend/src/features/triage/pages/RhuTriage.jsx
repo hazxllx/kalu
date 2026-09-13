@@ -8,6 +8,7 @@ import { CHECKUP_STATUS, useWorkflowStore, sendToPhnQueue } from "@/services/moc
 import { BARANGAYS } from "@/lib/barangays";
 import { barangayHealthCenter } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
+import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
 import {
   ArrowLeft,
   Search,
@@ -19,6 +20,7 @@ import {
   Stethoscope,
   ChevronDown,
   ChevronRight,
+  FileText,
 } from "lucide-react";
 
 /* Minimum characters before the resident search shows results. */
@@ -49,7 +51,7 @@ const STATUS_TONES = {
   [CHECKUP_STATUS.COMPLETED]: "bg-brand-green/10 text-brand-green",
 };
 
-const ROW_COLS = "md:grid-cols-[2.2fr_1fr_1.6fr_1.2fr]";
+const ROW_COLS = "md:grid-cols-[2.2fr_1fr_1.6fr_1.2fr_auto]";
 
 /* Workflow steps (0-indexed progress). */
 const STEP_ORDER = ["patient", "vitals", "reason", "location", "review"];
@@ -114,6 +116,7 @@ export default function RhuTriage() {
   const [errors, setErrors] = useState({});
   const [listSearch, setListSearch] = useState("");
   const [toast, setToast] = useState(null);
+  const [certPatient, setCertPatient] = useState(null); // patient being certified
 
   // Resident registry the RHU can pull from (deduplicated by name).
   const registry = useMemo(() => {
@@ -910,6 +913,7 @@ export default function RhuTriage() {
                 <span>Barangay</span>
                 <span>Reason</span>
                 <span>Status</span>
+                <span className="text-right">Action</span>
               </div>
 
               <ul>
@@ -946,6 +950,15 @@ export default function RhuTriage() {
                           {meta.text}
                         </span>
                       </div>
+                      <div className="flex items-center gap-2 md:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setCertPatient(p)}
+                          className="inline-flex items-center gap-1 whitespace-nowrap rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue dark:bg-card"
+                        >
+                          <FileText className="h-3.5 w-3.5" /> Medical Certificate
+                        </button>
+                      </div>
                     </li>
                   );
                 })}
@@ -954,6 +967,27 @@ export default function RhuTriage() {
           )}
         </Card>
       </div>
+
+      {/* Medical Certificate (prepared at triage, submitted for MHO review) */}
+      {certPatient && (
+        <MedicalCertificateModal
+          mode="create"
+          patient={{
+            patientId: certPatient.residentId || String(certPatient.id),
+            patient: certPatient.patient,
+            age: certPatient.age ?? "",
+            sex: certPatient.sex || "",
+            barangay: certPatient.barangay || "RHU",
+            address: certPatient.residenceBarangay || certPatient.barangay || "RHU",
+          }}
+          currentUser={user?.name || "RHU Personnel"}
+          currentUserRole="RHU Personnel"
+          onClose={() => setCertPatient(null)}
+          onSaved={(status) => {
+            showToast(`Medical certificate ${status === "For Review" ? "submitted for MHO review" : "saved as draft"}.`);
+          }}
+        />
+      )}
     </>
   );
 }

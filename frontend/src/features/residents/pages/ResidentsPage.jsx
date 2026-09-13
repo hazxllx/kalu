@@ -243,7 +243,7 @@ export default function ResidentsPage() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Residents"]}
+        crumbs={["Residents"]}
         title="Resident Directory"
         subtitle={
           scope && scope.level === HS_SCOPE.BARANGAY

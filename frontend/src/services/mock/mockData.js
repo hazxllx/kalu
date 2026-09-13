@@ -69,12 +69,6 @@ export const recentMedicalRecords = [
   { title: "Blood Glucose (FBS)", date: "May 15, 2026", type: "Laboratory", result: "92 mg/dL", tone: "yellow" },
 ];
 
-export const healthAnnouncements = [
-  { icon: "Syringe", title: "Free Immunization Drive", desc: "Catch-up immunization for children ages 0-5 this July at the Barangay Health Center.", date: "Jul 12, 2026", tone: "blue" },
-  { icon: "ShieldCheck", title: "Dengue Prevention Campaign", desc: "Community cleanup and fogging operations scheduled for San Isidro.", date: "Jul 10, 2026", tone: "green" },
-  { icon: "HeartPulse", title: "Hypertension Awareness Month", desc: "Free BP screening every Friday. Walk-ins welcome at the health station.", date: "Jul 05, 2026", tone: "yellow" },
-];
-
 export const appointments = [
   { date: "2026-08-15", time: "9:00 AM", service: "Prenatal Check-up", place: "Barangay Health Center", status: "Upcoming" },
   { date: "2026-08-28", time: "10:30 AM", service: "Immunization", place: "Barangay Health Center", status: "Upcoming" },
@@ -163,14 +157,6 @@ export const barangayServices = [
   { id: "SVC-004", name: "Distribution of Hypertension / Diabetic Medication", days: "Monday & Wednesday", hours: "8:00 AM – 12:00 PM", description: "Medication distribution for chronic disease management.", status: "Scheduled", icon: "Heart" },
 ];
 
-export const tclsRecords = [
-  { resident: "Ana Villanueva", program: "Pregnant Women", bhw: "M. Cruz", status: "Active", lastVisit: "2026-06-28", nextVisit: "2026-07-12", priority: "High" },
-  { resident: "Rosa Bautista", program: "Senior Citizens", bhw: "L. Ramos", status: "Active", lastVisit: "2026-06-20", nextVisit: "2026-07-20", priority: "Medium" },
-  { resident: "Carlos Mendoza", program: "Diabetes", bhw: "M. Cruz", status: "Active", lastVisit: "2026-06-15", nextVisit: "2026-07-15", priority: "High" },
-  { resident: "Miguel Torres", program: "Family Planning", bhw: "L. Ramos", status: "Active", lastVisit: "2026-06-10", nextVisit: "2026-08-10", priority: "Low" },
-  { resident: "Liza Gonzales", program: "TB Patients", bhw: "M. Cruz", status: "Monitoring", lastVisit: "2026-06-05", nextVisit: "2026-07-05", priority: "High" },
-];
-
 export const m1Records = [
   { resident: "Ana Villanueva", lmp: "2026-01-10", edd: "2026-10-17", prenatalVisits: 4, risk: "High", status: "Ongoing" },
   { resident: "Maria Santos", lmp: "2026-02-02", edd: "2026-11-09", prenatalVisits: 3, risk: "Low", status: "Ongoing" },
@@ -224,10 +210,6 @@ export const monthlyConsultations = [
 export const topDiseases = [
   { name: "Hypertension", value: 1240 }, { name: "Diabetes", value: 860 },
   { name: "Respiratory", value: 720 }, { name: "Dengue", value: 340 }, { name: "TB", value: 190 },
-];
-
-export const ageDistribution = [
-  { name: "0-5", value: 1820 }, { name: "6-17", value: 3100 }, { name: "18-59", value: 6200 }, { name: "60+", value: 1725 },
 ];
 
 export const vaccinationCoverage = [

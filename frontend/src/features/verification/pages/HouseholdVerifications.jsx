@@ -86,7 +86,7 @@ export default function HouseholdVerifications() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Dashboard", "Household Verifications"]}
+        crumbs={["Dashboard", "Household Verifications"]}
         title="Household Verification"
         subtitle={`${pending.length} households awaiting verification of profiling information ${scopeLabel}.`}
       />

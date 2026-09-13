@@ -29,7 +29,7 @@ export default function ResidentDashboard() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Dashboard"]}
+        crumbs={["Dashboard"]}
         title={<span className="flex items-center gap-3">Welcome back, {first} <VerificationBadge status={verified ? "verified" : "pending"} /></span>}
         subtitle="Here's an overview of your health at a glance."
       />

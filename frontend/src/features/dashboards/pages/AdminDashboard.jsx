@@ -7,7 +7,7 @@ import { adminStats, auditLogs } from "@/services/mock/mockData";
 export default function AdminDashboard() {
   return (
     <>
-      <PageHeader crumbs={["Home", "Dashboard"]} title="System Overview" subtitle="Platform health, usage, and recent activity." />
+      <PageHeader crumbs={["Dashboard"]} title="System Overview" subtitle="Platform health, usage, and recent activity." />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 mb-6">
         {adminStats.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
       </div>

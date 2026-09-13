@@ -9,7 +9,7 @@ import { m1Records } from "@/services/mock/mockData";
 export default function M1Records() {
   return (
     <>
-      <PageHeader crumbs={["Home", "M1 Records"]} title="M1 — Maternal Records" subtitle="Manage maternal health records for prenatal clients." />
+      <PageHeader crumbs={["M1 Records"]} title="M1 — Maternal Records" subtitle="Manage maternal health records for prenatal clients." />
       <div className="grid lg:grid-cols-2 gap-5">
         {m1Records.map((m, i) => (
           <motion.div key={m.resident} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}>

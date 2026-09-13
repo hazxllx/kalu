@@ -40,7 +40,7 @@ const RESIDENT_SERVICES = [
 export default function HealthServices() {
   return (
     <>
-      <PageHeader crumbs={["Home", "Health Services"]} title="Health Services" subtitle="Available services, hours, and requirements at your barangay." />
+      <PageHeader crumbs={["Health Services"]} title="Health Services" subtitle="Available services, hours, and requirements at your barangay." />
       <div className="grid sm:grid-cols-2 gap-4 sm:gap-5">
         {RESIDENT_SERVICES.map((s, i) => (
           <motion.div key={s.name} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}

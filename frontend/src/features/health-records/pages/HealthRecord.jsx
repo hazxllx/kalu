@@ -26,7 +26,7 @@ const labs = [
 export default function HealthRecord() {
   return (
     <>
-      <PageHeader crumbs={["Home", "My Health Record"]} title="My Health Record" subtitle="A complete view of your medical history and vitals." action={<button className="flex items-center gap-2 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"><Download className="w-4 h-4" /> Export Health Record</button>} />
+      <PageHeader crumbs={["My Health Record"]} title="My Health Record" subtitle="A complete view of your medical history and vitals." action={<button className="flex items-center gap-2 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"><Download className="w-4 h-4" /> Export Health Record</button>} />
 
       <Card className="p-5 mb-6">
         <div className="grid md:grid-cols-2 xl:grid-cols-6 gap-4 text-sm">

@@ -164,7 +164,7 @@ export default function HouseholdRiskOverview() {
   if (phase === "loading") {
     return (
       <>
-        <PageHeader crumbs={["Households", "Risk Overview"]} title="Household Risk Overview" subtitle="Identify households with multiple health-risk indicators and prioritize early intervention across the municipality." />
+        <PageHeader crumbs={["Households Risk Overview"]} title="Household Risk Overview" subtitle="Identify households with multiple health-risk indicators and prioritize early intervention across the municipality." />
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />
@@ -183,7 +183,7 @@ export default function HouseholdRiskOverview() {
   if (phase === "error") {
     return (
       <>
-        <PageHeader crumbs={["Households", "Risk Overview"]} title="Household Risk Overview" subtitle="Identify households with multiple health-risk indicators and prioritize early intervention across the municipality." />
+        <PageHeader crumbs={["Households Risk Overview"]} title="Household Risk Overview" subtitle="Identify households with multiple health-risk indicators and prioritize early intervention across the municipality." />
         <Card className="p-10 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-danger/10">
             <AlertTriangle className="h-7 w-7 text-brand-danger" />
@@ -205,7 +205,7 @@ export default function HouseholdRiskOverview() {
   return (
     <>
       <PageHeader
-        crumbs={["Households", "Risk Overview"]}
+        crumbs={["Households Risk Overview"]}
         title="Household Risk Overview"
         subtitle="Identify households with multiple health-risk indicators and prioritize early intervention across the municipality."
         action={

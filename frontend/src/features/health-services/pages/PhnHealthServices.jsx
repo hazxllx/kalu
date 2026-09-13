@@ -258,7 +258,7 @@ export default function PhnHealthServices() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Health Services"]}
+        crumbs={["Health Services"]}
         title="Health Services"
         subtitle={phn ? "Coordinate and schedule health services for your community." : "RHU-level health services."}
         action={

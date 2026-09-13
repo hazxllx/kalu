@@ -44,13 +44,6 @@ const REPORTS_SUMMARY = [
   { icon: Heart, title: "Health Program Reports", total: 24 },
 ];
 
-const STATUS_COLORS = {
-  Pending: "bg-brand-accent/10 text-brand-accent",
-  Accepted: "bg-brand-blue/10 text-brand-blue",
-  Completed: "bg-brand-green/10 text-brand-green",
-  "Referred to Another Facility": "bg-brand-purple/10 text-brand-purple",
-};
-
 const stats = [
   { icon: "Map", label: "Barangays", value: "3", tone: "accent" },
   { icon: "Users", label: "Total Residents", value: "1,248", tone: "blue" },
@@ -71,7 +64,7 @@ export default function RHUDashboard() {
   };
   return (
     <>
-      <PageHeader crumbs={["Home", "Dashboard"]} title="RHU Overview" subtitle="Manage consultations, treatments, referrals, and follow-ups across the municipality." />
+      <PageHeader crumbs={["Dashboard"]} title="RHU Overview" subtitle="Manage consultations, treatments, referrals, and follow-ups across the municipality." />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 mb-6">
         {stats.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
       </div>

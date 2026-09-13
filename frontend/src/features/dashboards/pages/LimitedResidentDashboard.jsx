@@ -28,7 +28,7 @@ export default function LimitedResidentDashboard() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Dashboard"]}
+        crumbs={["Dashboard"]}
         title={`Welcome, ${first}`}
         subtitle="Your account is pending verification. Some features are temporarily locked."
       />

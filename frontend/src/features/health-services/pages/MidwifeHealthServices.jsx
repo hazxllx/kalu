@@ -191,7 +191,7 @@ export default function HealthServicesPage() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Health Services"]}
+        crumbs={["Health Services"]}
         title="Health Services"
         subtitle="Ongoing healthcare services at the Barangay Health Station."
         action={

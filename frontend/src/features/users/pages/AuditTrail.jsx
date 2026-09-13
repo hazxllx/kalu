@@ -86,7 +86,7 @@ export default function AuditTrail() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Audit Trail"]}
+        crumbs={["Audit Trail"]}
         title="Audit Trail"
         subtitle="Complete record of system activity and access changes."
         action={

@@ -92,7 +92,7 @@ export default function HouseholdRiskClusters() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Early Intervention", "Household Risk Clusters"]}
+        crumbs={["Early Intervention", "Household Risk Clusters"]}
         title="Household Risk Clusters"
         subtitle="Identify households where multiple health-monitoring indicators cluster — for early intervention, not diagnosis."
       />

@@ -17,7 +17,7 @@ const actions = [
 export default function MidwifeDashboard() {
   return (
     <>
-      <PageHeader crumbs={["Home", "Dashboard"]} title="Welcome, Midwife Maria Dela Cruz" subtitle="Today's clinical summary for the Barangay Health Station." />
+      <PageHeader crumbs={["Dashboard"]} title="Welcome, Midwife Maria Dela Cruz" subtitle="Today's clinical summary for the Barangay Health Station." />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 mb-6">
         {midwifeStats.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
       </div>

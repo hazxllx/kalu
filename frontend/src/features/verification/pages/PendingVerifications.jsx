@@ -132,7 +132,7 @@ export default function PendingVerifications() {
   return (
     <>
       <PageHeader
-        crumbs={["Home", "Dashboard", "Pending Verifications"]}
+        crumbs={["Dashboard", "Pending Verifications"]}
         title="Pending Resident Verifications"
         subtitle={`${pending.length} residents awaiting identity verification ${scopeLabel}.`}
       />
