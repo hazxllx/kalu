@@ -18,7 +18,8 @@ import {
 } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
-import { monthlyConsultations } from "@/services/mock/mockData";
+import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
+import { monthlyConsultations, comparisonMonthlyConsultations, barangayOverview } from "@/services/mock/mockData";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 
 const summaryCards = [
@@ -64,16 +65,27 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const coverageLabel = coverage ? (coverage === "RHU" ? "RHU" : coverage) : null;
   const rhuCoverage = coverage === "RHU";
 
+  // Health Supervisor scope — reports are limited to the supervisor's single
+  // assigned barangay; the RHU/municipality-level figures are never shown.
+  const supervisorScope = getSupervisorScope(user);
+  const assignedBarangay = supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
+
   const reportTypes = isPhn
     ? REPORT_TYPE_LABELS
     : ["Monthly Maternal Report", "Follow-up Report", "Referral Report", "Immunization Report"];
 
   // The master list keeps every report the PHN can own; the coverage selector
-  // decides which rows are visible (barangay reports vs RHU reports).
+  // decides which rows are visible (barangay reports vs RHU reports). A
+  // barangay-assigned supervisor only ever sees their own barangay's reports.
   const [reports, setReports] = useState(() => (isPhn ? [...PHN_REPORTS] : [...REPORTS]));
   const scopedReports = useMemo(
-    () => (isPhn ? filterRowsByScope(reports, user, coverage) : reports),
-    [isPhn, reports, user, coverage]
+    () =>
+      isPhn
+        ? filterRowsByScope(reports, user, coverage)
+        : assignedBarangay
+          ? reports.filter((r) => r.barangay === assignedBarangay)
+          : reports,
+    [isPhn, reports, user, coverage, assignedBarangay]
   );
   const [selectedReportType, setSelectedReportType] = useState("All");
   const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -130,7 +142,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       period: reportForm.period,
       status: "Generated",
       date: new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
-      barangay: isPhn ? normalizeBarangay(reportForm.barangay) : "San Isidro",
+      barangay: isPhn ? normalizeBarangay(reportForm.barangay) : (assignedBarangay || "San Isidro"),
     };
     setReports([newReport, ...reports]);
     setShowGenerateModal(false);
@@ -159,8 +171,13 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   };
 
   // Chart shows only the series matching the active coverage (the assigned
-  // barangay, or the RHU when the PHN switches to RHU coverage).
-  const trendData = isPhn ? phnMonthlyTrend : monthlyConsultations;
+  // barangay, or the RHU when the PHN switches to RHU coverage). A
+  // barangay-assigned supervisor sees only their barangay's series.
+  const trendData = isPhn
+    ? phnMonthlyTrend
+    : assignedBarangay
+      ? comparisonMonthlyConsultations.map((m) => ({ month: m.month, value: m[assignedBarangay] }))
+      : monthlyConsultations;
   const chartSeries = isPhn ? [rhuCoverage ? "rhu" : coverageLabel || "rhu"] : [];
   const seriesConfig = {
     rhu: { fill: "#0B5CAD" },
@@ -170,8 +187,20 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   };
 
   // Report summary reflects the active coverage so switching between the
-  // barangay and the RHU changes the figures shown.
+  // barangay and the RHU changes the figures shown. A barangay-assigned
+  // supervisor gets a summary computed for their barangay only.
   const scopeSummary = useMemo(() => {
+    if (assignedBarangay) {
+      const label = `${assignedBarangay} barangay`;
+      const rows = (list) => (Array.isArray(list) ? list.filter((r) => r.barangay === assignedBarangay) : []);
+      const brgy = barangayOverview.find((b) => b.name === assignedBarangay) || { residents: 0, highRisk: 0, coverage: "0%" };
+      return [
+        { label: `${label} Residents`, value: brgy.residents.toLocaleString() },
+        { label: `${label} High-Risk Residents`, value: String(brgy.highRisk) },
+        { label: `${label} Vaccination Coverage`, value: brgy.coverage },
+        { label: `${label} Reports`, value: String(scopedReports.length) },
+      ];
+    }
     if (!isPhn) return summaryCards;
     const rowsOf = (list) => filterRowsByScope(list, user, coverage);
     const residentsCount = rowsOf(phnResidents).length;
@@ -189,7 +218,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       { label: `${label} Services Today`, value: String(servicesToday) },
       { label: `${label} Priority Cases`, value: String(priorityCases) },
     ];
-  }, [isPhn, coverage, coverageLabel, rhuCoverage, user]);
+  }, [isPhn, coverage, coverageLabel, rhuCoverage, user, assignedBarangay, scopedReports.length]);
 
   // A PHN works at the RHU — reports are submitted upward to the MHO, while
   // barangay-level roles submit theirs to the RHU.
@@ -205,7 +234,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         subtitle={
           isPhn
             ? "Generate and review RHU-level health reports."
-            : "Generate and submit monthly health reports to the RHU."
+            : assignedBarangay
+              ? `Generate and submit monthly health reports for Brgy. ${assignedBarangay} to the RHU.`
+              : "Generate and submit monthly health reports to the RHU."
         }
       />
 

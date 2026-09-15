@@ -14,12 +14,14 @@ import Login from '@/features/authentication/pages/Login';
 import RegistrationTypeSelection from '@/features/registration/pages/RegistrationTypeSelection';
 import NewResidentRegistration from '@/features/registration/pages/NewResidentRegistration';
 import TransferRegistration from '@/features/registration/pages/TransferRegistration';
-import MunicipalityRegistration from '@/features/registration/pages/MunicipalityRegistration';
-import MunicipalityApplications from '@/features/registration/pages/MunicipalityApplications';
+import PersonnelRegistration from '@/features/registration/pages/PersonnelRegistration';
 import MunicipalSubmissions from '@/features/submissions/pages/MunicipalSubmissions';
 import MunicipalHealthReports from '@/features/reports/pages/MunicipalHealthReports';
 import MedicalCertificates from '@/features/certificates/pages/MedicalCertificates';
 import CertificateComposer from '@/features/certificates/pages/CertificateComposer';
+import StaffRequests from '@/features/users/pages/StaffRequests';
+import SupervisorVerifications from '@/features/users/pages/SupervisorVerifications';
+import RhuReferrals from '@/features/referrals/pages/RhuReferrals';
 import RegistrationSuccess from '@/features/registration/pages/RegistrationSuccess';
 
 // Verification
@@ -102,7 +104,7 @@ const AppRoutes = () => (
     <Route path="/register" element={<RegistrationTypeSelection />} />
     <Route path="/register/new/step-1" element={<NewResidentRegistration />} />
     <Route path="/register/transfer" element={<TransferRegistration />} />
-    <Route path="/register/municipality" element={<MunicipalityRegistration />} />
+    <Route path="/register/personnel" element={<PersonnelRegistration />} />
     <Route path="/registration-success" element={<RegistrationSuccess />} />
     <Route path="/verification-status" element={<VerificationStatus />} />
     <Route path="/unauthorized" element={<UnauthorizedPage />} />
@@ -148,6 +150,7 @@ const AppRoutes = () => (
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="submissions" element={<MunicipalSubmissions />} />
         <Route path="referrals" element={<MHOReferrals />} />
+        <Route path="barangays" element={<Barangays />} />
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="reports" element={<MunicipalHealthReports />} />
@@ -216,6 +219,7 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<RHUDashboard />} />
         <Route path="triage" element={<RhuTriage />} />
+        <Route path="referrals" element={<RhuReferrals />} />
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="programs" element={<Programs />} />
@@ -250,8 +254,9 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<UserManagement />} />
+        <Route path="staff-requests" element={<StaffRequests />} />
+        <Route path="supervisor-verifications" element={<SupervisorVerifications />} />
         <Route path="risk-rules" element={<RiskRuleConfig />} />
-        <Route path="municipality-applications" element={<MunicipalityApplications />} />
         <Route path="roles" element={<SystemManagementPage variant="roles" />} />
         {/* Privilege & permission management (admin only). */}
         <Route path="permissions" element={<RolePermissionsPage />} />

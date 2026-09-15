@@ -173,8 +173,8 @@ export const followUps = [
 
 export const referrals = [
   { resident: "Ana Villanueva", facility: "RHU Pili", reason: "High-risk pregnancy", status: "Pending", direction: "Outgoing" },
-  { resident: "Carlos Mendoza", facility: "Bicol Medical Center", reason: "Uncontrolled diabetes", status: "Accepted", direction: "Outgoing" },
-  { resident: "Juan Dela Cruz", facility: "Barangay Health Station", reason: "Post-discharge care", status: "Received", direction: "Incoming" },
+  { resident: "Carlos Mendoza", facility: "RHU Pili", reason: "Uncontrolled diabetes", status: "Accepted", direction: "Outgoing" },
+  { resident: "Juan Dela Cruz", facility: "RHU Pili", reason: "Post-discharge care", status: "Received", direction: "Incoming" },
 ];
 
 export const immunizations = [

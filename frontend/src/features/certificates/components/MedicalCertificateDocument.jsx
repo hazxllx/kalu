@@ -8,7 +8,8 @@ import React from "react";
  *
  *   Government header → Office divider → No. (upper right) → title →
  *   certification text with fill-in fields → recommendation → remarks →
- *   issuance line → payment details (lower left) + signature (lower right).
+ *   issuance line → signature (lower right). KALUSAGAP medical certificates
+ *   carry no payment information.
  *
  * The document is intentionally NOT themed: an official certificate is always
  * black text on a white page in serif typography, in Light and Dark Mode
@@ -74,7 +75,6 @@ export default function MedicalCertificateDocument({ certificate, signatoryName 
   const signatory = String(signatoryName || c.medicalOfficer || "").trim() || "Demo Account Name Not Available";
   const exam = parseDate(c.dateOfExamination);
   const issued = parseDate(c.issuedAt || c.dateIssued);
-  const payment = parseDate(c.paymentDate);
 
   return (
     <div className="cert-doc" aria-label="Medical Certificate document">
@@ -159,19 +159,9 @@ export default function MedicalCertificateDocument({ certificate, signatoryName 
         </p>
         <p>at the Municipal Health Office of Pili, Camarines Sur.</p>
 
-        {/* Payment (lower-left) + signature (lower-right) */}
-        <div className="mt-auto flex items-end justify-between gap-10 pt-12">
-          <div className="text-[10.5pt] leading-[2]">
-            <p>
-              O.R. No. <Fill value={c.orNumber} minWidth="30mm" />
-            </p>
-            <p>
-              Amount: <Fill value={c.amount} minWidth="26mm" />
-            </p>
-            <p>
-              Date: <Fill value={payment ? `${payment.monthDay} 20${payment.yy}` : ""} minWidth="30mm" />
-            </p>
-          </div>
+        {/* Signature section (lower-right) — KALUSAGAP medical certificates
+            carry no payment information. */}
+        <div className="mt-auto flex justify-end pt-12">
           <div className="shrink-0 text-center">
             {/* Placeholder signature mark — no signature asset is reproduced. */}
             <p className="mb-1 text-[9pt] italic text-black/40">(Signature)</p>

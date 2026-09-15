@@ -16,7 +16,7 @@ const STATS = [
 ];
 
 const ACTIVITY = [
-  { type: "Referral", title: "New referral from San Isidro", desc: "Resident referred to Bicol Regional Training and Teaching Hospital", time: "2 hours ago", badge: "Pending" },
+  { type: "Referral", title: "New referral from San Isidro", desc: "Resident referred to RHU Pili", time: "2 hours ago", badge: "Pending" },
   { type: "Consultation", title: "Consultation records submitted", desc: "Barangay San Antonio submitted 12 consultation records", time: "5 hours ago", badge: "Received" },
   { type: "Alert", title: "High-risk resident identified", desc: "Hypertension Stage 2 — Barangay San Isidro", time: "8 hours ago", badge: "High" },
   { type: "Referral", title: "Referral status updated", desc: "Barangay San Antonio referral marked as Accepted", time: "1 day ago", badge: "Accepted" },

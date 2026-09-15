@@ -6,6 +6,7 @@ import VerificationBadge from "@/features/verification/components/VerificationBa
 import HouseholdVerificationReviewDrawer from "@/features/verification/components/HouseholdVerificationReviewDrawer";
 import { useAuth } from "@/context/AuthContext";
 import { getAssignedBarangay } from "@/lib/barangayScope";
+import { householdStore } from "@/services/mock/householdStore";
 import { ROLES } from "@/lib/brand";
 import {
   resolvePendingHouseholdVerifications,
@@ -74,6 +75,17 @@ export default function HouseholdVerifications() {
       ...prev,
     ]);
     setReviewing(null);
+
+    // Sync the outcome to the shared household store so the BHW household
+    // list immediately shows the verification status, reviewer, review date,
+    // and correction reason (one store for both roles).
+    householdStore.applyVerification(record.householdId, {
+      status: decision === "approved" ? "Verified" : "Returned for Correction",
+      reviewer: reviewerName || "Health Supervisor",
+      reviewedAt: reviewedAt ? reviewedAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+      reason,
+    });
+
     showToast(
       decision === "approved"
         ? `Household ${record.householdId} verified.`

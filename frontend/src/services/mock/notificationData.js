@@ -288,7 +288,7 @@ export const NOTIFICATIONS = {
       id: 2,
       icon: "CheckCircle",
       title: "Referral Status Updated",
-      desc: "An RHU referral for Roberto Aguilar has been accepted by Bicol Regional Training and Teaching Hospital.",
+      desc: "An RHU referral for Roberto Aguilar has been accepted by RHU Pili.",
       time: "5 hours ago",
       category: "success",
       read: false,

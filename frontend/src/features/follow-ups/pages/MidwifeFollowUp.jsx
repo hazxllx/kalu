@@ -7,6 +7,7 @@ import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2 } from "lucide-re
 import { residents, systemUsers } from "@/services/mock/mockData";
 import { ROLES } from "@/lib/brand";
 import { useAuth } from "@/context/AuthContext";
+import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 
 const FOLLOW_UP_TYPES = [
   "General Check-up",
@@ -23,6 +24,19 @@ const FOLLOW_UP_LOCATIONS = ["Barangay Health Station", "RHU", "Home Visit", "Ot
 const PERSONNEL_OPTIONS = systemUsers
   .filter((u) => u.status === "Active" && ["Midwife", "Health Supervisor", "BHW"].includes(u.role))
   .map((u) => u.name);
+
+/** Personnel within a barangay (supervisors oversee only their own barangay's workers). */
+const personnelOptionsFor = (barangay) =>
+  barangay
+    ? systemUsers
+        .filter(
+          (u) =>
+            u.status === "Active" &&
+            ["Midwife", "Health Supervisor", "BHW"].includes(u.role) &&
+            (u.barangay === barangay || u.barangay === "Municipal")
+        )
+        .map((u) => u.name)
+    : PERSONNEL_OPTIONS;
 
 const emptyScheduleForm = (personnel) => ({
   date: new Date().toISOString().slice(0, 10),
@@ -191,7 +205,14 @@ const PRIORITY_COLORS = {
 
 export default function MidwifeFollowUp() {
   const { user } = useAuth();
-  const [followUps, setFollowUps] = useState(FOLLOW_UPS);
+  // Health Supervisor scope: only their single assigned barangay. Rows,
+  // statistics, resident options and personnel options are all limited to it.
+  const supervisor = isHealthSupervisor(user);
+  const supervisorScope = supervisor ? getSupervisorScope(user) : null;
+  const assignedBarangay = supervisorScope && supervisorScope.level === "barangay" ? supervisorScope.assignedBarangay : null;
+  const inScope = (f) => !assignedBarangay || f.barangay === assignedBarangay;
+
+  const [followUps, setFollowUps] = useState(FOLLOW_UPS.filter(inScope));
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
@@ -211,11 +232,12 @@ export default function MidwifeFollowUp() {
   // displays the role's display name, so prefer that for consistency.
   const currentUserName =
     (user?.role && ROLES[user.role] && ROLES[user.role].name) || user?.name || "";
+  const basePersonnelOptions = personnelOptionsFor(assignedBarangay);
   const personnelOptions =
-    currentUserName && !PERSONNEL_OPTIONS.includes(currentUserName)
-      ? [currentUserName, ...PERSONNEL_OPTIONS]
-      : PERSONNEL_OPTIONS;
-  const defaultPersonnel = currentUserName || PERSONNEL_OPTIONS[0] || "";
+    currentUserName && !basePersonnelOptions.includes(currentUserName)
+      ? [currentUserName, ...basePersonnelOptions]
+      : basePersonnelOptions;
+  const defaultPersonnel = currentUserName || basePersonnelOptions[0] || "";
 
   // Escape closes the modal; lock background scrolling while it is open.
   useEffect(() => {
@@ -370,7 +392,11 @@ export default function MidwifeFollowUp() {
       <PageHeader
         crumbs={["Follow-ups"]}
         title="Follow-up Management"
-        subtitle="Manage scheduled follow-up visits and monitor resident outcomes."
+        subtitle={
+          assignedBarangay
+            ? `Manage scheduled follow-up visits and monitor resident outcomes in Brgy. ${assignedBarangay}.`
+            : "Manage scheduled follow-up visits and monitor resident outcomes."
+        }
         action={
           <button
             onClick={openScheduleModal}
@@ -579,7 +605,7 @@ export default function MidwifeFollowUp() {
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Resident</p>
                   <div onBlur={() => setTouched((t) => ({ ...t, resident: true }))}>
                     <ResidentSearchSelect
-                      residents={residents}
+                      residents={assignedBarangay ? residents.filter((r) => r.barangay === assignedBarangay) : residents}
                       value={selectedResident}
                       onChange={setSelectedResident}
                     />

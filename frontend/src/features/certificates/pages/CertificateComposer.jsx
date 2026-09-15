@@ -52,9 +52,6 @@ const defaultForm = () => ({
   recommendation: "",
   remarks: "",
   issuedAt: todayIso(),
-  orNumber: "",
-  amount: "",
-  paymentDate: "",
 });
 
 export default function CertificateComposer() {
@@ -151,9 +148,6 @@ function ComposerContent({ base, roleLabel, residents }) {
     recommendation: form.recommendation.trim(),
     remarks: form.remarks.trim(),
     issuedAt: form.issuedAt,
-    orNumber: form.orNumber.trim(),
-    amount: form.amount.trim(),
-    paymentDate: form.paymentDate,
     preparedBy: user?.name || roleLabel,
     preparedByRole: roleLabel,
     medicalOfficer: officerName,
@@ -179,19 +173,24 @@ function ComposerContent({ base, roleLabel, residents }) {
     setPreviewOpen(true);
   };
 
+  /**
+   * Print the certificate. Printing only persists the document data — it NEVER
+   * changes the certificate status. The status workflow is owned by the MHO in
+   * the register: Draft → For Review → Approved | Rejected → Issued. A
+   * certificate only becomes "Issued" through the MHO's register action on an
+   * already-Approved record.
+   */
   const handlePrint = () => {
     const cert = buildCertificate();
+    // Track the record id created on the first print so later prints update
+    // the same record. Status is never changed here — only document fields.
     if (savedId) {
       medicalCertificateStore.updateCertificate(savedId, cert);
     } else {
-      // The MHO can issue directly; other roles submit for MHO review.
-      const record = medicalCertificateStore.createCertificate({
-        ...cert,
-        status: user?.role === "mho" ? "Issued" : "For Review",
-      });
+      const record = medicalCertificateStore.createCertificate({ ...cert, status: "Draft" });
       setSavedId(record.id);
     }
-    showToast("Certificate saved to the register.");
+    showToast("Certificate saved as Draft — printing does not issue the certificate.");
     printCertificate(cert, officerName);
   };
 
@@ -379,32 +378,6 @@ function ComposerContent({ base, roleLabel, residents }) {
                   className={inputCls(errors.issuedAt)}
                 />
               </Field>
-              <Field label="O.R. No." hint="Payment details (optional).">
-                <input
-                  type="text"
-                  value={form.orNumber}
-                  onChange={(e) => set("orNumber")(e.target.value)}
-                  placeholder="Official receipt number..."
-                  className={inputCls()}
-                />
-              </Field>
-              <Field label="Amount">
-                <input
-                  type="text"
-                  value={form.amount}
-                  onChange={(e) => set("amount")(e.target.value)}
-                  placeholder="e.g. 50.00"
-                  className={inputCls()}
-                />
-              </Field>
-              <Field label="Payment Date">
-                <input
-                  type="date"
-                  value={form.paymentDate}
-                  onChange={(e) => set("paymentDate")(e.target.value)}
-                  className={inputCls()}
-                />
-              </Field>
             </div>
 
             <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
@@ -424,8 +397,8 @@ function ComposerContent({ base, roleLabel, residents }) {
           </Card>
 
           <p className="text-center text-xs text-brand-gray">
-            Preview the certificate before printing. Printing saves the certificate to the register
-            {user?.role === "mho" ? " and issues it under the MHO's authorization." : " and submits it for MHO review."}
+            Preview the certificate before printing. Printing saves the certificate as a Draft in the
+            register — issuing requires MHO review and approval under the status workflow.
           </p>
         </>
       )}

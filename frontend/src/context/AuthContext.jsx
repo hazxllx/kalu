@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { homeForRole } from '@/lib/roles';
 import { findMockAccount } from '@/services/mock/mockAccounts';
 
 const AuthContext = createContext(null);
@@ -74,10 +75,19 @@ export const AuthProvider = ({ children }) => {
         });
         subscription = listener.data?.subscription;
       } else {
-        // Dev fallback: restore a previously stored dev session.
+        // Dev fallback: restore a previously stored dev session. A session
+        // whose role no longer exists (e.g. a removed demo role) is discarded
+        // so it can never strand the user on an inaccessible dashboard.
         try {
           const raw = localStorage.getItem(DEV_SESSION_KEY);
-          if (raw) applyUser(JSON.parse(raw), { dev: true });
+          if (raw) {
+            const stored = JSON.parse(raw);
+            if (stored?.role && homeForRole(stored.role)) {
+              applyUser(stored, { dev: true });
+            } else {
+              localStorage.removeItem(DEV_SESSION_KEY);
+            }
+          }
         } catch {
           /* ignore malformed dev session */
         }

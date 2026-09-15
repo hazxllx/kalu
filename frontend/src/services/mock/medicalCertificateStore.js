@@ -17,6 +17,23 @@ import React, { useSyncExternalStore } from "react";
 
 export const CERT_STATUSES = ["Draft", "For Review", "Approved", "Issued", "Rejected", "Cancelled"];
 
+/**
+ * Allowed status transitions for the MHO workflow:
+ *   Draft → For Review
+ *   For Review → Approved | Rejected
+ *   Approved → Issued
+ * Drafts can never jump straight to Approved/Issued, Rejected is terminal, and
+ * Issued certificates are final. Enforced by the status-management UI.
+ */
+export const ALLOWED_TRANSITIONS = {
+  Draft: ["For Review"],
+  "For Review": ["Approved", "Rejected"],
+  Approved: ["Issued"],
+  Issued: [],
+  Rejected: [],
+  Cancelled: [],
+};
+
 export const CERT_PURPOSES = [
   "General Medical Certificate",
   "Fitness to Work / School",
@@ -48,15 +65,13 @@ const cert = (f) => ({
   preparedByRole: f.preparedByRole || "",
   dateIssued: f.dateIssued || "",
   notes: f.notes || "",
-  // Formal document fields (A4 Medical Certificate layout).
+  // Formal document fields (A4 Medical Certificate layout). KALUSAGAP medical
+  // certificates carry no payment information — only medical + issuance data.
   certificateNumber: f.certificateNumber || f.reference || "",
   civilStatus: f.civilStatus || "",
   recommendation: f.recommendation || "",
   remarks: f.remarks || "",
   issuedAt: f.issuedAt || "",
-  orNumber: f.orNumber || "",
-  amount: f.amount || "",
-  paymentDate: f.paymentDate || "",
   createdAt: f.createdAt || new Date().toISOString(),
   audit: f.audit || [
     { action: "Created", by: f.preparedBy || "—", at: f.createdAt || new Date().toISOString(), notes: "" },
@@ -242,6 +257,7 @@ export const medicalCertificateStore = {
   cancelCertificate,
   nextReference,
   statuses: CERT_STATUSES,
+  allowedTransitions: ALLOWED_TRANSITIONS,
   purposes: CERT_PURPOSES,
 };
 

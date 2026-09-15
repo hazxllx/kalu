@@ -1,9 +1,28 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, Cloud, AlertCircle } from "lucide-react";
-import { LOGO_URL } from "@/lib/brand";
+import { AlertCircle, ArrowLeft, ArrowRight, FileText, Loader2 } from "lucide-react";
+import {
+  RegistrationShell,
+  RegistrationCard,
+  StepIndicator,
+  PageHeading,
+  InfoNote,
+  btnPrimary,
+  btnGhost,
+} from "@/features/registration/components/RegistrationDesign";
 import UploadComponent from "@/features/registration/components/UploadComponent";
+
+/**
+ * Transfer of residency — step 1 of the transfer flow. The upload is processed
+ * and the extracted information is carried into the Personal Information
+ * registration wizard (`/register/new/step-1`). Only the presentation is shared
+ * with the other registration pages; the flow and navigation are unchanged.
+ */
+const STEPS = [
+  { num: 1, label: "Upload Record" },
+  { num: 2, label: "Personal Information" },
+];
 
 export default function TransferRegistration() {
   const navigate = useNavigate();
@@ -52,43 +71,26 @@ export default function TransferRegistration() {
   };
 
   return (
-    <div className="w-full bg-gradient-to-br from-brand-bg via-brand-blue/5 to-brand-green/3 p-4 md:p-6">
-      <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-brand-blue/8 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
-      <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-brand-green/8 rounded-full blur-3xl translate-x-1/2 translate-y-1/2" />
+    <RegistrationShell>
+      <RegistrationCard>
+        <div className="px-5 py-6 sm:px-10 sm:py-8">
+          <StepIndicator current={1} steps={STEPS} flowLabel="Transfer Registration" />
 
-      <div className="relative flex flex-col items-center justify-center px-4 py-8">
-        <div className="w-full max-w-2xl">
-          <div className="text-center mb-6">
-            <img src={LOGO_URL} alt="KALUSAGAP" className="h-16 w-auto mx-auto mb-6" />
-          </div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-2xl border border-slate-200 bg-white shadow-float p-6 md:p-8"
-        >
-          <h1 className="text-xl md:text-2xl font-semibold text-brand-ink tracking-tight mb-1">
-            Transfer from Another Barangay
-          </h1>
-          <p className="text-xs text-brand-gray mb-6">
-            Step 1: Upload your health record
-          </p>
-
-          <div className="mb-6">
-            <h2 className="text-base font-semibold text-brand-ink mb-2">
-              Upload Health Record
-            </h2>
-            <p className="text-xs text-brand-gray mb-4 leading-relaxed">
-              Upload your health record from your previous barangay.
-              <br />
-              We will extract your personal information automatically.
-            </p>
+          <motion.div
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.28 }}
+            className="mt-6 space-y-5"
+          >
+            <PageHeading
+              title="Transfer from Another Barangay"
+              subtitle="Upload your health record from your previous barangay. We will extract your personal information automatically."
+            />
 
             {error && (
-              <div className="mb-5 bg-brand-danger/10 border border-brand-danger/20 rounded-2xl p-3 flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 text-brand-danger shrink-0 mt-0.5" />
-                <p className="text-sm text-brand-danger">{error}</p>
-              </div>
+              <InfoNote tone="danger" icon={AlertCircle}>
+                {error}
+              </InfoNote>
             )}
 
             <UploadComponent
@@ -97,49 +99,36 @@ export default function TransferRegistration() {
               onFile={setFile}
               onRemove={() => setFile(null)}
             />
-          </div>
 
-          <div className="bg-brand-blue/5 border border-brand-blue/15 rounded-2xl p-4 mb-8">
-            <p className="text-xs text-brand-gray">
-              <strong className="text-brand-ink">Supported formats:</strong> PNG, JPG, JPEG, PDF
-              <br />
-              <strong className="text-brand-ink">Maximum file size:</strong> 10 MB
-            </p>
-          </div>
+            <InfoNote icon={FileText}>
+              <p>
+                <strong className="font-semibold text-brand-ink">Supported formats:</strong> PNG, JPG, JPEG, PDF
+              </p>
+              <p className="mt-0.5">
+                <strong className="font-semibold text-brand-ink">Maximum file size:</strong> 10 MB
+              </p>
+            </InfoNote>
+          </motion.div>
 
-          {/* Navigation Buttons */}
-          <div className="flex items-center justify-between pt-6 border-t border-brand-border">
-            <Link
-              to="/register"
-              className="flex items-center gap-2 text-sm font-medium text-brand-gray hover:text-brand-ink transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" /> Back to options
+          {/* Navigation */}
+          <div className="mt-8 flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
+            <Link to="/register" className={btnGhost}>
+              <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" /> Back to options
             </Link>
-            <button
-              onClick={handleProcess}
-              disabled={processing || !file}
-              className="flex items-center gap-2 bg-brand-blue text-white px-6 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors shadow-soft disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            <button onClick={handleProcess} disabled={processing || !file} className={btnPrimary}>
               {processing ? (
                 <>
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  >
-                    <Cloud className="w-4 h-4" />
-                  </motion.div>
-                  Processing...
+                  <Loader2 className="h-4 w-4 animate-spin" /> Processing...
                 </>
               ) : (
                 <>
-                  Process Document
+                  Process Document <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                 </>
               )}
             </button>
           </div>
-        </motion.div>
         </div>
-      </div>
-    </div>
+      </RegistrationCard>
+    </RegistrationShell>
   );
 }

@@ -169,6 +169,29 @@ const addResident = (input) => {
   return record;
 };
 
+/**
+ * Update an existing resident's editable profile fields (Health Supervisor
+ * edit action). Barangay scope is enforced by the calling page — the store
+ * only persists the patch. Risk is reclassified automatically when the
+ * program or age changes.
+ */
+const updateResident = (id, patch = {}) => {
+  const list = read();
+  const existing = list.find((r) => r.id === id);
+  if (!existing) return null;
+  const next = { ...existing, ...patch, id };
+  // Recompose the display address line from structured parts when provided.
+  const houseNo = patch.houseNo !== undefined ? patch.houseNo : existing.houseNo;
+  const street = patch.street !== undefined ? patch.street : existing.street;
+  const purok = patch.purok !== undefined ? patch.purok : existing.purok;
+  next.address = [houseNo, street, purok].filter(Boolean).join(", ");
+  // Keep risk in sync with the (possibly changed) program / age.
+  next.risk = classifyRisk(next.program, next.age);
+  cache = list.map((r) => (r.id === id ? next : r));
+  emit();
+  return { ...next };
+};
+
 /** React hook returning the live resident list. */
 export const useResidents = () => useSyncExternalStore(subscribe, getSnapshot);
 
@@ -177,6 +200,7 @@ export const residentStore = {
   getSnapshot,
   subscribe,
   addResident,
+  updateResident,
   initialsOf,
 };
 

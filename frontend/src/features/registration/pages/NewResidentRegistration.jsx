@@ -2,14 +2,24 @@ import React, { useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
-  Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, Check, User, Phone,
-  MapPin, Calendar, ChevronDown, Shield, Camera, FileText, Edit3,
+  Eye, EyeOff, ArrowRight, ArrowLeft, Check, MapPin, ChevronDown, Shield, Loader2,
 } from "lucide-react";
-import StepIndicator4 from "@/features/registration/components/StepIndicatorFourSteps";
-import { TextField, SelectField } from "@/features/registration/components/FormFields";
+import {
+  RegistrationShell,
+  RegistrationCard,
+  StepIndicator,
+  PageHeading,
+  Field,
+  SelectField,
+  inputCls,
+  SectionKicker,
+  InfoNote,
+  ReviewBlock,
+  btnPrimary,
+  btnGhost,
+} from "@/features/registration/components/RegistrationDesign";
 import FaceVerification from "@/features/registration/components/FaceVerification";
 import UploadComponent from "@/features/registration/components/UploadComponent";
-import { AgencyMark } from "@/components/branding/GovChrome";
 
 const BARANGAYS = ["San Isidro", "San Antonio", "Old San Roque"];
 
@@ -33,10 +43,17 @@ function checkStrength(pw) {
 }
 
 const STEPS_META = [
-  { num: 1, title: "Personal Information", subtitle: "Tell us about yourself.", icon: User },
-  { num: 2, title: "Account & Contact", subtitle: "Set up your login and contact details.", icon: Phone },
-  { num: 3, title: "Identity Verification", subtitle: "Capture or upload a photo for identity verification.", icon: Camera },
-  { num: 4, title: "Review Your Information", subtitle: "Please verify all details before submitting.", icon: FileText },
+  { num: 1, title: "Personal Information", subtitle: "Tell us about yourself." },
+  { num: 2, title: "Account & Contact", subtitle: "Set up your login and contact details." },
+  { num: 3, title: "Identity Verification", subtitle: "Capture or upload a photo for identity verification." },
+  { num: 4, title: "Review Your Information", subtitle: "Please verify all details before submitting." },
+];
+
+const STEPS = [
+  { num: 1, label: "Personal" },
+  { num: 2, label: "Account & Contact" },
+  { num: 3, label: "Identity" },
+  { num: 4, label: "Review" },
 ];
 
 export default function NewResidentRegistration() {
@@ -136,64 +153,69 @@ export default function NewResidentRegistration() {
   };
 
   const meta = STEPS_META[step - 1];
-  const completed = [];
-  for (let i = 1; i < step; i++) completed.push(i);
 
   return (
-    <Shell>
-      <div className="w-full">
-        <AgencyMark align="center" sealSize={44} />
-        <div className="gov-sheet mt-7 bg-white p-6 md:p-9">
-          <StepIndicator4 current={step} completed={completed} />
+    <RegistrationShell
+      footer={
+        <div className="mt-5 flex flex-col items-center gap-1.5 text-center">
+          <p className="text-[12.5px] text-white/70">
+            Already registered?{" "}
+            <Link
+              to="/login"
+              className="font-semibold text-white underline decoration-white/30 underline-offset-4 transition-colors hover:decoration-white"
+            >
+              Sign in to the portal
+            </Link>
+          </p>
+          <p className="text-[11.5px] text-white/50">No fees are collected for registration.</p>
         </div>
+      }
+    >
+      <RegistrationCard>
+        <div className="px-5 py-6 sm:px-10 sm:py-8">
+          <StepIndicator current={step} steps={STEPS} flowLabel="Personal Registration" />
 
-        <motion.div
-          key={step}
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="gov-sheet mt-6 bg-white"
-        >
-          <div className="flex items-center justify-between gap-4 border-b border-brand-border bg-brand-paper px-7 py-5 md:px-9">
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-brand-blue/20 bg-brand-light text-brand-blue">
-                <meta.icon className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </div>
-              <div>
-                <h1 className="font-display text-[19px] font-bold leading-tight text-brand-dark md:text-[21px]">
-                  {meta.title}
-                </h1>
-                <p className="mt-0.5 text-[12px] text-brand-gray">{meta.subtitle}</p>
-              </div>
-            </div>
-            <span className="hidden shrink-0 border border-brand-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-gov text-brand-gray sm:block">
-              Form A
-            </span>
-          </div>
+          <motion.div
+            key={step}
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.28 }}
+            className="mt-6 space-y-5"
+          >
+            <PageHeading title={meta.title} subtitle={meta.subtitle} />
 
-          <div className="px-7 py-7 md:px-9">
             {/* STEP 1: Personal Information */}
-          {step === 1 && (
-            <div className="space-y-4">
-              <div className="grid sm:grid-cols-2 gap-4">
-                <TextField label="First Name" icon={User} placeholder="Juan" value={form.firstName} onChange={set("firstName")} error={errors.firstName} />
-                <TextField label="Middle Name" icon={User} optional placeholder="Reyes" value={form.middleName} onChange={set("middleName")} />
-              </div>
-              <div className="grid sm:grid-cols-2 gap-4">
-                <TextField label="Last Name" icon={User} placeholder="Dela Cruz" value={form.lastName} onChange={set("lastName")} error={errors.lastName} />
-                <TextField label="Suffix" icon={User} optional placeholder="Jr." value={form.suffix} onChange={set("suffix")} />
-              </div>
-              <div className="grid sm:grid-cols-2 gap-4">
-                <TextField label="Birth Date" type="date" icon={Calendar} value={form.dob} onChange={(e) => setForm({ ...form, dob: e.target.value })} error={errors.dob} />
-                <TextField label="Age" icon={User} value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" />
-              </div>
-              <div className="grid sm:grid-cols-2 gap-4">
-                <SelectField label="Sex" value={form.sex} onChange={set("sex")} error={errors.sex}>
+            {step === 1 && (
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label="First Name" required error={errors.firstName}>
+                  <input type="text" placeholder="Juan" value={form.firstName} onChange={set("firstName")} className={inputCls(errors.firstName)} />
+                </Field>
+                <Field label="Middle Name" optional>
+                  <input type="text" placeholder="Reyes" value={form.middleName} onChange={set("middleName")} className={inputCls()} />
+                </Field>
+                <Field label="Last Name" required error={errors.lastName}>
+                  <input type="text" placeholder="Dela Cruz" value={form.lastName} onChange={set("lastName")} className={inputCls(errors.lastName)} />
+                </Field>
+                <Field label="Suffix" optional>
+                  <input type="text" placeholder="Jr." value={form.suffix} onChange={set("suffix")} className={inputCls()} />
+                </Field>
+                <Field label="Birth Date" required error={errors.dob}>
+                  <input
+                    type="date"
+                    value={form.dob}
+                    onChange={(e) => { setForm({ ...form, dob: e.target.value }); if (errors.dob) setErrors({ ...errors, dob: "" }); }}
+                    className={inputCls(errors.dob)}
+                  />
+                </Field>
+                <Field label="Age" hint="Calculated automatically from the date of birth.">
+                  <input type="text" value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" className={`${inputCls()} cursor-not-allowed text-slate-500`} />
+                </Field>
+                <SelectField label="Sex" required error={errors.sex} value={form.sex} onChange={set("sex")}>
                   <option value="">Select sex</option>
                   <option value="Male">Male</option>
                   <option value="Female">Female</option>
                 </SelectField>
-                <SelectField label="Civil Status" value={form.civilStatus} onChange={set("civilStatus")} error={errors.civilStatus}>
+                <SelectField label="Civil Status" required error={errors.civilStatus} value={form.civilStatus} onChange={set("civilStatus")}>
                   <option value="">Select status</option>
                   <option value="Single">Single</option>
                   <option value="Married">Married</option>
@@ -201,148 +223,213 @@ export default function NewResidentRegistration() {
                   <option value="Separated">Separated</option>
                 </SelectField>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* STEP 2: Account & Contact */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <TextField label="Email Address" type="email" icon={Mail} placeholder="you@example.com" value={form.email} onChange={set("email")} error={errors.email} />
-              <div className="relative">
-                <TextField label="Password" type={show ? "text" : "password"} icon={Lock} placeholder="Create a password" value={form.password} onChange={set("password")} error={errors.password} />
-                <button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-9 text-brand-gray">
-                  {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {form.password && (
-                <div className="border border-brand-border bg-brand-paper p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-brand-gray">
-                      Password Strength
-                    </span>
-                    <span className="font-stat text-[11.5px] font-bold uppercase tracking-[0.08em]" style={{ color: pwStrength.color }}>
-                      {pwStrength.label}
-                    </span>
-                  </div>
-                  <div className="mt-2.5 flex gap-1">
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <div key={i} className="h-1.5 flex-1 overflow-hidden bg-brand-border">
-                        <motion.div
-                          initial={false}
-                          animate={{ width: i < pwStrength.score ? "100%" : "0%" }}
-                          transition={{ duration: 0.3 }}
-                          className="h-full"
-                          style={{ background: pwStrength.color }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
-                    {pwStrength.checks.map((c, i) => (
-                      <div key={i} className="flex items-center gap-2 text-[12px]">
-                        <div className={`flex h-3.5 w-3.5 items-center justify-center ${c.pass ? "bg-brand-green" : "border border-brand-rule bg-white"}`}>
-                          {c.pass && <Check className="h-2.5 w-2.5 text-white" strokeWidth={3.5} />}
-                        </div>
-                        <span className={c.pass ? "text-brand-ink" : "text-brand-gray"}>{c.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="relative">
-                <TextField label="Confirm Password" type={showConfirm ? "text" : "password"} icon={Lock} placeholder="Re-enter password" value={form.confirmPassword} onChange={set("confirmPassword")} error={errors.confirmPassword} />
-                <button type="button" onClick={() => setShowConfirm(!showConfirm)} className="absolute right-3 top-9 text-brand-gray">
-                  {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
+            {/* STEP 2: Account & Contact */}
+            {step === 2 && (
+              <div className="space-y-5">
+                <Field label="Email Address" required error={errors.email}>
+                  <input type="email" placeholder="you@example.com" value={form.email} onChange={set("email")} className={inputCls(errors.email)} />
+                </Field>
 
-              <div className="mt-7 border-t border-brand-border pt-6">
-                <h3 className="gov-kicker text-brand-blue">Contact Information</h3>
-                <div className="mt-5 space-y-4">
-                  <TextField label="Mobile Number" type="tel" icon={Phone} placeholder="09XX XXX XXXX" value={form.mobile} onChange={set("mobile")} error={errors.mobile} />
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <TextField label="Province" icon={MapPin} value={form.province} onChange={set("province")} />
-                    <TextField label="Municipality" icon={MapPin} value={form.municipality} onChange={set("municipality")} />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-brand-ink">Barangay <span className="text-brand-danger">*</span></label>
-                    <div className="relative mt-1.5">
-                      <button type="button" onClick={() => setBarangayOpen(!barangayOpen)}
-                        className={`w-full flex items-center gap-2 bg-white border px-3.5 py-2.5 text-[13.5px] transition-colors ${errors.barangay ? "border-brand-danger" : "border-brand-border focus:border-brand-blue"}`}>
-                        <MapPin className="w-4 h-4 text-brand-gray shrink-0" />
-                        <span className={form.barangay ? "text-brand-ink" : "text-brand-gray/50"}>{form.barangay || "Search and select your barangay"}</span>
-                        <ChevronDown className="w-4 h-4 text-brand-gray ml-auto" />
-                      </button>
-                      {barangayOpen && (
-                        <div className="absolute z-20 mt-1 w-full border border-brand-border bg-white shadow-raise">
-                          <div className="border-b border-brand-border bg-brand-paper p-2">
-                            <input autoFocus value={barangayQuery} onChange={(e) => setBarangayQuery(e.target.value)} placeholder="Type to search..."
-                              className="w-full border border-brand-border bg-white px-3 py-2 text-[13px] outline-none placeholder:text-brand-gray/45 focus:border-brand-blue" />
-                          </div>
-                          <div className="max-h-48 overflow-y-auto">
-                            {filteredBarangays.map((b) => (
-                              <button key={b} type="button" onClick={() => { setForm({ ...form, barangay: b }); setBarangayOpen(false); setBarangayQuery(""); setErrors({ ...errors, barangay: "" }); }}
-                                className="w-full border-b border-brand-border/50 px-4 py-2.5 text-left text-[13px] text-brand-ink transition-colors last:border-b-0 hover:bg-brand-paper">{b}</button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                <Field
+                  label="Password"
+                  required
+                  error={errors.password}
+                  trailing={
+                    <button
+                      type="button"
+                      onClick={() => setShow(!show)}
+                      aria-label={show ? "Hide password" : "Show password"}
+                      className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-brand-ink"
+                    >
+                      {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  }
+                >
+                  <input type={show ? "text" : "password"} placeholder="Create a password" value={form.password} onChange={set("password")} className={`${inputCls(errors.password)} pr-12`} />
+                </Field>
+
+                {form.password && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                        Password Strength
+                      </span>
+                      <span className="font-stat text-[11.5px] font-bold uppercase tracking-[0.08em]" style={{ color: pwStrength.color }}>
+                        {pwStrength.label}
+                      </span>
                     </div>
-                    {errors.barangay && <p className="mt-1 text-[11.5px] text-brand-danger">{errors.barangay}</p>}
+                    <div className="mt-2.5 flex gap-1">
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <div key={i} className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200">
+                          <motion.div
+                            initial={false}
+                            animate={{ width: i < pwStrength.score ? "100%" : "0%" }}
+                            transition={{ duration: 0.3 }}
+                            className="h-full rounded-full"
+                            style={{ background: pwStrength.color }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
+                      {pwStrength.checks.map((c, i) => (
+                        <div key={i} className="flex items-center gap-2 text-[12px]">
+                          <div className={`flex h-3.5 w-3.5 items-center justify-center rounded-sm ${c.pass ? "bg-brand-green" : "border border-slate-300 bg-white"}`}>
+                            {c.pass && <Check className="h-2.5 w-2.5 text-white" strokeWidth={3.5} />}
+                          </div>
+                          <span className={c.pass ? "text-brand-ink" : "text-slate-500"}>{c.label}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <TextField label="Sitio / Purok" icon={MapPin} placeholder="Purok 5" value={form.sitio} onChange={set("sitio")} error={errors.sitio} />
-                    <TextField label="Street" icon={MapPin} optional placeholder="Mabini St." value={form.street} onChange={set("street")} />
+                )}
+
+                <Field
+                  label="Confirm Password"
+                  required
+                  error={errors.confirmPassword}
+                  trailing={
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirm(!showConfirm)}
+                      aria-label={showConfirm ? "Hide password" : "Show password"}
+                      className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-brand-ink"
+                    >
+                      {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  }
+                >
+                  <input type={showConfirm ? "text" : "password"} placeholder="Re-enter password" value={form.confirmPassword} onChange={set("confirmPassword")} className={`${inputCls(errors.confirmPassword)} pr-12`} />
+                </Field>
+
+                <div className="border-t border-slate-100 pt-5">
+                  <SectionKicker>Contact Information</SectionKicker>
+                  <div className="mt-5 space-y-5">
+                    <Field label="Mobile Number" required error={errors.mobile}>
+                      <input type="tel" placeholder="09XX XXX XXXX" value={form.mobile} onChange={set("mobile")} className={inputCls(errors.mobile)} />
+                    </Field>
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                      <Field label="Province">
+                        <input type="text" value={form.province} onChange={set("province")} className={inputCls()} />
+                      </Field>
+                      <Field label="Municipality">
+                        <input type="text" value={form.municipality} onChange={set("municipality")} className={inputCls()} />
+                      </Field>
+                    </div>
+
+                    <Field label="Barangay" required error={errors.barangay}>
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setBarangayOpen(!barangayOpen)}
+                          className={`${inputCls(errors.barangay)} flex cursor-pointer items-center gap-2 text-left`}
+                        >
+                          <MapPin className="h-4 w-4 shrink-0 text-slate-400" />
+                          <span className={`min-w-0 flex-1 truncate ${form.barangay ? "text-brand-ink" : "text-slate-400"}`}>
+                            {form.barangay || "Search and select your barangay"}
+                          </span>
+                          <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                        </button>
+                        {barangayOpen && (
+                          <div className="absolute z-20 mt-1.5 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_18px_40px_-16px_rgba(9,30,66,0.35)]">
+                            <div className="border-b border-slate-200 bg-slate-50/70 p-2">
+                              <input
+                                autoFocus
+                                value={barangayQuery}
+                                onChange={(e) => setBarangayQuery(e.target.value)}
+                                placeholder="Type to search..."
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] outline-none placeholder:text-slate-400 focus:border-brand-blue"
+                              />
+                            </div>
+                            <div className="max-h-48 overflow-y-auto">
+                              {filteredBarangays.length === 0 && (
+                                <p className="px-4 py-3 text-[12.5px] text-slate-400">No barangay found.</p>
+                              )}
+                              {filteredBarangays.map((b) => (
+                                <button
+                                  key={b}
+                                  type="button"
+                                  onClick={() => { setForm({ ...form, barangay: b }); setBarangayOpen(false); setBarangayQuery(""); setErrors({ ...errors, barangay: "" }); }}
+                                  className="w-full border-b border-slate-100 px-4 py-2.5 text-left text-[13px] text-brand-ink transition-colors last:border-b-0 hover:bg-slate-50"
+                                >
+                                  {b}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </Field>
+
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                      <Field label="Sitio / Purok" required error={errors.sitio}>
+                        <input type="text" placeholder="Purok 5" value={form.sitio} onChange={set("sitio")} className={inputCls(errors.sitio)} />
+                      </Field>
+                      <Field label="Street" optional>
+                        <input type="text" placeholder="Mabini St." value={form.street} onChange={set("street")} className={inputCls()} />
+                      </Field>
+                    </div>
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                      <Field label="House Number" optional>
+                        <input type="text" placeholder="Leave blank if not applicable" value={form.houseNo} onChange={set("houseNo")} className={inputCls()} />
+                      </Field>
+                      <Field label="Nearest Landmark" optional>
+                        <input type="text" placeholder="Near San Isidro Chapel" value={form.landmark} onChange={set("landmark")} className={inputCls()} />
+                      </Field>
+                    </div>
+                    <Field label="Occupation" optional>
+                      <input type="text" placeholder="Farmer" value={form.occupation} onChange={set("occupation")} className={inputCls()} />
+                    </Field>
                   </div>
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <TextField label="House Number" icon={MapPin} optional placeholder="Leave blank if not applicable" value={form.houseNo} onChange={set("houseNo")} />
-                    <TextField label="Nearest Landmark" icon={MapPin} optional placeholder="Near San Isidro Chapel" value={form.landmark} onChange={set("landmark")} />
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
+                  <SectionKicker>Declaration and Consent</SectionKicker>
+                  <div className="mt-4 space-y-3">
+                    <label className="flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={form.agree}
+                        onChange={(e) => { setForm({ ...form, agree: e.target.checked }); setErrors({ ...errors, agree: "" }); }}
+                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-blue focus:ring-brand-blue/30"
+                      />
+                      <span>
+                        I certify that the information provided is true and correct, and I agree to the{" "}
+                        <a href="#" className="font-semibold text-brand-blue underline underline-offset-2">Terms and Conditions</a> of this portal.
+                      </span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={form.agreePrivacy}
+                        onChange={(e) => { setForm({ ...form, agreePrivacy: e.target.checked }); setErrors({ ...errors, agree: "" }); }}
+                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-blue focus:ring-brand-blue/30"
+                      />
+                      <span>
+                        Pursuant to the Data Privacy Act of 2012 (RA 10173), I consent to the collection and processing of my
+                        personal and health information for the delivery of municipal health services.
+                      </span>
+                    </label>
                   </div>
-                  <TextField label="Occupation" icon={User} optional placeholder="Farmer" value={form.occupation} onChange={set("occupation")} />
+                  {errors.agree && <p className="mt-3 text-[12px] font-medium text-brand-danger">{errors.agree}</p>}
                 </div>
               </div>
+            )}
 
-              <div className="mt-7 border border-brand-border bg-brand-paper p-5">
-                <h3 className="gov-kicker text-brand-blue">Declaration and Consent</h3>
-                <div className="mt-4 space-y-3">
-                  <label className="flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-brand-gray">
-                    <input type="checkbox" checked={form.agree} onChange={(e) => { setForm({ ...form, agree: e.target.checked }); setErrors({ ...errors, agree: "" }); }} className="mt-0.5 h-4 w-4 shrink-0 rounded-none border-brand-rule text-brand-blue focus:ring-brand-blue/30" />
-                    <span>
-                      I certify that the information provided is true and correct, and I agree to the{" "}
-                      <a href="#" className="font-semibold text-brand-blue underline decoration-brand-rule underline-offset-2">Terms and Conditions</a> of this portal.
-                    </span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-brand-gray">
-                    <input type="checkbox" checked={form.agreePrivacy} onChange={(e) => { setForm({ ...form, agreePrivacy: e.target.checked }); setErrors({ ...errors, agree: "" }); }} className="mt-0.5 h-4 w-4 shrink-0 rounded-none border-brand-rule text-brand-blue focus:ring-brand-blue/30" />
-                    <span>
-                      Pursuant to the Data Privacy Act of 2012 (RA 10173), I consent to the collection and processing of my
-                      personal and health information for the delivery of municipal health services.
-                    </span>
-                  </label>
-                </div>
-                {errors.agree && <p className="mt-3 text-[12px] font-medium text-brand-danger">{errors.agree}</p>}
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: Identity Verification */}
-          {step === 3 && (
-            <div className="space-y-4">
-              <div className="flex items-start gap-3.5 border-l-2 border-brand-blue bg-brand-light px-4 py-4">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-brand-blue/25 bg-white">
-                  <Shield className="h-4 w-4 text-brand-blue" strokeWidth={1.8} />
-                </div>
-                <div>
-                  <p className="text-[12.5px] font-bold uppercase tracking-[0.08em] text-brand-dark">Identity Verification</p>
-                  <p className="mt-1 text-[12.5px] leading-relaxed text-brand-gray">
+            {/* STEP 3: Identity Verification */}
+            {step === 3 && (
+              <div className="space-y-6">
+                <InfoNote icon={Shield}>
+                  <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-brand-dark">Identity Verification</p>
+                  <p className="mt-1">
                     Capture a selfie or upload a clear photo of your face. This will be reviewed by your assigned Barangay
                     Health Worker before your account receives full access.
                   </p>
-                </div>
-              </div>
-              <div className="space-y-7 pt-2">
+                </InfoNote>
                 <div>
-                  <h3 className="gov-kicker mb-3.5 text-brand-blue">Face Photo</h3>
+                  <SectionKicker className="mb-3.5">Face Photo</SectionKicker>
                   <FaceVerification
                     captured={form.facePhoto}
                     onCapture={(f) => { setForm({ ...form, facePhoto: f }); setErrors({ ...errors, facePhoto: "" }); }}
@@ -351,140 +438,77 @@ export default function NewResidentRegistration() {
                   />
                 </div>
                 <div>
-                  <h3 className="gov-kicker mb-3.5 text-brand-blue">Government ID</h3>
+                  <SectionKicker className="mb-3.5">Government ID</SectionKicker>
                   <UploadComponent
                     label="Upload ID (SSS, UMID, Driver's License, etc.)"
                     file={form.idPhoto}
                     onFile={(f) => { setForm({ ...form, idPhoto: f }); setErrors({ ...errors, idPhoto: "" }); }}
                     onRemove={() => setForm({ ...form, idPhoto: null })}
                   />
-                  {errors.idPhoto && <p className="mt-1 text-[11.5px] text-brand-danger">{errors.idPhoto}</p>}
+                  {errors.idPhoto && <p className="mt-1.5 text-[11.5px] font-medium text-brand-danger">{errors.idPhoto}</p>}
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* STEP 4: Review Information */}
-          {step === 4 && (
-            <div className="space-y-4">
-              <ReviewSection title="Personal Information" onEdit={() => goTo(1)} items={[
-                ["Name", `${form.firstName} ${form.middleName} ${form.lastName} ${form.suffix}`.trim()],
-                ["Birth Date", form.dob],
-                ["Age", calcAge(form.dob)],
-                ["Sex", form.sex],
-                ["Civil Status", form.civilStatus],
-                ["Occupation", form.occupation || "N/A"],
-              ]} />
-              <ReviewSection title="Contact Information" onEdit={() => goTo(2)} items={[
-                ["Email", form.email],
-                ["Mobile Number", form.mobile],
-                ["Address", `${form.houseNo ? form.houseNo + ", " : ""}${form.street ? form.street + ", " : ""}Purok ${form.sitio}, Barangay ${form.barangay}, ${form.municipality}, ${form.province}`],
-                ["Nearest Landmark", form.landmark || "N/A"],
-              ]} />
-              <ReviewSection title="Identity Verification" onEdit={() => goTo(3)} items={[
-                ["Face Photo", form.facePhoto ? "Captured — pending review" : "Not captured"],
-                ["Government ID", form.idPhoto ? `Uploaded — ${form.idPhoto.name}` : "Not uploaded"],
-              ]} />
-            </div>
-          )}
-          </div>
+            {/* STEP 4: Review Information */}
+            {step === 4 && (
+              <div className="space-y-5">
+                <ReviewBlock title="Personal Information" onEdit={() => goTo(1)} items={[
+                  ["Name", `${form.firstName} ${form.middleName} ${form.lastName} ${form.suffix}`.trim()],
+                  ["Birth Date", form.dob],
+                  ["Age", calcAge(form.dob)],
+                  ["Sex", form.sex],
+                  ["Civil Status", form.civilStatus],
+                  ["Occupation", form.occupation || "N/A"],
+                ]} />
+                <ReviewBlock title="Contact Information" onEdit={() => goTo(2)} items={[
+                  ["Email", form.email],
+                  ["Mobile Number", form.mobile],
+                  ["Address", `${form.houseNo ? form.houseNo + ", " : ""}${form.street ? form.street + ", " : ""}Purok ${form.sitio}, Barangay ${form.barangay}, ${form.municipality}, ${form.province}`],
+                  ["Nearest Landmark", form.landmark || "N/A"],
+                ]} />
+                <ReviewBlock title="Identity Verification" onEdit={() => goTo(3)} items={[
+                  ["Face Photo", form.facePhoto ? "Captured — pending review" : "Not captured"],
+                  ["Government ID", form.idPhoto ? `Uploaded — ${form.idPhoto.name}` : "Not uploaded"],
+                ]} />
+              </div>
+            )}
+          </motion.div>
 
           {/* Navigation */}
-          <div className="flex items-center justify-between gap-4 border-t border-brand-border bg-brand-paper px-7 py-5 md:px-9">
+          <div className="mt-8 flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
             {step > 1 ? (
-              <button
-                onClick={back}
-                className="flex items-center gap-2 text-[12.5px] font-bold uppercase tracking-[0.08em] text-brand-gray transition-colors hover:text-brand-blue"
-              >
-                <ArrowLeft className="h-4 w-4" /> Back
+              <button onClick={back} className={btnGhost}>
+                <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" /> Back
               </button>
             ) : (
-              <Link
-                to="/register"
-                className="flex items-center gap-2 text-[12.5px] font-bold uppercase tracking-[0.08em] text-brand-gray transition-colors hover:text-brand-blue"
-              >
-                <ArrowLeft className="h-4 w-4" /> Back to forms
+              <Link to="/register" className={btnGhost}>
+                <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" /> All forms
               </Link>
             )}
 
             {step < 4 ? (
-              <button
-                onClick={next}
-                className="group flex items-center gap-2.5 bg-brand-blue px-7 py-3 text-[12.5px] font-bold uppercase tracking-[0.11em] text-white transition-colors hover:bg-brand-dark"
-              >
+              <button onClick={next} className={btnPrimary}>
                 Continue
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </button>
             ) : (
-              <button
-                onClick={submit}
-                disabled={submitting}
-                className="flex items-center gap-2.5 bg-brand-green px-7 py-3 text-[12.5px] font-bold uppercase tracking-[0.11em] text-white transition-colors hover:brightness-110 disabled:opacity-70"
-              >
+              <button onClick={submit} disabled={submitting} className={btnPrimary}>
                 {submitting ? (
                   <>
-                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
-                      <Shield className="h-4 w-4" />
-                    </motion.div>
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     Submitting
                   </>
                 ) : (
                   <>
-                    Submit Application <Check className="h-4 w-4" />
+                    Submit Registration <Check className="h-4 w-4" strokeWidth={2.5} />
                   </>
                 )}
               </button>
             )}
           </div>
-        </motion.div>
-
-        <div className="mt-6 flex flex-col items-center gap-2">
-          <p className="text-[13px] text-brand-gray">
-            Already registered?{" "}
-            <Link
-              to="/login"
-              className="font-semibold text-brand-blue underline decoration-brand-rule underline-offset-4 hover:decoration-brand-blue"
-            >
-              Sign in to the portal
-            </Link>
-          </p>
-          <p className="text-[11.5px] text-brand-gray/80">
-            No fees are collected for registration.
-          </p>
         </div>
-      </div>
-    </Shell>
-  );
-}
-
-function ReviewSection({ title, items, onEdit }) {
-  return (
-    <div className="border border-brand-border">
-      <div className="flex items-center justify-between border-b border-brand-border bg-brand-paper px-5 py-3">
-        <h3 className="text-[12px] font-bold uppercase tracking-[0.1em] text-brand-dark">{title}</h3>
-        <button
-          onClick={onEdit}
-          className="flex items-center gap-1.5 text-[11.5px] font-bold uppercase tracking-[0.08em] text-brand-blue transition-colors hover:text-brand-dark"
-        >
-          <Edit3 className="h-3.5 w-3.5" /> Edit
-        </button>
-      </div>
-      <dl className="divide-y divide-brand-border/70">
-        {items.map(([label, value]) => (
-          <div key={label} className="flex items-start gap-4 px-5 py-3">
-            <dt className="w-40 shrink-0 text-[12.5px] text-brand-gray">{label}</dt>
-            <dd className="text-[13px] font-semibold text-brand-ink">{value || "N/A"}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-function Shell({ children }) {
-  return (
-    <div className="min-h-screen bg-paper">
-      <div className="mx-auto max-w-3xl px-5 py-10 md:px-8 md:py-14">{children}</div>
-    </div>
+      </RegistrationCard>
+    </RegistrationShell>
   );
 }

@@ -95,6 +95,7 @@ export const NAV = {
   rhu_personnel: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/rhu_personnel/dashboard" },
     { label: "Triage", icon: "Activity", path: "/app/rhu_personnel/triage", permission: "triage.view" },
+    { label: "Referrals", icon: "Send", path: "/app/rhu_personnel/referrals" },
     { label: "Medical Certificates", icon: "FileText", path: "/app/rhu_personnel/certificates" },
     { label: "Health Programs", icon: "HeartPulse", path: "/app/rhu_personnel/programs" },
     { label: "Notifications", icon: "Bell", path: "/app/rhu_personnel/notifications" },
@@ -104,6 +105,7 @@ export const NAV = {
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/mho/dashboard", group: "Main" },
     { label: "Health Trends", icon: "TrendingUp", path: "/app/mho/trends", permission: "reports.analytics.view", group: "Monitoring" },
     { label: "Household Risk Overview", icon: "AlertTriangle", path: "/app/mho/households/risk-overview", group: "Monitoring" },
+    { label: "Community Monitoring", icon: "Map", path: "/app/mho/barangays", permission: "reports.analytics.view", group: "Monitoring" },
     { label: "TCL & M1 Submissions", icon: "ClipboardList", path: "/app/mho/submissions", group: "Submissions" },
     { label: "Referrals", icon: "Send", path: "/app/mho/referrals", permission: "referrals.view", group: "Health Services" },
     { label: "Medical Certificates", icon: "FileText", path: "/app/mho/certificates", group: "Health Services" },
@@ -114,7 +116,8 @@ export const NAV = {
   admin: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/admin/dashboard" },
     { label: "User Management", icon: "Users", path: "/app/admin/users", permission: "accounts.view" },
-    { label: "Municipality Applications", icon: "Building2", path: "/app/admin/municipality-applications" },
+    { label: "Staff Requests", icon: "ClipboardList", path: "/app/admin/staff-requests", permission: "accounts.view" },
+    { label: "Supervisor Verification", icon: "ShieldCheck", path: "/app/admin/supervisor-verifications", permission: "accounts.view" },
     { label: "Early Intervention Rules", icon: "AlertTriangle", path: "/app/admin/risk-rules" },
     { label: "Roles", icon: "Shield", path: "/app/admin/roles" },
     { label: "Role & Permissions", icon: "KeyRound", path: "/app/admin/permissions", permission: "accounts.roles.manage" },

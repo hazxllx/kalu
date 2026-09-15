@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from "react";
-import { Search, Download, Plus, X, Eye, CheckCircle2, ChevronDown } from "lucide-react";
+import { Search, Download, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
+import { auditStore } from "@/services/mock/auditStore";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import {
   useResidents,
@@ -111,9 +112,12 @@ export default function ResidentsPage() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [editTarget, setEditTarget] = useState(null); // resident being edited
   const [form, setForm] = useState(() => initialFromUser(user));
-  const [errors, setErrors] = useState({});
+  const [editForm, setEditForm] = useState({ name: "", contact: "", barangay: "", birthdate: "", gender: "", civilStatus: "", program: "", purok: "", street: "", houseNo: "" });
+  const [editErrors, setEditErrors] = useState({});
   const [toast, setToast] = useState(null);
 
   const programOptions = useMemo(() => {
@@ -163,6 +167,69 @@ export default function ResidentsPage() {
   const openView = (resident) => {
     setSelected(resident);
     setShowViewModal(true);
+  };
+
+  /**
+   * Open the Edit Resident modal (Health Supervisor, assigned barangay only).
+   * Pre-fills the editable demographic fields from the existing record.
+   */
+  const openEdit = (resident) => {
+    setEditTarget(resident);
+    setEditForm({
+      name: resident.name || "",
+      contact: resident.contact || "",
+      barangay: resident.barangay || "",
+      birthdate: resident.birthdate || "",
+      gender: resident.gender || "",
+      civilStatus: resident.civilStatus || "",
+      program: resident.program || "",
+      purok: resident.purok || "",
+      street: resident.street || "",
+      houseNo: resident.houseNo || "",
+    });
+    setEditErrors({});
+    setShowEditModal(true);
+  };
+
+  // Validate the edit form; the barangay must stay within the supervisor's scope.
+  const validateEdit = () => {
+    const errs = {};
+    if (!editForm.name.trim()) errs.name = "Full name is required.";
+    if (!editForm.barangay) errs.barangay = "Barangay is required.";
+    else if (!allowedBarangays.includes(editForm.barangay)) errs.barangay = "You can only edit residents within your assigned barangay.";
+    if (editForm.contact && !/^[0-9+\-\s()]{7,20}$/.test(editForm.contact.trim())) errs.contact = "Enter a valid contact number.";
+    if (editForm.birthdate) {
+      const d = new Date(editForm.birthdate);
+      if (Number.isNaN(d.getTime()) || d > new Date()) errs.birthdate = "Enter a valid birth date.";
+    }
+    setEditErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  /** Save the resident edit to the shared store and record an audit entry. */
+  const handleEditSave = () => {
+    if (!validateEdit() || !editTarget) return;
+    residentStore.updateResident(editTarget.id, {
+      name: editForm.name.trim(),
+      contact: editForm.contact.trim(),
+      barangay: editForm.barangay,
+      birthdate: editForm.birthdate,
+      gender: editForm.gender,
+      civilStatus: editForm.civilStatus,
+      program: editForm.program,
+      purok: editForm.purok,
+      street: editForm.street,
+      houseNo: editForm.houseNo,
+    });
+    auditStore.addEvent({
+      user: user?.name || "Health Supervisor",
+      role: "Health Supervisor",
+      action: "Resident updated",
+      description: `Updated resident record ${editTarget.id} (${editForm.name.trim()}).`,
+    });
+    setShowEditModal(false);
+    setEditTarget(null);
+    showToast("Resident updated successfully.");
   };
 
   const closeAdd = () => {
@@ -327,12 +394,20 @@ export default function ResidentsPage() {
           if (key === "status") return <StatusBadge value={row.status} />;
           if (key === "actions")
             return (
-              <button
-                onClick={() => openView(row)}
-                className="flex items-center gap-1 text-brand-blue text-sm font-medium hover:underline"
-              >
-                <Eye className="w-4 h-4" /> View
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => openView(row)}
+                  className="flex items-center gap-1 text-brand-blue text-sm font-medium hover:underline"
+                >
+                  <Eye className="w-4 h-4" /> View
+                </button>
+                <button
+                  onClick={() => openEdit(row)}
+                  className="flex items-center gap-1 text-brand-gray text-sm font-medium hover:underline"
+                >
+                  <Pencil className="w-4 h-4" /> Edit
+                </button>
+              </div>
             );
           return row[key];
         }}
@@ -467,6 +542,54 @@ export default function ResidentsPage() {
                   className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Edit Resident Modal (Health Supervisor, assigned barangay only) */}
+      {showEditModal && editTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-ink">Edit Resident</h3>
+                  <p className="text-sm text-brand-gray mt-0.5">
+                    {editTarget.id} · updates are limited to your assigned barangay.
+                  </p>
+                </div>
+                <button onClick={() => setShowEditModal(false)} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <Field label="Full Name" value={editForm.name} onChange={(v) => { setEditForm((p) => ({ ...p, name: v })); if (editErrors.name) setEditErrors((p) => ({ ...p, name: "" })); }} placeholder="e.g. Maria Santos" error={editErrors.name} />
+                </div>
+                <Field label="Contact Number" value={editForm.contact} onChange={(v) => { setEditForm((p) => ({ ...p, contact: v })); if (editErrors.contact) setEditErrors((p) => ({ ...p, contact: "" })); }} placeholder="e.g. 0917 123 4567" error={editErrors.contact} optional />
+                <Field label="Birth Date" type="date" value={editForm.birthdate} onChange={(v) => { setEditForm((p) => ({ ...p, birthdate: v })); if (editErrors.birthdate) setEditErrors((p) => ({ ...p, birthdate: "" })); }} error={editErrors.birthdate} optional />
+                <Select label="Sex" value={editForm.gender} onChange={(v) => setEditForm((p) => ({ ...p, gender: v }))} options={SEX_OPTIONS} placeholder="Select sex" />
+                <Select label="Civil Status" value={editForm.civilStatus} onChange={(v) => setEditForm((p) => ({ ...p, civilStatus: v }))} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
+                <Select label="Barangay" value={editForm.barangay} onChange={(v) => { setEditForm((p) => ({ ...p, barangay: v })); if (editErrors.barangay) setEditErrors((p) => ({ ...p, barangay: "" })); }} options={allowedBarangays} placeholder="Select barangay" error={editErrors.barangay} />
+                <Select label="Purok/Zone" value={editForm.purok} onChange={(v) => setEditForm((p) => ({ ...p, purok: v }))} options={PUROKS} placeholder="Select purok" />
+                <Select label="Health Program" value={editForm.program} onChange={(v) => setEditForm((p) => ({ ...p, program: v }))} options={programOptions} placeholder="Select program" />
+                <Field label="Street / Sitio" value={editForm.street} onChange={(v) => setEditForm((p) => ({ ...p, street: v }))} placeholder="Enter street or sitio" optional />
+                <Field label="House No." value={editForm.houseNo} onChange={(v) => setEditForm((p) => ({ ...p, houseNo: v }))} placeholder="Enter house number" optional />
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-brand-border">
+                <button onClick={() => setShowEditModal(false)} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleEditSave}
+                  className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Save Changes
                 </button>
               </div>
             </div>

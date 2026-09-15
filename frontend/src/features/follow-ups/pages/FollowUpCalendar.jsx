@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
+import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { useResidents } from "@/services/mock/residentStore";
 import {
   useFollowUpSchedules,
@@ -157,7 +158,21 @@ const VIEWS = [
 export default function FollowUpCalendar() {
   const { user } = useAuth();
   const schedules = useFollowUpSchedules();
-  const residents = useResidents();
+  const allResidents = useResidents();
+
+  // Health Supervisor scope — the calendar only ever shows (and offers for new
+  // schedules) residents of the supervisor's single assigned barangay.
+  const supervisorScope = user?.role === "health_supervisor" ? getSupervisorScope(user) : null;
+  const assignedBarangay = supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
+  const residents = useMemo(
+    () => (assignedBarangay ? allResidents.filter((r) => r.barangay === assignedBarangay) : allResidents),
+    [allResidents, assignedBarangay]
+  );
+  const residentIds = useMemo(() => new Set(residents.map((r) => r.id)), [residents]);
+  const scopedSchedules = useMemo(
+    () => (assignedBarangay ? schedules.filter((s) => residentIds.has(s.residentId)) : schedules),
+    [schedules, residentIds, assignedBarangay]
+  );
 
   // Health Supervisor only — the route already sits inside the supervisor's
   // protected area; this guard is a second line of defense.
@@ -180,7 +195,7 @@ export default function FollowUpCalendar() {
 
   return (
     <FollowUpCalendarContent
-      schedules={schedules}
+      schedules={scopedSchedules}
       residentNames={residents.map((r) => r.name).sort((a, b) => a.localeCompare(b))}
     />
   );

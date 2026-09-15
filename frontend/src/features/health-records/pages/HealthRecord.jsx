@@ -1,7 +1,7 @@
 import React from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { HeartPulse, Syringe, Droplet, Thermometer, Activity, FlaskConical, Download } from "lucide-react";
+import { HeartPulse, Syringe, Droplet, Thermometer, Activity, FlaskConical, Download, ClipboardCheck } from "lucide-react";
 import { residentTimeline } from "@/services/mock/mockData";
 
 const vitals = [
@@ -23,10 +23,80 @@ const labs = [
   { name: "Blood Glucose (FBS)", date: "May 2026", result: "92 mg/dL" },
 ];
 
+// PhilPEN (Philippine Package of Essential Non-communicable Disease
+// Interventions) assessment results — read-only for the resident.
+const philpenResults = [
+  {
+    date: "September 8, 2026",
+    risk: "Moderate",
+    status: "Completed",
+    findings: "Blood pressure 138/88; BMI within normal range. No tobacco or alcohol use reported.",
+    recommendations: "Continue low-sodium diet; monthly BP monitoring at the barangay health station.",
+    followUp: "Return for BP re-check on October 8, 2026.",
+  },
+  {
+    date: "June 12, 2026",
+    risk: "Low",
+    status: "Completed",
+    findings: "Blood pressure 122/78; random blood sugar 104 mg/dL. No risk factors identified.",
+    recommendations: "Maintain healthy lifestyle; annual re-screening.",
+    followUp: "Next routine assessment in June 2027.",
+  },
+];
+
+const RISK_TONES = {
+  Low: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
+  Moderate: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
+  High: "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
+};
+
 export default function HealthRecord() {
+  /**
+   * Export the resident's personal + health-record data as a downloadable JSON
+   * file (frontend only — nothing is uploaded or sent to a server).
+   */
+  const exportHealthRecord = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      resident: {
+        name: "Maria Santos",
+        barangay: "San Isidro",
+        birthday: "March 12, 1992",
+        age: 34,
+        sex: "Female",
+        bloodType: "O+",
+      },
+      vitals,
+      medicalHistory: {
+        chronicConditions: "None",
+        allergies: "Penicillin",
+        currentMedications: "Ferrous Sulfate",
+        pregnancyStatus: "2nd Trimester",
+      },
+      vaccinations,
+      laboratoryResults: labs,
+      consultationHistory: residentTimeline,
+      philpenAssessments: philpenResults,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "kalusagap-health-record.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <>
-      <PageHeader crumbs={["My Health Record"]} title="My Health Record" subtitle="A complete view of your medical history and vitals." action={<button className="flex items-center gap-2 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"><Download className="w-4 h-4" /> Export Health Record</button>} />
+      <PageHeader crumbs={["My Health Record"]} title="My Health Record" subtitle="A complete view of your medical history and vitals." action={
+        <button
+          onClick={exportHealthRecord}
+          className="flex items-center gap-2 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
+        >
+          <Download className="w-4 h-4" /> Export Health Record
+        </button>
+      } />
 
       <Card className="p-5 mb-6">
         <div className="grid md:grid-cols-2 xl:grid-cols-6 gap-4 text-sm">
@@ -98,6 +168,31 @@ export default function HealthRecord() {
                 <p className="text-xs text-brand-gray">{t.date}</p>
                 <p className="text-sm font-medium text-brand-ink">{t.title}</p>
                 <p className="text-xs text-brand-gray">{t.desc}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* PhilPEN assessment results — read-only, own records only */}
+        <Card className="p-6">
+          <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2">
+            <ClipboardCheck className="w-4 h-4 text-brand-blue" /> PhilPEN Assessment Results
+          </h3>
+          <div className="space-y-4">
+            {philpenResults.map((a) => (
+              <div key={a.date} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-card">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-brand-ink">Assessment Date: {a.date}</p>
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${RISK_TONES[a.risk] || RISK_TONES.Low}`}>
+                    <span className="h-2 w-2 rounded-full bg-current opacity-70" /> {a.risk} Risk
+                  </span>
+                </div>
+                <div className="mt-3 space-y-2 text-sm">
+                  <p className="text-brand-gray"><span className="font-medium text-brand-ink">Findings:</span> {a.findings}</p>
+                  <p className="text-brand-gray"><span className="font-medium text-brand-ink">Recommendations:</span> {a.recommendations}</p>
+                  <p className="text-brand-gray"><span className="font-medium text-brand-ink">Follow-up Advice:</span> {a.followUp}</p>
+                </div>
+                <p className="mt-3 text-xs text-brand-gray">Status: {a.status}</p>
               </div>
             ))}
           </div>

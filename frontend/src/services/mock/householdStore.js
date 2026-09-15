@@ -108,6 +108,21 @@ const markAllSynced = () => {
   emit();
 };
 
+/**
+ * Apply a Health Supervisor verification outcome to a household record so the
+ * BHW household list shows the same result (verification status, reviewer,
+ * review date, and correction reason). Shared by both roles — one store.
+ */
+const applyVerification = (householdId, { status, reviewer, reviewedAt, reason = "" }) => {
+  const list = read();
+  cache = list.map((h) =>
+    h.id === householdId
+      ? { ...h, verificationStatus: status, verifiedBy: reviewer, verifiedAt: reviewedAt, correctionReason: reason }
+      : h
+  );
+  emit();
+};
+
 const clearSession = () => {
   cache = cloneSeed();
   persist();
@@ -126,6 +141,7 @@ export const householdStore = {
   subscribe,
   addHousehold,
   markAllSynced,
+  applyVerification,
   clearSession,
   getSyncStatus,
   setSync,

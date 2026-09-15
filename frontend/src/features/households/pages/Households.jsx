@@ -40,6 +40,7 @@ const COLUMNS = [
   { key: "streetAddress", label: "Street Address / Sitio", filter: "text", placeholder: "Filter address..." },
   { key: "hhStatus", label: "HH Status", filter: "list", options: HH_STATUSES },
   { key: "collector", label: "Assigned Data Collector", filter: "list", options: BHW_NAMES },
+  { key: "verification", label: "Verification", filter: "list", options: ["Pending Verification", "Verified", "Returned for Correction"] },
   { key: "approval", label: "Approval Status", filter: "list", options: APPROVAL_STATUSES },
   { key: "risk", label: "Risk Level", filter: "list", options: ["Low", "Moderate", "High"] },
 ];
@@ -51,8 +52,16 @@ const EMPTY_FILTERS = {
   streetAddress: "",
   hhStatus: [],
   collector: [],
+  verification: [],
   approval: [],
   risk: [],
+};
+
+/** Verification badge tones shown to the BHW for gathered-data review status. */
+const VERIFICATION_TONES = {
+  "Pending Verification": "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
+  Verified: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
+  "Returned for Correction": "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
 };
 
 /** Column header filter — text search or a dropdown of status options. */
@@ -192,6 +201,9 @@ export default function Households() {
       if (filters.hhStatus.length && !filters.hhStatus.includes(h.hhStatus)) return false;
       if (filters.collector.length && !filters.collector.includes(h.collector)) return false;
       if (filters.approval.length && !filters.approval.includes(h.approval)) return false;
+  // Verification status filter (Pending Verification / Verified / Returned for Correction).
+  const verificationStatus = h.verificationStatus || "Pending Verification";
+  if (filters.verification.length && !filters.verification.includes(verificationStatus)) return false;
       if (filters.risk.length && !filters.risk.includes(risk)) return false;
       return true;
     });
@@ -385,6 +397,10 @@ export default function Households() {
               <tbody>
                 {visible.map((h) => {
                   const risk = riskFromScore(h.riskScore);
+                  // Tooltip describing who reviewed the gathered data and when.
+                  const verificationTitle = h.verifiedBy
+                    ? `Reviewed by ${h.verifiedBy}${h.verifiedAt ? ", " + h.verifiedAt : ""}`
+                    : "Not yet reviewed";
                   return (
                     <tr
                       key={h.id}
@@ -401,6 +417,24 @@ export default function Households() {
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{h.collector}</td>
+                      {/* Verification status of gathered data (synced from the
+                          Health Supervisor household verification workflow). */}
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col items-start gap-1">
+                          <span
+                            title={verificationTitle}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${VERIFICATION_TONES[h.verificationStatus] || VERIFICATION_TONES["Pending Verification"]}`}
+                          >
+                            <span className="h-2 w-2 rounded-full bg-current opacity-70" />
+                            {h.verificationStatus || "Pending Verification"}
+                          </span>
+                          {h.correctionReason && (
+                            <span className="max-w-[16rem] truncate text-[11px] text-brand-gray" title={h.correctionReason}>
+                              {h.correctionReason}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3">
                         <HHBadge value={h.approval} />
                       </td>
@@ -445,6 +479,14 @@ export default function Households() {
                       <HHBadge value={risk} label={`${risk} Risk`} />
                       <HHBadge value={h.hhStatus} />
                       {h.syncStatus && <StatusBadge value={h.syncStatus} />}
+                      {/* Verification status of gathered data (HS workflow sync). */}
+                      <span
+                        title={h.verifiedBy ? "Reviewed by " + h.verifiedBy + (h.verifiedAt ? ", " + h.verifiedAt : "") : "Not yet reviewed"}
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${VERIFICATION_TONES[h.verificationStatus] || VERIFICATION_TONES["Pending Verification"]}`}
+                      >
+                        <span className="h-2 w-2 rounded-full bg-current opacity-70" />
+                        {h.verificationStatus || "Pending Verification"}
+                      </span>
                     </div>
                   </div>
                   <div className="mt-5 grid grid-cols-2 gap-3 text-sm">

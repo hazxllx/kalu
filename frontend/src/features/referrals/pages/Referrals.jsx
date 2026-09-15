@@ -21,6 +21,7 @@ import {
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { ROLES } from "@/lib/brand";
 import { useAuth } from "@/context/AuthContext";
+import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, CheckCircle2, Download, Trash2 } from "lucide-react";
 
 const REFERRALS = [
@@ -47,7 +48,7 @@ const REFERRALS = [
     barangay: "San Antonio",
     date: "July 8, 2026",
     reason: "Abnormal Ultrasound Findings",
-    facility: "Bicol Medical Center",
+    facility: "RHU Pili",
     priority: "High",
     status: "Accepted",
     notes: "Ultrasound showed placenta previa. Referral for specialist evaluation.",
@@ -96,17 +97,26 @@ export default function Referrals({ roleKey } = {}) {
   // The PHN reads/writes the shared workflow store so referrals created from a
   // completed check-up and pending-referral counts stay in sync. Every other
   // role keeps its original local dataset unchanged. PHN rows are limited to
-  // the active coverage (assigned barangay or RHU).
+  // the active coverage (assigned barangay or RHU); a barangay-assigned Health
+  // Supervisor only ever sees referrals from their assigned barangay.
   const workflow = useWorkflowStore();
   const [localReferrals, setLocalReferrals] = useState(REFERRALS);
+  const supervisorScope = !isPhn ? getSupervisorScope(user) : null;
+  const assignedBarangay = supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
   const referrals = useMemo(
-    () => (isPhn ? filterRowsByScope(workflow.referrals, user, coverage) : localReferrals),
-    [isPhn, workflow.referrals, user, coverage, localReferrals]
+    () =>
+      isPhn
+        ? filterRowsByScope(workflow.referrals, user, coverage)
+        : assignedBarangay
+          ? localReferrals.filter((r) => r.barangay === assignedBarangay)
+          : localReferrals,
+    [isPhn, workflow.referrals, user, coverage, localReferrals, assignedBarangay]
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
-  const [barangayFilter, setBarangayFilter] = useState("All");
+  // Barangay-assigned supervisors work a single scope; the filter starts there.
+  const [barangayFilter, setBarangayFilter] = useState(assignedBarangay || "All");
   const [showNewReferralModal, setShowNewReferralModal] = useState(false);
   const [showViewDetailsModal, setShowViewDetailsModal] = useState(false);
   const [showEditReferralModal, setShowEditReferralModal] = useState(false);
@@ -121,10 +131,17 @@ export default function Referrals({ roleKey } = {}) {
   const [editForm, setEditForm] = useState(null);
   const [formErrors, setFormErrors] = useState({});
   const residentPool = useMemo(
-    () => (isPhn ? filterRowsByScope(phnResidents, user, coverage) : residents),
-    [isPhn, user, coverage]
+    () =>
+      isPhn
+        ? filterRowsByScope(phnResidents, user, coverage)
+        : assignedBarangay
+          ? residents.filter((r) => r.barangay === assignedBarangay)
+          : residents,
+    [isPhn, user, coverage, assignedBarangay]
   );
 
+  // A barangay-assigned supervisor works a single scope, so the barangay
+  // dropdown only ever offers that one barangay; other roles keep the full set.
   const filterOptions = phnFilterOptions(user);
 
   const filteredReferrals = referrals.filter((r) => {
@@ -349,7 +366,11 @@ export default function Referrals({ roleKey } = {}) {
       <PageHeader
         crumbs={["Referrals"]}
         title={isPhn ? "Referral Coordination" : "Referrals"}
-        subtitle="Manage resident referrals to RHU and higher-level healthcare facilities."
+        subtitle={
+          assignedBarangay
+            ? `Manage resident referrals to RHU and higher-level healthcare facilities in Brgy. ${assignedBarangay}.`
+            : "Manage resident referrals to RHU and higher-level healthcare facilities."
+        }
         action={
           <button
             onClick={() => {
@@ -386,7 +407,7 @@ export default function Referrals({ roleKey } = {}) {
             />
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            {!isPhn && (
+            {!isPhn && !assignedBarangay && (
               <select
                 value={barangayFilter}
                 onChange={(e) => setBarangayFilter(e.target.value)}
@@ -558,8 +579,6 @@ export default function Referrals({ roleKey } = {}) {
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                   >
                     <option>RHU Pili</option>
-                    <option>Bicol Medical Center</option>
-                    <option>Bicol Regional Training and Teaching Hospital</option>
                   </select>
                 </div>
                 <div>
@@ -717,8 +736,6 @@ export default function Referrals({ roleKey } = {}) {
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                   >
                     <option>RHU Pili</option>
-                    <option>Bicol Medical Center</option>
-                    <option>Bicol Regional Training and Teaching Hospital</option>
                   </select>
                 </div>
                 <div>

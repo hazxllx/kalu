@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import MedicalCertificateModal, { CertificateStatusBadge } from "@/features/certificates/components/MedicalCertificateModal";
-import { useMedicalCertificates, medicalCertificateStore } from "@/services/mock/medicalCertificateStore";
+import { useMedicalCertificates, medicalCertificateStore, ALLOWED_TRANSITIONS } from "@/services/mock/medicalCertificateStore";
+import { auditStore } from "@/services/mock/auditStore";
 import { useAuth } from "@/context/AuthContext";
 import { Search, FileText, Plus, X, ChevronRight, CheckCircle2 } from "lucide-react";
 
@@ -14,8 +15,8 @@ const formatDate = (iso) => {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
-/** Statuses the MHO may assign from the register (existing workflow statuses). */
-const CHANGEABLE_STATUSES = ["Draft", "For Review", "Approved", "Issued", "Rejected"];
+/** Valid next statuses for the MHO workflow (Draft→For Review→Approved/Rejected→Issued). */
+const nextStatusesFor = (status) => ALLOWED_TRANSITIONS[status] || [];
 
 /**
  * Medical Certificates list.
@@ -61,14 +62,23 @@ export default function MedicalCertificates() {
 
   const statuses = ["All", ...medicalStatuses()];
 
-  /** MHO saves a new status from the Change Status modal. */
+  /** MHO saves a new status from the Change Status modal (transition-validated). */
   const handleStatusChange = (newStatus, remarks) => {
     const cert = certificates.find((c) => c.id === statusTarget);
     setStatusTarget(null);
     if (!cert) return;
+    // Guard against invalid transitions (belt-and-braces; the dropdown already
+    // only offers valid next statuses).
+    if (!nextStatusesFor(cert.status).includes(newStatus)) return;
     medicalCertificateStore.setStatus(cert.id, newStatus, {
       by: user?.name || "MHO",
       notes: remarks,
+    });
+    auditStore.addEvent({
+      user: user?.name || "MHO",
+      role: "Municipal Health Officer",
+      action: "Certificate status changed",
+      description: `Set certificate ${cert.reference} from ${cert.status} to ${newStatus}.`,
     });
     showToast(`Certificate ${cert.reference} status changed to ${newStatus}.`);
   };
@@ -230,10 +240,13 @@ export default function MedicalCertificates() {
  * the certificate's audit trail by the store.
  */
 function StatusChangeModal({ certificate, onClose, onSave }) {
-  const [newStatus, setNewStatus] = useState(certificate.status);
+  // Only the allowed next statuses for the current status are selectable.
+  const allowed = nextStatusesFor(certificate.status);
+  const [newStatus, setNewStatus] = useState(allowed[0] || "");
   const [remarks, setRemarks] = useState("");
+  const [showIssueConfirm, setShowIssueConfirm] = useState(false);
 
-  const isUnchanged = newStatus === certificate.status;
+  const isUnchanged = !newStatus || newStatus === certificate.status;
 
   const infoRows = [
     { label: "Purpose", value: certificate.purpose },
@@ -244,7 +257,8 @@ function StatusChangeModal({ certificate, onClose, onSave }) {
 
   return (
     <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/50 p-4">
-      <Card className="max-h-[92vh] w-full max-w-md overflow-y-auto">
+      <div className="relative w-full max-w-md">
+        <Card className="max-h-[92vh] overflow-y-auto">
         <div className="p-6">
           <div className="mb-1 flex items-start justify-between gap-3">
             <div>
@@ -276,16 +290,22 @@ function StatusChangeModal({ certificate, onClose, onSave }) {
               <label className="text-sm font-medium text-brand-ink">
                 New Status <span className="text-brand-danger">*</span>
               </label>
-              <select
-                value={newStatus}
-                onChange={(e) => setNewStatus(e.target.value)}
-                className="mt-1.5 w-full rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
-              >
-                {CHANGEABLE_STATUSES.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-              {isUnchanged && (
+              {allowed.length > 0 ? (
+                <select
+                  value={newStatus}
+                  onChange={(e) => setNewStatus(e.target.value)}
+                  className="mt-1.5 w-full rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
+                >
+                  {allowed.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="mt-1.5 rounded-btn border border-slate-200 bg-brand-bg/60 px-3.5 py-2.5 text-sm text-brand-gray dark:border-border dark:bg-card-nested">
+                  This certificate is final — no further status changes are allowed.
+                </p>
+              )}
+              {allowed.length > 0 && newStatus === certificate.status && (
                 <p className="mt-1 text-xs text-brand-gray">
                   Select a different status to update this certificate.
                 </p>
@@ -308,7 +328,11 @@ function StatusChangeModal({ certificate, onClose, onSave }) {
               Cancel
             </button>
             <button
-              onClick={() => { if (!isUnchanged) onSave(newStatus, remarks.trim()); }}
+              onClick={() => {
+                // Issuing is irreversible — require confirmation first.
+                if (newStatus === "Issued") setShowIssueConfirm(true);
+                else onSave(newStatus, remarks.trim());
+              }}
               disabled={isUnchanged}
               className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -317,6 +341,31 @@ function StatusChangeModal({ certificate, onClose, onSave }) {
           </div>
         </div>
       </Card>
+
+      {/* Issuing confirmation — required before the Issued status is applied. */}
+      {showIssueConfirm && (
+        <div className="absolute inset-0 z-[5] flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-sm">
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-brand-ink">Issue this certificate?</h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-brand-gray">
+                Issuing makes <span className="font-medium text-brand-ink">{certificate.reference}</span> official and
+                final — its status can no longer be changed.
+              </p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button onClick={() => setShowIssueConfirm(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
+                <button
+                  onClick={() => { setShowIssueConfirm(false); onSave("Issued", remarks.trim()); }}
+                  className="rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+                >
+                  Issue Certificate
+                </button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+      </div>
     </div>
   );
 }
