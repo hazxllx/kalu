@@ -1,6 +1,6 @@
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';
-import { verifyDevToken } from '../utils/devSession.js';
+import { loadActiveProfile, profileToSessionUser } from '../services/profile.service.js';
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
@@ -8,23 +8,22 @@ import asyncHandler from '../utils/asyncHandler.js';
  * Authentication middleware.
  *
  * Extracts the Bearer access token issued by Supabase Auth, verifies it with
- * Supabase, and attaches the resolved user to `req.user`:
+ * Supabase, then resolves the caller's APPLICATION profile (role, status and
+ * municipality/barangay/facility assignment) from the `profiles` table — the
+ * single server-side source of truth. The client never supplies a role or a
+ * scope; both are read from the database after the token is verified.
  *
- *   req.user = { id, email, role, accessToken }
+ *   req.user = { id, email, name, role, status,
+ *                municipalityId, municipality, barangayId, barangay,
+ *                facilityId, accessToken }
  *
- * The application role is read from the Supabase Auth user metadata
- * (`app_metadata.role`, falling back to `user_metadata.role`). Once the
- * verified database structure exists, this is the single place to switch to
- * reading the role from a `profiles` table instead.
+ * Account states:
+ *   disabled                              -> 403 (account disabled)
+ *   staff role + pending_verification     -> 403 (pending activation)
+ *   resident + pending_verification       -> served as 'resident-limited'
  *
- * A request without a valid token is rejected with 401 before reaching any
- * controller — so the API cannot be called anonymously, regardless of what the
- * frontend does.
- *
- * When Supabase is NOT configured and the server is in a non-production
- * environment, a signed development token (see `utils/devSession.js`) is
- * accepted instead so the workflow can run fully local. In production, or as
- * soon as Supabase credentials exist, only real Supabase tokens pass.
+ * When Supabase is NOT configured the API reports 503 — accounts are managed
+ * exclusively through Supabase Auth; there is no local/mock sign-in path.
  */
 const extractToken = (req) => {
   const header = req.headers.authorization || '';
@@ -37,51 +36,74 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   if (!token) throw ApiError.unauthorized('Missing Bearer access token');
 
   if (!env.isSupabaseConfigured) {
-    if (!env.isDevAuthEnabled) {
-      throw new ApiError(503, 'Authentication is unavailable: Supabase is not configured on the server.');
-    }
-    const payload = verifyDevToken(token);
-    if (!payload?.sub || !payload?.role) {
-      throw ApiError.unauthorized('Invalid or expired session');
-    }
-    req.user = {
-      id: payload.sub,
-      email: payload.email || '',
-      name: payload.name || '',
-      role: payload.role,
-      // Barangay assignment travels inside the signed session — it can never
-      // be supplied by the caller (see config/scope.js).
-      barangay: payload.barangay || null,
-      accessToken: token,
-      authMode: 'dev',
-    };
-    return next();
+    throw ApiError(503, 'Authentication is unavailable: Supabase is not configured on the server.');
   }
 
   const supabase = getServiceClient();
-  const { data, error } = await supabase.auth.getUser(token);
+
+  // One retry on transient transport failures ("fetch failed" from a dropped
+  // keep-alive connection) so a network blip never masquerades as an invalid
+  // session; auth-level errors are returned as-is on the first attempt.
+  const getUserWithRetry = async (accessToken) => {
+    let lastResult;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      lastResult = await supabase.auth.getUser(accessToken);
+      const transportFailure =
+        lastResult.error && /fetch failed|networkerror/i.test(String(lastResult.error.message || ''));
+      if (!transportFailure || attempt === 1) return lastResult;
+    }
+    return lastResult;
+  };
+
+  const { data, error } = await getUserWithRetry(token);
 
   if (error || !data?.user) {
     throw ApiError.unauthorized('Invalid or expired session');
   }
 
   const { user } = data;
-  const role = user.app_metadata?.role || user.user_metadata?.role || null;
-  // Barangay assignment for barangay-scoped roles (e.g. Health Supervisor).
-  // Lives in the account metadata — never chosen by the caller.
-  const barangay =
-    user.app_metadata?.barangay || user.user_metadata?.barangay || null;
 
+  // Resolve the application profile. loadActiveProfile throws the 403s for
+  // disabled / pending-activation accounts described above.
+  const { profile, unavailable, error: profileError } = await loadActiveProfile(user.id);
+
+  // A broken/absent profile LAYER is a service problem, not a missing account.
+  // Reporting it as "no profile" would tell a correctly provisioned user to
+  // contact an administrator about a row that already exists.
+  if (profileError) {
+    throw ApiError(503, 'Profile lookup failed. Please try again.');
+  }
+  if (unavailable) {
+    throw ApiError(
+      503,
+      'The account profile service is temporarily unavailable. Please try again shortly.',
+    );
+  }
+
+  if (!profile) {
+    // Genuinely no row for this auth user: the account exists in Auth but was
+    // never provisioned.
+    throw ApiError.forbidden('Your account has no profile. Contact your administrator.');
+  }
+
+  const sessionUser = profileToSessionUser(profile);
   req.user = {
     id: user.id,
-    email: user.email,
-    role,
-    barangay,
+    email: sessionUser.email,
+    name: sessionUser.name,
+    role: sessionUser.role,
+    status: sessionUser.status,
+    municipalityId: sessionUser.municipalityId,
+    municipality: sessionUser.municipality,
+    barangayId: sessionUser.barangayId,
+    // Barangay NAME — barangayScope middleware and the service-layer filters
+    // compare against barangay names.
+    barangay: sessionUser.barangay,
+    facilityId: sessionUser.facilityId,
     accessToken: token,
     authMode: 'supabase',
   };
-
-  next();
+  return next();
 });
 
 export default authenticate;

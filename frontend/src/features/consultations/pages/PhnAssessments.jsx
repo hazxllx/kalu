@@ -10,7 +10,7 @@ import {
   completePatientCheckup,
   setCheckupOutcome,
   workflowHelpers,
-} from "@/services/mock/mockWorkflowStore";
+} from "@/services/local/workflowStore";
 import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
 import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
@@ -263,7 +263,7 @@ export default function PhnCheckups() {
                         </div>
                         <div>
                           <p className="text-sm font-medium text-brand-ink">{p.patient}</p>
-                          <p className="text-xs text-brand-gray">{p.age} yrs · {p.sex}</p>
+                          <p className="text-xs text-brand-gray">{p.age} yrs Â· {p.sex}</p>
                         </div>
                       </div>
                     </td>

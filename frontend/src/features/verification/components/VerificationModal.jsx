@@ -56,9 +56,9 @@ export default function VerificationModal({ open, onClose, data = {} }) {
                 {/* Info grid */}
                 <div className="grid grid-cols-2 gap-3 mb-6">
                   {[
-                    { label: "Reference Number", value: data.reference || "KSG-2026-00428" },
-                    { label: "Assigned Barangay", value: data.barangay || "San Isidro" },
-                    { label: "Submission Date", value: data.submitted || "July 5, 2026" },
+                    { label: "Reference Number", value: data.reference || "—" },
+                    { label: "Assigned Barangay", value: data.barangay || "—" },
+                    { label: "Submission Date", value: data.submitted || "—" },
                     { label: "Estimated Review", value: data.estimated || "2-3 business days" },
                   ].map((item) => (
                     <div key={item.label} className="bg-brand-bg rounded-btn p-3">

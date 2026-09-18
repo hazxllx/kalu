@@ -7,8 +7,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { useResidents } from "@/services/mock/residentStore";
-import { useConsultations, consultationStore } from "@/services/mock/consultationStore";
+import { useResidents } from "@/services/local/residentStore";
+import { useConsultations, consultationStore } from "@/services/local/consultationStore";
 
 const inputCls = (error) =>
   `w-full bg-white border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue ${

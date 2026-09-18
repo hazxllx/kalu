@@ -17,7 +17,7 @@ import {
  * assigned barangay (e.g. "San Isidro") and the RHU. The selection is shared
  * by every PHN page (dashboard, check-ups, referrals, follow-ups, health
  * services, records, reports, notifications) so the data shown stays
- * consistent, and it is remembered per demo account in localStorage.
+ * consistent, and it is remembered per account in localStorage.
  *
  * Defaults to the assigned barangay (San Isidro for the barangay PHN) while an
  * RHU-only PHN only ever gets the "RHU" coverage. The value is one of the
@@ -48,9 +48,9 @@ export const PhnCoverageProvider = ({ children }) => {
     coverage: readStoredCoverage(user),
   }));
 
-  // Reset the coverage whenever the signed-in account changes (login, logout,
-  // or switching demo accounts) so one account's selection never leaks into
-  // another account's session.
+  // Reset the coverage whenever the signed-in account changes (login or
+  // logout) so one account's selection never leaks into another account's
+  // session.
   if (state.email !== email) {
     setState({ email, coverage: readStoredCoverage(user) });
   }

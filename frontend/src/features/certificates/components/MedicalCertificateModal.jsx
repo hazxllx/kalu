@@ -3,7 +3,7 @@ import { Card } from "@/components/common/Card";
 import {
   medicalCertificateStore,
   CERT_PURPOSES,
-} from "@/services/mock/medicalCertificateStore";
+} from "@/services/local/medicalCertificateStore";
 import MedicalCertificateDocument from "./MedicalCertificateDocument";
 import { useCertificatePrint } from "./useCertificatePrint.jsx";
 import { useAuth } from "@/context/AuthContext";
@@ -66,13 +66,13 @@ export default function MedicalCertificateModal({
 }) {
 const { user } = useAuth();
 /**
- * Authorized signatory — the logged-in demo account's name (from the active
+ * Authorized signatory — the signed-in account's name (from the active
  * session), falling back to the caller-provided user and finally to the
  * certificate's designated medical officer. Never a placeholder label.
  */
 const signatoryName =
   String(user?.name || currentUser || certificate?.medicalOfficer || "").trim() ||
-  "Demo Account Name Not Available";
+  "Signatory name not set";
 const [form, setForm] = useState(() => ({
   purpose: certificate?.purpose || CERT_PURPOSES[0],
   findings: certificate?.findings || "",

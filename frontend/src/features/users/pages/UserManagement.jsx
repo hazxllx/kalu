@@ -9,8 +9,8 @@ import {
   ASSIGNABLE_ROLES,
   BARANGAY_SCOPED_ROLES,
   validateAssignment,
-} from "@/services/mock/adminUserStore";
-import { useAuditEvents } from "@/services/mock/auditStore";
+} from "@/services/local/adminUserStore";
+import { useAuditEvents } from "@/services/local/auditStore";
 import { BARANGAYS } from "@/lib/barangays";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -121,7 +121,7 @@ function UserFormModal({ initial, onClose, onSave }) {
               </Field>
             </div>
             <Field label="Email" required error={errors.email}>
-              <input type="email" value={form.email} onChange={(e) => set("email")(e.target.value)} placeholder="name@kalusagap.test" className={inputCls(errors.email)} />
+                    <input type="email" value={form.email} onChange={(e) => set("email")(e.target.value)} placeholder="name@pili.gov.ph" className={inputCls(errors.email)} />
             </Field>
             <Field label="Contact Number" required error={errors.contact}>
               <input type="text" value={form.contact} onChange={(e) => set("contact")(e.target.value)} placeholder="e.g. 0917 123 4567" className={inputCls(errors.contact)} />

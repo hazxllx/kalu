@@ -6,7 +6,7 @@ import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationModal from "@/features/verification/components/VerificationModal";
-import { residentDashboard, residentTimeline } from "@/services/mock/mockData";
+import { residentDashboard, residentTimeline } from "@/services/local/dashboardData";
 import { useAuth } from "@/context/AuthContext";
 
 const timelineColor = {
@@ -18,12 +18,13 @@ export default function ResidentDashboard() {
   const { user } = useAuth();
   const [verifyModal, setVerifyModal] = useState(false);
   const verified = true;
-  const displayName = user?.name || "Maria Santos";
+  const displayName = user?.name || "Resident";
   const first = displayName.split(" ")[0];
+  const followUp = residentDashboard.followUp;
   const cards = [
-    { icon: CalendarClock, tone: "bg-brand-accent/10 text-brand-accent", label: "Upcoming Follow-up", main: residentDashboard.followUp.date, sub: `${residentDashboard.followUp.time} · ${residentDashboard.followUp.place}` },
-    { icon: ShieldCheck, tone: "bg-brand-green/10 text-brand-green", label: "Health Risk Level", main: residentDashboard.risk, sub: "Stable — keep it up!" },
-    { icon: Stethoscope, tone: "bg-brand-yellow/15 text-[#B07E00]", label: "Last Check-up", main: residentDashboard.lastCheck, sub: "General Consultation" },
+    { icon: CalendarClock, tone: "bg-brand-accent/10 text-brand-accent", label: "Upcoming Follow-up", main: followUp.date || "—", sub: [followUp.time, followUp.place].filter(Boolean).join(" · ") || "—" },
+    { icon: ShieldCheck, tone: "bg-brand-green/10 text-brand-green", label: "Health Risk Level", main: residentDashboard.risk || "—", sub: "—" },
+    { icon: Stethoscope, tone: "bg-brand-yellow/15 text-[#B07E00]", label: "Last Check-up", main: residentDashboard.lastCheck || "—", sub: "—" },
   ];
 
   return (
@@ -118,6 +119,9 @@ export default function ResidentDashboard() {
           </div>
           <div className="relative pl-4 sm:pl-6">
             <div className="absolute left-[5px] sm:left-[7px] top-1 bottom-1 w-px bg-brand-border" />
+            {residentTimeline.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No timeline entries yet.</p>
+            )}
             {residentTimeline.map((t, i) => (
               <motion.div key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.08 }} className="relative pb-5 sm:pb-7 last:pb-0">
                 <span className={`absolute -left-4 sm:-left-6 top-1 w-3 sm:w-3.5 h-3 sm:h-3.5 rounded-full ring-4 ring-white ${timelineColor[t.color]}`} />

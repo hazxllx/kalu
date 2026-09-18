@@ -8,7 +8,7 @@ import { useTheme } from "@/context/ThemeContext";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, FileText,
-  Calendar, Monitor, Smartphone, LogOut, Sun, Moon, MonitorCog, Palette,
+  Calendar, Monitor, LogOut, Sun, Moon, MonitorCog, Palette,
 } from "lucide-react";
 
 function checkPasswordStrength(pw) {
@@ -38,7 +38,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
   const isVerifiedResident = roleKey === "resident";
 
   const displayName = user?.name || role.name;
-  const displayEmail = user?.email || `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`;
+  const displayEmail = user?.email || "—";
 
   // Settings is an account page — the working scope is not shown as a picker.
   // Only the barangay-assigned Health Supervisor (and BHW accounts that carry
@@ -52,7 +52,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
     { label: "Full Name", value: displayName },
     { label: "Role", value: role.label },
     { label: "Email", value: displayEmail },
-    { label: "Contact Number", value: "0917 123 4567" },
+    { label: "Contact Number", value: user?.contact || "—" },
     ...(showAssignedBarangay ? [{ label: "Assigned Barangay", value: assignedBarangay }] : []),
     { label: "Municipality", value: "Pili, Camarines Sur" },
   ];
@@ -235,8 +235,8 @@ export default function SettingsPage({ roleKey = "resident" }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
               { label: "Registered Email", value: displayEmail, icon: Mail },
-              { label: "Registration Date", value: "January 15, 2026", icon: Calendar },
-              { label: "Reference Number", value: "KSG-2026-00012", icon: FileText },
+              { label: "Registration Date", value: "—", icon: Calendar },
+              { label: "Reference Number", value: "—", icon: FileText },
               { label: "Verification Status", value: isResident ? (isVerifiedResident ? "Verified" : "Pending Verification") : "N/A", icon: ShieldCheck, badge: isResident },
             ].map((f) => (
               <div key={f.label} className="bg-brand-bg rounded-btn p-4">
@@ -258,38 +258,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
             <Monitor className="w-4 h-4 text-brand-blue" strokeWidth={1.8} /> Login Sessions
           </h3>
           <div className="space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-blue/30 bg-brand-blue/5 rounded-btn px-4 py-3.5 gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-brand-blue/15 flex items-center justify-center shrink-0">
-                  <Monitor className="w-5 h-5 text-brand-blue" strokeWidth={1.8} />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-brand-ink">Windows PC — Chrome</p>
-                  <p className="text-xs text-brand-gray">Chrome on Windows 11 — Last login: July 6, 2026, 8:32 AM</p>
-                </div>
-              </div>
-              <span className="text-xs font-medium text-brand-blue bg-brand-blue/10 px-2.5 py-1 rounded-full shrink-0">Current</span>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3.5 gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-brand-bg flex items-center justify-center shrink-0">
-                  <Smartphone className="w-5 h-5 text-brand-gray" strokeWidth={1.8} />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-brand-ink">iPhone 14 — Safari</p>
-                  <p className="text-xs text-brand-gray">Safari on iOS 17 — Last login: July 4, 2026, 6:15 PM</p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setProfileSaved(true);
-                  setTimeout(() => setProfileSaved(false), 2500);
-                }}
-                className="text-xs font-medium text-brand-danger hover:underline shrink-0"
-              >
-                Logout
-              </button>
-            </div>
+            <p className="text-sm text-brand-gray">No active sessions to display.</p>
           </div>
           <button
             onClick={() => {

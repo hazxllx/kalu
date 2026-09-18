@@ -27,6 +27,7 @@ const emptyData = () => ({
   visits: [],
   referrals: [],
   verifications: [],
+  residentVerificationLogs: [],
 });
 
 class FileStore {
@@ -49,6 +50,7 @@ class FileStore {
     if (!this.data) this.data = emptyData();
     // Older store files predate the verifications collection.
     if (!Array.isArray(this.data.verifications)) this.data.verifications = [];
+    if (!Array.isArray(this.data.residentVerificationLogs)) this.data.residentVerificationLogs = [];
   }
 
   /**
@@ -100,6 +102,11 @@ class FileStore {
   get verifications() {
     this.ensureLoaded();
     return this.data.verifications;
+  }
+
+  get residentVerificationLogs() {
+    this.ensureLoaded();
+    return this.data.residentVerificationLogs;
   }
 }
 

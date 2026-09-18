@@ -5,15 +5,16 @@ export const LOGO_URL = new URL("../assets/images/logo.png", import.meta.url).hr
  * Keys match the canonical role ids in `@/lib/roles` and the `/app/<key>` route
  * segments so `DashboardLayout` can derive links from the active roleKey.
  *
- * `name` values are placeholder display names for the mock/dev UI only.
+ * `name` is a role-neutral fallback label, used only when the signed-in account
+ * does not provide its own name. It is never a placeholder person.
  */
 export const ROLES = {
-  "resident-limited": { key: "resident-limited", label: "Resident (Pending)", name: "Juan Dela Cruz", basePath: "/app/resident-limited" },
-  resident: { key: "resident", label: "Resident (Verified)", name: "Maria Santos", basePath: "/app/resident" },
-  bhw: { key: "bhw", label: "Barangay Health Worker", name: "Maria Cruz", basePath: "/app/bhw" },
-  health_supervisor: { key: "health_supervisor", label: "Barangay Health Supervisor", name: "Maria Dela Cruz", basePath: "/app/health_supervisor" },
-  phn: { key: "phn", label: "Public Health Nurse", name: "Ana Villanueva", basePath: "/app/phn" },
-  rhu_personnel: { key: "rhu_personnel", label: "RHU Personnel", name: "Antonio Reyes", basePath: "/app/rhu_personnel" },
-  mho: { key: "mho", label: "Municipal Health Officer", name: "Dr. Maria L. Santos", basePath: "/app/mho" },
-  admin: { key: "admin", label: "System Administrator", name: "Jose Ramirez", basePath: "/app/admin" },
+  "resident-limited": { key: "resident-limited", label: "Resident (Pending)", name: "Resident (Pending)", basePath: "/app/resident-limited" },
+  resident: { key: "resident", label: "Resident (Verified)", name: "Resident (Verified)", basePath: "/app/resident" },
+  bhw: { key: "bhw", label: "Barangay Health Worker", name: "Barangay Health Worker", basePath: "/app/bhw" },
+  health_supervisor: { key: "health_supervisor", label: "Barangay Health Supervisor", name: "Health Supervisor", basePath: "/app/health_supervisor" },
+  phn: { key: "phn", label: "Public Health Nurse", name: "Public Health Nurse", basePath: "/app/phn" },
+  rhu_personnel: { key: "rhu_personnel", label: "RHU Personnel", name: "RHU Personnel", basePath: "/app/rhu_personnel" },
+  mho: { key: "mho", label: "Municipal Health Officer", name: "Municipal Health Officer", basePath: "/app/mho" },
+  admin: { key: "admin", label: "System Administrator", name: "System Administrator", basePath: "/app/admin" },
 };

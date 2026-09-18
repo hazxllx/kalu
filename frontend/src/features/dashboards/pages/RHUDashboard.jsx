@@ -5,16 +5,10 @@ import { Card } from "@/components/common/Card";
 import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { barangayOverview, monthlyConsultations } from "@/services/mock/mockData";
-import { FileText, Calendar, Heart, BarChart3, ArrowRight, Eye, Activity, HeartPulse } from "lucide-react";
+import { barangayOverview, monthlyConsultations } from "@/services/local/dashboardData";
+import { FileText, Calendar, BarChart3, Eye, Activity, HeartPulse } from "lucide-react";
 
-const RECENT_REFERRALS = [
-  { id: 1, resident: "Ana Villanueva", barangay: "San Isidro", date: "July 10, 2026", status: "Pending" },
-  { id: 2, resident: "Maria Santos", barangay: "San Isidro", date: "July 8, 2026", status: "Accepted" },
-  { id: 3, resident: "Grace Aquino", barangay: "San Antonio", date: "July 5, 2026", status: "Completed" },
-  { id: 4, resident: "Carmen Reyes", barangay: "San Isidro", date: "July 3, 2026", status: "Referred to Another Facility" },
-  { id: 5, resident: "Lourdes Mendoza", barangay: "San Antonio", date: "July 1, 2026", status: "Pending" },
-];
+const RECENT_REFERRALS = [];
 
 const QUICK_ACTIONS = [
   { icon: Activity, label: "Triage", description: "Send a patient to the PHN for check-up", path: "/app/rhu_personnel/triage" },
@@ -23,32 +17,17 @@ const QUICK_ACTIONS = [
   { icon: Calendar, label: "Notifications", description: "Check your notifications", path: "/app/rhu_personnel/notifications" },
 ];
 
-const BARANGAY_HEALTH_SUMMARY = [
-  { barangay: "San Isidro", residents: "2,140", highRisk: "34", vaccination: "91%" },
-  { barangay: "San Antonio", residents: "1,865", highRisk: "19", vaccination: "88%" },
-  { barangay: "Old San Roque", residents: "1,542", highRisk: "28", vaccination: "92%" },
-];
+const BARANGAY_HEALTH_SUMMARY = [];
 
-const HEALTH_PROGRAMS = [
-  { name: "Immunization", progress: 89 },
-  { name: "Maternal Care", progress: 82 },
-  { name: "Child Health", progress: 76 },
-  { name: "Nutrition Program", progress: 74 },
-  { name: "Senior Citizen Care", progress: 68 },
-];
+const HEALTH_PROGRAMS = [];
 
-const REPORTS_SUMMARY = [
-  { icon: FileText, title: "Consultation Reports", total: 312 },
-  { icon: ArrowRight, title: "Referral Reports", total: 48 },
-  { icon: Calendar, title: "Follow-up Reports", total: 86 },
-  { icon: Heart, title: "Health Program Reports", total: 24 },
-];
+const REPORTS_SUMMARY = [];
 
 const stats = [
-  { icon: "Map", label: "Barangays", value: "3", tone: "accent" },
-  { icon: "Users", label: "Total Residents", value: "1,248", tone: "blue" },
-  { icon: "AlertTriangle", label: "High Risk Cases", value: "215", tone: "danger" },
-  { icon: "Syringe", label: "Vaccination Coverage", value: "89%", tone: "green" },
+  { icon: "Map", label: "Barangays", value: "—", tone: "accent" },
+  { icon: "Users", label: "Total Residents", value: "—", tone: "blue" },
+  { icon: "AlertTriangle", label: "High Risk Cases", value: "—", tone: "danger" },
+  { icon: "Syringe", label: "Vaccination Coverage", value: "—", tone: "green" },
 ];
 
 export default function RHUDashboard() {
@@ -70,7 +49,7 @@ export default function RHUDashboard() {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         <Card className="p-4 sm:p-6 lg:col-span-2">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Disease Trend — Monthly Consultations</h3>
+          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Disease Trend â€” Monthly Consultations</h3>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={monthlyConsultations}>
               <CartesianGrid vertical={false} stroke="#E5EAF1" />
@@ -84,11 +63,14 @@ export default function RHUDashboard() {
         <Card className="p-4 sm:p-6 h-fit">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Recent Referrals</h3>
           <div className="space-y-3">
+            {RECENT_REFERRALS.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No referrals available yet.</p>
+            )}
             {RECENT_REFERRALS.slice(0, 5).map((r) => (
               <div key={r.id} className="flex items-center justify-between py-2 border-b border-brand-border last:border-0">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-brand-ink truncate">{r.resident}</p>
-                  <p className="text-xs text-brand-gray">{r.barangay} • {r.date}</p>
+                  <p className="text-xs text-brand-gray">{r.barangay} â€¢ {r.date}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusBadge value={r.status} />
@@ -140,6 +122,11 @@ export default function RHUDashboard() {
                 </tr>
               </thead>
               <tbody>
+                {BARANGAY_HEALTH_SUMMARY.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-3 py-8 text-center text-sm text-brand-gray">No data available yet.</td>
+                  </tr>
+                )}
                 {BARANGAY_HEALTH_SUMMARY.map((b) => (
                   <tr key={b.barangay} className="border-b border-brand-border hover:bg-brand-bg/50">
                     <td className="px-3 py-2 text-sm text-brand-ink">{b.barangay}</td>
@@ -156,6 +143,9 @@ export default function RHUDashboard() {
         <Card className="p-4 sm:p-6">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Health Program Progress</h3>
           <div className="space-y-4">
+            {HEALTH_PROGRAMS.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No data available yet.</p>
+            )}
             {HEALTH_PROGRAMS.map((program) => (
               <div key={program.name}>
                 <div className="flex justify-between text-sm mb-1.5">
@@ -175,6 +165,9 @@ export default function RHUDashboard() {
       <div className="mt-6">
         <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Reports Summary</h3>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {REPORTS_SUMMARY.length === 0 && (
+            <p className="text-sm text-brand-gray py-6 text-center sm:col-span-2 lg:col-span-4">No reports available yet.</p>
+          )}
           {REPORTS_SUMMARY.map((report) => (
             <Card key={report.title} className="p-4">
               <div className="flex items-center gap-3 mb-3">

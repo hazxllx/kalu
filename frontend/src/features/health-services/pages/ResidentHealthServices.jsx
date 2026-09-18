@@ -1,7 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
-import StatusBadge from "@/components/common/StatusBadge";
 import { Stethoscope, Syringe, Shield } from "lucide-react";
 
 const RESIDENT_SERVICES = [
@@ -10,7 +9,6 @@ const RESIDENT_SERVICES = [
     date: "Monday – Friday",
     time: "8:00 AM – 12:00 PM",
     description: "General consultation and assessment.",
-    status: "Available",
     icon: Stethoscope,
     iconBg: "bg-brand-green/10",
     iconColor: "text-brand-green",
@@ -20,7 +18,6 @@ const RESIDENT_SERVICES = [
     date: "Tuesday & Thursday",
     time: "1:00 PM – 3:00 PM",
     description: "Routine vaccination services.",
-    status: "Weekly",
     icon: Syringe,
     iconBg: "bg-brand-blue/10",
     iconColor: "text-brand-blue",
@@ -30,7 +27,6 @@ const RESIDENT_SERVICES = [
     date: "Last Thursday",
     time: "8:00 AM – 12:00 PM",
     description: "Women's preventive screening services.",
-    status: "Monthly",
     icon: Shield,
     iconBg: "bg-brand-yellow/15",
     iconColor: "text-[#B07E00]",
@@ -52,7 +48,6 @@ export default function HealthServices() {
                 </div>
                 <h3 className="font-semibold text-brand-ink text-sm sm:text-base leading-tight">{s.name}</h3>
               </div>
-              <StatusBadge value={s.status} />
             </div>
             <div className="space-y-1.5 text-sm text-brand-gray flex-1">
               <p className="text-brand-ink font-medium">{s.date}</p>

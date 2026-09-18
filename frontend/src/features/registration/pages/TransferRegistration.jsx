@@ -39,35 +39,19 @@ export default function TransferRegistration() {
     setProcessing(true);
     setError("");
 
-    // Simulate OCR/document processing
-    // In production, this would call a backend service to process the document
-    setTimeout(() => {
-      // Mock extracted data from document
-      const mockExtractedData = {
-        firstName: "Juan",
-        middleName: "Reyes",
-        lastName: "Dela Cruz",
-        suffix: "",
-        dob: "1990-05-15",
-        sex: "Male",
-        civilStatus: "Married",
-        mobile: "09123456789",
-        province: "Camarines Sur",
-        municipality: "Pili",
-        barangay: "San Isidro",
-        sitio: "Purok 5",
-        street: "Mabini St.",
-        houseNo: "123",
-        landmark: "Near San Isidro Chapel",
-        occupation: "Farmer",
-        previousHealthRecord: file.name,
-      };
-
-      // Store the data and navigate to the wizard
-      sessionStorage.setItem("transferData", JSON.stringify(mockExtractedData));
-      setProcessing(false);
-      navigate("/register/new/step-1");
-    }, 2000);
+    // Carry only the uploaded document reference into the wizard. Nothing is
+    // extracted or invented here: the applicant confirms and types their own
+    // personal information in the next step.
+    try {
+      sessionStorage.setItem(
+        "transferData",
+        JSON.stringify({ previousHealthRecord: file.name }),
+      );
+    } catch {
+      /* storage may be unavailable; the wizard simply starts blank */
+    }
+    setProcessing(false);
+    navigate("/register/new/step-1");
   };
 
   return (
@@ -84,7 +68,7 @@ export default function TransferRegistration() {
           >
             <PageHeading
               title="Transfer from Another Barangay"
-              subtitle="Upload your health record from your previous barangay. We will extract your personal information automatically."
+              subtitle="Upload your health record from your previous barangay. You will confirm your personal information in the next step."
             />
 
             {error && (

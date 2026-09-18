@@ -2,8 +2,8 @@ import React, { useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import ReviewModal, { ModalSection, ModalRow } from "@/features/users/components/ReviewModal";
-import { useSupervisorVerifications, supervisorVerificationStore, SUPERVISOR_STATUSES } from "@/services/mock/supervisorVerificationStore";
-import { useAuditEvents, auditStore } from "@/services/mock/auditStore";
+import { useSupervisorVerifications, supervisorVerificationStore, SUPERVISOR_STATUSES } from "@/services/local/supervisorVerificationStore";
+import { useAuditEvents, auditStore } from "@/services/local/auditStore";
 import { useAuth } from "@/context/AuthContext";
 import { Search, ShieldCheck, CheckCircle2, Ban, ChevronRight, FileQuestion, Stethoscope } from "lucide-react";
 

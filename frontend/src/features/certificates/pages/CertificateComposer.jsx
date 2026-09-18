@@ -4,11 +4,11 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
 import { ROLES } from "@/lib/brand";
-import { useResidents } from "@/services/mock/residentStore";
+import { useResidents } from "@/services/local/residentStore";
 import {
   medicalCertificateStore,
   CERT_PURPOSES,
-} from "@/services/mock/medicalCertificateStore";
+} from "@/services/local/medicalCertificateStore";
 import MedicalCertificateDocument from "../components/MedicalCertificateDocument";
 import { useCertificatePrint } from "../components/useCertificatePrint.jsx";
 import {

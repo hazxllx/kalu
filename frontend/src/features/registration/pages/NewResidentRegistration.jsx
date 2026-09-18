@@ -18,8 +18,22 @@ import {
   btnPrimary,
   btnGhost,
 } from "@/features/registration/components/RegistrationDesign";
-import FaceVerification from "@/features/registration/components/FaceVerification";
+import DatePicker from "@/components/common/DatePicker";
+import { supabase } from "@/lib/supabase";
+import { registrationApi } from "@/services/api";
+import { api } from "@/services/api/apiClient";
 import UploadComponent from "@/features/registration/components/UploadComponent";
+import {
+  CIVIL_STATUSES,
+  NAME_SUFFIXES,
+  SEX_OPTIONS,
+  dateOfBirth,
+  email as validateEmail,
+  enumValue,
+  phone as validatePhone,
+  required,
+  validateFields,
+} from "@/utils/validation";
 
 const BARANGAYS = ["San Isidro", "San Antonio", "Old San Roque"];
 
@@ -45,7 +59,7 @@ function checkStrength(pw) {
 const STEPS_META = [
   { num: 1, title: "Personal Information", subtitle: "Tell us about yourself." },
   { num: 2, title: "Account & Contact", subtitle: "Set up your login and contact details." },
-  { num: 3, title: "Identity Verification", subtitle: "Capture or upload a photo for identity verification." },
+  { num: 3, title: "Identity / Proof of Residency", subtitle: "Upload a document for Health Supervisor review." },
   { num: 4, title: "Review Your Information", subtitle: "Please verify all details before submitting." },
 ];
 
@@ -103,8 +117,8 @@ export default function NewResidentRegistration() {
     confirmPassword: "",
     agree: false,
     agreePrivacy: false,
-    facePhoto: null,
-    idPhoto: null,
+    agreeReview: false,
+    document: null,
   });
 
   const set = (key) => (e) => {
@@ -117,27 +131,31 @@ export default function NewResidentRegistration() {
   const filteredBarangays = BARANGAYS.filter((b) => b.toLowerCase().includes(barangayQuery.toLowerCase()));
 
   const validateStep = (s) => {
-    const errs = {};
+    let errs = {};
     if (s === 1) {
-      if (!form.firstName) errs.firstName = "First name is required";
-      if (!form.lastName) errs.lastName = "Last name is required";
-      if (!form.dob) errs.dob = "Date of birth is required";
-      if (!form.sex) errs.sex = "Sex is required";
-      if (!form.civilStatus) errs.civilStatus = "Civil status is required";
+      errs = validateFields(form, {
+        firstName: (v) => required(v, "First name"),
+        lastName: (v) => required(v, "Last name"),
+        suffix: (v) => (v ? enumValue(v, NAME_SUFFIXES, { label: "suffix" }) : ""),
+        dob: (v) => dateOfBirth(v, { label: "Date of birth" }),
+        sex: (v) => enumValue(v, SEX_OPTIONS, { label: "sex" }),
+        civilStatus: (v) => enumValue(v, CIVIL_STATUSES, { label: "civil status" }),
+      });
     }
     if (s === 2) {
-      if (!form.email) errs.email = "Email is required";
-      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = "Enter a valid email address";
-      if (!form.password) errs.password = "Password is required";
+      errs = validateFields(form, {
+        email: (v) => validateEmail(v, { label: "Email address" }),
+        password: (v) => required(v, "Password"),
+        mobile: (v) => validatePhone(v, { label: "Mobile number" }),
+        barangay: (v) => required(v, "Barangay"),
+        sitio: (v) => required(v, "Sitio / Purok"),
+      });
       if (form.password !== form.confirmPassword) errs.confirmPassword = "Passwords do not match";
-      if (!form.mobile) errs.mobile = "Mobile number is required";
-      if (!form.barangay) errs.barangay = "Barangay is required";
-      if (!form.sitio) errs.sitio = "Sitio / Purok is required";
       if (!form.agree || !form.agreePrivacy) errs.agree = "You must accept Terms and Privacy Policy";
     }
     if (s === 3) {
-      if (!form.facePhoto) errs.facePhoto = "Please capture or upload a photo for verification";
-      if (!form.idPhoto) errs.idPhoto = "Please upload a government ID for verification";
+      if (!form.agreeReview) errs.agreeReview = "Please confirm your information for review to continue";
+      if (!form.document) errs.document = "Please upload a proof of residency or government ID before submitting.";
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -147,9 +165,114 @@ export default function NewResidentRegistration() {
   const back = () => setStep((p) => Math.max(p - 1, 1));
   const goTo = (s) => setStep(s);
 
-  const submit = () => {
+  const submit = async () => {
+    if (submitting) return; // guard against duplicate submissions
     setSubmitting(true);
-    setTimeout(() => navigate("/registration-success"), 1800);
+    setErrors({});
+
+    try {
+      const isSupabase = !!supabase;
+      if (!isSupabase) {
+        throw new Error('Authentication is not configured. Please try again later or contact the RHU.');
+      }
+
+      const address = [
+        form.houseNo.trim(),
+        form.street.trim(),
+        form.sitio.trim(),
+        `Barangay ${form.barangay}`,
+        form.municipality,
+        form.province,
+      ].filter(Boolean).join(', ');
+
+      const payload = {
+        resident: {
+          firstName: form.firstName.trim(),
+          middleName: form.middleName.trim(),
+          lastName: form.lastName.trim(),
+          suffix: form.suffix.trim(),
+          birthDate: form.dob || '',
+          sex: form.sex,
+          civilStatus: form.civilStatus,
+          currentAddress: address,
+          permanentAddress: address,
+          cellphoneNo: form.mobile.trim(),
+          barangay: form.barangay,
+        },
+      };
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: form.email.trim(),
+        password: form.password,
+        options: {
+          data: {
+            full_name: `${form.firstName} ${form.lastName}`.trim(),
+            name: `${form.firstName} ${form.lastName}`.trim(),
+          },
+        },
+      });
+      if (signUpError) throw signUpError;
+
+      // When email confirmation is enabled, signUp returns no session and the
+      // resident record cannot be created yet. Try one direct sign-in; if that
+      // also fails, keep the payload so the identity-verification page can
+      // finish creating the resident record after the resident signs in.
+      let session = signUpData?.session || null;
+      if (!session) {
+        const { data: signInData } = await supabase.auth.signInWithPassword({
+          email: form.email.trim(),
+          password: form.password,
+        });
+        session = signInData?.session || null;
+      }
+
+      if (!session) {
+        sessionStorage.setItem('pendingResidentRegistration', JSON.stringify(payload));
+        sessionStorage.setItem('registrationNeedsConfirmation', '1');
+        navigate('/registration-success');
+        return;
+      }
+
+      const resident = await registrationApi.registerResident(payload);
+      if (!resident?.id) {
+        throw new Error('Registration failed. Please try again.');
+      }
+
+      if (form.document) {
+        const documentFormData = new FormData();
+        documentFormData.append('file', form.document);
+        documentFormData.append('documentType', 'proof_of_residency');
+        documentFormData.append('residentId', resident.id);
+
+        const documentPayload = {
+          residentId: resident.id,
+          file: form.document,
+          documentType: 'proof_of_residency',
+        };
+
+        const documentResponse = await api.post('/resident-documents/upload', documentPayload);
+        if (!documentResponse?.document) {
+          throw new Error('Document upload failed. Please try again.');
+        }
+      }
+
+      sessionStorage.removeItem('pendingResidentRegistration');
+      sessionStorage.removeItem('registrationNeedsConfirmation');
+
+      // Persist the new resident id/ref so the success screen can show it.
+      sessionStorage.setItem('registrationSuccess', JSON.stringify({
+        residentId: resident?.id || '',
+        healthRecordNo: resident?.healthRecordNo || '',
+        barangay: resident?.barangay || form.barangay,
+        name: `${form.firstName} ${form.lastName}`.trim(),
+      }));
+
+      navigate('/registration-success');
+    } catch (err) {
+      const message = err?.message || 'Registration failed. Please try again.';
+      setErrors((prev) => ({ ...prev, submit: message }));
+      setSubmitting(false);
+    }
   };
 
   const meta = STEPS_META[step - 1];
@@ -196,15 +319,25 @@ export default function NewResidentRegistration() {
                 <Field label="Last Name" required error={errors.lastName}>
                   <input type="text" placeholder="Dela Cruz" value={form.lastName} onChange={set("lastName")} className={inputCls(errors.lastName)} />
                 </Field>
-                <Field label="Suffix" optional>
-                  <input type="text" placeholder="Jr." value={form.suffix} onChange={set("suffix")} className={inputCls()} />
+                <Field label="Suffix" optional error={errors.suffix}>
+                  <select
+                    value={form.suffix}
+                    onChange={set("suffix")}
+                    className={`${inputCls(errors.suffix)} cursor-pointer`}
+                  >
+                    <option value="">None</option>
+                    {NAME_SUFFIXES.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
                 </Field>
                 <Field label="Birth Date" required error={errors.dob}>
-                  <input
-                    type="date"
+                  <DatePicker
                     value={form.dob}
-                    onChange={(e) => { setForm({ ...form, dob: e.target.value }); if (errors.dob) setErrors({ ...errors, dob: "" }); }}
-                    className={inputCls(errors.dob)}
+                    max={new Date().toISOString().slice(0, 10)}
+                    error={Boolean(errors.dob)}
+                    placeholder="Select birth date..."
+                    onChange={(v) => { setForm({ ...form, dob: v }); if (errors.dob) setErrors({ ...errors, dob: "" }); }}
                   />
                 </Field>
                 <Field label="Age" hint="Calculated automatically from the date of birth.">
@@ -418,35 +551,42 @@ export default function NewResidentRegistration() {
               </div>
             )}
 
-            {/* STEP 3: Identity Verification */}
+            {/* STEP 3: Identity / Proof of Residency */}
             {step === 3 && (
               <div className="space-y-6">
                 <InfoNote icon={Shield}>
-                  <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-brand-dark">Identity Verification</p>
+                  <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-brand-dark">Proof of Residency</p>
                   <p className="mt-1">
-                    Capture a selfie or upload a clear photo of your face. This will be reviewed by your assigned Barangay
-                    Health Worker before your account receives full access.
+                    Upload a valid document so the Health Supervisor can confirm that you belong to the selected barangay and municipality.
+                    Accepted documents include Barangay Certificate of Residency, Barangay Clearance, Government ID showing address, or other approved proof.
                   </p>
                 </InfoNote>
-                <div>
-                  <SectionKicker className="mb-3.5">Face Photo</SectionKicker>
-                  <FaceVerification
-                    captured={form.facePhoto}
-                    onCapture={(f) => { setForm({ ...form, facePhoto: f }); setErrors({ ...errors, facePhoto: "" }); }}
-                    onRemove={() => setForm({ ...form, facePhoto: null })}
-                    error={errors.facePhoto}
-                  />
-                </div>
-                <div>
-                  <SectionKicker className="mb-3.5">Government ID</SectionKicker>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
+                  <SectionKicker className="mb-3.5">Uploaded document</SectionKicker>
                   <UploadComponent
-                    label="Upload ID (SSS, UMID, Driver's License, etc.)"
-                    file={form.idPhoto}
-                    onFile={(f) => { setForm({ ...form, idPhoto: f }); setErrors({ ...errors, idPhoto: "" }); }}
-                    onRemove={() => setForm({ ...form, idPhoto: null })}
+                    label="Proof of Residency / Government ID"
+                    optional={false}
+                    file={form.document}
+                    onFile={(file) => setForm((p) => ({ ...p, document: file }))}
+                    onRemove={() => setForm((p) => ({ ...p, document: null }))}
                   />
-                  {errors.idPhoto && <p className="mt-1.5 text-[11.5px] font-medium text-brand-danger">{errors.idPhoto}</p>}
+                  {errors.document && <p className="mt-1.5 text-[11.5px] font-medium text-brand-danger">{errors.document}</p>}
                 </div>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-5 text-[12.5px] leading-relaxed text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={form.agreeReview}
+                    onChange={(e) => { setForm({ ...form, agreeReview: e.target.checked }); setErrors({ ...errors, agreeReview: "" }); }}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-blue focus:ring-brand-blue/30"
+                  />
+                  <span>
+                    I confirm that the uploaded document belongs to me and that the information I provided is accurate. I understand my registration
+                    will be reviewed by the Health Supervisor before my account is approved.
+                  </span>
+                </label>
+                {errors.agreeReview && <p className="text-[12px] font-medium text-brand-danger">{errors.agreeReview}</p>}
               </div>
             )}
 
@@ -467,13 +607,21 @@ export default function NewResidentRegistration() {
                   ["Address", `${form.houseNo ? form.houseNo + ", " : ""}${form.street ? form.street + ", " : ""}Purok ${form.sitio}, Barangay ${form.barangay}, ${form.municipality}, ${form.province}`],
                   ["Nearest Landmark", form.landmark || "N/A"],
                 ]} />
-                <ReviewBlock title="Identity Verification" onEdit={() => goTo(3)} items={[
-                  ["Face Photo", form.facePhoto ? "Captured — pending review" : "Not captured"],
-                  ["Government ID", form.idPhoto ? `Uploaded — ${form.idPhoto.name}` : "Not uploaded"],
+                <ReviewBlock title="Verification" onEdit={() => goTo(3)} items={[
+                  ["Method", "Health Supervisor review"],
+                  ["Status", "Pending Verification after submission"],
                 ]} />
               </div>
             )}
           </motion.div>
+
+          {/* Submit error (network, duplicate account, validation from API) */}
+          {errors.submit && (
+            <div role="alert" className="mt-6 flex items-start gap-2.5 rounded-xl border border-brand-danger/25 bg-brand-danger/5 px-4 py-3">
+              <Shield className="mt-0.5 h-4 w-4 shrink-0 text-brand-danger" strokeWidth={1.9} />
+              <p className="text-[12.5px] leading-relaxed text-brand-danger">{errors.submit}</p>
+            </div>
+          )}
 
           {/* Navigation */}
           <div className="mt-8 flex items-center justify-between gap-3 border-t border-slate-100 pt-5">

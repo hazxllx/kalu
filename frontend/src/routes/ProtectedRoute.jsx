@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';
+import { FullPageSkeleton } from '@/components/common/Skeleton';
 
 /**
  * Route guard.
@@ -16,19 +17,17 @@ import { useAuth } from '@/context/AuthContext';
  *   <Route element={<ProtectedRoute allow={['bhw']} />}>
  *     <Route path="/app/bhw" element={<DashboardLayout roleKey="bhw" />}>...</Route>
  *   </Route>
+ *
+ * While the session is being restored (and the account profile/role resolved
+ * through the backend) the guard renders the page skeleton rather than a blank
+ * screen, so the shell never flashes empty or unstyled.
  */
-const Fallback = () => (
-  <div className="fixed inset-0 flex items-center justify-center">
-    <div className="w-8 h-8 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin" />
-  </div>
-);
-
 export default function ProtectedRoute({ allow = [] }) {
   const { isAuthenticated, isLoadingAuth, authChecked, role } = useAuth();
   const location = useLocation();
 
   if (isLoadingAuth || !authChecked) {
-    return <Fallback />;
+    return <FullPageSkeleton />;
   }
 
   if (!isAuthenticated) {

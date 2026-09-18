@@ -4,7 +4,7 @@ import { Card } from "@/components/common/Card";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
 import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2 } from "lucide-react";
-import { residents, systemUsers } from "@/services/mock/mockData";
+import { residents, systemUsers } from "@/services/local/dashboardData";
 import { ROLES } from "@/lib/brand";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
@@ -90,7 +90,7 @@ const formatTime = (hhmm) => {
 };
 
 /**
- * New follow-ups are saved as Scheduled — never Completed. They surface
+ * New follow-ups are saved as Scheduled â€” never Completed. They surface
  * under "Today" or "Upcoming" depending on the scheduled date.
  */
 const deriveStatus = (isoDate) => {
@@ -104,88 +104,7 @@ const deriveStatus = (isoDate) => {
   return "Scheduled";
 };
 
-const FOLLOW_UPS = [
-  {
-    id: 1,
-    resident: "Ana Villanueva",
-    age: 32,
-    sex: "Female",
-    barangay: "San Isidro",
-    contact: "0917 123 4567",
-    purpose: "Prenatal Check-up",
-    assignedMidwife: "Maria Dela Cruz",
-    scheduledDate: "July 12, 2026",
-    scheduledTime: "9:00 AM",
-    location: "Barangay Health Station",
-    priority: "High",
-    status: "Scheduled",
-    remarks: "",
-  },
-  {
-    id: 2,
-    resident: "Maria Santos",
-    age: 28,
-    sex: "Female",
-    barangay: "San Isidro",
-    contact: "0918 234 5678",
-    purpose: "Postnatal Check-up",
-    assignedMidwife: "Maria Dela Cruz",
-    scheduledDate: "July 13, 2026",
-    scheduledTime: "10:00 AM",
-    location: "Home Visit",
-    priority: "High",
-    status: "Today",
-    remarks: "",
-  },
-  {
-    id: 3,
-    resident: "Elena Garcia",
-    age: 25,
-    sex: "Female",
-    barangay: "San Isidro",
-    contact: "0919 345 6789",
-    purpose: "Immunization Follow-up",
-    assignedMidwife: "Maria Dela Cruz",
-    scheduledDate: "July 8, 2026",
-    scheduledTime: "2:00 PM",
-    location: "Barangay Health Station",
-    priority: "Medium",
-    status: "Completed",
-    remarks: "Blood pressure improving. Medication completed.",
-  },
-  {
-    id: 4,
-    resident: "Carmen Reyes",
-    age: 30,
-    sex: "Female",
-    barangay: "San Isidro",
-    contact: "0920 456 7890",
-    purpose: "High-Risk Pregnancy Monitoring",
-    assignedMidwife: "Grace Aquino",
-    scheduledDate: "July 15, 2026",
-    scheduledTime: "11:00 AM",
-    location: "Barangay Health Station",
-    priority: "High",
-    status: "Upcoming",
-    remarks: "",
-  },
-  {
-    id: 5,
-    resident: "Lourdes Mendoza",
-    age: 35,
-    sex: "Female",
-    barangay: "San Isidro",
-    contact: "0921 567 8901",
-    purpose: "Tetanus Toxoid Booster",
-    assignedMidwife: "Grace Aquino",
-    scheduledDate: "July 10, 2026",
-    scheduledTime: "3:00 PM",
-    location: "Barangay Health Station",
-    priority: "Low",
-    status: "Missed",
-    remarks: "Resident unavailable during visit.",
-  },
-];
+const FOLLOW_UPS = [];
 
 const STATUS_COLORS = {
   Scheduled: "bg-brand-blue/10 text-brand-blue",
@@ -228,7 +147,7 @@ export default function MidwifeFollowUp() {
   const [touched, setTouched] = useState({});
   const [toast, setToast] = useState(null);
 
-  // Auto-assign the logged-in user where possible — the dashboard shell
+  // Auto-assign the logged-in user where possible â€” the dashboard shell
   // displays the role's display name, so prefer that for consistency.
   const currentUserName =
     (user?.role && ROLES[user.role] && ROLES[user.role].name) || user?.name || "";
@@ -335,7 +254,7 @@ export default function MidwifeFollowUp() {
     setShowScheduleModal(true);
   };
 
-  // Inline validation — fields are flagged once touched, not on every keystroke.
+  // Inline validation â€” fields are flagged once touched, not on every keystroke.
   const scheduleErrors = {
     resident: touched.resident && !selectedResident ? "Please select a resident." : "",
     date: !scheduleForm.date
@@ -357,7 +276,7 @@ export default function MidwifeFollowUp() {
     Boolean(scheduleForm.reason.trim());
 
   const handleSchedule = () => {
-    // Backstop — the primary button is disabled until the form is complete.
+    // Backstop â€” the primary button is disabled until the form is complete.
     if (!canSchedule) {
       setTouched({ resident: true, date: true, time: true, reason: true });
       return;
@@ -563,6 +482,13 @@ export default function MidwifeFollowUp() {
                   </td>
                 </tr>
               ))}
+              {filteredFollowUps.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-brand-gray">
+                    No follow-ups yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -621,7 +547,7 @@ export default function MidwifeFollowUp() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-brand-ink">{selectedResident.name}</p>
                         <p className="text-xs text-brand-gray">
-                          {selectedResident.id} · {selectedResident.age} yrs · {selectedResident.gender} ·{" "}
+                          {selectedResident.id} Â· {selectedResident.age} yrs Â· {selectedResident.gender} Â·{" "}
                           {selectedResident.barangay}
                         </p>
                       </div>
@@ -734,7 +660,7 @@ export default function MidwifeFollowUp() {
                             <option key={p} value={p}>{p}</option>
                           ))}
                         </select>
-                        <p className="mt-1 text-xs text-brand-gray">Auto-assigned to you — change if needed.</p>
+                        <p className="mt-1 text-xs text-brand-gray">Auto-assigned to you â€” change if needed.</p>
                       </div>
                     </div>
                     <div>
@@ -763,7 +689,7 @@ export default function MidwifeFollowUp() {
                   {deriveStatus(scheduleForm.date)}
                 </span>
                 <span>
-                  Follow-ups are saved as Scheduled — appearing under Today or Upcoming based on the date.
+                  Follow-ups are saved as Scheduled â€” appearing under Today or Upcoming based on the date.
                 </span>
               </p>
             </div>
@@ -814,7 +740,7 @@ export default function MidwifeFollowUp() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.resident}</p>
-                    <p className="text-xs text-brand-gray">{selectedFollowUp.sex} • {selectedFollowUp.age} years old</p>
+                    <p className="text-xs text-brand-gray">{selectedFollowUp.sex} â€¢ {selectedFollowUp.age} years old</p>
                   </div>
                 </div>
                 <div className="space-y-1 text-xs">
@@ -836,7 +762,7 @@ export default function MidwifeFollowUp() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Calendar className="w-3.5 h-3.5 text-brand-gray" />
-                  <p className="text-sm text-brand-ink">{selectedFollowUp.scheduledDate} • {selectedFollowUp.scheduledTime}</p>
+                  <p className="text-sm text-brand-ink">{selectedFollowUp.scheduledDate} â€¢ {selectedFollowUp.scheduledTime}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <MapPin className="w-3.5 h-3.5 text-brand-gray" />

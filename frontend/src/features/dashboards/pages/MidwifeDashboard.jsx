@@ -4,7 +4,8 @@ import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Plus, FileHeart, Send, CalendarCheck, ClipboardList } from "lucide-react";
-import { midwifeStats, healthServices } from "@/services/mock/mockData";
+import { midwifeStats, healthServices } from "@/services/local/dashboardData";
+import { useAuth } from "@/context/AuthContext";
 
 const actions = [
   { icon: Plus, label: "New Consultation" },
@@ -15,9 +16,12 @@ const actions = [
 ];
 
 export default function MidwifeDashboard() {
+  const { user } = useAuth();
+  const firstName = (user?.name || "").trim().split(" ")[0];
+  const welcome = firstName ? `Welcome, Midwife ${firstName}` : "Welcome, Midwife";
   return (
     <>
-      <PageHeader crumbs={["Dashboard"]} title="Welcome, Midwife Maria Dela Cruz" subtitle="Today's clinical summary for the Barangay Health Station." />
+      <PageHeader crumbs={["Dashboard"]} title={welcome} subtitle="Today's clinical summary for the Barangay Health Station." />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 mb-6">
         {midwifeStats.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
       </div>
@@ -26,11 +30,14 @@ export default function MidwifeDashboard() {
         <Card className="p-4 sm:p-6 lg:col-span-2">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Ongoing Health Services</h3>
           <div className="space-y-3">
+            {healthServices.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No health services available yet.</p>
+            )}
             {healthServices.slice(0, 5).map((s) => (
               <div key={s.name} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2">
                 <div>
                   <p className="font-medium text-brand-ink text-sm">{s.name}</p>
-                  <p className="text-xs text-brand-gray">{s.schedule} · {s.enrolled} enrolled</p>
+                  <p className="text-xs text-brand-gray">{s.schedule} Â· {s.enrolled} enrolled</p>
                 </div>
                 <StatusBadge value={s.status} />
               </div>

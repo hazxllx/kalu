@@ -3,10 +3,10 @@ import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
-import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
-import { useHouseholdRiskClusters } from "@/services/mock/householdRiskStore";
+import { useWorkflowStore } from "@/services/local/workflowStore";
+import { useHouseholdRiskClusters } from "@/services/local/householdRiskStore";
 import { RISK_LEVELS } from "@/lib/householdRisk";
-import { phnAlerts, barangayCommunity } from "@/services/mock/mockPhnData";
+import { phnAlerts, barangayCommunity } from "@/services/local/phnData";
 import {
   filterSupervisorRows,
   getSupervisorScope,
@@ -139,7 +139,7 @@ export default function HealthSupervisorDashboard() {
           resident: r.resident,
           barangay: r.barangay || "RHU",
           detail: r.reason,
-          extra: `${r.facility || ""} · ${r.status || ""}`,
+          extra: `${r.facility || ""} Â· ${r.status || ""}`,
           action: "Review Referral",
         });
       });
@@ -155,7 +155,7 @@ export default function HealthSupervisorDashboard() {
           resident: r.resident,
           barangay: r.barangay || "RHU",
           detail: r.reason,
-          extra: `${r.facility || ""} · ${r.priority || ""}`,
+          extra: `${r.facility || ""} Â· ${r.priority || ""}`,
           action: "Review Referral",
         });
       });
@@ -171,7 +171,7 @@ export default function HealthSupervisorDashboard() {
           resident: f.resident,
           barangay: f.barangay || "RHU",
           detail: f.purpose,
-          extra: `${f.dueDate || ""} · ${f.time || ""}`,
+          extra: `${f.dueDate || ""} Â· ${f.time || ""}`,
           action: "Review",
         });
       });
@@ -231,7 +231,7 @@ export default function HealthSupervisorDashboard() {
         title="Health Monitoring"
         subtitle={
           scope && scope.level === "barangay"
-            ? `Barangay ${scope.assignedBarangay} — monitor health cases, services, referrals, follow-ups, and community health alerts for your assigned barangay.`
+            ? `Barangay ${scope.assignedBarangay} â€” monitor health cases, services, referrals, follow-ups, and community health alerts for your assigned barangay.`
             : "Monitor health cases, services, referrals, follow-ups, and community health alerts."
         }
       />
@@ -245,7 +245,7 @@ export default function HealthSupervisorDashboard() {
         <StatCard icon="Bell" label="Health Alerts" value={stats.alerts} tone="blue" />
       </div>
 
-      {/* Household Risk Clusters — early intervention */}
+      {/* Household Risk Clusters â€” early intervention */}
       <RiskClusterStrip />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
@@ -309,7 +309,7 @@ export default function HealthSupervisorDashboard() {
                     {a.level}
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-brand-gray">{a.barangay || "RHU"} · {a.status}</p>
+                <p className="mt-1 text-xs text-brand-gray">{a.barangay || "RHU"} Â· {a.status}</p>
               </div>
             ))}
           </div>
@@ -398,7 +398,7 @@ export default function HealthSupervisorDashboard() {
               <div>
                 <h3 className="text-base font-semibold text-brand-ink">{casePatient.patient}</h3>
                 <p className="text-xs text-brand-gray mt-0.5">
-                  {casePatient.barangay || "RHU"} · {casePatient.reason || casePatient.triage?.chiefComplaint}
+                  {casePatient.barangay || "RHU"} Â· {casePatient.reason || casePatient.triage?.chiefComplaint}
                 </p>
               </div>
               <button onClick={() => setCaseModal(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray hover:bg-brand-bg hover:text-brand-ink" aria-label="Close modal">
@@ -414,7 +414,7 @@ export default function HealthSupervisorDashboard() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-2">Triage</p>
                   <p className="text-brand-ink">
-                    {casePatient.triage?.chiefComplaint || casePatient.reason} — BP {casePatient.triage?.bloodPressure || "—"}, T {casePatient.triage?.temperature ? `${casePatient.triage.temperature}°C` : "—"}
+                    {casePatient.triage?.chiefComplaint || casePatient.reason} â€” BP {casePatient.triage?.bloodPressure || "â€”"}, T {casePatient.triage?.temperature ? `${casePatient.triage.temperature}Â°C` : "â€”"}
                   </p>
                   {casePatient.triage?.notes && <p className="text-xs text-brand-gray mt-1">{casePatient.triage.notes}</p>}
                 </div>

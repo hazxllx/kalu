@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
-import { HOUSEHOLD_RETURN_REASONS } from "@/services/mock/mockHouseholdVerifications";
+import { HOUSEHOLD_RETURN_REASONS } from "@/services/local/householdVerifications";
 
 const formatReviewDate = (date) =>
   date.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
@@ -18,7 +18,7 @@ function InfoCell({ icon: Icon, label, value }) {
         {Icon && <Icon className="w-3.5 h-3.5 text-brand-gray" strokeWidth={1.8} />}
         <p className="text-[11px] text-brand-gray uppercase tracking-wide">{label}</p>
       </div>
-      <p className="mt-1 text-sm font-medium text-brand-ink">{value || "—"}</p>
+      <p className="mt-1 text-sm font-medium text-brand-ink">{value || "â€”"}</p>
     </div>
   );
 }
@@ -118,7 +118,7 @@ export default function HouseholdVerificationReviewDrawer({
                 <VerificationBadge status="pending" size="sm" />
               </div>
               <p className="text-xs text-brand-gray">
-                HH Head: {household.head} · Barangay {household.barangay}
+                HH Head: {household.head} Â· Barangay {household.barangay}
               </p>
             </div>
           </div>

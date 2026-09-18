@@ -4,7 +4,7 @@ import { Card } from "@/components/common/Card";
 import {
   useMunicipalSubmissions,
   municipalSubmissionsStore,
-} from "@/services/mock/municipalSubmissionsStore";
+} from "@/services/local/municipalSubmissionsStore";
 import { useAuth } from "@/context/AuthContext";
 import {
   Search, FileText, ClipboardList, X, ChevronRight, RefreshCw, ShieldCheck, CheckCircle2, AlertTriangle,

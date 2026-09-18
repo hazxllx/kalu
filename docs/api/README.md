@@ -5,23 +5,41 @@ through `VITE_API_URL`.
 
 ## Implemented
 
-| Method | Endpoint      | Description                        | Auth |
+| Method | Endpoint | Description | Auth |
 | ------ | ------------- | ---------------------------------- | ---- |
 | GET    | `/api/health` | Confirms the API process is running | none |
+| POST   | `/api/auth/login` | Email + password → Supabase session + profile user | none |
+| GET    | `/api/auth/me` | Current user: role, status, municipality/barangay/facility scope (from `profiles`) | Bearer |
+| POST   | `/api/auth/logout` | Revokes the current session | Bearer |
+| GET    | `/api/residents` | Directory listing + search (`?q=&barangay=&limit=&offset=`), scope-enforced | HS / PHN / MHO |
+| POST   | `/api/residents` | Register a resident (validated 422, scope-checked 403, duplicate 409) | HS / PHN / MHO |
+| GET    | `/api/residents/:id` | Single resident within the caller's scope | HS / PHN / MHO |
+| PUT    | `/api/residents/:id` | Permitted demographic corrections (identity keys locked) | PHN / HS |
+| GET    | `/api/households` | Household listing + search (`?q=&barangay=&limit=&offset=`), scope-enforced | BHW / HS / PHN |
+| POST   | `/api/households` | Register a household (server-allocated `HH-` id, server-computed risk, duplicate 409) | BHW / HS / PHN |
+| GET    | `/api/households/:id` | Household detail incl. members (out-of-scope = 404) | BHW / HS / PHN |
+| PUT    | `/api/households/:id` | Field updates; verification outcomes HS-only | BHW / HS / PHN |
+| POST   | `/api/households/:id/members` | Add a member (existing resident or free-form; duplicate member 409) | BHW / HS / PHN |
+| DELETE | `/api/households/:id/members/:memberId` | Remove a household member | BHW / HS / PHN |
+| GET    | `/api/intake/residents/search` | Identity prefill lookup for the intake form | BHW / RHU / HS |
+| POST   | `/api/intake/visits` | Create a draft visit submission (vitals; BMI computed server-side) | BHW / RHU / HS |
+| POST   | `/api/intake/visits/:id/submit` | Validate + lock + hand off to the PHN queue | BHW / RHU / HS |
+| GET/PUT | `/api/phn/submissions…` | PHN queue listing + processing | PHN |
+| GET    | `/api/verifications/queue?status=` | Resident verification queue: pending/approved/rejected/resubmission_required (barangay-scoped) | HS / PHN |
+| GET    | `/api/verifications/pending` / `history` | Pending queue / recent decisions (compat) | HS / PHN |
+| GET    | `/api/verifications/:id` (+ `/:id/history`) | One resident's verification record + audit history | HS / PHN |
+| PATCH  | `/api/verifications/:id/approve` | Approve a resident (activates the account) | HS / PHN |
+| PATCH  | `/api/verifications/:id/reject` | Reject a resident (`reason` required) | HS / PHN |
+| PATCH  | `/api/verifications/:id/request-resubmission` | Send a registration back for correction (`reason` required) | HS / PHN |
+| POST   | `/api/verifications/:ref/decision` | Legacy approve/reject alias | HS / PHN |
+| GET    | `/api/verifications/me` | Resident's own verification status + history | Resident |
+| PATCH  | `/api/verifications/:id/resubmit` | Resident resubmits own rejected registration | Resident |
+| GET    | `/api/analytics/early-warning` | Early-warning aggregates (barangay-scoped) | MHO / HS |
 
-```bash
-curl http://localhost:5000/api/health
-```
-
-```json
-{
-  "status": "ok",
-  "message": "KALUSAGAP backend is running"
-}
-```
-
-Nothing else exists yet. The React app still reads from
-`frontend/src/services/mock/`.
+Status codes: `401` missing/invalid token · `403` authenticated but unauthorized
+(role, account state, or scope) · `404` unavailable/out-of-scope record · `409`
+duplicate · `422` validation errors (`error.details` lists field messages) ·
+`500` unexpected server error.
 
 ## Planned endpoints
 

@@ -67,12 +67,12 @@ function RuledText({ value, lines = 3 }) {
 export default function MedicalCertificateDocument({ certificate, signatoryName }) {
   const c = certificate || {};
   /**
-   * Authorized signatory — the logged-in demo account's name (passed in from
-   * the current session), falling back to the certificate's designated
-   * medical officer. Never a placeholder like "Authorized Municipal Health
-   * Officer"; when no name is available the explicit fallback below shows.
+   * Authorized signatory — the signed-in account's name (passed in from the
+   * current session), falling back to the certificate's designated medical
+   * officer. Never a placeholder like "Authorized Municipal Health Officer";
+   * when no name is available the explicit fallback below shows.
    */
-  const signatory = String(signatoryName || c.medicalOfficer || "").trim() || "Demo Account Name Not Available";
+  const signatory = String(signatoryName || c.medicalOfficer || "").trim() || "Signatory name not set";
   const exam = parseDate(c.dateOfExamination);
   const issued = parseDate(c.issuedAt || c.dateIssued);
 

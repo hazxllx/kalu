@@ -14,23 +14,26 @@ role-based dashboards for the Municipal Health Office.
 
 ## Project Status
 
-The frontend UI is complete and, during development, renders from small local
-mock datasets. The backend now has a real authentication + role-based
-authorization pipeline and a full REST API surface, but the domain endpoints
-are intentionally not wired to the database yet — they return `501 Not
-Implemented` until the **verified ERD** is available. This is deliberate: the
-code is *backend-ready*, not faking database results.
+The frontend UI is complete and renders **live data only**: there are no mock,
+demo or fabricated datasets in the application. Every page shows a skeleton
+while its data (or its code chunk) is loading and an empty state when a query
+returns nothing. The backend has a real authentication + role-based
+authorization pipeline and a REST API surface; domain endpoints that are not
+connected yet return `501 Not Implemented` until the **verified ERD** is
+available, and the pages connected to them show their empty state rather than
+inventing rows. This is deliberate: the code is *backend-ready*, not faking
+database results.
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Frontend (React + Vite + Tailwind + Recharts + Lucide) | ✅ Implemented | Preserved existing UI; wired to real auth + protected routes |
+| Frontend (React + Vite + Tailwind + Recharts + Lucide) | ✅ Implemented | Route-level code splitting with skeleton fallbacks; wired to real auth + protected routes |
 | Backend (Node + Express REST API) | ✅ Implemented | App, middleware, auth, RBAC, route/controller/service layout |
-| Supabase integration | ⚠️ Partial · 🔒 Requires configuration | Clients + Auth wired; set env vars to activate |
-| Authentication (Supabase Auth) | ✅ Implemented (🔒 needs Supabase to go live) | Dev-auth fallback for local testing without Supabase |
+| Supabase integration | ✅ Active · 🔒 Requires configuration | Clients + Auth wired; set env vars to activate |
+| Authentication (Supabase Auth) | ✅ Implemented | The only sign-in path — no local, demo or mock accounts |
 | Authorization / RBAC | ✅ Implemented | Frontend `ProtectedRoute` + backend `authenticate`/`authorize` |
-| Database (Supabase PostgreSQL) | ❌ Not implemented · REQUIRES VERIFIED ERD | No tables/queries invented; endpoints return 501 |
-| Row Level Security (RLS) | ❌ Not implemented · REQUIRES VERIFIED ERD | Architecture prepared; policies pending schema |
-| Mock data (development only) | ✅ Implemented | Minimal, clearly-fake datasets + test accounts |
+| Database (Supabase PostgreSQL) | ⚠️ Partial · REQUIRES VERIFIED ERD | Reference + account tables live; remaining domain endpoints return 501 |
+| Row Level Security (RLS) | ✅ Implemented | Policies on the deployed registry, account and clinical tables |
+| Mock / demo data | ✅ Removed | No fabricated datasets or demo credentials remain in the app |
 
 ---
 
@@ -114,7 +117,7 @@ KALUSAGAP/
 │   │   ├── routes/            AppRoutes, ProtectedRoute, ScrollToTop
 │   │   ├── services/
 │   │   │   ├── api/           apiClient + feature API modules (real backend)
-│   │   │   └── mock/          minimal dev datasets + mockAccounts
+│   │   │   └── local/         empty in-session working sets (no demo data)
 │   │   └── styles/            index.css (Tailwind)
 │   └── package.json
 │
@@ -168,11 +171,14 @@ Enforcement is layered: `ProtectedRoute` (frontend) → `authenticate` +
   `authenticate`, then `authorize(roles)` checks the role. Requests fail closed
   (401/403), and when Supabase is not configured, protected endpoints return
   503 rather than allowing access.
-- **Development fallback:** when `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
-  are not set, the UI signs in against the local test accounts (see below). The
-  role still comes from the matched account — no role picker, no hard-coded
-  successful login. This path disappears automatically once Supabase env vars
-  are provided.
+- **No fallback accounts.** Supabase Auth is the only sign-in path. There are
+  no demo, mock or shared test credentials in the repository. When
+  `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are not set, the login page
+  reports that authentication is not configured and refuses to sign in.
+- **Loading states.** While the session is being restored the guarded routes
+  render a skeleton; each route's page component is code-split and shows a
+  skeleton while its chunk loads; and pages fetching API data show table/card
+  skeletons until the request settles.
 
 ---
 
@@ -248,10 +254,9 @@ npm run start:backend  # run the API without file watching
 ### Login page
 A single, centered login card (fits a 1366×768 viewport without scrolling):
 KALUSAGAP branding, "Sign in to the portal", email + password, remember me /
-forgot password, Sign In, and a "Register here" link. The former large blue
-"Who uses this portal" panel was removed; its support contact now lives in a
-small footer under the card. A collapsed-by-default **Demo Accounts** switcher
-sits at the bottom of the card (see below). File:
+forgot password, Sign In, and a "Register here" link. There are no demo
+credentials and no account switcher: the role is always resolved from the
+authenticated Supabase account. File:
 `frontend/src/features/authentication/pages/Login.jsx`.
 
 ### Registration UI
@@ -263,44 +268,22 @@ preview, and the **Continue** button sit on the right — all within a normal
 desktop viewport. File:
 `frontend/src/features/registration/pages/RegistrationTypeSelection.jsx`.
 
-### Demo Accounts (development / presentation only)
-The login page has a collapsed **Demo Accounts** section. Expanding it lists the
-test roles with a **Use Account** button that autofills the email and password
-into the form — it does **not** auto-submit. The role is derived from the
-account, never picked by the user. Accounts are defined once in
-`frontend/src/services/mock/mockAccounts.js` (the same source used by the
-dev-auth fallback). These are committed development credentials — never reuse
-them in production.
+### Creating accounts
+Accounts are created in Supabase Auth (dashboard, CLI, or the admin API). A
+trigger creates the matching `profiles` row; an administrator then sets the
+account's `role` and `status`. Sign in with the account's email and password —
+the portal derives the role from the `profiles` table.
 
-| Role | Email |
-| --- | --- |
-| Administrator | admin@kalusagap.test |
-| Municipal Health Officer | mho@kalusagap.test |
-| Public Health Nurse | phn@kalusagap.test |
-| Health Supervisor | supervisor@kalusagap.test |
-| RHU Personnel | rhu@kalusagap.test |
-| Barangay Health Worker | bhw@kalusagap.test |
-| Resident 1 | resident1@kalusagap.test |
-| Resident 2 | resident2@kalusagap.test |
-| Resident 3 | resident3@kalusagap.test |
-
-Passwords for these dev accounts are configured alongside the emails in
-`frontend/src/services/mock/mockAccounts.js`. When Supabase is configured, sign
-in with any account created in the Supabase dashboard (set the `role` in the
-user's `app_metadata`); the dev-auth fallback (any password) applies only when
-Supabase env vars are absent.
-
-### Role visualization (for presentations)
-1. Open the login page.
-2. Expand **Demo Accounts**.
-3. Click **Use Account** for a role (e.g. Health Supervisor).
-4. Email and password populate automatically.
-5. Click **Sign In**.
-6. That role's dashboard opens. Unauthorized areas remain blocked by
-   `ProtectedRoute` and the backend `authorize` middleware.
+### Loading & empty states
+- Session restore: guarded routes render a skeleton until the session and the
+  account profile are resolved.
+- Navigation: each page is code-split; its chunk loads behind a skeleton.
+- Data: tables, cards and charts show skeletons while their API request is in
+  flight, and an explicit empty state when the query returns no rows.
 
 ### UI/UX changes summary
 - Removed the large "Who uses this portal" role panel from login.
+- Removed the demo-account switcher and all mock credentials.
 - Redesigned login and registration as a modern **split card** on a deep-navy
   KALUSAGAP background: left = the form (login) or the type selector +
   requirements (registration); right = a navy visual storytelling panel with a
@@ -312,8 +295,6 @@ Supabase env vars are absent.
   radial background depth for a premium institutional feel.
 - Registration keeps its two-step progress indicator, three selectable form
   cards, "What you'll need" requirements, and a "Processing time" note.
-- Kept the collapsed, keyboard-accessible demo-account switcher (autofill only)
-  in the left login column.
 
 ---
 
@@ -321,12 +302,18 @@ Supabase env vars are absent.
 
 
 `GET /api/health` is public. `POST /api/auth/login`, `GET /api/auth/me`,
-`POST /api/auth/logout` use Supabase Auth. Every other group is protected and
-role-scoped and currently returns **501** (BACKEND READY / DATABASE PENDING —
-REQUIRES VERIFIED ERD): `/api/users`, `/api/households`, `/api/residents`,
-`/api/health-records`, `/api/assessments`, `/api/consultations`, `/api/triage`,
-`/api/referrals`, `/api/follow-ups`, `/api/reports`, `/api/analytics`,
-`/api/notifications`.
+`POST /api/auth/logout` use Supabase Auth.
+
+Connected groups (real database-backed endpoints, role-scoped):
+`/api/residents`, `/api/households`, `/api/intake`, `/api/phn`,
+`/api/verifications`, `/api/analytics`.
+
+Groups whose verified schema is not connected yet are protected and
+role-scoped but return **501** (BACKEND READY / DATABASE PENDING — REQUIRES
+VERIFIED ERD): `/api/users`, `/api/health-records`, `/api/assessments`,
+`/api/consultations`, `/api/triage`, `/api/referrals`, `/api/follow-ups`,
+`/api/reports`, `/api/notifications`. Screens backed by those groups render
+their loading skeleton and then an empty state — never fabricated rows.
 
 ---
 
@@ -341,6 +328,8 @@ REQUIRES VERIFIED ERD): `/api/users`, `/api/households`, `/api/residents`,
 - Return only the fields a screen needs; never log passwords, tokens, or health
   information.
 - Use Supabase Auth for credentials — do not store or hash passwords manually.
+- No demo, sample or shared credentials are committed. Sign-in is Supabase Auth
+  only, and a deployment without Supabase configuration refuses to sign in.
 
 ## Documentation
 

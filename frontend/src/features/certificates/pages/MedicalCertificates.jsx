@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import MedicalCertificateModal, { CertificateStatusBadge } from "@/features/certificates/components/MedicalCertificateModal";
-import { useMedicalCertificates, medicalCertificateStore, ALLOWED_TRANSITIONS } from "@/services/mock/medicalCertificateStore";
-import { auditStore } from "@/services/mock/auditStore";
+import { useMedicalCertificates, medicalCertificateStore, ALLOWED_TRANSITIONS } from "@/services/local/medicalCertificateStore";
+import { auditStore } from "@/services/local/auditStore";
 import { useAuth } from "@/context/AuthContext";
 import { Search, FileText, Plus, X, ChevronRight, CheckCircle2 } from "lucide-react";
 

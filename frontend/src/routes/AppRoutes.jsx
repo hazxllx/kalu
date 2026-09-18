@@ -1,83 +1,117 @@
+import { Suspense, lazy } from 'react';
 import { Route, Routes, Navigate } from 'react-router-dom';
 
 import DashboardLayout from '@/layouts/DashboardLayout';
 import NotFoundPage from '@/pages/NotFoundPage';
 import UnauthorizedPage from '@/pages/UnauthorizedPage';
 import ProtectedRoute from '@/routes/ProtectedRoute';
+import { FullPageSkeleton, PageSkeleton } from '@/components/common/Skeleton';
 import { ROUTE_ROLES } from '@/lib/roles';
 
-// Landing + public entry points
+// Landing + login are the public entry points and load eagerly so the first
+// paint never waits on a chunk fetch.
 import Landing from '@/features/landing/pages/Landing';
 import Login from '@/features/authentication/pages/Login';
 
+/**
+ * Code-split the rest of the route table.
+ *
+ * Every page below is loaded on demand. While its chunk is being fetched the
+ * route shows a skeleton — `PageSkeleton` inside the dashboard shell (so the
+ * sidebar/header stay mounted) and `FullPageSkeleton` for the standalone
+ * public/registration pages. This is the only loading state the router adds;
+ * individual pages still show their own skeletons while their API data loads.
+ */
+const appPage = (loader) => {
+  const Page = lazy(loader);
+  return function LazyAppPage() {
+    return (
+      <Suspense fallback={<PageSkeleton />}>
+        <Page />
+      </Suspense>
+    );
+  };
+};
+
+const publicPage = (loader) => {
+  const Page = lazy(loader);
+  return function LazyPublicPage() {
+    return (
+      <Suspense fallback={<FullPageSkeleton />}>
+        <Page />
+      </Suspense>
+    );
+  };
+};
+
 // Registration
-import RegistrationTypeSelection from '@/features/registration/pages/RegistrationTypeSelection';
-import NewResidentRegistration from '@/features/registration/pages/NewResidentRegistration';
-import TransferRegistration from '@/features/registration/pages/TransferRegistration';
-import PersonnelRegistration from '@/features/registration/pages/PersonnelRegistration';
-import MunicipalSubmissions from '@/features/submissions/pages/MunicipalSubmissions';
-import MunicipalHealthReports from '@/features/reports/pages/MunicipalHealthReports';
-import MedicalCertificates from '@/features/certificates/pages/MedicalCertificates';
-import CertificateComposer from '@/features/certificates/pages/CertificateComposer';
-import StaffRequests from '@/features/users/pages/StaffRequests';
-import SupervisorVerifications from '@/features/users/pages/SupervisorVerifications';
-import RhuReferrals from '@/features/referrals/pages/RhuReferrals';
-import RegistrationSuccess from '@/features/registration/pages/RegistrationSuccess';
+const RegistrationTypeSelection = publicPage(() => import('@/features/registration/pages/RegistrationTypeSelection'));
+const NewResidentRegistration = publicPage(() => import('@/features/registration/pages/NewResidentRegistration'));
+const TransferRegistration = publicPage(() => import('@/features/registration/pages/TransferRegistration'));
+const PersonnelRegistration = publicPage(() => import('@/features/registration/pages/PersonnelRegistration'));
+const RegistrationSuccess = publicPage(() => import('@/features/registration/pages/RegistrationSuccess'));
+const VerificationStatus = publicPage(() => import('@/features/verification/pages/VerificationStatus'));
 
 // Verification
-import VerificationStatus from '@/features/verification/pages/VerificationStatus';
-import PendingVerifications from '@/features/verification/pages/PendingVerifications';
-import ResidentVerification from '@/features/verification/pages/ResidentVerification';
-import HouseholdVerifications from '@/features/verification/pages/HouseholdVerifications';
+const PendingVerifications = appPage(() => import('@/features/verification/pages/PendingVerifications'));
+const ResidentVerificationStatus = appPage(() => import('@/features/verification/pages/ResidentVerificationStatus'));
+const HouseholdVerifications = appPage(() => import('@/features/verification/pages/HouseholdVerifications'));
 
 // Role dashboards
-import ResidentDashboard from '@/features/dashboards/pages/ResidentDashboard';
-import LimitedResidentDashboard from '@/features/dashboards/pages/LimitedResidentDashboard';
-import BHWDashboard from '@/features/dashboards/pages/BHWDashboard';
-import HealthSupervisorDashboard from '@/features/dashboards/pages/HealthSupervisorDashboard';
-import RHUDashboard from '@/features/dashboards/pages/RHUDashboard';
-import MHODashboard from '@/features/dashboards/pages/MHODashboard';
-import AdminDashboard from '@/features/dashboards/pages/AdminDashboard';
-import PHNDashboard from '@/features/dashboards/pages/PHNDashboard';
-import RhuTriage from '@/features/triage/pages/RhuTriage';
-import PhnCheckups from '@/features/consultations/pages/PhnAssessments';
-import PhnHealthRecords from '@/features/health-records/pages/PhnHealthRecords';
-import PhnHealthServices from '@/features/health-services/pages/PhnHealthServices';
+const ResidentDashboard = appPage(() => import('@/features/dashboards/pages/ResidentDashboard'));
+const LimitedResidentDashboard = appPage(() => import('@/features/dashboards/pages/LimitedResidentDashboard'));
+const BHWDashboard = appPage(() => import('@/features/dashboards/pages/BHWDashboard'));
+const HealthSupervisorDashboard = appPage(() => import('@/features/dashboards/pages/HealthSupervisorDashboard'));
+const RHUDashboard = appPage(() => import('@/features/dashboards/pages/RHUDashboard'));
+const MHODashboard = appPage(() => import('@/features/dashboards/pages/MHODashboard'));
+const AdminDashboard = appPage(() => import('@/features/dashboards/pages/AdminDashboard'));
+const PHNDashboard = appPage(() => import('@/features/dashboards/pages/PHNDashboard'));
+const RhuTriage = appPage(() => import('@/features/triage/pages/RhuTriage'));
+const PhnCheckups = appPage(() => import('@/features/consultations/pages/PhnAssessments'));
+const PhnHealthRecords = appPage(() => import('@/features/health-records/pages/PhnHealthRecords'));
+const PhnHealthServices = appPage(() => import('@/features/health-services/pages/PhnHealthServices'));
 
 // Domain features
-import ResidentsPage from '@/features/residents/pages/ResidentsPage';
-import Households from '@/features/households/pages/Households';
-import AddHouseholdPage from '@/features/households/pages/AddHouseholdPage';
-import HouseholdRiskClusters from '@/features/households/pages/HouseholdRiskClusters';
-import HouseholdRiskOverview from '@/features/households/pages/HouseholdRiskOverview';
-import HouseholdRiskDetail from '@/features/households/pages/HouseholdRiskDetail';
-import RiskRuleConfig from '@/features/households/pages/RiskRuleConfig';
-import ConsultationsPage from '@/features/consultations/pages/ConsultationsPage';
-import TreatmentConsultation from '@/features/consultations/pages/TreatmentConsultation';
-import HealthRecord from '@/features/health-records/pages/HealthRecord';
-import TCLS from '@/features/health-records/pages/TCLS';
-import M1Records from '@/features/health-records/pages/M1Records';
-import Immunization from '@/features/health-records/pages/Immunization';
-import ResidentFollowUps from '@/features/follow-ups/pages/ResidentFollowUps';
-import ResidentFollowUpCalendar from '@/features/follow-ups/pages/ResidentFollowUpCalendar';
-import MidwifeFollowUp from '@/features/follow-ups/pages/MidwifeFollowUp';
-import FollowUpCalendar from '@/features/follow-ups/pages/FollowUpCalendar';
-import PhnFollowUps from '@/features/follow-ups/pages/PhnFollowUps';
-import Referrals from '@/features/referrals/pages/Referrals';
-import MHOReferrals from '@/features/referrals/pages/MHOReferrals';
-import Appointments from '@/features/appointments/pages/Appointments';
-import ResidentHealthServices from '@/features/health-services/pages/ResidentHealthServices';
-import MidwifeHealthServices from '@/features/health-services/pages/MidwifeHealthServices';
-import Programs from '@/features/health-services/pages/Programs';
-import NotificationsPage from '@/features/notifications/pages/NotificationsPage';
-import ReportsPage from '@/features/reports/pages/ReportsPage';
-import HealthTrends from '@/features/analytics/pages/HealthTrends';
-import Barangays from '@/features/analytics/pages/Barangays';
-import UserManagement from '@/features/users/pages/UserManagement';
-import AuditTrail from '@/features/users/pages/AuditTrail';
-import SystemManagementPage from '@/features/users/pages/SystemManagementPage';
-import RolePermissionsPage from '@/features/access-control/pages/RolePermissionsPage';
-import SettingsPage from '@/features/settings/pages/SettingsPage';
+const ResidentsPage = appPage(() => import('@/features/residents/pages/ResidentsPage'));
+const Households = appPage(() => import('@/features/households/pages/Households'));
+const AddHouseholdPage = appPage(() => import('@/features/households/pages/AddHouseholdPage'));
+const HouseholdRiskClusters = appPage(() => import('@/features/households/pages/HouseholdRiskClusters'));
+const HouseholdRiskOverview = appPage(() => import('@/features/households/pages/HouseholdRiskOverview'));
+const HouseholdRiskDetail = appPage(() => import('@/features/households/pages/HouseholdRiskDetail'));
+const RiskRuleConfig = appPage(() => import('@/features/households/pages/RiskRuleConfig'));
+const ConsultationsPage = appPage(() => import('@/features/consultations/pages/ConsultationsPage'));
+const TreatmentConsultation = appPage(() => import('@/features/consultations/pages/TreatmentConsultation'));
+const HealthRecord = appPage(() => import('@/features/health-records/pages/HealthRecord'));
+const TCLS = appPage(() => import('@/features/health-records/pages/TCLS'));
+const M1Records = appPage(() => import('@/features/health-records/pages/M1Records'));
+const Immunization = appPage(() => import('@/features/health-records/pages/Immunization'));
+const ResidentFollowUps = appPage(() => import('@/features/follow-ups/pages/ResidentFollowUps'));
+const ResidentFollowUpCalendar = appPage(() => import('@/features/follow-ups/pages/ResidentFollowUpCalendar'));
+const MidwifeFollowUp = appPage(() => import('@/features/follow-ups/pages/MidwifeFollowUp'));
+const FollowUpCalendar = appPage(() => import('@/features/follow-ups/pages/FollowUpCalendar'));
+const PhnFollowUps = appPage(() => import('@/features/follow-ups/pages/PhnFollowUps'));
+const Referrals = appPage(() => import('@/features/referrals/pages/Referrals'));
+const MHOReferrals = appPage(() => import('@/features/referrals/pages/MHOReferrals'));
+const RhuReferrals = appPage(() => import('@/features/referrals/pages/RhuReferrals'));
+const Appointments = appPage(() => import('@/features/appointments/pages/Appointments'));
+const ResidentHealthServices = appPage(() => import('@/features/health-services/pages/ResidentHealthServices'));
+const MidwifeHealthServices = appPage(() => import('@/features/health-services/pages/MidwifeHealthServices'));
+const Programs = appPage(() => import('@/features/health-services/pages/Programs'));
+const NotificationsPage = appPage(() => import('@/features/notifications/pages/NotificationsPage'));
+const ReportsPage = appPage(() => import('@/features/reports/pages/ReportsPage'));
+const MunicipalHealthReports = appPage(() => import('@/features/reports/pages/MunicipalHealthReports'));
+const MunicipalSubmissions = appPage(() => import('@/features/submissions/pages/MunicipalSubmissions'));
+const HealthTrends = appPage(() => import('@/features/analytics/pages/HealthTrends'));
+const Barangays = appPage(() => import('@/features/analytics/pages/Barangays'));
+const UserManagement = appPage(() => import('@/features/users/pages/UserManagement'));
+const AuditTrail = appPage(() => import('@/features/users/pages/AuditTrail'));
+const SystemManagementPage = appPage(() => import('@/features/users/pages/SystemManagementPage'));
+const RolePermissionsPage = appPage(() => import('@/features/access-control/pages/RolePermissionsPage'));
+const SettingsPage = appPage(() => import('@/features/settings/pages/SettingsPage'));
+const MedicalCertificates = appPage(() => import('@/features/certificates/pages/MedicalCertificates'));
+const CertificateComposer = appPage(() => import('@/features/certificates/pages/CertificateComposer'));
+const StaffRequests = appPage(() => import('@/features/users/pages/StaffRequests'));
+const SupervisorVerifications = appPage(() => import('@/features/users/pages/SupervisorVerifications'));
 
 /**
  * Central route table for KALUSAGAP.
@@ -106,8 +140,8 @@ const AppRoutes = () => (
     <Route path="/register/transfer" element={<TransferRegistration />} />
     <Route path="/register/personnel" element={<PersonnelRegistration />} />
     <Route path="/registration-success" element={<RegistrationSuccess />} />
-    <Route path="/verification-status" element={<VerificationStatus />} />
-    <Route path="/unauthorized" element={<UnauthorizedPage />} />
+            <Route path="/verification-status" element={<VerificationStatus />} />
+            <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
     {/* Resident */}
     <Route element={<ProtectedRoute allow={ROUTE_ROLES.resident} />}>
@@ -121,6 +155,7 @@ const AppRoutes = () => (
         <Route path="followup-calendar" element={<ResidentFollowUpCalendar />} />
         <Route path="appointments" element={<Appointments />} />
         <Route path="services" element={<ResidentHealthServices />} />
+        <Route path="verification" element={<ResidentVerificationStatus />} />
         <Route path="notifications" element={<NotificationsPage roleKey="resident" />} />
         <Route path="settings" element={<SettingsPage roleKey="resident" />} />
       </Route>
@@ -134,7 +169,7 @@ const AppRoutes = () => (
         <Route path="announcements" element={<NotificationsPage roleKey="resident-limited" />} />
         <Route path="services" element={<ResidentHealthServices />} />
         <Route path="profile" element={<SettingsPage roleKey="resident-limited" />} />
-        <Route path="verification" element={<LimitedResidentDashboard />} />
+        <Route path="verification" element={<ResidentVerificationStatus />} />
         <Route path="support" element={<SettingsPage roleKey="resident-limited" />} />
         <Route path="settings" element={<SettingsPage roleKey="resident-limited" />} />
       </Route>
@@ -188,7 +223,6 @@ const AppRoutes = () => (
         <Route path="dashboard" element={<HealthSupervisorDashboard />} />
         <Route path="residents" element={<ResidentsPage />} />
         <Route path="verifications" element={<PendingVerifications />} />
-        <Route path="verification/review" element={<ResidentVerification />} />
         <Route path="household-verifications" element={<HouseholdVerifications />} />
         <Route path="consultations" element={<TreatmentConsultation />} />
         <Route path="tcls" element={<TCLS />} />

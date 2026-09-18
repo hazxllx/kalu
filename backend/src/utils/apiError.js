@@ -33,6 +33,10 @@ export default class ApiError extends Error {
     return new ApiError(409, message);
   }
 
+  static unprocessable(message = 'Validation failed', details) {
+    return new ApiError(422, message, details);
+  }
+
   static notImplemented(message = 'Not implemented yet') {
     return new ApiError(501, message);
   }

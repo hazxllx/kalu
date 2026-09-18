@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
-import { phnResidents } from "@/services/mock/mockPhnData";
-import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
+import { phnResidents } from "@/services/local/phnData";
+import { useWorkflowStore } from "@/services/local/workflowStore";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import PhnCheckupWorkbench from "@/features/consultations/components/PhnCheckupWorkbench";
 import {
@@ -105,7 +105,7 @@ export default function PhnHealthRecords() {
   const workflow = useWorkflowStore();
 
   // Triaged/check-up patients are matched by name so the record shows the live
-  // status of the RHU → PHN workflow without storing a second patient list.
+  // status of the RHU â†’ PHN workflow without storing a second patient list.
   const visiblePatients = useMemo(
     () => filterRowsByScope(workflow.patients, user, coverage),
     [workflow.patients, user, coverage]
@@ -304,7 +304,7 @@ export default function PhnHealthRecords() {
   const livePatientFor = (record) => patientByName[record.resident] || null;
 
   // The workflow visible in a health record:
-  //   Patient Information → Triage → PHN Check-up → Findings → Outcomes.
+  //   Patient Information â†’ Triage â†’ PHN Check-up â†’ Findings â†’ Outcomes.
   const renderWorkflow = (record) => {
     const patient = patientByName[record.resident];
     const hasAny =
@@ -326,21 +326,21 @@ export default function PhnHealthRecords() {
         {patient?.triage && (
           <WorkflowStep
             title="Triage"
-            sub={`${patient.triage.date || ""} · ${patient.triage.personnel || "RHU Personnel"}`}
+            sub={`${patient.triage.date || ""} Â· ${patient.triage.personnel || "RHU Personnel"}`}
           >
             <p className="mt-1 text-xs text-brand-gray">
-              {patient.reason || patient.triage.chiefComplaint} — BP {patient.triage.bloodPressure || "—"}, T {patient.triage.temperature ? `${patient.triage.temperature}°C` : "—"}
+              {patient.reason || patient.triage.chiefComplaint} â€” BP {patient.triage.bloodPressure || "â€”"}, T {patient.triage.temperature ? `${patient.triage.temperature}Â°C` : "â€”"}
             </p>
           </WorkflowStep>
         )}
         {patient?.status === "Consultation Completed" && patient?.checkup && (
           <WorkflowStep
             title="PHN Check-up"
-            sub={`${patient.checkup.completedAt || ""} · ${patient.checkup.completedBy || ""}`}
+            sub={`${patient.checkup.completedAt || ""} Â· ${patient.checkup.completedBy || ""}`}
           >
             <p className="mt-1 text-xs text-brand-gray">
-              Status: Consultation Completed · Risk: {patient.checkup.riskLevel || "—"}
-              {patient.checkup.riskReason ? ` · ${patient.checkup.riskReason}` : ""}
+              Status: Consultation Completed Â· Risk: {patient.checkup.riskLevel || "â€”"}
+              {patient.checkup.riskReason ? ` Â· ${patient.checkup.riskReason}` : ""}
             </p>
             <div className="mt-2 rounded-btn border border-brand-border px-3 py-2">
               <p className="text-xs text-brand-gray mb-0.5">Assessment / Findings</p>
@@ -366,25 +366,25 @@ export default function PhnHealthRecords() {
         {visibleReferrals
           .filter((r) => r.resident === record.resident)
           .map((r) => (
-            <WorkflowStep key={`r-${r.id}`} title="Referral" sub={`${r.date || ""} → ${r.facility || ""}`}>
+            <WorkflowStep key={`r-${r.id}`} title="Referral" sub={`${r.date || ""} â†’ ${r.facility || ""}`}>
               <p className="mt-1 text-xs text-brand-gray">
-                {r.reason} — <span className="text-brand-ink">{r.status}</span>
+                {r.reason} â€” <span className="text-brand-ink">{r.status}</span>
               </p>
             </WorkflowStep>
           ))}
         {visibleFollowUps
           .filter((f) => f.resident === record.resident)
           .map((f) => (
-            <WorkflowStep key={`f-${f.id}`} title="Follow-up" sub={`${f.dueDate || ""} · ${f.time || ""}`}>
+            <WorkflowStep key={`f-${f.id}`} title="Follow-up" sub={`${f.dueDate || ""} Â· ${f.time || ""}`}>
               <p className="mt-1 text-xs text-brand-gray">
-                {f.purpose} — <span className="text-brand-ink">{f.status}</span>
+                {f.purpose} â€” <span className="text-brand-ink">{f.status}</span>
               </p>
             </WorkflowStep>
           ))}
         {visibleServices
           .filter((s) => (s.name || "").includes(record.resident) || (s.notes || "").includes(record.resident))
           .map((s) => (
-            <WorkflowStep key={`s-${s.id}`} title={s.name.includes(record.resident) ? "Monitoring / Health Service" : "Monitoring / Health Service"} sub={`${s.date || ""} · ${s.personnel || ""}`}>
+            <WorkflowStep key={`s-${s.id}`} title={s.name.includes(record.resident) ? "Monitoring / Health Service" : "Monitoring / Health Service"} sub={`${s.date || ""} Â· ${s.personnel || ""}`}>
               <p className="mt-1 text-xs text-brand-gray">{s.notes || s.name}</p>
             </WorkflowStep>
           ))}
@@ -625,7 +625,7 @@ export default function PhnHealthRecords() {
                         </div>
                         <div>
                           <p className="text-sm font-medium text-brand-ink">{r.resident}</p>
-                          <p className="text-xs text-brand-gray">{r.sex} · {r.age}</p>
+                          <p className="text-xs text-brand-gray">{r.sex} Â· {r.age}</p>
                         </div>
                       </div>
                     </td>
@@ -645,7 +645,7 @@ export default function PhnHealthRecords() {
                           {live.status}
                         </span>
                       ) : (
-                        <span className="text-xs text-brand-gray">—</span>
+                        <span className="text-xs text-brand-gray">â€”</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -766,7 +766,7 @@ export default function PhnHealthRecords() {
                     <p className="text-brand-gray">Name: <span className="text-brand-ink">{selected.resident}</span></p>
                     <p className="text-brand-gray">Age: <span className="text-brand-ink">{selected.age}</span></p>
                     <p className="text-brand-gray">Sex: <span className="text-brand-ink">{selected.sex}</span></p>
-                    <p className="text-brand-gray">Barangay: <span className="text-brand-ink">{viewPatient?.residenceBarangay || selected.barangay || "—"}</span></p>
+                    <p className="text-brand-gray">Barangay: <span className="text-brand-ink">{viewPatient?.residenceBarangay || selected.barangay || "â€”"}</span></p>
                     <p className="text-brand-gray">Consultation Location: <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-blue/10 px-2 py-0.5 text-xs font-medium text-brand-blue"><span className="leading-snug">{viewLocation}</span></span></p>
                   </div>
                 </div>

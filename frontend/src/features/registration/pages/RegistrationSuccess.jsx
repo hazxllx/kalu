@@ -1,11 +1,28 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { CheckCircle2, ShieldCheck, LogIn, Printer, ArrowLeft } from "lucide-react";
 import { AgencyMark } from "@/components/branding/GovChrome";
 
 export default function RegistrationSuccess() {
-  const reference = "KSG-2026-00428";
+  const success = useMemo(() => {
+    try {
+      const raw = sessionStorage.getItem('registrationSuccess');
+      if (!raw) return null;
+      sessionStorage.removeItem('registrationSuccess');
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const needsConfirmation = useMemo(() => {
+    const flag = sessionStorage.getItem('registrationNeedsConfirmation') === '1';
+    sessionStorage.removeItem('registrationNeedsConfirmation');
+    return flag;
+  }, []);
+
+  const reference = success?.healthRecordNo || success?.residentId || '—';
 
   return (
     <div className="min-h-screen bg-paper">
@@ -14,7 +31,6 @@ export default function RegistrationSuccess() {
           <AgencyMark align="center" sealSize={44} />
 
           <div className="gov-sheet mt-7 bg-white">
-            {/* Acknowledgment slip masthead */}
             <div className="border-b border-brand-border bg-brand-paper px-8 py-6">
               <div className="flex items-center justify-between gap-4">
                 <p className="gov-kicker text-brand-blue">Acknowledgment of Receipt</p>
@@ -44,13 +60,14 @@ export default function RegistrationSuccess() {
                 </div>
               </div>
 
-              {/* Reference ledger */}
               <dl className="mt-8 grid grid-cols-2 gap-px border border-brand-border bg-brand-border sm:grid-cols-4">
                 {[
                   ["Reference No.", reference],
                   ["Type", "Form A"],
                   ["Status", "Pending"],
                   ["Office", "MHO · Pili"],
+                  ...(success?.barangay ? [["Barangay", success.barangay]] : []),
+                  ...(success?.name ? [["Name", success.name]] : []),
                 ].map(([label, value]) => (
                   <div key={label} className="bg-white px-4 py-4">
                     <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-brand-gray">
@@ -61,20 +78,25 @@ export default function RegistrationSuccess() {
                 ))}
               </dl>
 
-              {/* Status notice */}
               <div className="mt-6 border-l-[3px] border-brand-gold bg-brand-goldpale px-5 py-4">
                 <p className="flex items-center gap-2.5 text-[13px] font-bold uppercase tracking-[0.08em] text-brand-amber">
                   <ShieldCheck className="h-4 w-4" strokeWidth={2} />
                   Pending verification
                 </p>
-                <p className="mt-1.5 text-[12.5px] leading-relaxed text-brand-ink/80">
-                  You may now sign in with a limited resident account. Full access
-                  to health services is unlocked once your Barangay Health Worker
-                  verifies your identity.
-                </p>
+                {needsConfirmation ? (
+                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-brand-ink/80">
+                    Your account was created. Check your email inbox and confirm your address, then sign in. Once
+                    signed in, open <strong>Verification Status</strong> to finish creating your resident record and
+                    track the Health Supervisor's review.
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-brand-ink/80">
+                    You may now sign in with a limited resident account. Your registration is pending review by the
+                    Health Supervisor of your barangay; once approved, full access to health services is unlocked.
+                  </p>
+                )}
               </div>
 
-              {/* Actions */}
               <div className="mt-7 grid gap-3 sm:grid-cols-2">
                 <Link
                   to="/login"

@@ -14,7 +14,7 @@ stores until these are built.
 // role, assigned barangay, status, password hash).
 // TODO: Add endpoints for create / update / disable / enable / reset-password
 // / delete (disabled only) with admin-only authorization.
-// Frontend reference: frontend/src/services/mock/adminUserStore.js
+// Frontend reference: frontend/src/services/local/adminUserStore.js
 
 ## 2. Staff Registration Requests
 
@@ -22,14 +22,14 @@ stores until these are built.
 // (applicant info, documents, status, notes, reviewer, timestamps).
 // TODO: Add endpoints for list / review (approve, reject, request documents)
 // with required-notes validation on the server.
-// Frontend reference: frontend/src/services/mock/staffRequestStore.js
+// Frontend reference: frontend/src/services/local/staffRequestStore.js
 
 ## 3. Health Supervisor Account Verification
 
 // TODO: Add the database model for supervisor verification accounts
 // (assigned barangay, document status, PHN endorsement note, status, reason).
 // TODO: Add endpoints for admin review decisions and PHN endorsements.
-// Frontend reference: frontend/src/services/mock/supervisorVerificationStore.js
+// Frontend reference: frontend/src/services/local/supervisorVerificationStore.js
 
 ## 4. Role and Barangay Assignment
 
@@ -44,14 +44,14 @@ stores until these are built.
 // description, status, timestamp, IP address).
 // TODO: Add login/logout event capture and an admin-only query endpoint with
 // search, action, role, and date filters.
-// Frontend reference: frontend/src/services/mock/auditStore.js
+// Frontend reference: frontend/src/services/local/auditStore.js
 
 ## 6. Medical Certificate Status History
 
 // TODO: Add the database model for medical certificates and their status
 // history (previous status, new status, actor, notes, timestamp).
 // TODO: Add server-side enforcement of the allowed transitions
-// (Draft → For Review → Approved | Rejected; Approved → Issued) and
+// (Draft â†’ For Review â†’ Approved | Rejected; Approved â†’ Issued) and
 // confirmation-before-issuing.
 // Frontend reference: medicalCertificateStore.ALLOWED_TRANSITIONS
 
@@ -74,7 +74,7 @@ stores until these are built.
 
 // TODO: Add the database model for PhilPEN assessment results (date, risk
 // classification, findings, recommendations, follow-up advice, status).
-// TODO: Add a resident-scoped read endpoint — residents must never see or
+// TODO: Add a resident-scoped read endpoint â€” residents must never see or
 // edit another resident's results.
 // Frontend reference: HealthRecord philpenResults
 
@@ -84,7 +84,7 @@ stores until these are built.
 // receiving facility, reason, priority, status, notes, assigned personnel).
 // TODO: Add endpoints for list / detail / status updates with role-based
 // authorization (RHU Personnel manage; MHO monitors).
-// Frontend reference: frontend/src/services/mock/referralTrackingStore.js
+// Frontend reference: frontend/src/services/local/referralTrackingStore.js
 
 ## 11. MHO Referral Tracking
 

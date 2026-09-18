@@ -7,15 +7,15 @@ import { Card } from "@/components/common/Card";
 import {
   immunizations,
   immunizationSessions,
-} from "@/services/mock/mockData";
+} from "@/services/local/dashboardData";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { BARANGAYS } from "@/lib/barangays";
-import { useResidents, residentStore } from "@/services/mock/residentStore";
+import { useResidents, residentStore } from "@/services/local/residentStore";
 import { X, Plus, CheckCircle2, Search, Syringe, UserPlus } from "lucide-react";
 
 const formatDate = (iso) => {
-  if (!iso || iso === "—") return "—";
+  if (!iso || iso === "â€”") return "â€”";
   const d = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -140,7 +140,7 @@ export default function Immunization() {
         // Mark the scheduled dose as given for an existing child/vaccine row.
         return prev.map((r) =>
           r.child === recordForm.child && r.vaccine.toLowerCase() === vaccine.toLowerCase()
-            ? { ...r, status: "Completed", nextDose: "—" }
+            ? { ...r, status: "Completed", nextDose: "â€”" }
             : r
         );
       }
@@ -149,13 +149,13 @@ export default function Immunization() {
       return prev
         .map((r) =>
           hasPlaceholder && r.child === recordForm.child && r.vaccine === "Awaiting vaccination"
-            ? { child: r.child, vaccine, status: "Completed", nextDose: "—", completed: 1 }
+            ? { child: r.child, vaccine, status: "Completed", nextDose: "â€”", completed: 1 }
             : r
         )
         .concat(
           hasPlaceholder
             ? []
-            : [{ child: recordForm.child, vaccine, status: "Completed", nextDose: "—", completed: 1 }]
+            : [{ child: recordForm.child, vaccine, status: "Completed", nextDose: "â€”", completed: 1 }]
         );
     });
     setRecordOpen(false);
@@ -210,7 +210,7 @@ export default function Immunization() {
     }
 
     // Reuse the resident registry: if the child already exists there, do not
-    // create a duplicate resident — only add them to immunization monitoring.
+    // create a duplicate resident â€” only add them to immunization monitoring.
     let resident = existingResidentMatch;
     let createdResident = false;
     if (!resident) {
@@ -548,7 +548,7 @@ export default function Immunization() {
                     <label className={labelCls}>Date of Birth <span className="text-brand-danger">*</span></label>
                     <input type="date" value={addForm.dob} onChange={(e) => setAddForm({ ...addForm, dob: e.target.value })} className={inputCls(addErrors.dob)} />
                     {addErrors.dob && <p className="mt-1 text-xs text-brand-danger">{addErrors.dob}</p>}
-                    {addForm.dob && <p className="mt-1 text-xs text-brand-gray">Age: {ageFromDob(addForm.dob) || "—"} years</p>}
+                    {addForm.dob && <p className="mt-1 text-xs text-brand-gray">Age: {ageFromDob(addForm.dob) || "â€”"} years</p>}
                   </div>
                   <div>
                     <label className={labelCls}>Sex <span className="text-brand-danger">*</span></label>

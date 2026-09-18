@@ -3,13 +3,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
-import { FOLLOWUP_STATUSES, phnResidents } from "@/services/mock/mockPhnData";
+import { FOLLOWUP_STATUSES, phnResidents } from "@/services/local/phnData";
 import {
   useWorkflowStore,
   addFollowUp,
   patchFollowUp,
   removeFollowUp,
-} from "@/services/mock/mockWorkflowStore";
+} from "@/services/local/workflowStore";
 import {
   filterRowsByScope,
   isPHN,
@@ -617,7 +617,7 @@ export default function PhnFollowUps() {
                   <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Follow-up Information</h4>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <p className="text-brand-gray">Purpose: <span className="text-brand-ink">{selected.purpose}</span></p>
-                    <p className="text-brand-gray">Due: <span className="text-brand-ink">{selected.dueDate} · {selected.time}</span></p>
+                    <p className="text-brand-gray">Due: <span className="text-brand-ink">{selected.dueDate} Â· {selected.time}</span></p>
                     <p className="text-brand-gray">Assigned to: <span className="text-brand-ink">{selected.assignedTo}</span></p>
                     <p className="text-brand-gray">Priority: <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[selected.priority]}`}>{selected.priority}</span></p>
                   </div>
@@ -669,7 +669,7 @@ export default function PhnFollowUps() {
               <div className="space-y-4">
                 <div>
                   <p className="text-sm text-brand-gray mb-1">Follow-up</p>
-                  <p className="text-sm font-medium text-brand-ink">{selected.resident} — {selected.purpose}</p>
+                  <p className="text-sm font-medium text-brand-ink">{selected.resident} â€” {selected.purpose}</p>
                 </div>
                 <div>
                   <p className="text-sm text-brand-gray mb-1">Current Status</p>

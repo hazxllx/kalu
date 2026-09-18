@@ -4,9 +4,10 @@ import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
-import { bhwDashboard, households } from "@/services/mock/mockData";
-import { useHouseholdRiskClusters } from "@/services/mock/householdRiskStore";
+import { bhwDashboard, households } from "@/services/local/dashboardData";
+import { useHouseholdRiskClusters } from "@/services/local/householdRiskStore";
 import { RISK_LEVELS } from "@/lib/householdRisk";
+import { useAuth } from "@/context/AuthContext";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 
 function riskLevel(score) {
@@ -15,7 +16,7 @@ function riskLevel(score) {
   return "Low";
 }
 
-// Household-level concerns, aggregated across the barangay. Community data only —
+// Household-level concerns, aggregated across the barangay. Community data only â€”
 // no individual resident is identified.
 const concernSummary = Object.entries(
   households.reduce((acc, h) => {
@@ -27,6 +28,9 @@ const concernSummary = Object.entries(
 ).sort((a, b) => b[1] - a[1]).slice(0, 4);
 
 export default function BHWDashboard() {
+  const { user } = useAuth();
+  const firstName = (user?.name || "").trim().split(" ")[0];
+  const assignedBarangay = user?.assignedBarangay || user?.barangay;
   const clusters = useHouseholdRiskClusters();
   const counts = {
     priority: clusters.filter((c) => c.risk.level === RISK_LEVELS.PRIORITY).length,
@@ -36,12 +40,16 @@ export default function BHWDashboard() {
   };
   return (
     <>
-      <PageHeader crumbs={["Dashboard"]} title="Good morning, Maria" subtitle="Here's what needs your attention today in San Isidro." />
+      <PageHeader
+        crumbs={["Dashboard"]}
+        title={`Good morning, ${firstName || "BHW"}`}
+        subtitle={assignedBarangay ? `Here's what needs your attention today in ${assignedBarangay}.` : "Here's what needs your attention today."}
+      />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4 mb-6">
         {bhwDashboard.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
       </div>
 
-      {/* Household Risk Clusters — early intervention */}
+      {/* Household Risk Clusters â€” early intervention */}
       <Link to="/app/bhw/households/risk-clusters" className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-brand-blue/40 transition-colors">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue">
           <AlertTriangle className="h-5 w-5" />
@@ -66,11 +74,14 @@ export default function BHWDashboard() {
             </Link>
           </div>
           <div className="space-y-3">
+            {households.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No household profiles yet.</p>
+            )}
             {households.slice(0, 4).map((h) => (
               <div key={h.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2">
                 <div>
                   <p className="font-medium text-brand-ink text-sm">{h.address}</p>
-                  <p className="text-xs text-brand-gray">{h.id} · {h.members} members</p>
+                  <p className="text-xs text-brand-gray">{h.id} Â· {h.members} members</p>
                 </div>
                 <StatusBadge value={riskLevel(h.riskScore)} />
               </div>
@@ -80,6 +91,9 @@ export default function BHWDashboard() {
         <Card className="p-4 sm:p-6">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Household Health Concerns</h3>
           <div className="space-y-3">
+            {concernSummary.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No household concerns recorded yet.</p>
+            )}
             {concernSummary.map(([concern, count]) => (
               <div key={concern} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2">
                 <div>

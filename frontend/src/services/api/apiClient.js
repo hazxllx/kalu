@@ -12,10 +12,10 @@ import { supabase } from '@/lib/supabase';
  * and derive their role. Responses are unwrapped from the `{ data }` envelope
  * used by the backend (`utils/apiResponse.js`).
  *
- * NOTE: the backend domain endpoints currently return 501 until the verified
- * database schema is connected. During development the UI renders from
- * `@/services/mock/*`; swap a feature module's mock call for its apiClient call
- * once the corresponding endpoint is live.
+ * NOTE: the backend domain endpoints that are not connected yet return 501.
+ * Pages render their loading skeleton while a request is in flight and an
+ * empty state when the endpoint supplies no rows — no fabricated data is
+ * rendered anywhere in the app.
  */
 const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
@@ -25,18 +25,29 @@ async function getAccessToken() {
   return data?.session?.access_token || null;
 }
 
-async function request(path, { method = 'GET', body, headers = {}, ...rest } = {}) {
+/** Build the request URL, serializing `params` into the query string. */
+function buildUrl(path, params) {
+  if (!params) return `${BASE_URL}${path}`;
+  const search = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+  ).toString();
+  return search ? `${BASE_URL}${path}?${search}` : `${BASE_URL}${path}`;
+}
+
+async function request(path, { method = 'GET', body, headers = {}, params, ...rest } = {}) {
   const token = await getAccessToken();
 
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+
+  const response = await fetch(buildUrl(path, params), {
     method,
     credentials: 'include',
     headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(body ? { body } : {}),
     ...rest,
   });
 
@@ -53,9 +64,37 @@ async function request(path, { method = 'GET', body, headers = {}, ...rest } = {
     throw error;
   }
 
-  // Unwrap the standard success envelope when present.
   return isJson && payload && 'data' in payload ? payload.data : payload;
 }
+
+export const postFormData = async (path, formData, options = {}) => {
+  const token = await getAccessToken();
+  const response = await fetch(buildUrl(path, options.params), {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
+    body: formData,
+    ...options,
+  });
+
+  const isJson = response.headers.get('content-type')?.includes('application/json');
+  const payload = isJson ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    const message =
+      (isJson && (payload?.error?.message || payload?.message)) ||
+      `Request failed with status ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return isJson && payload && 'data' in payload ? payload.data : payload;
+};
 
 export const api = {
   get: (path, options) => request(path, { ...options, method: 'GET' }),

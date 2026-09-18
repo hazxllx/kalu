@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { useHouseholdRiskClusters, householdRiskStore } from "@/services/mock/householdRiskStore";
+import { useHouseholdRiskClusters, householdRiskStore } from "@/services/local/householdRiskStore";
 import {
   RISK_LEVELS, RISK_LEVEL_LABELS, RISK_CLASSIFICATION_BASIS, getRiskConfig,
 } from "@/lib/householdRisk";

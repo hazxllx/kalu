@@ -7,7 +7,7 @@ import {
   resetRiskConfig,
   DEFAULT_RISK_CONFIG,
 } from "@/lib/householdRisk";
-import { householdRiskStore } from "@/services/mock/householdRiskStore";
+import { householdRiskStore } from "@/services/local/householdRiskStore";
 import { Check, RotateCcw, Save } from "lucide-react";
 
 export default function RiskRuleConfig() {

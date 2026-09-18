@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Card } from "@/components/common/Card";
 import { X, PhoneCall, UserPlus, ArrowUpRight } from "lucide-react";
 import { RISK_WORKFLOW_STATUSES } from "@/lib/householdRisk";
-import { ACTIVE_BHWS } from "@/services/mock/tclStore";
+import { ACTIVE_BHWS } from "@/services/local/tclStore";
 
 const BHW_OPTIONS = Array.from(new Set([...ACTIVE_BHWS, "Maria Cruz", "Lourdes Ramos", "Grace Aquino", "Maria Dela Cruz", "Ana Villanueva"]));
 

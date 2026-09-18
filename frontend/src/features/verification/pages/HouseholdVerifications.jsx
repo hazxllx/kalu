@@ -6,12 +6,12 @@ import VerificationBadge from "@/features/verification/components/VerificationBa
 import HouseholdVerificationReviewDrawer from "@/features/verification/components/HouseholdVerificationReviewDrawer";
 import { useAuth } from "@/context/AuthContext";
 import { getAssignedBarangay } from "@/lib/barangayScope";
-import { householdStore } from "@/services/mock/householdStore";
+import { householdStore } from "@/services/local/householdStore";
 import { ROLES } from "@/lib/brand";
 import {
   resolvePendingHouseholdVerifications,
   resolveHouseholdVerificationHistory,
-} from "@/services/mock/mockHouseholdVerifications";
+} from "@/services/local/householdVerifications";
 import { Search, CheckCircle2, ChevronRight, History, Home } from "lucide-react";
 
 const formatHistoryDate = (iso) => {
@@ -157,7 +157,7 @@ export default function HouseholdVerifications() {
                   </td>
                   <td className="px-6 py-3.5">
                     <p className="font-medium text-brand-ink">{h.head}</p>
-                    <p className="text-xs text-brand-gray">{h.members} members · {h.families} {h.families === 1 ? "family" : "families"}</p>
+                    <p className="text-xs text-brand-gray">{h.members} members Â· {h.families} {h.families === 1 ? "family" : "families"}</p>
                   </td>
                   <td className="px-6 py-3.5 text-brand-gray">{h.barangay}</td>
                   <td className="px-6 py-3.5">
@@ -230,7 +230,7 @@ export default function HouseholdVerifications() {
                         {h.remarks && <span className="block text-xs text-brand-gray mt-0.5">{h.remarks}</span>}
                       </p>
                     ) : (
-                      <p className="text-sm text-brand-gray">{h.remarks || "—"}</p>
+                      <p className="text-sm text-brand-gray">{h.remarks || "â€”"}</p>
                     )}
                   </td>
                   <td className="px-6 py-3.5 text-sm text-brand-gray">{h.reviewedBy}</td>

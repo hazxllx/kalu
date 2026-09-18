@@ -6,8 +6,11 @@ import healthRoutes from './health.routes.js';
 import intakeRoutes from './intake.routes.js';
 import phnRoutes, { phnReadsRouter } from './phnQueue.routes.js';
 import residentsRoutes from './residents.routes.js';
+import registrationRoutes from './registration.routes.js';
+import householdsRoutes from './households.routes.js';
 import analyticsRoutes from './analytics.routes.js';
 import verificationsRoutes from './verifications.routes.js';
+import documentsRoutes from './documents.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -29,6 +32,10 @@ router.use('/health', healthRoutes);
 // Authentication
 router.use('/auth', authRoutes);
 
+// Resident self-registration (creates the linked residents row; the Supabase
+// Auth account is created client-side by supabase.auth.signUp).
+router.use('/registration', registrationRoutes);
+
 // Resident -> RHU -> PHN submission workflow
 router.use('/intake', intakeRoutes);          // BHW / RHU personnel intake
 router.use('/phn', phnRoutes);                // PHN processing (queue, referrals)
@@ -43,8 +50,9 @@ router.use('/verifications', verificationsRoutes);
 // Account / system administration
 router.use('/users', createResourceRouter('users', { readRoles: FEATURE_ROLES.users }));
 
-// Community data collection (BHW)
-router.use('/households', createResourceRouter('households', { readRoles: FEATURE_ROLES.households, writeRoles: FEATURE_ROLES.dataCollection }));
+// Household Profiling — real Supabase-backed workflow (Phase 5): BHW
+// collection, Health Supervisor verification, server-computed risk.
+router.use('/households', householdsRoutes);
 
 // Legacy clinical resources — schema not connected yet (501).
 router.use('/health-records', createResourceRouter('health-records', { readRoles: FEATURE_ROLES.healthRecords }));

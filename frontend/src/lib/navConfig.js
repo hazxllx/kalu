@@ -15,6 +15,7 @@
 export const NAV = {
   "resident-limited": [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/resident-limited/dashboard" },
+    { label: "Verification Status", icon: "ShieldCheck", path: "/app/resident-limited/verification" },
     { label: "Health Services", icon: "Stethoscope", path: "/app/resident-limited/services" },
     { label: "Notifications", icon: "Bell", path: "/app/resident-limited/announcements" },
     { label: "Profile", icon: "User", path: "/app/resident-limited/profile" },
@@ -25,6 +26,7 @@ export const NAV = {
   ],
   resident: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/resident/dashboard" },
+    { label: "Verification Status", icon: "ShieldCheck", path: "/app/resident/verification" },
     { label: "My Health Records", icon: "FileHeart", path: "/app/resident/record", permission: "residents.profile.view" },
     { label: "Consultation History", icon: "ClipboardList", path: "/app/resident/consultations", permission: "consultation.history.view" },
     { label: "Follow-ups", icon: "CalendarClock", path: "/app/resident/followups", permission: "followups.view" },
@@ -62,10 +64,9 @@ export const NAV = {
   // Health Supervisor: barangay-level nurse/midwife. Owns resident
   // verification, resident directory, household verification, health records,
   // consultation, referrals, follow-ups and barangay community monitoring /
-  // early warning. The demo account is assigned to Barangay San Isidro — its
-  // Early Warning module and barangay-sensitive data are scoped to that
-  // assignment (see `@/lib/barangayScope` and the API's barangay-scope
-  // middleware).
+  // early warning. The account is assigned to a barangay — its Early Warning
+  // module and barangay-sensitive data are scoped to that assignment (see
+  // `@/lib/barangayScope` and the API's barangay-scope middleware).
   health_supervisor: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/health_supervisor/dashboard", group: "Main" },
     { label: "Resident Directory", icon: "Users", path: "/app/health_supervisor/residents", permission: "residents.directory.view", group: "Main" },

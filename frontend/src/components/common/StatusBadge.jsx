@@ -21,6 +21,10 @@ const TONES = {
   Available: "bg-emerald-50 text-emerald-700",
   Unavailable: "bg-rose-50 text-rose-700",
   "Pending Sync": "bg-amber-100 text-amber-700",
+  // Resident verification states (residents.verification_status)
+  verified: "bg-emerald-50 text-emerald-700",
+  unverified: "bg-slate-100 text-slate-600",
+  rejected: "bg-rose-50 text-rose-700",
 };
 
 export default function StatusBadge({ value, className = "" }) {

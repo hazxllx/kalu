@@ -1,21 +1,22 @@
 import { getServiceClient } from '../config/supabase.js';
+import { loadActiveProfile, profileToSessionUser } from './profile.service.js';
 import ApiError from '../utils/apiError.js';
 
 /**
- * Authentication business logic (Supabase Auth).
+ * Authentication business logic (Supabase Auth + profiles).
  *
  * The frontend can either talk to Supabase Auth directly (current default, via
- * `@/lib/supabase`) or through these endpoints. Either way, the *role* is
- * derived from the authenticated account — never chosen by the client.
- *
- * These functions call real Supabase Auth. They do NOT touch application tables
- * yet, so they do not depend on the unverified ERD.
+ * `@/lib/supabase`) or through these endpoints. Either way the role, account
+ * status and coverage assignment are resolved from the `profiles` table —
+ * never chosen by the client.
  */
 
-const toSessionUser = (user) => ({
+const metadataUser = (user) => ({
   id: user.id,
   email: user.email,
+  name: user.email,
   role: user.app_metadata?.role || user.user_metadata?.role || null,
+  status: null,
 });
 
 export const signIn = async ({ email, password }) => {
@@ -28,8 +29,27 @@ export const signIn = async ({ email, password }) => {
     throw ApiError.unauthorized('Invalid email or password');
   }
 
+  // Resolve the application profile. When the account-state gate rejects the
+  // account, revoke the freshly issued session before surfacing the error so
+  // no usable token is left behind.
+  let profileResult;
+  try {
+    profileResult = await loadActiveProfile(data.user.id);
+  } catch (err) {
+    try {
+      await supabase.auth.admin.signOut(data.session.access_token);
+    } catch {
+      /* best-effort revocation */
+    }
+    throw err;
+  }
+
+  const { profile, unavailable } = profileResult;
+  const user = profile ? profileToSessionUser(profile) : metadataUser(data.user);
+
   return {
-    user: toSessionUser(data.user),
+    user,
+    profileResolved: !unavailable && Boolean(profile),
     session: {
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
@@ -42,7 +62,10 @@ export const getCurrentUser = async (accessToken) => {
   const supabase = getServiceClient();
   const { data, error } = await supabase.auth.getUser(accessToken);
   if (error || !data?.user) throw ApiError.unauthorized('Invalid or expired session');
-  return toSessionUser(data.user);
+
+  // Profile is the source of truth; metadata is the pre-migration fallback.
+  const { profile } = await loadActiveProfile(data.user.id);
+  return profile ? profileToSessionUser(profile) : metadataUser(data.user);
 };
 
 export const signOut = async (accessToken) => {

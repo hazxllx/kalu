@@ -4,14 +4,14 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
-import { residents } from "@/services/mock/mockData";
-import { phnResidents, REFERRAL_STATUSES } from "@/services/mock/mockPhnData";
+import { residents } from "@/services/local/dashboardData";
+import { phnResidents, REFERRAL_STATUSES } from "@/services/local/phnData";
 import {
   useWorkflowStore,
   addReferral,
   patchReferral,
   removeReferral,
-} from "@/services/mock/mockWorkflowStore";
+} from "@/services/local/workflowStore";
 import {
   filterRowsByScope,
   phnFilterOptions,
@@ -24,50 +24,7 @@ import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, CheckCircle2, Download, Trash2 } from "lucide-react";
 
-const REFERRALS = [
-  {
-    id: 1,
-    referralNo: "RH-2026-000001",
-    resident: "Ana Villanueva",
-    age: 32,
-    sex: "Female",
-    barangay: "San Isidro",
-    date: "July 10, 2026",
-    reason: "High-risk Pregnancy",
-    facility: "RHU Pili",
-    priority: "High",
-    status: "Pending",
-    notes: "Requires specialized maternal care due to elevated blood pressure.",
-  },
-  {
-    id: 2,
-    referralNo: "RH-2026-000002",
-    resident: "Maria Santos",
-    age: 28,
-    sex: "Female",
-    barangay: "San Antonio",
-    date: "July 8, 2026",
-    reason: "Abnormal Ultrasound Findings",
-    facility: "RHU Pili",
-    priority: "High",
-    status: "Accepted",
-    notes: "Ultrasound showed placenta previa. Referral for specialist evaluation.",
-  },
-  {
-    id: 3,
-    referralNo: "RH-2026-000003",
-    resident: "Grace Aquino",
-    age: 24,
-    sex: "Female",
-    barangay: "Old San Roque",
-    date: "July 5, 2026",
-    reason: "Postpartum Follow-up",
-    facility: "RHU Pili",
-    priority: "Medium",
-    status: "Completed",
-    notes: "Post-delivery monitoring completed. Mother and baby in good condition.",
-  },
-];
+const REFERRALS = [];
 
 const emptyReferralForm = () => ({
   date: new Date().toISOString().slice(0, 10),

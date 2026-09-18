@@ -5,23 +5,20 @@ import { Map, Users, Stethoscope, Send, ShieldAlert, Activity, ClipboardList, Ch
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
-import { useMunicipalSubmissions } from "@/services/mock/municipalSubmissionsStore";
+import { useMunicipalSubmissions } from "@/services/local/municipalSubmissionsStore";
+import { BARANGAYS } from "@/lib/barangays";
 
 const STATS = [
-  { icon: Map, tone: "bg-brand-blue/10 text-brand-blue", label: "Total Barangays", value: "3" },
-  { icon: Users, tone: "bg-brand-accent/10 text-brand-accent", label: "Registered Residents", value: "1,248" },
-  { icon: Stethoscope, tone: "bg-brand-green/10 text-brand-green", label: "Total Consultations", value: "3,420" },
-  { icon: Send, tone: "bg-brand-yellow/15 text-[#B07E00]", label: "Total Referrals", value: "186" },
-  { icon: ShieldAlert, tone: "bg-brand-danger/10 text-brand-danger", label: "High-Risk Residents", value: "47" },
+  { icon: Map, tone: "bg-brand-blue/10 text-brand-blue", label: "Total Barangays", value: "—" },
+  { icon: Users, tone: "bg-brand-accent/10 text-brand-accent", label: "Registered Residents", value: "—" },
+  { icon: Stethoscope, tone: "bg-brand-green/10 text-brand-green", label: "Total Consultations", value: "—" },
+  { icon: Send, tone: "bg-brand-yellow/15 text-[#B07E00]", label: "Total Referrals", value: "—" },
+  { icon: ShieldAlert, tone: "bg-brand-danger/10 text-brand-danger", label: "High-Risk Residents", value: "—" },
 ];
 
-const ACTIVITY = [
-  { type: "Referral", title: "New referral from San Isidro", desc: "Resident referred to RHU Pili", time: "2 hours ago", badge: "Pending" },
-  { type: "Consultation", title: "Consultation records submitted", desc: "Barangay San Antonio submitted 12 consultation records", time: "5 hours ago", badge: "Received" },
-  { type: "Alert", title: "High-risk resident identified", desc: "Hypertension Stage 2 — Barangay San Isidro", time: "8 hours ago", badge: "High" },
-  { type: "Referral", title: "Referral status updated", desc: "Barangay San Antonio referral marked as Accepted", time: "1 day ago", badge: "Accepted" },
-  { type: "Report", title: "Monthly municipal report available", desc: "June 2026 municipal health summary is ready for review", time: "2 days ago", badge: "Completed" },
-];
+const ACTIVITY = [];
+
+const TOP_CONDITIONS = [];
 
 export default function MHODashboard() {
   const submissions = useMunicipalSubmissions();
@@ -33,7 +30,7 @@ export default function MHODashboard() {
       m1Submitted: m1.filter((s) => s.period === "September 2026").length,
       pending: submissions.filter((s) => s.reviewStatus === "Pending Review" || s.status === "Under Review").length,
       needsCorrection: submissions.filter((s) => s.reviewStatus === "Needs Correction" || s.reviewStatus === "Returned").length,
-      totalBarangays: 3,
+      totalBarangays: BARANGAYS.length,
     };
   }, [submissions]);
 
@@ -80,6 +77,9 @@ export default function MHODashboard() {
             <Activity className="w-4 h-4 text-brand-gray shrink-0" strokeWidth={1.8} />
           </div>
           <div className="space-y-1">
+            {ACTIVITY.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No recent activity.</p>
+            )}
             {ACTIVITY.map((a, i) => (
               <div key={i} className="flex items-start gap-3 py-3 border-b border-brand-border last:border-0">
                 <div className="flex-1 min-w-0">
@@ -99,13 +99,10 @@ export default function MHODashboard() {
         <Card className="p-4 sm:p-6 h-fit">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Top Health Conditions</h3>
           <div className="space-y-3">
-            {[
-              { name: "Hypertension", count: 342, pct: 28 },
-              { name: "Diabetes Mellitus", count: 189, pct: 15 },
-              { name: "Respiratory Infections", count: 156, pct: 13 },
-              { name: "Malnutrition", count: 98, pct: 8 },
-              { name: "Anemia", count: 74, pct: 6 },
-            ].map((c) => (
+            {TOP_CONDITIONS.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No data available yet.</p>
+            )}
+            {TOP_CONDITIONS.map((c) => (
               <div key={c.name}>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-brand-ink">{c.name}</span>

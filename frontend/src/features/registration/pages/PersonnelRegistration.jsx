@@ -20,7 +20,8 @@ import {
   btnGhost,
 } from "@/features/registration/components/RegistrationDesign";
 import UploadComponent from "@/features/registration/components/UploadComponent";
-import { staffRequestStore } from "@/services/mock/staffRequestStore";
+import DatePicker from "@/components/common/DatePicker";
+import { staffRequestStore } from "@/services/local/staffRequestStore";
 import { BARANGAYS } from "@/lib/barangays";
 import { CONSULTATION_LOCATIONS, barangayHealthCenter } from "@/lib/consultationLocations";
 
@@ -437,7 +438,13 @@ export default function PersonnelRegistration() {
                   <input type="text" placeholder="Jr." value={form.suffix} onChange={set("suffix")} className={inputCls()} />
                 </Field>
                 <Field label="Birth Date" required error={errors.dob}>
-                  <input type="date" max={TODAY} value={form.dob} onChange={set("dob")} className={inputCls(errors.dob)} />
+                  <DatePicker
+                    value={form.dob}
+                    max={TODAY}
+                    error={Boolean(errors.dob)}
+                    placeholder="Select birth date..."
+                    onChange={(v) => { setForm((p) => ({ ...p, dob: v })); if (errors.dob) setErrors((p) => ({ ...p, dob: "" })); }}
+                  />
                 </Field>
                 <Field label="Age" hint="Calculated automatically from the date of birth.">
                   <input type="text" value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" className={`${inputCls()} cursor-not-allowed text-slate-500`} />
@@ -570,7 +577,13 @@ export default function PersonnelRegistration() {
                       <input type="text" placeholder="e.g. PRC-0012345" value={form.licenseNumber} onChange={set("licenseNumber")} className={inputCls(errors.licenseNumber)} />
                     </Field>
                     <Field label="License Expiration Date" required error={errors.licenseExpiry}>
-                      <input type="date" min={TODAY} value={form.licenseExpiry} onChange={set("licenseExpiry")} className={inputCls(errors.licenseExpiry)} />
+                      <DatePicker
+                        value={form.licenseExpiry}
+                        min={TODAY}
+                        error={Boolean(errors.licenseExpiry)}
+                        placeholder="Select expiration date..."
+                        onChange={(v) => set("licenseExpiry")(v)}
+                      />
                     </Field>
                   </div>
                 )}

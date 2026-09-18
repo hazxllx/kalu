@@ -6,7 +6,7 @@ import { Card } from "@/components/common/Card";
 import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { useResidents } from "@/services/mock/residentStore";
+import { useResidents } from "@/services/local/residentStore";
 import {
   useTcls,
   tclStore,
@@ -14,7 +14,7 @@ import {
   TCL_STATUSES,
   TCL_PRIORITIES,
   ACTIVE_BHWS,
-} from "@/services/mock/tclStore";
+} from "@/services/local/tclStore";
 
 const categories = ["All", ...TCL_PROGRAMS];
 

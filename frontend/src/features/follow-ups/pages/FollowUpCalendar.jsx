@@ -3,14 +3,14 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { useResidents } from "@/services/mock/residentStore";
+import { useResidents } from "@/services/local/residentStore";
 import {
   useFollowUpSchedules,
   followUpScheduleStore,
   SCHEDULE_STATUSES,
   PROVIDERS,
   LOCATIONS,
-} from "@/services/mock/followUpScheduleStore";
+} from "@/services/local/followUpScheduleStore";
 import { DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
 import { dayLabel, groupByDay, monthLabel, toKey, weekLabel } from "../lib/scheduleDates";
 import {

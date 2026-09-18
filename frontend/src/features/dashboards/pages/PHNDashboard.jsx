@@ -8,14 +8,14 @@ import StatusBadge from "@/components/common/StatusBadge";
 import {
   REFERRAL_STATUSES,
   phnAlerts,
-} from "@/services/mock/mockPhnData";
+} from "@/services/local/phnData";
 import {
   CHECKUP_STATUS,
   useWorkflowStore,
   startPatientCheckup,
   patchReferral,
   workflowHelpers,
-} from "@/services/mock/mockWorkflowStore";
+} from "@/services/local/workflowStore";
 import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { riskOfPatient } from "@/lib/riskRules";
@@ -65,15 +65,15 @@ const QUICK_ACTIONS = [
 ];
 
 const welcomeFor = (user) => {
-  const first = (user?.name || "Ana Villanueva").split(" ")[0];
-  return `Welcome, Nurse ${first}`;
+  const first = (user?.name || "").trim().split(" ")[0];
+  return first ? `Welcome, Nurse ${first}` : "Welcome, Nurse";
 };
 
 export default function PHNDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
   // PHNs are RHU-based personnel. The dashboard always reflects the RHU
-  // workflow — patients may come from any barangay (BHWs / health centers
+  // workflow â€” patients may come from any barangay (BHWs / health centers
   // refer them to the RHU), so no row is hidden by residence barangay.
   const { coverage } = usePhnCoverage();
   const welcome = welcomeFor(user);
@@ -145,7 +145,7 @@ export default function PHNDashboard() {
     };
   }, [anyModalOpen]);
 
-  // PHNs are RHU-based — the right rail always shows the RHU check-up
+  // PHNs are RHU-based â€” the right rail always shows the RHU check-up
   // progress summary.
   const stats = useMemo(() => {
     const today = workflowHelpers.todayLong();
@@ -257,7 +257,7 @@ export default function PHNDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-        {/* Patients for Check-up — single queue source, scope-filtered */}
+        {/* Patients for Check-up â€” single queue source, scope-filtered */}
         <Card id="queue" className="p-4 sm:p-6 lg:col-span-2 scroll-mt-24">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
@@ -289,7 +289,7 @@ export default function PHNDashboard() {
                     <tr key={q.id} className="border-b border-brand-border last:border-0 hover:bg-brand-bg/50 transition-colors">
                       <td className="px-4 py-3">
                         <p className="font-medium text-brand-ink">{q.patient}</p>
-                        <p className="text-xs text-brand-gray">{q.age} yrs · {q.sex}</p>
+                        <p className="text-xs text-brand-gray">{q.age} yrs Â· {q.sex}</p>
                       </td>
                       <td className="px-4 py-3 text-brand-ink">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${q.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>
@@ -331,7 +331,7 @@ export default function PHNDashboard() {
           </div>
         </Card>
 
-        {/* Right rail — RHU check-up progress */}
+        {/* Right rail â€” RHU check-up progress */}
         <Card className="p-4 sm:p-6 h-fit">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
@@ -377,7 +377,7 @@ export default function PHNDashboard() {
                   <div className="min-w-0">
                     <p className="font-medium text-brand-ink text-sm">{r.resident}</p>
                     <p className="text-xs text-brand-gray">
-                      {r.barangay || "RHU"} · {r.reason}
+                      {r.barangay || "RHU"} Â· {r.reason}
                     </p>
                   </div>
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium shrink-0 ${REFERRAL_STATUS_TONES[r.status] || "bg-slate-100 text-slate-600"}`}>
@@ -413,9 +413,9 @@ export default function PHNDashboard() {
               <div key={f.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2">
                 <div className="min-w-0">
                   <p className="font-medium text-brand-ink text-sm">
-                    {f.resident} <span className="text-brand-gray font-normal">— {f.barangay || "RHU"} — {f.purpose}</span>
+                    {f.resident} <span className="text-brand-gray font-normal">â€” {f.barangay || "RHU"} â€” {f.purpose}</span>
                   </p>
-                  <p className="text-xs text-brand-gray flex items-center gap-1 mt-0.5"><Clock className="w-3 h-3" /> {f.dueDate} · {f.time}</p>
+                  <p className="text-xs text-brand-gray flex items-center gap-1 mt-0.5"><Clock className="w-3 h-3" /> {f.dueDate} Â· {f.time}</p>
                 </div>
                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium shrink-0 ${FOLLOWUP_STATUS_TONES[f.status] || "bg-slate-100 text-slate-600"}`}>
                   <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" /> {f.status}
@@ -442,7 +442,7 @@ export default function PHNDashboard() {
                     <span className={`mt-1 w-2.5 h-2.5 rounded-full shrink-0 ${level.dot}`} />
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-brand-ink text-sm">{a.type}</p>
-                      <p className="text-xs text-brand-gray mt-0.5">{a.barangay || "RHU"} — {a.description}</p>
+                      <p className="text-xs text-brand-gray mt-0.5">{a.barangay || "RHU"} â€” {a.description}</p>
                       <button onClick={() => setAlertDetail(a)} className="text-xs font-medium text-brand-blue hover:underline mt-2">Review</button>
                     </div>
                   </div>
@@ -466,7 +466,7 @@ export default function PHNDashboard() {
               <div key={s.id} className="flex items-center justify-between border border-brand-border rounded-btn px-4 py-2.5 gap-2">
                 <div className="min-w-0">
                   <p className="font-medium text-brand-ink text-sm truncate">{s.name}</p>
-                  <p className="text-xs text-brand-gray">{s.barangay || "RHU"} · {s.count}</p>
+                  <p className="text-xs text-brand-gray">{s.barangay || "RHU"} Â· {s.count}</p>
                 </div>
                 <StatusBadge value={s.status === "Ongoing" ? "Ongoing" : s.status === "Completed" ? "Completed" : "Scheduled"} />
               </div>
@@ -640,7 +640,7 @@ export default function PHNDashboard() {
                           <p className="font-medium text-brand-ink text-sm">{s.name}</p>
                           <StatusBadge value={s.status === "Ongoing" ? "Ongoing" : s.status === "Completed" ? "Completed" : "Scheduled"} />
                         </div>
-                        <p className="text-xs text-brand-gray mt-1">{s.barangay || "RHU"} · {s.count} · {s.time} · {s.personnel}</p>
+                        <p className="text-xs text-brand-gray mt-1">{s.barangay || "RHU"} Â· {s.count} Â· {s.time} Â· {s.personnel}</p>
                       </div>
                     ))}
                   </div>

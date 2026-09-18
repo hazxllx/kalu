@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { MapPin, Users, AlertTriangle, Syringe, Plus, X, ShieldAlert, LifeBuoy } from "lucide-react";
-import { barangayOverview } from "@/services/mock/mockData";
+import { barangayOverview } from "@/services/local/dashboardData";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 
@@ -14,7 +14,7 @@ import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
  *   ONLY the supervisor's assigned barangay. Adding barangays is a municipality
  *   administration function, so no Add button is offered.
  * - Health Supervisor (no assignment): an empty state that asks the
- *   municipality administrator for an assignment — never a fallback list of
+ *   municipality administrator for an assignment â€” never a fallback list of
  *   every barangay.
  * - Municipality-level roles (e.g. MHO): the existing multi-barangay overview
  *   and registration flow, unchanged.
@@ -134,7 +134,7 @@ export default function Barangays() {
         <PageHeader
           crumbs={["Barangays"]}
           title="My Barangay"
-          subtitle={`Brgy. ${assignedBarangay} — health profile and community health information for your assigned barangay.`}
+          subtitle={`Brgy. ${assignedBarangay} â€” health profile and community health information for your assigned barangay.`}
         />
         {!barangay ? (
           <Card className="p-10 text-center">

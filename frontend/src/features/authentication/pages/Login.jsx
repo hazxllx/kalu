@@ -1,45 +1,75 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, AlertTriangle, ChevronDown, Users } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, AlertTriangle, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { homeForRole } from "@/lib/roles";
+import { homeForRole, landingFor } from "@/lib/roles";
 import GovSeal from "@/components/branding/GovSeal";
-import { MOCK_ACCOUNTS } from "@/services/mock/mockAccounts";
+import { email as validateEmail, required, validateFields, firstErrorField } from "@/utils/validation";
+import { FieldError, ValidationSummary } from "@/components/common/Validation";
 
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, isSupabaseConfigured } = useAuth();
+  const { login, isSupabaseConfigured, authNotice } = useAuth();
   const [show, setShow] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [demoOpen, setDemoOpen] = useState(false);
+  const emailRef = useRef(null);
+  const passwordRef = useRef(null);
+  const fieldRefs = { email: emailRef, password: passwordRef };
+
+  const focusField = (field) => {
+    const target = fieldRefs[field]?.current;
+    if (target) target.focus();
+  };
 
   // The role is resolved from the authenticated account — never chosen here.
+  // A `from` path left in history by an earlier session is honored only when
+  // the signed-in role may open it; otherwise the role's own dashboard is used
+  // (prevents a valid account being dropped on /unauthorized after sign-in).
   const submit = async (e) => {
     e.preventDefault();
+    if (submitting) return; // guard against rapid double submission
+
+    const errors = validateFields(
+      { email, password },
+      {
+        email: (v) => validateEmail(v, { label: "Email address" }),
+        password: (v) => required(v, "Password"),
+      },
+    );
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      const first = firstErrorField(errors);
+      if (first) focusField(first);
+      return;
+    }
+
     setError("");
     setSubmitting(true);
     try {
       const role = await login({ email, password });
       const from = location.state?.from;
-      navigate(from || homeForRole(role), { replace: true });
+      navigate(landingFor(role, from) || homeForRole(role), { replace: true });
     } catch (err) {
+      // Generic message only: never reveal whether the email exists.
       setError(err.message || "Unable to sign in. Please check your credentials.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Demo helper: populate the form only. The user still clicks "Sign In".
-  const fillDemoAccount = (account) => {
-    setEmail(account.email);
-    setPassword(account.password);
-    setError("");
-  };
+  const clearFieldError = (field) =>
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
 
   return (
     <div className="relative flex min-h-dvh w-full flex-col items-center justify-center gov-navy-panel px-4 py-5 sm:py-7">
@@ -89,38 +119,76 @@ export default function Login() {
                   </div>
                 )}
 
+                <ValidationSummary
+                  errors={fieldErrors}
+                  title="Please fix the highlighted fields."
+                  onFocusField={focusField}
+                />
+
+                {/* The session is valid but the profile service failed. This is
+                    NOT an account problem, so it is shown as a warning rather
+                    than the "no profile" error. */}
+                {!error && authNotice && (
+                  <div
+                    role="status"
+                    className="flex items-start gap-2 rounded-lg border border-brand-gold/40 bg-brand-goldpale/70 px-3 py-2.5 text-[12px] leading-relaxed text-brand-amber"
+                  >
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={2} />
+                    <span>{authNotice}</span>
+                  </div>
+                )}
+
                 <div>
                   <label htmlFor="login-email" className="text-[12.5px] font-bold text-brand-ink">
                     Email address <span className="font-normal text-brand-danger">*</span>
                   </label>
-                  <div className="mt-1.5 flex items-center gap-3 rounded-lg border border-brand-border bg-white px-3.5 py-2.5 transition-all focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20">
+                  <div
+                    className={`mt-1.5 flex items-center gap-3 rounded-lg border bg-white px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-brand-blue/20 ${
+                      fieldErrors.email ? "border-brand-danger" : "border-brand-border focus-within:border-brand-blue"
+                    }`}
+                  >
                     <Mail className="h-4 w-4 shrink-0 text-brand-gray" strokeWidth={2} />
                     <input
                       id="login-email"
+                      ref={emailRef}
                       type="email"
-                      required
                       autoComplete="email"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        clearFieldError("email");
+                      }}
+                      aria-invalid={Boolean(fieldErrors.email)}
+                      aria-describedby={fieldErrors.email ? "login-email-error" : undefined}
                       placeholder="your@email.gov.ph"
                       className="w-full bg-transparent text-[14px] text-brand-ink outline-none placeholder:text-brand-gray/50"
                     />
                   </div>
+                  <FieldError id="login-email-error" error={fieldErrors.email} />
                 </div>
 
                 <div>
                   <label htmlFor="login-password" className="text-[12.5px] font-bold text-brand-ink">
                     Password <span className="font-normal text-brand-danger">*</span>
                   </label>
-                  <div className="mt-1.5 flex items-center gap-3 rounded-lg border border-brand-border bg-white px-3.5 py-2.5 transition-all focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20">
+                  <div
+                    className={`mt-1.5 flex items-center gap-3 rounded-lg border bg-white px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-brand-blue/20 ${
+                      fieldErrors.password ? "border-brand-danger" : "border-brand-border focus-within:border-brand-blue"
+                    }`}
+                  >
                     <Lock className="h-4 w-4 shrink-0 text-brand-gray" strokeWidth={2} />
                     <input
                       id="login-password"
+                      ref={passwordRef}
                       type={show ? "text" : "password"}
-                      required
                       autoComplete="current-password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        clearFieldError("password");
+                      }}
+                      aria-invalid={Boolean(fieldErrors.password)}
+                      aria-describedby={fieldErrors.password ? "login-password-error" : undefined}
                       placeholder="••••••••"
                       className="w-full bg-transparent text-[14px] text-brand-ink outline-none placeholder:text-brand-gray/50"
                     />
@@ -133,6 +201,7 @@ export default function Login() {
                       {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                  <FieldError id="login-password-error" error={fieldErrors.password} />
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -150,11 +219,20 @@ export default function Login() {
 
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || !isSupabaseConfigured}
                   className="group flex w-full items-center justify-center gap-2.5 rounded-lg bg-brand-blue py-3 text-[13px] font-bold uppercase tracking-[0.12em] text-white shadow-sm transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {submitting ? "Signing in…" : "Sign In"}
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      Signing in…
+                    </>
+                  ) : (
+                    <>
+                      Sign In
+                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                    </>
+                  )}
                 </button>
 
                 <p className="text-center text-[13px] text-brand-gray">
@@ -168,54 +246,21 @@ export default function Login() {
                 </p>
               </form>
 
-              {/* Demo access — collapsed, secondary */}
-              <div className="mt-5 rounded-lg border border-brand-border bg-brand-paper">
-                <button
-                  type="button"
-                  onClick={() => setDemoOpen((v) => !v)}
-                  aria-expanded={demoOpen}
-                  aria-controls="demo-accounts-panel"
-                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-brand-light/50"
+              {/* Authentication is Supabase-only. If the portal has no Supabase
+                  configuration there is no local fallback to sign in with, so
+                  say so plainly instead of offering a fabricated account. */}
+              {!isSupabaseConfigured && (
+                <div
+                  role="status"
+                  className="mt-5 flex items-start gap-2 rounded-lg border border-brand-gold/40 bg-brand-goldpale/70 px-3 py-2.5 text-[11.5px] leading-relaxed text-brand-amber"
                 >
-                  <span className="flex items-center gap-2.5">
-                    <Users className="h-4 w-4 text-brand-blue" strokeWidth={2} />
-                    <span>
-                      <span className="block text-[11.5px] font-bold uppercase tracking-gov text-brand-ink">Demo Access</span>
-                      <span className="block text-[11px] text-brand-gray">Try a prepared test account</span>
-                    </span>
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                  <span>
+                    Sign-in is unavailable: this deployment has no Supabase authentication
+                    configured. Contact the system administrator.
                   </span>
-                  <ChevronDown
-                    className={`h-4 w-4 shrink-0 text-brand-gray transition-transform duration-200 ${demoOpen ? "rotate-180" : ""}`}
-                    strokeWidth={2}
-                  />
-                </button>
-
-                {demoOpen && (
-                  <div id="demo-accounts-panel" className="border-t border-brand-border px-4 pb-3 pt-3">
-                    <p className="mb-2 text-[10px] font-bold uppercase tracking-gov text-brand-gray">
-                      For development and presentation only
-                    </p>
-                    <ul className="grid gap-1.5 sm:grid-cols-2">
-                      {MOCK_ACCOUNTS.map((acc) => (
-                        <li key={acc.email} className="min-w-0">
-                          <button
-                            type="button"
-                            onClick={() => fillDemoAccount(acc)}
-                            className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-left transition-colors hover:border-brand-blue hover:bg-brand-light/60"
-                          >
-                            <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-brand-ink">{acc.label}</span>
-                            <ArrowRight className="h-3 w-3 shrink-0 text-brand-blue" strokeWidth={2.2} />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="mt-2 text-[10.5px] leading-relaxed text-brand-gray">
-                      Fills the form only — click <span className="font-semibold">Sign In</span> to continue.
-                      {!isSupabaseConfigured && " Any password is accepted locally."}
-                    </p>
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {/* RIGHT — KALUSAGAP visual panel (desktop) */}

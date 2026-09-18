@@ -3,7 +3,7 @@ import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
-import { appointments } from "@/services/mock/mockData";
+import { appointments } from "@/services/local/dashboardData";
 
 const tabs = ["All", "Upcoming", "Completed", "Missed"];
 

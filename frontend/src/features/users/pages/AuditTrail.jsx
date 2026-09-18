@@ -5,7 +5,7 @@ import { ArrowRight, Download, Search, X } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
 import { usePermissions } from "@/context/PermissionsContext";
-import { useAuditEvents } from "@/services/mock/auditStore";
+import { useAuditEvents } from "@/services/local/auditStore";
 
 const FILTERS = [
   { id: "all", label: "All activity" },

@@ -5,13 +5,15 @@ Intervention System** (Municipal Health Office, Pili, Camarines Sur).
 
 ## Purpose
 
-This is the backend **foundation**. It boots, answers a health check, applies
-CORS, and establishes the folder layout and conventions that the real endpoints
-will follow. It contains no database code and no business logic, because the
-PostgreSQL schema and ERD are still being finalized by the team.
+This is the backend **foundation plus the connected domain endpoints**. It
+boots, answers a health check, applies CORS, and implements Supabase Auth with
+role-based authorization. The resident, household, intake, PHN queue,
+verification and analytics groups are database-backed; the remaining domain
+groups return `501` until their verified schema is connected.
 
-The React app in `frontend/` continues to run on its local mock datasets and
-does not call this API yet.
+The React app in `frontend/` calls this API through `src/services/api/`. It
+renders no mock or demo data: pages show a loading skeleton while a request is
+in flight and an empty state when an endpoint returns no rows.
 
 ## Technologies
 

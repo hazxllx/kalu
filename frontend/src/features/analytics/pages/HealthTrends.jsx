@@ -6,9 +6,10 @@ import {
 import { TrendingUp, TrendingDown, Activity, Send, MapPin } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import { PageSkeleton } from "@/components/common/Skeleton";
 import { useAuth } from "@/context/AuthContext";
 import { getAssignedBarangay } from "@/lib/barangayScope";
-import { resolveEarlyWarningData } from "@/services/mock/mockEarlyWarning";
+import { resolveEarlyWarningData } from "@/services/local/earlyWarning";
 import { fetchEarlyWarningData } from "@/services/api/earlyWarningApi";
 
 const tooltipStyle = { fontSize: "12px", borderRadius: "8px", border: "1px solid #E5EAF1" };
@@ -57,26 +58,34 @@ const mergeLiveScopedData = (base, live) => ({
 
 export default function HealthTrends() {
   const { user } = useAuth();
-  // Barangay scope comes from the signed-in user's assignment — never from a
+  // Barangay scope comes from the signed-in user's assignment â€” never from a
   // selector, URL or filter the user controls.
   const assignedBarangay = getAssignedBarangay(user);
   const [period, setPeriod] = useState("12m");
   const [liveData, setLiveData] = useState(null);
+  const [loading, setLoading] = useState(Boolean(assignedBarangay));
 
   const baseData = useMemo(() => resolveEarlyWarningData(assignedBarangay), [assignedBarangay]);
 
   // Barangay-scoped callers pull live figures from the API, which enforces
-  // the same assignment on the server. Unreachable API (local dev) simply
-  // keeps the scoped dataset above.
+  // the same assignment on the server. The figures render behind a skeleton
+  // until the request settles; an unavailable API simply leaves the empty
+  // dataset (and the page's empty states) in place.
   useEffect(() => {
-    if (!assignedBarangay) return undefined;
+    if (!assignedBarangay) {
+      setLoading(false);
+      return undefined;
+    }
     let cancelled = false;
     fetchEarlyWarningData()
       .then((payload) => {
         if (!cancelled && payload) setLiveData(payload);
       })
       .catch(() => {
-        /* API unavailable — keep the scoped mock dataset */
+        /* API unavailable â€” the empty dataset is shown instead */
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -132,6 +141,10 @@ export default function HealthTrends() {
         />
 
         {/* Summary */}
+        {loading ? (
+          <PageSkeleton />
+        ) : (
+        <>
         <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5">
           {cards.map((c) => (
             <div key={c.label} className="rounded-2xl border border-slate-200 bg-white shadow-card p-5">
@@ -149,10 +162,10 @@ export default function HealthTrends() {
           ))}
         </div>
 
-        {/* Community Health Overview — assigned barangay only */}
+        {/* Community Health Overview â€” assigned barangay only */}
         <Card className="p-4 sm:p-6 mt-6">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-1">Community Health Overview</h3>
-          <p className="text-xs text-brand-gray mb-4">Barangay {s.barangayOverview.name} — your assigned barangay.</p>
+          <p className="text-xs text-brand-gray mb-4">Barangay {s.barangayOverview.name} â€” your assigned barangay.</p>
           <div className="grid lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
               <div className="flex justify-center">
@@ -293,12 +306,14 @@ export default function HealthTrends() {
             </ResponsiveContainer>
           </Card>
         </div>
+        </>
+        )}
       </>
     );
   }
 
   /* ------------------------------------------------------------------ */
-  /* Municipality-wide view (MHO — unchanged behaviour)                  */
+  /* Municipality-wide view (MHO â€” unchanged behaviour)                  */
   /* ------------------------------------------------------------------ */
   const d = baseData;
   return (

@@ -1,0 +1,229 @@
+import React, { useSyncExternalStore } from "react";
+
+/**
+ * Medical Certificate store (local in-session state only).
+ *
+ * There is NO demo data: the certificate list starts empty. This module keeps
+ * the certificates created (or updated) during the current browser session
+ * until the corresponding backend endpoint persists them to the database.
+ * Certificates are always linked to an existing patient record (patientId +
+ * snapshot) and move through a review workflow:
+ *
+ *   Draft → For Review → Approved → Issued
+ *                     ↘ Rejected / Cancelled
+ *
+ * - Triage / PHN prepare certificates (Draft) and submit them (For Review).
+ * - Only the MHO can approve / issue / reject (status changes are audited).
+ * - PHN access is limited to their RHU workflow scope (enforced by the pages).
+ */
+
+export const CERT_STATUSES = ["Draft", "For Review", "Approved", "Issued", "Rejected", "Cancelled"];
+
+/**
+ * Allowed status transitions for the MHO workflow:
+ *   Draft → For Review
+ *   For Review → Approved | Rejected
+ *   Approved → Issued
+ * Drafts can never jump straight to Approved/Issued, Rejected is terminal, and
+ * Issued certificates are final. Enforced by the status-management UI.
+ */
+export const ALLOWED_TRANSITIONS = {
+  Draft: ["For Review"],
+  "For Review": ["Approved", "Rejected"],
+  Approved: ["Issued"],
+  Issued: [],
+  Rejected: [],
+  Cancelled: [],
+};
+
+export const CERT_PURPOSES = [
+  "General Medical Certificate",
+  "Fitness to Work / School",
+  "Sick Leave Certification",
+  "Post-Consultation Clearance",
+  "Travel / Camping Clearance",
+];
+
+// v2: no demo data. Bumped so any previously persisted demo certificates are
+// ignored and replaced by the empty working set on first load.
+const STORAGE_KEY = "kalusagap.med-certificates.v2";
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const cert = (f) => ({
+  id: f.id,
+  reference: f.reference,
+  patientId: f.patientId,
+  patient: f.patient,
+  age: f.age,
+  sex: f.sex,
+  barangay: f.barangay,
+  address: f.address,
+  purpose: f.purpose,
+  findings: f.findings,
+  dateOfExamination: f.dateOfExamination,
+  medicalOfficer: f.medicalOfficer || "",
+  licenseNumber: f.licenseNumber || "",
+  status: f.status || "Draft",
+  preparedBy: f.preparedBy || "",
+  preparedByRole: f.preparedByRole || "",
+  dateIssued: f.dateIssued || "",
+  notes: f.notes || "",
+  // Formal document fields (A4 Medical Certificate layout). KALUSAGAP medical
+  // certificates carry no payment information — only medical + issuance data.
+  certificateNumber: f.certificateNumber || f.reference || "",
+  civilStatus: f.civilStatus || "",
+  recommendation: f.recommendation || "",
+  remarks: f.remarks || "",
+  issuedAt: f.issuedAt || "",
+  createdAt: f.createdAt || new Date().toISOString(),
+  audit: f.audit || [
+    { action: "Created", by: f.preparedBy || "—", at: f.createdAt || new Date().toISOString(), notes: "" },
+  ],
+});
+
+let cache = null;
+const read = () => {
+  if (cache) return cache;
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        cache = parsed;
+        return cache;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  cache = [];
+  return cache;
+};
+const persist = () => {
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(cache || []));
+  } catch {
+    /* ignore */
+  }
+};
+
+// Immediately write the empty working set so stale persisted keys are replaced.
+persist();
+
+const listeners = new Set();
+const emit = () => {
+  persist();
+  listeners.forEach((cb) => cb());
+};
+const subscribe = (cb) => {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+};
+const getSnapshot = () => read();
+const getCertificates = () => read().map((c) => ({ ...c, audit: c.audit.map((a) => ({ ...a })) }));
+
+const updateRecord = (id, patch) => {
+  cache = read().map((c) => (c.id === id ? { ...c, ...patch } : c));
+  emit();
+};
+
+const appendAudit = (record, action, by, notes) => [
+  ...(record.audit || []),
+  { action, by: by || "—", at: new Date().toISOString(), notes: notes || "" },
+];
+
+/** Create a certificate (Draft) from a patient snapshot. */
+const createCertificate = (payload) => {
+  const list = read();
+  const year = new Date().getFullYear();
+  const max = list.reduce((acc, c) => {
+    const m = String(c.id || "").match(/MC-(\d{4})-(\d+)/);
+    return m && Number(m[1]) === year ? Math.max(acc, parseInt(m[2], 10)) : acc;
+  }, 0);
+  const seq = max + 1;
+  const id = `MC-${year}-${String(seq).padStart(4, "0")}`;
+  const record = cert({
+    ...payload,
+    id,
+    reference: id,
+    status: payload.status || "Draft",
+  });
+  cache = [record, ...list];
+  emit();
+  return record;
+};
+
+/**
+ * Transition a certificate's status with an audit entry.
+ * MHO-only decisions (approve/issue/reject/cancel) are enforced by the UI;
+ * the store records whatever the authorized caller performs.
+ */
+const setStatus = (id, status, { by = "", notes = "" } = {}) => {
+  const rec = read().find((c) => c.id === id);
+  if (!rec) return null;
+  const patch = {
+    status,
+    audit: appendAudit(rec, status, by, notes),
+    notes: notes !== "" ? notes : rec.notes,
+  };
+  if (status === "Issued") {
+    patch.dateIssued = todayIso();
+  }
+  if ((status === "Approved" || status === "Issued") && !rec.medicalOfficer) {
+    patch.medicalOfficer = by;
+  }
+  updateRecord(id, patch);
+  return getCertificates().find((c) => c.id === id);
+};
+
+/** Submit a draft for MHO review. */
+const submitForReview = (id, { by = "" } = {}) => setStatus(id, "For Review", { by });
+
+/** MHO decisions. */
+const approveCertificate = (id, { by = "", notes = "" } = {}) => setStatus(id, "Approved", { by, notes });
+const issueCertificate = (id, { by = "", notes = "" } = {}) => setStatus(id, "Issued", { by, notes });
+const rejectCertificate = (id, { by = "", notes = "" } = {}) => setStatus(id, "Rejected", { by, notes });
+const cancelCertificate = (id, { by = "", notes = "" } = {}) => setStatus(id, "Cancelled", { by, notes });
+
+/**
+ * Update an existing certificate's document fields (composer edit/re-print).
+ * The audit trail and status workflow are untouched by this update.
+ */
+const updateCertificate = (id, payload) => {
+  const rec = read().find((c) => c.id === id);
+  if (!rec) return null;
+  updateRecord(id, { ...payload, id });
+  return getCertificates().find((c) => c.id === id);
+};
+
+/** Next MC-YYYY-#### reference (used to prefill the certificate number). */
+const nextReference = () => {
+  const year = new Date().getFullYear();
+  const max = read().reduce((acc, c) => {
+    const m = String(c.id || "").match(/MC-(\d{4})-(\d+)/);
+    return m && Number(m[1]) === year ? Math.max(acc, parseInt(m[2], 10)) : acc;
+  }, 0);
+  return `MC-${year}-${String(max + 1).padStart(4, "0")}`;
+};
+
+export const useMedicalCertificates = () => useSyncExternalStore(subscribe, getSnapshot);
+
+export const medicalCertificateStore = {
+  getCertificates,
+  getSnapshot,
+  subscribe,
+  createCertificate,
+  updateCertificate,
+  submitForReview,
+  approveCertificate,
+  issueCertificate,
+  rejectCertificate,
+  cancelCertificate,
+  nextReference,
+  statuses: CERT_STATUSES,
+  allowedTransitions: ALLOWED_TRANSITIONS,
+  purposes: CERT_PURPOSES,
+};
+
+export default medicalCertificateStore;

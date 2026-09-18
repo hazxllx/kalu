@@ -8,31 +8,25 @@ import {
   AlertTriangle,
   Info,
   CheckCircle2,
-  CloudOff,
   Home,
   ArrowLeft,
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
-import {
-  useHouseholds,
-  useHouseholdSyncStatus,
-  householdStore,
-} from "@/services/mock/householdStore";
-import { systemUsers } from "@/services/mock/mockData";
+import { householdsApi } from "@/services/api";
+import { systemUsers } from "@/services/local/dashboardData";
+import { maxLength, numeric, phone as validatePhone } from "@/utils/validation";
 import {
   HH_STATUSES,
   APPROVAL_STATUSES,
   PUROKS,
   WATER_SOURCES,
-  WATER_SOURCE_LABELS,
   WATER_TYPES,
   WATER_DISTANCES,
   WATER_AVAILABILITY,
   TREATMENT_METHODS,
   TOILET_TYPES,
-  TOILET_LABELS,
   SANITATION_ACCESS,
   WASTE_DISPOSAL,
   PHILHEALTH_CATEGORIES,
@@ -86,6 +80,7 @@ const emptyMember = () => ({
   q4: "",
   remarks: "",
   fpMethod: "None",
+  contact: "",
 });
 
 function ageFromBirthday(birthday) {
@@ -200,6 +195,18 @@ function MemberCard({ member, index, error = {}, onUpdate, onRemove, canRemove }
           {error.name && <p className="mt-1 text-xs text-red-600">{error.name}</p>}
         </div>
 
+        <div>
+          <label className={`${field} mb-1.5`}>Contact Number (optional)</label>
+          <input
+            type="text"
+            value={member.contact}
+            onChange={(e) => onUpdate("contact", e.target.value)}
+            placeholder="e.g. 0917 123 4567"
+            className={error.contact ? inputErr : input}
+          />
+          {error.contact && <p className="mt-1 text-xs text-red-600">{error.contact}</p>}
+        </div>
+
         <div className={threeCol}>
           <div>
             <label className={`${field} mb-1.5`}>Relationship {error.relationship && <span className="text-red-600">*</span>}</label>
@@ -217,7 +224,7 @@ function MemberCard({ member, index, error = {}, onUpdate, onRemove, canRemove }
           </div>
           <div>
             <label className={`${field} mb-1.5`}>Age</label>
-            <input type="number" min="0" value={member.age} onChange={(e) => onUpdate("age", e.target.value)} placeholder="—" className={input} />
+            <input type="number" min="0" value={member.age} onChange={(e) => onUpdate("age", e.target.value)} placeholder="â€”" className={input} />
           </div>
         </div>
 
@@ -263,7 +270,7 @@ function MemberCard({ member, index, error = {}, onUpdate, onRemove, canRemove }
 
         <div>
           <label className={`${field} mb-1.5`}>Remarks</label>
-          <input type="text" value={member.remarks} onChange={(e) => onUpdate("remarks", e.target.value)} placeholder="—" className={input} />
+          <input type="text" value={member.remarks} onChange={(e) => onUpdate("remarks", e.target.value)} placeholder="â€”" className={input} />
         </div>
       </div>
     </div>
@@ -327,7 +334,7 @@ const SECTION_INDEX = {
 };
 
 /**
- * Add New Household — dedicated full-page workflow.
+ * Add New Household â€” dedicated full-page workflow.
  *
  * Replaces the previous right-side drawer with a routed page (`households/new`)
  * that renders in the normal application shell. All fields, validations, the
@@ -338,8 +345,6 @@ export default function AddHouseholdPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const householdList = useHouseholds();
-  const syncStatus = useHouseholdSyncStatus();
 
   // Absolute path to the Household Profiling list for the current role area
   // (e.g. /app/bhw/households or /app/health_supervisor/households). Relative
@@ -355,8 +360,8 @@ export default function AddHouseholdPage() {
   const defaultCollector =
     user?.role === "bhw" && user?.name ? user.name : ACTIVE_BHWS[0] || "Maria Cruz";
   const bhwOptions = bhwOptionsFor(defaultCollector);
-  const householdId = householdStore.nextId(householdList);
-  const offline = syncStatus !== "connected";
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   const [openSections, setOpenSections] = useState({
     info: true,
@@ -405,6 +410,14 @@ export default function AddHouseholdPage() {
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
+  const clearError = (key) =>
+    setErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
   const toggleSection = (id) => setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const updateMember = (idx, key, value) =>
@@ -444,75 +457,39 @@ export default function AddHouseholdPage() {
 
   const validate = () => {
     const next = {};
+    const headErr = maxLength(form.head, 120, "Household head name");
     if (!form.head.trim()) next.head = "Household Head Name is required.";
+    else if (headErr) next.head = headErr;
     if (!form.purok) next.purok = "Purok/Zone is required.";
+    const streetErr = maxLength(form.streetAddress, 200, "Street address");
     if (!form.streetAddress.trim()) next.streetAddress = "Street Address / Sitio is required.";
-    if (!form.families || Number(form.families) < 1) next.families = "Enter at least 1 family.";
+    else if (streetErr) next.streetAddress = streetErr;
+
+    const famErr = numeric(form.families, { label: "Number of families", min: 1, max: 50, isRequired: true, integer: true });
+    if (famErr) next.families = famErr;
+    const incomeErr = numeric(form.income, { label: "Monthly income", min: 0, max: 100000000 });
+    if (incomeErr) next.income = incomeErr;
+    const contactErr = validatePhone(form.contact, { isRequired: false, label: "Contact number" });
+    if (contactErr) next.contact = contactErr;
+
     if (!form.respLast.trim()) next.respLast = "Last Name is required.";
     if (!form.respFirst.trim()) next.respFirst = "First Name is required.";
     if (!form.respMaiden.trim()) next.respMaiden = "Mother's Maiden Name is required.";
     if (!form.waterSource) next.waterSource = "Primary Water Source is required.";
     if (!form.toilet) next.toilet = "Toilet Facility Type is required.";
-    const mErrors = form.members.map((m) => ({
-      name: m.name.trim() ? "" : "Name is required.",
-      relationship: m.relationship ? "" : "Relationship is required.",
-      sex: m.sex ? "" : "Sex is required.",
-    }));
+    const mErrors = form.members.map((m) => {
+      const contactErr = m.contact ? validatePhone(m.contact, { isRequired: false, label: "Member contact number" }) : "";
+      return {
+        name: m.name.trim() ? "" : "Name is required.",
+        relationship: m.relationship ? "" : "Relationship is required.",
+        sex: m.sex ? "" : "Sex is required.",
+        contact: contactErr,
+      };
+    });
     return { errors: next, memberErrors: mErrors };
   };
 
-  const buildHousehold = () => {
-    const members = form.members.map((m) => ({ ...m, age: m.age === "" ? "" : Number(m.age) }));
-    const computed = computeHouseholdRisk({ ...form, members });
-    const autoFlags = householdFlags({ ...form, members });
-    const incomeNum = Number(form.income) || 0;
-    return {
-      id: householdId,
-      head: form.head.trim(),
-      purok: form.purok,
-      streetAddress: form.streetAddress.trim(),
-      contact: form.contact.trim(),
-      families: Number(form.families) || 1,
-      collector: form.collector,
-      hhStatus: form.hhStatus,
-      approval: form.approval,
-      income: incomeNum > 0 ? `₱${incomeNum.toLocaleString()}/mo` : "—",
-      incomeNum,
-      lastUpdated: today(),
-      address: `${form.streetAddress.trim()}, ${form.purok}`,
-      members: members.length,
-      memberList: members,
-      water: WATER_SOURCE_LABELS[form.waterSource] || "—",
-      waterSource: form.waterSource,
-      waterType: form.waterType,
-      waterDistance: form.waterDistance,
-      waterAvailability: form.waterAvailability,
-      treatment:
-        form.treatWater === "Yes" && form.treatmentMethods.length > 0
-          ? form.treatmentMethods.join(", ")
-          : "None",
-      toilet: TOILET_LABELS[form.toilet] || "—",
-      toiletType: form.toilet,
-      sanitationAccess: form.sanitationAccess,
-      wasteDisposal: form.wasteDisposal,
-      segregation: form.segregation,
-      visits: form.visits,
-      respondent: `${form.respLast.trim()}, ${form.respFirst.trim()}`,
-      nhts: form.nhts || "—",
-      ip: form.ip || "—",
-      philhealth: form.phMember === "Yes" ? { id: form.phId.trim(), category: form.phCategory } : null,
-      riskScore: computed.score,
-      riskLevel: computed.level,
-      riskFactors: computed.factors,
-      flags: autoFlags,
-      concerns: [...new Set([...autoFlags, ...computed.factors])],
-      // Offline/local saving is preserved: households saved while offline are
-      // tagged "Pending Sync" and queued for the next synchronization.
-      syncStatus: offline ? "Pending Sync" : null,
-    };
-  };
-
-  const handleSave = () => {
+  const handleSave = async () => {
     const { errors: nextErrors, memberErrors: nextMemberErrors } = validate();
     const membersInvalid = nextMemberErrors.some((m) => Object.values(m).some(Boolean));
     setErrors(nextErrors);
@@ -529,9 +506,77 @@ export default function AddHouseholdPage() {
       });
       return;
     }
-    householdStore.addHousehold(buildHousehold());
-    if (householdsPath) {
-      navigate(householdsPath, { replace: true, state: { hhToast: `Household ${householdId} added successfully` } });
+
+    // Save through the real API. The server allocates the household id,
+    // recomputes the risk classification, validates the barangay against the
+    // signed-in account's scope, and rejects duplicates (409) or invalid
+    // fields (422) with messages surfaced below.
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const result = await householdsApi.create({
+        household: {
+          barangay: user?.assignedBarangay || user?.barangay || "",
+          headName: form.head.trim(),
+          purok: form.purok,
+          streetAddress: form.streetAddress.trim(),
+          contact: form.contact.trim(),
+          families: Number(form.families) || 1,
+          monthlyIncome: form.income === "" ? null : Number(form.income),
+          hhStatus: form.hhStatus,
+          approvalStatus: form.approval,
+          respondentLast: form.respLast.trim(),
+          respondentFirst: form.respFirst.trim(),
+          respondentMaiden: form.respMaiden.trim(),
+          nhts: form.nhts,
+          ip: form.ip,
+          philhealthMember: form.phMember === "Yes",
+          philhealthId: form.phId.trim(),
+          philhealthCategory: form.phCategory,
+          waterSource: form.waterSource,
+          waterType: form.waterType,
+          waterDistance: form.waterDistance,
+          waterAvailability: form.waterAvailability,
+          waterTreated: form.treatWater === "Yes",
+          treatmentMethods: form.treatmentMethods,
+          toiletType: form.toilet,
+          sanitationAccess: form.sanitationAccess,
+          wasteDisposal: form.wasteDisposal,
+          wasteSegregation: form.segregation,
+          quarterVisits: form.visits,
+          collectorName: form.collector,
+          members: form.members.map((m) => ({
+            name: m.name.trim(),
+            birthday: m.birthday || "",
+            age: m.age === "" ? null : Number(m.age),
+            sex: m.sex || "",
+            classification: m.classification || "",
+            relationship: m.relationship || "",
+            contact: m.contact ? m.contact.trim() : "",
+            isPwd: Boolean(m.pwd),
+            philhealth: m.philhealth || "",
+            fpMethod: m.fpMethod || "",
+            quarterStatus: m.quarterStatus || "",
+          })),
+        },
+      });
+      const saved = result?.household;
+      if (householdsPath) {
+        navigate(householdsPath, {
+          replace: true,
+          state: { hhToast: `Household ${saved?.id || ""} added successfully` },
+        });
+      }
+    } catch (err) {
+      const details = err?.payload?.error?.details;
+      setSaveError(
+        Array.isArray(details) && details.length
+          ? details.join(" ")
+          : err?.message || "Could not save the household. Please try again."
+      );
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -568,11 +613,9 @@ export default function AddHouseholdPage() {
               Back to Household Profiling
             </Link>
           )}
-          {!offline && (
-            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 md:ml-0">
-              <CheckCircle2 className="h-3.5 w-3.5" /> Online — will sync immediately
-            </span>
-          )}
+          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 md:ml-0">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Saved directly to the database
+          </span>
         </div>
         <div className="mt-2 flex items-start gap-3">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-light">
@@ -589,9 +632,17 @@ export default function AddHouseholdPage() {
         </div>
       </div>
 
-      {/* Form body — fills the content area; two columns on md+ */}
+      {/* Server-side validation / duplicate errors */}
+      {saveError && (
+        <div role="alert" className="mb-5 flex items-start gap-2.5 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
+
+      {/* Form body â€” fills the content area; two columns on md+ */}
       <div className="w-full space-y-5 pb-6">
-        {/* 1 — Household Information */}
+        {/* 1 â€” Household Information */}
         <Section
           id="info"
           index={SECTION_INDEX.info}
@@ -601,8 +652,8 @@ export default function AddHouseholdPage() {
           onToggle={toggleSection}
         >
           <div className={grid2}>
-            <Field label="Household ID" hint="Auto-generated, read-only">
-              <input readOnly value={householdId} className={readOnlyCls} />
+            <Field label="Household ID" hint="Assigned automatically on save">
+              <input readOnly value="Auto-generated (e.g. HH-001)" className={readOnlyCls} />
             </Field>
             <Field label="Household Head Name" required error={errors.head}>
               <input
@@ -630,13 +681,13 @@ export default function AddHouseholdPage() {
                 className={inputCls(errors.streetAddress)}
               />
             </Field>
-            <Field label="Contact Number" hint="Optional">
+            <Field label="Contact Number" hint="Optional" error={errors.contact}>
               <input
                 type="text"
                 value={form.contact}
-                onChange={(e) => set("contact", e.target.value)}
+                onChange={(e) => { set("contact", e.target.value); clearError("contact"); }}
                 placeholder="e.g. 09XX XXX XXXX"
-                className={inputCls()}
+                className={inputCls(errors.contact)}
               />
             </Field>
             <Field label="Last Updated" hint="Auto date, read-only">
@@ -645,7 +696,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 2 — Household Details */}
+        {/* 2 â€” Household Details */}
         <Section
           id="details"
           index={SECTION_INDEX.details}
@@ -664,17 +715,17 @@ export default function AddHouseholdPage() {
                 className={inputCls(errors.families)}
               />
             </Field>
-            <Field label="Estimated Monthly Income (₱)" hint="Optional — used in risk classification">
+            <Field label="Estimated Monthly Income (â‚±)" hint="Optional â€” used in risk classification" error={errors.income}>
               <input
                 type="number"
                 min="0"
                 value={form.income}
-                onChange={(e) => set("income", e.target.value)}
+                onChange={(e) => { set("income", e.target.value); clearError("income"); }}
                 placeholder="e.g. 9500"
-                className={inputCls()}
+                className={inputCls(errors.income)}
               />
             </Field>
-            <Field label="Assigned Data Collector / BHW" hint="Auto-filled with the logged-in user — editable">
+            <Field label="Assigned Data Collector / BHW" hint="Auto-filled with the logged-in user â€” editable">
               <select value={form.collector} onChange={(e) => set("collector", e.target.value)} className={`${inputCls()} cursor-pointer`}>
                 {bhwOptions.map((b) => (
                   <option key={b} value={b}>{b}</option>
@@ -698,7 +749,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 3 — Respondent Information */}
+        {/* 3 â€” Respondent Information */}
         <Section
           id="respondent"
           index={SECTION_INDEX.respondent}
@@ -728,7 +779,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 4 — Visit Tracking */}
+        {/* 4 â€” Visit Tracking */}
         <Section
           id="visits"
           index={SECTION_INDEX.visits}
@@ -756,7 +807,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 5 — HH Head PhilHealth Info */}
+        {/* 5 â€” HH Head PhilHealth Info */}
         <Section
           id="philhealth"
           index={SECTION_INDEX.philhealth}
@@ -791,7 +842,7 @@ export default function AddHouseholdPage() {
           )}
         </Section>
 
-        {/* 6 — Water Source & Sanitation Details */}
+        {/* 6 â€” Water Source & Sanitation Details */}
         <Section
           id="water"
           index={SECTION_INDEX.water}
@@ -895,7 +946,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 7 — Household Members */}
+        {/* 7 â€” Household Members */}
         <Section
           id="members"
           index={SECTION_INDEX.members}
@@ -921,8 +972,8 @@ export default function AddHouseholdPage() {
                   {CLASSIFICATIONS.map((c) => (
                     <p key={c.value} className="text-xs text-brand-gray">
                       <span className="font-semibold text-brand-ink">{c.value}</span>
-                      {" — "}
-                      {c.label.split("— ")[1]}
+                      {" â€” "}
+                      {c.label.split("â€” ")[1]}
                     </p>
                   ))}
                 </div>
@@ -933,7 +984,7 @@ export default function AddHouseholdPage() {
           {hasMemberErrors && (
             <div className="mb-3 flex items-center gap-2 rounded-btn border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
               <AlertTriangle className="h-4 w-4 shrink-0" />
-              Some member rows are incomplete — fill in the highlighted fields or remove the row.
+              Some member rows are incomplete â€” fill in the highlighted fields or remove the row.
             </div>
           )}
           <div className="hidden overflow-x-auto rounded-btn border border-brand-border bg-white lg:block">
@@ -953,10 +1004,11 @@ export default function AddHouseholdPage() {
                   <th className="px-2 py-2">Q2</th>
                   <th className="px-2 py-2">Q3</th>
                   <th className="px-2 py-2">Q4</th>
-                  <th className="px-2 py-2">Remarks</th>
-                  <th className="px-2 py-2">Family Planning Method</th>
-                  <th className="px-2 py-2" />
-                </tr>
+                   <th className="px-2 py-2">Remarks</th>
+                   <th className="px-2 py-2">Family Planning Method</th>
+                   <th className="px-2 py-2">Contact Number</th>
+                   <th className="px-2 py-2" />
+                 </tr>
               </thead>
               <tbody>
                 {form.members.map((m, i) => {
@@ -999,7 +1051,7 @@ export default function AddHouseholdPage() {
                           min="0"
                           value={m.age}
                           onChange={(e) => updateMember(i, "age", e.target.value)}
-                          placeholder="—"
+                          placeholder="â€”"
                           className={`${cellCls()} w-14`}
                         />
                       </td>
@@ -1030,7 +1082,7 @@ export default function AddHouseholdPage() {
                       {["q1", "q2", "q3", "q4"].map((q) => (
                         <td key={q} className="px-2 py-2">
                           <select value={m[q]} onChange={(e) => updateMember(i, q, e.target.value)} className={`${cellCls()} w-[74px] cursor-pointer`}>
-                            <option value="">—</option>
+                            <option value="">â€”</option>
                             {QUARTER_STATUSES.map((s) => (
                               <option key={s} value={s}>{s}</option>
                             ))}
@@ -1038,14 +1090,24 @@ export default function AddHouseholdPage() {
                         </td>
                       ))}
                       <td className="px-2 py-2">
-                        <input type="text" value={m.remarks} onChange={(e) => updateMember(i, "remarks", e.target.value)} placeholder="—" className={`${cellCls()} w-28`} />
+                        <input type="text" value={m.remarks} onChange={(e) => updateMember(i, "remarks", e.target.value)} placeholder="â€”" className={`${cellCls()} w-28`} />
                       </td>
-                      <td className="px-2 py-2">
+                       <td className="px-2 py-2">
                         <select value={m.fpMethod} onChange={(e) => updateMember(i, "fpMethod", e.target.value)} className={`${cellCls()} w-32 cursor-pointer`}>
                           {FP_METHODS.map((f) => (
                             <option key={f} value={f}>{f}</option>
                           ))}
                         </select>
+                      </td>
+                      <td className="px-2 py-2">
+                        <input
+                          type="text"
+                          value={m.contact}
+                          onChange={(e) => updateMember(i, "contact", e.target.value)}
+                          placeholder="09XX XXX XXXX"
+                          className={cellCls(me.contact)}
+                        />
+                        {me.contact && <p className="mt-1 text-[10px] text-red-600">{me.contact}</p>}
                       </td>
                       <td className="px-2 py-2">
                         <button
@@ -1089,7 +1151,7 @@ export default function AddHouseholdPage() {
           </button>
         </Section>
 
-        {/* 8 — Auto-Calculated Risk Classification */}
+        {/* 8 â€” Auto-Calculated Risk Classification */}
         <Section
           id="risk"
           index={SECTION_INDEX.risk}
@@ -1103,7 +1165,7 @@ export default function AddHouseholdPage() {
               <div className="flex items-center gap-3">
                 <HHBadge value={risk.level} label={`${risk.level} Risk`} />
                 <span className="text-xs text-brand-gray">
-                  Risk score <span className="font-semibold text-brand-ink">{risk.score}/100</span> — computed live
+                  Risk score <span className="font-semibold text-brand-ink">{risk.score}/100</span> â€” computed live
                 </span>
               </div>
               <span className="text-[11px] text-brand-gray">
@@ -1117,7 +1179,7 @@ export default function AddHouseholdPage() {
                 ))}
               </div>
             ) : (
-              <p className="mt-3 text-xs text-brand-gray">No risk factors recorded yet — fill in the sections above.</p>
+              <p className="mt-3 text-xs text-brand-gray">No risk factors recorded yet â€” fill in the sections above.</p>
             )}
 
             <div className="mt-4 space-y-2.5">
@@ -1125,7 +1187,7 @@ export default function AddHouseholdPage() {
                 <div className="flex items-start gap-2.5 rounded-btn border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
-                    <strong>Sanitation Risk</strong> — unsafe water source (Level I / Unimproved) or no toilet
+                    <strong>Sanitation Risk</strong> â€” unsafe water source (Level I / Unimproved) or no toilet
                     facility. Tagged for environmental sanitation follow-up.
                   </span>
                 </div>
@@ -1152,8 +1214,8 @@ export default function AddHouseholdPage() {
         <Card className="p-4 sm:p-5">
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-center gap-1.5 text-xs text-brand-gray">
-              <CloudOff className="h-3.5 w-3.5 shrink-0" />
-              Saved locally when offline — tagged "Pending Sync" and queued automatically.
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-brand-green" />
+              The household id and risk classification are computed by the server on save.
             </p>
             <div className="flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
               <Link
@@ -1164,9 +1226,10 @@ export default function AddHouseholdPage() {
               </Link>
               <button
                 onClick={handleSave}
-                className="inline-flex items-center justify-center rounded-btn bg-brand-blue px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-brand-dark sm:py-2.5"
+                disabled={saving}
+                className="inline-flex items-center justify-center rounded-btn bg-brand-blue px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60 sm:py-2.5"
               >
-                Save Household
+                {saving ? "Savingâ€¦" : "Save Household"}
               </button>
             </div>
           </div>

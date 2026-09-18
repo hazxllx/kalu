@@ -15,13 +15,7 @@ import {
   countGrantedInModule,
 } from "@/lib/permissions";
 
-const LOGS = [
-  { timestamp: "2026-07-07 09:20", user: "Maria Cruz", role: "BHW", action: "Added Consultation", module: "Consultation", status: "Success", ip: "192.168.1.24" },
-  { timestamp: "2026-07-07 09:35", user: "Juan Dela Cruz", role: "Resident", action: "Registration Submitted", module: "Registration", status: "Success", ip: "192.168.1.42" },
-  { timestamp: "2026-07-07 10:02", user: "Admin System", role: "System Admin", action: "Updated User Role", module: "User Management", status: "Success", ip: "192.168.1.9" },
-  { timestamp: "2026-07-07 10:15", user: "Grace Aquino", role: "BHW", action: "Reviewed Verification", module: "Verification", status: "Success", ip: "192.168.1.55" },
-  { timestamp: "2026-07-07 10:28", user: "Antonio Reyes", role: "RHU", action: "Submitted Monthly Summary", module: "Reports", status: "Success", ip: "192.168.1.77" },
-];
+const LOGS = [];
 
 /**
  * Roles overview.
@@ -166,11 +160,16 @@ const SystemLogs = () => (
                 <td className="py-3 text-brand-gray">{log.ip}</td>
               </tr>
             ))}
+            {LOGS.length === 0 && (
+              <tr>
+                <td colSpan={7} className="py-8 text-center text-brand-gray">No system logs recorded.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
       <div className="mt-4 flex items-center justify-between text-sm text-brand-gray">
-        <span>Showing 5 of 5 entries</span>
+        <span>Showing {LOGS.length} of {LOGS.length} entries</span>
         <div className="flex items-center gap-2">
           <button className="px-3 py-1.5 rounded-btn border border-brand-border hover:bg-brand-bg">Previous</button>
           <button className="px-3 py-1.5 rounded-btn border border-brand-border hover:bg-brand-bg">Next</button>

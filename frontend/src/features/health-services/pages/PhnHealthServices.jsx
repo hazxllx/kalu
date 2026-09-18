@@ -3,13 +3,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
-import { SERVICE_STATUSES } from "@/services/mock/mockPhnData";
+import { SERVICE_STATUSES } from "@/services/local/phnData";
 import {
   useWorkflowStore,
   addService,
   patchService,
   removeService,
-} from "@/services/mock/mockWorkflowStore";
+} from "@/services/local/workflowStore";
 import {
   filterRowsByScope,
   isPHN,
@@ -144,7 +144,7 @@ export default function PhnHealthServices() {
       .join("\n");
     setEditingService(null);
     setForm({
-      name: monitoring ? `${draft.resident} — Monitoring` : `${draft.resident} — Health Service`,
+      name: monitoring ? `${draft.resident} â€” Monitoring` : `${draft.resident} â€” Health Service`,
       date: new Date().toISOString().slice(0, 10),
       time: "09:00",
       barangay: draft.barangay || phnDefaultBarangay(user, coverage),
@@ -331,7 +331,7 @@ export default function PhnHealthServices() {
                     </div>
                     <div className="min-w-0">
                       <h3 className="font-semibold text-brand-ink text-sm sm:text-base leading-tight truncate">{s.name}</h3>
-                      <p className="text-xs text-brand-gray mt-0.5">{scopeLabel(s, user)} · {s.count}</p>
+                      <p className="text-xs text-brand-gray mt-0.5">{scopeLabel(s, user)} Â· {s.count}</p>
                     </div>
                   </div>
                   <StatusBadge value={s.status} />

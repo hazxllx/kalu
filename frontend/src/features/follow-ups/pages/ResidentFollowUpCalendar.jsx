@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
-import { useFollowUpSchedules, followUpScheduleStore } from "@/services/mock/followUpScheduleStore";
+import { useFollowUpSchedules, followUpScheduleStore } from "@/services/local/followUpScheduleStore";
 import { DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
 import ScheduleStatusBadge, { ConfirmationBadge, STATUS_DOTS } from "../components/ScheduleStatusBadge";
 import { dayLabel, formatTime, fromKey, groupByDay, monthLabel, toKey, weekLabel } from "../lib/scheduleDates";

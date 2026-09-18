@@ -10,8 +10,12 @@ import asyncHandler from '../utils/asyncHandler.js';
 /**
  * Master resident-record endpoints for authorized health staff.
  *
- *   GET /residents/:id — PHN / Health Supervisor / MHO
- *   PUT /residents/:id — PHN / Health Supervisor (profile corrections)
+ *   GET  /residents          — directory listing + search, scope-enforced
+ *                              (Health Supervisor / PHN / MHO)
+ *   POST /residents          — register a resident (validated, scope-checked,
+ *                              duplicate identity guarded)
+ *   GET  /residents/:id      — PHN / Health Supervisor / MHO
+ *   PUT  /residents/:id      — PHN / Health Supervisor (profile corrections)
  *
  * Barangay scoping is enforced twice: `resolveBarangayScope` rejects any
  * cross-barangay request before the controller runs, and the service layer
@@ -20,6 +24,13 @@ import asyncHandler from '../utils/asyncHandler.js';
 const router = Router();
 
 router.use(authenticate, resolveBarangayScope);
+
+// Scope-aware directory listing + registration (Health Supervisor / PHN / MHO).
+// Barangay scope is enforced twice: `resolveBarangayScope` rejects
+// cross-barangay query/body values before the controller runs, and the service
+// layer independently re-checks the assignment.
+router.get('/', authorize(FEATURE_ROLES.residents), asyncHandler(residentsController.listResidents));
+router.post('/', authorize(FEATURE_ROLES.residents), asyncHandler(residentsController.createResident));
 
 router.get('/:id', authorize(FEATURE_ROLES.referralRecords), asyncHandler(residentsController.getResident));
 router.put('/:id', authorize(['phn', 'health_supervisor']), asyncHandler(residentsController.updateResident));

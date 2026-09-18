@@ -2,13 +2,13 @@ import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { useHouseholdRiskClusters } from "@/services/mock/householdRiskStore";
-import { useMunicipalSubmissions } from "@/services/mock/municipalSubmissionsStore";
+import { useHouseholdRiskClusters } from "@/services/local/householdRiskStore";
+import { useMunicipalSubmissions } from "@/services/local/municipalSubmissionsStore";
 import { RISK_LEVELS } from "@/lib/householdRisk";
 import {
   residents, households, followUps, referrals, immunizations, immunizationSessions,
   m1Records, barangayOverview, vaccinationCoverage, monthlyConsultations, topDiseases, recentHealthAlerts,
-} from "@/services/mock/mockData";
+} from "@/services/local/dashboardData";
 import {
   Users, Home as HomeIcon, Stethoscope, Send, CalendarClock, AlertTriangle,
   FileText, Download, RefreshCw, X, ChevronRight, FileSpreadsheet,
@@ -124,7 +124,7 @@ export default function MunicipalHealthReports() {
     return {
       residents: scope(residents).length || barangayOverview.find((b) => b.name === brgy)?.residents || barangayOverview.reduce((a, b) => a + b.residents, 0),
       households: scope(households).length || (brgy ? clusters.filter((c) => c.barangay === brgy).length : clusters.length),
-      consultations: brgy ? (barangayOverview.find((b) => b.name === brgy)?.consultations || 94) : 312,
+      consultations: brgy ? (barangayOverview.find((b) => b.name === brgy)?.consultations || 0) : barangayOverview.reduce((a, b) => a + (b.consultations || 0), 0),
       referrals: scope(referrals).length || referrals.length,
       followUps: followUps.filter((f) => f.status === "Today" || f.status === "Upcoming").length,
       priority: riskCounts.priority,
@@ -159,8 +159,8 @@ export default function MunicipalHealthReports() {
         return {
           name: b.name,
           residents: b.residents,
-          consultations: b.consultations || 94,
-          referrals: referrals.length ? (b.name === "San Isidro" ? 4 : b.name === "San Antonio" ? 3 : 2) : 0,
+          consultations: b.consultations || 0,
+          referrals: referrals.filter((r) => r.barangay === b.name).length,
           followUps: followUps.filter((f) => f.status === "Today" || f.status === "Upcoming").length,
           priority: bcl.filter((c) => c.risk?.level === RISK_LEVELS.PRIORITY).length,
         };
@@ -170,11 +170,11 @@ export default function MunicipalHealthReports() {
 
   const trendData = useMemo(() => {
     const base = monthlyConsultations.map((m) => ({ month: m.name || m.month, Consultations: m.value || m.consultations || 0 }));
-    return base.map((m, i) => ({
+    return base.map((m) => ({
       ...m,
-      Referrals: [12, 15, 9, 18, 14, 11, 9, 13, 9, 16, 12, 14][i] || 10,
-      "Follow-ups": [8, 11, 14, 9, 12, 10, 15, 9, 11, 13, 10, 12][i] || 10,
-      "Household Visits": [6, 9, 7, 11, 8, 10, 6, 12, 9, 8, 10, 7][i] || 8,
+      Referrals: 0,
+      "Follow-ups": 0,
+      "Household Visits": 0,
     }));
   }, []);
 
@@ -194,8 +194,8 @@ export default function MunicipalHealthReports() {
 
   const recentActivity = useMemo(() => {
     const items = [];
-    submissions.slice(0, 4).forEach((s) => items.push({ title: `${s.type} submitted by Barangay ${s.barangay}`, time: `${s.reference} · ${s.period}`, tag: "Submission" }));
-    clusters.filter((c) => c.risk?.level === RISK_LEVELS.INTERVENTION || c.risk?.level === RISK_LEVELS.PRIORITY).slice(0, 2).forEach((c) => items.push({ title: `New household risk cluster — ${c.head} Household`, time: `Barangay ${c.barangay}`, tag: "Risk" }));
+    submissions.slice(0, 4).forEach((s) => items.push({ title: `${s.type} submitted by Barangay ${s.barangay}`, time: `${s.reference} Â· ${s.period}`, tag: "Submission" }));
+    clusters.filter((c) => c.risk?.level === RISK_LEVELS.INTERVENTION || c.risk?.level === RISK_LEVELS.PRIORITY).slice(0, 2).forEach((c) => items.push({ title: `New household risk cluster â€” ${c.head} Household`, time: `Barangay ${c.barangay}`, tag: "Risk" }));
     recentHealthAlerts.slice(0, 2).forEach((a) => items.push({ title: a.msg || a.title, time: a.time, tag: a.level || "Alert" }));
     return items.slice(0, 6);
   }, [submissions, clusters, recentHealthAlerts]);
@@ -209,12 +209,12 @@ export default function MunicipalHealthReports() {
 
   const exportReport = (format) => {
     const scopeLabel = isAll ? "All Barangays" : brgy;
-    showToast(`${format} export generated for ${period} · ${scopeLabel} · ${reportType}.`);
+    showToast(`${format} export generated for ${period} Â· ${scopeLabel} Â· ${reportType}.`);
   };
 
   const generateReport = () => {
     const scopeLabel = isAll ? "All Barangays" : brgy;
-    showToast(`Municipal report generated for ${period} · ${scopeLabel} · ${reportType}.`);
+    showToast(`Municipal report generated for ${period} Â· ${scopeLabel} Â· ${reportType}.`);
   };
 
   const filterCls = "rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 py-2.5 text-sm outline-none dark:text-foreground";
@@ -263,7 +263,7 @@ export default function MunicipalHealthReports() {
 
       {toast && <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg"><span className="text-sm">{toast}</span></div>}
 
-      {/* Filter bar — evenly sized, labeled, stacking on mobile */}
+      {/* Filter bar â€” evenly sized, labeled, stacking on mobile */}
       <Card className="p-4 mb-6">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Filter label="Reporting Period" value={period} onChange={setPeriod} options={PERIODS} />
@@ -361,6 +361,11 @@ export default function MunicipalHealthReports() {
                     </td>
                   </tr>
                 ))}
+                {barangayRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-brand-gray">No barangay data recorded.</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -376,7 +381,7 @@ export default function MunicipalHealthReports() {
               const pct = barangayRows.length ? Math.round((count / Math.max(barangayRows.length, 1)) * 100) : 0;
               return (
                 <div key={label}>
-                  <div className="flex items-center justify-between text-sm"><span className="text-brand-ink">{label}</span><span className="text-brand-gray">{count} / {barangayRows.length} barangays · {pct}%</span></div>
+                  <div className="flex items-center justify-between text-sm"><span className="text-brand-ink">{label}</span><span className="text-brand-gray">{count} / {barangayRows.length} barangays Â· {pct}%</span></div>
                   <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-brand-blue" style={{ width: `${pct}%` }} /></div>
                 </div>
               );
@@ -480,33 +485,41 @@ export default function MunicipalHealthReports() {
       {reportType === "All Reports" ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card className="p-5">
-            <SectionHeader title="Top Health Conditions" subtitle={`Most recorded conditions · ${period}`} />
-            <div className="space-y-3">
-              {derived.healthConditions.map((c) => {
-                const maxVal = derived.healthConditions[0]?.value || derived.healthConditions[0]?.count || 1;
-                return (
-                  <div key={c.name || c.label}>
-                    <div className="flex items-center justify-between text-sm"><span className="text-brand-ink">{c.name || c.label}</span><span className="text-brand-gray font-semibold">{c.count || c.value}</span></div>
-                    <div className="mt-1.5 h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-brand-blue rounded-full" style={{ width: `${Math.max(6, ((c.count || c.value || 0) / maxVal) * 100)}%` }} /></div>
-                  </div>
-                );
-              })}
-            </div>
+            <SectionHeader title="Top Health Conditions" subtitle={`Most recorded conditions Â· ${period}`} />
+            {derived.healthConditions.length === 0 ? (
+              <p className="text-sm text-brand-gray">No health conditions recorded for this period.</p>
+            ) : (
+              <div className="space-y-3">
+                {derived.healthConditions.map((c) => {
+                  const maxVal = derived.healthConditions[0]?.value || derived.healthConditions[0]?.count || 1;
+                  return (
+                    <div key={c.name || c.label}>
+                      <div className="flex items-center justify-between text-sm"><span className="text-brand-ink">{c.name || c.label}</span><span className="text-brand-gray font-semibold">{c.count || c.value}</span></div>
+                      <div className="mt-1.5 h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-brand-blue rounded-full" style={{ width: `${Math.max(6, ((c.count || c.value || 0) / maxVal) * 100)}%` }} /></div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
 
           <Card className="p-5">
             <SectionHeader title="Recent Municipal Activity" />
-            <div className="space-y-1">
-              {recentActivity.map((a, i) => (
-                <div key={i} className="flex items-start gap-3 py-2.5 border-b border-brand-border last:border-0">
-                  <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-0.5 text-[11px] font-medium text-brand-blue dark:bg-brand-blue/15">{a.tag}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-brand-ink">{a.title}</p>
-                    <p className="text-xs text-brand-gray">{a.time}</p>
+            {recentActivity.length === 0 ? (
+              <p className="text-sm text-brand-gray">No recent activity to display.</p>
+            ) : (
+              <div className="space-y-1">
+                {recentActivity.map((a, i) => (
+                  <div key={i} className="flex items-start gap-3 py-2.5 border-b border-brand-border last:border-0">
+                    <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-0.5 text-[11px] font-medium text-brand-blue dark:bg-brand-blue/15">{a.tag}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-brand-ink">{a.title}</p>
+                      <p className="text-xs text-brand-gray">{a.time}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
       ) : null}

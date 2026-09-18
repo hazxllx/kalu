@@ -4,7 +4,7 @@ import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
 import { usePermissions } from "@/context/PermissionsContext";
-import { barangayServices } from "@/services/mock/mockData";
+import { barangayServices } from "@/services/local/dashboardData";
 import {
   Stethoscope,
   Syringe,
@@ -371,7 +371,7 @@ export default function HealthServicesPage() {
                       setForm({ ...form, days: e.target.value });
                       setErrors((prev) => ({ ...prev, days: "" }));
                     }}
-                    placeholder="e.g. Monday – Friday"
+                    placeholder="e.g. Monday â€“ Friday"
                     className={inputCls(errors.days)}
                   />
                   {errors.days && <p className="mt-1 text-xs text-red-600">{errors.days}</p>}
@@ -382,7 +382,7 @@ export default function HealthServicesPage() {
                     type="text"
                     value={form.hours}
                     onChange={(e) => setForm({ ...form, hours: e.target.value })}
-                    placeholder="e.g. 8:00 AM – 12:00 PM"
+                    placeholder="e.g. 8:00 AM â€“ 12:00 PM"
                     className={inputCls()}
                   />
                 </div>

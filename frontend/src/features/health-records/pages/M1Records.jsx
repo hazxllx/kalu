@@ -4,7 +4,7 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Baby, Calendar, Activity } from "lucide-react";
-import { m1Records, residents } from "@/services/mock/mockData";
+import { m1Records, residents } from "@/services/local/dashboardData";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 
@@ -30,7 +30,7 @@ export default function M1Records() {
     <>
       <PageHeader
         crumbs={["M1 Records"]}
-        title="M1 — Maternal Records"
+        title="M1 â€” Maternal Records"
         subtitle={
           assignedBarangay
             ? `Manage maternal health records for prenatal clients in Brgy. ${assignedBarangay}.`
@@ -59,7 +59,7 @@ export default function M1Records() {
                     <div className="w-11 h-11 rounded-xl bg-brand-light text-brand-blue flex items-center justify-center"><Baby className="w-5 h-5" /></div>
                     <div>
                       <h3 className="font-semibold text-brand-ink">{m.resident}</h3>
-                      <p className="text-xs text-brand-gray">Prenatal · {m.prenatalVisits} visits</p>
+                      <p className="text-xs text-brand-gray">Prenatal Â· {m.prenatalVisits} visits</p>
                     </div>
                   </div>
                   <StatusBadge value={m.risk} />

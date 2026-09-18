@@ -13,11 +13,15 @@ KALUSAGAP/
 
 ## Current state
 
-The React app is complete as a UI and renders from local mock datasets in
-`frontend/src/services/mock/`. The backend is a working skeleton exposing only
-`GET /api/health`; Supabase is not wired up yet, and login navigates by selected
-role instead of authenticating. Treat every "service" boundary below as the
-place where real data access is meant to land.
+The React app is complete as a UI and renders **live data only** — it contains
+no mock, demo or fabricated datasets. Authentication is Supabase Auth, the role
+is resolved from the `profiles` table through the API, and every page shows a
+skeleton while loading and an empty state when a query returns nothing. The
+Express backend exposes the real auth/RBAC pipeline plus the database-backed
+resident, household, intake, PHN queue, verification and analytics endpoints;
+the remaining domain groups return `501` until their verified schema is
+connected. Treat every "service" boundary below as the place where real data
+access lands.
 
 ## Intended request flow
 
@@ -102,8 +106,9 @@ boundaries; the database (RLS) and the API are.
 
 ## Notifications
 
-`frontend/src/features/notifications/` renders the in-system notification feed,
-currently backed by `frontend/src/services/mock/notificationData.js`.
+`frontend/src/features/notifications/` renders the in-system notification feed.
+The feed starts empty (no demo entries) and is held in the client session store
+until the notifications endpoint is connected.
 
 The structure is ready for expansion without rework: add
 `backend/src/services/notification.service.js` plus

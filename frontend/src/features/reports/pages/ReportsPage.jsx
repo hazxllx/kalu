@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { TrendingUp, Download, Send, Check, CheckCircle2, X } from "lucide-react";
+import { Download, Send, Check, CheckCircle2, X } from "lucide-react";
 import {
   phnMonthlyTrend,
   phnResidents,
   phnReferrals,
   phnFollowUps,
   phnHealthServices,
-} from "@/services/mock/mockPhnData";
+} from "@/services/local/phnData";
 import {
   filterRowsByScope,
   normalizeBarangay,
@@ -19,36 +19,16 @@ import {
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { monthlyConsultations, comparisonMonthlyConsultations, barangayOverview } from "@/services/mock/mockData";
+import { monthlyConsultations, comparisonMonthlyConsultations, barangayOverview } from "@/services/local/dashboardData";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 
-const summaryCards = [
-  { label: "Total Prenatal Patients", value: "48" },
-  { label: "Active Follow-ups", value: "23" },
-  { label: "Completed Follow-ups", value: "86" },
-  { label: "Referrals Submitted", value: "9" },
-  { label: "Monthly Consultations", value: "312" },
-  { label: "High-risk Pregnancies", value: "12" },
-];
+const summaryCards = [];
 
-const REPORTS = [
-  { id: 1, name: "Monthly Maternal Report", type: "Monthly Maternal Report", period: "June 2026", status: "Submitted to RHU", date: "July 1, 2026", submittedDate: "July 1, 2026", submittedTime: "9:30 AM", barangay: "San Isidro" },
-  { id: 2, name: "Follow-up Report", type: "Follow-up Report", period: "July 2026", status: "Generated", date: "July 10, 2026", barangay: "San Antonio" },
-  { id: 3, name: "Referral Report", type: "Referral Report", period: "June 2026", status: "Draft", date: "June 28, 2026", barangay: "Old San Roque" },
-  { id: 4, name: "Immunization Report", type: "Immunization Report", period: "June 2026", status: "Submitted to RHU", date: "June 25, 2026", submittedDate: "June 25, 2026", submittedTime: "2:15 PM", barangay: "San Isidro" },
-];
+const REPORTS = [];
 
 // PHN reports. `barangay: null` means an RHU-level report (no barangay scope);
 // the rest belong to a specific barangay and are scope-filtered below.
-const PHN_REPORTS = [
-  { id: 101, name: "RHU Health Records Summary", type: "Health Records", period: "August 2026", status: "Submitted to RHU", date: "September 1, 2026", submittedDate: "September 1, 2026", submittedTime: "8:45 AM", barangay: null },
-  { id: 102, name: "RHU Referrals Report", type: "Referrals", period: "August 2026", status: "Generated", date: "September 3, 2026", barangay: null },
-  { id: 103, name: "San Isidro Health Records", type: "Health Records", period: "August 2026", status: "Generated", date: "September 2, 2026", barangay: "San Isidro" },
-  { id: 104, name: "San Isidro Referrals", type: "Referrals", period: "August 2026", status: "Generated", date: "September 4, 2026", barangay: "San Isidro" },
-  { id: 105, name: "San Isidro Follow-ups", type: "Follow-ups", period: "August 2026", status: "Submitted to RHU", date: "September 2, 2026", submittedDate: "September 2, 2026", submittedTime: "10:15 AM", barangay: "San Isidro" },
-  { id: 106, name: "San Antonio Follow-ups", type: "Follow-ups", period: "August 2026", status: "Generated", date: "September 5, 2026", barangay: "San Antonio" },
-  { id: 107, name: "Old San Roque Health Services", type: "Health Services", period: "August 2026", status: "Draft", date: "September 5, 2026", barangay: "Old San Roque" },
-];
+const PHN_REPORTS = [];
 
 const STATUS_COLORS = {
   Draft: "bg-brand-gray/10 text-brand-gray",
@@ -65,7 +45,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const coverageLabel = coverage ? (coverage === "RHU" ? "RHU" : coverage) : null;
   const rhuCoverage = coverage === "RHU";
 
-  // Health Supervisor scope — reports are limited to the supervisor's single
+  // Health Supervisor scope â€” reports are limited to the supervisor's single
   // assigned barangay; the RHU/municipality-level figures are never shown.
   const supervisorScope = getSupervisorScope(user);
   const assignedBarangay = supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
@@ -192,7 +172,6 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const scopeSummary = useMemo(() => {
     if (assignedBarangay) {
       const label = `${assignedBarangay} barangay`;
-      const rows = (list) => (Array.isArray(list) ? list.filter((r) => r.barangay === assignedBarangay) : []);
       const brgy = barangayOverview.find((b) => b.name === assignedBarangay) || { residents: 0, highRisk: 0, coverage: "0%" };
       return [
         { label: `${label} Residents`, value: brgy.residents.toLocaleString() },
@@ -220,8 +199,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     ];
   }, [isPhn, coverage, coverageLabel, rhuCoverage, user, assignedBarangay, scopedReports.length]);
 
-  // A PHN works at the RHU — reports are submitted upward to the MHO, while
+  // A PHN works at the RHU â€” reports are submitted upward to the MHO, while
   // barangay-level roles submit theirs to the RHU.
+  const summaryItems = isPhn ? scopeSummary : summaryCards;
   const submitTarget = isPhn ? "MHO" : "RHU";
   const displayStatus = (report) =>
     isPhn && report.status === "Submitted to RHU" ? "Submitted to MHO" : report.status;
@@ -252,7 +232,6 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         <Card className="p-6 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-brand-ink">{isPhn ? (rhuCoverage ? "RHU Health Cases Trend" : `${coverageLabel} Health Cases Trend`) : "Monthly Consultations"}</h3>
-            <span className="flex items-center gap-1 text-sm text-brand-green"><TrendingUp className="w-4 h-4" /> {isPhn ? "+6%" : "+17%"}</span>
           </div>
           <ResponsiveContainer width="100%" height={220}>
             {isPhn ? (
@@ -285,12 +264,16 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         </Card>
         <Card className="p-6 h-fit">
           <h3 className="font-semibold text-brand-ink mb-4">Report Summary</h3>
-          {(isPhn ? scopeSummary : summaryCards).map((s) => (
-            <div key={s.label} className="flex justify-between py-3 border-b border-brand-border last:border-0">
-              <span className="text-sm text-brand-gray">{s.label}</span>
-              <span className="font-stat font-bold text-brand-ink">{s.value}</span>
-            </div>
-          ))}
+          {summaryItems.length === 0 ? (
+            <p className="text-sm text-brand-gray">No summary data available.</p>
+          ) : (
+            summaryItems.map((s) => (
+              <div key={s.label} className="flex justify-between py-3 border-b border-brand-border last:border-0">
+                <span className="text-sm text-brand-gray">{s.label}</span>
+                <span className="font-stat font-bold text-brand-ink">{s.value}</span>
+              </div>
+            ))
+          )}
         </Card>
       </div>
 
@@ -362,7 +345,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                           <span className="flex items-center gap-1 text-brand-green">
                             <Check className="w-3 h-3" /> Submitted
                           </span>
-                          <div className="mt-1">{report.submittedDate} • {report.submittedTime}</div>
+                          <div className="mt-1">{report.submittedDate} â€¢ {report.submittedTime}</div>
                         </div>
                       )}
                       {report.status === "Draft" && (

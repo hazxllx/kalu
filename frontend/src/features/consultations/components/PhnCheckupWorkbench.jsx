@@ -3,7 +3,7 @@ import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTrian
 import { Card } from "@/components/common/Card";
 import { calculateRiskLevel } from "@/lib/riskRules";
 import { consultationLocationFor } from "@/lib/consultationLocations";
-import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
+import { useWorkflowStore } from "@/services/local/workflowStore";
 import { useAuth } from "@/context/AuthContext";
 import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
 
@@ -35,7 +35,7 @@ const inputCls = (error) =>
     error ? "border-brand-danger" : "border-brand-border"
   }`;
 
-const InfoItem = ({ label, value, fallback = "—" }) => (
+const InfoItem = ({ label, value, fallback = "â€”" }) => (
   <div>
     <p className="text-xs text-brand-gray mb-1">{label}</p>
     <p className="text-sm font-medium text-brand-ink">{value || fallback}</p>
@@ -60,16 +60,16 @@ const RiskPill = ({ level }) => (
 const OutcomeItem = ({ label, value }) => (
   <div className="rounded-btn bg-brand-bg/60 border border-brand-border px-3 py-2">
     <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">{label}</p>
-    <p className="mt-0.5 text-sm font-medium text-brand-ink">{value || "—"}</p>
+    <p className="mt-0.5 text-sm font-medium text-brand-ink">{value || "â€”"}</p>
   </div>
 );
 
 /**
  * PHN consultation workbench.
  *
- *  - "Patient Information"  — resident profile + consultation location (RHU).
- *  - "Triage Information"   — READ-ONLY snapshot collected by RHU Personnel.
- *  - "PHN Check-up"         — the PHN records assessment / findings / health
+ *  - "Patient Information"  â€” resident profile + consultation location (RHU).
+ *  - "Triage Information"   â€” READ-ONLY snapshot collected by RHU Personnel.
+ *  - "PHN Check-up"         â€” the PHN records assessment / findings / health
  *                             concern / clinical notes / recommendations here.
  *
  * The Risk Level is calculated AUTOMATICALLY from the read-only triage data
@@ -239,7 +239,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
               </div>
             </div>
 
-            {/* Triage Information — READ ONLY */}
+            {/* Triage Information â€” READ ONLY */}
             <div className="mb-6">
               <SectionTitle step={2} title="Triage Information (collected by RHU Personnel)" />
               <div className="rounded-btn border border-brand-border px-4 py-3">
@@ -247,7 +247,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   <div className="sm:col-span-2 lg:col-span-3">
                     <InfoItem label="Chief Complaint / Reason for Visit" value={patient?.triage?.chiefComplaint || patient?.reason} />
                   </div>
-                  <InfoItem label="Temperature" value={patient?.triage?.temperature ? `${patient.triage.temperature} °C` : null} />
+                  <InfoItem label="Temperature" value={patient?.triage?.temperature ? `${patient.triage.temperature} Â°C` : null} />
                   <InfoItem label="Blood Pressure" value={patient?.triage?.bloodPressure ? `${patient.triage.bloodPressure} mmHg` : null} />
                   <InfoItem label="Pulse Rate" value={patient?.triage?.pulseRate ? `${patient.triage.pulseRate} bpm` : null} />
                   <InfoItem label="Respiratory Rate" value={patient?.triage?.respiratoryRate ? `${patient.triage.respiratoryRate} /min` : null} />
@@ -320,7 +320,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                 {justCompleted && (
                   <div className="mt-4 flex items-center gap-2 rounded-btn bg-brand-green/10 border border-brand-green/20 px-4 py-3 text-sm text-brand-green">
                     <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    Check-up completed. The patient record now reflects the full triage → check-up workflow.
+                    Check-up completed. The patient record now reflects the full triage â†’ check-up workflow.
                   </div>
                 )}
                 {onOutcome ? renderOutcomeActions() : null}

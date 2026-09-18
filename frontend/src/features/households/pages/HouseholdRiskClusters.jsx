@@ -6,7 +6,7 @@ import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import {
   useHouseholdRiskClusters,
   householdRiskStore,
-} from "@/services/mock/householdRiskStore";
+} from "@/services/local/householdRiskStore";
 import { RISK_LEVELS, RISK_LEVEL_LABELS, RISK_WORKFLOW_STATUSES, householdRiskBasis } from "@/lib/householdRisk";
 import { Link } from "react-router-dom";
 import {

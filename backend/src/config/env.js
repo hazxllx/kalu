@@ -39,20 +39,11 @@ const env = {
   // JSON file that persists residents, submissions and referrals so the
   // workflow works end-to-end in local development. Never a production store.
   dataDir: process.env.DATA_DIR || '',
-
-  // --- Development-only auth ------------------------------------------------
-  // Secret used to sign local dev-auth tokens (see services/devAuth.service.js).
-  // When absent the server derives a persistent random secret on first boot so
-  // dev tokens survive restarts; this path is disabled in production and
-  // whenever Supabase is configured.
-  devAuthSecret: process.env.DEV_AUTH_SECRET || '',
 };
 
 env.isProduction = env.nodeEnv === 'production';
 // True only when the server has enough configuration to talk to Supabase.
+// Supabase Auth is the ONLY sign-in path — there is no local/mock authentication.
 env.isSupabaseConfigured = Boolean(env.supabaseUrl && env.supabaseServiceRoleKey);
-// Whether server-side dev authentication (mock accounts + signed tokens) may
-// be used. Never in production, and never when real Supabase auth is available.
-env.isDevAuthEnabled = !env.isProduction && !env.isSupabaseConfigured;
 
 export default env;

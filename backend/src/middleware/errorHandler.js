@@ -27,10 +27,18 @@ const errorHandler = (err, req, res, next) => {
     ? 'Something went wrong. Please try again later.'
     : err.message || 'Unexpected error';
 
+  // `details` is the legacy field-errors carrier (kept for existing clients).
+  // When it is a plain object of field -> message we also expose it as
+  // `errors`, which is the documented validation shape. Arrays of messages
+  // (service-level domain validation) remain under `details` only.
+  const isFieldErrorMap =
+    err.details && typeof err.details === 'object' && !Array.isArray(err.details);
+
   res.status(statusCode).json({
     error: {
       message,
       ...(err.details ? { details: err.details } : {}),
+      ...(isFieldErrorMap ? { errors: err.details } : {}),
     },
   });
 };

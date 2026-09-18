@@ -4,8 +4,11 @@ import { api } from './apiClient';
  * Residents API. Thin wrapper over the centralized apiClient so components and
  * hooks never build resident URLs themselves.
  *
- * Backend endpoints are role-scoped (Health Supervisor / PHN / MHO — NOT BHW)
- * and currently return 501 until the verified schema is connected.
+ * Live endpoints (role-scoped: Health Supervisor / PHN / MHO — NOT BHW):
+ *   GET  /residents        directory listing + search, scope-enforced
+ *   POST /residents        register a resident (validated, duplicate-guarded)
+ *   GET  /residents/:id    single record (within the caller's scope)
+ *   PUT  /residents/:id    permitted demographic corrections
  */
 export const residentsApi = {
   list: (params) => api.get('/residents', { params }),

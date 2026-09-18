@@ -1,291 +1,319 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationReviewDrawer from "@/features/verification/components/VerificationReviewDrawer";
-import { useAuth } from "@/context/AuthContext";
-import { getAssignedBarangay } from "@/lib/barangayScope";
-import { ROLES } from "@/lib/brand";
+import { SkeletonTable } from "@/components/common/Skeleton";
 import {
-  resolvePendingVerifications,
-  resolveVerificationHistory,
-} from "@/services/mock/mockVerifications";
-import {
-  fetchPendingVerifications,
-  submitVerificationDecision,
+  approveResident,
+  fetchResidentVerification,
+  fetchVerificationHistory,
+  fetchVerificationQueue,
+  rejectResident,
+  requestResubmission,
 } from "@/services/api/verificationsApi";
-import { Search, CheckCircle2, ChevronRight, History } from "lucide-react";
+import { CheckCircle2, ChevronRight, History, Search } from "lucide-react";
 
-const formatApiDate = (iso) => {
-  if (!iso) return "";
-  const d = new Date(String(iso).length === 10 ? `${iso}T00:00:00` : iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
+/**
+ * Health Supervisor resident-verification page.
+ *
+ * Pending / Approved / Rejected queues backed by the residents table, plus the
+ * recent decision history. Barangay scope is enforced by the server. After an
+ * action the queue and history are re-fetched from the API — the UI never
+ * assumes the outcome.
+ */
+
+const TABS = [
+  { key: "pending", label: "Pending" },
+  { key: "approved", label: "Approved" },
+  { key: "rejected", label: "Rejected" },
+  { key: "resubmission_required", label: "Resubmission" },
+];
+
+const formatDate = (value) => {
+  if (!value) return "—";
+  const d = new Date(String(value).length === 10 ? `${value}T00:00:00` : value);
+  if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 };
 
-const formatHistoryDate = (iso) => {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
+const formatDateTime = (value) => {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
-/** Maps the API record shape onto the page's display shape. */
-const fromApi = (v) => ({
-  ref: v.ref,
-  name: v.name,
-  barangay: v.barangay,
-  registered: formatApiDate(v.registeredDate),
-  contact: v.contactNumber || "",
-  birthDate: formatApiDate(v.birthDate),
-  age: v.age ?? "",
-  sex: v.sex || "",
-  civilStatus: v.civilStatus || "",
-  address: v.address || "",
-  residencyStatus: v.residencyStatus || "",
-  lengthOfResidency: v.lengthOfResidency || "",
-  householdId: v.householdId || "",
-  proofDocument: v.proofDocument || "",
-  status: v.status || "Pending",
-});
-
 export default function PendingVerifications() {
-  const { user } = useAuth();
-  // Barangay scope comes from the signed-in user's assignment — the queue is
-  // limited to it here AND on the server (/api/verifications/* derives the
-  // same scope from the session).
-  const assignedBarangay = getAssignedBarangay(user);
-  const reviewerName = (user?.role && ROLES[user.role] && ROLES[user.role].name) || user?.name || "";
-  const reviewerRoleLabel =
-    (user?.role && ROLES[user.role] && ROLES[user.role].label) || "Health Supervisor";
-
-  const [pending, setPending] = useState(() => resolvePendingVerifications(assignedBarangay));
-  const [history, setHistory] = useState(() => resolveVerificationHistory(assignedBarangay));
+  const [tab, setTab] = useState("pending");
+  const [rows, setRows] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [reviewing, setReviewing] = useState(null);
+  const [reviewHistory, setReviewHistory] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
+  const [error, setError] = useState("");
 
-  // Pull the live queue from the API when reachable (server enforces the
-  // barangay assignment); otherwise keep the scoped mock dataset.
-  useEffect(() => {
-    let cancelled = false;
-    fetchPendingVerifications()
-      .then((rows) => {
-        if (!cancelled && Array.isArray(rows) && rows.length > 0) {
-          setPending(rows.map(fromApi));
-        }
-      })
-      .catch(() => {
-        /* API unavailable — keep the scoped mock queue */
-      });
-    return () => {
-      cancelled = true;
-    };
+  const loadQueue = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const { rows: data } = await fetchVerificationQueue({ status: tab });
+      setRows(data);
+    } catch (err) {
+      setRows([]);
+      setError(err?.message || "We could not load the verification queue. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [tab]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistory(await fetchVerificationHistory());
+    } catch {
+      setHistory([]);
+    }
   }, []);
 
-  const filtered = pending.filter(
-    (r) =>
-      r.name.toLowerCase().includes(query.toLowerCase()) ||
-      r.ref.toLowerCase().includes(query.toLowerCase())
-  );
+  useEffect(() => {
+    loadQueue();
+  }, [loadQueue]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const showToast = (message) => {
     setToast(message);
-    setTimeout(() => setToast(null), 4000);
+    window.setTimeout(() => setToast(null), 4000);
   };
 
-  const handleDecision = ({ decision, reason, remarks, reviewedAt }) => {
-    const record = reviewing;
-    if (!record) return;
+  const openReview = async (row) => {
+    setReviewing(row);
+    setReviewHistory([]);
+    try {
+      const { verification, history: detailHistory } = await fetchResidentVerification(row.id);
+      if (verification) setReviewing(verification);
+      setReviewHistory(detailHistory);
+    } catch {
+      /* keep the row data already shown */
+    }
+  };
 
-    // Best-effort persistence through the API — the server independently
-    // verifies the reviewer's barangay assignment before accepting it.
-    submitVerificationDecision({ ref: record.ref, decision, reason, remarks }).catch(() => {});
-
-    setPending((prev) => prev.filter((v) => v.ref !== record.ref));
-    setHistory((prev) => [
-      {
-        ref: record.ref,
-        name: record.name,
-        barangay: record.barangay,
-        status: decision === "approved" ? "Verified" : "Rejected",
-        decision,
-        reason,
-        remarks,
-        reviewedBy: reviewerName || "Health Supervisor",
-        reviewedByRole: user?.role || "",
-        reviewedAt,
-        notified: true,
-      },
-      ...prev,
-    ]);
+  const afterDecision = async (message) => {
     setReviewing(null);
-    showToast(
-      decision === "approved"
-        ? `${record.name} is now verified as a resident of Barangay ${record.barangay}.`
-        : `${record.name}'s verification was rejected — the resident will be notified.`
-    );
+    setReviewHistory([]);
+    await Promise.all([loadQueue(), loadHistory()]);
+    showToast(message);
   };
 
-  const scopeLabel = assignedBarangay ? `in Barangay ${assignedBarangay}` : "in your barangay";
+  const runDecision = async (action) => {
+    if (!reviewing) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await action();
+      await afterDecision(
+        tab === "pending" || tab === "resubmission_required"
+          ? `Decision recorded for ${reviewing.name}.`
+          : `Updated ${reviewing.name}.`,
+      );
+    } catch (err) {
+      setError(err?.message || "The action could not be completed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const filtered = rows.filter((r) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      String(r.name || "").toLowerCase().includes(q) ||
+      String(r.ref || "").toLowerCase().includes(q) ||
+      String(r.barangay || "").toLowerCase().includes(q)
+    );
+  });
+
+  const activeTab = TABS.find((t) => t.key === tab);
 
   return (
     <>
       <PageHeader
-        crumbs={["Dashboard", "Pending Verifications"]}
-        title="Pending Resident Verifications"
-        subtitle={`${pending.length} residents awaiting identity verification ${scopeLabel}.`}
+        crumbs={["Dashboard", "Resident Verifications"]}
+        title="Resident Verifications"
+        subtitle="Review resident registrations and record an approval or rejection."
       />
 
-      {/* Toast Notification */}
       {toast && (
-        <div className="fixed bottom-4 right-4 z-50 flex animate-in slide-in-from-bottom-2 items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">
           <CheckCircle2 className="h-4 w-4 text-brand-green" />
           <span className="text-sm text-white">{toast}</span>
         </div>
       )}
 
+      {error && (
+        <div role="alert" className="mb-4 rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger">
+          {error}
+        </div>
+      )}
+
       <Card className="overflow-hidden">
-        {/* Search bar */}
-        <div className="px-6 py-4 border-b border-brand-border">
-          <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-input px-3.5 py-2.5 max-w-sm">
-            <Search className="w-4 h-4 text-brand-gray" />
+        {/* Tabs + search */}
+        <div className="flex flex-col gap-3 border-b border-brand-border px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-1.5">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  tab === t.key ? "bg-brand-blue text-white" : "bg-brand-bg text-brand-gray hover:text-brand-ink"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex max-w-sm items-center gap-2 rounded-input border border-brand-border bg-brand-bg px-3.5 py-2.5">
+            <Search className="h-4 w-4 text-brand-gray" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or reference..."
-              className="bg-transparent text-sm outline-none w-full placeholder:text-brand-gray/70"
+              placeholder="Search by name, reference or barangay..."
+              className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
             />
           </div>
         </div>
 
-        {/* Pending table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-brand-bg text-left">
-                <th className="px-6 py-3 font-medium text-brand-gray">Resident</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Barangay</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Registered</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Reference</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Status</th>
-                <th className="px-6 py-3 font-medium text-brand-gray text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-brand-border">
-              {filtered.map((r, i) => (
-                <motion.tr
-                  key={r.ref}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className="hover:bg-brand-bg/50 transition-colors"
-                >
-                  <td className="px-6 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-xs font-heading font-semibold">
-                        {r.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+          {loading ? (
+            <SkeletonTable rows={5} cols={6} className="px-6 py-5" />
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-brand-bg text-left">
+                  <th className="px-6 py-3 font-medium text-brand-gray">Resident</th>
+                  <th className="px-6 py-3 font-medium text-brand-gray">Barangay</th>
+                  <th className="px-6 py-3 font-medium text-brand-gray">Submitted</th>
+                  <th className="px-6 py-3 font-medium text-brand-gray">Reference</th>
+                  <th className="px-6 py-3 font-medium text-brand-gray">Status</th>
+                  <th className="px-6 py-3 text-right font-medium text-brand-gray">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-brand-border">
+                {filtered.map((r, i) => (
+                  <motion.tr
+                    key={r.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.04 }}
+                    className="transition-colors hover:bg-brand-bg/50"
+                  >
+                    <td className="px-6 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-light text-xs font-heading font-semibold text-brand-blue">
+                          {(r.name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                        </div>
+                        <span className="font-medium text-brand-ink">{r.name}</span>
                       </div>
-                      <span className="font-medium text-brand-ink">{r.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-3.5 text-brand-gray">{r.barangay}</td>
-                  <td className="px-6 py-3.5 text-brand-gray">{r.registered}</td>
-                  <td className="px-6 py-3.5">
-                    <span className="font-stat font-medium text-brand-ink text-xs">{r.ref}</span>
-                  </td>
-                  <td className="px-6 py-3.5">
-                    <VerificationBadge status="pending" size="sm" />
-                  </td>
-                  <td className="px-6 py-3.5 text-right">
-                    <button
-                      onClick={() => setReviewing(r)}
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
-                    >
-                      Review <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
+                    </td>
+                    <td className="px-6 py-3.5 text-brand-gray">{r.barangay}</td>
+                    <td className="px-6 py-3.5 text-brand-gray">{formatDate(r.submittedAt)}</td>
+                    <td className="px-6 py-3.5">
+                      <span className="font-stat text-xs font-medium text-brand-ink">{r.ref}</span>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <VerificationBadge status={r.status} size="sm" />
+                    </td>
+                    <td className="px-6 py-3.5 text-right">
+                      <button
+                        onClick={() => openReview(r)}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                      >
+                        Review <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  </motion.tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
-        {filtered.length === 0 && (
+        {!loading && filtered.length === 0 && (
           <div className="px-6 py-16 text-center">
-            <div className="w-14 h-14 rounded-full bg-brand-bg flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-7 h-7 text-brand-gray" strokeWidth={1.5} />
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-bg">
+              <CheckCircle2 className="h-7 w-7 text-brand-gray" strokeWidth={1.5} />
             </div>
-            <p className="mt-4 text-sm font-medium text-brand-ink">No pending verifications</p>
-            <p className="text-xs text-brand-gray mt-1">All caught up.</p>
+            <p className="mt-4 text-sm font-medium text-brand-ink">No {activeTab?.label.toLowerCase()} residents</p>
+            <p className="mt-1 text-xs text-brand-gray">Nothing to show for this filter.</p>
           </div>
         )}
       </Card>
 
-      {/* Verification history */}
+      {/* Decision history */}
       <Card className="mt-6 overflow-hidden">
         <div className="flex items-center gap-2 border-b border-brand-border px-6 py-4">
-          <History className="w-4 h-4 text-brand-blue" strokeWidth={1.8} />
-          <h3 className="font-heading font-semibold text-brand-ink text-sm">Verification History</h3>
-          <span className="ml-auto text-xs text-brand-gray">{history.length} reviewed</span>
+          <History className="h-4 w-4 text-brand-blue" strokeWidth={1.8} />
+          <h3 className="font-heading text-sm font-semibold text-brand-ink">Recent Decisions</h3>
+          <span className="ml-auto text-xs text-brand-gray">{history.length} recorded</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-brand-bg text-left">
                 <th className="px-6 py-3 font-medium text-brand-gray">Resident</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Reference</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Decision</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Reason / Remarks</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Reviewed by</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Review Date</th>
+                <th className="px-6 py-3 font-medium text-brand-gray">Action</th>
+                <th className="px-6 py-3 font-medium text-brand-gray">Reason</th>
+                <th className="px-6 py-3 font-medium text-brand-gray">Date</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-brand-border">
               {history.map((h) => (
-                <tr key={`${h.ref}-${h.reviewedAt}`} className="hover:bg-brand-bg/50 transition-colors">
+                <tr key={h.id} className="transition-colors hover:bg-brand-bg/50">
                   <td className="px-6 py-3.5">
-                    <p className="font-medium text-brand-ink">{h.name}</p>
+                    <p className="font-medium text-brand-ink">{h.residentName || h.residentRef}</p>
                     <p className="text-xs text-brand-gray">Barangay {h.barangay}</p>
                   </td>
                   <td className="px-6 py-3.5">
-                    <span className="font-stat font-medium text-brand-ink text-xs">{h.ref}</span>
+                    <VerificationBadge status={h.newStatus} size="sm" />
                   </td>
-                  <td className="px-6 py-3.5">
-                    <VerificationBadge status={h.status.toLowerCase()} size="sm" />
-                  </td>
-                  <td className="px-6 py-3.5 max-w-xs">
-                    {h.decision === "rejected" ? (
-                      <p className="text-sm text-brand-ink">
-                        {h.reason}
-                        {h.remarks && <span className="block text-xs text-brand-gray mt-0.5">{h.remarks}</span>}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-brand-gray">
-                        {h.remarks || "—"}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-6 py-3.5 text-sm text-brand-gray">{h.reviewedBy}</td>
-                  <td className="px-6 py-3.5 text-sm text-brand-gray whitespace-nowrap">
-                    {formatHistoryDate(h.reviewedAt)}
-                  </td>
+                  <td className="max-w-xs px-6 py-3.5 text-sm text-brand-ink">{h.reason || "—"}</td>
+                  <td className="whitespace-nowrap px-6 py-3.5 text-sm text-brand-gray">{formatDateTime(h.createdAt)}</td>
                 </tr>
               ))}
+              {history.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-10 text-center text-sm text-brand-gray">
+                    No decisions recorded yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </Card>
 
-      {/* Verification review drawer */}
       <AnimatePresence>
         {reviewing && (
           <VerificationReviewDrawer
             verification={reviewing}
-            reviewerName={reviewerName}
-            reviewerRoleLabel={reviewerRoleLabel}
-            onClose={() => setReviewing(null)}
-            onDecision={handleDecision}
+            history={reviewHistory}
+            submitting={submitting}
+            onClose={() => {
+              if (submitting) return;
+              setReviewing(null);
+              setReviewHistory([]);
+            }}
+            onApprove={() => runDecision(() => approveResident(reviewing.id, {}))}
+            onReject={({ reason, remarks }) => runDecision(() => rejectResident(reviewing.id, { reason, remarks }))}
+            onRequestResubmission={({ reason, remarks }) =>
+              runDecision(() => requestResubmission(reviewing.id, { reason, remarks }))
+            }
           />
         )}
       </AnimatePresence>

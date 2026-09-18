@@ -11,6 +11,9 @@ import { residentId, healthRecordNo, submissionId, referralId } from './ids.js';
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
+/** Canonical dev barangays (single-municipality file driver). */
+const DEV_BARANGAYS = Object.freeze(['San Isidro', 'San Antonio', 'Old San Roque']);
+
 const normalizeText = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 const attachResidentToVisit = (visit, residentsById) => ({
@@ -67,6 +70,41 @@ export const fileRepository = {
   nextReferralId: () => store.mutate((data) => nextReferral(data)),
 
   // ----- residents ---------------------------------------------------------
+  /**
+   * Scope-aware directory listing (mirrors the Supabase driver). The file
+   * driver is single-municipality dev data, so `municipalityId` is ignored and
+   * barangay filtering uses the stored text. Returns { rows, total }.
+   */
+  listResidents: async ({ q = '', limit = 50, offset = 0, barangay = null, municipalityId = null } = {}) => {
+    let rows = store.residents.filter((r) => matchesQuery(r, q));
+    if (barangay) rows = rows.filter((r) => r.barangay === barangay);
+    const total = rows.length;
+    return { rows: clone(rows.slice(offset, offset + limit)), total };
+  },
+
+  findBarangayByName: async (name) => {
+    const match = DEV_BARANGAYS.find(
+      (b) => b.toLowerCase() === String(name || '').trim().toLowerCase(),
+    );
+    return match ? { id: `dev-${match}`, name: match, municipalityId: null, municipality: null } : null;
+  },
+
+  // ----- households ---------------------------------------------------------
+  // Household records are Supabase-backed only (Phase 5 schema); the local
+  // file driver has no household store, so these fail closed with a clear
+  // message instead of returning fake data.
+  householdsUnsupported: async () => {
+    throw Object.assign(new Error('Household records require the Supabase data driver. Configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env.'), { statusCode: 503 });
+  },
+
+  listHouseholds: async function () { return this.householdsUnsupported(); },
+  getHousehold: async function () { return this.householdsUnsupported(); },
+  insertHousehold: async function () { return this.householdsUnsupported(); },
+  updateHousehold: async function () { return this.householdsUnsupported(); },
+  findHouseholdDuplicate: async function () { return this.householdsUnsupported(); },
+  addHouseholdMember: async function () { return this.householdsUnsupported(); },
+  removeHouseholdMember: async function () { return this.householdsUnsupported(); },
+
   searchResidents: async ({ q = '', limit = 20 } = {}) => {
     const residents = store.residents.filter((r) => matchesQuery(r, q)).slice(0, limit);
     return clone(residents);
@@ -117,6 +155,77 @@ export const fileRepository = {
       Object.assign(row, next);
       return clone(row);
     });
+  },
+
+  // ----- manual resident verification --------------------------------------
+  /** Verification queue (mirrors the Supabase driver). Returns { rows, total }. */
+  listResidentsByVerificationStatus: async ({
+    statuses = null,
+    q = '',
+    barangay = null,
+    municipalityId = null,
+    limit = 100,
+    offset = 0,
+  } = {}) => {
+    let rows = store.residents.slice();
+    if (statuses && statuses.length) {
+      rows = rows.filter((r) => statuses.includes(r.verificationStatus || 'pending'));
+    }
+    if (q) rows = rows.filter((r) => matchesQuery(r, q));
+    if (barangay) rows = rows.filter((r) => r.barangay === barangay);
+    rows.sort((a, b) =>
+      String(a.submittedForVerificationAt || a.createdAt || '').localeCompare(
+        String(b.submittedForVerificationAt || b.createdAt || ''),
+      ),
+    );
+    const total = rows.length;
+    return { rows: clone(rows.slice(offset, offset + limit)), total };
+  },
+
+  /** The file driver has no accounts, so there is no profile status to sync. */
+  setProfileStatus: async () => null,
+
+  insertResidentVerificationLog: async (log) => {
+    return store.mutate((data) => {
+      const row = {
+        id: `RVL-${String(data.residentVerificationLogs.length + 1).padStart(6, '0')}`,
+        residentId: log.residentId,
+        reviewedBy: log.reviewedBy ?? null,
+        action: log.action,
+        reason: log.reason || '',
+        previousStatus: log.previousStatus ?? null,
+        newStatus: log.newStatus,
+        createdAt: new Date().toISOString(),
+      };
+      data.residentVerificationLogs.push(row);
+      return clone(row);
+    });
+  },
+
+  listResidentVerificationLogs: async (residentId, { limit = 50 } = {}) => {
+    const rows = store.residentVerificationLogs
+      .filter((l) => l.residentId === residentId)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+      .slice(0, limit);
+    return clone(rows);
+  },
+
+  listRecentResidentVerificationLogs: async ({ actions = null, barangay = null, municipalityId = null, limit = 100, offset = 0 } = {}) => {
+    const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
+    let rows = store.residentVerificationLogs.map((l) => {
+      const resident = residentsById[l.residentId] || {};
+      return {
+        ...clone(l),
+        residentName: [resident.firstName, resident.lastName].filter(Boolean).join(' ').trim(),
+        residentRef: resident.id || l.residentId,
+        barangay: resident.barangay || '',
+        residentStatus: resident.verificationStatus || '',
+      };
+    });
+    if (actions && actions.length) rows = rows.filter((l) => actions.includes(l.action));
+    if (barangay) rows = rows.filter((l) => l.barangay === barangay);
+    rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return { rows: rows.slice(offset, offset + limit), total: rows.length };
   },
 
   // ----- visits / submissions ----------------------------------------------
@@ -216,6 +325,17 @@ export const fileRepository = {
     rows.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
     return { rows: rows.slice(offset, offset + limit), total: rows.length };
   },
+
+  // ----- resident account link ---------------------------------------------
+  /**
+   * The resident record linked to a signed-in account. Residents are linked by
+   * `authUserId` (set during registration), never by a client-supplied id.
+   */
+  getResidentByAuthUserId: async (authUserId) => {
+    const found = store.residents.find((r) => r.authUserId && r.authUserId === authUserId);
+    return found ? clone(found) : null;
+  },
+
 };
 
 export default fileRepository;

@@ -9,7 +9,7 @@ import Icon from "@/components/common/Icon";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { LOGO_URL, ROLES } from "@/lib/brand";
 import { NAV, filterNavByPermission } from "@/lib/navConfig";
-import { useWorkflowStore } from "@/services/mock/mockWorkflowStore";
+import { useWorkflowStore } from "@/services/local/workflowStore";
 import { filterRowsByScope } from "@/lib/phnScope";
 import { useAuth } from "@/context/AuthContext";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
@@ -71,7 +71,7 @@ export default function DashboardLayout({ roleKey }) {
     // An item is active when its path matches exactly OR when the current
     // location is a child page of that module (e.g. `/app/bhw/households/new`
     // keeps "Household Profiling" highlighted instead of leaving no active
-    // item — and never highlights Dashboard).
+    // item â€” and never highlights Dashboard).
     const isItemActive = (item) => {
       if (!item.path || item.path === "#") return false;
       return (
@@ -173,7 +173,7 @@ export default function DashboardLayout({ roleKey }) {
 
   /**
    * Sidebar identity block: logo mark plus the system name.
-   * The artwork is a square symbol, so the name is spelled out beside it —
+   * The artwork is a square symbol, so the name is spelled out beside it â€”
    * mirroring the AgencyMark used on the public and auth pages.
    */
   const SidebarBrand = () => (
@@ -193,13 +193,16 @@ export default function DashboardLayout({ roleKey }) {
   return (
     <div className="min-h-screen bg-[color:#f5f7fa] dark:bg-background">
       <aside className="hidden lg:flex fixed inset-y-0 left-0 w-72 flex-col bg-white dark:bg-sidebar border-r border-slate-200 dark:border-border">
-        {/* Brand header — fixed */}
+        {/* Brand header â€” fixed */}
         <div className="h-20 shrink-0 flex items-center px-5 border-b border-slate-200 dark:border-border">
           <SidebarBrand />
         </div>
 
-        {/* Scrollable navigation — independent of brand + footer */}
-        <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-4">
+        {/* Scrollable navigation â€” independent of brand + footer. The
+            scrollbar appears on hover/focus (.nav-scroll) so long menus stay
+            obviously scrollable; the flex column guarantees items can never be
+            covered by the account footer below. */}
+        <nav aria-label="Main navigation" className="nav-scroll flex-1 overflow-y-auto px-3 py-4">
           <NavList />
           {/* Bottom padding so the final nav item is always reachable */}
           <div className="h-4" aria-hidden="true" />
@@ -225,7 +228,7 @@ export default function DashboardLayout({ roleKey }) {
                 <SidebarBrand />
                 <button onClick={() => setOpen(false)} aria-label="Close menu" className="shrink-0"><X className="w-5 h-5 text-slate-600 dark:text-slate-400" /></button>
               </div>
-              <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-4">
+              <nav aria-label="Main navigation" className="nav-scroll flex-1 overflow-y-auto px-3 py-4">
                 <NavList />
                 <div className="h-4" aria-hidden="true" />
               </nav>

@@ -15,7 +15,7 @@ import {
   comparisonFollowUpTrend, comparisonVaccinationCoverage, comparisonReferralCompletion,
   comparisonMaternalTrend, comparisonChildHealth, comparisonSeniorTrend,
   comparisonProgramParticipation, healthStatusSummary, recentHealthAlerts,
-} from "@/services/mock/mockData";
+} from "@/services/local/dashboardData";
 
 const CHART_COLORS = { "San Antonio": "#28B463", "San Isidro": "#2A7DE1", "Old San Roque": "#E67E22" };
 const DONUT_COLORS = ["#0B5CAD", "#2A7DE1", "#28B463", "#F5B400", "#E74C3C"];
@@ -82,7 +82,7 @@ export default function Analytics() {
                     <span className="w-3 h-3 rounded-full" style={{ background: b.color }} />
                     <div>
                       <p className="font-body font-medium text-brand-ink">{b.name}</p>
-                      <p className="text-xs text-brand-gray">{b.population.toLocaleString()} residents · {b.consultations} consultations</p>
+                      <p className="text-xs text-brand-gray">{b.population.toLocaleString()} residents Â· {b.consultations} consultations</p>
                     </div>
                   </div>
                   <div className="text-right">
@@ -103,7 +103,7 @@ export default function Analytics() {
       <div className="mt-8">
         <h2 className="font-heading font-semibold text-brand-ink text-lg mb-4">Community Health Trends</h2>
         <div className="grid lg:grid-cols-2 gap-5">
-          {/* Monthly Consultations — Line Chart */}
+          {/* Monthly Consultations â€” Line Chart */}
           <ChartCard title="Monthly Consultations" subtitle="Consultation volume over 6 months" delay={0.05}>
             <LineChart data={comparisonMonthlyConsultations}>
               <CartesianGrid vertical={false} stroke="#E5EAF1" />
@@ -117,7 +117,7 @@ export default function Analytics() {
             </LineChart>
           </ChartCard>
 
-          {/* Disease Distribution — Donut Chart */}
+          {/* Disease Distribution â€” Donut Chart */}
           <ChartCard title="Disease Distribution" subtitle="Combined case counts across 3 barangays" delay={0.1}>
             <PieChart>
               <Pie data={diseaseDonutData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={2}>
@@ -128,7 +128,7 @@ export default function Analytics() {
             </PieChart>
           </ChartCard>
 
-          {/* Follow-up Completion — Area Chart */}
+          {/* Follow-up Completion â€” Area Chart */}
           <ChartCard title="Follow-up Completion Rate" subtitle="Monthly trend across barangays" delay={0.15}>
             <AreaChart data={comparisonFollowUpTrend}>
               <AreaGradients idPrefix="fu" />
@@ -143,7 +143,7 @@ export default function Analytics() {
             </AreaChart>
           </ChartCard>
 
-          {/* Vaccination Coverage — Bar Chart */}
+          {/* Vaccination Coverage â€” Bar Chart */}
           <ChartCard title="Vaccination Coverage" subtitle="Current coverage by barangay" delay={0.2}>
             <BarChart data={comparisonVaccinationCoverage}>
               <CartesianGrid vertical={false} stroke="#E5EAF1" />
@@ -156,7 +156,7 @@ export default function Analytics() {
             </BarChart>
           </ChartCard>
 
-          {/* Referral Completion — Bar Chart */}
+          {/* Referral Completion â€” Bar Chart */}
           <ChartCard title="Referral Completion" subtitle="Completion rate by barangay" delay={0.25}>
             <BarChart data={comparisonReferralCompletion}>
               <CartesianGrid vertical={false} stroke="#E5EAF1" />
@@ -169,7 +169,7 @@ export default function Analytics() {
             </BarChart>
           </ChartCard>
 
-          {/* Maternal Health — Area Chart */}
+          {/* Maternal Health â€” Area Chart */}
           <ChartCard title="Maternal Health Services" subtitle="Monthly service coverage trend" delay={0.3}>
             <AreaChart data={comparisonMaternalTrend}>
               <AreaGradients idPrefix="mh" />
@@ -184,7 +184,7 @@ export default function Analytics() {
             </AreaChart>
           </ChartCard>
 
-          {/* Child Health — Bar Chart */}
+          {/* Child Health â€” Bar Chart */}
           <ChartCard title="Child Health Services" subtitle="Service coverage by barangay" delay={0.35}>
             <BarChart data={comparisonChildHealth}>
               <CartesianGrid vertical={false} stroke="#E5EAF1" />
@@ -197,7 +197,7 @@ export default function Analytics() {
             </BarChart>
           </ChartCard>
 
-          {/* Senior Citizen Monitoring — Line Chart */}
+          {/* Senior Citizen Monitoring â€” Line Chart */}
           <ChartCard title="Senior Citizen Monitoring" subtitle="Monthly monitoring coverage trend" delay={0.4}>
             <LineChart data={comparisonSeniorTrend}>
               <CartesianGrid vertical={false} stroke="#E5EAF1" />
@@ -211,7 +211,7 @@ export default function Analytics() {
             </LineChart>
           </ChartCard>
 
-          {/* Health Program Participation — Bar Chart */}
+          {/* Health Program Participation â€” Bar Chart */}
           <ChartCard title="Health Program Participation" subtitle="Participation rate by barangay" delay={0.45}>
             <BarChart data={comparisonProgramParticipation}>
               <CartesianGrid vertical={false} stroke="#E5EAF1" />

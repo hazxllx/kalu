@@ -1,19 +1,20 @@
 /**
  * Barangay data-scope rules (single source of truth for the API).
  *
- * Some community roles are assigned to exactly ONE barangay — a Health
- * Supervisor works inside their own barangay and must never see another
- * barangay's records, even by changing filters, URLs or record ids.
+ * Some community roles are assigned to exactly ONE barangay — the Health
+ * Supervisor and the Barangay Health Worker both work inside their own
+ * barangay and must never see another barangay's records, even by changing
+ * filters, URLs or record ids.
  *
- * The assignment lives on the account (dev account field today; a
- * `profiles.barangay` column / Supabase `app_metadata.barangay` once the
- * verified database structure is connected). It is read from the
- * authenticated session — NEVER from a request parameter — and every
+ * The assignment is read from the authenticated session (`req.user.barangay`,
+ * resolved from the `profiles` table by `authenticate` — or the signed dev
+ * session in local development) — NEVER from a request parameter — and every
  * barangay-sensitive query filters on it in the service/repository layer.
+ * The database RLS policies mirror the same rules.
  */
 
 /** Roles whose data access is limited to their assigned barangay. */
-export const BARANGAY_SCOPED_ROLES = Object.freeze(['health_supervisor']);
+export const BARANGAY_SCOPED_ROLES = Object.freeze(['health_supervisor', 'bhw']);
 
 /**
  * The caller's assigned barangay, or null when the role is municipality-wide

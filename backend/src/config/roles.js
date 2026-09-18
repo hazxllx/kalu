@@ -18,6 +18,11 @@ export const ROLES = Object.freeze({
   RHU_PERSONNEL: 'rhu_personnel',
   BHW: 'bhw',
   RESIDENT: 'resident',
+  // Verification sub-state of a resident account. `authenticate` serves a
+  // resident whose profile status is `pending_verification` under this role so
+  // self-service endpoints (e.g. resubmitting a registration) can recognise
+  // them, and so route access stays limited until a Health Supervisor approves.
+  RESIDENT_LIMITED: 'resident-limited',
 });
 
 export const ALL_ROLES = Object.values(ROLES);
@@ -72,8 +77,10 @@ export const FEATURE_ROLES = Object.freeze({
   // Cross-cutting
   notifications: ALL_ROLES,
   // Resident self-service (a resident only ever sees their own data; that is
-  // enforced in the service layer + Supabase RLS, not by this list).
-  residentSelf: [ROLES.RESIDENT],
+  // enforced in the service layer + Supabase RLS, not by this list). A resident
+  // awaiting manual verification is served as 'resident-limited' and may view
+  // their own status and resubmit their own registration.
+  residentSelf: [ROLES.RESIDENT, ROLES.RESIDENT_LIMITED],
 });
 
 export const isValidRole = (role) => ALL_ROLES.includes(role);
