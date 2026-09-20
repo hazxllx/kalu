@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import validate from '../middleware/validate.js';
+import uploadDocumentFile from '../middleware/uploadDocumentFile.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import * as documentsController from '../controllers/documents.controller.js';
@@ -10,12 +11,14 @@ import { validateDocumentUpload, validateDocumentReview } from '../validators/do
 
 const router = Router();
 
-// Upload a proof-of-residency document for the signed-in resident.
+// Upload a resident registration document (proof of residency, government ID
+// front/back, identity photo). The file arrives as multipart field `file`.
 router.post(
   '/resident-documents/upload',
   authenticate,
   authorize(FEATURE_ROLES.residentSelf),
-  validate(validateDocumentUpload),
+  uploadDocumentFile,
+  validate((body, req) => validateDocumentUpload({ ...body, file: req.file }), 'body'),
   asyncHandler(documentsController.uploadResidentDocument),
 );
 

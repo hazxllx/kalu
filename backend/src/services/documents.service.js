@@ -6,12 +6,19 @@ import { validateDocumentUpload, validateDocumentReview } from '../validators/do
 const SELF_ROLES = ['resident', 'resident-limited'];
 const REVIEW_ROLES = ['health_supervisor', 'phn', 'admin'];
 
-export const uploadResidentDocument = async ({ user, residentId, file, documentType = 'proof_of_residency' }) => {
+export const uploadResidentDocument = async ({
+  user,
+  residentId,
+  file,
+  documentType = 'proof_of_residency',
+  governmentIdType = null,
+  governmentIdTypeOther = null,
+}) => {
   if (!SELF_ROLES.includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may upload documents.');
   }
 
-  const validation = validateDocumentUpload({ file, documentType });
+  const validation = validateDocumentUpload({ file, documentType, governmentIdType, governmentIdTypeOther });
   if (validation.error) {
     throw ApiError.badRequest('Invalid document.', validation.error);
   }
@@ -25,10 +32,18 @@ export const uploadResidentDocument = async ({ user, residentId, file, documentT
     throw ApiError.forbidden('You may only upload documents for your own account.');
   }
 
+  // Registration submits four distinct document types, so only block a
+  // duplicate of the SAME document slot (e.g. two pending ID-front files),
+  // not a different one (e.g. ID front while ID back is still pending).
   const existing = await repository.listDocumentsByResident(residentId);
-  const pending = existing.find((d) => d.verificationStatus === 'pending');
-  if (pending) {
-    throw ApiError.conflict('A pending document already exists. Please wait for review or remove it first.');
+  const sameSlot = existing.find(
+    (d) =>
+      d.verificationStatus === 'pending' &&
+      d.documentType === documentType &&
+      (d.governmentIdType ?? null) === (validation.governmentIdType ?? null),
+  );
+  if (sameSlot) {
+    throw ApiError.conflict('An uploaded document of this type is already awaiting review. Remove it first to replace it.');
   }
 
   const documentId = crypto.randomUUID();
@@ -41,6 +56,7 @@ export const uploadResidentDocument = async ({ user, residentId, file, documentT
   const document = await repository.insertDocument({
     residentId,
     documentType,
+    governmentIdType: validation.governmentIdType,
     fileName: validation.fileName,
     storagePath,
     mimeType: validation.mimeType,

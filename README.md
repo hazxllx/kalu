@@ -10,6 +10,21 @@ It supports resident registration and verification, household profiling,
 health records, consultations, triage, referrals, follow-ups, reporting, and
 role-based dashboards for the Municipal Health Office.
 
+## About This Project
+
+KALUSAGAP is designed for the Municipal Health Office of Pili, Camarines Sur.
+It gives residents a way to register and submit identity documents, while
+authorized health personnel can manage household information, review resident
+registrations, monitor health risks, and coordinate follow-up care. The system
+uses server-side validation, role-based access control, Supabase Auth, and
+database-level Row Level Security to protect health information.
+
+The repository contains two applications:
+
+- `frontend/` — React and Vite web application.
+- `backend/` — Express REST API that serves the frontend and connects to
+  Supabase.
+
 ---
 
 ## Project Status
@@ -182,11 +197,15 @@ Enforcement is layered: `ProtectedRoute` (frontend) → `authenticate` +
 
 ---
 
-## Requirements
+## Run The Project
 
-Node.js 18 or newer, npm, and Git.
+### Requirements
 
-## Setup
+- Node.js 18 or newer
+- npm
+- A Supabase project for authentication and database-backed features
+
+### 1. Install dependencies
 
 ```bash
 git clone <repository-url>
@@ -194,7 +213,10 @@ cd KALUSAGAP
 npm run install:all
 ```
 
-Create the local environment files (each `.env` is git-ignored):
+### 2. Create environment files
+
+Each `.env` file is local and git-ignored. From the repository root, run the
+matching command for your shell:
 
 ```powershell
 # Windows PowerShell
@@ -208,14 +230,14 @@ cp frontend/.env.example frontend/.env
 cp backend/.env.example backend/.env
 ```
 
-### Environment variables
+### 3. Configure environment variables
 
 Frontend (`frontend/.env`) — browser-safe only:
 
 ```
 VITE_API_URL=http://localhost:5000/api
-VITE_SUPABASE_URL=            # leave blank to use the dev-auth fallback
-VITE_SUPABASE_ANON_KEY=       # public anon key ONLY — never the service-role key
+VITE_SUPABASE_URL=            # Supabase project URL
+VITE_SUPABASE_ANON_KEY=       # public anon key only; never use the service-role key
 ```
 
 Backend (`backend/.env`) — server-side secrets:
@@ -228,24 +250,59 @@ SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=    # SERVER ONLY. Never expose to the frontend or commit it.
 ```
 
-## Run
+The frontend and backend must use the same Supabase project. Do not put the
+backend service-role key in `frontend/.env`.
+
+### 4. Start both applications
+
+Open two terminals in the repository root:
 
 ```bash
-# terminal 1 — API on http://localhost:5000
+# Terminal 1: API on http://localhost:5000
 npm run dev:backend
+```
 
-# terminal 2 — web app on http://localhost:5173
+```bash
+# Terminal 2: web app on http://localhost:5173
 npm run dev:frontend
 ```
 
-Other scripts:
+Open `http://localhost:5173` in a browser. The backend health endpoint is
+available at `http://localhost:5000/api/health`.
+
+### Useful commands
 
 ```bash
-npm run build          # production build of the frontend into frontend/dist
-npm run preview        # serve that build locally
-npm run lint           # ESLint over the frontend
-npm run start:backend  # run the API without file watching
+npm run build                         # build the frontend for production
+npm run preview                       # preview the production frontend build
+npm run lint                          # lint the frontend
+npm run start:backend                 # start the backend without watching
+npm test --prefix backend             # run backend tests
+npm run typecheck --prefix frontend   # check frontend types/configuration
 ```
+
+To run the frontend and backend in production-like mode:
+
+```bash
+# Terminal 1
+npm run build
+npm run preview
+
+# Terminal 2
+npm run start:backend
+```
+
+### Troubleshooting
+
+- **Port already in use:** stop the process using port `5000` or `5173`, or
+  change `PORT` in `backend/.env` and `VITE_API_URL` in `frontend/.env` to
+  match.
+- **Authentication unavailable:** check that all Supabase variables are set
+  in both environment files, then restart both development servers.
+- **API requests fail from the browser:** confirm the backend is running and
+  that `VITE_API_URL` ends with `/api`.
+- **Database errors:** apply the required Supabase migrations and confirm the
+  backend service-role key belongs to the configured project.
 
 ---
 

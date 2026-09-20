@@ -16,9 +16,6 @@ export default function StepIndicator4({ current, completed = [] }) {
         <p className="gov-kicker text-brand-blue">
           Application Form · Step {String(current).padStart(2, "0")} of 04
         </p>
-        <p className="font-stat text-[11px] font-bold tracking-[0.1em] text-brand-gray">
-          {Math.round((completed.length / STEPS.length) * 100)}% Complete
-        </p>
       </div>
 
       <div className="mt-5 flex items-start justify-between">

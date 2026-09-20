@@ -207,16 +207,12 @@ export function ReviewBlock({ title, onEdit, items }) {
  */
 export function StepIndicator({ current, steps, flowLabel }) {
   const total = steps.length;
-  const progress = total > 1 ? Math.round(((current - 1) / (total - 1)) * 100) : 100;
 
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3 border-b border-slate-200/80 pb-3">
         <p className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-brand-blue">
           {flowLabel} · Step {String(current).padStart(2, "0")} of {String(total).padStart(2, "0")}
-        </p>
-        <p className="shrink-0 font-stat text-[11px] font-bold tabular-nums tracking-[0.1em] text-slate-400">
-          {progress}% Complete
         </p>
       </div>
 

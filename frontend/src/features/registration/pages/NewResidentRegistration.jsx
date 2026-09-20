@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
-  Eye, EyeOff, ArrowRight, ArrowLeft, Check, MapPin, ChevronDown, Shield, Loader2,
+  Eye, EyeOff, ArrowRight, ArrowLeft, Check, MapPin, ChevronDown, Shield, Loader2, Mail, Camera,
 } from "lucide-react";
 import {
   RegistrationShell,
@@ -21,7 +21,7 @@ import {
 import DatePicker from "@/components/common/DatePicker";
 import { supabase } from "@/lib/supabase";
 import { registrationApi } from "@/services/api";
-import { api } from "@/services/api/apiClient";
+import { postFormData } from "@/services/api/apiClient";
 import UploadComponent from "@/features/registration/components/UploadComponent";
 import {
   CIVIL_STATUSES,
@@ -36,6 +36,28 @@ import {
 } from "@/utils/validation";
 
 const BARANGAYS = ["San Isidro", "San Antonio", "Old San Roque"];
+
+// Government ID types selectable in Step 3. Values match the backend
+// `GOVERNMENT_ID_TYPES` in backend/src/validators/documents.validators.js.
+const GOVT_ID_TYPES = [
+  { value: "philsys", label: "PhilSys / National ID" },
+  { value: "drivers_license", label: "Driver's License" },
+  { value: "passport", label: "Passport" },
+  { value: "umid", label: "UMID" },
+  { value: "prc_id", label: "PRC ID" },
+  { value: "postal_id", label: "Postal ID" },
+  { value: "other", label: "Other Government-Issued ID" },
+];
+
+const GOVT_ID_LABEL = Object.fromEntries(GOVT_ID_TYPES.map((o) => [o.value, o.label]));
+
+// Length of the verification token the live (hosted) Supabase project sends in
+// the Confirm Signup email — confirmed from the actually delivered email
+// (8 digits, e.g. 60295568). The `otp_length = 6` in supabase/config.toml
+// applies only to a local `supabase start` stack, NOT to the hosted project
+// this frontend talks to. The UI must render this many boxes and the ENTIRE
+// code is always passed to verifyOtp() unmodified — never truncated.
+const OTP_LENGTH = 8;
 
 function calcAge(dob) {
   if (!dob) return "";
@@ -59,7 +81,7 @@ function checkStrength(pw) {
 const STEPS_META = [
   { num: 1, title: "Personal Information", subtitle: "Tell us about yourself." },
   { num: 2, title: "Account & Contact", subtitle: "Set up your login and contact details." },
-  { num: 3, title: "Identity / Proof of Residency", subtitle: "Upload a document for Health Supervisor review." },
+  { num: 3, title: "Identity Verification", subtitle: "Provide valid government-issued identification for Health Supervisor review." },
   { num: 4, title: "Review Your Information", subtitle: "Please verify all details before submitting." },
 ];
 
@@ -80,6 +102,164 @@ export default function NewResidentRegistration() {
   const [barangayOpen, setBarangayOpen] = useState(false);
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
+
+  // Email verification (real Supabase Confirm Signup OTP — no local/fake OTP)
+  // emailPhase: "idle" | "sending" | "sent" | "verifying" | "verified"
+  const [emailPhase, setEmailPhase] = useState("idle");
+  const [otpDigits, setOtpDigits] = useState(new Array(OTP_LENGTH).fill(""));
+  const [otpError, setOtpError] = useState("");
+  const [sendError, setSendError] = useState("");
+  const [resendIn, setResendIn] = useState(0);
+  const otpRefs = useRef(new Array(OTP_LENGTH).fill(null));
+
+  // 60-second resend cooldown
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
+  // Temporary random password used to trigger Supabase's Confirm Signup email.
+  // Stored in sessionStorage (not localStorage) only until the resident's real
+  // password is set at submission. Never rendered or logged.
+  const tempPasswordRef = useRef(
+    typeof sessionStorage !== "undefined" ? sessionStorage.getItem("pendingSignupTempPassword") || "" : ""
+  );
+
+  // Session returned by the successful email OTP verification. It is real Supabase
+  // session state — never fake/local verification state.
+  const verifiedSessionRef = useRef(null);
+
+  const clearOtp = () => setOtpDigits(new Array(OTP_LENGTH).fill(""));
+
+  const emailVerified = emailPhase === "verified";
+
+  const sendCode = async () => {
+    if (emailVerified || emailPhase === "sending" || emailPhase === "verifying") return;
+    const emailErr = validateEmail(form.email, { label: "Email address" });
+    if (emailErr) { setErrors((p) => ({ ...p, email: emailErr })); return; }
+    if (!supabase) {
+      setSendError("Authentication is not configured. Please try again later or contact the RHU.");
+      return;
+    }
+    const isResend = emailPhase === "sent";
+    setEmailPhase("sending");
+    setSendError("");
+    setOtpError("");
+    try {
+      if (isResend) {
+        const { error } = await supabase.auth.resend({ type: "signup", email: form.email.trim() });
+        if (error) throw error;
+      } else {
+        // Supabase's Confirm Signup email (with the {{ .Token }} OTP) is triggered
+        // by signUp. Supabase requires a password at signup, so a random temporary
+        // one is used; the resident's real password is set after OTP verification
+        // (via updateUser) before the registration is submitted. No fake OTP is
+        // ever created — the code always comes from Supabase Auth.
+        const tempPassword = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}K${Math.floor(Math.random() * 10)}`;
+        // Held only in sessionStorage until the resident's real password is set
+        // at submission. It never appears in the DOM, logs, or network payloads.
+        sessionStorage.setItem("pendingSignupTempPassword", tempPassword);
+        tempPasswordRef.current = tempPassword;
+        const { error } = await supabase.auth.signUp({
+          email: form.email.trim(),
+          password: tempPassword,
+          options: {
+            data: {
+              full_name: `${form.firstName} ${form.lastName}`.trim(),
+              name: `${form.firstName} ${form.lastName}`.trim(),
+            },
+          },
+        });
+        if (error) throw error;
+      }
+      setEmailPhase("sent");
+      clearOtp();
+      setResendIn(60);
+    } catch (err) {
+      const msg = err?.message || "";
+      setEmailPhase(/already registered/i.test(msg) ? "idle" : (isResend ? "sent" : "idle"));
+      if (/email rate limit exceeded|frequency/i.test(msg)) {
+        setSendError("Too many verification emails were sent recently. Please wait a minute, then request a new code.");
+      } else if (/already registered/i.test(msg)) {
+        setSendError("This email address is already registered. Please sign in, or use a different email address.");
+      } else {
+        setSendError(msg || "Could not send the verification code. Please try again.");
+      }
+    }
+  };
+
+  const verifyEmail = async () => {
+    if (emailVerified || emailPhase === "verifying") return;
+    const code = otpDigits.join("");
+    if (code.length !== OTP_LENGTH) {
+      setOtpError(`Please enter the complete ${OTP_LENGTH}-digit code from your email.`);
+      return;
+    }
+    if (!supabase) {
+      setOtpError("Authentication is not configured. Please try again later.");
+      return;
+    }
+    setEmailPhase("verifying");
+    setOtpError("");
+    try {
+      // The COMPLETE token from the email is passed through unmodified.
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: form.email.trim(),
+        token: code,
+        type: "email",
+      });
+      if (error) throw error;
+      verifiedSessionRef.current = data?.session || null;
+      setEmailPhase("verified");
+      clearOtp();
+      setResendIn(0);
+    } catch (err) {
+      setEmailPhase("sent");
+      const msg = err?.message || "";
+      if (/expired|invalid otp/i.test(msg)) {
+        setOtpError("This code is invalid or has expired. Please check the email and try again, or request a new code.");
+      } else {
+        setOtpError(msg || "Verification failed. Please check the code from the email and try again.");
+      }
+    }
+  };
+
+  const handleOtpChange = (i) => (e) => {
+    const incoming = e.target.value.replace(/\D/g, "");
+    const next = [...otpDigits];
+    if (!incoming) {
+      next[i] = "";
+      setOtpDigits(next);
+      return;
+    }
+    let pos = i;
+    for (const d of incoming) {
+      if (pos >= OTP_LENGTH) break;
+      next[pos] = d;
+      pos += 1;
+    }
+    setOtpDigits(next);
+    if (pos < OTP_LENGTH) otpRefs.current[pos]?.focus();
+    setOtpError("");
+  };
+
+  const handleOtpKeyDown = (i) => (e) => {
+    if (e.key === "Backspace" && !otpDigits[i] && i > 0) {
+      otpRefs.current[i - 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const text = (e.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, OTP_LENGTH);
+    if (!text) return;
+    const next = new Array(OTP_LENGTH).fill("");
+    for (let i = 0; i < text.length; i += 1) next[i] = text[i];
+    setOtpDigits(next);
+    otpRefs.current[Math.min(text.length, OTP_LENGTH - 1)]?.focus();
+    setOtpError("");
+  };
 
   // Check if there's transfer data in sessionStorage
   const transferData = useMemo(() => {
@@ -118,17 +298,88 @@ export default function NewResidentRegistration() {
     agree: false,
     agreePrivacy: false,
     agreeReview: false,
-    document: null,
+    // Step 3 — identity verification only. Files remain plain File objects
+    // until submission; status is derived as Uploaded / Pending Review and is
+    // never marked Verified during upload.
+    identity: {
+      governmentIdType: "",
+      governmentIdTypeOther: "",
+      governmentIdFront: null,
+      governmentIdBack: null,
+      identityPhoto: null,
+    },
   });
 
   const set = (key) => (e) => {
     const val = e.target ? e.target.value : e;
+    if (key === "email") return setEmailValue(val);
+    if (key === "identity") {
+      // Identity fields are set via targeted setters below.
+      return;
+    }
     setForm((p) => ({ ...p, [key]: val }));
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
   };
 
+  // Targeted identity-state setters so unrelated fields (e.g. password) do not
+  // need to re-render the entire identity object.
+  const setIdType = (e) => {
+    setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdType: e.target.value } }));
+    setErrors((prev) => ({ ...prev, governmentIdType: "", governmentIdTypeOther: "" }));
+  };
+  const setIdTypeOther = (e) => {
+    setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdTypeOther: e.target.value } }));
+    setErrors((prev) => ({ ...prev, governmentIdTypeOther: "" }));
+  };
+  const setIdFront = (file) => {
+    setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdFront: file } }));
+    setErrors((prev) => ({ ...prev, governmentIdFront: "" }));
+  };
+  const setIdBack = (file) => {
+    setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdBack: file } }));
+    setErrors((prev) => ({ ...prev, governmentIdBack: "" }));
+  };
+  const setIdentityPhoto = (file) => {
+    setForm((p) => ({ ...p, identity: { ...p.identity, identityPhoto: file } }));
+    setErrors((prev) => ({ ...prev, identityPhoto: "" }));
+  };
+
+  // Changing the email invalidates any in-flight or completed verification.
+  const setEmailValue = (val) => {
+    setForm((p) => ({ ...p, email: val }));
+    if (errors.email || errors.emailVerified) {
+      setErrors((p) => ({ ...p, email: "", emailVerified: "" }));
+    }
+    if (emailPhase !== "idle") {
+      setEmailPhase("idle");
+      setOtpDigits(new Array(OTP_LENGTH).fill(""));
+      setOtpError("");
+      setSendError("");
+      setResendIn(0);
+    }
+  };
+
   const pwStrength = useMemo(() => checkStrength(form.password), [form.password]);
   const filteredBarangays = BARANGAYS.filter((b) => b.toLowerCase().includes(barangayQuery.toLowerCase()));
+
+  // A successful verifyOtp() stores a real Supabase session in the browser
+  // client. If the resident reloads the page mid-registration, restore the
+  // verified state from that session (matched by email) instead of forcing a
+  // second verification.
+  useEffect(() => {
+    const email = form.email.trim().toLowerCase();
+    if (!email || emailPhase !== "idle" || !supabase) return;
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      const ses = data?.session;
+      if (ses?.user?.email?.toLowerCase() === email) {
+        verifiedSessionRef.current = ses;
+        setEmailPhase("verified");
+      }
+    });
+    return () => { active = false; };
+  }, [form.email, emailPhase]);
 
   const validateStep = (s) => {
     let errs = {};
@@ -151,11 +402,19 @@ export default function NewResidentRegistration() {
         sitio: (v) => required(v, "Sitio / Purok"),
       });
       if (form.password !== form.confirmPassword) errs.confirmPassword = "Passwords do not match";
+      if (!emailVerified) errs.emailVerified = "Please verify your email address before continuing.";
       if (!form.agree || !form.agreePrivacy) errs.agree = "You must accept Terms and Privacy Policy";
     }
     if (s === 3) {
+      const idt = form.identity;
+      if (!idt.governmentIdType) errs.governmentIdType = "Select your government-issued ID.";
+      if (idt.governmentIdType === "other" && !idt.governmentIdTypeOther.trim()) {
+        errs.governmentIdTypeOther = "Please specify the type of government-issued ID.";
+      }
+      if (!idt.governmentIdFront) errs.governmentIdFront = "Upload the front of your government ID.";
+      if (!idt.governmentIdBack) errs.governmentIdBack = "Upload the back of your government ID.";
+      if (!idt.identityPhoto) errs.identityPhoto = "Upload your identity photo holding the ID.";
       if (!form.agreeReview) errs.agreeReview = "Please confirm your information for review to continue";
-      if (!form.document) errs.document = "Please upload a proof of residency or government ID before submitting.";
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -175,6 +434,12 @@ export default function NewResidentRegistration() {
       if (!isSupabase) {
         throw new Error('Authentication is not configured. Please try again later or contact the RHU.');
       }
+
+      const idt = form.identity;
+      const govTypeDisplay =
+        idt.governmentIdType === "other"
+          ? `Other: ${idt.governmentIdTypeOther.trim()}`
+          : (GOVT_ID_LABEL[idt.governmentIdType] || idt.governmentIdType || "");
 
       const address = [
         form.houseNo.trim(),
@@ -198,68 +463,82 @@ export default function NewResidentRegistration() {
           permanentAddress: address,
           cellphoneNo: form.mobile.trim(),
           barangay: form.barangay,
+          // Identity metadata so the Health Supervisor can see the selected ID
+          // type and the submitted identity documents. The individual files are
+          // uploaded separately to the documents API below.
+          identity: {
+            governmentIdType: idt.governmentIdType,
+            governmentIdTypeOther: idt.governmentIdType === "other" ? idt.governmentIdTypeOther.trim() : "",
+            governmentIdTypeDisplay: govTypeDisplay,
+          },
         },
       };
 
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email: form.email.trim(),
-        password: form.password,
-        options: {
-          data: {
-            full_name: `${form.firstName} ${form.lastName}`.trim(),
-            name: `${form.firstName} ${form.lastName}`.trim(),
-          },
-        },
-      });
-      if (signUpError) throw signUpError;
-
-      // When email confirmation is enabled, signUp returns no session and the
-      // resident record cannot be created yet. Try one direct sign-in; if that
-      // also fails, keep the payload so the identity-verification page can
-      // finish creating the resident record after the resident signs in.
-      let session = signUpData?.session || null;
-      if (!session) {
-        const { data: signInData } = await supabase.auth.signInWithPassword({
+      // The email was already verified in Step 2 via Supabase's real email OTP
+      // (Confirm Signup). verifyOtp() stored a real Supabase session in the
+      // browser client, so it is restored here across page reloads.
+      let session = verifiedSessionRef.current || null;
+      if (!session?.user) {
+        const { data: existing } = await supabase.auth.getSession();
+        session = existing?.session?.user?.email?.toLowerCase() === form.email.trim().toLowerCase()
+          ? existing.session
+          : null;
+      }
+      if (!session?.user && tempPasswordRef.current) {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: form.email.trim(),
-          password: form.password,
+          password: tempPasswordRef.current,
         });
+        if (signInError) throw signInError;
         session = signInData?.session || null;
       }
 
       if (!session) {
-        sessionStorage.setItem('pendingResidentRegistration', JSON.stringify(payload));
-        sessionStorage.setItem('registrationNeedsConfirmation', '1');
-        navigate('/registration-success');
-        return;
+        throw new Error('Your email could not be used to sign in. Please verify your email and try again.');
       }
+      sessionStorage.removeItem('pendingSignupTempPassword');
+      tempPasswordRef.current = '';
+
+      // The Supabase account was created in Step 2 with a temporary password
+      // (required to trigger the Confirm Signup OTP email). Now that we hold a
+      // valid session for the confirmed account, set the resident's real
+      // chosen password.
+      const { error: setPwError } = await supabase.auth.updateUser({ password: form.password });
+      if (setPwError) throw setPwError;
 
       const resident = await registrationApi.registerResident(payload);
       if (!resident?.id) {
         throw new Error('Registration failed. Please try again.');
       }
 
-      if (form.document) {
-        const documentFormData = new FormData();
-        documentFormData.append('file', form.document);
-        documentFormData.append('documentType', 'proof_of_residency');
-        documentFormData.append('residentId', resident.id);
+      // Upload each identity document through the real upload endpoint. Each
+      // file becomes its own documents record with verification_status
+      // 'pending' (Uploaded → Pending Review). Status is never 'Verified' at
+      // upload time — only Health Supervisor review can set that. Any failed
+      // upload throws, so the form never falsely reports success.
+      const uploads = [
+        idt.governmentIdFront && { file: idt.governmentIdFront, documentType: 'government_id_front', label: 'the front of your government ID', needsIdType: true },
+        idt.governmentIdBack && { file: idt.governmentIdBack, documentType: 'government_id_back', label: 'the back of your government ID', needsIdType: true },
+        idt.identityPhoto && { file: idt.identityPhoto, documentType: 'identity_photo', label: 'your identity photo', needsIdType: false },
+      ].filter(Boolean);
 
-        const documentPayload = {
-          residentId: resident.id,
-          file: form.document,
-          documentType: 'proof_of_residency',
-        };
-
-        const documentResponse = await api.post('/resident-documents/upload', documentPayload);
-        if (!documentResponse?.document) {
-          throw new Error('Document upload failed. Please try again.');
+      for (const u of uploads) {
+        const fd = new FormData();
+        fd.append('file', u.file);
+        fd.append('documentType', u.documentType);
+        fd.append('residentId', resident.id);
+        if (u.needsIdType) {
+          fd.append('governmentIdType', idt.governmentIdType);
+          if (idt.governmentIdType === 'other' && idt.governmentIdTypeOther.trim()) {
+            fd.append('governmentIdTypeOther', idt.governmentIdTypeOther.trim());
+          }
+        }
+        const docResp = await postFormData('/resident-documents/upload', fd);
+        if (!docResp?.document) {
+          throw new Error(`We could not upload ${u.label}. Please go back and try again.`);
         }
       }
 
-      sessionStorage.removeItem('pendingResidentRegistration');
-      sessionStorage.removeItem('registrationNeedsConfirmation');
-
-      // Persist the new resident id/ref so the success screen can show it.
       sessionStorage.setItem('registrationSuccess', JSON.stringify({
         residentId: resident?.id || '',
         healthRecordNo: resident?.healthRecordNo || '',
@@ -362,7 +641,108 @@ export default function NewResidentRegistration() {
             {step === 2 && (
               <div className="space-y-5">
                 <Field label="Email Address" required error={errors.email}>
-                  <input type="email" placeholder="you@example.com" value={form.email} onChange={set("email")} className={inputCls(errors.email)} />
+                  {emailPhase === "idle" || emailPhase === "sending" ? (
+                    <div className="space-y-2.5">
+                      <input
+                        type="email"
+                        placeholder="you@example.com"
+                        value={form.email}
+                        onChange={set("email")}
+                        className={inputCls(errors.email)}
+                        disabled={emailPhase === "sending"}
+                      />
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={sendCode}
+                          disabled={emailPhase === "sending" || resendIn > 0 && emailPhase === "sent"}
+                          className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {emailPhase === "sending" ? (
+                            <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending</>
+                          ) : (
+                            <><Mail className="h-3.5 w-3.5" /> {emailPhase === "sent" ? "Send Code Again" : "Send Verification Code"}</>
+                          )}
+                        </button>
+                        {emailPhase === "sent" && resendIn > 0 && (
+                          <span className="text-[12px] font-medium text-slate-500 tabular-nums">Resend code in {resendIn}s</span>
+                        )}
+                      </div>
+                      {sendError && <p className="text-[11.5px] font-medium text-brand-danger">{sendError}</p>}
+                      {errors.emailVerified && <p className="text-[11.5px] font-medium text-brand-danger">{errors.emailVerified}</p>}
+                    </div>
+                  ) : null}
+
+                  {(emailPhase === "sent" || emailPhase === "verifying" || emailPhase === "verified") && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                      {emailPhase === "verified" ? (
+                        <div className="flex items-center gap-2.5 text-[12.5px] font-semibold text-brand-green">
+                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-green/15">
+                            <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                          </span>
+                          Email address verified
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-start gap-3">
+                            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-blue/10">
+                              <Mail className="h-[18px] w-[18px] text-brand-blue" strokeWidth={1.9} />
+                            </span>
+                            <div>
+                              <p className="text-[13px] font-bold text-brand-ink">Check your email</p>
+                              <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">
+                                We've sent a verification code to{" "}
+                                <span className="font-semibold text-slate-700">{form.email}</span>.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 flex gap-1.5" onPaste={handleOtpPaste}>
+                            {otpDigits.map((d, i) => (
+                              <input
+                                key={i}
+                                ref={(el) => { otpRefs.current[i] = el; }}
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                maxLength={1}
+                                value={d}
+                                onChange={handleOtpChange(i)}
+                                onKeyDown={handleOtpKeyDown(i)}
+                                aria-label={`Verification digit ${i + 1}`}
+                                className={`h-12 w-full rounded-lg border bg-white text-center font-stat text-lg font-bold text-brand-ink outline-none transition-colors focus:border-brand-blue ${
+                                  otpError ? "border-brand-danger/60" : "border-slate-300"
+                                }`}
+                              />
+                            ))}
+                          </div>
+
+                          {otpError && <p className="mt-2 text-[11.5px] font-medium text-brand-danger">{otpError}</p>}
+
+                          <div className="mt-3.5 flex flex-wrap items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={verifyEmail}
+                              disabled={emailPhase === "verifying"}
+                              className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {emailPhase === "verifying"
+                                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying</>
+                                : <><Check className="h-3.5 w-3.5" strokeWidth={2.5} /> Verify Email</>}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={sendCode}
+                              disabled={emailPhase === "verifying" || resendIn > 0}
+                              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-[12.5px] font-semibold text-brand-ink transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend Code"}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </Field>
 
                 <Field
@@ -551,42 +931,123 @@ export default function NewResidentRegistration() {
               </div>
             )}
 
-            {/* STEP 3: Identity / Proof of Residency */}
+            {/* STEP 3: Identity Verification */}
             {step === 3 && (
               <div className="space-y-6">
                 <InfoNote icon={Shield}>
-                  <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-brand-dark">Proof of Residency</p>
+                  <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-brand-dark">
+                    Identity Verification
+                  </p>
                   <p className="mt-1">
-                    Upload a valid document so the Health Supervisor can confirm that you belong to the selected barangay and municipality.
-                    Accepted documents include Barangay Certificate of Residency, Barangay Clearance, Government ID showing address, or other approved proof.
+                    Select a valid government-issued ID and upload both the front and back sides. You must also provide an
+                    identity photo so the Health Supervisor can review your registration.
                   </p>
                 </InfoNote>
 
+                {/* 1. Government ID Type */}
                 <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
-                  <SectionKicker className="mb-3.5">Uploaded document</SectionKicker>
-                  <UploadComponent
-                    label="Proof of Residency / Government ID"
-                    optional={false}
-                    file={form.document}
-                    onFile={(file) => setForm((p) => ({ ...p, document: file }))}
-                    onRemove={() => setForm((p) => ({ ...p, document: null }))}
-                  />
-                  {errors.document && <p className="mt-1.5 text-[11.5px] font-medium text-brand-danger">{errors.document}</p>}
+                  <SectionKicker className="mb-3.5">1. Government ID Type</SectionKicker>
+                  <Field label="Government ID Type" required error={errors.governmentIdType}>
+                    <div className="relative">
+                      <select
+                        value={form.identity.governmentIdType}
+                        onChange={setIdType}
+                        className={`${inputCls(errors.governmentIdType)} cursor-pointer appearance-none pr-10`}
+                      >
+                        <option value="">Select your government-issued ID</option>
+                        {GOVT_ID_TYPES.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                        aria-hidden="true"
+                      />
+                    </div>
+                  </Field>
+
+                  {form.identity.governmentIdType === "other" && (
+                    <div className="mt-4">
+                      <Field label="Specify ID Type" required error={errors.governmentIdTypeOther}>
+                        <input
+                          type="text"
+                          placeholder="Enter ID type"
+                          value={form.identity.governmentIdTypeOther}
+                          onChange={setIdTypeOther}
+                          className={inputCls(errors.governmentIdTypeOther)}
+                        />
+                      </Field>
+                    </div>
+                  )}
                 </div>
 
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-5 text-[12.5px] leading-relaxed text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={form.agreeReview}
-                    onChange={(e) => { setForm({ ...form, agreeReview: e.target.checked }); setErrors({ ...errors, agreeReview: "" }); }}
-                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-blue focus:ring-brand-blue/30"
+                {/* 2 & 3. Government ID — Front / Back */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
+                  <SectionKicker className="mb-3.5">2. Government ID — Front &amp; Back</SectionKicker>
+                  <div className="space-y-5">
+                    <UploadComponent
+                      label="Government ID — Front"
+                      optional={false}
+                      file={form.identity.governmentIdFront}
+                      onFile={setIdFront}
+                      onRemove={() => setIdFront(null)}
+                    />
+                    {errors.governmentIdFront && (
+                      <p className="-mt-3 text-[11.5px] font-medium text-brand-danger">{errors.governmentIdFront}</p>
+                    )}
+                    <UploadComponent
+                      label="Government ID — Back"
+                      optional={false}
+                      file={form.identity.governmentIdBack}
+                      onFile={setIdBack}
+                      onRemove={() => setIdBack(null)}
+                    />
+                    {errors.governmentIdBack && (
+                      <p className="-mt-3 text-[11.5px] font-medium text-brand-danger">{errors.governmentIdBack}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. Identity Photo */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
+                  <SectionKicker className="mb-3.5">3. Identity Photo</SectionKicker>
+                  <div className="mb-4 flex items-start gap-3 rounded-lg border border-brand-blue/15 bg-brand-light/40 px-3.5 py-3 text-[12px] leading-relaxed text-slate-500">
+                    <Camera className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" strokeWidth={1.9} />
+                    <p>
+                      Take a clear photo of yourself holding the same government ID uploaded above. The Health Supervisor
+                      will use it to confirm that the ID belongs to you.
+                    </p>
+                  </div>
+                  <UploadComponent
+                    label="Identity Photo (you holding your ID)"
+                    optional={false}
+                    file={form.identity.identityPhoto}
+                    onFile={setIdentityPhoto}
+                    onRemove={() => setIdentityPhoto(null)}
                   />
-                  <span>
-                    I confirm that the uploaded document belongs to me and that the information I provided is accurate. I understand my registration
-                    will be reviewed by the Health Supervisor before my account is approved.
-                  </span>
-                </label>
-                {errors.agreeReview && <p className="text-[12px] font-medium text-brand-danger">{errors.agreeReview}</p>}
+                  {errors.identityPhoto && (
+                    <p className="mt-1.5 text-[11.5px] font-medium text-brand-danger">{errors.identityPhoto}</p>
+                  )}
+                </div>
+
+                {/* 4. Applicant Acknowledgment */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
+                  <SectionKicker className="mb-3.5">4. Applicant Acknowledgment</SectionKicker>
+                  <label className="flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={form.agreeReview}
+                      onChange={(e) => { setForm({ ...form, agreeReview: e.target.checked }); setErrors({ ...errors, agreeReview: "" }); }}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-blue focus:ring-brand-blue/30"
+                    />
+                    <span>
+                      I confirm that the government ID and identity photo I uploaded belong to me and that the information I
+                      provided is accurate. I understand that my registration documents will be reviewed by the Health
+                      Supervisor before my account is approved.
+                    </span>
+                  </label>
+                  {errors.agreeReview && <p className="mt-3 text-[12px] font-medium text-brand-danger">{errors.agreeReview}</p>}
+                </div>
               </div>
             )}
 
@@ -606,6 +1067,15 @@ export default function NewResidentRegistration() {
                   ["Mobile Number", form.mobile],
                   ["Address", `${form.houseNo ? form.houseNo + ", " : ""}${form.street ? form.street + ", " : ""}Purok ${form.sitio}, Barangay ${form.barangay}, ${form.municipality}, ${form.province}`],
                   ["Nearest Landmark", form.landmark || "N/A"],
+                ]} />
+                <ReviewBlock title="Identity Verification" onEdit={() => goTo(3)} items={[
+                  ["Government ID Type", form.identity.governmentIdType === "other"
+                    ? `Other: ${form.identity.governmentIdTypeOther || "—"}`
+                    : (GOVT_ID_LABEL[form.identity.governmentIdType] || "—")],
+                  ["ID Front", form.identity.governmentIdFront?.name || "—"],
+                  ["ID Back", form.identity.governmentIdBack?.name || "—"],
+                  ["Identity Photo", form.identity.identityPhoto?.name || "—"],
+                  ["Document Status", "Uploaded — Pending Review"],
                 ]} />
                 <ReviewBlock title="Verification" onEdit={() => goTo(3)} items={[
                   ["Method", "Health Supervisor review"],

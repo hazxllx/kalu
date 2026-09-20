@@ -13,7 +13,6 @@ const STEPS = [
 
 export default function StepIndicator({ current, completed = [] }) {
   const total = STEPS.length;
-  const done = completed.length;
 
   return (
     <div>
@@ -21,9 +20,6 @@ export default function StepIndicator({ current, completed = [] }) {
       <div className="flex items-baseline justify-between border-b border-brand-border pb-2.5">
         <p className="gov-kicker text-brand-blue">
           Step {String(current).padStart(2, "0")} of {String(total).padStart(2, "0")}
-        </p>
-        <p className="font-stat text-[11px] font-bold tracking-[0.1em] text-brand-gray">
-          {Math.round((done / total) * 100)}% Complete
         </p>
       </div>
 

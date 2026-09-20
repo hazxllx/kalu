@@ -68,6 +68,9 @@ router.use('/reports', createResourceRouter('reports', { readRoles: FEATURE_ROLE
 // Early Warning analytics — barangay scope enforced from the session
 router.use('/analytics', analyticsRoutes);
 
+// Resident document upload and review
+router.use(documentsRoutes);
+
 // Cross-cutting
 router.use('/notifications', createResourceRouter('notifications', { readRoles: FEATURE_ROLES.notifications }));
 

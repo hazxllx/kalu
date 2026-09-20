@@ -2,9 +2,12 @@ import * as documentsService from '../services/documents.service.js';
 import { sendCreated, sendData, sendNoContent } from '../utils/apiResponse.js';
 
 export const uploadResidentDocument = async (req, res) => {
-  const file = req.file || req.body?.file;
-  const documentType = req.body?.documentType || 'proof_of_residency';
-  const residentId = req.body?.residentId;
+  const file = req.file;
+  const body = req.body || {};
+  const documentType = body.documentType || 'proof_of_residency';
+  const residentId = body.residentId;
+  const governmentIdType = body.governmentIdType;
+  const governmentIdTypeOther = body.governmentIdTypeOther;
 
   if (!residentId) {
     return sendData(res, { error: 'Resident ID is required.' }, { status: 400 });
@@ -15,6 +18,8 @@ export const uploadResidentDocument = async (req, res) => {
     residentId,
     file,
     documentType,
+    governmentIdType,
+    governmentIdTypeOther,
   });
 
   sendCreated(res, { document: result });

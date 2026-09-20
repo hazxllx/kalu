@@ -7,13 +7,28 @@ export const ALLOWED_MIME_TYPES = Object.freeze([
   'image/jpg',
 ]);
 
-export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+// Registration identity documents (ID front/back, selfie) are capped higher
+// than the legacy proof-of-residency 5 MB rule.
+export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 export const ALLOWED_DOCUMENT_TYPES = Object.freeze([
   'proof_of_residency',
   'barangay_certificate',
   'barangay_clearance',
   'government_id',
+  'other',
+  'government_id_front',
+  'government_id_back',
+  'identity_photo',
+]);
+
+export const GOVERNMENT_ID_TYPES = Object.freeze([
+  'philsys',
+  'drivers_license',
+  'passport',
+  'umid',
+  'prc_id',
+  'postal_id',
   'other',
 ]);
 
@@ -27,13 +42,35 @@ export const VERIFICATION_STATUSES = Object.freeze([
 export const validateDocumentUpload = (input = {}) => {
   const errors = {};
 
+  const customGovernmentIdType = typeof input.governmentIdTypeOther === 'string'
+    ? input.governmentIdTypeOther.trim()
+    : '';
+
   const documentType = input.documentType || 'proof_of_residency';
   if (!ALLOWED_DOCUMENT_TYPES.includes(documentType)) {
     errors.documentType = 'Invalid document type.';
   }
 
+  const rawGovernmentIdType = input.governmentIdType
+    ? typeof input.governmentIdType === 'string' ? input.governmentIdType.trim().toLowerCase() : null
+    : null;
+  const governmentIdType = rawGovernmentIdType === 'other' && customGovernmentIdType
+    ? customGovernmentIdType
+    : rawGovernmentIdType;
+  if (documentType === 'government_id_front' || documentType === 'government_id_back') {
+    if (rawGovernmentIdType === 'other') {
+      if (!customGovernmentIdType) {
+        errors.governmentIdType = 'Select your government ID type.';
+      }
+    } else if (!rawGovernmentIdType || !GOVERNMENT_ID_TYPES.includes(rawGovernmentIdType)) {
+      errors.governmentIdType = 'Select your government ID type.';
+    }
+  } else if (governmentIdType && rawGovernmentIdType !== 'other' && !GOVERNMENT_ID_TYPES.includes(governmentIdType.toLowerCase())) {
+    errors.governmentIdType = 'Invalid government ID type.';
+  }
+
   if (!input.file || !(input.file instanceof File)) {
-    errors.file = 'Please upload a valid proof of residency document.';
+    errors.file = 'Please upload a valid document.';
     return invalid(errors);
   }
 
@@ -44,11 +81,11 @@ export const validateDocumentUpload = (input = {}) => {
   }
 
   if (file.size > MAX_FILE_SIZE) {
-    errors.file = 'File size must not exceed 5 MB.';
+    errors.file = 'File size must not exceed 10 MB.';
   }
 
   if (file.size < 1) {
-    errors.file = 'Please upload a valid proof of residency document.';
+    errors.file = 'Please upload a valid document.';
   }
 
   if (Object.keys(errors).length > 0) {
@@ -57,6 +94,7 @@ export const validateDocumentUpload = (input = {}) => {
 
   return valid({
     documentType,
+    governmentIdType: governmentIdType || null,
     fileName: file.name,
     mimeType: file.type,
     sizeBytes: file.size,
@@ -94,5 +132,6 @@ export default {
   ALLOWED_MIME_TYPES,
   MAX_FILE_SIZE,
   ALLOWED_DOCUMENT_TYPES,
+  GOVERNMENT_ID_TYPES,
   VERIFICATION_STATUSES,
 };

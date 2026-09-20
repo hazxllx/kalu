@@ -120,6 +120,7 @@ const DOCUMENT_TO_DB = {
   id: 'id',
   residentId: 'resident_id',
   documentType: 'document_type',
+  governmentIdType: 'government_id_type',
   fileName: 'file_name',
   storagePath: 'storage_path',
   mimeType: 'mime_type',
@@ -879,6 +880,7 @@ export const supabaseRepository = {
       .insert({
         resident_id: document.residentId,
         document_type: document.documentType,
+        government_id_type: document.governmentIdType || null,
         file_name: document.fileName,
         storage_path: document.storagePath,
         mime_type: document.mimeType,

@@ -38,6 +38,8 @@ async function request(path, { method = 'GET', body, headers = {}, params, ...re
   const token = await getAccessToken();
 
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const isJsonBody = body !== undefined && body !== null && !isFormData && typeof body !== 'string' && !(body instanceof URLSearchParams);
+  const requestBody = isJsonBody ? JSON.stringify(body) : body;
 
   const response = await fetch(buildUrl(path, params), {
     method,
@@ -47,7 +49,7 @@ async function request(path, { method = 'GET', body, headers = {}, params, ...re
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },
-    ...(body ? { body } : {}),
+    ...(requestBody !== undefined && requestBody !== null ? { body: requestBody } : {}),
     ...rest,
   });
 
