@@ -34,6 +34,13 @@ const env = {
   // The anon key is safe to use for verifying end-user access tokens.
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
 
+  smtpHost: process.env.SMTP_HOST || '',
+  smtpPort: Number(process.env.SMTP_PORT) || 587,
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPassword: process.env.SMTP_PASSWORD || '',
+  smtpFrom: process.env.SMTP_FROM || '',
+  otpPepper: process.env.OTP_PEPPER || '',
+
   // --- Local data store ------------------------------------------------------
   // Used only while Supabase is not configured (see repository). Holds the
   // JSON file that persists residents, submissions and referrals so the

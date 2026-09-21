@@ -29,6 +29,14 @@ const toNodeFile = (multerFile) => {
   return file;
 };
 
+const hasExpectedSignature = (file) => {
+  const bytes = file.buffer;
+  if (file.mimetype === 'application/pdf') return bytes.subarray(0, 4).toString() === '%PDF';
+  if (file.mimetype === 'image/png') return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg') return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  return false;
+};
+
 export const uploadDocumentFile = (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
@@ -46,6 +54,9 @@ export const uploadDocumentFile = (req, res, next) => {
     }
     if (!req.file) {
       return next(ApiError.badRequest('Please upload a valid document.'));
+    }
+    if (!hasExpectedSignature(req.file)) {
+      return next(ApiError.badRequest('The uploaded file content does not match an approved document type.'));
     }
     req.file = toNodeFile(req.file);
     next();

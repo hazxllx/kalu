@@ -11,6 +11,9 @@ import householdsRoutes from './households.routes.js';
 import analyticsRoutes from './analytics.routes.js';
 import verificationsRoutes from './verifications.routes.js';
 import documentsRoutes from './documents.routes.js';
+import transferRoutes from './transfer.routes.js';
+import consultationsRoutes from './consultations.routes.js';
+import operationalRoutes from './operational.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -35,6 +38,8 @@ router.use('/auth', authRoutes);
 // Resident self-registration (creates the linked residents row; the Supabase
 // Auth account is created client-side by supabase.auth.signUp).
 router.use('/registration', registrationRoutes);
+router.use('/consultations', consultationsRoutes);
+router.use('/operational', operationalRoutes);
 
 // Resident -> RHU -> PHN submission workflow
 router.use('/intake', intakeRoutes);          // BHW / RHU personnel intake
@@ -70,6 +75,7 @@ router.use('/analytics', analyticsRoutes);
 
 // Resident document upload and review
 router.use(documentsRoutes);
+router.use(transferRoutes);
 
 // Cross-cutting
 router.use('/notifications', createResourceRouter('notifications', { readRoles: FEATURE_ROLES.notifications }));

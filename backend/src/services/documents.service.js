@@ -22,6 +22,7 @@ export const uploadResidentDocument = async ({
   if (validation.error) {
     throw ApiError.badRequest('Invalid document.', validation.error);
   }
+  const documentMeta = validation.value;
 
   const resident = await repository.getResident(residentId);
   if (!resident) {
@@ -40,7 +41,7 @@ export const uploadResidentDocument = async ({
     (d) =>
       d.verificationStatus === 'pending' &&
       d.documentType === documentType &&
-      (d.governmentIdType ?? null) === (validation.governmentIdType ?? null),
+      (d.governmentIdType ?? null) === (documentMeta.governmentIdType ?? null),
   );
   if (sameSlot) {
     throw ApiError.conflict('An uploaded document of this type is already awaiting review. Remove it first to replace it.');
@@ -56,11 +57,11 @@ export const uploadResidentDocument = async ({
   const document = await repository.insertDocument({
     residentId,
     documentType,
-    governmentIdType: validation.governmentIdType,
-    fileName: validation.fileName,
+    governmentIdType: documentMeta.governmentIdType,
+    fileName: documentMeta.fileName,
     storagePath,
-    mimeType: validation.mimeType,
-    sizeBytes: validation.sizeBytes,
+    mimeType: documentMeta.mimeType,
+    sizeBytes: documentMeta.sizeBytes,
     verificationStatus: 'pending',
     uploadedById: user.id,
   });

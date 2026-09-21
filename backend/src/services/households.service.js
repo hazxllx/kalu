@@ -230,6 +230,19 @@ export const updateHousehold = async ({ id, user, patch = {} }) => {
   if (touchesVerification && !VERIFY_ROLES.includes(user?.role)) {
     throw ApiError.forbidden('Verification outcomes can only be set by the Health Supervisor.');
   }
+  // The reviewer identity and timestamp always come from the authenticated
+  // session — never from the client. A returned-for-correction outcome requires
+  // a correction reason.
+  if (patch.verificationStatus !== undefined) {
+    patch.verifiedBy = user.id;
+    patch.verifiedAt = new Date().toISOString();
+    if (patch.verificationStatus === 'Returned for Correction' && !text(patch.correctionReason)) {
+      throw ApiError.unprocessable('A correction reason is required when returning a household.');
+    }
+    if (patch.verificationStatus !== 'Returned for Correction') {
+      patch.correctionReason = '';
+    }
+  }
 
   const errors = [];
   if (patch.hhStatus !== undefined && !HH_STATUSES.includes(patch.hhStatus)) {

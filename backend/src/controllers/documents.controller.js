@@ -1,4 +1,5 @@
 import * as documentsService from '../services/documents.service.js';
+import ApiError from '../utils/apiError.js';
 import { sendCreated, sendData, sendNoContent } from '../utils/apiResponse.js';
 
 export const uploadResidentDocument = async (req, res) => {
@@ -10,7 +11,7 @@ export const uploadResidentDocument = async (req, res) => {
   const governmentIdTypeOther = body.governmentIdTypeOther;
 
   if (!residentId) {
-    return sendData(res, { error: 'Resident ID is required.' }, { status: 400 });
+    throw ApiError.badRequest('Resident ID is required.');
   }
 
   const result = await documentsService.uploadResidentDocument({
@@ -28,7 +29,7 @@ export const uploadResidentDocument = async (req, res) => {
 export const getMyDocument = async (req, res) => {
   const residentId = req.query?.residentId || req.params?.residentId;
   if (!residentId) {
-    return sendData(res, { error: 'Resident ID is required.' }, { status: 400 });
+    throw ApiError.badRequest('Resident ID is required.');
   }
 
   const result = await documentsService.getMyDocument({
@@ -70,7 +71,7 @@ export const deleteResidentDocument = async (req, res) => {
   const residentId = req.body?.residentId;
 
   if (!residentId) {
-    return sendData(res, { error: 'Resident ID is required.' }, { status: 400 });
+    throw ApiError.badRequest('Resident ID is required.');
   }
 
   await documentsService.deleteResidentDocument({

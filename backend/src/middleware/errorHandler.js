@@ -21,6 +21,16 @@ const errorHandler = (err, req, res, next) => {
   if (isServerError) {
     console.error(`Unhandled error on ${req.method} ${req.path}:`, err.message);
     if (!env.isProduction && err.stack) console.error(err.stack);
+  } else if (!env.isProduction) {
+    // Client errors (4xx) are silent in production, but during development we
+    // log the real message and any field details so a 400/409 during flows
+    // like registration can be diagnosed instead of appearing as an opaque
+    // "Request failed with status 400" in the browser.
+    console.warn(
+      `Client error ${statusCode} on ${req.method} ${req.path}:`,
+      err.message,
+      err.details ? JSON.stringify(err.details) : '',
+    );
   }
 
   const message = isServerError && env.isProduction

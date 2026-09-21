@@ -28,6 +28,8 @@ const emptyData = () => ({
   referrals: [],
   verifications: [],
   residentVerificationLogs: [],
+  transferRequests: [],
+  transferRequestAuditLogs: [],
 });
 
 class FileStore {
@@ -51,6 +53,8 @@ class FileStore {
     // Older store files predate the verifications collection.
     if (!Array.isArray(this.data.verifications)) this.data.verifications = [];
     if (!Array.isArray(this.data.residentVerificationLogs)) this.data.residentVerificationLogs = [];
+    if (!Array.isArray(this.data.transferRequests)) this.data.transferRequests = [];
+    if (!Array.isArray(this.data.transferRequestAuditLogs)) this.data.transferRequestAuditLogs = [];
   }
 
   /**
@@ -107,6 +111,16 @@ class FileStore {
   get residentVerificationLogs() {
     this.ensureLoaded();
     return this.data.residentVerificationLogs;
+  }
+
+  get transferRequests() {
+    this.ensureLoaded();
+    return this.data.transferRequests;
+  }
+
+  get transferRequestAuditLogs() {
+    this.ensureLoaded();
+    return this.data.transferRequestAuditLogs;
   }
 }
 

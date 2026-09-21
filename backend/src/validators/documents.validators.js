@@ -20,6 +20,8 @@ export const ALLOWED_DOCUMENT_TYPES = Object.freeze([
   'government_id_front',
   'government_id_back',
   'identity_photo',
+  'transfer_previous_health_record',
+  'transfer_proof_of_address',
 ]);
 
 export const GOVERNMENT_ID_TYPES = Object.freeze([
@@ -92,9 +94,19 @@ export const validateDocumentUpload = (input = {}) => {
     return invalid(errors);
   }
 
+  // `residentId` is preserved so the `validate` middleware (which REPLACES
+  // req.body with this value) does not strip the field the controller needs to
+  // link the upload to the signed-in resident's record. Without this the
+  // controller always saw an undefined residentId and returned HTTP 400.
+  const residentId = typeof input.residentId === 'string'
+    ? input.residentId.trim()
+    : (input.residentId ?? '');
+
   return valid({
+    ...(residentId ? { residentId } : {}),
     documentType,
     governmentIdType: governmentIdType || null,
+    ...(customGovernmentIdType ? { governmentIdTypeOther: customGovernmentIdType } : {}),
     fileName: file.name,
     mimeType: file.type,
     sizeBytes: file.size,

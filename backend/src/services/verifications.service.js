@@ -19,6 +19,7 @@
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
+import { notifyResident } from './notifications.service.js';
 
 export const VERIFICATION_STATUS = Object.freeze({
   PENDING: 'pending',
@@ -232,6 +233,15 @@ export const approve = async ({ user, id, remarks = '' } = {}) => {
   });
   await syncAccountStatus(resident, VERIFICATION_STATUS.APPROVED);
 
+  await notifyResident({
+    recipientAuthUserId: resident.authUserId,
+    category: 'information',
+    title: 'Registration approved',
+    message: 'Your resident registration has been approved. You now have full access to your health record.',
+    relatedType: 'resident_verification',
+    relatedId: resident.id,
+  });
+
   return toVerification(updated);
 };
 
@@ -272,6 +282,15 @@ export const reject = async ({ user, id, reason, remarks = '' } = {}) => {
   });
   await syncAccountStatus(resident, VERIFICATION_STATUS.REJECTED);
 
+  await notifyResident({
+    recipientAuthUserId: resident.authUserId,
+    category: 'alert',
+    title: 'Registration rejected',
+    message: `Your resident registration was rejected. Reason: ${storedReason}`,
+    relatedType: 'resident_verification',
+    relatedId: resident.id,
+  });
+
   return toVerification(updated);
 };
 
@@ -309,6 +328,15 @@ export const requestResubmission = async ({ user, id, reason, remarks = '' } = {
     newStatus: VERIFICATION_STATUS.RESUBMISSION_REQUIRED,
   });
   await syncAccountStatus(resident, VERIFICATION_STATUS.RESUBMISSION_REQUIRED);
+
+  await notifyResident({
+    recipientAuthUserId: resident.authUserId,
+    category: 'alert',
+    title: 'Resubmission requested',
+    message: `Please update and resubmit your registration. Reason: ${storedReason}`,
+    relatedType: 'resident_verification',
+    relatedId: resident.id,
+  });
 
   return toVerification(updated);
 };

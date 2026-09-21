@@ -119,6 +119,7 @@ const memberFromRow = (row) => ({
 const DOCUMENT_TO_DB = {
   id: 'id',
   residentId: 'resident_id',
+  transferRequestId: 'transfer_request_id',
   documentType: 'document_type',
   governmentIdType: 'government_id_type',
   fileName: 'file_name',
@@ -578,16 +579,21 @@ export const supabaseRepository = {
     return Boolean(data);
   },
 
-  async findResidentByIdentity({ lastName, firstName, middleName, birthDate } = {}) {
+  async findResidentByIdentity({ lastName, firstName, middleName, birthDate, identityNo } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.residents)
       .select('*')
-      .ilike('last_name', String(lastName || '').trim())
-      .ilike('first_name', String(firstName || '').trim());
+      .limit(5);
+    if (identityNo) query = query.eq('identity_no', String(identityNo).trim());
+    else {
+      query = query
+        .ilike('last_name', String(lastName || '').trim())
+        .ilike('first_name', String(firstName || '').trim());
+    }
     if (middleName) query = query.ilike('middle_name', String(middleName).trim());
     if (birthDate) query = query.eq('birth_date', birthDate);
-    const { data, error } = await query.limit(5);
+    const { data, error } = await query;
     throwOnError(error, 'Could not look up resident');
     const rows = data || [];
     const exact = rows.find((r) => {
@@ -872,19 +878,110 @@ export const supabaseRepository = {
     return residentFromRow(data);
   },
 
+  async createTransferRequest({ authUserId, otpHash, otpExpiresAt }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from('transfer_requests').insert({
+      auth_user_id: authUserId,
+      status: 'pending',
+      otp_hash: otpHash,
+      otp_expires_at: otpExpiresAt,
+    }).select('*').single();
+    throwOnError(error, 'Could not create transfer request');
+    return data;
+  },
+
+  async getTransferRequest(id, authUserId = null) {
+    const supabase = getServiceClient();
+    let query = supabase.from('transfer_requests').select('*').eq('id', id);
+    if (authUserId) query = query.eq('auth_user_id', authUserId);
+    const { data, error } = await query.maybeSingle();
+    throwOnError(error, 'Could not load transfer request');
+    return data || null;
+  },
+
+  async getLatestTransferRequest(authUserId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from('transfer_requests').select('*')
+      .eq('auth_user_id', authUserId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    throwOnError(error, 'Could not load transfer request');
+    return data || null;
+  },
+
+  async updateTransferRequest(id, patch) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from('transfer_requests').update(patch).eq('id', id).select('*').single();
+    throwOnError(error, 'Could not update transfer request');
+    return data;
+  },
+
+  async listTransferRequests({ status = null, limit = 100, offset = 0 } = {}) {
+    const supabase = getServiceClient();
+    let query = supabase.from('transfer_requests').select('*', { count: 'exact' })
+      .order('created_at', { ascending: true }).range(offset, offset + limit - 1);
+    if (status) query = query.eq('status', status);
+    const { data, error, count } = await query;
+    throwOnError(error, 'Could not list transfer requests');
+    return { rows: data || [], total: count ?? (data || []).length };
+  },
+
+  async approveTransferRequest({ requestId, reviewerId, residentId }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('approve_transfer_request', {
+      p_request_id: requestId, p_reviewer_id: reviewerId, p_resident_id: residentId,
+    });
+    throwOnError(error, 'Could not approve transfer request');
+    return data || null;
+  },
+
+  async insertTransferAuditLog({ transferRequestId, actorId, action, metadata = {} }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from('transfer_request_audit_logs').insert({
+      transfer_request_id: transferRequestId, actor_id: actorId, action, metadata,
+    }).select('*').single();
+    throwOnError(error, 'Could not write transfer audit log');
+    return data;
+  },
+
+  async listDocumentsByTransferRequest(transferRequestId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from(TABLES.documents).select('*')
+      .eq('transfer_request_id', transferRequestId).order('created_at', { ascending: true });
+    throwOnError(error, 'Could not list transfer documents');
+    return (data || []).map(documentFromRow);
+  },
+
+  /** Atomically claims an unlinked record; identity matching stays server-side. */
+  async claimResidentForAccount({ authUserId, identityNo, birthDate }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('claim_resident_for_account', {
+      p_auth_user_id: authUserId,
+      p_identity_no: String(identityNo || '').trim(),
+      p_birth_date: birthDate,
+    });
+    throwOnError(error, 'Could not complete resident account linking');
+    return residentFromRow(data);
+  },
+
   // ----- documents ----------------------------------------------------------
   async insertDocument(document) {
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from(TABLES.documents)
       .insert({
-        resident_id: document.residentId,
+        resident_id: document.residentId || null,
+        transfer_request_id: document.transferRequestId || null,
         document_type: document.documentType,
+        // `purpose` is a NOT NULL column on the original documents table (no
+        // default). The registration/transfer flows track the kind of file in
+        // `document_type`, so mirror it into `purpose` to satisfy the column
+        // without a schema change.
+        purpose: document.purpose || document.documentType,
         government_id_type: document.governmentIdType || null,
         file_name: document.fileName,
         storage_path: document.storagePath,
         mime_type: document.mimeType,
         size_bytes: document.sizeBytes,
+        status: document.status || 'uploaded',
         verification_status: document.verificationStatus || 'pending',
         uploaded_by: document.uploadedById || null,
       })

@@ -110,7 +110,11 @@ export const fileRepository = {
     return clone(residents);
   },
 
-  findResidentByIdentity: async ({ lastName, firstName, middleName, birthDate } = {}) => {
+  findResidentByIdentity: async ({ lastName, firstName, middleName, birthDate, identityNo } = {}) => {
+    if (identityNo) {
+      const match = store.residents.find((r) => r.identityNo && r.identityNo === String(identityNo).trim());
+      return match ? clone(match) : null;
+    }
     const last = normalizeText(lastName);
     const first = normalizeText(firstName);
     const mid = normalizeText(middleName);
@@ -335,6 +339,61 @@ export const fileRepository = {
     const found = store.residents.find((r) => r.authUserId && r.authUserId === authUserId);
     return found ? clone(found) : null;
   },
+
+  claimResidentForAccount: async ({ authUserId, identityNo, birthDate }) => {
+    return store.mutate((data) => {
+      const found = data.residents.find(
+        (r) => !r.authUserId && r.identityNo && r.identityNo === String(identityNo || '').trim() && r.birthDate === birthDate,
+      );
+      if (!found) return null;
+      found.authUserId = authUserId;
+      found.updatedAt = new Date().toISOString();
+      return clone(found);
+    });
+  },
+
+  createTransferRequest: async ({ authUserId, otpHash, otpExpiresAt }) => store.mutate((data) => {
+    const row = { id: crypto.randomUUID(), authUserId, auth_user_id: authUserId, status: 'pending', otpHash, otp_hash: otpHash, otpExpiresAt, otp_expires_at: otpExpiresAt, otpAttempts: 0, otp_attempts: 0, otpVerifiedAt: null, otp_verified_at: null, createdAt: new Date().toISOString(), created_at: new Date().toISOString() };
+    data.transferRequests.push(row);
+    return clone(row);
+  }),
+  getTransferRequest: async (id, authUserId = null) => {
+    const row = store.transferRequests.find((item) => item.id === id && (!authUserId || item.authUserId === authUserId));
+    return row ? clone(row) : null;
+  },
+  getLatestTransferRequest: async (authUserId) => {
+    const rows = store.transferRequests.filter((item) => item.authUserId === authUserId);
+    return rows.length ? clone(rows[rows.length - 1]) : null;
+  },
+  updateTransferRequest: async (id, patch) => store.mutate((data) => {
+    const row = data.transferRequests.find((item) => item.id === id);
+    if (!row) return null;
+    Object.assign(row, patch, { updatedAt: new Date().toISOString() });
+    return clone(row);
+  }),
+  listTransferRequests: async ({ status = null, limit = 100, offset = 0 } = {}) => {
+    let rows = store.transferRequests.slice();
+    if (status) rows = rows.filter((row) => row.status === status);
+    return { rows: clone(rows.slice(offset, offset + limit)), total: rows.length };
+  },
+  approveTransferRequest: async ({ requestId, reviewerId, residentId }) => store.mutate((data) => {
+    const request = data.transferRequests.find((row) => row.id === requestId);
+    const resident = data.residents.find((row) => row.id === residentId && !row.authUserId);
+    if (!request || !resident || !request.otpVerifiedAt || !['pending', 'under_review'].includes(request.status)) return null;
+    resident.authUserId = request.authUserId;
+    request.status = 'approved';
+    request.targetResidentId = resident.id;
+    request.reviewedBy = reviewerId;
+    request.reviewedAt = new Date().toISOString();
+    return clone(request);
+  }),
+  insertTransferAuditLog: async ({ transferRequestId, actorId, action, metadata = {} }) => store.mutate((data) => {
+    const row = { id: crypto.randomUUID(), transferRequestId, actorId, action, metadata, createdAt: new Date().toISOString() };
+    data.transferRequestAuditLogs.push(row);
+    return clone(row);
+  }),
+  listDocumentsByTransferRequest: async () => [],
+  deleteDocument: async () => true,
 
 };
 

@@ -1,9 +1,17 @@
 import { getServiceClient } from '../config/supabase.js';
+import path from 'node:path';
 
 const BUCKET = 'documents';
 
-const storagePath = (residentId, documentId, fileName) =>
-  `resident-documents/${residentId}/${documentId}/${fileName}`;
+const safeExtension = (fileName, mimeType) => {
+  const ext = path.extname(String(fileName || '')).toLowerCase();
+  return ['.pdf', '.png', '.jpg', '.jpeg'].includes(ext)
+    ? ext
+    : mimeType === 'application/pdf' ? '.pdf' : mimeType === 'image/png' ? '.png' : '.jpg';
+  };
+
+const storagePath = (residentId, documentId, fileName, prefix = 'resident-documents') =>
+  `${prefix}/${residentId}/${documentId}${safeExtension(fileName, '')}`;
 
 /**
  * Upload a file to the private documents bucket.
@@ -11,7 +19,7 @@ const storagePath = (residentId, documentId, fileName) =>
  */
 export const uploadDocument = async ({ file, residentId, documentId }) => {
   const supabase = getServiceClient();
-  const path = storagePath(residentId, documentId, file.name);
+  const path = storagePath(residentId, documentId, file.name, 'resident-documents');
 
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
     cacheControl: 'private, max-age=3600',
@@ -29,6 +37,17 @@ export const uploadDocument = async ({ file, residentId, documentId }) => {
     storagePath: path,
     url: urlData?.signedUrl || null,
   };
+};
+
+export const uploadTransferDocument = async ({ file, transferRequestId, documentId }) => {
+  const supabase = getServiceClient();
+  const path = storagePath(transferRequestId, documentId, file.name, 'transfer-documents');
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+    cacheControl: 'private, max-age=3600', upsert: false, contentType: file.type,
+  });
+  if (error) throw new Error(`Upload failed: ${error.message}`);
+  const { data: urlData } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
+  return { storagePath: path, url: urlData?.signedUrl || null };
 };
 
 /**
@@ -55,4 +74,4 @@ export const deleteDocument = async (storagePath) => {
   return true;
 };
 
-export default { uploadDocument, getDocumentSignedUrl, deleteDocument, storagePath };
+export default { uploadDocument, uploadTransferDocument, getDocumentSignedUrl, deleteDocument, storagePath };
