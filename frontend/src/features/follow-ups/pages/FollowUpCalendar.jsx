@@ -1,21 +1,57 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { useResidents } from "@/services/local/residentStore";
-import {
-  useFollowUpSchedules,
-  followUpScheduleStore,
-  SCHEDULE_STATUSES,
-  PROVIDERS,
-  LOCATIONS,
-} from "@/services/local/followUpScheduleStore";
+import { followUpsApi, residentsApi } from "@/services/api";
 import { DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
 import { dayLabel, groupByDay, monthLabel, toKey, weekLabel } from "../lib/scheduleDates";
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Plus, X, Search, ShieldAlert, Pencil, Trash2, Ban, CheckCircle2,
+  CalendarDays, ChevronLeft, ChevronRight, Plus, X, Search, ShieldAlert, Pencil, Ban, CheckCircle2, Clock,
 } from "lucide-react";
+
+/**
+ * Follow-up Schedule Calendar (Health Supervisor).
+ *
+ * SINGLE SOURCE OF TRUTH: this calendar reads and writes the same persisted
+ * `follow_ups` records (via `followUpsApi`) as the Follow-up Management table.
+ * A follow-up created in either place appears in both after a refresh, and any
+ * reschedule / status change here updates the same database row.
+ */
+
+/* ------------------------------ Constants -------------------------------- */
+
+const CALENDAR_STATUSES = ["Scheduled", "Ongoing", "Completed", "Missed", "Cancelled"];
+const PROVIDERS = ["Midwife", "Nurse", "BHW", "Physician", "Health Supervisor"];
+const LOCATIONS = ["Barangay Health Station", "RHU", "Home Visit", "Other"];
+
+/** follow_ups row (snake_case, with joined resident) → calendar schedule shape. */
+const confirmationLabel = (row) => {
+  if (row.resident_decision === 'approved') return 'Confirmed';
+  if (row.resident_decision === 'rejected') return 'Rejected';
+  if (row.requires_resident_response || row.resident_decision === 'pending') return 'Awaiting Confirmation';
+  return null;
+};
+const mapRowToSchedule = (row) => ({
+  id: row.id,
+  residentId: row.resident_id,
+  residentName: row.resident
+    ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
+    : "Resident",
+  barangay: row.resident?.barangay || "",
+  date: row.scheduled_date || "",
+  time: row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : "",
+  location: row.location || "",
+  provider: row.assigned_provider || "",
+  instructions: row.notes || "",
+  purpose: row.purpose || "",
+  priority: row.priority || "Medium",
+  status: row.status || "Scheduled",
+  // Resident confirmation outcome (read-only for the Health Supervisor).
+  confirmationStatus: confirmationLabel(row),
+  respondedAt: row.resident_decision_at || "",
+  rejectionReason: row.resident_decision === 'rejected' ? (row.resident_decision_reason || "") : "",
+});
 
 /* --------------------------- Form (supervisor) ---------------------------- */
 
@@ -40,15 +76,18 @@ function Field({ label, required, error, children }) {
 const EMPTY_FORM = () => ({
   residentName: "",
   residentId: "",
+  purpose: "General Check-up",
   date: toKey(new Date()),
   time: "09:00",
   location: LOCATIONS[0],
   provider: PROVIDERS[0],
+  priority: "Medium",
   instructions: "",
   status: "Scheduled",
+  requiresResidentResponse: true,
 });
 
-function ScheduleFormModal({ initial, residentNames, onClose, onSave }) {
+function ScheduleFormModal({ initial, residents, saving, onClose, onSave }) {
   const [form, setForm] = useState(() => (initial ? { ...initial } : EMPTY_FORM()));
   const [errors, setErrors] = useState({});
 
@@ -57,14 +96,25 @@ function ScheduleFormModal({ initial, residentNames, onClose, onSave }) {
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
   };
 
+  const isNew = !initial;
+
   const validate = () => {
     const next = {};
     if (!form.residentName.trim()) next.residentName = "Resident name is required.";
+    if (isNew && !form.residentId) next.residentName = "Select a resident from the list.";
+    if (!form.purpose.trim()) next.purpose = "Purpose is required.";
     if (!form.date) next.date = "Follow-up date is required.";
     if (!form.time) next.time = "Follow-up time is required.";
     if (!form.provider) next.provider = "Healthcare provider is required.";
     setErrors(next);
     return Object.keys(next).length === 0;
+  };
+
+  // When the typed name matches a resident, capture their id (create needs it).
+  const onNameChange = (value) => {
+    const match = residents.find((r) => r.name.toLowerCase() === value.trim().toLowerCase());
+    setForm((p) => ({ ...p, residentName: value, residentId: match ? match.id : isNew ? "" : p.residentId }));
+    if (errors.residentName) setErrors((p) => ({ ...p, residentName: "" }));
   };
 
   return (
@@ -87,21 +137,22 @@ function ScheduleFormModal({ initial, residentNames, onClose, onSave }) {
                 type="text"
                 list="followup-resident-names"
                 value={form.residentName}
-                onChange={(e) => set("residentName")(e.target.value)}
-                placeholder="Search or enter resident name..."
-                className={inputCls(errors.residentName)}
+                disabled={!isNew}
+                onChange={(e) => onNameChange(e.target.value)}
+                placeholder="Search or select a resident..."
+                className={`${inputCls(errors.residentName)} ${!isNew ? "opacity-70" : ""}`}
               />
               <datalist id="followup-resident-names">
-                {residentNames.map((n) => <option key={n} value={n} />)}
+                {residents.map((r) => <option key={r.id} value={r.name} />)}
               </datalist>
             </Field>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Resident ID">
-                <input type="text" value={form.residentId} onChange={(e) => set("residentId")(e.target.value)} placeholder="e.g. R-1024" className={inputCls()} />
+              <Field label="Purpose" required error={errors.purpose}>
+                <input type="text" value={form.purpose} onChange={(e) => set("purpose")(e.target.value)} placeholder="e.g. Prenatal check-up" className={inputCls(errors.purpose)} />
               </Field>
               <Field label="Status">
                 <select value={form.status} onChange={(e) => set("status")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                  {SCHEDULE_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {CALENDAR_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </Field>
               <Field label="Follow-up Date" required error={errors.date}>
@@ -120,6 +171,13 @@ function ScheduleFormModal({ initial, residentNames, onClose, onSave }) {
                   {PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </Field>
+              <Field label="Priority">
+                <select value={form.priority} onChange={(e) => set("priority")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                  <option>High</option>
+                  <option>Medium</option>
+                  <option>Low</option>
+                </select>
+              </Field>
             </div>
             <Field label="Follow-up Instructions">
               <textarea
@@ -130,15 +188,32 @@ function ScheduleFormModal({ initial, residentNames, onClose, onSave }) {
                 className={`${inputCls()} resize-none`}
               />
             </Field>
+            {isNew && (
+              <label className="flex items-start gap-2.5 rounded-btn border border-slate-200 bg-brand-bg/50 px-3.5 py-3 dark:border-border dark:bg-input">
+                <input
+                  type="checkbox"
+                  checked={form.requiresResidentResponse}
+                  onChange={(e) => set("requiresResidentResponse")(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-blue focus:ring-brand-blue"
+                />
+                <span className="text-sm text-brand-ink">
+                  Require the resident to confirm this follow-up
+                  <span className="mt-0.5 block text-xs text-brand-gray">
+                    The resident is notified and must approve before it becomes a scheduled calendar event. If they reject it, it is cancelled.
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
 
           <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
             <button
+              disabled={saving}
               onClick={() => { if (validate()) onSave(form); }}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
             >
-              <CheckCircle2 className="h-4 w-4" /> {initial ? "Save Changes" : "Add Schedule"}
+              <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : initial ? "Save Changes" : "Add Schedule"}
             </button>
           </div>
         </div>
@@ -157,22 +232,6 @@ const VIEWS = [
 
 export default function FollowUpCalendar() {
   const { user } = useAuth();
-  const schedules = useFollowUpSchedules();
-  const allResidents = useResidents();
-
-  // Health Supervisor scope — the calendar only ever shows (and offers for new
-  // schedules) residents of the supervisor's single assigned barangay.
-  const supervisorScope = user?.role === "health_supervisor" ? getSupervisorScope(user) : null;
-  const assignedBarangay = supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
-  const residents = useMemo(
-    () => (assignedBarangay ? allResidents.filter((r) => r.barangay === assignedBarangay) : allResidents),
-    [allResidents, assignedBarangay]
-  );
-  const residentIds = useMemo(() => new Set(residents.map((r) => r.id)), [residents]);
-  const scopedSchedules = useMemo(
-    () => (assignedBarangay ? schedules.filter((s) => residentIds.has(s.residentId)) : schedules),
-    [schedules, residentIds, assignedBarangay]
-  );
 
   // Health Supervisor only — the route already sits inside the supervisor's
   // protected area; this guard is a second line of defense.
@@ -193,15 +252,20 @@ export default function FollowUpCalendar() {
     );
   }
 
-  return (
-    <FollowUpCalendarContent
-      schedules={scopedSchedules}
-      residentNames={residents.map((r) => r.name).sort((a, b) => a.localeCompare(b))}
-    />
-  );
+  return <FollowUpCalendarContent user={user} />;
 }
 
-function FollowUpCalendarContent({ schedules, residentNames }) {
+function FollowUpCalendarContent({ user }) {
+  const supervisorScope = getSupervisorScope(user);
+  const assignedBarangay =
+    supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
+
+  const [schedules, setSchedules] = useState([]);
+  const [residents, setResidents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [saving, setSaving] = useState(false);
+
   const [view, setView] = useState("month");
   const [cursor, setCursor] = useState(() => new Date());
   const [searchQuery, setSearchQuery] = useState("");
@@ -217,6 +281,31 @@ function FollowUpCalendarContent({ schedules, residentNames }) {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
   };
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return Promise.all([followUpsApi.list(), residentsApi.list({ limit: 200 })])
+      .then(([followUpResult, residentResult]) => {
+        setSchedules((followUpResult?.rows || []).map(mapRowToSchedule));
+        const rows = residentResult?.rows || residentResult || [];
+        setResidents(
+          rows
+            .map((r) => ({
+              id: r.id,
+              name: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
+              barangay: r.barangay || "",
+            }))
+            .filter((r) => !assignedBarangay || r.barangay === assignedBarangay)
+        );
+      })
+      .catch((err) => setLoadError(err?.message || "Unable to load the schedule. Please try again."))
+      .finally(() => setLoading(false));
+  }, [assignedBarangay]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   /** Filtered schedules (search + status + provider). */
   const filtered = useMemo(() => {
@@ -254,17 +343,65 @@ function FollowUpCalendarContent({ schedules, residentNames }) {
 
   const selectedSchedule = selected ? schedules.find((s) => s.id === selected) : null;
 
-  const handleSave = (form) => {
-    if (formTarget && formTarget !== "new") {
-      followUpScheduleStore.updateSchedule(formTarget.id, form);
-      showToast("Follow-up schedule updated.");
-    } else {
-      followUpScheduleStore.addSchedule(form);
-      showToast("Follow-up schedule added.");
-      setCursor(new Date(form.date));
+  /** Apply a persisted patch to one follow-up row and refresh local state. */
+  const patchSchedule = async (id, patch, message) => {
+    setSaving(true);
+    try {
+      const result = await followUpsApi.update(id, patch);
+      const mapped = mapRowToSchedule(result?.record || result);
+      setSchedules((prev) => prev.map((s) => (s.id === id ? { ...s, ...mapped } : s)));
+      showToast(message);
+      return mapped;
+    } catch (err) {
+      showToast(err?.message || "Could not save changes.");
+      throw err;
+    } finally {
+      setSaving(false);
     }
-    setFormTarget(null);
-    setSelected(null);
+  };
+
+  const handleSave = async (form) => {
+    setSaving(true);
+    try {
+      if (formTarget && formTarget !== "new") {
+        const result = await followUpsApi.update(formTarget.id, {
+          purpose: form.purpose,
+          scheduled_date: form.date,
+          scheduled_time: form.time,
+          location: form.location,
+          priority: form.priority,
+          status: form.status,
+          assigned_provider: form.provider,
+          notes: form.instructions,
+        });
+        const mapped = mapRowToSchedule(result?.record || result);
+        setSchedules((prev) => prev.map((s) => (s.id === formTarget.id ? { ...s, ...mapped } : s)));
+        showToast("Follow-up schedule updated.");
+      } else {
+        const result = await followUpsApi.create({
+          residentId: form.residentId,
+          purpose: form.purpose,
+          scheduled_date: form.date,
+          scheduled_time: form.time,
+          location: form.location,
+          priority: form.priority,
+          status: form.status,
+          assigned_provider: form.provider,
+          notes: form.instructions,
+          requiresResidentResponse: form.requiresResidentResponse,
+        });
+        const mapped = mapRowToSchedule(result?.record || result);
+        setSchedules((prev) => [mapped, ...prev]);
+        showToast("Follow-up schedule added.");
+        setCursor(new Date(`${form.date}T00:00:00`));
+      }
+      setFormTarget(null);
+      setSelected(null);
+    } catch (err) {
+      showToast(err?.message || "Could not save the schedule.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -337,7 +474,7 @@ function FollowUpCalendarContent({ schedules, residentNames }) {
           </div>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none dark:border-border dark:bg-input dark:text-foreground">
             <option value="All">All Statuses</option>
-            {SCHEDULE_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {CALENDAR_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none dark:border-border dark:bg-input dark:text-foreground">
             <option value="All">All Providers</option>
@@ -360,7 +497,21 @@ function FollowUpCalendarContent({ schedules, residentNames }) {
       </Card>
 
       {/* Calendar view */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <Card className="p-10 text-center">
+          <CalendarDays className="mx-auto h-10 w-10 animate-pulse text-brand-gray/50" />
+          <p className="mt-3 text-sm font-medium text-brand-ink">Loading schedule...</p>
+        </Card>
+      ) : loadError ? (
+        <Card className="p-10 text-center">
+          <ShieldAlert className="mx-auto h-10 w-10 text-brand-danger" />
+          <p className="mt-3 text-sm font-medium text-brand-ink">Unable to load the schedule</p>
+          <p className="mt-1 text-xs text-brand-gray">{loadError}</p>
+          <button onClick={load} className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
+            Try Again
+          </button>
+        </Card>
+      ) : filtered.length === 0 ? (
         <Card className="p-10 text-center">
           <CalendarDays className="mx-auto h-10 w-10 text-brand-gray/50" />
           <p className="mt-3 text-sm font-medium text-brand-ink">No Follow-up Schedules Found</p>
@@ -393,25 +544,38 @@ function FollowUpCalendarContent({ schedules, residentNames }) {
           onClose={() => setSelected(null)}
           actions={
             <>
-              <button
-                onClick={() => { followUpScheduleStore.deleteSchedule(selectedSchedule.id); setSelected(null); showToast("Follow-up schedule removed."); }}
-                className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/30 bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card"
-              >
-                <Trash2 className="h-4 w-4" /> Delete
-              </button>
+              {selectedSchedule.status !== "Completed" && (
+                <button
+                  disabled={saving}
+                  onClick={async () => { try { await patchSchedule(selectedSchedule.id, { status: "Completed" }, "Follow-up marked completed."); setSelected(null); } catch { /* toast shown */ } }}
+                  className="inline-flex items-center gap-1.5 rounded-btn border border-emerald-300 bg-white px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 dark:bg-card"
+                >
+                  <CheckCircle2 className="h-4 w-4" /> Complete
+                </button>
+              )}
+              {selectedSchedule.status !== "Missed" && (
+                <button
+                  disabled={saving}
+                  onClick={async () => { try { await patchSchedule(selectedSchedule.id, { status: "Missed" }, "Follow-up marked missed."); setSelected(null); } catch { /* toast shown */ } }}
+                  className="inline-flex items-center gap-1.5 rounded-btn border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60 dark:bg-card"
+                >
+                  <Clock className="h-4 w-4" /> Mark Missed
+                </button>
+              )}
               {selectedSchedule.status !== "Cancelled" && (
                 <button
-                  onClick={() => { followUpScheduleStore.cancelSchedule(selectedSchedule.id); setSelected(null); showToast("Follow-up schedule cancelled."); }}
-                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover"
+                  disabled={saving}
+                  onClick={async () => { try { await patchSchedule(selectedSchedule.id, { status: "Cancelled" }, "Follow-up cancelled."); setSelected(null); } catch { /* toast shown */ } }}
+                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
                 >
-                  <Ban className="h-4 w-4" /> Cancel Schedule
+                  <Ban className="h-4 w-4" /> Cancel
                 </button>
               )}
               <button
                 onClick={() => { setFormTarget(selectedSchedule); setSelected(null); }}
                 className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
               >
-                <Pencil className="h-4 w-4" /> Edit
+                <Pencil className="h-4 w-4" /> Edit / Reschedule
               </button>
             </>
           }
@@ -422,7 +586,8 @@ function FollowUpCalendarContent({ schedules, residentNames }) {
       {formTarget && (
         <ScheduleFormModal
           initial={formTarget === "new" ? null : formTarget}
-          residentNames={residentNames}
+          residents={residents}
+          saving={saving}
           onClose={() => setFormTarget(null)}
           onSave={handleSave}
         />

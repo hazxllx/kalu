@@ -1,9 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import SearchableSelect from "@/components/common/SearchableSelect";
-import { residents } from "@/services/local/dashboardData";
-import { phnResidents } from "@/services/local/phnData";
+import { intakeApi } from "@/services/api";
 import { CHECKUP_STATUS, useWorkflowStore, sendToPhnQueue } from "@/services/local/workflowStore";
 import { BARANGAYS } from "@/lib/barangays";
 import { barangayHealthCenter } from "@/lib/consultationLocations";
@@ -71,7 +70,11 @@ const emptyVitals = () => ({
   bloodSugar: "",
 });
 
-/** BMI = weight(kg) / (height(m))Â². Returns "" when inputs are missing/invalid. */
+/** BMI = weight(kg) / (height(m))². Returns "" when inputs are missing/invalid.
+ *  Preview only: the backend (utils/bmi.js) recomputes and persists the
+ *  authoritative value at 1-decimal precision, so this preview uses the SAME
+ *  rounding to avoid a frontend/backend mismatch. Never defaults missing
+ *  height/weight to 0. */
 const computeBmi = (heightCm, weightKg) => {
   const h = Number(heightCm);
   const w = Number(weightKg);
@@ -79,8 +82,8 @@ const computeBmi = (heightCm, weightKg) => {
     return { value: "", raw: null };
   }
   const hM = h / 100;
-  const raw = w / (hM * hM);
-  return { value: raw.toFixed(2), raw: Math.round(raw * 100) / 100 };
+  const rounded = Math.round((w / (hM * hM)) * 10) / 10;
+  return { value: rounded.toFixed(1), raw: rounded };
 };
 
 const inputCls = (error) =>
@@ -102,7 +105,8 @@ export default function RhuTriage() {
 
   // Patient selection state.
   const [searchQuery, setSearchQuery] = useState("");
-  const [entryMode, setEntryMode] = useState("search"); // "search" | "walkin" before a patient is confirmed
+  // "choose" (pick how to identify the patient) | "search" | "walkin"
+  const [entryMode, setEntryMode] = useState("choose");
   const [patientType, setPatientType] = useState(null); // null | "registered" | "walkin"
   const [selected, setSelected] = useState(null); // registered resident object (real record only)
   const [walkIn, setWalkIn] = useState({ name: "", age: "", sex: "Female", barangay: "" }); // walk-in draft
@@ -118,24 +122,12 @@ export default function RhuTriage() {
   const [toast, setToast] = useState(null);
   const [certPatient, setCertPatient] = useState(null); // patient being certified
 
-  // Resident registry the RHU can pull from (deduplicated by name).
-  const registry = useMemo(() => {
-    const seen = new Set();
-    const out = [];
-    [...phnResidents, ...residents].forEach((r) => {
-      const name = String(r.name || "").trim();
-      if (!name || seen.has(name)) return;
-      seen.add(name);
-      out.push({
-        id: r.id || name,
-        name,
-        age: r.age,
-        sex: String(r.gender || r.sex || "Female"),
-        barangay: r.barangay || "",
-      });
-    });
-    return out.sort((a, b) => a.name.localeCompare(b.name));
-  }, []);
+  // Registered-patient search is backed by the REAL resident directory
+  // (GET /api/intake/residents/search), barangay/municipality-scoped on the
+  // server. There is no local resident registry: a "registered" patient always
+  // carries a real residents.id resolved from the backend.
+  const [matches, setMatches] = useState([]);
+  const [searching, setSearching] = useState(false);
 
   const sentPatients = store.patients;
 
@@ -155,11 +147,46 @@ export default function RhuTriage() {
   // Live filter over actual resident records. Typed text is never a patient.
   const trimmedQuery = searchQuery.trim();
   const shouldSearch = trimmedQuery.length >= MIN_SEARCH_LENGTH;
-  const matches = useMemo(() => {
-    if (!shouldSearch) return [];
-    const q = trimmedQuery.toLowerCase();
-    return registry.filter((r) => r.name.toLowerCase().includes(q)).slice(0, 8);
-  }, [registry, trimmedQuery, shouldSearch]);
+
+  useEffect(() => {
+    if (!shouldSearch) {
+      setMatches([]);
+      setSearching(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const rows = await intakeApi.searchResidents(trimmedQuery);
+        if (cancelled) return;
+        const mapped = rows
+          .map((r) => ({
+            id: r.id,
+            name:
+              [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() ||
+              r.name ||
+              "",
+            age: r.birthDate
+              ? Math.max(0, new Date().getFullYear() - new Date(r.birthDate).getFullYear())
+              : r.age ?? "",
+            sex: r.sex || "",
+            barangay: r.barangay || "",
+          }))
+          .filter((r) => r.name)
+          .slice(0, 8);
+        setMatches(mapped);
+      } catch {
+        if (!cancelled) setMatches([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [trimmedQuery, shouldSearch]);
 
   /* --------------------- Derived patient identity ---------------------- */
   const hasPatient = patientType !== null;
@@ -209,7 +236,7 @@ export default function RhuTriage() {
     setSelected(null);
     setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
     setSearchQuery("");
-    setEntryMode("search");
+    setEntryMode("choose");
     setVitals(emptyVitals());
     setReason("");
     setReasonDetail("");
@@ -228,14 +255,20 @@ export default function RhuTriage() {
     setErrors({});
   };
 
+  const startSearch = () => {
+    setEntryMode("search");
+    setErrors({});
+  };
+
   const openWalkIn = () => {
     setPatientType(null);
     setEntryMode("walkin");
     setErrors({});
   };
 
-  const backToSearch = () => {
-    setEntryMode("search");
+  const backToChoices = () => {
+    setEntryMode("choose");
+    setSearchQuery("");
     setErrors({});
   };
 
@@ -243,7 +276,7 @@ export default function RhuTriage() {
     setPatientType(null);
     setSelected(null);
     setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
-    setEntryMode("search");
+    setEntryMode("choose");
     setSearchQuery("");
     setErrors({});
   };
@@ -326,6 +359,9 @@ export default function RhuTriage() {
   /* ----------------------------- Final action --------------------------- */
   const handleSendToPhn = () => {
     const payload = {
+      // Registered patients carry their real residents.id (from the backend
+      // search); walk-ins have none until they are created through intake.
+      residentId: patientType === "registered" ? selected?.id || null : null,
       patient: patientName,
       age: numeric(patientAge),
       sex: patientSex,
@@ -444,7 +480,7 @@ export default function RhuTriage() {
             <div>
               <h3 className="text-base font-semibold text-brand-ink">New Triage</h3>
               <p className="mt-0.5 text-xs text-brand-gray">
-                Answer a few questions to send a patient to the PHN.
+                First identify the patient, record today's visit, then send them to the PHN.
               </p>
             </div>
           </div>
@@ -457,13 +493,46 @@ export default function RhuTriage() {
               <div>
                 {!hasPatient ? (
                   <>
-                    {stepIndicator(1, "Patient", "Who are you helping today?")}
+                    {stepIndicator(1, "Identify Patient", "Who are you helping today?")}
 
-                    {entryMode === "walkin" ? (
+                    {entryMode === "choose" ? (
+                      /* Two clear ways to identify the patient. */
+                      <div className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={startSearch}
+                          className="group flex flex-col items-start gap-2 rounded-btn border-2 border-brand-border bg-white p-4 text-left transition-colors hover:border-brand-blue"
+                        >
+                          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-light text-brand-blue">
+                            <Search className="h-5 w-5" />
+                          </span>
+                          <span className="text-sm font-semibold text-brand-ink">Search Existing Patient</span>
+                          <span className="text-xs text-brand-gray">
+                            Find a resident already registered in KALUSAGAP.
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={openWalkIn}
+                          className="group flex flex-col items-start gap-2 rounded-btn border-2 border-brand-border bg-white p-4 text-left transition-colors hover:border-brand-blue"
+                        >
+                          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-light text-brand-blue">
+                            <Plus className="h-5 w-5" />
+                          </span>
+                          <span className="text-sm font-semibold text-brand-ink">Register Walk-in Patient</span>
+                          <span className="text-xs text-brand-gray">
+                            For patients who do not yet have an existing record.
+                          </span>
+                        </button>
+                      </div>
+                    ) : entryMode === "walkin" ? (
                       <div className="space-y-4">
-                        <p className="text-sm text-brand-ink">
-                          The patient is not registered, so please enter their details.
-                        </p>
+                        <div className="max-w-xl rounded-btn border border-brand-blue/20 bg-brand-blue/5 px-4 py-3">
+                          <p className="text-sm font-semibold text-brand-ink">Walk-in Patient Information</p>
+                          <p className="mt-0.5 text-xs text-brand-gray">
+                            This information will be used to record today's RHU visit.
+                          </p>
+                        </div>
                         <div>
                           <label className="mb-1.5 block text-sm font-medium text-brand-ink">
                             Patient Name <span className="text-brand-danger">*</span>
@@ -520,10 +589,10 @@ export default function RhuTriage() {
                         <div className="flex flex-col-reverse items-stretch gap-3 pt-1 sm:max-w-xl sm:flex-row sm:items-center sm:justify-between">
                           <button
                             type="button"
-                            onClick={backToSearch}
+                            onClick={backToChoices}
                             className="inline-flex items-center justify-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-gray transition-colors hover:text-brand-ink"
                           >
-                            <ArrowLeft className="h-4 w-4" /> Search registered patient
+                            <ArrowLeft className="h-4 w-4" /> Back
                           </button>
                           <button
                             type="button"
@@ -541,8 +610,21 @@ export default function RhuTriage() {
                     ) : (
                       /* Registered resident search */
                       <div>
-                        <p className="text-sm font-medium text-brand-ink">Who are you helping today?</p>
-                        <p className="mb-2 mt-0.5 text-xs text-brand-gray">Start typing a patient's name.</p>
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-brand-ink">Search Existing Patient</p>
+                            <p className="mt-0.5 text-xs text-brand-gray">
+                              Find a resident already registered in KALUSAGAP by name.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={backToChoices}
+                            className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-brand-gray hover:text-brand-ink"
+                          >
+                            <ArrowLeft className="h-3.5 w-3.5" /> Back
+                          </button>
+                        </div>
                         <div className="flex max-w-2xl items-center gap-2 rounded-btn border border-brand-border bg-white px-3.5 py-3 focus-within:border-brand-blue">
                           <Search className="h-4 w-4 shrink-0 text-brand-gray" />
                           <input
@@ -558,6 +640,8 @@ export default function RhuTriage() {
                           <div className="mt-2 max-w-2xl overflow-hidden rounded-btn border border-brand-border bg-white">
                             {trimmedQuery.length < MIN_SEARCH_LENGTH ? (
                               <p className="px-4 py-3 text-sm text-brand-gray">Keep typing to search for a patient.</p>
+                            ) : searching ? (
+                              <p className="px-4 py-3 text-sm text-brand-gray">Searching…</p>
                             ) : matches.length > 0 ? (
                               <ul>
                                 {matches.map((r) => (
@@ -584,36 +668,59 @@ export default function RhuTriage() {
                                 ))}
                               </ul>
                             ) : (
-                              <p className="px-4 py-3 text-sm text-brand-gray">
-                                No registered patient found. Add them as a walk-in patient below.
-                              </p>
+                              <div className="px-4 py-3">
+                                <p className="text-sm text-brand-gray">
+                                  No registered patient found for “{trimmedQuery}”.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={openWalkIn}
+                                  className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                                >
+                                  <Plus className="h-4 w-4" /> Register as a walk-in patient instead
+                                </button>
+                              </div>
                             )}
                           </div>
                         )}
-
-                        <button
-                          type="button"
-                          onClick={openWalkIn}
-                          className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
-                        >
-                          <Plus className="h-4 w-4" /> Patient is not registered
-                        </button>
                       </div>
                     )}
                   </>
                 ) : (
                   /* Selected patient summary (registered or confirmed walk-in) */
                   <>
+                    {stepIndicator(1, "Identify Patient", "Confirm the patient before continuing to triage.")}
                     <div className="max-w-2xl rounded-btn border border-emerald-200 bg-emerald-50/70 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
                             <Check className="h-5 w-5" />
                           </span>
                           <div className="min-w-0">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Patient</p>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                              {patientType === "registered" ? "Registered Patient" : "Walk-in Patient"}
+                            </p>
                             <p className="truncate text-sm font-semibold text-brand-ink sm:text-base">{patientName}</p>
-                            <p className="text-xs text-brand-gray">{metaLine(patientAge, patientSex, patientBarangay)}</p>
+                            <dl className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-brand-gray sm:grid-cols-3">
+                              {patientType === "registered" && (
+                                <div className="col-span-2 sm:col-span-3">
+                                  <dt className="inline text-brand-gray">Patient ID: </dt>
+                                  <dd className="inline font-medium text-brand-ink">{selected?.id || "—"}</dd>
+                                </div>
+                              )}
+                              <div>
+                                <dt className="text-brand-gray">Age</dt>
+                                <dd className="font-medium text-brand-ink">{patientAge !== "" && patientAge != null ? `${patientAge}` : "—"}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-brand-gray">Sex</dt>
+                                <dd className="font-medium text-brand-ink">{patientSex || "—"}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-brand-gray">Barangay</dt>
+                                <dd className="font-medium text-brand-ink">{patientBarangay || "—"}</dd>
+                              </div>
+                            </dl>
                           </div>
                         </div>
                         <button
@@ -627,7 +734,7 @@ export default function RhuTriage() {
                     </div>
 
                     {errors.patient && <p className="mt-2 text-xs text-brand-danger">{errors.patient}</p>}
-                    {backContinue(continueFromPatient)}
+                    {backContinue(continueFromPatient, "Continue to Triage")}
                   </>
                 )}
               </div>

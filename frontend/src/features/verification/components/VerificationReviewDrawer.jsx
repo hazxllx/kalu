@@ -1,10 +1,23 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  X, CheckCircle2, XCircle, FileWarning, User, MapPin, Calendar, Phone, Hash, History, Loader2,
+  X, CheckCircle2, XCircle, FileWarning, User, MapPin, Calendar, Phone, Hash, History, Loader2, FileText,
 } from "lucide-react";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { REJECTION_REASONS } from "@/services/local/verifications";
+import { fetchResidentDocuments } from "@/services/api/verificationsApi";
+
+const DOC_LABELS = {
+  government_id_front: "ID Front",
+  government_id_back: "ID Back",
+  identity_photo: "Photo Holding ID",
+  proof_of_residency: "Proof of Residency",
+  barangay_certificate: "Barangay Certificate",
+  barangay_clearance: "Barangay Clearance",
+  government_id: "Government ID",
+};
+
+const isImageDoc = (doc) => String(doc?.mimeType || "").startsWith("image/");
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -58,6 +71,24 @@ export default function VerificationReviewDrawer({
   const [reason, setReason] = useState("");
   const [remarks, setRemarks] = useState("");
   const [error, setError] = useState("");
+  const [documents, setDocuments] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [docsError, setDocsError] = useState("");
+
+  // Load the resident's submitted documents (fresh signed URLs, private storage,
+  // scope-enforced server-side). Re-fetches when a different resident opens.
+  useEffect(() => {
+    let active = true;
+    const residentId = verification?.id;
+    if (!residentId) return undefined;
+    setDocsLoading(true);
+    setDocsError("");
+    fetchResidentDocuments(residentId)
+      .then((docs) => { if (active) setDocuments(docs); })
+      .catch(() => { if (active) setDocsError("Could not load the submitted documents."); })
+      .finally(() => { if (active) setDocsLoading(false); });
+    return () => { active = false; };
+  }, [verification?.id]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -167,6 +198,43 @@ export default function VerificationReviewDrawer({
               <InfoCell icon={MapPin} label="Address" value={verification.address} />
               <InfoCell icon={Hash} label="Reference Number" value={verification.ref} />
             </div>
+          </section>
+
+          <section>
+            <SectionTitle>Submitted Documents</SectionTitle>
+            {docsLoading ? (
+              <div className="flex items-center gap-2 rounded-btn bg-brand-bg p-3 text-sm text-brand-gray">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading documents…
+              </div>
+            ) : docsError ? (
+              <p className="rounded-btn bg-brand-bg p-3 text-sm text-brand-danger">{docsError}</p>
+            ) : documents.length === 0 ? (
+              <p className="rounded-btn bg-brand-bg p-3 text-sm text-brand-gray">No documents were uploaded.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {documents.map((doc) => (
+                  <a
+                    key={doc.id}
+                    href={doc.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group overflow-hidden rounded-btn border border-brand-border bg-white transition-colors hover:border-brand-blue"
+                    title={`Open ${DOC_LABELS[doc.documentType] || doc.documentType}`}
+                  >
+                    <div className="flex h-28 items-center justify-center overflow-hidden bg-brand-bg">
+                      {isImageDoc(doc) ? (
+                        <img src={doc.url} alt={DOC_LABELS[doc.documentType] || doc.documentType} className="h-full w-full object-cover" />
+                      ) : (
+                        <FileText className="h-8 w-8 text-brand-blue" strokeWidth={1.6} />
+                      )}
+                    </div>
+                    <p className="truncate px-2.5 py-2 text-xs font-medium text-brand-ink">
+                      {DOC_LABELS[doc.documentType] || doc.documentType}
+                    </p>
+                  </a>
+                ))}
+              </div>
+            )}
           </section>
 
           {(verification.rejectionReason || verification.verifiedAt) && (

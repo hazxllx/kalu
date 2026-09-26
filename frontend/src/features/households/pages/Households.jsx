@@ -26,8 +26,11 @@ import {
   ChevronsUpDown,
   ClipboardList,
   Eye,
+  HeartPulse,
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
+import MemberHealthModal from "../components/MemberHealthModal";
+import { useAuth } from "@/context/AuthContext";
 import { householdsApi, intakeApi } from "@/services/api";
 import {
   HH_STATUSES,
@@ -166,6 +169,7 @@ const detailCell = (label, value) => (
 export default function Households() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
 
   const [households, setHouseholds] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -182,6 +186,7 @@ export default function Households() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(null);
   const [showAddMember, setShowAddMember] = useState(false);
+  const [healthMember, setHealthMember] = useState(null);
   const [memberForm, setMemberForm] = useState({ name: "", relationship: "", sex: "", age: "", classification: "", isPwd: false });
   const [memberError, setMemberError] = useState(null);
   const [memberSaving, setMemberSaving] = useState(false);
@@ -898,13 +903,22 @@ export default function Households() {
                                   .join(" · ")}
                               </p>
                             </div>
-                            <button
-                              onClick={() => removeMember(m)}
-                              className="inline-flex items-center gap-1 text-xs font-medium text-brand-gray transition-colors hover:text-brand-danger"
-                              aria-label={`Remove ${m.name}`}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" /> Remove
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => setHealthMember(m)}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue transition-colors hover:underline"
+                                aria-label={`Health profile for ${m.name}`}
+                              >
+                                <HeartPulse className="h-3.5 w-3.5" /> Health
+                              </button>
+                              <button
+                                onClick={() => removeMember(m)}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-brand-gray transition-colors hover:text-brand-danger"
+                                aria-label={`Remove ${m.name}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" /> Remove
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -922,6 +936,17 @@ export default function Households() {
             </div>
           </Card>
         </div>
+      )}
+
+      {/* Member Health Profile — opened per household member from the detail modal */}
+      {healthMember && detail && (
+        <MemberHealthModal
+          householdId={detail.id}
+          member={healthMember}
+          verificationStatus={detail.verificationStatus}
+          currentRole={user?.role}
+          onClose={() => setHealthMember(null)}
+        />
       )}
     </>
   );

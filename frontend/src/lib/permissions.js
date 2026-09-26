@@ -787,6 +787,10 @@ const DEFAULT_GRANTS = Object.freeze({
     'followups.notify',
     'services.view',
     'reports.view',
+    // Municipality-wide Community Health Monitoring (view only). PHN sees the
+    // whole Municipality of Pili on the map, matching the MHO experience, but
+    // this grants NO administrative capability.
+    'reports.analytics.view',
   ],
 
   // Triage intake and case routing at the RHU. RHU Personnel do NOT have access

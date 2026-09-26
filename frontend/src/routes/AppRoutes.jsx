@@ -21,13 +21,20 @@ import Login from '@/features/authentication/pages/Login';
  * sidebar/header stay mounted) and `FullPageSkeleton` for the standalone
  * public/registration pages. This is the only loading state the router adds;
  * individual pages still show their own skeletons while their API data loads.
+ *
+ * Props given to the route element are forwarded to the page. Pages such as
+ * SettingsPage, NotificationsPage, ReportsPage, Referrals and
+ * SystemManagementPage are configured per role through props (roleKey /
+ * variant), so dropping them would silently give every role the default
+ * configuration — for example a staff Settings page rendering the resident
+ * account view.
  */
 const appPage = (loader) => {
   const Page = lazy(loader);
-  return function LazyAppPage() {
+  return function LazyAppPage(props) {
     return (
       <Suspense fallback={<PageSkeleton />}>
-        <Page />
+        <Page {...props} />
       </Suspense>
     );
   };
@@ -35,10 +42,10 @@ const appPage = (loader) => {
 
 const publicPage = (loader) => {
   const Page = lazy(loader);
-  return function LazyPublicPage() {
+  return function LazyPublicPage(props) {
     return (
       <Suspense fallback={<FullPageSkeleton />}>
-        <Page />
+        <Page {...props} />
       </Suspense>
     );
   };
@@ -56,6 +63,7 @@ const VerificationStatus = publicPage(() => import('@/features/verification/page
 const PendingVerifications = appPage(() => import('@/features/verification/pages/PendingVerifications'));
 const ResidentVerificationStatus = appPage(() => import('@/features/verification/pages/ResidentVerificationStatus'));
 const HouseholdVerifications = appPage(() => import('@/features/verification/pages/HouseholdVerifications'));
+const TransferRequests = appPage(() => import('@/features/verification/pages/TransferRequests'));
 
 // Role dashboards
 const ResidentDashboard = appPage(() => import('@/features/dashboards/pages/ResidentDashboard'));
@@ -84,6 +92,7 @@ const TreatmentConsultation = appPage(() => import('@/features/consultations/pag
 const HealthRecord = appPage(() => import('@/features/health-records/pages/HealthRecord'));
 const TCLS = appPage(() => import('@/features/health-records/pages/TCLS'));
 const M1Records = appPage(() => import('@/features/health-records/pages/M1Records'));
+const M1Fhsis = appPage(() => import('@/features/health-records/pages/M1Fhsis'));
 const Immunization = appPage(() => import('@/features/health-records/pages/Immunization'));
 const ResidentFollowUps = appPage(() => import('@/features/follow-ups/pages/ResidentFollowUps'));
 const ResidentFollowUpCalendar = appPage(() => import('@/features/follow-ups/pages/ResidentFollowUpCalendar'));
@@ -91,6 +100,7 @@ const MidwifeFollowUp = appPage(() => import('@/features/follow-ups/pages/Midwif
 const FollowUpCalendar = appPage(() => import('@/features/follow-ups/pages/FollowUpCalendar'));
 const PhnFollowUps = appPage(() => import('@/features/follow-ups/pages/PhnFollowUps'));
 const Referrals = appPage(() => import('@/features/referrals/pages/Referrals'));
+const HealthReferrals = appPage(() => import('@/features/referrals/pages/HealthReferrals'));
 const MHOReferrals = appPage(() => import('@/features/referrals/pages/MHOReferrals'));
 const RhuReferrals = appPage(() => import('@/features/referrals/pages/RhuReferrals'));
 const Appointments = appPage(() => import('@/features/appointments/pages/Appointments'));
@@ -103,6 +113,7 @@ const MunicipalHealthReports = appPage(() => import('@/features/reports/pages/Mu
 const MunicipalSubmissions = appPage(() => import('@/features/submissions/pages/MunicipalSubmissions'));
 const HealthTrends = appPage(() => import('@/features/analytics/pages/HealthTrends'));
 const Barangays = appPage(() => import('@/features/analytics/pages/Barangays'));
+const CommunityMonitoring = appPage(() => import('@/features/analytics/pages/CommunityMonitoring'));
 const UserManagement = appPage(() => import('@/features/users/pages/UserManagement'));
 const AuditTrail = appPage(() => import('@/features/users/pages/AuditTrail'));
 const SystemManagementPage = appPage(() => import('@/features/users/pages/SystemManagementPage'));
@@ -150,7 +161,7 @@ const AppRoutes = () => (
         <Route path="dashboard" element={<ResidentDashboard />} />
         <Route path="record" element={<HealthRecord />} />
         <Route path="consultations" element={<ConsultationsPage showResidentSearch={false} />} />
-        <Route path="referrals" element={<Referrals />} />
+        <Route path="referrals" element={<HealthReferrals />} />
         <Route path="followups" element={<ResidentFollowUps />} />
         <Route path="followup-calendar" element={<ResidentFollowUpCalendar />} />
         <Route path="appointments" element={<Appointments />} />
@@ -167,6 +178,9 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<LimitedResidentDashboard />} />
         <Route path="announcements" element={<NotificationsPage roleKey="resident-limited" />} />
+        <Route path="follow-ups" element={<ResidentFollowUps />} />
+        <Route path="followups" element={<ResidentFollowUps />} />
+        <Route path="followup-calendar" element={<ResidentFollowUpCalendar />} />
         <Route path="services" element={<ResidentHealthServices />} />
         <Route path="profile" element={<SettingsPage roleKey="resident-limited" />} />
         <Route path="verification" element={<ResidentVerificationStatus />} />
@@ -184,8 +198,9 @@ const AppRoutes = () => (
         <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="submissions" element={<MunicipalSubmissions />} />
+        <Route path="transfer-requests" element={<TransferRequests />} />
         <Route path="referrals" element={<MHOReferrals />} />
-        <Route path="barangays" element={<Barangays />} />
+        <Route path="barangays" element={<CommunityMonitoring />} />
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="reports" element={<MunicipalHealthReports />} />
@@ -199,6 +214,7 @@ const AppRoutes = () => (
       <Route path="/app/phn" element={<DashboardLayout roleKey="phn" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<PHNDashboard />} />
+        <Route path="transfer-requests" element={<TransferRequests />} />
         <Route path="record" element={<PhnHealthRecords />} />
         <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
@@ -206,6 +222,7 @@ const AppRoutes = () => (
         <Route path="referrals" element={<Referrals roleKey="phn" />} />
         <Route path="followups" element={<PhnFollowUps />} />
         <Route path="services" element={<PhnHealthServices />} />
+        <Route path="barangays" element={<CommunityMonitoring />} />
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="reports" element={<ReportsPage roleKey="phn" />} />
@@ -223,22 +240,24 @@ const AppRoutes = () => (
         <Route path="dashboard" element={<HealthSupervisorDashboard />} />
         <Route path="residents" element={<ResidentsPage />} />
         <Route path="verifications" element={<PendingVerifications />} />
+        <Route path="transfer-requests" element={<TransferRequests />} />
         <Route path="household-verifications" element={<HouseholdVerifications />} />
         <Route path="consultations" element={<TreatmentConsultation />} />
         <Route path="tcls" element={<TCLS />} />
         <Route path="m1" element={<M1Records />} />
+        <Route path="m1-report" element={<M1Fhsis />} />
         <Route path="followups" element={<MidwifeFollowUp />} />
         <Route path="followup-calendar" element={<FollowUpCalendar />} />
         <Route path="services" element={<MidwifeHealthServices />} />
         <Route path="immunization" element={<Immunization />} />
-        <Route path="referrals" element={<Referrals />} />
+        <Route path="referrals" element={<HealthReferrals />} />
         <Route path="households" element={<Households />} />
         <Route path="households/new" element={<AddHouseholdPage />} />
         <Route path="households/risk-clusters" element={<HouseholdRiskClusters />} />
         <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="trends" element={<HealthTrends />} />
-        <Route path="barangays" element={<Barangays />} />
+        <Route path="barangays" element={<CommunityMonitoring />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="notifications" element={<NotificationsPage roleKey="health_supervisor" />} />
         <Route path="settings" element={<SettingsPage roleKey="health_supervisor" />} />

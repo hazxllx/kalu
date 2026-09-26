@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { Outlet, useLocation, Link } from "react-router-dom";
+import { Outlet, useLocation, Link, Navigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Bell, Menu, X, LogOut, ChevronDown, User, Settings,
@@ -9,18 +9,15 @@ import Icon from "@/components/common/Icon";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { LOGO_URL, ROLES } from "@/lib/brand";
 import { NAV, filterNavByPermission } from "@/lib/navConfig";
-import { useWorkflowStore } from "@/services/local/workflowStore";
-import { filterRowsByScope } from "@/lib/phnScope";
+import { notificationsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
-import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { usePermissions } from "@/context/PermissionsContext";
 
 export default function DashboardLayout({ roleKey }) {
   const role = ROLES[roleKey];
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout, refreshProfile } = useAuth();
   const { can } = usePermissions();
-  const { coverage } = usePhnCoverage();
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
@@ -46,15 +43,38 @@ export default function DashboardLayout({ roleKey }) {
     .join("")
     .toUpperCase();
 
-  const workflow = useWorkflowStore();
-  // Notifications come from the shared workflow store (kept in sync with the
-  // Notifications page) and are always filtered to the signed-in PHN's active
-  // coverage (assigned barangay or RHU); other roles are unaffected.
-  const notifications = filterRowsByScope(workflow.notifications[roleKey] || [], user, coverage);
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // The bell reflects the signed-in user's own persisted notifications
+  // (`/operational/notifications`), refreshed on navigation so the unread count
+  // stays in step with the Notifications page and survives refresh/re-login.
+  const [unreadCount, setUnreadCount] = useState(0);
+  useEffect(() => {
+    let active = true;
+    notificationsApi
+      .list()
+      .then((result) => {
+        if (!active) return;
+        const rows = result?.rows || result || [];
+        setUnreadCount(rows.filter((n) => !n.read_at).length);
+      })
+      .catch(() => active && setUnreadCount(0));
+    return () => {
+      active = false;
+    };
+  }, [location.pathname]);
   const notificationsPath = roleKey === "resident-limited"
     ? "/app/resident-limited/announcements"
     : `/app/${roleKey}/notifications`;
+
+  // A pending resident sitting in the limited area re-checks their authoritative
+  // profile whenever they open or navigate within it. The moment the Health
+  // Supervisor's approval sets profiles.status = 'active', effectiveRole becomes
+  // 'resident' and the redirect below moves them into the full resident area —
+  // no re-login, no timers, no hardcoded unlock flag.
+  useEffect(() => {
+    if (roleKey === "resident-limited") {
+      refreshProfile?.();
+    }
+  }, [roleKey, location.pathname, refreshProfile]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -124,7 +144,17 @@ export default function DashboardLayout({ roleKey }) {
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-3 pt-1 space-y-1">
                   {it.children.map((child) => {
                     const active = isItemActive(child);
-                    return (
+  // A verified resident (profiles.status = 'active' -> role 'resident') must
+  // never render the limited/locked layout. If an approved account is still on
+  // the resident-limited area — a session that predates approval, a stale link,
+  // or a post-login `from` that pointed here — send them to the full resident
+  // dashboard so their features are available. (The reverse, a limited account
+  // reaching /app/resident, is already blocked by ProtectedRoute.)
+  if (roleKey === "resident-limited" && user?.role === "resident") {
+    return <Navigate to="/app/resident/dashboard" replace />;
+  }
+
+  return (
                       <Link key={child.path} to={child.path} onClick={() => setOpen(false)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${active ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15" : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"}`}>
                         <Icon name={child.icon} className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} />
                         <span className="truncate">{child.label}</span>

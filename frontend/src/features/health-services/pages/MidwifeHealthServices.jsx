@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
 import { usePermissions } from "@/context/PermissionsContext";
+import { useAuth } from "@/context/AuthContext";
 import { barangayServices } from "@/services/local/dashboardData";
 import {
   Stethoscope,
@@ -17,6 +19,9 @@ import {
   Trash2,
   X,
   CheckCircle2,
+  Clock,
+  CalendarDays,
+  ArrowRight,
 } from "lucide-react";
 
 const SERVICE_STATUSES = ["Available", "Scheduled", "Unavailable"];
@@ -54,6 +59,8 @@ const inputCls = (error) =>
 
 export default function HealthServicesPage() {
   const { can } = usePermissions();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const canCreate = can("services.create");
   const canEdit = can("services.edit");
   const canDelete = can("services.delete");
@@ -66,14 +73,33 @@ export default function HealthServicesPage() {
   const [errors, setErrors] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [viewTarget, setViewTarget] = useState(null);
   const [toast, setToast] = useState(null);
+
+  /**
+   * Some service cards open a dedicated monitoring module instead of an
+   * informational detail. M1 / Maternal opens the barangay-scoped M1 monitoring
+   * view (real residents + maternal records from Supabase).
+   */
+  const routeForService = (service) => {
+    const name = String(service?.name || "").toLowerCase();
+    const rolePath = user?.role ? `/app/${user.role}` : "/app/health_supervisor";
+    if (name.includes("m1") || name.includes("maternal")) return `${rolePath}/m1`;
+    return null;
+  };
+
+  const handleCardOpen = (service) => {
+    const target = routeForService(service);
+    if (target) navigate(target);
+    else setViewTarget(service);
+  };
 
   const showToast = (message) => {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
   };
 
-  const anyModalOpen = showFormModal || Boolean(deleteTarget);
+  const anyModalOpen = showFormModal || Boolean(deleteTarget) || Boolean(viewTarget);
 
   // Lock background scrolling while a modal is open.
   useEffect(() => {
@@ -90,6 +116,7 @@ export default function HealthServicesPage() {
     const onKey = (e) => {
       if (e.key !== "Escape") return;
       if (deleteTarget) setDeleteTarget(null);
+      else if (viewTarget) setViewTarget(null);
       else setShowFormModal(false);
     };
     document.addEventListener("keydown", onKey);
@@ -225,7 +252,12 @@ export default function HealthServicesPage() {
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="rounded-2xl border border-slate-200 bg-white shadow-card p-4 sm:p-5 h-full flex flex-col"
+                onClick={() => handleCardOpen(s)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleCardOpen(s); } }}
+                aria-label={`Open ${s.name}`}
+                className="cursor-pointer rounded-2xl border border-slate-200 bg-white shadow-card p-4 sm:p-5 h-full flex flex-col transition-colors hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -236,7 +268,7 @@ export default function HealthServicesPage() {
                     </div>
                     <h3 className="font-semibold text-brand-ink text-sm sm:text-base leading-tight">{s.name}</h3>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <StatusBadge value={s.status} />
                     {canEdit && (
                       <button
@@ -289,6 +321,10 @@ export default function HealthServicesPage() {
                   <p className="text-brand-ink font-medium">{s.days}</p>
                   <p>{s.hours}</p>
                   <p className="line-clamp-1">{s.description}</p>
+                </div>
+                <div className="mt-4 flex items-center gap-1.5 text-sm font-medium text-brand-blue">
+                  {routeForService(s) ? "Open monitoring" : "View details"}
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </div>
               </motion.div>
             );
@@ -371,7 +407,7 @@ export default function HealthServicesPage() {
                       setForm({ ...form, days: e.target.value });
                       setErrors((prev) => ({ ...prev, days: "" }));
                     }}
-                    placeholder="e.g. Monday â€“ Friday"
+                    placeholder="e.g. Monday - Friday"
                     className={inputCls(errors.days)}
                   />
                   {errors.days && <p className="mt-1 text-xs text-red-600">{errors.days}</p>}
@@ -382,7 +418,7 @@ export default function HealthServicesPage() {
                     type="text"
                     value={form.hours}
                     onChange={(e) => setForm({ ...form, hours: e.target.value })}
-                    placeholder="e.g. 8:00 AM â€“ 12:00 PM"
+                    placeholder="e.g. 8:00 AM - 12:00 PM"
                     className={inputCls()}
                   />
                 </div>
@@ -427,6 +463,76 @@ export default function HealthServicesPage() {
               >
                 {editingService ? "Save Changes" : "Add Service"}
               </button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Service Detail Modal */}
+      {viewTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setViewTarget(null)}>
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${viewTarget.name} details`}
+            className="w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-brand-border px-6 py-4">
+              <div className="flex items-center gap-3">
+                {(() => { const st = iconStyle(viewTarget.icon); return (
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${st.iconBg}`}>
+                    <st.Icon className={`h-5 w-5 ${st.iconColor}`} strokeWidth={1.8} />
+                  </div>
+                ); })()}
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-ink">{viewTarget.name}</h3>
+                  <StatusBadge value={viewTarget.status} />
+                </div>
+              </div>
+              <button
+                onClick={() => setViewTarget(null)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink"
+                aria-label="Close modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div className="flex items-start gap-3">
+                <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-brand-gray" />
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Schedule</p>
+                  <p className="text-sm font-medium text-brand-ink">{viewTarget.days || "—"}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-brand-gray" />
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Operating Hours</p>
+                  <p className="text-sm font-medium text-brand-ink">{viewTarget.hours || "—"}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-brand-gray">Description</p>
+                <p className="mt-1 text-sm text-brand-ink">{viewTarget.description || "No description provided."}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
+              <button
+                onClick={() => setViewTarget(null)}
+                className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
+              >
+                Close
+              </button>
+              {canEdit && (
+                <button
+                  onClick={() => { const svc = viewTarget; setViewTarget(null); openEdit(svc); }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
+                >
+                  <Pencil className="h-4 w-4" /> Edit
+                </button>
+              )}
             </div>
           </Card>
         </div>

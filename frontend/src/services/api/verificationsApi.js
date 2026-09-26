@@ -43,6 +43,13 @@ export const fetchResidentVerification = async (id) => {
   return { verification: payload?.verification || null, history: payload?.history || [] };
 };
 
+// Staff: the resident's uploaded documents (ID front/back, holding-ID photo)
+// with fresh signed URLs from private storage. Scope-enforced server-side.
+export const fetchResidentDocuments = async (residentId) => {
+  const payload = await api.get(`/verifications/${encodeURIComponent(residentId)}/documents`);
+  return payload?.documents || [];
+};
+
 export const approveResident = async (id, { remarks } = {}) =>
   api.patch(`/verifications/${encodeURIComponent(id)}/approve`, { remarks });
 
@@ -76,6 +83,7 @@ export default {
   fetchPendingVerifications,
   fetchVerificationHistory,
   fetchResidentVerification,
+  fetchResidentDocuments,
   approveResident,
   rejectResident,
   requestResubmission,

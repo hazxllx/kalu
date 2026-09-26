@@ -16,7 +16,6 @@ import { BARANGAYS } from "@/lib/barangays";
 const CIVIL_STATUS_OPTIONS = ["Single", "Married", "Widowed", "Separated"];
 const SEX_OPTIONS = ["Female", "Male"];
 const SUFFIX_OPTIONS = ["", "Jr.", "Sr.", "II", "III", "IV"];
-const VERIFICATION_OPTIONS = ["unverified", "pending", "verified", "rejected"];
 const RELIGION_OPTIONS = ["Roman Catholic", "Protestant", "Iglesia ni Cristo", "Born Again", "Muslim", "Other"];
 
 const EMPTY_FORM = {
@@ -130,7 +129,6 @@ export default function ResidentsPage() {
   const [loadError, setLoadError] = useState(null);
 
   const [q, setQ] = useState("");
-  const [verificationFilter, setVerificationFilter] = useState("All");
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
@@ -165,7 +163,11 @@ export default function ResidentsPage() {
       setLoading(true);
       setLoadError(null);
       try {
-        const result = await residentsApi.list({ q: searchTerm, limit: 100 });
+        // Verified directory only: the backend returns residents who are
+        // individually approved OR belong to a Verified household, scoped to
+        // this supervisor's barangay. Pending/unverified residents live in the
+        // Resident Verification queue, not here.
+        const result = await residentsApi.list({ q: searchTerm, limit: 100, verified: true });
         setResidents(result?.rows || []);
       } catch (err) {
         setResidents([]);
@@ -193,15 +195,14 @@ export default function ResidentsPage() {
 
   const rows = useMemo(() => {
     return residents
-      .filter((r) => verificationFilter === "All" || (r.verificationStatus || "unverified") === verificationFilter)
       .map((r) => ({
         ...r,
         name: fullNameOf(r),
         age: calcAge(r.birthDate),
         gender: r.sex || "—",
-        status: r.verificationStatus || "unverified",
+        status: r.verificationStatus || "verified",
       }));
-  }, [residents, verificationFilter]);
+  }, [residents]);
 
   const openAdd = () => {
     setForm(initialFromUser(user));
@@ -380,8 +381,8 @@ export default function ResidentsPage() {
         title="Resident Directory"
         subtitle={
           assignedBarangay
-            ? `Search, filter, and manage residents in Barangay ${assignedBarangay}.`
-            : "Search, filter, and manage residents in your area."
+            ? `Verified residents in Barangay ${assignedBarangay}. Pending registrations are reviewed under Resident Verification.`
+            : "Verified residents in your area. Pending registrations are reviewed under Resident Verification."
         }
         action={
           <button
@@ -402,18 +403,6 @@ export default function ResidentsPage() {
             placeholder="Search by name, health record no., PhilHealth, or contact..."
             className="bg-transparent text-sm outline-none w-full"
           />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2">
-            <select
-              value={verificationFilter}
-              onChange={(e) => setVerificationFilter(e.target.value)}
-              className="bg-transparent text-sm outline-none capitalize"
-            >
-              <option value="All">All Statuses</option>
-              {VERIFICATION_OPTIONS.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
-            </select>
-          </div>
         </div>
       </Card>
 

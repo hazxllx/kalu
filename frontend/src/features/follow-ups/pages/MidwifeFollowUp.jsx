@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
 import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2 } from "lucide-react";
-import { residents, systemUsers } from "@/services/local/dashboardData";
+import { systemUsers } from "@/services/local/dashboardData";
 import { ROLES } from "@/lib/brand";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
+import { followUpsApi, residentsApi } from "@/services/api";
 
 const FOLLOW_UP_TYPES = [
   "General Check-up",
@@ -106,6 +107,29 @@ const deriveStatus = (isoDate) => {
 
 const FOLLOW_UPS = [];
 
+/** Map a persisted follow_ups row (snake_case) to the table's view shape. */
+const mapFollowUpRow = (row) => ({
+  ...row,
+  id: row.id,
+  residentId: row.resident_id,
+  resident: row.resident ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ") : "Resident",
+  barangay: row.resident?.barangay || "",
+  sex: row.resident?.sex || "",
+  contact: row.resident?.cellphone_no || "",
+  age: row.resident?.birth_date ? new Date().getFullYear() - new Date(row.resident.birth_date).getFullYear() : "",
+  purpose: row.purpose,
+  type: row.purpose,
+  scheduledDateRaw: row.scheduled_date,
+  scheduledTimeRaw: row.scheduled_time,
+  scheduledDate: formatDate(row.scheduled_date),
+  scheduledTime: formatTime(row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : ""),
+  location: row.location,
+  priority: row.priority,
+  status: row.status,
+  assignedMidwife: row.assigned_provider,
+  remarks: row.notes,
+});
+
 const STATUS_COLORS = {
   Scheduled: "bg-brand-blue/10 text-brand-blue",
   Today: "bg-brand-accent/10 text-brand-accent",
@@ -131,7 +155,11 @@ export default function MidwifeFollowUp() {
   const assignedBarangay = supervisorScope && supervisorScope.level === "barangay" ? supervisorScope.assignedBarangay : null;
   const inScope = (f) => !assignedBarangay || f.barangay === assignedBarangay;
 
-  const [followUps, setFollowUps] = useState(FOLLOW_UPS.filter(inScope));
+  const [followUps, setFollowUps] = useState([]);
+  const [residentsFromApi, setResidentsFromApi] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
@@ -144,8 +172,52 @@ export default function MidwifeFollowUp() {
   const [selectedFollowUp, setSelectedFollowUp] = useState(null);
   const [selectedResident, setSelectedResident] = useState(null);
   const [scheduleForm, setScheduleForm] = useState(() => emptyScheduleForm(""));
+  const [visitForm, setVisitForm] = useState({ findings: "", treatment: "", advice: "", nextVisitDate: "" });
+  const [remarksDraft, setRemarksDraft] = useState("");
   const [touched, setTouched] = useState({});
   const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError(null);
+    Promise.all([followUpsApi.list(), residentsApi.list({ limit: 200 })])
+      .then(([followUpResult, residentResult]) => {
+        if (!active) return;
+        setFollowUps((followUpResult?.rows || []).map(mapFollowUpRow));
+        setResidentsFromApi(residentResult?.rows || residentResult || []);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setLoadError(err?.message || "Unable to load follow-ups. Please try again.");
+      })
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const showToast = (message, ms = 3000) => {
+    setToast(message);
+    setTimeout(() => setToast(null), ms);
+  };
+
+  /** Persist a patch to a follow-up and refresh the row from the server result. */
+  const persistFollowUp = async (id, patch, successMessage) => {
+    setSaving(true);
+    try {
+      const result = await followUpsApi.update(id, patch);
+      const updated = mapFollowUpRow(result?.record || result);
+      setFollowUps((prev) => prev.map((f) => (f.id === id ? { ...f, ...updated } : f)));
+      if (successMessage) showToast(successMessage);
+      return updated;
+    } catch (err) {
+      showToast(err?.message || "Could not save changes.", 4000);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Auto-assign the logged-in user where possible â€” the dashboard shell
   // displays the role's display name, so prefer that for consistency.
@@ -157,6 +229,12 @@ export default function MidwifeFollowUp() {
       ? [currentUserName, ...basePersonnelOptions]
       : basePersonnelOptions;
   const defaultPersonnel = currentUserName || basePersonnelOptions[0] || "";
+  const residentOptions = useMemo(() => residentsFromApi.map((r) => ({
+    ...r,
+    name: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
+    age: r.birthDate ? new Date().getFullYear() - new Date(r.birthDate).getFullYear() : "",
+    gender: r.sex || "",
+  })).filter((r) => !assignedBarangay || r.barangay === assignedBarangay), [residentsFromApi, assignedBarangay]);
 
   // Escape closes the modal; lock background scrolling while it is open.
   useEffect(() => {
@@ -193,6 +271,7 @@ export default function MidwifeFollowUp() {
 
   const handleRecordVisit = (followUp) => {
     setSelectedFollowUp(followUp);
+    setVisitForm({ findings: "", treatment: "", advice: "", nextVisitDate: "" });
     setShowRecordVisitModal(true);
   };
 
@@ -203,6 +282,7 @@ export default function MidwifeFollowUp() {
 
   const handleAddRemarks = (followUp) => {
     setSelectedFollowUp(followUp);
+    setRemarksDraft(followUp.remarks || "");
     setShowRemarksModal(true);
   };
 
@@ -211,40 +291,55 @@ export default function MidwifeFollowUp() {
     setShowCompleteConfirm(true);
   };
 
-  const confirmComplete = () => {
-    setFollowUps((prev) =>
-      prev.map((f) => (f.id === selectedFollowUp.id ? { ...f, status: "Completed" } : f))
-    );
-    setShowCompleteConfirm(false);
-    setSelectedFollowUp(null);
-    setToast("Follow-up marked as completed."); setTimeout(() => setToast(null), 3000);
+  const confirmComplete = async () => {
+    const target = selectedFollowUp;
+    try {
+      await persistFollowUp(target.id, { status: "Completed" }, "Follow-up marked as completed.");
+      setShowCompleteConfirm(false);
+      setSelectedFollowUp(null);
+    } catch {
+      /* toast already shown */
+    }
   };
 
-  const handleStatusUpdate = (newStatus) => {
-    setFollowUps((prev) =>
-      prev.map((f) => (f.id === selectedFollowUp.id ? { ...f, status: newStatus } : f))
-    );
-    setShowUpdateStatusModal(false);
-    setSelectedFollowUp(null);
-    setToast(`Status updated to ${newStatus}.`); setTimeout(() => setToast(null), 3000);
+  const handleStatusUpdate = async (newStatus) => {
+    const target = selectedFollowUp;
+    try {
+      await persistFollowUp(target.id, { status: newStatus }, `Status updated to ${newStatus}.`);
+      setShowUpdateStatusModal(false);
+      setSelectedFollowUp(null);
+    } catch {
+      /* toast already shown */
+    }
   };
 
-  const handleSaveRemarks = (remarks) => {
-    setFollowUps((prev) =>
-      prev.map((f) => (f.id === selectedFollowUp.id ? { ...f, remarks: remarks } : f))
-    );
-    setShowRemarksModal(false);
-    setSelectedFollowUp(null);
-    setToast("Remarks saved successfully."); setTimeout(() => setToast(null), 3000);
+  const handleSaveRemarks = async (remarks) => {
+    const target = selectedFollowUp;
+    try {
+      await persistFollowUp(target.id, { notes: remarks }, "Remarks saved successfully.");
+      setShowRemarksModal(false);
+      setSelectedFollowUp(null);
+    } catch {
+      /* toast already shown */
+    }
   };
 
-  const handleSaveVisit = (visitData) => {
-    setFollowUps((prev) =>
-      prev.map((f) => (f.id === selectedFollowUp.id ? { ...f, ...visitData, status: "Completed" } : f))
-    );
-    setShowRecordVisitModal(false);
-    setSelectedFollowUp(null);
-    setToast("Visit recorded successfully."); setTimeout(() => setToast(null), 3000);
+  const handleSaveVisit = async (visitData) => {
+    const target = selectedFollowUp;
+    const patch = { status: "Completed" };
+    if (visitData?.notes !== undefined) patch.notes = visitData.notes;
+    if (visitData?.nextVisitDate) {
+      patch.scheduled_date = visitData.nextVisitDate;
+      patch.status = "Scheduled";
+      patch.completed_at = null;
+    }
+    try {
+      await persistFollowUp(target.id, patch, "Visit recorded successfully.");
+      setShowRecordVisitModal(false);
+      setSelectedFollowUp(null);
+    } catch {
+      /* toast already shown */
+    }
   };
 
   const openScheduleModal = () => {
@@ -275,34 +370,39 @@ export default function MidwifeFollowUp() {
     Boolean(scheduleForm.time) &&
     Boolean(scheduleForm.reason.trim());
 
-  const handleSchedule = () => {
+  const handleSchedule = async () => {
     // Backstop â€” the primary button is disabled until the form is complete.
     if (!canSchedule) {
       setTouched({ resident: true, date: true, time: true, reason: true });
       return;
     }
 
-    const newFollowUp = {
-      id: followUps.reduce((acc, f) => Math.max(acc, f.id || 0), 0) + 1,
-      resident: selectedResident.name,
-      residentId: selectedResident.id,
-      age: selectedResident.age,
-      sex: selectedResident.gender,
-      barangay: selectedResident.barangay,
-      contact: "",
-      purpose: scheduleForm.reason.trim(),
-      type: scheduleForm.type,
-      assignedMidwife: scheduleForm.personnel || defaultPersonnel,
-      scheduledDate: formatDate(scheduleForm.date),
-      scheduledTime: formatTime(scheduleForm.time),
-      location: scheduleForm.location,
-      priority: scheduleForm.priority,
-      status: deriveStatus(scheduleForm.date),
-      remarks: scheduleForm.notes.trim(),
-    };
-    setFollowUps([newFollowUp, ...followUps]);
-    setShowScheduleModal(false);
-    setToast(`Follow-up scheduled successfully for ${newFollowUp.resident} on ${newFollowUp.scheduledDate}.`);
+    try {
+      const result = await followUpsApi.create({
+        residentId: selectedResident.id,
+        purpose: scheduleForm.reason.trim(),
+        scheduled_date: scheduleForm.date,
+        scheduled_time: scheduleForm.time,
+        location: scheduleForm.location,
+        priority: scheduleForm.priority,
+        status: deriveStatus(scheduleForm.date),
+        assigned_provider: scheduleForm.personnel || defaultPersonnel,
+        notes: scheduleForm.notes.trim(),
+      });
+      const record = result?.record || result;
+      const newFollowUp = {
+        ...mapFollowUpRow(record),
+        resident: record.resident ? mapFollowUpRow(record).resident : selectedResident.name,
+        barangay: record.resident?.barangay || selectedResident.barangay,
+        age: selectedResident.age,
+        sex: selectedResident.gender,
+      };
+      setFollowUps((current) => [newFollowUp, ...current]);
+      setShowScheduleModal(false);
+      setToast(`Follow-up scheduled successfully for ${newFollowUp.resident} on ${newFollowUp.scheduledDate}.`);
+    } catch (err) {
+      setToast(err?.message || "Could not schedule follow-up.");
+    }
     setTimeout(() => setToast(null), 4000);
   };
 
@@ -485,7 +585,11 @@ export default function MidwifeFollowUp() {
               {filteredFollowUps.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-10 text-center text-sm text-brand-gray">
-                    No follow-ups yet.
+                    {loading
+                      ? "Loading follow-ups..."
+                      : loadError
+                        ? <span className="text-brand-danger">{loadError}</span>
+                        : "No follow-ups yet."}
                   </td>
                 </tr>
               )}
@@ -531,7 +635,7 @@ export default function MidwifeFollowUp() {
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Resident</p>
                   <div onBlur={() => setTouched((t) => ({ ...t, resident: true }))}>
                     <ResidentSearchSelect
-                      residents={assignedBarangay ? residents.filter((r) => r.barangay === assignedBarangay) : residents}
+                      residents={residentOptions}
                       value={selectedResident}
                       onChange={setSelectedResident}
                     />
@@ -838,6 +942,8 @@ export default function MidwifeFollowUp() {
                   <textarea
                     rows={3}
                     placeholder="Enter findings..."
+                    value={visitForm.findings}
+                    onChange={(e) => setVisitForm((v) => ({ ...v, findings: e.target.value }))}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none"
                   />
                 </div>
@@ -846,6 +952,8 @@ export default function MidwifeFollowUp() {
                   <textarea
                     rows={2}
                     placeholder="Enter treatment..."
+                    value={visitForm.treatment}
+                    onChange={(e) => setVisitForm((v) => ({ ...v, treatment: e.target.value }))}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none"
                   />
                 </div>
@@ -854,13 +962,17 @@ export default function MidwifeFollowUp() {
                   <textarea
                     rows={2}
                     placeholder="Enter advice..."
+                    value={visitForm.advice}
+                    onChange={(e) => setVisitForm((v) => ({ ...v, advice: e.target.value }))}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none"
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-brand-ink block mb-1.5">Next Visit Date</label>
+                  <label className="text-sm font-medium text-brand-ink block mb-1.5">Next Visit Date (optional — reschedules the follow-up)</label>
                   <input
                     type="date"
+                    value={visitForm.nextVisitDate}
+                    onChange={(e) => setVisitForm((v) => ({ ...v, nextVisitDate: e.target.value }))}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                   />
                 </div>
@@ -873,10 +985,20 @@ export default function MidwifeFollowUp() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => handleSaveVisit({})}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
+                  disabled={saving}
+                  onClick={() => {
+                    const notes = [
+                      visitForm.findings && `Findings: ${visitForm.findings}`,
+                      visitForm.treatment && `Treatment: ${visitForm.treatment}`,
+                      visitForm.advice && `Advice: ${visitForm.advice}`,
+                    ]
+                      .filter(Boolean)
+                      .join("\n");
+                    handleSaveVisit({ notes: notes || selectedFollowUp.remarks || "", nextVisitDate: visitForm.nextVisitDate });
+                  }}
+                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
                 >
-                  Save Visit
+                  {saving ? "Saving..." : "Save Visit"}
                 </button>
               </div>
             </div>
@@ -935,7 +1057,8 @@ export default function MidwifeFollowUp() {
                 <textarea
                   rows={4}
                   placeholder="Enter remarks..."
-                  defaultValue={selectedFollowUp.remarks}
+                  value={remarksDraft}
+                  onChange={(e) => setRemarksDraft(e.target.value)}
                   className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none"
                 />
               </div>
@@ -947,10 +1070,11 @@ export default function MidwifeFollowUp() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => handleSaveRemarks("Updated remarks")}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
+                  disabled={saving}
+                  onClick={() => handleSaveRemarks(remarksDraft)}
+                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
                 >
-                  Save
+                  {saving ? "Saving..." : "Save"}
                 </button>
               </div>
             </div>

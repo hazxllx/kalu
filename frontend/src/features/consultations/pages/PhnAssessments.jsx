@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
+import { consultationsApi } from "@/services/api";
 import {
   CHECKUP_STATUS,
   useWorkflowStore,
@@ -70,6 +71,36 @@ export default function PhnCheckups() {
   const [activePatientId, setActivePatientId] = useState(null);
   const [toast, setToast] = useState(null);
 
+  // Completed consultations are read from the REAL backend (visits-backed
+  // /api/consultations, scope-enforced server-side). The database — not the
+  // local workflow store — is the source of truth for persisted PHN
+  // consultation records displayed here.
+  const [consults, setConsults] = useState([]);
+  const [consultsLoading, setConsultsLoading] = useState(true);
+  const [consultsError, setConsultsError] = useState("");
+
+  const loadConsults = useCallback(async () => {
+    setConsultsLoading(true);
+    setConsultsError("");
+    try {
+      const result = await consultationsApi.list();
+      setConsults(result?.rows || []);
+    } catch (err) {
+      setConsultsError(err?.message || "Unable to load consultations. Please try again.");
+      setConsults([]);
+    } finally {
+      setConsultsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadConsults(); }, [loadConsults]);
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const completedTodayCount = useMemo(
+    () => consults.filter((c) => c.consultationDate === todayIso).length,
+    [consults, todayIso],
+  );
+
   const visiblePatients = useMemo(
     () => filterRowsByScope(store.patients, user, coverage),
     [store.patients, user, coverage]
@@ -98,13 +129,6 @@ export default function PhnCheckups() {
     const matchesStatus = statusFilter === "All" || p.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
-
-  const completedToday = useMemo(() => {
-    const today = workflowHelpers.todayLong();
-    return visiblePatients
-      .filter((p) => p.status === CHECKUP_STATUS.COMPLETED && p.checkup?.completedAt === today)
-      .sort((a, b) => String(b.checkup?.completedAt || "").localeCompare(String(a.checkup?.completedAt || "")));
-  }, [visiblePatients]);
 
   // Allow other pages (e.g. the PHN dashboard "Start Check-up" action) to
   // deep-open the consultation workbench for a patient.
@@ -197,7 +221,7 @@ export default function PhnCheckups() {
           { label: "Waiting for PHN", value: stats.waiting, icon: "Users", tone: "accent", index: 0 },
           { label: "In Check-up", value: stats.inCheckup, icon: "ClipboardCheck", tone: "blue", index: 1 },
           { label: "Priority Cases", value: stats.priority, icon: "AlertTriangle", tone: "danger", index: 2 },
-          { label: "Completed Today", value: stats.completed, icon: "UserCheck", tone: "green", index: 3 },
+          { label: "Completed Today", value: completedTodayCount, icon: "UserCheck", tone: "green", index: 3 },
         ].map((stat) => (
           <StatCard
             key={stat.label}
@@ -310,50 +334,56 @@ export default function PhnCheckups() {
         </div>
       </Card>
 
-      {/* Today's Completed Check-ups */}
+      {/* Completed consultations — sourced from the real backend records
+          (/api/consultations, visits-backed, scope-enforced). This list is the
+          database source of truth; it does not read the local workflow store. */}
       <Card className="p-4 sm:p-6 mt-5">
         <div className="flex items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Today's Completed Check-ups</h3>
-            <p className="text-xs text-brand-gray mt-0.5">Recently completed PHN consultations.</p>
+            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Completed Consultations</h3>
+            <p className="text-xs text-brand-gray mt-0.5">Recorded PHN consultations from the database (most recent first).</p>
           </div>
           <UserCheck className="w-4 h-4 text-brand-gray shrink-0" />
         </div>
+        {consultsError && (
+          <div className="mb-3 flex items-start gap-2 rounded-btn bg-brand-danger/10 px-3 py-2 text-sm text-brand-danger">
+            <span>{consultsError}</span>
+            <button onClick={loadConsults} className="ml-2 font-medium underline">Retry</button>
+          </div>
+        )}
         <div className="overflow-x-auto -mx-1">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-brand-bg border-b border-brand-border text-left">
                 <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Patient</th>
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Reason</th>
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Risk</th>
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Outcome</th>
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide text-right">Action</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Barangay</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Chief Complaint</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Diagnosis</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Date</th>
               </tr>
             </thead>
             <tbody>
-              {completedToday.map((p) => (
-                <tr key={p.id} className="border-b border-brand-border last:border-0">
+              {consults.map((c) => (
+                <tr key={c.id} className="border-b border-brand-border last:border-0">
                   <td className="px-4 py-3">
-                    <p className="font-medium text-brand-ink">{p.patient}</p>
-                    <p className="text-xs text-brand-gray">{scopeLabel(p, user)}</p>
+                    <p className="font-medium text-brand-ink">{c.resident?.name || "—"}</p>
+                    <p className="text-xs text-brand-gray">{[c.resident?.age && `${c.resident.age} yrs`, c.resident?.sex].filter(Boolean).join(" · ")}</p>
                   </td>
-                  <td className="px-4 py-3 text-brand-ink">{p.reason || p.triage?.chiefComplaint}</td>
-                  <td className="px-4 py-3"><RiskBadge level={riskOfPatient(p).level} /></td>
-                  <td className="px-4 py-3 text-brand-ink">{p.checkup?.outcome || "No Further Action"}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleView(p)}
-                      className="text-sm font-medium text-brand-blue hover:underline whitespace-nowrap"
-                    >
-                      View
-                    </button>
-                  </td>
+                  <td className="px-4 py-3 text-brand-gray">{c.resident?.barangay || "—"}</td>
+                  <td className="px-4 py-3 text-brand-ink">{c.chiefComplaint || "—"}</td>
+                  <td className="px-4 py-3 text-brand-ink">{c.diagnosis || "—"}</td>
+                  <td className="px-4 py-3 text-brand-gray">{c.consultationDate || "—"}</td>
                 </tr>
               ))}
-              {completedToday.length === 0 && (
+              {consultsLoading && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-brand-gray">Loading consultations…</td>
+                </tr>
+              )}
+              {!consultsLoading && !consultsError && consults.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-sm text-brand-gray">
-                    No completed check-ups today.
+                    No recorded consultations yet.
                   </td>
                 </tr>
               )}

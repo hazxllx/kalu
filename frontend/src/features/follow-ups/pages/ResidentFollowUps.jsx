@@ -1,341 +1,296 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
-import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
-import { Calendar, CheckCircle, XCircle, Clock, MapPin, Eye, X } from "lucide-react";
+import { residentFollowUpsApi } from "@/services/api";
+import ScheduleStatusBadge, { ConfirmationBadge } from "../components/ScheduleStatusBadge";
+import {
+  Calendar, CheckCircle2, XCircle, Clock, MapPin, User, AlertCircle, Ban, X, CalendarClock, ShieldCheck,
+} from "lucide-react";
 
-const FOLLOW_UPS = [
-  {
-    id: 1,
-    purpose: "Blood Pressure Monitoring",
-    date: "July 12, 2026",
-    time: "9:00 AM",
-    location: "Barangay Health Station",
-    status: "Scheduled",
-    remarks: "Bring your health record.",
-    instructions: "Please arrive 15 minutes early. Bring your BP log if available.",
-    healthWorkerNotes: "Regular BP monitoring for hypertension management.",
-    availability: "Waiting for Confirmation",
-  },
-  {
-    id: 2,
-    purpose: "Prenatal Follow-up",
-    date: "August 5, 2026",
-    time: "10:00 AM",
-    location: "Barangay Health Station",
-    status: "Completed",
-    remarks: "Next visit after one month.",
-    instructions: "Bring prenatal records and ultrasound results.",
-    healthWorkerNotes: "BP 120/80, fetal heartbeat normal. Continue prenatal vitamins.",
-    availability: "Available",
-  },
-  {
-    id: 3,
-    purpose: "Diabetes Monitoring",
-    date: "September 2, 2026",
-    time: "1:00 PM",
-    location: "Home Visit",
-    status: "Upcoming",
-    remarks: "Prepare medication list.",
-    instructions: "Have your blood sugar log ready for review.",
-    healthWorkerNotes: "Monthly diabetes check-up scheduled.",
-    availability: "Waiting for Confirmation",
-  },
-  {
-    id: 4,
-    purpose: "Postnatal Check-up",
-    date: "June 15, 2026",
-    time: "11:00 AM",
-    location: "Barangay Health Station",
-    status: "Completed",
-    remarks: "Mother and baby in good condition.",
-    instructions: "Bring baby for check-up.",
-    healthWorkerNotes: "BP stable, baby weight 3.2kg, breastfeeding well established.",
-    availability: "Available",
-  },
-  {
-    id: 5,
-    purpose: "Immunization Follow-up",
-    date: "May 20, 2026",
-    time: "9:30 AM",
-    location: "Barangay Health Station",
-    status: "Missed",
-    remarks: "Reschedule required.",
-    instructions: "Bring immunization card.",
-    healthWorkerNotes: "Patient did not show up for scheduled immunization.",
-    availability: "Not Available",
-  },
-];
+/**
+ * Resident Follow-ups — the resident's own follow-up activities with a real
+ * confirmation workflow (approve / reject). Data comes from the resident-safe
+ * API (`/resident/follow-ups`); the backend derives ownership from the session,
+ * so this page only ever shows the signed-in resident's own follow-ups. A
+ * follow-up that requires a response shows an "Action Required" banner with
+ * Approve / Reject actions. Rejecting requires a reason.
+ *
+ * Available to both verified residents and pending (resident-limited) accounts:
+ * responding to a follow-up request does not require full verification.
+ */
 
-export default function FollowUps() {
-  const [selectedFollowUp, setSelectedFollowUp] = useState(null);
-  const [showDetailModal, setShowDetailModal] = useState(false);
-  const [followUps, setFollowUps] = useState(FOLLOW_UPS);
+const fmtDate = (d) => {
+  if (!d) return "—";
+  const parsed = new Date(`${d}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? d : parsed.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+};
+const fmtTime = (t) => {
+  if (!t) return "";
+  const [h, m] = String(t).split(":");
+  const hour = ((Number(h) + 11) % 12) + 1;
+  const ampm = Number(h) < 12 ? "AM" : "PM";
+  return `${hour}:${m ?? "00"} ${ampm}`;
+};
 
-  const stats = {
-    upcoming: followUps.filter((f) => f.status === "Upcoming" || f.status === "Scheduled").length,
-    today: followUps.filter((f) => f.status === "Today").length,
+const isActionable = (f) =>
+  f.requiresResidentResponse && f.status === "Pending" && (f.confirmationStatus || "Awaiting Confirmation") === "Awaiting Confirmation";
+
+export default function ResidentFollowUps() {
+  const [followUps, setFollowUps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return residentFollowUpsApi
+      .list()
+      .then((result) => setFollowUps(result?.rows || []))
+      .catch((err) => setLoadError(err?.message || "Unable to load your follow-ups. Please try again."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const stats = useMemo(() => ({
+    actionRequired: followUps.filter(isActionable).length,
+    upcoming: followUps.filter((f) => ["Scheduled", "Upcoming", "Today", "Ongoing"].includes(f.status)).length,
     completed: followUps.filter((f) => f.status === "Completed").length,
-    missed: followUps.filter((f) => f.status === "Missed").length,
-  };
+    cancelled: followUps.filter((f) => f.status === "Cancelled").length,
+  }), [followUps]);
 
-  const handleView = (followUp) => {
-    setSelectedFollowUp(followUp);
-    setShowDetailModal(true);
-  };
+  const sorted = useMemo(
+    () => [...followUps].sort((a, b) => {
+      if (isActionable(a) !== isActionable(b)) return isActionable(a) ? -1 : 1; // action-required first
+      return `${a.scheduledDate}${a.scheduledTime}`.localeCompare(`${b.scheduledDate}${b.scheduledTime}`);
+    }),
+    [followUps]
+  );
 
-  const handleAvailabilityChange = (followUpId, availability) => {
-    setFollowUps(prev => prev.map(f => 
-      f.id === followUpId ? { ...f, availability } : f
-    ));
-    if (selectedFollowUp && selectedFollowUp.id === followUpId) {
-      setSelectedFollowUp({ ...selectedFollowUp, availability });
+  const approve = async (id) => {
+    setBusyId(id);
+    try {
+      await residentFollowUpsApi.approve(id);
+      showToast("Follow-up approved — see you at your appointment.");
+      setSelected(null);
+      await load();
+    } catch (err) {
+      showToast(err?.message || "Could not approve the follow-up.");
+    } finally {
+      setBusyId(null);
     }
   };
+
+  const reject = async (id, reason) => {
+    setBusyId(id);
+    try {
+      await residentFollowUpsApi.reject(id, reason);
+      showToast("Follow-up rejected — the health team has been notified.");
+      setRejectTarget(null);
+      setSelected(null);
+      await load();
+    } catch (err) {
+      showToast(err?.message || "Could not reject the follow-up.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const StatCard = ({ icon: Icon, tone, label, value, hint }) => (
+    <Card className="p-5">
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${tone}`}>
+          <Icon className="w-5 h-5" />
+        </div>
+        <div>
+          <p className="text-sm text-brand-gray">{label}</p>
+          <p className="text-2xl font-semibold text-brand-ink mt-1">{value}</p>
+        </div>
+      </div>
+      <p className="text-xs text-brand-gray">{hint}</p>
+    </Card>
+  );
 
   return (
     <>
       <PageHeader
         crumbs={["Follow-ups"]}
-        title="Follow-up Schedule"
-        subtitle="View your upcoming and completed follow-up appointments with your Barangay Health Worker."
+        title="My Follow-ups"
+        subtitle="Review the follow-ups your health team scheduled for you, and confirm or reject the ones that need your response."
       />
 
-      {/* Summary Cards */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <Card className="p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-accent/10 flex items-center justify-center">
-              <Calendar className="w-5 h-5 text-brand-accent" />
-            </div>
-            <div>
-              <p className="text-sm text-brand-gray">Upcoming Follow-ups</p>
-              <p className="text-2xl font-semibold text-brand-ink mt-1">{stats.upcoming}</p>
-            </div>
-          </div>
-          <p className="text-xs text-brand-gray">Your next scheduled visit</p>
-        </Card>
-
-        <Card className="p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-blue/10 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-brand-blue" />
-            </div>
-            <div>
-              <p className="text-sm text-brand-gray">Today's Follow-up</p>
-              <p className="text-2xl font-semibold text-brand-ink mt-1">{stats.today > 0 ? stats.today : "No Appointment"}</p>
-            </div>
-          </div>
-          <p className="text-xs text-brand-gray">{stats.today > 0 ? `${stats.today} Today` : "No appointments today"}</p>
-        </Card>
-
-        <Card className="p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
-              <CheckCircle className="w-5 h-5 text-brand-green" />
-            </div>
-            <div>
-              <p className="text-sm text-brand-gray">Completed Follow-ups</p>
-              <p className="text-2xl font-semibold text-brand-ink mt-1">{stats.completed}</p>
-            </div>
-          </div>
-          <p className="text-xs text-brand-gray">Completed visits</p>
-        </Card>
-
-        <Card className="p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-danger/10 flex items-center justify-center">
-              <XCircle className="w-5 h-5 text-brand-danger" />
-            </div>
-            <div>
-              <p className="text-sm text-brand-gray">Missed Follow-ups</p>
-              <p className="text-2xl font-semibold text-brand-ink mt-1">{stats.missed}</p>
-            </div>
-          </div>
-          <p className="text-xs text-brand-gray">{stats.missed > 0 ? "Reschedule required" : "No missed appointments"}</p>
-        </Card>
+        <StatCard icon={AlertCircle} tone="bg-amber-100 text-amber-700" label="Action Required" value={stats.actionRequired} hint="Awaiting your response" />
+        <StatCard icon={CalendarClock} tone="bg-brand-blue/10 text-brand-blue" label="Upcoming" value={stats.upcoming} hint="Confirmed / scheduled visits" />
+        <StatCard icon={CheckCircle2} tone="bg-brand-green/10 text-brand-green" label="Completed" value={stats.completed} hint="Completed visits" />
+        <StatCard icon={XCircle} tone="bg-brand-danger/10 text-brand-danger" label="Cancelled" value={stats.cancelled} hint="Rejected / cancelled" />
       </div>
 
-      {/* Follow-up List */}
       <Card className="p-6">
         <h3 className="font-semibold text-brand-ink mb-4">Your Follow-up Appointments</h3>
-        
-        {followUps.length === 0 ? (
+
+        {loading ? (
+          <div className="py-12 text-center">
+            <Calendar className="w-10 h-10 text-brand-gray/50 mx-auto mb-3 animate-pulse" />
+            <p className="text-sm text-brand-gray">Loading your follow-ups…</p>
+          </div>
+        ) : loadError ? (
+          <div className="py-12 text-center">
+            <AlertCircle className="w-10 h-10 text-brand-danger mx-auto mb-3" />
+            <p className="text-sm font-medium text-brand-ink">{loadError}</p>
+            <button onClick={load} className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">Try Again</button>
+          </div>
+        ) : sorted.length === 0 ? (
           <div className="text-center py-12">
-            <Calendar className="w-12 h-12 text-brand-gray mx-auto mb-4" />
+            <Calendar className="w-12 h-12 text-brand-gray/50 mx-auto mb-4" />
             <p className="text-brand-gray">No follow-up appointments have been scheduled yet.</p>
+            <p className="mt-1 text-xs text-brand-gray">When your health worker schedules a follow-up, it will appear here.</p>
           </div>
         ) : (
           <div className="space-y-4">
-            {followUps.map((f, i) => (
-              <motion.div
-                key={f.id}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                className="border border-brand-border rounded-xl p-4 hover:border-brand-blue/30 transition-colors cursor-pointer"
-                onClick={() => handleView(f)}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-brand-blue/10 flex items-center justify-center shrink-0">
-                        <Calendar className="w-5 h-5 text-brand-blue" />
-                      </div>
-                      <div className="flex-1">
-                        <h4 className="font-medium text-brand-ink">{f.purpose}</h4>
-                        <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-brand-gray">
-                          <div className="flex items-center gap-1">
-                            <Calendar className="w-4 h-4" />
-                            {f.date}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" />
-                            {f.time}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <MapPin className="w-4 h-4" />
-                            {f.location}
+            {sorted.map((f, i) => {
+              const actionable = isActionable(f);
+              return (
+                <motion.div
+                  key={f.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.04 }}
+                  className={`rounded-xl border p-4 transition-colors ${
+                    actionable ? "border-amber-300 bg-amber-50/60 dark:bg-amber-500/5" : "border-brand-border hover:border-brand-blue/30"
+                  }`}
+                >
+                  {actionable && (
+                    <div className="mb-3 flex items-center gap-2 rounded-btn bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                      <AlertCircle className="h-3.5 w-3.5" /> Action Required — please confirm or reject this follow-up
+                    </div>
+                  )}
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-brand-blue/10 flex items-center justify-center shrink-0">
+                          <Calendar className="w-5 h-5 text-brand-blue" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-medium text-brand-ink">{f.purpose || "Follow-up"}</h4>
+                          <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-brand-gray">
+                            <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> {fmtDate(f.scheduledDate)}</span>
+                            {f.scheduledTime && <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {fmtTime(f.scheduledTime)}</span>}
+                            {f.location && <span className="flex items-center gap-1"><MapPin className="w-4 h-4" /> {f.location}</span>}
+                            {f.assignedProvider && <span className="flex items-center gap-1"><User className="w-4 h-4" /> {f.assignedProvider}</span>}
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-3 sm:mt-0 mt-3">
-                    <StatusBadge value={f.status} />
-                    <button className="p-2 text-brand-blue hover:bg-brand-light rounded-lg transition-colors">
-                      <Eye className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                {f.remarks && (
-                  <p className="text-sm text-brand-gray mt-3 ml-13">{f.remarks}</p>
-                )}
-                {f.availability && (
-                  <div className="mt-3 pt-3 border-t border-brand-border ml-13">
-                    <p className="text-xs text-brand-gray mb-1">Availability</p>
-                    <div className="flex items-center gap-2">
-                      {f.availability === "Available" && <div className="w-2 h-2 rounded-full bg-brand-green" />}
-                      {f.availability === "Not Available" && <div className="w-2 h-2 rounded-full bg-brand-danger" />}
-                      {f.availability === "Waiting for Confirmation" && <div className="w-2 h-2 rounded-full bg-brand-yellow" />}
-                      <span className="text-sm text-brand-ink">{f.availability}</span>
+                    <div className="flex items-center gap-2 sm:flex-col sm:items-end">
+                      <ScheduleStatusBadge value={f.status === "Pending" ? "Pending" : f.status} />
+                      {f.confirmationStatus && <ConfirmationBadge value={f.confirmationStatus} />}
                     </div>
                   </div>
-                )}
-              </motion.div>
-            ))}
+
+                  {f.instructions && (
+                    <p className="mt-3 rounded-btn bg-brand-bg/60 px-3 py-2 text-sm text-brand-ink dark:bg-card-nested">{f.instructions}</p>
+                  )}
+
+                  {f.confirmationStatus === "Rejected" && f.rejectionReason && (
+                    <div className="mt-3 rounded-btn border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+                      <span className="font-medium">You rejected this follow-up:</span> {f.rejectionReason}
+                    </div>
+                  )}
+
+                  {actionable && (
+                    <div className="mt-4 flex flex-wrap gap-3 border-t border-amber-200/70 pt-3 dark:border-amber-500/20">
+                      <button
+                        disabled={busyId === f.id}
+                        onClick={() => approve(f.id)}
+                        className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                      >
+                        <CheckCircle2 className="h-4 w-4" /> Approve
+                      </button>
+                      <button
+                        disabled={busyId === f.id}
+                        onClick={() => setRejectTarget(f)}
+                        className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/40 bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 disabled:opacity-60 dark:bg-card"
+                      >
+                        <Ban className="h-4 w-4" /> Reject
+                      </button>
+                    </div>
+                  )}
+                  {f.confirmationStatus === "Confirmed" && (
+                    <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-brand-green">
+                      <ShieldCheck className="h-4 w-4" /> You confirmed this follow-up.
+                    </p>
+                  )}
+                </motion.div>
+              );
+            })}
           </div>
         )}
       </Card>
 
-      {/* Detail Modal */}
-      {showDetailModal && selectedFollowUp && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="text-base font-semibold text-brand-ink">Follow-up Details</h3>
-                <button
-                  onClick={() => setShowDetailModal(false)}
-                  className="text-brand-gray hover:text-brand-ink"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+      {rejectTarget && (
+        <RejectModal
+          followUp={rejectTarget}
+          busy={busyId === rejectTarget.id}
+          onClose={() => setRejectTarget(null)}
+          onSubmit={(reason) => reject(rejectTarget.id, reason)}
+        />
+      )}
 
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xs text-brand-gray mb-1">Purpose</p>
-                  <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.purpose}</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs text-brand-gray mb-1">Scheduled Date</p>
-                    <p className="text-sm text-brand-ink">{selectedFollowUp.date}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-brand-gray mb-1">Time</p>
-                    <p className="text-sm text-brand-ink">{selectedFollowUp.time}</p>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-xs text-brand-gray mb-1">Location</p>
-                  <p className="text-sm text-brand-ink flex items-center gap-2">
-                    <MapPin className="w-4 h-4" />
-                    {selectedFollowUp.location}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-brand-gray mb-1">Status</p>
-                  <StatusBadge value={selectedFollowUp.status} />
-                </div>
-
-                {selectedFollowUp.instructions && (
-                  <div>
-                    <p className="text-xs text-brand-gray mb-1">Instructions</p>
-                    <p className="text-sm text-brand-ink">{selectedFollowUp.instructions}</p>
-                  </div>
-                )}
-
-                {selectedFollowUp.healthWorkerNotes && (
-                  <div>
-                    <p className="text-xs text-brand-gray mb-1">Health Worker Notes</p>
-                    <p className="text-sm text-brand-ink">{selectedFollowUp.healthWorkerNotes}</p>
-                  </div>
-                )}
-
-                {selectedFollowUp.remarks && (
-                  <div>
-                    <p className="text-xs text-brand-gray mb-1">Remarks</p>
-                    <p className="text-sm text-brand-ink">{selectedFollowUp.remarks}</p>
-                  </div>
-                )}
-
-                {(selectedFollowUp.status === "Upcoming" || selectedFollowUp.status === "Scheduled") && (
-                  <div className="pt-4 border-t border-brand-border">
-                    <p className="text-xs text-brand-gray mb-2">Availability</p>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => handleAvailabilityChange(selectedFollowUp.id, "Available")}
-                        className={`flex-1 px-4 py-2 rounded-btn text-sm font-medium transition-colors ${
-                          selectedFollowUp.availability === "Available"
-                            ? "bg-brand-green text-white border-brand-green"
-                            : "bg-white text-brand-green border border-brand-green hover:bg-brand-green/10"
-                        }`}
-                      >
-                        ✓ Available
-                      </button>
-                      <button
-                        onClick={() => handleAvailabilityChange(selectedFollowUp.id, "Not Available")}
-                        className={`flex-1 px-4 py-2 rounded-btn text-sm font-medium transition-colors ${
-                          selectedFollowUp.availability === "Not Available"
-                            ? "bg-brand-danger text-white border-brand-danger"
-                            : "bg-white text-brand-danger border border-brand-danger hover:bg-brand-danger/10"
-                        }`}
-                      >
-                        ✕ Not Available
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-brand-border">
-                <button
-                  onClick={() => setShowDetailModal(false)}
-                  className="w-full px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </Card>
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-[90] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
+          <CheckCircle2 className="h-4 w-4 text-brand-green" />
+          <span className="text-sm">{toast}</span>
         </div>
       )}
     </>
+  );
+}
+
+function RejectModal({ followUp, busy, onClose, onSubmit }) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const submit = () => {
+    if (!reason.trim()) { setError("Please provide a reason for rejecting the follow-up."); return; }
+    onSubmit(reason.trim());
+  };
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+      <Card className="w-full max-w-md">
+        <div className="p-6">
+          <div className="mb-1 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-brand-ink">Reject Follow-up</h3>
+              <p className="mt-0.5 text-sm text-brand-gray">{followUp.purpose} · {fmtDate(followUp.scheduledDate)}</p>
+            </div>
+            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+          </div>
+          <div className="mt-4">
+            <label className="text-sm font-medium text-brand-ink">Reason for rejecting <span className="text-brand-danger">*</span></label>
+            <textarea
+              rows={4}
+              value={reason}
+              onChange={(e) => { setReason(e.target.value); if (error) setError(""); }}
+              placeholder="Let your health worker know why you cannot attend."
+              className={`mt-1.5 w-full resize-none rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${error ? "border-brand-danger" : "border-slate-200 dark:border-border"}`}
+            />
+            {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
+          </div>
+          <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
+            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
+            <button disabled={busy} onClick={submit} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-60">
+              <Ban className="h-4 w-4" /> Reject Follow-up
+            </button>
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }

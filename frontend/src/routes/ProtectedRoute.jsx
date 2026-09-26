@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';
+import { homeForRole } from '@/lib/roles';
 import { FullPageSkeleton } from '@/components/common/Skeleton';
 
 /**
@@ -23,10 +24,14 @@ import { FullPageSkeleton } from '@/components/common/Skeleton';
  * screen, so the shell never flashes empty or unstyled.
  */
 export default function ProtectedRoute({ allow = [] }) {
-  const { isAuthenticated, isLoadingAuth, authChecked, role } = useAuth();
+  const { isAuthenticated, isLoadingAuth, authChecked, isResolvingProfile, role } = useAuth();
   const location = useLocation();
 
-  if (isLoadingAuth || !authChecked) {
+  // Wait for the initial session restore AND for any in-flight resolution of a
+  // freshly-established session's authoritative role (e.g. right after a new
+  // resident registers). Rejecting before the role is resolved is what caused
+  // a valid resident to land on /unauthorized.
+  if (isLoadingAuth || !authChecked || isResolvingProfile) {
     return <FullPageSkeleton />;
   }
 
@@ -35,6 +40,17 @@ export default function ProtectedRoute({ allow = [] }) {
   }
 
   if (allow.length > 0 && !allow.includes(role)) {
+    // An authenticated user whose role doesn't match this area is sent to their
+    // OWN dashboard rather than a dead /unauthorized page. This is what makes a
+    // post-approval refresh unlock the resident: once the session role has been
+    // re-resolved to 'resident' (profiles.status = 'active'), a refresh landing
+    // on the old /app/resident-limited URL is redirected to /app/resident, the
+    // same destination a fresh login uses. Falls back to /unauthorized only when
+    // the role has no home (e.g. unresolved).
+    const home = homeForRole(role);
+    if (home && home !== '/login') {
+      return <Navigate to={home} replace />;
+    }
     return <Navigate to="/unauthorized" replace />;
   }
 

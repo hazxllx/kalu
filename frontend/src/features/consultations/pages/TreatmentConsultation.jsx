@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import DataTable from "@/components/tables/DataTable";
@@ -7,8 +7,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { useResidents } from "@/services/local/residentStore";
-import { useConsultations, consultationStore } from "@/services/local/consultationStore";
+import { consultationsApi, residentsApi } from "@/services/api";
 
 const inputCls = (error) =>
   `w-full bg-white border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue ${
@@ -39,8 +38,8 @@ const emptyForm = () => ({
 
 const toResidentOption = (r) => ({
   id: r.id,
-  name: r.name,
-  age: r.age,
+  name: r.name || [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
+  age: r.age || (r.birthDate ? Math.max(0, new Date().getFullYear() - new Date(r.birthDate).getFullYear()) : "—"),
   sex: r.gender || r.sex || "—",
   barangay: r.barangay || "",
   program: r.program || "General",
@@ -56,10 +55,24 @@ const formatDate = (iso) => {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
+/** Two-letter initials for the resident avatar (local — no external store). */
+const initialsOf = (name) =>
+  String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || "—";
+
 export default function TreatmentConsultation() {
   const { user } = useAuth();
-  const allResidents = useResidents();
-  const consultations = useConsultations();
+  const [allResidents, setAllResidents] = useState([]);
+  const [consultations, setConsultations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   // Records list view by default. Clicking "+ Add Treatment Consultation"
   // opens the consultation entry form below; saving persists the record to the
@@ -85,6 +98,27 @@ export default function TreatmentConsultation() {
   const [formData, setFormData] = useState(emptyForm());
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return Promise.all([residentsApi.list({ limit: 200 }), consultationsApi.list()])
+      .then(([residentResult, consultationResult]) => {
+        setAllResidents(residentResult?.rows || residentResult || []);
+        setConsultations(consultationResult?.rows || []);
+      })
+      .catch((err) => {
+        // A failed load must surface as an explicit error state — never a
+        // silent empty "no consultations" list.
+        setLoadError(err?.message || "Could not load consultation records.");
+        setConsultations([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const filteredResidents = residentOptions.filter(
     (r) =>
@@ -166,18 +200,19 @@ export default function TreatmentConsultation() {
     }
     const payload = {
       ...formData,
-      resident: selectedResident,
-      provider: user?.name || "Health Supervisor",
-      providerRole: "Health Supervisor",
+      residentId: selectedResident.id,
     };
-    if (editingId) {
-      consultationStore.updateConsultation(editingId, payload);
-      showToast("Consultation updated successfully.");
-    } else {
-      consultationStore.addConsultation(payload);
-      showToast("Consultation saved successfully.");
-    }
-    cancelForm();
+    setBusy(true);
+    const request = editingId ? consultationsApi.update(editingId, payload) : consultationsApi.create(payload);
+    request.then((result) => {
+      const saved = result?.consultation;
+      setConsultations((current) => editingId
+        ? current.map((item) => item.id === editingId ? saved : item)
+        : [saved, ...current]);
+      showToast(editingId ? "Consultation updated successfully." : "Consultation saved successfully.");
+      cancelForm();
+    }).catch((err) => setErrors((prev) => ({ ...prev, submit: err?.message || "Could not save consultation." })))
+      .finally(() => setBusy(false));
   };
 
   const recordRows = useMemo(
@@ -225,7 +260,7 @@ export default function TreatmentConsultation() {
               >
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-full bg-brand-blue text-white flex items-center justify-center font-semibold">
-                    {consultationStore.initialsOf(resident.name)}
+                    {resident.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}
                   </div>
                   <div>
                     <p className="font-semibold text-brand-ink">{resident.name}</p>
@@ -536,44 +571,60 @@ export default function TreatmentConsultation() {
           <p className="text-xs text-brand-gray mt-0.5">Consultations recorded for residents in your area.</p>
         </div>
 
-        <DataTable
-          columns={columns}
-          rows={recordRows}
-          renderCell={(key, row) => {
-            if (key === "resident")
-              return (
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-xs font-semibold shrink-0">
-                    {consultationStore.initialsOf(row.resident?.name)}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-medium text-brand-ink truncate">{row.resident?.name || "—"}</p>
-                    <p className="text-xs text-brand-gray">{row.resident?.barangay || ""}</p>
-                  </div>
-                </div>
-              );
-            if (key === "date") return <span className="text-brand-ink">{formatDate(row.consultationDate)}</span>;
-            if (key === "chiefComplaint") return <span className="text-brand-ink">{row.chiefComplaint || "—"}</span>;
-            if (key === "diagnosis") return <span className="text-brand-gray">{row.diagnosis || "—"}</span>;
-            if (key === "followUp")
-              return row.followUpRequired === "Yes" ? (
-                <span className="inline-flex rounded-full bg-brand-accent/10 text-brand-accent px-2.5 py-1 text-xs font-medium">
-                  {row.nextVisitDate ? formatDate(row.nextVisitDate) : "Yes"}
-                </span>
-              ) : (
-                <span className="inline-flex rounded-full bg-slate-100 text-slate-600 px-2.5 py-1 text-xs font-medium">No</span>
-              );
-            if (key === "actions")
-              return (
-                <button onClick={() => openForEdit(row)} className="flex items-center gap-1 text-brand-blue text-sm font-medium hover:underline">
-                  <FileText className="w-4 h-4" /> View
-                </button>
-              );
-            return row[key];
-          }}
-        />
-        {recordRows.length === 0 && (
-          <p className="py-10 text-center text-sm text-brand-gray">No consultations yet. Click "+ Add Treatment Consultation" to record the first one.</p>
+        {loadError ? (
+          <div className="py-10 text-center">
+            <p className="text-sm font-medium text-brand-danger">{loadError}</p>
+            <button
+              onClick={load}
+              className="mt-3 inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <>
+            <DataTable
+              columns={columns}
+              rows={recordRows}
+              renderCell={(key, row) => {
+                if (key === "resident")
+                  return (
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-xs font-semibold shrink-0">
+                        {initialsOf(row.resident?.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-brand-ink truncate">{row.resident?.name || "—"}</p>
+                        <p className="text-xs text-brand-gray">{row.resident?.barangay || ""}</p>
+                      </div>
+                    </div>
+                  );
+                if (key === "date") return <span className="text-brand-ink">{formatDate(row.consultationDate)}</span>;
+                if (key === "chiefComplaint") return <span className="text-brand-ink">{row.chiefComplaint || "—"}</span>;
+                if (key === "diagnosis") return <span className="text-brand-gray">{row.diagnosis || "—"}</span>;
+                if (key === "followUp")
+                  return row.followUpRequired === "Yes" ? (
+                    <span className="inline-flex rounded-full bg-brand-accent/10 text-brand-accent px-2.5 py-1 text-xs font-medium">
+                      {row.nextVisitDate ? formatDate(row.nextVisitDate) : "Yes"}
+                    </span>
+                  ) : (
+                    <span className="inline-flex rounded-full bg-slate-100 text-slate-600 px-2.5 py-1 text-xs font-medium">No</span>
+                  );
+                if (key === "actions")
+                  return (
+                    <button onClick={() => openForEdit(row)} className="flex items-center gap-1 text-brand-blue text-sm font-medium hover:underline">
+                      <FileText className="w-4 h-4" /> View
+                    </button>
+                  );
+                return row[key];
+              }}
+            />
+            {loading ? (
+              <p className="py-10 text-center text-sm text-brand-gray">Loading consultations...</p>
+            ) : recordRows.length === 0 ? (
+              <p className="py-10 text-center text-sm text-brand-gray">No consultations yet. Click "+ Add Treatment Consultation" to record the first one.</p>
+            ) : null}
+          </>
         )}
       </Card>
     </>

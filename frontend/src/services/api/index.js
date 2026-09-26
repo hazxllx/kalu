@@ -11,9 +11,13 @@
 export { api, default as apiClient } from './apiClient';
 export { authApi } from './authApi';
 export { residentsApi } from './residentsApi';
+export { usersApi } from './usersApi';
 export { registrationApi } from './registrationApi';
 export { householdsApi } from './householdsApi';
 export { intakeApi } from './intakeApi';
 export { healthRecordsApi } from './healthRecordsApi';
 export { consultationsApi } from './consultationsApi';
 export { referralsApi } from './referralsApi';
+export { followUpsApi, tclApi, maternalApi, immunizationsApi, notificationsApi } from './operationalApi';
+export { residentFollowUpsApi } from './residentFollowUpsApi';
+export { m1Api } from './m1Api';

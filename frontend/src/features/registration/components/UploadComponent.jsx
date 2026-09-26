@@ -4,20 +4,31 @@ import { UploadCloud, FileText, X, CheckCircle2, ImageIcon } from "lucide-react"
 import { labelCls } from "@/features/registration/components/RegistrationDesign";
 
 const ACCEPTED = ".png,.jpg,.jpeg,.pdf";
+const DEFAULT_EXTS = ["png", "jpg", "jpeg", "pdf"];
 const MAX_SIZE = 10 * 1024 * 1024;
 
-export default function UploadComponent({ label, optional = false, file, onFile, onRemove }) {
+export default function UploadComponent({
+  label,
+  optional = false,
+  file,
+  onFile,
+  onRemove,
+  accept = ACCEPTED,
+  allowedExts = DEFAULT_EXTS,
+  hint,
+}) {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState(file ? 100 : 0);
   const inputRef = useRef(null);
+  const formatsHint = hint || `${allowedExts.map((e) => e.toUpperCase()).join(", ")} — up to 10 MB`;
 
   const handleFile = useCallback((f) => {
     setError("");
     if (!f) return;
     const ext = f.name.split(".").pop()?.toLowerCase();
-    if (!["png", "jpg", "jpeg", "pdf"].includes(ext)) {
-      setError("Unsupported format. Please use PNG, JPG, or PDF.");
+    if (!allowedExts.includes(ext)) {
+      setError(`Unsupported format. Please use ${allowedExts.map((e) => e.toUpperCase()).join(", ")}.`);
       return;
     }
     if (f.size > MAX_SIZE) {
@@ -33,7 +44,7 @@ export default function UploadComponent({ label, optional = false, file, onFile,
       });
     }, 80);
     onFile(f);
-  }, [onFile]);
+  }, [onFile, allowedExts]);
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -55,7 +66,7 @@ export default function UploadComponent({ label, optional = false, file, onFile,
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPTED}
+        accept={accept}
         className="hidden"
         onChange={(e) => handleFile(e.target.files[0])}
       />
@@ -83,7 +94,7 @@ export default function UploadComponent({ label, optional = false, file, onFile,
               Drag & drop or{" "}
               <span className="text-brand-blue underline decoration-brand-blue/30 underline-offset-2">browse files</span>
             </p>
-            <p className="mt-1.5 text-[11.5px] text-slate-400">PNG, JPG, JPEG, PDF — up to 10 MB</p>
+            <p className="mt-1.5 text-[11.5px] text-slate-400">{formatsHint}</p>
           </motion.div>
         ) : (
           <motion.div

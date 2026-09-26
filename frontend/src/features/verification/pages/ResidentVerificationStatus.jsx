@@ -4,6 +4,7 @@ import { Card } from "@/components/common/Card";
 import { Skeleton } from "@/components/common/Skeleton";
 import VerificationBanner from "@/features/verification/components/VerificationBanner";
 import { fetchMyVerification } from "@/services/api/verificationsApi";
+import { useAuth } from "@/context/AuthContext";
 import { CheckCircle2, Clock, FileWarning, History, ShieldX } from "lucide-react";
 
 /**
@@ -45,17 +46,25 @@ const statusLabel = (status) =>
 export default function ResidentVerificationStatus() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
+  const { refreshProfile } = useAuth();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setState(await fetchMyVerification());
+      const result = await fetchMyVerification();
+      setState(result);
+      // If the manual review has been approved, re-resolve the account profile
+      // so the session's role flips from 'resident-limited' to 'resident' and
+      // the full resident area unlocks immediately — no re-login required.
+      if (result?.verification?.status === "approved") {
+        refreshProfile?.();
+      }
     } catch {
       setState(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshProfile]);
 
   useEffect(() => {
     load();

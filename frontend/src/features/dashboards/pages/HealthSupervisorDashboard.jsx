@@ -1,12 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
 import { useWorkflowStore } from "@/services/local/workflowStore";
-import { useHouseholdRiskClusters } from "@/services/local/householdRiskStore";
-import { RISK_LEVELS } from "@/lib/householdRisk";
-import { phnAlerts, barangayCommunity } from "@/services/local/phnData";
+import { referralsApi, followUpsApi, householdsApi } from "@/services/api";
+import { fetchEarlyWarningData } from "@/services/api/earlyWarningApi";
 import {
   filterSupervisorRows,
   getSupervisorScope,
@@ -16,6 +15,41 @@ import { riskOfPatient } from "@/lib/riskRules";
 import { useAuth } from "@/context/AuthContext";
 import { Link } from "react-router-dom";
 import { X, ChevronRight, Eye, AlertTriangle } from "lucide-react";
+
+// Referral statuses that count as "still pending" (mirrors the DB check
+// constraint on public.health_referrals — Completed/Cancelled are terminal).
+const OPEN_REFERRAL_STATUSES = new Set(["Pending", "Accepted", "In Progress"]);
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/** persisted health_referrals row → the flat shape the dashboard renders. */
+const mapReferral = (row) => ({
+  id: row.id,
+  resident: row.resident
+    ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
+    : "Resident",
+  barangay: row.resident?.barangay || "",
+  reason: row.reason || "",
+  facility: row.destination_facility || "",
+  priority: row.priority || "Medium",
+  status: row.status || "Pending",
+});
+
+/** persisted follow_ups row → the flat shape the dashboard renders. */
+const mapFollowUp = (row) => ({
+  id: row.id,
+  resident: row.resident
+    ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
+    : "Resident",
+  barangay: row.resident?.barangay || "",
+  purpose: row.purpose || "",
+  dueDate: row.scheduled_date || "",
+  time: row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : "",
+  status: row.status || "Scheduled",
+});
+
+/** A follow-up is "overdue/attention" when it is still open and due today or earlier. */
+const isFollowUpDue = (f) =>
+  !["Completed", "Cancelled"].includes(f.status) && f.dueDate && String(f.dueDate).slice(0, 10) <= todayIso();
 
 const RISK_TONES = {
   High: "bg-brand-danger/10 text-brand-danger",
@@ -47,23 +81,96 @@ export default function HealthSupervisorDashboard() {
   const scope = getSupervisorScope(user);
   const workflow = useWorkflowStore();
 
-  // Every dataset below is filtered to the supervisor's assigned coverage
-  // BEFORE rendering/search/counts so no other barangay can leak through.
+  // DATABASE-BACKED sources:
+  //   - referrals   -> /api/referrals            (health_referrals)
+  //   - followUps   -> /api/operational/followups (follow_ups)
+  //   - households  -> /api/households            (server-computed risk_level)
+  //   - earlyWarn   -> /api/analytics/early-warning (risk assessment per barangay)
+  // Every one enforces the caller's barangay/municipality scope SERVER-SIDE;
+  // no barangay id from this component can widen it.
+  const [referrals, setReferrals] = useState([]);
+  const [followUps, setFollowUps] = useState([]);
+  const [households, setHouseholds] = useState([]);
+  const [earlyWarning, setEarlyWarning] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  // Barangays this supervisor may see: their one assigned barangay, or every
+  // barangay when municipality-wide. Used to drive the per-barangay early
+  // warning fetch (the server still authorizes each barangay).
+  const visibleBarangays = useMemo(() => supervisorVisibleBarangays(user), [user]);
+  const barangayKey = visibleBarangays.join("|");
+
+  const loadStats = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    const barangays = barangayKey ? barangayKey.split("|") : [];
+    return Promise.all([
+      referralsApi.list(),
+      followUpsApi.list(),
+      householdsApi.list({ limit: 100 }),
+      Promise.all(barangays.map((b) => fetchEarlyWarningData(b))),
+    ])
+      .then(([referralResult, followUpResult, householdResult, ewList]) => {
+        setReferrals((referralResult?.rows || []).map(mapReferral));
+        setFollowUps((followUpResult?.rows || []).map(mapFollowUp));
+        setHouseholds(householdResult?.rows || []);
+        const map = {};
+        barangays.forEach((b, i) => { map[b] = ewList[i] || null; });
+        setEarlyWarning(map);
+      })
+      .catch((err) => {
+        // A backend failure must NOT masquerade as zero counts — surface it.
+        setLoadError(err?.message || "Unable to load dashboard statistics. Please try again.");
+        setReferrals([]);
+        setFollowUps([]);
+        setHouseholds([]);
+        setEarlyWarning({});
+      })
+      .finally(() => setLoading(false));
+  }, [barangayKey]);
+
+  useEffect(() => { loadStats(); }, [loadStats]);
+
+  // Server already scopes these to the supervisor's coverage; the values are
+  // real database rows, not workflowStore data.
+  const visibleReferrals = referrals;
+  const visibleFollowUps = followUps;
+
+  // Real high-risk residents come from the Early Warning risk assessment
+  // (server-computed from recorded vitals), summed across the supervisor's
+  // visible barangays.
+  const highRiskResidents = useMemo(
+    () => Object.values(earlyWarning).reduce((sum, ew) => sum + (ew?.summary?.highRiskResidents || 0), 0),
+    [earlyWarning]
+  );
+
+  // Community Health Alerts are derived from the real Early Warning status:
+  // a barangay with any high-risk resident raises one alert. No fabricated
+  // alerts and no invented thresholds.
+  const visibleAlerts = useMemo(() => {
+    const alerts = [];
+    Object.entries(earlyWarning).forEach(([brgy, ew]) => {
+      const high = ew?.summary?.highRiskResidents || 0;
+      if (high > 0) {
+        alerts.push({
+          id: `ew-${brgy}`,
+          type: `${high} high-risk resident${high > 1 ? "s" : ""}`,
+          level: high >= 3 ? "critical" : "warning",
+          barangay: brgy,
+          status: ew?.status || "Needs Attention",
+        });
+      }
+    });
+    return alerts;
+  }, [earlyWarning]);
+
+  // Patients (RHU triage -> PHN check-up queue) have NO backend source: they
+  // are an in-session PHN workflow, not a persisted entity. They stay on the
+  // workflow store and are filtered to the supervisor's coverage before use.
   const visiblePatients = useMemo(
     () => filterSupervisorRows(workflow.patients, user),
     [workflow.patients, user]
-  );
-  const visibleReferrals = useMemo(
-    () => filterSupervisorRows(workflow.referrals, user),
-    [workflow.referrals, user]
-  );
-  const visibleFollowUps = useMemo(
-    () => filterSupervisorRows(workflow.followUps, user),
-    [workflow.followUps, user]
-  );
-  const visibleAlerts = useMemo(
-    () => filterSupervisorRows(phnAlerts, user),
-    [user]
   );
 
   const [caseModal, setCaseModal] = useState(null);
@@ -79,26 +186,16 @@ export default function HealthSupervisorDashboard() {
   const riskOf = (patient) => riskOfPatient(patient);
 
   const stats = useMemo(() => {
-    const highRiskPatients = visiblePatients.filter((p) => riskOf(p).level === "High");
-    const highRiskReferrals = visibleReferrals.filter(
-      (r) => r.priority === "High" && r.status !== "Completed"
-    );
-    const highRiskNames = new Set([
-      ...highRiskPatients.map((p) => p.patient),
-      ...highRiskReferrals.map((r) => r.resident),
-    ]);
     return {
+      // Active Cases = PHN check-up queue (workflow, no backend) — see note above.
       activeCases: visiblePatients.filter((p) => p.status !== "Consultation Completed").length,
-      highRisk: highRiskNames.size,
-      pendingReferrals: visibleReferrals.filter(
-        (r) => r.status === "For Review" || r.status === "Pending" || r.status === "Accepted"
-      ).length,
-      overdueFollowUps: visibleFollowUps.filter(
-        (f) => f.status === "Overdue" || f.status === "Due Today"
-      ).length,
+      // High-Risk Cases = real Early Warning risk assessment (server-computed).
+      highRisk: highRiskResidents,
+      pendingReferrals: visibleReferrals.filter((r) => OPEN_REFERRAL_STATUSES.has(r.status)).length,
+      overdueFollowUps: visibleFollowUps.filter(isFollowUpDue).length,
       alerts: visibleAlerts.length,
     };
-  }, [visiblePatients, visibleReferrals, visibleFollowUps, visibleAlerts]);
+  }, [visiblePatients, visibleReferrals, visibleFollowUps, visibleAlerts, highRiskResidents]);
 
   const cases = useMemo(() => {
     const items = [];
@@ -127,11 +224,7 @@ export default function HealthSupervisorDashboard() {
 
     // High-priority referrals awaiting action (e.g. high-risk maternal cases).
     visibleReferrals
-      .filter(
-        (r) =>
-          r.priority === "High" &&
-          (r.status === "For Review" || r.status === "Pending" || r.status === "Accepted")
-      )
+      .filter((r) => r.priority === "High" && OPEN_REFERRAL_STATUSES.has(r.status))
       .forEach((r) => {
         push({
           key: `high-referral-${r.id}`,
@@ -146,7 +239,7 @@ export default function HealthSupervisorDashboard() {
 
     // Remaining referrals awaiting review.
     visibleReferrals
-      .filter((r) => r.status === "For Review" || r.status === "Pending")
+      .filter((r) => r.status === "Pending")
       .slice(0, 3)
       .forEach((r) => {
         push({
@@ -160,14 +253,15 @@ export default function HealthSupervisorDashboard() {
         });
       });
 
-    // Overdue / due follow-ups.
+    // Overdue / due follow-ups (open and due today or earlier).
     visibleFollowUps
-      .filter((f) => f.status === "Overdue" || f.status === "Due Today")
+      .filter(isFollowUpDue)
       .slice(0, 2)
       .forEach((f) => {
+        const overdue = String(f.dueDate).slice(0, 10) < todayIso();
         items.push({
           key: `followup-${f.id}`,
-          kind: f.status === "Overdue" ? "OVERDUE FOLLOW-UP" : "FOLLOW-UP DUE",
+          kind: overdue ? "OVERDUE FOLLOW-UP" : "FOLLOW-UP DUE",
           resident: f.resident,
           barangay: f.barangay || "RHU",
           detail: f.purpose,
@@ -191,24 +285,24 @@ export default function HealthSupervisorDashboard() {
           )
       ).length;
     return attentionBarangays.map((name) => {
-      const base = barangayCommunity.find((b) => b.name === name) || {
-        residents: 0,
-        activeCases: 0,
-        referrals: 0,
-        followUps: 0,
-        priorityCases: 0,
-      };
+      const ew = earlyWarning[name] || null;
       return {
         name,
-        residents: base.residents,
-        activeCases: base.activeCases,
-        highRisk: base.priorityCases,
+        // Residents + High-Risk are DATABASE-BACKED (Early Warning / residents).
+        residents: ew?.summary?.residents ?? 0,
+        highRisk: ew?.summary?.highRiskResidents ?? 0,
+        // Active Cases = PHN check-up queue (workflow, no backend source).
+        activeCases: visiblePatients.filter((p) => p.barangay === name && p.status !== "Consultation Completed").length,
+        // Communicable has no persisted disease classification yet — derived
+        // from the local check-up queue reasons (see limitations).
         communicable: communicableCount(name),
-        pendingReferrals: base.referrals,
-        overdueFollowUps: base.followUps,
+        // Pending Referrals + Overdue Follow-ups are DATABASE-BACKED, grouped
+        // from the scoped API rows by barangay.
+        pendingReferrals: visibleReferrals.filter((r) => r.barangay === name && OPEN_REFERRAL_STATUSES.has(r.status)).length,
+        overdueFollowUps: visibleFollowUps.filter((f) => f.barangay === name && isFollowUpDue(f)).length,
       };
     });
-  }, [attentionBarangays, visiblePatients]);
+  }, [attentionBarangays, earlyWarning, visiblePatients, visibleReferrals, visibleFollowUps]);
 
   const handleCaseAction = (item) => {
     if (item.action === "Review Case") {
@@ -236,17 +330,36 @@ export default function HealthSupervisorDashboard() {
         }
       />
 
-      {/* Summary cards */}
+      {/* Backend failure for the database-backed statistics — surfaced, never
+          silently shown as zero. */}
+      {loadError && (
+        <Card className="mb-4 flex items-start justify-between gap-3 border-brand-danger/30 bg-brand-danger/5 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-brand-danger" />
+            <div>
+              <p className="text-sm font-semibold text-brand-ink">Couldn't load dashboard statistics</p>
+              <p className="mt-0.5 text-xs text-brand-gray">{loadError}</p>
+            </div>
+          </div>
+          <button onClick={loadStats} className="shrink-0 rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue transition-colors">
+            Retry
+          </button>
+        </Card>
+      )}
+
+      {/* Summary cards. High-Risk, Pending Referrals, Overdue Follow-ups and
+          Health Alerts are real DB-backed counts (— while loading or on error,
+          never a fake 0). Active Cases is the local PHN check-up queue. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4 mb-6">
         <StatCard icon="Users" label="Active Cases" value={stats.activeCases} tone="blue" />
-        <StatCard icon="AlertTriangle" label="High-Risk Cases" value={stats.highRisk} tone="danger" />
-        <StatCard icon="Send" label="Pending Referrals" value={stats.pendingReferrals} tone="yellow" />
-        <StatCard icon="CalendarClock" label="Overdue Follow-ups" value={stats.overdueFollowUps} tone="accent" />
-        <StatCard icon="Bell" label="Health Alerts" value={stats.alerts} tone="blue" />
+        <StatCard icon="AlertTriangle" label="High-Risk Cases" value={loading ? "…" : loadError ? "—" : stats.highRisk} tone="danger" />
+        <StatCard icon="Send" label="Pending Referrals" value={loading ? "…" : loadError ? "—" : stats.pendingReferrals} tone="yellow" />
+        <StatCard icon="CalendarClock" label="Overdue Follow-ups" value={loading ? "…" : loadError ? "—" : stats.overdueFollowUps} tone="accent" />
+        <StatCard icon="Bell" label="Health Alerts" value={loading ? "…" : loadError ? "—" : stats.alerts} tone="blue" />
       </div>
 
-      {/* Household Risk Clusters â€” early intervention */}
-      <RiskClusterStrip />
+      {/* Household Risk Clusters — real server-computed household risk. */}
+      <RiskClusterStrip households={households} loading={loading} error={loadError} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Cases Requiring Attention */}
@@ -440,13 +553,20 @@ export default function HealthSupervisorDashboard() {
     </>
   );
 
-  function RiskClusterStrip() {
-    const risk = useHouseholdRiskClusters();
+  function RiskClusterStrip({ households: rows = [], loading: isLoading, error }) {
+    // Counts come from the REAL server-computed household risk classification
+    // (public.households.risk_level: High / Moderate / Low), scoped to the
+    // supervisor's coverage by the /api/households endpoint.
     const counts = {
-      priority: risk.filter((c) => c.risk.level === RISK_LEVELS.PRIORITY).length,
-      intervention: risk.filter((c) => c.risk.level === RISK_LEVELS.INTERVENTION).length,
-      monitor: risk.filter((c) => c.risk.level === RISK_LEVELS.MONITOR).length,
+      high: rows.filter((h) => h.riskLevel === "High").length,
+      moderate: rows.filter((h) => h.riskLevel === "Moderate").length,
+      low: rows.filter((h) => h.riskLevel === "Low").length,
     };
+    const summary = isLoading
+      ? "Loading household risk…"
+      : error
+        ? "Household risk unavailable — retry above."
+        : null;
     return (
       <Link to="/app/health_supervisor/households/risk-clusters" className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-brand-blue/40 transition-colors">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue">
@@ -454,11 +574,15 @@ export default function HealthSupervisorDashboard() {
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-brand-ink">Household Risk Clusters</p>
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-gray">
-            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-danger" /> {counts.priority} Priority Review</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-accent" /> {counts.intervention} Needs Intervention</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-yellow" /> {counts.monitor} Monitor</span>
-          </p>
+          {summary ? (
+            <p className="text-xs text-brand-gray">{summary}</p>
+          ) : (
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-gray">
+              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-danger" /> {counts.high} High risk</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-accent" /> {counts.moderate} Moderate risk</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-green" /> {counts.low} Low risk</span>
+            </p>
+          )}
         </div>
         <ChevronRight className="h-4 w-4 shrink-0 text-brand-gray" />
       </Link>

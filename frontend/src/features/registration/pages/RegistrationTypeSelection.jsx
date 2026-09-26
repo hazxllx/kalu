@@ -63,11 +63,6 @@ const options = [
   },
 ];
 
-const STEPS = [
-  { n: 1, label: "Registration Type" },
-  { n: 2, label: "Registration Information" },
-];
-
 /**
  * Requirements and processing time for the selected form.
  *
@@ -130,39 +125,6 @@ function FormDetails({ form, tone = "light", className = "" }) {
   );
 }
 
-function StepIndicator({ current = 1 }) {
-  return (
-    <ol className="flex items-center gap-2 sm:gap-3" aria-label={`Step ${current} of ${STEPS.length}`}>
-      {STEPS.map((s, i) => {
-        const active = s.n === current;
-        const done = s.n < current;
-        return (
-          <li key={s.n} className="flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center gap-2">
-              <span
-                className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-bold transition-colors ${
-                  active
-                    ? "border-brand-blue bg-brand-blue text-white"
-                    : done
-                    ? "border-brand-blue bg-brand-light text-brand-blue"
-                    : "border-brand-rule bg-white text-brand-gray"
-                }`}
-                aria-current={active ? "step" : undefined}
-              >
-                {done ? <Check className="h-3 w-3" strokeWidth={3} /> : s.n}
-              </span>
-              <span className={`text-[11px] font-semibold sm:text-[11.5px] ${active ? "text-brand-ink" : "text-brand-gray"}`}>
-                {s.label}
-              </span>
-            </div>
-            {i < STEPS.length - 1 && <span className="h-px w-4 bg-brand-rule sm:w-8" aria-hidden="true" />}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
 export default function RegistrationTypeSelection() {
   const [selected, setSelected] = useState("resident");
   const active = options.find((o) => o.key === selected);
@@ -196,11 +158,9 @@ export default function RegistrationTypeSelection() {
           <div className="grid lg:grid-cols-[1.12fr_0.88fr]">
             {/* LEFT — registration */}
             <div className="px-5 py-5 sm:px-7 sm:py-6">
-              <StepIndicator current={1} />
-
-              <p className="gov-kicker mt-3.5 flex items-center gap-2 text-brand-blue">
+              <p className="gov-kicker flex items-center gap-2 text-brand-blue">
                 <span className="h-px w-5 bg-brand-blue/45" aria-hidden="true" />
-                Registration · Step 1 of 2
+                Registration
               </p>
               <h1 className="mt-1.5 font-display text-[20px] font-bold text-brand-dark md:text-[22px]">
                 Select the applicable registration form

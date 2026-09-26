@@ -35,8 +35,14 @@ export const ROLE_HOME = Object.freeze({
 });
 
 /**
- * Which roles may access each protected area. A resident area also admits the
- * limited (pending) resident state, and vice-versa, since it is the same person.
+ * Which roles may access each protected area.
+ *
+ * The limited (pending) area admits ONLY the limited role. A resident whose
+ * identity has been approved is served as the full `resident` role, so they no
+ * longer belong in the limited area — the route guard redirects them to their
+ * own dashboard (see ProtectedRoute). Keeping the full `resident` out of the
+ * limited area is what makes a post-approval page refresh unlock features
+ * instead of lingering on the locked, limited layout.
  */
 export const ROUTE_ROLES = Object.freeze({
   admin: [ROLE.ADMIN],
@@ -46,7 +52,7 @@ export const ROUTE_ROLES = Object.freeze({
   rhu_personnel: [ROLE.RHU_PERSONNEL],
   bhw: [ROLE.BHW],
   resident: [ROLE.RESIDENT],
-  'resident-limited': [ROLE.RESIDENT, ROLE.RESIDENT_LIMITED],
+  'resident-limited': [ROLE.RESIDENT_LIMITED],
 });
 
 export const homeForRole = (role) => ROLE_HOME[role] || '/login';

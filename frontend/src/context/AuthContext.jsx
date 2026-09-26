@@ -98,6 +98,11 @@ export const AuthProvider = ({ children }) => {
   const [role, setRole] = useState(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
+  // True while the authoritative profile (role/status/coverage) is being
+  // resolved for a freshly-established session — e.g. immediately after a new
+  // resident registers. The route guard waits on this so it never rejects a
+  // session whose role has not finished loading from the `profiles` table.
+  const [isResolvingProfile, setIsResolvingProfile] = useState(false);
   const [authError, setAuthError] = useState(null);
   // Non-blocking warning: the session is valid but the profile layer failed.
   const [authNotice, setAuthNotice] = useState(null);
@@ -105,12 +110,49 @@ export const AuthProvider = ({ children }) => {
   // event (e.g. TOKEN_REFRESHED) cannot downgrade the session back to
   // metadata-only values and drop role/status/coverage.
   const resolvedProfileUser = useRef(null);
+  // The auth user id currently being resolved, to de-duplicate concurrent
+  // profile fetches triggered by rapid auth-state events.
+  const resolvingForRef = useRef(null);
 
   const applyUser = useCallback((nextUser, nextSession = null) => {
     setUser(nextUser);
     setRole(nextUser?.role || null);
     setSession(nextSession);
   }, []);
+
+  /**
+   * Resolve the authoritative application profile (role/status/coverage from
+   * the `profiles` table via the backend) for a session and apply it. Used for
+   * any newly-established session that has not been resolved yet — most
+   * importantly the just-registered resident, whose role exists only in the
+   * database, never in the Supabase auth metadata. A 403/401 ends the session;
+   * a transient service failure keeps the session and surfaces a notice.
+   */
+  const resolveProfileForSession = useCallback(async (nextSession) => {
+    const uid = nextSession?.user?.id;
+    if (!uid || !supabase) return;
+    if (resolvingForRef.current === uid) return; // a resolve is already in flight
+    resolvingForRef.current = uid;
+    setIsResolvingProfile(true);
+    try {
+      const profileUser = await fetchProfileUser();
+      if (profileUser) {
+        resolvedProfileUser.current = profileToFrontendUser(profileUser);
+        applyUser(resolvedProfileUser.current, nextSession);
+      }
+    } catch (err) {
+      if (isAccountRejection(err)) {
+        await supabase.auth.signOut();
+        resolvedProfileUser.current = null;
+        applyUser(null, null);
+      } else {
+        setAuthNotice(TRANSIENT_PROFILE_NOTICE);
+      }
+    } finally {
+      resolvingForRef.current = null;
+      setIsResolvingProfile(false);
+    }
+  }, [applyUser]);
 
   // --- Session restoration + auth-state subscription -----------------------
   useEffect(() => {
@@ -148,7 +190,14 @@ export const AuthProvider = ({ children }) => {
               // Keep the database-resolved role/status/coverage.
               applyUser(resolved, nextSession);
             } else {
+              // A new/unresolved session (e.g. a resident who just completed
+              // registration). Show the metadata identity immediately, then
+              // resolve the authoritative role from the profiles table — the
+              // resident role is stored there, not in the auth metadata, so
+              // without this the role would stay null and the route guard would
+              // reject the account with /unauthorized.
               applyUser(toUser(nextSession.user), nextSession);
+              resolveProfileForSession(nextSession);
             }
           } else {
             resolvedProfileUser.current = null;
@@ -234,6 +283,39 @@ export const AuthProvider = ({ children }) => {
     if (shouldRedirect) window.location.href = '/login';
   }, [applyUser]);
 
+  /**
+   * Re-resolve the signed-in account's authoritative profile (role/status/
+   * coverage) from the backend and apply it to the current session — WITHOUT a
+   * re-login. This is how a resident whose identity was just approved by the
+   * Health Supervisor picks up their new role: `profiles.status` flips to
+   * 'active', so `effectiveRole` returns 'resident' and the limited/locked UI
+   * gives way to the full resident area. Uses the same profile fetch as
+   * sign-in; no polling, timers or hardcoded flags.
+   */
+  const refreshProfile = useCallback(async () => {
+    if (!isSupabaseConfigured || !supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    const currentSession = data?.session || null;
+    if (!currentSession?.user) return null;
+    try {
+      const profileUser = await fetchProfileUser();
+      if (profileUser) {
+        resolvedProfileUser.current = profileToFrontendUser(profileUser);
+        applyUser(resolvedProfileUser.current, currentSession);
+        return resolvedProfileUser.current.role;
+      }
+    } catch (err) {
+      if (isAccountRejection(err)) {
+        await supabase.auth.signOut();
+        resolvedProfileUser.current = null;
+        applyUser(null, null);
+      } else {
+        setAuthNotice(TRANSIENT_PROFILE_NOTICE);
+      }
+    }
+    return null;
+  }, [applyUser]);
+
   const value = {
     user,
     session,
@@ -241,11 +323,13 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated: Boolean(user),
     isLoadingAuth,
     authChecked,
+    isResolvingProfile,
     authError,
     authNotice,
     isSupabaseConfigured,
     login,
     logout,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

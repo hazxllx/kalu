@@ -452,6 +452,10 @@ export default function AddHouseholdPage() {
 
   const risk = useMemo(() => computeHouseholdRisk(form), [form]);
   const flags = useMemo(() => householdFlags(form), [form]);
+  // The classification is only meaningful once the required inputs that drive
+  // the score exist. Until then we must NOT imply the household is "Low Risk"
+  // (that read false on an empty form). The server remains the source of truth.
+  const riskReady = Boolean(form.waterSource && form.toilet);
   const hasMemberErrors = memberErrors.some((m) => Object.values(m).some(Boolean));
   const showDistance = form.waterSource && form.waterSource !== "level3";
 
@@ -1161,6 +1165,16 @@ export default function AddHouseholdPage() {
           onToggle={toggleSection}
         >
           <div className="rounded-btn border border-brand-border bg-white p-4">
+            {!riskReady ? (
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-brand-ink">Not yet calculated</p>
+                <p className="text-xs text-brand-gray">
+                  Complete the required household information (at least the primary water source and
+                  toilet facility) to calculate the household risk classification.
+                </p>
+              </div>
+            ) : (
+              <>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <HHBadge value={risk.level} label={`${risk.level} Risk`} />
@@ -1180,6 +1194,8 @@ export default function AddHouseholdPage() {
               </div>
             ) : (
               <p className="mt-3 text-xs text-brand-gray">No risk factors recorded yet â€” fill in the sections above.</p>
+            )}
+              </>
             )}
 
             <div className="mt-4 space-y-2.5">

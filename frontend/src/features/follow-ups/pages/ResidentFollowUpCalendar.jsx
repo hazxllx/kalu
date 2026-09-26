@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
-import { useFollowUpSchedules, followUpScheduleStore } from "@/services/local/followUpScheduleStore";
+import { residentFollowUpsApi } from "@/services/api";
 import { DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
 import ScheduleStatusBadge, { ConfirmationBadge, STATUS_DOTS } from "../components/ScheduleStatusBadge";
 import { dayLabel, formatTime, fromKey, groupByDay, monthLabel, toKey, weekLabel } from "../lib/scheduleDates";
@@ -19,24 +19,41 @@ const VIEWS = [
 /** Statuses that still require the resident to attend/prepare. */
 const UPCOMING_STATUSES = ["Scheduled", "Pending"];
 
+/** Resident-safe follow-up (camelCase from the API) → calendar schedule shape. */
+const mapToSchedule = (row) => ({
+  id: row.id,
+  date: row.scheduledDate || "",
+  time: row.scheduledTime || "",
+  location: row.location || "",
+  provider: row.assignedProvider || "",
+  instructions: row.instructions || "",
+  purpose: row.purpose || "",
+  status: row.status || "Scheduled",
+  confirmationStatus: row.confirmationStatus || (row.requiresResidentResponse ? "Awaiting Confirmation" : null),
+  respondedAt: row.respondedAt || "",
+  rejectionReason: row.rejectionReason || "",
+  requiresResidentResponse: row.requiresResidentResponse,
+});
+
 export default function ResidentFollowUpCalendar() {
   const { user } = useAuth();
-  const schedules = useFollowUpSchedules();
+  const [schedules, setSchedules] = useState([]);
+  const [loaded, setLoaded] = useState(false);
 
-  // The resident sees ONLY their own schedules — matched against the signed-in
-  // account from the same shared store the Health Supervisor calendar uses.
-  // (Hook runs before the guard below so hook order stays stable.)
-  const myName = (user?.name || "").trim().toLowerCase();
-  const mySchedules = useMemo(
-    () => schedules.filter((s) => (s.residentName || "").trim().toLowerCase() === myName),
-    [schedules, myName]
+  const reload = React.useCallback(
+    () => residentFollowUpsApi
+      .list()
+      .then((result) => setSchedules((result?.rows || []).map(mapToSchedule)))
+      .catch(() => setSchedules([]))
+      .finally(() => setLoaded(true)),
+    []
   );
+  React.useEffect(() => { reload(); }, [reload]);
 
-  // Resident role only — the route already sits inside the resident's
-  // protected area; this guard is a second line of defense. The unverified
-  // (resident-limited) account reaches only its own area, where follow-ups
-  // stay locked pending verification.
-  if (user?.role !== "resident") {
+  // Both verified residents and pending (resident-limited) accounts may view and
+  // respond to their own follow-ups. The resident-safe API already returns only
+  // the signed-in resident's records, so no client-side owner filtering is done.
+  if (user?.role !== "resident" && user?.role !== "resident-limited") {
     return (
       <>
         <PageHeader crumbs={["Follow-ups", "Schedule Calendar"]} title="My Follow-up Calendar" subtitle="Your scheduled follow-up activities." />
@@ -53,15 +70,16 @@ export default function ResidentFollowUpCalendar() {
     );
   }
 
-  return <ResidentCalendarContent schedules={mySchedules} />;
+  return <ResidentCalendarContent schedules={schedules} loaded={loaded} reload={reload} />;
 }
 
-function ResidentCalendarContent({ schedules }) {
+function ResidentCalendarContent({ schedules, loaded, reload }) {
   const [view, setView] = useState("month");
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState(null); // schedule id (detail modal)
   const [confirmTarget, setConfirmTarget] = useState(null); // schedule id
   const [rejectTarget, setRejectTarget] = useState(null); // schedule id
+  const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
 
   const today = new Date();
@@ -72,6 +90,19 @@ function ResidentCalendarContent({ schedules }) {
     setTimeout(() => setToast(null), 3200);
   };
 
+  const approve = async (id) => {
+    setBusy(true);
+    try { await residentFollowUpsApi.approve(id); setConfirmTarget(null); setSelected(null); await reload(); showToast("Follow-up confirmed — see you at your appointment."); }
+    catch (err) { showToast(err?.message || "Could not confirm the follow-up."); }
+    finally { setBusy(false); }
+  };
+  const reject = async (id, reason) => {
+    setBusy(true);
+    try { await residentFollowUpsApi.reject(id, reason); setRejectTarget(null); setSelected(null); await reload(); showToast("Follow-up rejected — the health team has been notified."); }
+    catch (err) { showToast(err?.message || "Could not reject the follow-up."); }
+    finally { setBusy(false); }
+  };
+
   /**
    * A schedule is confirmable/rejectable only while the follow-up itself is
    * still actionable (Scheduled/Pending) AND the resident has not responded
@@ -79,7 +110,8 @@ function ResidentCalendarContent({ schedules }) {
    */
   const isActionable = (s) =>
     ["Scheduled", "Pending"].includes(s.status) &&
-    (s.confirmationStatus || "Awaiting Confirmation") === "Awaiting Confirmation";
+    (s.confirmationStatus || "Awaiting Confirmation") === "Awaiting Confirmation" &&
+    s.requiresResidentResponse;
 
   const byDay = useMemo(() => groupByDay(schedules), [schedules]);
 
@@ -119,7 +151,7 @@ function ResidentCalendarContent({ schedules }) {
   const selectedSchedule = selected ? schedules.find((s) => s.id === selected) : null;
 
   /* --------------------------- Empty state --------------------------- */
-  if (schedules.length === 0) {
+  if (loaded && schedules.length === 0) {
     return (
       <>
         <PageHeader
@@ -295,12 +327,9 @@ function ResidentCalendarContent({ schedules }) {
                 <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
                   <button onClick={() => setConfirmTarget(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
                   <button
-                    onClick={() => {
-                      followUpScheduleStore.confirmSchedule(s.id);
-                      setConfirmTarget(null);
-                      showToast("Follow-up confirmed — see you at your appointment.");
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+                    disabled={busy}
+                    onClick={() => approve(s.id)}
+                    className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
                   >
                     <CheckCircle2 className="h-4 w-4" /> Yes, I will attend
                   </button>
@@ -318,12 +347,9 @@ function ResidentCalendarContent({ schedules }) {
         return (
           <RejectModal
             schedule={s}
+            busy={busy}
             onClose={() => setRejectTarget(null)}
-            onSubmit={(reason) => {
-              followUpScheduleStore.rejectSchedule(s.id, reason);
-              setRejectTarget(null);
-              showToast("Follow-up rejected — the health team has been notified.");
-            }}
+            onSubmit={(reason) => reject(s.id, reason)}
           />
         );
       })()}
@@ -339,7 +365,7 @@ function ResidentCalendarContent({ schedules }) {
 }
 
 /** Rejection modal: requires a reason before the schedule can be rejected. */
-function RejectModal({ schedule, onClose, onSubmit }) {
+function RejectModal({ schedule, busy, onClose, onSubmit }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
 
@@ -387,7 +413,8 @@ function RejectModal({ schedule, onClose, onSubmit }) {
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
             <button
               onClick={handleSubmit}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90"
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-60"
             >
               <Ban className="h-4 w-4" /> Reject Follow-up
             </button>

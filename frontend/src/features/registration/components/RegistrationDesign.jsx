@@ -205,14 +205,14 @@ export function ReviewBlock({ title, onEdit, items }) {
  * Active: filled navy circle with halo. Completed: navy with a check.
  * Upcoming: neutral outline. Connectors fill navy once a step completes.
  */
-export function StepIndicator({ current, steps, flowLabel }) {
+export function StepIndicator({ current, steps, flowLabel, showStepCount = true }) {
   const total = steps.length;
 
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3 border-b border-slate-200/80 pb-3">
         <p className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-brand-blue">
-          {flowLabel} · Step {String(current).padStart(2, "0")} of {String(total).padStart(2, "0")}
+          {flowLabel}{showStepCount ? ` · Step ${String(current).padStart(2, "0")} of ${String(total).padStart(2, "0")}` : ""}
         </p>
       </div>
 

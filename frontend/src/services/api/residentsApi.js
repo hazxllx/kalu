@@ -16,6 +16,9 @@ export const residentsApi = {
   create: (payload) => api.post('/residents', payload),
   update: (id, payload) => api.put(`/residents/${id}`, payload),
   remove: (id) => api.delete(`/residents/${id}`),
+  // Resident self-service: update own profile (contact number). The resident is
+  // derived from the authenticated session server-side; no id is sent.
+  updateMine: (payload) => api.patch('/residents/me', payload),
 };
 
 export default residentsApi;

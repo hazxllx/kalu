@@ -1,15 +1,14 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
-import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope } from "lucide-react";
+import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope, RefreshCw } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { useResidents } from "@/services/local/residentStore";
+import { tclApi, residentsApi } from "@/services/api";
 import {
-  useTcls,
-  tclStore,
   TCL_PROGRAMS,
   TCL_STATUSES,
   TCL_PRIORITIES,
@@ -34,6 +33,35 @@ const formatDate = (iso) => {
 };
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const ageFromBirth = (birthDate) => {
+  if (!birthDate) return "";
+  const d = new Date(birthDate);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+  return age >= 0 ? age : "";
+};
+
+/**
+ * Normalize a residents API row (firstName/lastName/sex/birthDate) into the
+ * shape this page renders (name/age/gender). Local-store residents already have
+ * `name`, so pass those through. Without this the name sort below crashed on
+ * `undefined.localeCompare`, which is what blanked the whole page.
+ */
+const normalizeResident = (r) => {
+  if (!r) return null;
+  const name = r.name || [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" ").trim();
+  return {
+    ...r,
+    name: name || "Unknown resident",
+    age: r.age ?? ageFromBirth(r.birthDate),
+    gender: r.gender || r.sex || "",
+    barangay: r.barangay || "",
+  };
+};
 
 function ModalShell({ title, subtitle, onClose, children }) {
   useEffect(() => {
@@ -68,8 +96,41 @@ function ModalShell({ title, subtitle, onClose, children }) {
 
 export default function TCLS() {
   const { user } = useAuth();
-  const allTcls = useTcls();
-  const allResidents = useResidents();
+  const localResidents = useResidents();
+  const [allTcls, setAllTcls] = useState([]);
+  const [allResidents, setAllResidents] = useState(() => (localResidents || []).map(normalizeResident).filter(Boolean));
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  const loadData = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return Promise.all([tclApi.list(), residentsApi.list({ limit: 200 })])
+      .then(([tclResult, residentResult]) => {
+        setAllTcls((tclResult?.rows || []).map((row) => ({
+          ...row,
+          residentId: row.resident_id,
+          program: row.program,
+          bhw: row.assigned_bhw,
+          lastVisit: row.last_visit,
+          nextVisit: row.next_visit,
+          nextVisitTime: row.next_visit_time,
+        })));
+        const residentRows = residentResult?.rows || residentResult || [];
+        setAllResidents(residentRows.map(normalizeResident).filter(Boolean));
+      })
+      .catch((err) => {
+        // A failed load must surface as an explicit error state, never a silent
+        // empty "no records found" list.
+        setLoadError(err?.message || "Unable to load TCL records.");
+        setAllTcls([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const scope = getSupervisorScope(user);
   const scopedBarangays =
@@ -81,7 +142,7 @@ export default function TCLS() {
       : allResidents;
     return pool
       .map((r) => ({ ...r }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }, [allResidents, scopedBarangays]);
 
   const residentById = useMemo(() => {
@@ -167,13 +228,13 @@ export default function TCLS() {
 
   const filteredResidents = residentOptions.filter(
     (r) =>
-      r.name.toLowerCase().includes(residentQuery.toLowerCase()) ||
-      r.id.toLowerCase().includes(residentQuery.toLowerCase())
+      (r.name || "").toLowerCase().includes(residentQuery.toLowerCase()) ||
+      (r.id || "").toLowerCase().includes(residentQuery.toLowerCase())
   );
 
   const selectedResident = residentOptions.find((r) => r.id === form.residentId) || null;
 
-  const saveTcl = () => {
+  const saveTcl = async () => {
     const nextErrors = {};
     if (!form.residentId) nextErrors.resident = "Please select a resident.";
     if (!form.program) nextErrors.program = "Please select a health program.";
@@ -181,43 +242,31 @@ export default function TCLS() {
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
-    const result = tclStore.addTcl({
-      resident: selectedResident,
-      program: form.program,
-      bhw: form.bhw,
-      priority: form.priority,
-      status: form.status,
-      lastVisit: form.lastVisit || "",
-      nextVisit: form.nextVisit || "",
-      nextVisitTime: form.nextVisitTime || "",
-      notes: form.notes,
-    });
-    if (!result.ok) {
-      setSubmitError(result.error);
-      return;
-    }
+    try {
+      const result = await tclApi.create({ residentId: form.residentId, program: form.program, assigned_bhw: form.bhw, priority: form.priority, status: form.status, last_visit: form.lastVisit || null, next_visit: form.nextVisit || null, next_visit_time: form.nextVisitTime || null, notes: form.notes });
+      setAllTcls((current) => [{ ...result.record, residentId: form.residentId, program: form.program, bhw: form.bhw, lastVisit: form.lastVisit, nextVisit: form.nextVisit, nextVisitTime: form.nextVisitTime }, ...current]);
+    } catch (err) { setSubmitError(err?.message || "Could not save TCL record."); return; }
     setShowAdd(false);
     showToast(`${selectedResident.name} added to ${form.program}.`);
   };
 
-  const saveSchedule = () => {
+  const saveSchedule = async () => {
     const nextErrors = {};
     if (!scheduleForm.nextVisit) nextErrors.nextVisit = "Please set the next visit date.";
     setScheduleErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
-    tclStore.scheduleVisit(showSchedule, {
-      nextVisit: scheduleForm.nextVisit,
-      nextVisitTime: scheduleForm.nextVisitTime,
-      lastVisit: scheduleForm.lastVisit,
-      notes: scheduleForm.notes,
-    });
+    try {
+      await tclApi.update(showSchedule, { next_visit: scheduleForm.nextVisit, next_visit_time: scheduleForm.nextVisitTime, last_visit: scheduleForm.lastVisit, notes: scheduleForm.notes });
+      setAllTcls((current) => current.map((row) => row.id === showSchedule ? { ...row, nextVisit: scheduleForm.nextVisit, nextVisitTime: scheduleForm.nextVisitTime, lastVisit: scheduleForm.lastVisit, notes: scheduleForm.notes } : row));
+    } catch (err) { setSubmitError(err?.message || "Could not save TCL schedule."); return; }
     showToast("Visit schedule saved.");
     setShowSchedule(null);
   };
 
-  const changeStatus = (status) => {
+  const changeStatus = async (status) => {
     if (!showView) return;
-    tclStore.updateStatus(showView, status);
+    try { await tclApi.update(showView, { status }); setAllTcls((current) => current.map((row) => row.id === showView ? { ...row, status } : row)); }
+    catch (err) { setSubmitError(err?.message || "Could not update TCL status."); return; }
     showToast(`Status updated to ${status}.`);
   };
 
@@ -289,50 +338,66 @@ export default function TCLS() {
         ))}
       </div>
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        renderCell={(key, row) => {
-          if (key === "resident")
-            return (
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-xs font-semibold shrink-0">
-                  {row.resident?.name?.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <p className="font-medium text-brand-ink truncate">{row.resident?.name || "—"}</p>
-                  <p className="text-xs text-brand-gray">{row.resident?.barangay || ""}</p>
-                </div>
-              </div>
-            );
-          if (key === "program") return <span className="text-brand-ink">{row.program}</span>;
-          if (key === "bhw") return <span className="text-brand-gray">{row.bhw || "—"}</span>;
-          if (key === "lastVisit") return <span className="text-brand-gray">{formatDate(row.lastVisit)}</span>;
-          if (key === "nextVisit")
-            return row.nextVisit ? (
-              <div>
-                <p className="text-brand-ink">{formatDate(row.nextVisit)}</p>
-                {row.nextVisitTime && <p className="text-xs text-brand-gray">{row.nextVisitTime}</p>}
-              </div>
-            ) : (
-              <span className="text-brand-gray">—</span>
-            );
-          if (key === "priority") return <StatusBadge value={row.priority} />;
-          if (key === "status") return <StatusBadge value={row.status} />;
-          if (key === "actions")
-            return (
-              <div className="flex gap-3">
-                <button onClick={() => setShowView(row.id)} className="text-brand-blue text-sm font-medium hover:underline">View</button>
-                <button onClick={() => openSchedule(row)} className="text-brand-green text-sm font-medium hover:underline">Schedule</button>
-              </div>
-            );
-          return row[key];
-        }}
-      />
-      {rows.length === 0 && (
-        <p className="py-8 text-center text-sm text-brand-gray">
-          No target clients found in this program.
-        </p>
+      {loadError ? (
+        <Card className="p-10 text-center">
+          <p className="text-sm font-medium text-brand-danger">{loadError}</p>
+          <button
+            onClick={loadData}
+            className="mt-3 inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue transition-colors"
+          >
+            <RefreshCw className="h-4 w-4" /> Retry
+          </button>
+        </Card>
+      ) : (
+        <>
+          <DataTable
+            columns={columns}
+            rows={rows}
+            renderCell={(key, row) => {
+              if (key === "resident")
+                return (
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-xs font-semibold shrink-0">
+                      {(row.resident?.name || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-brand-ink truncate">{row.resident?.name || "—"}</p>
+                      <p className="text-xs text-brand-gray">{row.resident?.barangay || ""}</p>
+                    </div>
+                  </div>
+                );
+              if (key === "program") return <span className="text-brand-ink">{row.program}</span>;
+              if (key === "bhw") return <span className="text-brand-gray">{row.bhw || "—"}</span>;
+              if (key === "lastVisit") return <span className="text-brand-gray">{formatDate(row.lastVisit)}</span>;
+              if (key === "nextVisit")
+                return row.nextVisit ? (
+                  <div>
+                    <p className="text-brand-ink">{formatDate(row.nextVisit)}</p>
+                    {row.nextVisitTime && <p className="text-xs text-brand-gray">{row.nextVisitTime}</p>}
+                  </div>
+                ) : (
+                  <span className="text-brand-gray">—</span>
+                );
+              if (key === "priority") return <StatusBadge value={row.priority} />;
+              if (key === "status") return <StatusBadge value={row.status} />;
+              if (key === "actions")
+                return (
+                  <div className="flex gap-3">
+                    <button onClick={() => setShowView(row.id)} className="text-brand-blue text-sm font-medium hover:underline">View</button>
+                    <button onClick={() => openSchedule(row)} className="text-brand-green text-sm font-medium hover:underline">Schedule</button>
+                  </div>
+                );
+              return row[key];
+            }}
+          />
+          {loading ? (
+            <p className="py-8 text-center text-sm text-brand-gray">Loading TCL records…</p>
+          ) : rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-brand-gray">
+              No TCL records found{cat === "All" ? "" : ` in ${cat}`}.
+            </p>
+          ) : null}
+        </>
       )}
 
       {/* Add TCL */}

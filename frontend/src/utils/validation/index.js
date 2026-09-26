@@ -23,7 +23,11 @@ export const CIVIL_STATUSES = Object.freeze(['Single', 'Married', 'Widowed', 'Se
 export const MIN_REJECTION_REASON = 5;
 
 const PH_MOBILE = /^(?:\+63|0)9\d{9}$/;
+const PH_MOBILE_STRICT = /^09\d{9}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** Controlled Zone values for a resident/household address. */
+export const ZONE_VALUES = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8]);
 
 export const asString = (value) => (value === null || value === undefined ? '' : String(value));
 export const text = (value) => asString(value).trim();
@@ -32,7 +36,16 @@ export const isBlank = (value) => text(value) === '';
 export const hasMaxLength = (value, max) => asString(value).length <= max;
 export const normalizePhone = (value) => asString(value).replace(/[\s()\-.]/g, '');
 export const isPhonePH = (value) => PH_MOBILE.test(normalizePhone(value));
+/**
+ * Strict registration mobile: EXACTLY 11 digits, starting 09, no separators or
+ * letters. Mirrors backend `isStrictMobile`. Kept separate from `isPhonePH` so
+ * other forms (e.g. household member contact) keep their tolerant rule.
+ */
+export const isStrictMobile = (value) => PH_MOBILE_STRICT.test(asString(value));
 export const isEmail = (value) => EMAIL.test(text(value));
+
+/** Keep only digits (used to enforce numeric-only mobile input). */
+export const digitsOnly = (value) => asString(value).replace(/\D/g, '');
 
 export const parseDate = (value) => {
   const raw = text(value);
@@ -75,6 +88,26 @@ export const email = (value, { label = 'Email', isRequired = true } = {}) => {
 export const phone = (value, { label = 'Contact number', isRequired = true } = {}) => {
   if (isBlank(value)) return isRequired ? `${label} is required.` : '';
   if (!isPhonePH(value)) return 'Contact number must be a valid PH mobile number (e.g. 0917 123 4567).';
+  return '';
+};
+
+/**
+ * Strict registration mobile: exactly 11 numeric digits (e.g. 09381829120).
+ * No spaces, dashes, letters or +63 prefix.
+ */
+export const strictMobile = (value, { label = 'Mobile number', isRequired = true } = {}) => {
+  if (isBlank(value)) return isRequired ? `${label} is required.` : '';
+  if (!isStrictMobile(value)) {
+    return 'Mobile number must be exactly 11 digits with no spaces or symbols (e.g. 09381829120).';
+  }
+  return '';
+};
+
+/** Controlled Zone (1..8). */
+export const zone = (value, { label = 'Zone', isRequired = true } = {}) => {
+  if (isBlank(value)) return isRequired ? `${label} is required.` : '';
+  const n = Number(String(value).replace(/^zone\s*/i, ''));
+  if (!Number.isInteger(n) || !ZONE_VALUES.includes(n)) return 'Select a zone from 1 to 8.';
   return '';
 };
 
@@ -149,7 +182,10 @@ export default {
   isBlank,
   isEmail,
   isPhonePH,
+  isStrictMobile,
+  digitsOnly,
   normalizePhone,
+  ZONE_VALUES,
   parseDate,
   isFutureDate,
   ageFromDate,
@@ -158,6 +194,8 @@ export default {
   required,
   email,
   phone,
+  strictMobile,
+  zone,
   dateOfBirth,
   enumValue,
   numeric,

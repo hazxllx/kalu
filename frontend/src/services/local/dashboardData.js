@@ -79,7 +79,22 @@ export const midwifeStats = [];
 
 export const healthServices = [];
 
-export const barangayServices = [];
+// Barangay Health Station service OFFERINGS (what the station provides), shown
+// on /app/health_supervisor/services. This is the offering catalog only - NOT
+// individual resident service records. It is currently a client-side catalog
+// (the Health Services page has no persisted backend table); the Health
+// Supervisor can add/edit/remove offerings and set availability. Family
+// Planning and Cancer Screening are listed here as services (not as separate
+// sidebar items). Descriptions are neutral; clinical workflow/eligibility for
+// Family Planning and Cancer Screening requires validation with RHU/MHO.
+export const barangayServices = [
+  { id: "SVC-001", name: "Consultation", days: "Monday - Friday", hours: "8:00 AM - 5:00 PM", description: "General health consultation and assessment.", status: "Available", icon: "Stethoscope" },
+  { id: "SVC-002", name: "TCLS", days: "Monday - Friday", hours: "8:00 AM - 5:00 PM", description: "Target Client List monitoring for community health programs.", status: "Available", icon: "Activity" },
+  { id: "SVC-003", name: "M1 / Maternal", days: "Monday - Friday", hours: "8:00 AM - 5:00 PM", description: "Maternal health monitoring and recording.", status: "Available", icon: "Heart" },
+  { id: "SVC-004", name: "Immunization", days: "Monday - Friday", hours: "8:00 AM - 5:00 PM", description: "Routine immunization services.", status: "Available", icon: "Syringe" },
+  { id: "SVC-005", name: "Family Planning", days: "Monday - Friday", hours: "8:00 AM - 5:00 PM", description: "Family planning counseling and services.", status: "Available", icon: "Heart" },
+  { id: "SVC-006", name: "Cancer Screening", days: "Monday - Friday", hours: "8:00 AM - 5:00 PM", description: "Cancer screening and early detection services.", status: "Available", icon: "Shield" },
+];
 
 export const m1Records = [];
 

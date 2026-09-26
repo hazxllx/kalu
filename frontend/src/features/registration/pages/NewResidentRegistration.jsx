@@ -19,6 +19,7 @@ import {
   btnGhost,
 } from "@/features/registration/components/RegistrationDesign";
 import DatePicker from "@/components/common/DatePicker";
+import { REGISTRATION_OTP_LENGTH, isValidRegistrationOtp } from "@/features/registration/otp";
 import { supabase } from "@/lib/supabase";
 import { registrationApi } from "@/services/api";
 import { postFormData } from "@/services/api/apiClient";
@@ -27,15 +28,21 @@ import {
   CIVIL_STATUSES,
   NAME_SUFFIXES,
   SEX_OPTIONS,
+  ZONE_VALUES,
   dateOfBirth,
+  digitsOnly,
   email as validateEmail,
   enumValue,
-  phone as validatePhone,
+  strictMobile as validateStrictMobile,
+  zone as validateZone,
   required,
   validateFields,
 } from "@/utils/validation";
 
-const BARANGAYS = ["San Isidro", "San Antonio", "Old San Roque"];
+// Fallback barangays for the Pili deployment. The live list is loaded from the
+// backend (public.barangays) on mount so this is only a resilience fallback and
+// is never the source of truth.
+const FALLBACK_BARANGAYS = ["San Isidro", "San Antonio", "Old San Roque"];
 
 // Government ID types selectable in Step 3. Values match the backend
 // `GOVERNMENT_ID_TYPES` in backend/src/validators/documents.validators.js.
@@ -51,13 +58,10 @@ const GOVT_ID_TYPES = [
 
 const GOVT_ID_LABEL = Object.fromEntries(GOVT_ID_TYPES.map((o) => [o.value, o.label]));
 
-// Length of the verification token the live (hosted) Supabase project sends in
-// the Confirm Signup email — confirmed from the actually delivered email
-// (8 digits, e.g. 60295568). The `otp_length = 6` in supabase/config.toml
-// applies only to a local `supabase start` stack, NOT to the hosted project
-// this frontend talks to. The UI must render this many boxes and the ENTIRE
-// code is always passed to verifyOtp() unmodified — never truncated.
-const OTP_LENGTH = 8;
+// Supabase Auth email OTP length for New Resident Registration. This is the
+// registration-only constant and is deliberately kept separate from the Transfer
+// of Residency OTP (a custom 4-digit backend code). See features/registration/otp.js.
+const OTP_LENGTH = REGISTRATION_OTP_LENGTH;
 
 function calcAge(dob) {
   if (!dob) return "";
@@ -98,10 +102,40 @@ export default function NewResidentRegistration() {
   const [show, setShow] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [possibleExisting, setPossibleExisting] = useState(false);
   const [barangayQuery, setBarangayQuery] = useState("");
   const [barangayOpen, setBarangayOpen] = useState(false);
+  // Live barangay list from the backend (public.barangays for Pili). Falls back
+  // to the canonical three if the lookup is unavailable, so the field always
+  // works, but the DB is the source of truth.
+  const [barangayList, setBarangayList] = useState(FALLBACK_BARANGAYS);
   /** @type {[Record<string, string>, Function]} */
   const [errors, setErrors] = useState({});
+
+  // Load the real barangay list for the Municipality of Pili from the backend
+  // (public.barangays is public-readable). This keeps the dropdown data-driven
+  // instead of hard-coded in the component; the fallback list only applies if
+  // the query is unavailable.
+  useEffect(() => {
+    let cancelled = false;
+    if (!supabase) return undefined;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("barangays")
+          .select("name, status, municipalities!inner(name)")
+          .eq("municipalities.name", "Pili")
+          .eq("status", "Active")
+          .order("name", { ascending: true });
+        if (!cancelled && !error && Array.isArray(data) && data.length) {
+          setBarangayList(data.map((b) => b.name));
+        }
+      } catch {
+        /* keep the fallback list */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Email verification (real Supabase Confirm Signup OTP — no local/fake OTP)
   // emailPhase: "idle" | "sending" | "sent" | "verifying" | "verified"
@@ -191,8 +225,9 @@ export default function NewResidentRegistration() {
 
   const verifyEmail = async () => {
     if (emailVerified || emailPhase === "verifying") return;
+    // Keep the code as a STRING so leading zeros (e.g. "012345") are preserved.
     const code = otpDigits.join("");
-    if (code.length !== OTP_LENGTH) {
+    if (!isValidRegistrationOtp(code)) {
       setOtpError(`Please enter the complete ${OTP_LENGTH}-digit code from your email.`);
       return;
     }
@@ -287,7 +322,7 @@ export default function NewResidentRegistration() {
     province: transferData?.province || "Camarines Sur",
     municipality: transferData?.municipality || "Pili",
     barangay: transferData?.barangay || "",
-    sitio: transferData?.sitio || "",
+    zone: transferData?.zone || "",
     street: transferData?.street || "",
     houseNo: transferData?.houseNo || "",
     landmark: transferData?.landmark || "",
@@ -304,6 +339,7 @@ export default function NewResidentRegistration() {
     identity: {
       governmentIdType: "",
       governmentIdTypeOther: "",
+      identityNo: "",
       governmentIdFront: null,
       governmentIdBack: null,
       identityPhoto: null,
@@ -313,6 +349,14 @@ export default function NewResidentRegistration() {
   const set = (key) => (e) => {
     const val = e.target ? e.target.value : e;
     if (key === "email") return setEmailValue(val);
+    if (key === "mobile") {
+      // Numeric-only, capped at 11 digits. Prevents letters, spaces, symbols
+      // and paste of formatted numbers ever entering the field.
+      const digits = digitsOnly(val).slice(0, 11);
+      setForm((p) => ({ ...p, mobile: digits }));
+      if (errors.mobile) setErrors((p) => ({ ...p, mobile: "" }));
+      return;
+    }
     if (key === "identity") {
       // Identity fields are set via targeted setters below.
       return;
@@ -330,6 +374,10 @@ export default function NewResidentRegistration() {
   const setIdTypeOther = (e) => {
     setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdTypeOther: e.target.value } }));
     setErrors((prev) => ({ ...prev, governmentIdTypeOther: "" }));
+  };
+  const setIdentityNo = (e) => {
+    setForm((p) => ({ ...p, identity: { ...p.identity, identityNo: e.target.value } }));
+    setErrors((prev) => ({ ...prev, identityNo: "" }));
   };
   const setIdFront = (file) => {
     setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdFront: file } }));
@@ -360,7 +408,7 @@ export default function NewResidentRegistration() {
   };
 
   const pwStrength = useMemo(() => checkStrength(form.password), [form.password]);
-  const filteredBarangays = BARANGAYS.filter((b) => b.toLowerCase().includes(barangayQuery.toLowerCase()));
+  const filteredBarangays = barangayList.filter((b) => b.toLowerCase().includes(barangayQuery.toLowerCase()));
 
   // A successful verifyOtp() stores a real Supabase session in the browser
   // client. If the resident reloads the page mid-registration, restore the
@@ -397,9 +445,9 @@ export default function NewResidentRegistration() {
       errs = validateFields(form, {
         email: (v) => validateEmail(v, { label: "Email address" }),
         password: (v) => required(v, "Password"),
-        mobile: (v) => validatePhone(v, { label: "Mobile number" }),
+        mobile: (v) => validateStrictMobile(v, { label: "Mobile number" }),
         barangay: (v) => required(v, "Barangay"),
-        sitio: (v) => required(v, "Sitio / Purok"),
+        zone: (v) => validateZone(v, { label: "Zone" }),
       });
       if (form.password !== form.confirmPassword) errs.confirmPassword = "Passwords do not match";
       if (!emailVerified) errs.emailVerified = "Please verify your email address before continuing.";
@@ -408,6 +456,7 @@ export default function NewResidentRegistration() {
     if (s === 3) {
       const idt = form.identity;
       if (!idt.governmentIdType) errs.governmentIdType = "Select your government-issued ID.";
+      if (!idt.identityNo.trim()) errs.identityNo = "Enter the number shown on your government ID.";
       if (idt.governmentIdType === "other" && !idt.governmentIdTypeOther.trim()) {
         errs.governmentIdTypeOther = "Please specify the type of government-issued ID.";
       }
@@ -444,7 +493,7 @@ export default function NewResidentRegistration() {
       const address = [
         form.houseNo.trim(),
         form.street.trim(),
-        form.sitio.trim(),
+        form.zone ? `Zone ${form.zone}` : "",
         `Barangay ${form.barangay}`,
         form.municipality,
         form.province,
@@ -463,14 +512,17 @@ export default function NewResidentRegistration() {
           permanentAddress: address,
           cellphoneNo: form.mobile.trim(),
           barangay: form.barangay,
+          zone: form.zone ? Number(form.zone) : undefined,
           // Identity metadata so the Health Supervisor can see the selected ID
           // type and the submitted identity documents. The individual files are
           // uploaded separately to the documents API below.
           identity: {
             governmentIdType: idt.governmentIdType,
             governmentIdTypeOther: idt.governmentIdType === "other" ? idt.governmentIdTypeOther.trim() : "",
+            identityNo: idt.identityNo.trim(),
             governmentIdTypeDisplay: govTypeDisplay,
           },
+          identityNo: idt.identityNo.trim(),
         },
       };
 
@@ -539,16 +591,37 @@ export default function NewResidentRegistration() {
         }
       }
 
-      sessionStorage.setItem('registrationSuccess', JSON.stringify({
-        residentId: resident?.id || '',
-        healthRecordNo: resident?.healthRecordNo || '',
-        barangay: resident?.barangay || form.barangay,
-        name: `${form.firstName} ${form.lastName}`.trim(),
-      }));
-
-      navigate('/registration-success');
+      // The account is already authenticated from the signup verification.
+      // Go straight to the limited resident dashboard; the verification banner
+      // there is the post-registration confirmation state.
+      navigate('/app/resident-limited/dashboard');
     } catch (err) {
-      const message = err?.message || 'Registration failed. Please try again.';
+      // Preserve the exact technical error for developers without exposing it
+      // to residents. The backend now returns a real message in the standard
+      // { error: { message, details } } envelope (see apiClient), so this is
+      // the actual validation/processing failure, not a generic status string.
+      if (import.meta.env?.DEV) {
+        // eslint-disable-next-line no-console
+        console.error('Registration submit failed:', err?.status, err?.message, err?.payload);
+      }
+
+      const status = err?.status;
+      const backendMessage = typeof err?.message === 'string' ? err.message : '';
+      const isGenericStatusOnly = /^Request failed with status/i.test(backendMessage);
+
+      let message;
+      if (status === 409) {
+        message = backendMessage && !isGenericStatusOnly
+          ? backendMessage
+          : 'This account may already have a registration on file. Please sign in or verify your identity.';
+      } else if (backendMessage && !isGenericStatusOnly) {
+        message = backendMessage;
+      } else {
+        message =
+          'Your registration could not be submitted because some registration information could not be processed. Please review your information and try again.';
+      }
+
+      setPossibleExisting(status === 409);
       setErrors((prev) => ({ ...prev, submit: message }));
       setSubmitting(false);
     }
@@ -821,7 +894,23 @@ export default function NewResidentRegistration() {
                   <SectionKicker>Contact Information</SectionKicker>
                   <div className="mt-5 space-y-5">
                     <Field label="Mobile Number" required error={errors.mobile}>
-                      <input type="tel" placeholder="09XX XXX XXXX" value={form.mobile} onChange={set("mobile")} className={inputCls(errors.mobile)} />
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        autoComplete="tel"
+                        pattern="[0-9]*"
+                        maxLength={11}
+                        placeholder="09381829120"
+                        value={form.mobile}
+                        onChange={set("mobile")}
+                        onKeyDown={(e) => {
+                          // Block anything that is not a digit or an editing key.
+                          const allowed = ["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"];
+                          if (allowed.includes(e.key) || e.ctrlKey || e.metaKey) return;
+                          if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                        }}
+                        className={inputCls(errors.mobile)}
+                      />
                     </Field>
                     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                       <Field label="Province">
@@ -877,9 +966,18 @@ export default function NewResidentRegistration() {
                     </Field>
 
                     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                      <Field label="Sitio / Purok" required error={errors.sitio}>
-                        <input type="text" placeholder="Purok 5" value={form.sitio} onChange={set("sitio")} className={inputCls(errors.sitio)} />
-                      </Field>
+                      <SelectField
+                        label="Zone"
+                        required
+                        error={errors.zone}
+                        value={form.zone}
+                        onChange={set("zone")}
+                      >
+                        <option value="">Select or search zone</option>
+                        {ZONE_VALUES.map((z) => (
+                          <option key={z} value={String(z)}>{`Zone ${z}`}</option>
+                        ))}
+                      </SelectField>
                       <Field label="Street" optional>
                         <input type="text" placeholder="Mabini St." value={form.street} onChange={set("street")} className={inputCls()} />
                       </Field>
@@ -965,6 +1063,18 @@ export default function NewResidentRegistration() {
                       />
                     </div>
                   </Field>
+
+                  <div className="mt-4">
+                    <Field label="Government ID Number" required error={errors.identityNo} hint="Used privately to prevent duplicate resident records.">
+                      <input
+                        type="text"
+                        value={form.identity.identityNo}
+                        onChange={setIdentityNo}
+                        className={inputCls(errors.identityNo)}
+                        autoComplete="off"
+                      />
+                    </Field>
+                  </div>
 
                   {form.identity.governmentIdType === "other" && (
                     <div className="mt-4">
@@ -1065,7 +1175,7 @@ export default function NewResidentRegistration() {
                 <ReviewBlock title="Contact Information" onEdit={() => goTo(2)} items={[
                   ["Email", form.email],
                   ["Mobile Number", form.mobile],
-                  ["Address", `${form.houseNo ? form.houseNo + ", " : ""}${form.street ? form.street + ", " : ""}Purok ${form.sitio}, Barangay ${form.barangay}, ${form.municipality}, ${form.province}`],
+                  ["Address", `${form.houseNo ? form.houseNo + ", " : ""}${form.street ? form.street + ", " : ""}${form.zone ? "Zone " + form.zone + ", " : ""}Barangay ${form.barangay}, ${form.municipality}, ${form.province}`],
                   ["Nearest Landmark", form.landmark || "N/A"],
                 ]} />
                 <ReviewBlock title="Identity Verification" onEdit={() => goTo(3)} items={[
@@ -1089,7 +1199,16 @@ export default function NewResidentRegistration() {
           {errors.submit && (
             <div role="alert" className="mt-6 flex items-start gap-2.5 rounded-xl border border-brand-danger/25 bg-brand-danger/5 px-4 py-3">
               <Shield className="mt-0.5 h-4 w-4 shrink-0 text-brand-danger" strokeWidth={1.9} />
-              <p className="text-[12.5px] leading-relaxed text-brand-danger">{errors.submit}</p>
+              <div className="min-w-0">
+                <p className="text-[12.5px] leading-relaxed text-brand-danger">{errors.submit}</p>
+                {possibleExisting && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link to="/login" className="rounded-lg bg-brand-blue px-3 py-2 text-xs font-bold text-white">Sign in</Link>
+                    <Link to="/register/transfer" className="rounded-lg border border-brand-blue/25 px-3 py-2 text-xs font-bold text-brand-blue">Verify my identity</Link>
+                    <Link to="/register" className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600">Cancel</Link>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

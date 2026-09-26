@@ -1,8 +1,7 @@
 import { api } from './apiClient';
 
 /**
- * Consultations API (role-scoped: Health Supervisor / PHN). Returns 501 until
- * the verified schema is connected.
+ * Consultations API backed by the scope-enforced visits workflow.
  */
 export const consultationsApi = {
   list: (params) => api.get('/consultations', { params }),
