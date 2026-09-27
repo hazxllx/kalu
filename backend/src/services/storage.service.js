@@ -31,7 +31,7 @@ export const uploadDocument = async ({ file, residentId, documentId }) => {
     throw new Error(`Upload failed: ${error.message}`);
   }
 
-  const { data: urlData } = supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
+  const { data: urlData } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
 
   return {
     storagePath: path,

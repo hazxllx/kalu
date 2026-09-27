@@ -1,9 +1,8 @@
 /**
  * KALUSAGAP canonical application roles (single source of truth for the API).
  *
- * These are the *application* roles. They are expected to be stored on each
- * user (e.g. in a `profiles` table column or in the Supabase Auth user's
- * `app_metadata.role`) once the verified database structure is available.
+ * These roles are stored on `profiles.role`. Supabase Auth metadata may carry
+ * a copy, but backend authorization resolves the profile from the database.
  *
  * IMPORTANT: role -> feature mapping below reflects the KALUSAGAP role brief.
  * It is used by the `authorize()` middleware. It intentionally follows
@@ -72,7 +71,17 @@ export const FEATURE_ROLES = Object.freeze({
 
   // Monitoring / aggregate information
   reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
-  analytics: [ROLES.MHO, ROLES.HEALTH_SUPERVISOR],
+  // Community Health Monitoring / map analytics. MHO + PHN are municipality-wide
+  // (they see every authorised barangay in Pili); a Health Supervisor is scoped
+  // by the session to their assigned barangay only. RHU Personnel is NOT here:
+  // its role does not include community monitoring.
+  analytics: [ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR],
+
+  // FHSIS M1 monthly report. Read: barangay + municipality monitoring roles.
+  // Write (record underlying events / remarks / header): barangay-scoped staff
+  // plus PHN. Scope is re-enforced in the service and by Supabase RLS.
+  m1Read: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
+  m1Write: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.BHW],
 
   // Cross-cutting
   notifications: ALL_ROLES,

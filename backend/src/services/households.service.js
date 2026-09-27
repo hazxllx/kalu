@@ -16,7 +16,9 @@
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { computeHouseholdRisk, householdFlags } from '../utils/householdRisk.js';
+import { computeBMI } from '../utils/bmi.js';
 import { assignedBarangay } from '../config/scope.js';
+import { recordHouseholdAudit, emitHouseholdWorkflow } from './householdWorkflow.js';
 
 const READ_ROLES = ['bhw', 'health_supervisor', 'phn'];
 const WRITE_ROLES = ['bhw', 'health_supervisor', 'phn'];
@@ -32,6 +34,31 @@ const TOILET_TYPES = ['ws_own', 'ws_shared', 'open_pit', 'antipolo', 'none'];
 const VERIFICATION_STATUSES = ['Pending Verification', 'Verified', 'Returned for Correction'];
 
 const text = (value) => String(value ?? '').trim();
+
+/**
+ * Completeness gate for verification/approval (issue #5).
+ *
+ * A Health Supervisor must not be able to approve/verify a household that is
+ * missing the required profiling data. This is a PURE function (exported for
+ * unit testing) returning the human-readable list of missing items; the service
+ * throws a 422 with the list so the frontend can show exactly what is missing
+ * instead of a bare "Invalid request".
+ *
+ * `merged` is the household view with any same-request patch already applied.
+ */
+export const missingForVerification = (merged = {}) => {
+  const missing = [];
+  const roster = Array.isArray(merged.members) ? merged.members : [];
+  if (!text(merged.headName)) missing.push('Household head');
+  if (!text(merged.purok)) missing.push('Purok/Zone');
+  if (!text(merged.streetAddress)) missing.push('Street address / sitio');
+  if (!text(merged.respondentFirst) && !text(merged.respondentLast)) missing.push('Respondent information');
+  if (!WATER_SOURCES.includes(text(merged.waterSource))) missing.push('Water source');
+  if (!TOILET_TYPES.includes(text(merged.toiletType))) missing.push('Toilet facility');
+  if (!text(merged.sanitationAccess)) missing.push('Sanitation access');
+  if (roster.length < 1) missing.push('At least one household member');
+  return missing;
+};
 
 /** True when the household is outside the caller's scope (treated as absent). */
 const outOfScope = (household, user) => {
@@ -182,8 +209,11 @@ export const createHousehold = async ({ user, payload = {} }) => {
     contact: text(payload.contact),
     families,
     monthlyIncome: payload.monthlyIncome === '' || payload.monthlyIncome === undefined ? null : Number(payload.monthlyIncome) || null,
-    hhStatus: HH_STATUSES.includes(payload.hhStatus) ? payload.hhStatus : 'Pending',
-    approvalStatus: APPROVAL_STATUSES.includes(payload.approvalStatus) ? payload.approvalStatus : 'Not yet approved',
+    hhStatus: HH_STATUSES.includes(payload.hhStatus) && payload.hhStatus !== 'Approved' ? payload.hhStatus : 'Pending',
+    // A newly created household is never born "Approved": approval is a
+    // Health-Supervisor verification outcome, never a create-time client field
+    // (separation of duties, issue #6).
+    approvalStatus: 'Not yet approved',
     respondentLast: text(payload.respondentLast),
     respondentFirst: text(payload.respondentFirst),
     respondentMaiden: text(payload.respondentMaiden),
@@ -218,7 +248,10 @@ export const createHousehold = async ({ user, payload = {} }) => {
     });
   }
 
-  return repository.getHousehold(household.id);
+  const full = await repository.getHousehold(household.id);
+  // Best-effort audit of the creation event (no notification on create).
+  await recordHouseholdAudit({ user, action: 'HOUSEHOLD_CREATED', household: full });
+  return full;
 };
 
 export const updateHousehold = async ({ id, user, patch = {} }) => {
@@ -229,6 +262,16 @@ export const updateHousehold = async ({ id, user, patch = {} }) => {
   const touchesVerification = VERIFICATION_FIELDS.some((f) => patch[f] !== undefined);
   if (touchesVerification && !VERIFY_ROLES.includes(user?.role)) {
     throw ApiError.forbidden('Verification outcomes can only be set by the Health Supervisor.');
+  }
+
+  // Separation of duties (issue #6): the *approval* decision — the approval
+  // status field, or moving the household to the 'Approved' HH status — is a
+  // verification-authority action. A BHW (data collector) may encode/submit but
+  // must never declare a household Approved itself.
+  const setsApprovalStatus = patch.approvalStatus !== undefined;
+  const setsApprovedHhStatus = patch.hhStatus === 'Approved';
+  if ((setsApprovalStatus || setsApprovedHhStatus) && !VERIFY_ROLES.includes(user?.role)) {
+    throw ApiError.forbidden('Only the Health Supervisor can approve a household.');
   }
   // The reviewer identity and timestamp always come from the authenticated
   // session — never from the client. A returned-for-correction outcome requires
@@ -266,6 +309,23 @@ export const updateHousehold = async ({ id, user, patch = {} }) => {
   const { members, errors: memberErrors } = normalizeMembers(patch.members);
   if (memberErrors.length) throw ApiError.unprocessable('Please correct the member details.', memberErrors);
 
+  // Completeness gate (issue #5): a household cannot be verified/approved while
+  // required profiling data is missing. Applies to any approval-granting patch
+  // (Verified verification outcome, or an Approved approval/HH status). We check
+  // the household as it will be AFTER this patch (same-request field edits count).
+  const isApproving =
+    patch.verificationStatus === 'Verified' ||
+    patch.approvalStatus === 'Approved' ||
+    patch.hhStatus === 'Approved';
+  if (isApproving) {
+    const roster = members === undefined ? (household.members || []) : members;
+    const merged = { ...household, ...patch, members: roster };
+    const missing = missingForVerification(merged);
+    if (missing.length) {
+      throw ApiError.unprocessable('Approval blocked. Complete the required household information first.', missing);
+    }
+  }
+
   const nextPatch = { ...patch };
   delete nextPatch.riskScore;
   delete nextPatch.riskLevel;
@@ -279,7 +339,20 @@ export const updateHousehold = async ({ id, user, patch = {} }) => {
   const risk = recomputeRisk(household, nextPatch, members === undefined ? undefined : members);
   const updated = await repository.updateHousehold(id, { ...nextPatch, ...risk });
   if (!updated) throw ApiError.notFound('Household not found');
-  return repository.getHousehold(id);
+  const full = await repository.getHousehold(id);
+
+  // Best-effort audit + notification for lifecycle transitions (submit /
+  // resubmit / verify / return). Reuses the existing health_audit_logs and
+  // notifications tables; never rolls back the write above.
+  await emitHouseholdWorkflow({
+    user,
+    previous: household,
+    patch: nextPatch,
+    household: full,
+    reason: text(nextPatch.correctionReason),
+  });
+
+  return full;
 };
 
 export const addHouseholdMember = async ({ id, user, member = {} }) => {
@@ -322,6 +395,93 @@ export const removeHouseholdMember = async ({ id, memberId, user }) => {
   return { success: true, household: await repository.getHousehold(household.id) };
 };
 
+// ---------------------------------------------------------------------------
+// Member health profile (foundation): anthropometrics + server-computed BMI,
+// mortality, trans-out, remarks. Attaches 1:1 to an existing household member;
+// no new person record is ever created here.
+// ---------------------------------------------------------------------------
+
+/** Parse a positive measurement to a number, or null when blank/invalid. */
+const positiveNumberOrNull = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : NaN; // NaN signals an invalid value
+};
+
+const dateOrNull = (value) => {
+  const raw = text(value);
+  if (!raw) return null;
+  return raw;
+};
+
+/** Locate a member within a scoped household or throw 404. */
+const getScopedMember = async (id, memberId, user) => {
+  const household = await getScopedHousehold(id, user);
+  const member = (household.members || []).find((m) => m.id === memberId);
+  if (!member) throw ApiError.notFound('Household member not found');
+  return { household, member };
+};
+
+export const getMemberHealth = async ({ id, memberId, user }) => {
+  if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
+  const { member } = await getScopedMember(id, memberId, user);
+  const profile = await repository.getMemberHealthProfile(memberId);
+  return { member, profile: profile || null };
+};
+
+export const saveMemberHealth = async ({ id, memberId, user, payload = {} }) => {
+  if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
+  const { household } = await getScopedMember(id, memberId, user);
+
+  // A verified profile is locked to the BHW — the Health Supervisor must return
+  // it for correction before the collector can change health information again.
+  if (household.verificationStatus === 'Verified' && !VERIFY_ROLES.includes(user?.role)) {
+    throw ApiError.forbidden('This household is verified. Ask the Health Supervisor to return it for correction before editing.');
+  }
+
+  const errors = [];
+  const heightCm = positiveNumberOrNull(payload.heightCm);
+  const weightKg = positiveNumberOrNull(payload.weightKg);
+  if (Number.isNaN(heightCm)) errors.push('Height must be a positive number in centimetres.');
+  if (Number.isNaN(weightKg)) errors.push('Weight must be a positive number in kilograms.');
+  if (heightCm !== null && !Number.isNaN(heightCm) && (heightCm <= 0 || heightCm >= 300)) {
+    errors.push('Height (cm) is out of range.');
+  }
+  if (weightKg !== null && !Number.isNaN(weightKg) && (weightKg <= 0 || weightKg >= 500)) {
+    errors.push('Weight (kg) is out of range.');
+  }
+  const dateOfDeath = dateOrNull(payload.dateOfDeath);
+  if (dateOfDeath && Number.isNaN(Date.parse(dateOfDeath))) errors.push('Date of death is invalid.');
+  if (dateOfDeath && new Date(dateOfDeath) > new Date()) errors.push('Date of death cannot be in the future.');
+  if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
+
+  // BMI is ALWAYS recomputed server-side from the stored measurements and is a
+  // recorded, unclassified value. It is null (never 0) whenever either
+  // measurement is missing/invalid, so a stale BMI can never survive.
+  const { bmi } = computeBMI(heightCm, weightKg);
+  const bmiMeasuredAt = bmi !== null ? new Date().toISOString().slice(0, 10) : null;
+
+  const saved = await repository.upsertMemberHealthProfile(memberId, {
+    heightCm: heightCm === null || Number.isNaN(heightCm) ? null : heightCm,
+    weightKg: weightKg === null || Number.isNaN(weightKg) ? null : weightKg,
+    bmi,
+    bmiMeasuredAt,
+    dateOfDeath,
+    causeOfDeath: text(payload.causeOfDeath),
+    transOut: Boolean(payload.transOut),
+    remarks: text(payload.remarks),
+    createdBy: user?.id || null,
+  });
+
+  await recordHouseholdAudit({
+    user,
+    action: 'HOUSEHOLD_MEMBER_HEALTH_UPDATED',
+    household,
+  });
+
+  return saved;
+};
+
 export default {
   listHouseholds,
   getHousehold,
@@ -329,4 +489,6 @@ export default {
   updateHousehold,
   addHouseholdMember,
   removeHouseholdMember,
+  getMemberHealth,
+  saveMemberHealth,
 };

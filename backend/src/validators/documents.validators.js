@@ -7,6 +7,12 @@ export const ALLOWED_MIME_TYPES = Object.freeze([
   'image/jpg',
 ]);
 
+// A "photo holding your ID" (identity_photo) must be a real photo, never a PDF.
+// This applies to registration and resubmission alike so front-end and back-end
+// agree on the same rule.
+export const IMAGE_ONLY_DOCUMENT_TYPES = Object.freeze(['identity_photo']);
+export const IMAGE_MIME_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/jpg']);
+
 // Registration identity documents (ID front/back, selfie) are capped higher
 // than the legacy proof-of-residency 5 MB rule.
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -80,6 +86,11 @@ export const validateDocumentUpload = (input = {}) => {
 
   if (!ALLOWED_MIME_TYPES.includes(file.type)) {
     errors.file = 'Only PDF, JPG, and PNG files are allowed.';
+  }
+
+  // The identity photo (holding-ID selfie) must be an image, not a PDF.
+  if (IMAGE_ONLY_DOCUMENT_TYPES.includes(documentType) && !IMAGE_MIME_TYPES.includes(file.type)) {
+    errors.file = 'The photo holding your ID must be an image (JPG or PNG).';
   }
 
   if (file.size > MAX_FILE_SIZE) {

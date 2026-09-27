@@ -47,4 +47,9 @@ router.put('/:id', authorize(HOUSEHOLD_ROLES), params, validate(updateHouseholdV
 router.post('/:id/members', authorize(HOUSEHOLD_ROLES), params, validate(householdMemberValidator), asyncHandler(householdsController.addHouseholdMember));
 router.delete('/:id/members/:memberId', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.removeHouseholdMember));
 
+// Member-level health profile (anthropometrics + server-computed BMI, mortality,
+// remarks). Same scope + role gates as the parent household.
+router.get('/:id/members/:memberId/health', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.getMemberHealth));
+router.put('/:id/members/:memberId/health', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.saveMemberHealth));
+
 export default router;

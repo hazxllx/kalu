@@ -209,12 +209,12 @@ export default function Login() {
                     <input type="checkbox" defaultChecked className="h-4 w-4 accent-brand-blue" />
                     Remember me
                   </label>
-                  <a
-                    href="#"
+                  <Link
+                    to="/forgot-password"
                     className="text-[12px] font-medium text-brand-blue underline decoration-brand-rule underline-offset-4 hover:decoration-brand-blue"
                   >
                     Forgot password?
-                  </a>
+                  </Link>
                 </div>
 
                 <button

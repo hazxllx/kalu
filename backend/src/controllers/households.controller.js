@@ -55,6 +55,25 @@ export const removeHouseholdMember = async (req, res) => {
   sendData(res, result);
 };
 
+export const getMemberHealth = async (req, res) => {
+  const result = await householdsService.getMemberHealth({
+    id: req.params.id,
+    memberId: req.params.memberId,
+    user: req.user,
+  });
+  sendData(res, result);
+};
+
+export const saveMemberHealth = async (req, res) => {
+  const profile = await householdsService.saveMemberHealth({
+    id: req.params.id,
+    memberId: req.params.memberId,
+    payload: req.body?.health || req.body || {},
+    user: req.user,
+  });
+  sendData(res, { profile });
+};
+
 export default {
   listHouseholds,
   getHousehold,
@@ -62,4 +81,6 @@ export default {
   updateHousehold,
   addHouseholdMember,
   removeHouseholdMember,
+  getMemberHealth,
+  saveMemberHealth,
 };

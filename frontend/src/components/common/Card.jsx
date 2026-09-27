@@ -8,12 +8,19 @@ export function Card({ className = "", children, ...props }) {
   );
 }
 
-export function CardHeader({ title, subtitle, action }) {
+/**
+ * Section heading used inside a Card. It carries no padding or divider of its
+ * own so it aligns flush with the card's content padding, matching the inline
+ * `<h3>` + supporting-text pattern used across the PHN screens:
+ *   Section title  — text-base / font-semibold / brand ink
+ *   Supporting text — text-xs / brand gray
+ */
+export function CardHeader({ title, subtitle, action, className = "" }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-200 px-6 pt-5 pb-4">
-      <div>
-        <h3 className="font-semibold text-slate-900">{title}</h3>
-        {subtitle && <p className="mt-1 text-sm text-slate-600">{subtitle}</p>}
+    <div className={`flex items-start justify-between gap-3 ${className}`}>
+      <div className="min-w-0">
+        <h3 className="text-base font-semibold text-brand-ink">{title}</h3>
+        {subtitle && <p className="mt-1 text-xs text-brand-gray">{subtitle}</p>}
       </div>
       {action}
     </div>

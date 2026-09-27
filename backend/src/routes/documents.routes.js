@@ -38,9 +38,17 @@ router.delete(
   asyncHandler(documentsController.deleteResidentDocument),
 );
 
-// Staff: view a resident's document (scope-enforced in service).
+// Staff: list a resident's uploaded documents (signed URLs; scope-enforced).
 router.get(
   '/verifications/:residentId/documents',
+  authenticate,
+  authorize(FEATURE_ROLES.verification),
+  asyncHandler(documentsController.listResidentDocuments),
+);
+
+// Staff: view a single resident document (scope-enforced in service).
+router.get(
+  '/verifications/:residentId/documents/:documentId',
   authenticate,
   authorize(FEATURE_ROLES.verification),
   asyncHandler(documentsController.getResidentDocument),

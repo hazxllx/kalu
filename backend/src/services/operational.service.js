@@ -8,6 +8,62 @@ const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => { if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error }); };
 
 /**
+ * Follow-up lifecycle guard (enforced on the server).
+ *
+ * The status names are loose across the app (staff screens use
+ * 'Scheduled'/'Today'/'Upcoming', the resident flow uses
+ * 'Pending' -> 'Scheduled'/'Cancelled'), so instead of matching names we
+ * enforce the rules that must never break:
+ *   - a Completed / Cancelled / Rejected follow-up is final and cannot change;
+ *   - a follow-up that is still pending, rejected, cancelled or missed cannot
+ *     be marked Completed (a missed one must be rescheduled first);
+ *   - a follow-up scheduled for a future date cannot be completed early.
+ *
+ * Dates are compared on the Philippine calendar date (Asia/Manila, UTC+8) so a
+ * late-evening UTC "now" does not roll over to the wrong day.
+ */
+const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+// Today's date (YYYY-MM-DD) on the Philippine calendar.
+export const manilaDateString = (d = new Date()) =>
+  new Date(d.getTime() + MANILA_OFFSET_MS).toISOString().slice(0, 10);
+
+// Statuses a follow-up may not be completed from.
+const COMPLETE_BLOCKERS = new Set(['Pending', 'Cancelled', 'Rejected', 'Missed']);
+// Final statuses that can no longer change.
+const TERMINAL_STATUSES = new Set(['Completed', 'Cancelled', 'Rejected']);
+
+/**
+ * Check a staff status change against the stored follow-up. Throws on an
+ * illegal transition; a no-op (same status, or none) passes. Exported so it can
+ * be unit-tested on its own.
+ */
+export const assertFollowUpTransition = (existing = {}, nextStatus, { today = manilaDateString() } = {}) => {
+  const current = text(existing.status) || 'Scheduled';
+  const target = text(nextStatus);
+  if (!target || target === current) return; // editing other fields / no change
+
+  if (TERMINAL_STATUSES.has(current)) {
+    throw ApiError.conflict(`This follow-up is ${current} and can no longer change status.`);
+  }
+
+  if (target === 'Completed') {
+    if (COMPLETE_BLOCKERS.has(current)) {
+      throw ApiError.conflict(`A ${current} follow-up cannot be marked Completed.`);
+    }
+    if (existing.requires_resident_response && text(existing.resident_decision) !== 'approved') {
+      throw ApiError.conflict("This follow-up is still awaiting the resident's confirmation and cannot be completed.");
+    }
+    const sched = text(existing.scheduled_date);
+    if (sched && sched > today) {
+      throw ApiError.unprocessable(
+        `This follow-up is scheduled for ${sched}; it cannot be marked Completed before then (today is ${today}).`,
+      );
+    }
+  }
+};
+
+/**
  * Build the resident-facing notification for an operational record change.
  * Notification text deliberately avoids clinical detail — it points the
  * resident to the relevant record without exposing sensitive information.
@@ -19,6 +75,8 @@ const notificationFor = (kind, action, record) => {
   switch (`${kind}:${action}`) {
     case 'followups:created':
       return { category: 'reminder', title: 'Follow-up scheduled', message: `A health worker scheduled a follow-up${when}.` };
+    case 'followups:awaiting_response':
+      return { category: 'reminder', title: 'New follow-up requires your response', message: `A health worker requested a follow-up${when}. Please review it and confirm or reject it in your Follow-ups.` };
     case 'followups:rescheduled':
       return { category: 'reminder', title: 'Follow-up rescheduled', message: `Your follow-up was moved${when}.` };
     case 'followups:completed':
@@ -73,10 +131,13 @@ const audit = async (supabase, user, action, entityType, entityId, resident) => 
   throwOnError(error, 'Could not write audit log');
 };
 
-export const list = async ({ user, kind, residentId = null, status = null }) => {
-  const supabase = getServiceClient();
+export const list = async ({ user, kind, residentId = null, status = null, supabase = getServiceClient() }) => {
   if (!TABLES[kind] && kind !== 'notifications') throw ApiError.badRequest('Unknown operational record type.');
   if (kind === 'notifications') {
+    // Resident/staff notifications are ALWAYS scoped to the authenticated
+    // account's auth.users id (req.user.id). The service-role client bypasses
+    // RLS, so this explicit recipient filter — not RLS — is the isolation
+    // boundary here; it is covered by operational.notifications.isolation.test.
     const { data, error } = await supabase.from('notifications').select('*').eq('recipient_id', user.id).order('created_at', { ascending: false }).limit(100);
     throwOnError(error, 'Could not load notifications');
     return data || [];
@@ -90,10 +151,23 @@ export const list = async ({ user, kind, residentId = null, status = null }) => 
     if (!ownResident) return [];
     residentId = ownResident.id;
   }
-  const select = kind === 'followups'
-    ? '*, resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, cellphone_no)'
-    : '*';
+  // Records that render a resident name embed the CURRENT resident row (already
+  // authorized by the scope filters + RLS below), so the UI shows the live name
+  // after a reload instead of a create-time snapshot. No extra/unrestricted
+  // resident query is issued — the embed only resolves each row's own resident.
+  const residentEmbed = 'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, cellphone_no)';
+  const select = (kind === 'followups' || kind === 'maternal') ? `*, ${residentEmbed}` : '*';
   let query = supabase.from(TABLES[kind]).select(select).order('created_at', { ascending: false }).limit(200);
+  // Server-side barangay/municipality scope (defense in depth beyond RLS): a
+  // barangay-assigned Health Supervisor only ever sees their own barangay, and
+  // municipality-wide staff only their own municipality — never the whole table.
+  if (user.role === 'health_supervisor') {
+    if (!user.barangayId) return [];
+    query = query.eq('barangay_id', user.barangayId);
+  } else if (user.role === 'phn' || user.role === 'mho') {
+    if (!user.municipalityId) return [];
+    query = query.eq('municipality_id', user.municipalityId);
+  }
   if (residentId) { await residentFor(supabase, user, residentId); query = query.eq('resident_id', residentId); }
   if (status) query = query.eq('status', status);
   const { data, error } = await query;
@@ -110,10 +184,43 @@ export const create = async ({ user, kind, payload = {} }) => {
   const row = { ...payload, resident_id: resident.id, created_by: user.id };
   delete row.residentId;
   delete row.id;
+  // A follow-up may require the resident to confirm (approve) or reject it
+  // before it becomes an approved/scheduled calendar event. When requested it
+  // is created in the 'Pending' lifecycle status with a pending resident
+  // decision; the resident is notified to respond. The client-supplied
+  // decision fields are never trusted — they are set here from the workflow.
+  let followUpAwaitsResident = false;
+  if (kind === 'followups') {
+    followUpAwaitsResident = Boolean(row.requiresResidentResponse ?? row.requires_resident_response);
+    delete row.requiresResidentResponse;
+    delete row.resident_decision;
+    delete row.resident_decision_at;
+    delete row.resident_decision_reason;
+    if (followUpAwaitsResident) {
+      row.requires_resident_response = true;
+      row.resident_decision = 'pending';
+      row.resident_decision_at = null;
+      row.resident_decision_reason = '';
+      row.status = 'Pending';
+    } else {
+      row.requires_resident_response = false;
+    }
+    // A new follow-up is a scheduled event — it can never be created already
+    // Completed (that is how a future date was being back-dated to done).
+    const initialStatus = text(row.status);
+    if (['Completed', 'Missed'].includes(initialStatus)) {
+      throw ApiError.unprocessable('A new follow-up cannot be created as Completed or Missed; it must be scheduled first.');
+    }
+    // Reject a nonsensical / unparseable scheduled date up front.
+    const sched = text(row.scheduled_date);
+    if (sched && Number.isNaN(Date.parse(sched))) {
+      throw ApiError.unprocessable('The scheduled date is invalid.');
+    }
+  }
   const { data, error } = await supabase.from(table).insert(row).select('*').single();
   throwOnError(error, `Could not create ${kind}`);
   await audit(supabase, user, `${kind.toUpperCase()}_CREATED`, table, data.id, resident);
-  await notifyResident(supabase, resident, kind, 'created', data);
+  await notifyResident(supabase, resident, kind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);
   return data;
 };
 
@@ -137,9 +244,22 @@ export const update = async ({ user, kind, id, payload = {} }) => {
   delete row.municipality_id;
   delete row.created_by;
   delete row.created_at;
+  // The resident confirmation outcome is owned by the resident-follow-up
+  // endpoints, never by a staff update — strip any client-supplied decision.
+  delete row.resident_decision;
+  delete row.resident_decision_at;
+  delete row.resident_decision_reason;
+  delete row.requires_resident_response;
+  delete row.requiresResidentResponse;
   // Completing a follow-up stamps completed_at server-side.
   if (kind === 'followups' && text(row.status) === 'Completed' && !existing.completed_at) {
     row.completed_at = new Date().toISOString();
+  }
+  // Enforce the follow-up lifecycle server-side (state machine + future-date
+  // completion guard) BEFORE writing. A rejected/pending/cancelled/missed or
+  // future-dated follow-up can never be silently marked Completed.
+  if (kind === 'followups' && Object.prototype.hasOwnProperty.call(payload, 'status')) {
+    assertFollowUpTransition(existing, payload.status);
   }
   const { data, error } = await supabase.from(table).update(row).eq('id', id).select('*').single();
   throwOnError(error, `Could not update ${kind}`);
@@ -168,8 +288,7 @@ export const update = async ({ user, kind, id, payload = {} }) => {
 };
 
 /** Recipient marks one of their own notifications read. */
-export const markNotificationRead = async ({ user, id }) => {
-  const supabase = getServiceClient();
+export const markNotificationRead = async ({ user, id, supabase = getServiceClient() }) => {
   const { data, error } = await supabase
     .from('notifications')
     .update({ read_at: new Date().toISOString() })

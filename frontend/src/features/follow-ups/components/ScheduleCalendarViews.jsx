@@ -26,11 +26,14 @@ const eventTitle = (s, variant) =>
 const eventSubtitle = (s, variant) =>
   variant === "resident" ? `${s.location} · ${s.provider}` : `${formatTime(s.time)} · ${s.provider}`;
 
-/** Month-chip tone: rejected resident responses are highlighted red. */
-const chipTone = (s) =>
-  s.confirmationStatus === "Rejected"
-    ? "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400"
-    : STATUS_TONES[s.status] || STATUS_TONES.Scheduled;
+/** Month-chip tone: awaiting-response gold, rejected red, else the status tone. */
+const chipTone = (s) => {
+  if (s.confirmationStatus === "Rejected")
+    return "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400";
+  if (s.confirmationStatus === "Awaiting Confirmation")
+    return "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400";
+  return STATUS_TONES[s.status] || STATUS_TONES.Scheduled;
+};
 
 /* --------------------------------- Month --------------------------------- */
 
@@ -266,6 +269,19 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
                     <p className="mt-0.5 text-sm text-rose-700 dark:text-rose-300">{schedule.rejectionReason}</p>
                   </div>
                 )}
+              </div>
+            )}
+            {/* Resident response prompt — shown only while the follow-up is
+                awaiting the resident's decision. The Confirm / Reject controls
+                themselves are injected via `actions` (rendered in the footer)
+                so the same secure workflow is used from the calendar and the
+                list. */}
+            {variant === "resident" && schedule.confirmationStatus === "Awaiting Confirmation" && (
+              <div className="rounded-btn border border-amber-200 bg-amber-50 px-3.5 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+                <p className="text-[11px] uppercase tracking-wide text-amber-700 dark:text-amber-400">Follow-up Response</p>
+                <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
+                  Your health team scheduled this follow-up for you. Please confirm whether you can attend, or reject it with a reason.
+                </p>
               </div>
             )}
           </div>

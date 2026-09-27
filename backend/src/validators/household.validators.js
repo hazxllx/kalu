@@ -22,12 +22,16 @@ export const HH_STATUSES = Object.freeze([
   'For Masterlist Update', 'Non-Eligible', 'Duplicate', 'Migrated', 'Other',
 ]);
 export const APPROVAL_STATUSES = Object.freeze(['Not yet approved', 'Approved', 'Needs revision']);
+export const VERIFICATION_STATUSES = Object.freeze(['Pending Verification', 'Verified', 'Returned for Correction']);
 export const WATER_SOURCES = Object.freeze(['level1', 'level2', 'level3', 'unimproved']);
 export const TOILET_TYPES = Object.freeze(['ws_own', 'ws_shared', 'open_pit', 'antipolo', 'none']);
 export const PHILHEALTH_VALUES = Object.freeze(['member', 'non-member']);
 export const SEX_VALUES = Object.freeze(['Male', 'Female']);
 
 const SAFE_HH_ID = /^[A-Za-z0-9_-]{1,32}$/;
+// Household member ids are database UUIDs (gen_random_uuid, 36 chars), which are
+// longer than the short HH- household id, so they need their own pattern.
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
  * Validates the household route params in one step and returns ALL params so
@@ -42,7 +46,7 @@ export const householdParamsValidator = (params = {}) => {
   const memberId = params.memberId === undefined ? undefined : text(params.memberId);
   if (memberId !== undefined) {
     if (!memberId) errors.memberId = 'A member id is required.';
-    else if (!SAFE_HH_ID.test(memberId)) errors.memberId = 'The member id is not valid.';
+    else if (!UUID.test(memberId) && !SAFE_HH_ID.test(memberId)) errors.memberId = 'The member id is not valid.';
   }
 
   if (Object.keys(errors).length) return invalid(errors);
@@ -165,6 +169,21 @@ const runHouseholdValidator = (input, { partial }) => {
     errors.toiletType = 'Invalid toilet facility type.';
   } else if (body.toiletType !== undefined) {
     out.toiletType = text(body.toiletType);
+  }
+
+  // Health Supervisor verification outcome. The validator only passes the
+  // outcome and its reason through; the reviewer identity (verifiedBy) and
+  // timestamp (verifiedAt) are always derived server-side from the session in
+  // the service layer and are never accepted from the client.
+  if (body.verificationStatus !== undefined) {
+    if (body.verificationStatus !== '' && !inEnum(body.verificationStatus, VERIFICATION_STATUSES)) {
+      errors.verificationStatus = 'Invalid verification status.';
+    } else {
+      out.verificationStatus = text(body.verificationStatus);
+    }
+  }
+  if (body.correctionReason !== undefined) {
+    out.correctionReason = optionalText(body.correctionReason, TEXT_LIMITS.long, 'correctionReason', 'Correction reason', errors);
   }
 
   if (body.respondentLast !== undefined) out.respondentLast = optionalText(body.respondentLast, TEXT_LIMITS.medium, 'respondentLast', 'Respondent last name', errors);

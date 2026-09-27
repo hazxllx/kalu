@@ -43,6 +43,32 @@ function FitToMarkers({ points }) {
   return null;
 }
 
+// Leaflet needs the real pixel size of its container. When the map lives inside
+// a flex/grid column (as in Community Monitoring) it can render before the
+// column has its final width, leaving grey tiles or a clipped view. Recompute
+// the size after mount and whenever the container is resized by layout,
+// sidebar, or viewport changes.
+function InvalidateSize() {
+  const map = useMap();
+  useEffect(() => {
+    const invalidate = () => map.invalidateSize();
+    const timer = setTimeout(invalidate, 200);
+    const container = map.getContainer();
+    let observer;
+    if (typeof ResizeObserver !== "undefined" && container) {
+      observer = new ResizeObserver(() => map.invalidateSize());
+      observer.observe(container);
+    }
+    window.addEventListener("resize", invalidate);
+    return () => {
+      clearTimeout(timer);
+      if (observer) observer.disconnect();
+      window.removeEventListener("resize", invalidate);
+    };
+  }, [map]);
+  return null;
+}
+
 // Sequential intensity ramp (neutral → high). `intensity` is 0..1 relative to
 // the busiest barangay in the current scope; 0 (no reported data) is neutral.
 function intensityColor(intensity, caseCount) {
@@ -148,6 +174,7 @@ export default function CommunityHealthMap({
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
             <FitToMarkers points={points} />
+            <InvalidateSize />
             {plotted.map((b) => {
               const caseCount = b.caseCount ?? 0;
               const color = intensityColor(b.intensity ?? 0, caseCount);

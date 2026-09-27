@@ -21,11 +21,18 @@ const makeHousehold = (over = {}) => ({
   id: 'HH-000001',
   barangay: 'San Isidro',
   municipalityId: 'M1',
+  // Complete profiling data so the verification-outcome tests below exercise
+  // the reviewer-stamping / scope / reason logic (not the completeness gate).
+  headName: 'Juan Dela Cruz',
+  purok: 'Purok 1',
+  streetAddress: 'Sitio Maligaya',
+  respondentFirst: 'Maria',
+  respondentLast: 'Dela Cruz',
   waterSource: 'level3',
   toiletType: 'ws_own',
   sanitationAccess: 'Yes',
   monthlyIncome: 12000,
-  members: [],
+  members: [{ name: 'Juan Dela Cruz', relationship: 'Head', classification: '' }],
   verificationStatus: 'Pending Verification',
   verifiedBy: null,
   verifiedAt: null,
@@ -124,4 +131,73 @@ test('an invalid verification status is rejected', async () => {
     () => service.updateHousehold({ id: 'HH-000001', user: HS, patch: { verificationStatus: 'Bogus' } }),
     (e) => e.statusCode === 422,
   );
+});
+
+// --- completeness gate (issue #5) ------------------------------------------
+
+test('verifying an incomplete household is blocked and names the missing fields', async () => {
+  HOUSEHOLDS.set('HH-000001', makeHousehold({ members: [], waterSource: '', toiletType: '' }));
+  await assert.rejects(
+    () => service.updateHousehold({ id: 'HH-000001', user: HS, patch: { verificationStatus: 'Verified' } }),
+    (e) => {
+      assert.equal(e.statusCode, 422);
+      assert.ok(Array.isArray(e.details));
+      assert.ok(e.details.includes('Water source'));
+      assert.ok(e.details.includes('Toilet facility'));
+      assert.ok(e.details.includes('At least one household member'));
+      return true;
+    },
+  );
+  // The blocked verification did not mutate the stored record.
+  assert.equal(HOUSEHOLDS.get('HH-000001').verificationStatus, 'Pending Verification');
+});
+
+test('a household with zero members cannot be approved (HH-023 style)', async () => {
+  HOUSEHOLDS.set('HH-000001', makeHousehold({ members: [] }));
+  await assert.rejects(
+    () => service.updateHousehold({ id: 'HH-000001', user: HS, patch: { verificationStatus: 'Verified' } }),
+    (e) => e.statusCode === 422 && e.details.includes('At least one household member'),
+  );
+});
+
+test('a complete household verifies successfully (HH-020 style)', async () => {
+  HOUSEHOLDS.set('HH-000001', makeHousehold());
+  const result = await service.updateHousehold({ id: 'HH-000001', user: HS, patch: { verificationStatus: 'Verified' } });
+  assert.equal(result.verificationStatus, 'Verified');
+});
+
+test('missingForVerification lists each absent required field', () => {
+  const missing = service.missingForVerification({ members: [] });
+  for (const label of ['Household head', 'Purok/Zone', 'Street address / sitio', 'Respondent information', 'Water source', 'Toilet facility', 'Sanitation access', 'At least one household member']) {
+    assert.ok(missing.includes(label), `expected missing to include ${label}`);
+  }
+  assert.deepEqual(service.missingForVerification({
+    headName: 'H', purok: 'P', streetAddress: 'S', respondentFirst: 'R',
+    waterSource: 'level3', toiletType: 'ws_own', sanitationAccess: 'Yes',
+    members: [{ name: 'H' }],
+  }), []);
+});
+
+// --- separation of duties (issue #6) ---------------------------------------
+
+test('a BHW cannot set the approval status', async () => {
+  HOUSEHOLDS.set('HH-000001', makeHousehold());
+  await assert.rejects(
+    () => service.updateHousehold({ id: 'HH-000001', user: BHW, patch: { approvalStatus: 'Approved' } }),
+    (e) => e.statusCode === 403,
+  );
+});
+
+test('a BHW cannot move a household to the Approved HH status', async () => {
+  HOUSEHOLDS.set('HH-000001', makeHousehold());
+  await assert.rejects(
+    () => service.updateHousehold({ id: 'HH-000001', user: BHW, patch: { hhStatus: 'Approved' } }),
+    (e) => e.statusCode === 403,
+  );
+});
+
+test('a BHW may still submit a household for verification', async () => {
+  HOUSEHOLDS.set('HH-000001', makeHousehold({ hhStatus: 'Ongoing' }));
+  const result = await service.updateHousehold({ id: 'HH-000001', user: BHW, patch: { hhStatus: 'Submitted' } });
+  assert.equal(result.hhStatus, 'Submitted');
 });

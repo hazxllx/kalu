@@ -160,6 +160,19 @@ export const completeSubmission = async ({ id, user }) => {
     [SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.SUBMITTED],
     SUBMISSION_STATUS.COMPLETED,
   );
+
+  // The clinical OUTPUTS moved off the submit gate are enforced HERE, at
+  // completion: a completed visit must carry the PHN's findings and the
+  // treatment given. This preserves the end-state guarantee (a completed
+  // consultation is clinically complete) without requiring those fields at the
+  // triage hand-off.
+  const missing = [];
+  if (!String(submission.findings ?? '').trim()) missing.push('Findings are required before completing the check-up.');
+  if (!String(submission.treatmentGiven ?? '').trim()) missing.push('Treatment given is required before completing the check-up.');
+  if (missing.length) {
+    throw ApiError.badRequest('Cannot complete: the PHN clinical assessment is incomplete.', missing);
+  }
+
   const now = new Date().toISOString();
   return repository.updateVisit(id, {
     status: SUBMISSION_STATUS.COMPLETED,

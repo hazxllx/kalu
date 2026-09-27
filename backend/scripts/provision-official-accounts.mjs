@@ -1,285 +1,269 @@
 /**
- * KALUSAGAP — official account provisioning (admin only).
+ * KALUSAGAP — official/QA account provisioning + credential check.
  *
- * Creates (or updates) the three official role accounts through the Supabase
- * Admin API using the backend service-role key. The service-role key never
- * leaves the server: this script runs from `backend/`, never from the browser.
+ * Reads backend/.env for SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (and the
+ * anon key for password verification). For each account in ACCOUNTS it:
+ *   1. checks whether the Supabase Auth user exists,
+ *   2. verifies the intended password via a real anon sign-in,
+ *   3. (only with --apply) creates the auth user when missing, resets an
+ *      invalid password, confirms the email, and fixes the profile row's
+ *      role / status / municipality / barangay so the account can log in.
  *
- *   node scripts/provision-official-accounts.mjs            # create/repair, generate + print temporary passwords
- *   node scripts/provision-official-accounts.mjs --no-rotate # keep existing passwords, never print them
+ * Safe by default: without --apply it changes NOTHING and only prints a report.
+ * Service-role writes bypass RLS and the profile self-edit guard trigger.
  *
- * SAFE TO RE-RUN: accounts are matched by email. An existing account is
- * updated in place (role metadata, profile role/status/coverage) and is NEVER
- * duplicated. Passwords are generated fresh, stored only by Supabase Auth
- * (never in the database or in source), and are marked temporary.
- *
- * What it guarantees per account:
- *   - a confirmed Supabase Auth user with the given email,
- *   - `app_metadata.role` set to the canonical role id,
- *   - a `profiles` row with the same role, status 'active' and the coverage
- *     assignment the role requires (barangay-scoped roles get a barangay).
- *
- * It does not touch any other account.
+ * Usage:
+ *   node backend/scripts/provision-official-accounts.mjs            # check only
+ *   node backend/scripts/provision-official-accounts.mjs --apply    # create/fix
  */
-import 'dotenv/config';
-import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const ANON_KEY = process.env.SUPABASE_ANON_KEY;
-const API_URL = process.env.API_URL || `http://localhost:${process.env.PORT || 5000}/api`;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Load backend/.env regardless of the current working directory.
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-  console.error('Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in backend/.env');
+const APPLY = process.argv.includes('--apply');
+
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+
+if (!SUPABASE_URL || !SERVICE_KEY) {
+  console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in backend/.env');
+  process.exit(1);
+}
+if (!ANON_KEY) {
+  console.error('Missing SUPABASE_ANON_KEY in backend/.env (needed to verify passwords)');
   process.exit(1);
 }
 
-const rotatePasswords = !process.argv.includes('--no-rotate');
-
-const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
+const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
 });
 
-/** The official accounts this project provisions. */
+// Municipality / barangay used for scoped roles.
+const MUNICIPALITY = { name: 'Pili', province: 'Camarines Sur' };
+const DEFAULT_SUPERVISOR_BARANGAY = 'San Isidro';
+
+// role: exact public.app_role value. status: 'active' required for staff login.
+// scope: 'municipality' -> set municipality_id (barangay must stay null);
+//        'barangay'     -> set municipality_id + barangay_id;
+//        'none'         -> admin/resident (no scope needed).
 const ACCOUNTS = [
-  {
-    role: 'admin',
-    email: 'admin@kalusagap.test',
-    fullName: 'System Administrator',
-    position: 'System Administrator',
-    barangay: null,
-  },
-  {
-    role: 'phn',
-    email: 'phn@kalusagap.test',
-    fullName: 'Public Health Nurse',
-    position: 'Public Health Nurse',
-    // PHNs are RHU-based personnel and are never assigned a barangay.
-    barangay: null,
-  },
-  {
-    role: 'health_supervisor',
-    email: 'supervisor@kalusagap.test',
-    fullName: 'Barangay Health Supervisor',
-    position: 'Barangay Health Supervisor',
-    barangay: 'San Isidro',
-  },
+  { email: 'admin@kalusagap.test',          password: 'SyDXk?jcsAd@kBG8vq',   role: 'admin',             status: 'active', scope: 'none',         fullName: 'System Administrator' },
+  { email: 'mho@kalusagap.test',            password: 'CS*GTe5dmJMRsEY8J#',   role: 'mho',               status: 'active', scope: 'municipality', fullName: 'Municipal Health Officer' },
+  { email: 'rhu.personnel@kalusagap.test',  password: '*YmXmTMr3MH3%DLFwU',   role: 'rhu_personnel',     status: 'active', scope: 'municipality', fullName: 'RHU Personnel' },
+  { email: 'phn@kalusagap.test',            password: 'RuoVRzXN55!!Jr7&bc',   role: 'phn',               status: 'active', scope: 'municipality', fullName: 'Public Health Nurse' },
+  { email: 'supervisor@kalusagap.test',     password: 'QWZ3r5HpMg%pMpAf2B',   role: 'health_supervisor', status: 'active', scope: 'barangay',     fullName: 'Health Supervisor', barangay: DEFAULT_SUPERVISOR_BARANGAY },
+  { email: 'mollie.greenholt@forms.lat',    password: 'Holyshit12!',          role: 'resident',          status: 'active', scope: 'none',         fullName: 'Mollie Greenholt' },
 ];
 
-/* -------------------------------------------------------------------------- */
-/* Temporary password generation                                              */
-/* -------------------------------------------------------------------------- */
+const mask = (pw) => (pw ? `${pw.slice(0, 2)}***${pw.slice(-2)} (len ${pw.length})` : '(empty)');
 
-const UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-const LOWER = 'abcdefghijkmnopqrstuvwxyz';
-const DIGITS = '23456789';
-const SYMBOLS = '!@#$%&*?';
-const ALL = UPPER + LOWER + DIGITS + SYMBOLS;
-
-const pick = (set) => set[crypto.randomInt(set.length)];
-
-/** Unique, high-entropy temporary password (one of each character class). */
-const generatePassword = (length = 18) => {
-  const chars = [pick(UPPER), pick(LOWER), pick(DIGITS), pick(SYMBOLS)];
-  while (chars.length < length) chars.push(pick(ALL));
-  // Fisher–Yates shuffle so the guaranteed characters are not positionally fixed.
-  for (let i = chars.length - 1; i > 0; i -= 1) {
-    const j = crypto.randomInt(i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
+async function listAllAuthUsers() {
+  const byEmail = new Map();
+  let page = 1;
+  for (;;) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(`listUsers failed: ${error.message}`);
+    for (const u of data.users) if (u.email) byEmail.set(u.email.toLowerCase(), u);
+    if (data.users.length < 1000) break;
+    page += 1;
   }
-  return chars.join('');
-};
+  return byEmail;
+}
 
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
-
-/** Find an auth user by email (paginated; the admin API has no email filter). */
-const findUserByEmail = async (email) => {
-  const target = email.toLowerCase();
-  for (let page = 1; page <= 50; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error) throw error;
-    const match = (data?.users || []).find((u) => (u.email || '').toLowerCase() === target);
-    if (match) return match;
-    if ((data?.users || []).length < 200) return null;
-  }
-  return null;
-};
-
-/** The Pili deployment municipality (created by supabase/seed.sql). */
-const loadMunicipality = async () => {
-  const { data, error } = await admin
-    .from('municipalities')
-    .select('id, name, province')
-    .eq('name', 'Pili')
-    .eq('province', 'Camarines Sur')
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-};
-
-const loadBarangay = async (municipalityId, name) => {
-  if (!name) return null;
-  const { data, error } = await admin
-    .from('barangays')
-    .select('id, name')
-    .eq('municipality_id', municipalityId)
-    .eq('name', name)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-};
-
-/** Keep the profiles row authoritative: role, status and coverage. */
-const syncProfile = async ({ userId, email, fullName, role, position, municipalityId, barangayId }) => {
-  const row = {
-    id: userId,
-    email,
-    full_name: fullName,
-    role,
-    status: 'active',
-    municipality_id: municipalityId,
-    barangay_id: barangayId,
-    position,
-  };
-
-  const { data: existing, error: readError } = await admin
-    .from('profiles').select('id').eq('id', userId).maybeSingle();
-  if (readError) throw readError;
-
-  const { error } = existing
-    ? await admin.from('profiles').update(row).eq('id', userId)
-    : await admin.from('profiles').insert(row);
-  if (error) throw error;
-};
-
-/** Prove the credentials work AND that the role resolves from the database. */
-const verifyLogin = async (email, password) => {
-  const response = await fetch(`${API_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+async function verifyPassword(email, password) {
+  // Brand-new anon client per attempt; discarded immediately.
+  const c = createClient(SUPABASE_URL, ANON_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
   });
+  const { data, error } = await c.auth.signInWithPassword({ email, password });
+  if (error) return { ok: false, reason: error.message };
+  await c.auth.signOut().catch(() => {});
+  return { ok: Boolean(data?.session), reason: null };
+}
 
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.data?.session?.accessToken) {
-    return { ok: false, reason: payload?.error?.message || `HTTP ${response.status}` };
+async function resolveScopeIds() {
+  const { data: muni, error: mErr } = await admin
+    .from('municipalities').select('id')
+    .eq('name', MUNICIPALITY.name).eq('province', MUNICIPALITY.province).single();
+  if (mErr) throw new Error(`municipality lookup failed: ${mErr.message}`);
+
+  const { data: brgys, error: bErr } = await admin
+    .from('barangays').select('id,name').eq('municipality_id', muni.id);
+  if (bErr) throw new Error(`barangay lookup failed: ${bErr.message}`);
+
+  const barangayByName = new Map(brgys.map((b) => [b.name, b.id]));
+  return { municipalityId: muni.id, barangayByName };
+}
+
+async function getProfile(id) {
+  const { data, error } = await admin
+    .from('profiles')
+    .select('id,email,full_name,role,status,municipality_id,barangay_id')
+    .eq('id', id).maybeSingle();
+  if (error) throw new Error(`profile lookup failed: ${error.message}`);
+  return data;
+}
+
+function buildProfilePatch(acct, profile, scope) {
+  const patch = {};
+  if (profile.role !== acct.role) patch.role = acct.role;
+  // Status: for staff, enforce 'active' (required to log in). For residents,
+  // preserve their verification status (pending_verification still logs in as
+  // resident-limited); only re-enable a disabled resident.
+  if (acct.role === 'resident') {
+    if (profile.status === 'disabled') patch.status = 'active';
+  } else if (profile.status !== acct.status) {
+    patch.status = acct.status;
   }
+  if (!profile.full_name) patch.full_name = acct.fullName;
 
-  // Confirm the authenticated profile (role/status/coverage) resolves server-side.
-  const me = await fetch(`${API_URL}/auth/me`, {
-    headers: { Authorization: `Bearer ${payload.data.session.accessToken}` },
-  });
-  const mePayload = await me.json().catch(() => null);
-
-  return {
-    ok: true,
-    role: mePayload?.data?.user?.role || payload.data.user?.role || null,
-    status: mePayload?.data?.user?.status ?? null,
-    barangay: mePayload?.data?.user?.barangay ?? null,
-  };
-};
-
-/* -------------------------------------------------------------------------- */
-/* Main                                                                       */
-/* -------------------------------------------------------------------------- */
-
-const main = async () => {
-  if (!ANON_KEY) {
-    console.warn('Note: SUPABASE_ANON_KEY not set — login verification still runs through the API.');
+  if (acct.scope === 'municipality') {
+    if (!profile.municipality_id) patch.municipality_id = scope.municipalityId;
+    if (profile.barangay_id) patch.barangay_id = null; // non-scoped role must not carry a barangay
+  } else if (acct.scope === 'barangay') {
+    if (!profile.municipality_id) patch.municipality_id = scope.municipalityId;
+    if (!profile.barangay_id) {
+      const bId = scope.barangayByName.get(acct.barangay);
+      if (!bId) throw new Error(`barangay '${acct.barangay}' not found in seed data`);
+      patch.barangay_id = bId;
+    }
+  } else if (acct.scope === 'none' && acct.role !== 'resident') {
+    // admin: barangay must be null; municipality optional (admin sees all).
+    if (profile.barangay_id) patch.barangay_id = null;
   }
+  return patch;
+}
 
-  const municipality = await loadMunicipality();
-  if (!municipality) {
-    console.error('Municipality "Pili, Camarines Sur" not found. Apply supabase/seed.sql first.');
-    process.exit(1);
-  }
+async function main() {
+  console.log(`\nKALUSAGAP account provisioning — mode: ${APPLY ? 'APPLY (writes enabled)' : 'CHECK ONLY (no writes)'}`);
+  console.log(`Supabase project: ${SUPABASE_URL}\n`);
 
-  const results = [];
+  const scope = await resolveScopeIds();
+  const authUsers = await listAllAuthUsers();
 
-  for (const account of ACCOUNTS) {
-    const existing = await findUserByEmail(account.email);
-    const password = rotatePasswords ? generatePassword() : null;
+  const summary = [];
 
-    let userId;
-    let created = false;
+  for (const acct of ACCOUNTS) {
+    const line = { email: acct.email, role: acct.role, actions: [] };
+    let user = authUsers.get(acct.email.toLowerCase());
 
-    if (existing) {
-      userId = existing.id;
-      const patch = { email_confirm: true, app_metadata: { ...(existing.app_metadata || {}), role: account.role } };
-      if (password) patch.password = password;
-      const { error } = await admin.auth.admin.updateUserById(userId, patch);
-      if (error) throw new Error(`${account.email}: ${error.message}`);
+    // 1) Ensure auth user exists.
+    if (!user) {
+      line.exists = false;
+      if (APPLY) {
+        const { data, error } = await admin.auth.admin.createUser({
+          email: acct.email,
+          password: acct.password,
+          email_confirm: true,
+          user_metadata: { full_name: acct.fullName },
+        });
+        if (error) throw new Error(`createUser(${acct.email}) failed: ${error.message}`);
+        user = data.user;
+        line.actions.push('CREATED auth user (email confirmed)');
+      } else {
+        line.actions.push('WOULD CREATE auth user');
+      }
     } else {
-      const { data, error } = await admin.auth.admin.createUser({
-        email: account.email,
-        password,
-        email_confirm: true,
-        app_metadata: { role: account.role },
-        user_metadata: { full_name: account.fullName },
-      });
-      if (error) throw new Error(`${account.email}: ${error.message}`);
-      userId = data.user.id;
-      created = true;
-    }
-
-    const barangay = await loadBarangay(municipality.id, account.barangay);
-    if (account.barangay && !barangay) {
-      throw new Error(`Barangay "${account.barangay}" not found for ${account.email}. Apply supabase/seed.sql first.`);
-    }
-
-    await syncProfile({
-      userId,
-      email: account.email,
-      fullName: account.fullName,
-      role: account.role,
-      position: account.position,
-      municipalityId: municipality.id,
-      barangayId: barangay?.id || null,
-    });
-
-    let verification = { ok: false, reason: 'password not rotated' };
-    if (password) {
-      try {
-        verification = await verifyLogin(account.email, password);
-      } catch (err) {
-        verification = { ok: false, reason: err.message };
+      line.exists = true;
+      // Confirm email if needed so password sign-in can succeed.
+      if (!user.email_confirmed_at && !user.confirmed_at) {
+        if (APPLY) {
+          await admin.auth.admin.updateUserById(user.id, { email_confirm: true });
+          line.actions.push('CONFIRMED email');
+        } else {
+          line.actions.push('WOULD CONFIRM email');
+        }
       }
     }
 
-    results.push({ account, userId, created, password, verification });
+    // 2) Verify / fix password (only meaningful once the user exists).
+    if (user) {
+      const check = await verifyPassword(acct.email, acct.password);
+      line.passwordValid = check.ok;
+      if (!check.ok) {
+        line.passwordReason = check.reason;
+        if (APPLY) {
+          const { error } = await admin.auth.admin.updateUserById(user.id, {
+            password: acct.password,
+            email_confirm: true,
+          });
+          if (error) throw new Error(`password reset(${acct.email}) failed: ${error.message}`);
+          line.actions.push(`RESET password -> ${mask(acct.password)}`);
+        } else {
+          line.actions.push(`WOULD RESET password -> ${mask(acct.password)}`);
+        }
+      }
+    }
+
+    // 3) Ensure profile role/status/scope (only when we have a user id).
+    if (user) {
+      let profile = await getProfile(user.id);
+      if (!profile) {
+        // Trigger normally creates it; insert defensively if absent.
+        if (APPLY) {
+          const insert = {
+            id: user.id, email: acct.email, full_name: acct.fullName,
+            role: acct.role, status: acct.status,
+          };
+          if (acct.scope === 'municipality') insert.municipality_id = scope.municipalityId;
+          if (acct.scope === 'barangay') {
+            insert.municipality_id = scope.municipalityId;
+            insert.barangay_id = scope.barangayByName.get(acct.barangay);
+          }
+          const { error } = await admin.from('profiles').insert(insert);
+          if (error) throw new Error(`profile insert(${acct.email}) failed: ${error.message}`);
+          line.actions.push(`CREATED profile (role=${acct.role}, status=${acct.status})`);
+          profile = await getProfile(user.id);
+        } else {
+          line.actions.push(`WOULD CREATE profile (role=${acct.role}, status=${acct.status})`);
+        }
+      }
+
+      if (profile) {
+        line.profile = {
+          role: profile.role, status: profile.status,
+          municipality_id: profile.municipality_id, barangay_id: profile.barangay_id,
+        };
+        const patch = buildProfilePatch(acct, profile, scope);
+        if (Object.keys(patch).length > 0) {
+          if (APPLY) {
+            const { error } = await admin.from('profiles').update(patch).eq('id', user.id);
+            if (error) throw new Error(`profile update(${acct.email}) failed: ${error.message}`);
+            line.actions.push(`FIXED profile ${JSON.stringify(patch)}`);
+          } else {
+            line.actions.push(`WOULD FIX profile ${JSON.stringify(patch)}`);
+          }
+        }
+      }
+    }
+
+    if (line.actions.length === 0) line.actions.push('OK — no change needed');
+    summary.push(line);
   }
 
-  /* ------------------------------- report -------------------------------- */
-  console.log('');
-  console.log('KALUSAGAP — official accounts provisioned');
-  console.log('=========================================');
-  for (const { account, userId, created, password, verification } of results) {
-    console.log('');
-    console.log(`${account.role.toUpperCase()}  (${created ? 'created' : 'existing account updated'})`);
-    console.log(`  email     : ${account.email}`);
-    console.log(`  password  : ${password || '(unchanged — not displayed)'}`);
-    console.log(`  user id   : ${userId}`);
-    console.log(`  coverage  : ${account.barangay || 'municipality-wide'}`);
-    console.log(
-      `  verified  : ${
-        verification.ok
-          ? `login OK · role=${verification.role} · status=${verification.status}${verification.barangay ? ` · barangay=${verification.barangay}` : ''}`
-          : `NOT verified — ${verification.reason}`
-      }`,
-    );
+  console.log('================ RESULT ================');
+  for (const l of summary) {
+    console.log(`\n${l.email}  [${l.role}]`);
+    console.log(`  auth user exists : ${l.exists}`);
+    if (l.passwordValid !== undefined) {
+      console.log(`  password valid   : ${l.passwordValid}${l.passwordReason ? `  (${l.passwordReason})` : ''}`);
+    }
+    if (l.profile) {
+      console.log(`  profile          : role=${l.profile.role}, status=${l.profile.status}, muni=${l.profile.municipality_id ? 'set' : 'null'}, brgy=${l.profile.barangay_id ? 'set' : 'null'}`);
+    }
+    for (const a of l.actions) console.log(`  - ${a}`);
   }
-  console.log('');
-  console.log('Passwords are TEMPORARY (Supabase Auth only) — rotate them after first sign-in.');
-  console.log('');
-
-  const failed = results.filter((r) => !r.verification.ok && r.password);
-  if (failed.length) process.exit(1);
-};
+  console.log('\n========================================');
+  if (!APPLY) console.log('CHECK ONLY: no changes were made. Re-run with --apply to create/fix.');
+}
 
 main().catch((err) => {
-  console.error('Provisioning failed:', err.message);
+  console.error('\nFATAL:', err.message);
   process.exit(1);
 });

@@ -59,4 +59,24 @@ export const getUserClient = (accessToken) => {
   });
 };
 
-export default { getServiceClient, getUserClient };
+/**
+ * Isolated, throwaway auth client for backend email/password sign-in.
+ *
+ * A BRAND-NEW client is returned on every call and is never cached. This is
+ * mandatory: `signInWithPassword` sets the calling client's Authorization
+ * header to the signed-in user's JWT. If that ran on the shared service-role
+ * singleton it would (a) demote the service-role client to an end-user (RLS)
+ * context and (b) let one caller's login change the auth context of every other
+ * concurrent request — the root cause of BUG-001. The anon key is the correct
+ * key for the password grant; the instance is discarded once the caller has the
+ * returned session, so no user JWT is ever stored globally.
+ */
+export const createAuthClient = () => {
+  assertConfigured();
+  const key = env.supabaseAnonKey || env.supabaseServiceRoleKey;
+  return createClient(env.supabaseUrl, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+};
+
+export default { getServiceClient, getUserClient, createAuthClient };

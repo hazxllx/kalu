@@ -40,6 +40,12 @@ export const getMyDocument = async (req, res) => {
   sendData(res, { document: result });
 };
 
+export const listResidentDocuments = async (req, res) => {
+  const { residentId } = req.params;
+  const documents = await documentsService.listResidentDocuments({ user: req.user, residentId });
+  sendData(res, { documents });
+};
+
 export const getResidentDocument = async (req, res) => {
   const { residentId, documentId } = req.params;
 
@@ -86,6 +92,7 @@ export const deleteResidentDocument = async (req, res) => {
 export default {
   uploadResidentDocument,
   getMyDocument,
+  listResidentDocuments,
   getResidentDocument,
   reviewResidentDocument,
   deleteResidentDocument,

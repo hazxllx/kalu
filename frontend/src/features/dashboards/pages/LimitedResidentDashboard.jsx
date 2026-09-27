@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import VerificationBanner from "@/features/verification/components/VerificationBanner";
+import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import { useAuth } from "@/context/AuthContext";
 
 const AVAILABLE = [
@@ -36,6 +37,8 @@ export default function LimitedResidentDashboard() {
       <div className="mb-6">
         <VerificationBanner />
       </div>
+
+      <TransferStatusBanner />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
         {AVAILABLE.map((m, i) => (

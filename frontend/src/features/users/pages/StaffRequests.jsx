@@ -56,7 +56,7 @@ export default function StaffRequests() {
     const q = query.trim().toLowerCase();
     return requests
       .filter((r) => statusFilter === "All" || r.status === statusFilter)
-      .filter((r) => !q || r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q) || r.position.toLowerCase().includes(q))
+      .filter((r) => !q || r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q) || (r.role || r.position || "").toLowerCase().includes(q))
       .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
   }, [requests, query, statusFilter, audit]);
 
@@ -107,7 +107,7 @@ export default function StaffRequests() {
               <tr className="bg-brand-bg text-left">
                 <th className="px-5 py-3 font-medium text-brand-gray">Request</th>
                 <th className="px-5 py-3 font-medium text-brand-gray">Applicant</th>
-                <th className="px-5 py-3 font-medium text-brand-gray">Position</th>
+                <th className="px-5 py-3 font-medium text-brand-gray">Role</th>
                 <th className="px-5 py-3 font-medium text-brand-gray">Barangay</th>
                 <th className="px-5 py-3 font-medium text-brand-gray">Submitted</th>
                 <th className="px-5 py-3 font-medium text-brand-gray">Status</th>
@@ -122,7 +122,7 @@ export default function StaffRequests() {
                     <p className="font-medium text-brand-ink">{r.name}</p>
                     <p className="text-xs text-brand-gray">{r.email}</p>
                   </td>
-                  <td className="px-5 py-3 text-brand-gray">{r.position}</td>
+                  <td className="px-5 py-3 text-brand-gray">{r.role || r.position || "—"}</td>
                   <td className="px-5 py-3 text-brand-gray">{r.barangay || "—"}</td>
                   <td className="px-5 py-3 text-brand-gray whitespace-nowrap">{formatDate(r.submittedAt)}</td>
                   <td className="px-5 py-3"><StatusBadge value={r.status} /></td>
@@ -161,11 +161,11 @@ function RequestModal({ record, onClose, onDecide }) {
   const rows = [
     { label: "Applicant", value: `${record.name} (${record.email})` },
     { label: "Contact", value: record.contact },
-    { label: "Position", value: record.position },
     { label: "Barangay", value: record.barangay || "—" },
     // Health Personnel applications carry richer professional detail; the
     // seeded demo rows omit these, so they are only shown when present.
     ...(record.role ? [{ label: "Health Personnel Role", value: record.role }] : []),
+    ...(record.position ? [{ label: "Position", value: record.position }] : []),
     ...(record.municipality ? [{ label: "Municipality / LGU", value: record.municipality }] : []),
     ...(record.facility ? [{ label: "Health Facility", value: record.facility }] : []),
     ...(record.department ? [{ label: "Department / Office", value: record.department }] : []),
@@ -190,7 +190,7 @@ function RequestModal({ record, onClose, onDecide }) {
   return (
     <ReviewModal
       title={record.name}
-      subtitle={`${record.id} · ${record.position}`}
+      subtitle={`${record.id} · ${record.role || record.position || "Health Personnel"}`}
       status={<StatusBadge value={record.status} />}
       onClose={onClose}
     >

@@ -6,6 +6,7 @@ import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationModal from "@/features/verification/components/VerificationModal";
+import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import { residentDashboard, residentTimeline } from "@/services/local/dashboardData";
 import { useAuth } from "@/context/AuthContext";
 
@@ -34,6 +35,8 @@ export default function ResidentDashboard() {
         title={<span className="flex items-center gap-3">Welcome back, {first} <VerificationBadge status={verified ? "verified" : "pending"} /></span>}
         subtitle="Here's an overview of your health at a glance."
       />
+
+      <TransferStatusBanner />
 
       {!verified && (
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-6">

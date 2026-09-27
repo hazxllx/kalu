@@ -5,9 +5,8 @@ dotenv.config();
 /**
  * Single source of truth for backend configuration.
  *
- * Nothing else in the codebase reads `process.env` directly: importing this
- * module keeps defaults and parsing in one place, so a new setting is added
- * once and used everywhere.
+ * Application runtime configuration is centralized here. Operational scripts
+ * may read script-specific variables directly.
  *
  * Supabase settings are read here. They are OPTIONAL at boot: the server still
  * starts without them (so the health check and the API skeleton work in local

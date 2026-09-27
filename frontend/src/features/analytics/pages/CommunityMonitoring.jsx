@@ -10,6 +10,7 @@ import StatCard from "@/components/common/StatCard";
 import { useAuth } from "@/context/AuthContext";
 import { getAssignedBarangay } from "@/lib/barangayScope";
 import CommunityHealthMap from "@/features/analytics/components/CommunityHealthMap";
+import { toLocalISODate, formatDateRange, currentYear } from "@/lib/dateUtils";
 import {
   fetchCommunityMap,
   fetchCommunityMapTrends,
@@ -28,7 +29,10 @@ const DATE_PRESETS = [
   { id: "custom", label: "Custom Range" },
 ];
 
-const iso = (d) => d.toISOString().slice(0, 10);
+// Local-day ISO formatter. Using LOCAL calendar components (never UTC) keeps
+// the default range anchored to the Philippine calendar day: without this,
+// new Date(year, 0, 1) at UTC+8 serialises to the previous year's Dec 31.
+const iso = (d) => toLocalISODate(d);
 
 /** Resolve a preset (or custom range) into inclusive {from, to} ISO dates. */
 function resolveRange(preset, custom) {
@@ -147,7 +151,9 @@ export default function CommunityMonitoring() {
     if (isBarangayScoped) loadTrends(assignedBarangay);
   }, [isBarangayScoped, assignedBarangay, loadTrends]);
 
-  const periodLabel = range.from && range.to ? `${range.from} to ${range.to}` : "All records";
+  // Readable range for card subtitles, e.g. "Jan 1, 2026 – Sep 27, 2026".
+  const periodLabel = range.from || range.to ? formatDateRange(range.from, range.to) : "All records";
+  const trendsYear = trends?.year || currentYear(new Date(range.to || Date.now()));
 
   const trendData = (trends?.monthly || MONTH_LABELS.map((m) => ({ month: m, cases: 0 })));
 
@@ -186,11 +192,11 @@ export default function CommunityMonitoring() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {!isBarangayScoped && (
             <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Barangay</label>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Barangay</label>
               <select
                 value={barangayFilter}
                 onChange={(e) => { setBarangayFilter(e.target.value); setSelected(null); }}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue"
+                className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue"
               >
                 <option value="All">All Barangays</option>
                 {(mapData?.barangays || []).map((b) => (
@@ -201,11 +207,11 @@ export default function CommunityMonitoring() {
           )}
 
           <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Disease / Health Condition</label>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Disease / Health Condition</label>
             <select
               value={condition}
               onChange={(e) => setCondition(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue"
+              className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue"
             >
               <option value="All">All Conditions</option>
               {conditions.map((c) => (
@@ -215,11 +221,11 @@ export default function CommunityMonitoring() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Date Range</label>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Date Range</label>
             <select
               value={preset}
               onChange={(e) => setPreset(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue"
+              className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue"
             >
               {DATE_PRESETS.map((p) => (
                 <option key={p.id} value={p.id}>{p.label}</option>
@@ -231,22 +237,22 @@ export default function CommunityMonitoring() {
         {preset === "custom" && (
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">From</label>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">From</label>
               <input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue" />
+                className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue" />
             </div>
             <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">To</label>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">To</label>
               <input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue" />
+                className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue" />
             </div>
           </div>
         )}
       </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Map */}
-        <div className="lg:col-span-2">
+        {/* Left / main column: Health Heatmap + Health Trends */}
+        <div className="space-y-6 lg:col-span-2">
           <Card className="p-5">
             <CardHeader
               title="Health Heatmap"
@@ -264,9 +270,34 @@ export default function CommunityMonitoring() {
               />
             </div>
           </Card>
+
+          {/* Health Trends */}
+          <Card className="p-5">
+            <CardHeader
+              title="Health Trends"
+              subtitle={`${condition === "All" ? "All conditions" : condition} · ${
+                isBarangayScoped ? assignedBarangay : selectedRow?.name || (drillBarangay || "All authorized barangays")
+              } · ${trendsYear}`}
+            />
+            <div className="pt-4">
+              {trendsLoading ? (
+                <div className="flex h-[280px] items-center justify-center text-sm text-slate-500">Loading trends…</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={trendData} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#EEF2F7" />
+                    <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                    <Tooltip contentStyle={{ fontSize: "12px", borderRadius: "8px", border: "1px solid #E5EAF1" }} />
+                    <Bar dataKey="cases" name="Cases" fill="#0B5CAD" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </Card>
         </div>
 
-        {/* Barangay detail panel */}
+        {/* Right column: Barangay detail panel */}
         <div>
           <Card className="p-5">
             <CardHeader title="Barangay Details" subtitle={selectedRow ? selectedRow.name : "Select a barangay on the map"} />
@@ -282,47 +313,30 @@ export default function CommunityMonitoring() {
                   <button
                     type="button"
                     onClick={() => loadTrends(selectedRow.name)}
-                    className="mt-2 inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90"
+                    className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90"
                   >
                     <TrendingUp className="h-4 w-4" /> View Health Trends
                   </button>
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">
-                  {isBarangayScoped
-                    ? "Showing your assigned barangay. Trends are displayed below."
-                    : "Click a barangay marker to see its case breakdown and trends."}
-                </p>
+                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 bg-brand-bg/40 px-6 py-10 text-center">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue">
+                    <MapPin className="h-6 w-6" strokeWidth={1.6} />
+                  </span>
+                  <p className="text-sm font-semibold text-brand-ink">
+                    {isBarangayScoped ? "Assigned Barangay" : "Select a barangay on the map"}
+                  </p>
+                  <p className="max-w-xs text-sm text-slate-500">
+                    {isBarangayScoped
+                      ? "Showing your assigned barangay. Trends are displayed below."
+                      : "Click a barangay marker to see its case breakdown and trends."}
+                  </p>
+                </div>
               )}
             </div>
           </Card>
         </div>
       </div>
-
-      {/* Health trends */}
-      <Card className="mt-6 p-5">
-        <CardHeader
-          title="Health Trends"
-          subtitle={`${condition === "All" ? "All conditions" : condition} · ${
-            isBarangayScoped ? assignedBarangay : selectedRow?.name || (drillBarangay || "All authorized barangays")
-          } · ${trends?.year || new Date(range.to || Date.now()).getFullYear()}`}
-        />
-        <div className="pt-4">
-          {trendsLoading ? (
-            <div className="flex h-[280px] items-center justify-center text-sm text-slate-500">Loading trends…</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={trendData} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#EEF2F7" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                <Tooltip contentStyle={{ fontSize: "12px", borderRadius: "8px", border: "1px solid #E5EAF1" }} />
-                <Bar dataKey="cases" name="Cases" fill="#0B5CAD" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </Card>
     </div>
   );
 }

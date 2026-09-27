@@ -6,7 +6,8 @@ import {
   ageFromDate,
   isEmail,
   isFutureDate,
-  isPhonePH,
+  isStrictMobile,
+  toZone,
   invalid,
   parseDate,
   text,
@@ -61,12 +62,22 @@ export const registerResidentValidator = (input = {}) => {
   if (!civilStatus) errors.civilStatus = 'Civil status is required.';
   else if (!CIVIL_STATUSES.includes(civilStatus)) errors.civilStatus = 'Select a valid civil status.';
 
-  const cellphoneNo = str(body.cellphoneNo, 20, 'cellphoneNo', 'Contact number', errors);
-  if (cellphoneNo && !isPhonePH(cellphoneNo)) {
-    errors.cellphoneNo = 'Contact number must be a valid PH mobile number (e.g. 0917 123 4567).';
+  const cellphoneNo = str(body.cellphoneNo, 20, 'cellphoneNo', 'Mobile number', errors);
+  if (cellphoneNo && !isStrictMobile(cellphoneNo)) {
+    errors.cellphoneNo = 'Mobile number must be exactly 11 digits with no spaces or symbols (e.g. 09381829120).';
   }
 
   const barangay = str(body.barangay, TEXT_LIMITS.medium, 'barangay', 'Barangay', errors);
+
+  // Zone is a controlled value 1..8 (was "Sitio / Purok"). Reject anything else
+  // server-side; the frontend dropdown is only a convenience.
+  const zone = toZone(body.zone);
+  if (body.zone === undefined || text(body.zone) === '') {
+    errors.zone = 'Zone is required.';
+  } else if (zone === null) {
+    errors.zone = 'Zone must be a number from 1 to 8.';
+  }
+
   const currentAddress = str(body.currentAddress, TEXT_LIMITS.address, 'currentAddress', 'Address', errors);
   const permanentAddress = str(body.permanentAddress, TEXT_LIMITS.address, 'permanentAddress', 'Permanent address', errors, { optional: true });
 
@@ -95,6 +106,7 @@ export const registerResidentValidator = (input = {}) => {
     permanentAddress: permanentAddress || currentAddress,
     cellphoneNo,
     barangay,
+    ...(zone === null ? {} : { zone }),
     ...(sms === undefined ? {} : { smsUpdates: Boolean(sms) }),
   };
 

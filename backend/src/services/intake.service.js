@@ -122,6 +122,17 @@ export const validateVitals = (vitals = {}) => {
   return errors;
 };
 
+/**
+ * Validates a submission at the RHU/BHW hand-off (the `submitted` transition).
+ *
+ * A submission at this stage carries only what the intake/triage worker
+ * actually possesses: the resident identity, the visit date, the chief
+ * complaint and the triage vitals. The clinical OUTPUTS — `findings` and
+ * `treatmentGiven` — belong to the PHN stage and are therefore NOT required
+ * here; they are enforced later, at PHN completion (see
+ * phnQueue.service.completeSubmission). This lets a legitimate triage hand-off
+ * enter the PHN queue without fabricating clinical content.
+ */
 export const validateSubmissionForSubmit = (resident, visit) => {
   const errors = [];
   if (!resident || !resident.firstName || !resident.lastName) {
@@ -133,8 +144,7 @@ export const validateSubmissionForSubmit = (resident, visit) => {
   }
   if (!visit.visitDate) errors.push('Date & time of visit is required.');
   if (!visit.chiefComplaint) errors.push('Chief complaint is required.');
-  if (!visit.findings) errors.push('Findings are required.');
-  if (!visit.treatmentGiven) errors.push('Treatment given is required.');
+  // findings + treatmentGiven are PHN-stage outputs, enforced at completion.
   errors.push(...validateVitals(visit.vitals || {}));
   return errors;
 };
@@ -147,14 +157,30 @@ export const validateSubmissionForSubmit = (resident, visit) => {
 export const createSubmission = async ({ residentId = null, resident = null, visit = {}, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
 
+  const scope = assignedBarangay(user);
+
   let residentRow = null;
   if (residentId) {
     residentRow = await repository.getResident(residentId);
-    if (!residentRow) throw ApiError.notFound('Resident record not found');
+    // A barangay-scoped caller may only attach a visit to a resident in their
+    // own barangay. Reported as 404 (not 403) so a caller cannot probe for the
+    // existence of out-of-scope resident ids.
+    if (!residentRow || !withinBarangayScope(user, residentRow)) {
+      throw ApiError.notFound('Resident record not found');
+    }
   } else if (resident) {
     const demographics = normalizeDemographics(resident);
     if (!demographics.lastName || !demographics.firstName) {
       throw ApiError.badRequest('Last name and first name are required for a new resident record.');
+    }
+    // A barangay-scoped caller cannot create a resident outside their assigned
+    // barangay. The barangay is forced to the session's scope; a mismatching
+    // client-supplied barangay is rejected rather than silently overwritten.
+    if (scope) {
+      if (demographics.barangay && demographics.barangay.toLowerCase() !== scope.toLowerCase()) {
+        throw ApiError.forbidden('Your account is assigned to Barangay ' + scope + ' only');
+      }
+      demographics.barangay = scope;
     }
     const existing = await repository.findResidentByIdentity({
       lastName: demographics.lastName,

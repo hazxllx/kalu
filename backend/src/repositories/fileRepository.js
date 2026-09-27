@@ -89,8 +89,18 @@ export const fileRepository = {
     return match ? { id: `dev-${match}`, name: match, municipalityId: null, municipality: null } : null;
   },
 
+  /** Canonical dev barangays as id/name rows for selection lists. */
+  listBarangays: async () => DEV_BARANGAYS.map((name) => ({
+    id: `dev-${name}`, name, municipality_id: null, status: 'active',
+  })),
+
+  // The file driver is single-municipality and has no municipalities store, so
+  // there is no centre coordinate to return; the map falls back to framing the
+  // plotted barangays.
+  getMunicipality: async () => null,
+
   // ----- households ---------------------------------------------------------
-  // Household records are Supabase-backed only (Phase 5 schema); the local
+  // Household records are Supabase-backed only; the local
   // file driver has no household store, so these fail closed with a clear
   // message instead of returning fake data.
   householdsUnsupported: async () => {
@@ -104,7 +114,8 @@ export const fileRepository = {
   findHouseholdDuplicate: async function () { return this.householdsUnsupported(); },
   addHouseholdMember: async function () { return this.householdsUnsupported(); },
   removeHouseholdMember: async function () { return this.householdsUnsupported(); },
-
+  getMemberHealthProfile: async function () { return this.householdsUnsupported(); },
+  upsertMemberHealthProfile: async function () { return this.householdsUnsupported(); },
   searchResidents: async ({ q = '', limit = 20 } = {}) => {
     const residents = store.residents.filter((r) => matchesQuery(r, q)).slice(0, limit);
     return clone(residents);
@@ -352,8 +363,21 @@ export const fileRepository = {
     });
   },
 
-  createTransferRequest: async ({ authUserId, otpHash, otpExpiresAt }) => store.mutate((data) => {
-    const row = { id: crypto.randomUUID(), authUserId, auth_user_id: authUserId, status: 'pending', otpHash, otp_hash: otpHash, otpExpiresAt, otp_expires_at: otpExpiresAt, otpAttempts: 0, otp_attempts: 0, otpVerifiedAt: null, otp_verified_at: null, createdAt: new Date().toISOString(), created_at: new Date().toISOString() };
+  createTransferRequest: async ({
+    authUserId, residentId = null, fromBarangayId = null, toBarangayId = null,
+    reason = '', status = 'draft', otpHash = null, otpExpiresAt = null,
+  }) => store.mutate((data) => {
+    const now = new Date().toISOString();
+    const row = {
+      id: crypto.randomUUID(), authUserId, auth_user_id: authUserId,
+      residentId, resident_id: residentId,
+      fromBarangayId, from_barangay_id: fromBarangayId,
+      toBarangayId, to_barangay_id: toBarangayId,
+      reason, status,
+      otpHash, otp_hash: otpHash, otpExpiresAt, otp_expires_at: otpExpiresAt,
+      otpAttempts: 0, otp_attempts: 0, otpVerifiedAt: null, otp_verified_at: null,
+      createdAt: now, created_at: now, updatedAt: now, updated_at: now,
+    };
     data.transferRequests.push(row);
     return clone(row);
   }),
@@ -364,6 +388,13 @@ export const fileRepository = {
   getLatestTransferRequest: async (authUserId) => {
     const rows = store.transferRequests.filter((item) => item.authUserId === authUserId);
     return rows.length ? clone(rows[rows.length - 1]) : null;
+  },
+  listTransferRequestsByUser: async (authUserId) => {
+    const rows = store.transferRequests
+      .filter((item) => item.authUserId === authUserId)
+      .slice()
+      .reverse();
+    return clone(rows);
   },
   updateTransferRequest: async (id, patch) => store.mutate((data) => {
     const row = data.transferRequests.find((item) => item.id === id);
@@ -376,13 +407,23 @@ export const fileRepository = {
     if (status) rows = rows.filter((row) => row.status === status);
     return { rows: clone(rows.slice(offset, offset + limit)), total: rows.length };
   },
-  approveTransferRequest: async ({ requestId, reviewerId, residentId }) => store.mutate((data) => {
+  approveTransferRequest: async ({ requestId, reviewerId }) => store.mutate((data) => {
     const request = data.transferRequests.find((row) => row.id === requestId);
-    const resident = data.residents.find((row) => row.id === residentId && !row.authUserId);
-    if (!request || !resident || !request.otpVerifiedAt || !['pending', 'under_review'].includes(request.status)) return null;
-    resident.authUserId = request.authUserId;
+    if (!request || !['pending', 'under_review'].includes(request.status)) return null;
+    if (!request.residentId || !request.toBarangayId) return null;
+    const resident = data.residents.find((row) => row.id === request.residentId);
+    if (!resident) return null;
+    // Change ONLY the resident's current barangay; keep id, account link, records.
+    // The Supabase driver relies on the residents_sync_scope trigger to copy the
+    // canonical barangay NAME from barangay_id into the free-text `barangay`
+    // column. The file driver has no trigger, so resolve the destination name
+    // here — otherwise the resident's displayed "Current Barangay" would show the
+    // raw id (e.g. "dev-San Antonio") instead of "San Antonio" after approval.
+    const destinationName = DEV_BARANGAYS.find((name) => `dev-${name}` === request.toBarangayId)
+      || request.toBarangayId;
+    resident.barangayId = request.toBarangayId;
+    resident.barangay = destinationName;
     request.status = 'approved';
-    request.targetResidentId = resident.id;
     request.reviewedBy = reviewerId;
     request.reviewedAt = new Date().toISOString();
     return clone(request);

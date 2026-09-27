@@ -14,6 +14,140 @@
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
+import { isPhonePH } from '../validators/common.js';
+import { computeBMI } from '../utils/bmi.js';
+
+const SELF_ROLES = ['resident', 'resident-limited'];
+
+const clean = (value) => String(value ?? '').trim();
+
+/**
+ * Map a stored visit to the BASIC, resident-safe view for "My Health Record".
+ * BMI is DERIVED here (never stored via the consultation path) so the resident
+ * sees the same computed value the staff form shows. No internal identifiers or
+ * other residents' data are ever included.
+ */
+const toResidentRecord = (visit = {}) => {
+  const v = visit.vitals || {};
+  const findings = clean(visit.findings);
+  const diagnosisMarker = '\nDiagnosis: ';
+  const [findingsText, diagnosis] = findings.includes(diagnosisMarker)
+    ? findings.split(diagnosisMarker)
+    : [findings, clean(visit.phn?.assessment)];
+
+  const treatment = clean(visit.treatmentGiven);
+  const medMarker = '\nMedication: ';
+  const [treatmentText, medication] = treatment.includes(medMarker)
+    ? treatment.split(medMarker)
+    : [treatment, ''];
+
+  const recommendation = clean(visit.recommendation);
+  const nextVisitDate = recommendation.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || '';
+  const adviceText = recommendation.replace(/\n?Next visit:\s*\d{4}-\d{2}-\d{2}/, '').trim();
+
+  const { bmi, category } = computeBMI(v.heightCm, v.weightKg);
+
+  return {
+    id: visit.id,
+    date: visit.visitDate ? String(visit.visitDate).slice(0, 10) : '',
+    time: String(visit.visitDate || '').includes('T') ? String(visit.visitDate).slice(11, 16) : '',
+    chiefComplaint: clean(visit.chiefComplaint),
+    findings: clean(findingsText),
+    diagnosis: clean(diagnosis),
+    treatmentGiven: clean(treatmentText),
+    medications: clean(medication),
+    recommendations: adviceText,
+    followUpRequired: nextVisitDate ? 'Yes' : 'No',
+    nextVisitDate,
+    vitals: {
+      bloodPressure: clean(v.bp),
+      temperature: v.temperature ?? '',
+      pulseRate: v.hr ?? '',
+      respiratoryRate: v.rr ?? '',
+      oxygenSaturation: v.o2sat ?? '',
+      height: v.heightCm ?? '',
+      weight: v.weightKg ?? '',
+      bmi: bmi ?? '',
+      bmiCategory: category ?? '',
+    },
+    seenBy: clean(visit.recordedByName),
+    status: visit.status || '',
+  };
+};
+
+/**
+ * "My Health Record" for the authenticated resident.
+ *
+ * The resident identity is derived from the session (auth user id ->
+ * residents.auth_user_id) and is NEVER taken from the client, so a resident can
+ * only ever read their OWN completed consultations. Returns basic profile plus
+ * the resident-safe consultation history.
+ */
+export const getOwnHealthRecords = async ({ user } = {}) => {
+  if (!SELF_ROLES.includes(user?.role)) {
+    throw ApiError.forbidden('Only a resident may view their own health record.');
+  }
+  const resident = await repository.getResidentByAuthUserId(user.id);
+  if (!resident) {
+    // Account exists but is not yet linked to a resident record.
+    return { resident: null, consultations: [] };
+  }
+  const result = await repository.listVisits({
+    residentId: resident.id,
+    statuses: ['completed'],
+    limit: 100,
+  });
+  const consultations = (result.rows || [])
+    .map(toResidentRecord)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  return {
+    resident: {
+      name: [resident.firstName, resident.middleName, resident.lastName, resident.suffix]
+        .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(),
+      barangay: resident.barangay || '',
+      birthDate: resident.birthDate || '',
+      age: resident.birthDate
+        ? Math.max(0, new Date().getFullYear() - new Date(resident.birthDate).getFullYear())
+        : '',
+      sex: resident.sex || '',
+      verificationStatus: resident.verificationStatus || '',
+    },
+    consultations,
+  };
+};
+
+/**
+ * Resident self-service profile update. The resident is derived from the
+ * authenticated session (never a body id), and only the whitelisted, non-
+ * administrative field(s) may change — currently the contact number. Identity,
+ * barangay/municipality, reference and verification state are system-controlled
+ * and are never editable here.
+ */
+export const updateOwnProfile = async ({ user, payload = {} } = {}) => {
+  if (!SELF_ROLES.includes(user?.role)) {
+    throw ApiError.forbidden('Only a resident may update their own profile.');
+  }
+  const resident = await repository.getResidentByAuthUserId(user.id);
+  if (!resident) throw ApiError.notFound('Your resident record was not found.');
+
+  const patch = {};
+  if (payload.cellphoneNo !== undefined) {
+    const phone = String(payload.cellphoneNo ?? '').trim();
+    if (phone && !isPhonePH(phone)) {
+      throw ApiError.unprocessable('Contact number must be a valid PH mobile number (e.g. 0917 123 4567).');
+    }
+    patch.cellphoneNo = phone;
+  }
+
+  const target = Object.keys(patch).length ? await repository.updateResident(resident.id, patch) : resident;
+  return {
+    id: target.id,
+    name: [target.firstName, target.middleName, target.lastName, target.suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(),
+    cellphoneNo: target.cellphoneNo || '',
+    barangay: target.barangay || '',
+  };
+};
 
 const EDITABLE_RESIDENT_KEYS = [
   'suffix',
@@ -54,7 +188,7 @@ const parsePositiveInt = (value, fallback) => {
  * The repository additionally filters on municipality_id, and Supabase RLS
  * re-checks the same scope at the database level.
  */
-export const listResidents = async ({ user, q = '', barangay = '', limit = 50, offset = 0 } = {}) => {
+export const listResidents = async ({ user, q = '', barangay = '', limit = 50, offset = 0, verifiedOnly = false } = {}) => {
   const scope = assignedBarangay(user);
   const requested = String(barangay || '').trim();
   if (scope && requested && requested.toLowerCase() !== scope.toLowerCase()) {
@@ -63,14 +197,55 @@ export const listResidents = async ({ user, q = '', barangay = '', limit = 50, o
   const effectiveBarangay = scope || requested || null;
   const parsedLimit = Math.min(parsePositiveInt(limit, 50), 100);
   const parsedOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
+  const search = String(q || '').trim();
+  const municipalityId = user?.municipalityId || null;
 
-  return repository.listResidents({
-    q: String(q || '').trim(),
+  if (!verifiedOnly) {
+    return repository.listResidents({
+      q: search,
+      limit: parsedLimit,
+      offset: parsedOffset,
+      barangay: effectiveBarangay,
+      municipalityId,
+    });
+  }
+
+  // Verified directory: a resident qualifies when EITHER their individual
+  // verification is approved (residents.verification_status = 'approved') OR
+  // they are a linked member of a Verified household in the same scope. The
+  // two sources are merged and de-duplicated on the canonical resident id so a
+  // resident who is both never appears twice. Scope is always the server-side
+  // assignment — never a barangay id from the client.
+  const approved = await repository.listResidents({
+    q: search,
     limit: parsedLimit,
-    offset: parsedOffset,
+    offset: 0,
     barangay: effectiveBarangay,
-    municipalityId: user?.municipalityId || null,
+    municipalityId,
+    verificationStatuses: ['approved'],
   });
+
+  const byId = new Map(approved.rows.map((r) => [r.id, r]));
+
+  const householdVerifiedIds = await repository.verifiedHouseholdResidentIds({
+    barangay: effectiveBarangay,
+    municipalityId,
+  });
+  const missingIds = householdVerifiedIds.filter((id) => !byId.has(id));
+  if (missingIds.length) {
+    const extra = await repository.listResidentsByIds({
+      ids: missingIds,
+      q: search,
+      barangay: effectiveBarangay,
+      municipalityId,
+    });
+    for (const resident of extra) byId.set(resident.id, resident);
+  }
+
+  const rows = [...byId.values()]
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, parsedLimit);
+  return { rows, total: byId.size };
 };
 
 /**
@@ -206,4 +381,4 @@ export const updateResident = async ({ id, patch = {}, user }) => {
   return repository.updateResident(id, updates);
 };
 
-export default { getResident, updateResident };
+export default { getResident, updateResident, getOwnHealthRecords };

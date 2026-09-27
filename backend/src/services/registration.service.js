@@ -2,6 +2,7 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { getServiceClient } from '../config/supabase.js';
 import { validateDocumentUpload } from '../validators/documents.validators.js';
+import { isStrictMobile, toZone } from '../validators/common.js';
 
 const SELF_ROLES = Object.freeze(['resident', 'resident-limited']);
 
@@ -32,6 +33,8 @@ const validate = (payload) => {
   const sex = text(payload.sex);
   const barangay = text(payload.barangay);
   const identityNo = text(payload.identityNo);
+  const cellphoneNo = text(payload.cellphoneNo);
+  const zone = toZone(payload.zone);
 
   if (!firstName) errors.push('First name is required.');
   if (!lastName) errors.push('Last name is required.');
@@ -44,10 +47,18 @@ const validate = (payload) => {
   if (!sex) errors.push('Sex is required.');
   else if (!['Male', 'Female'].includes(sex)) errors.push('Sex must be "Male" or "Female".');
   if (!barangay) errors.push('Barangay is required.');
+  // Server-authoritative mobile + zone checks (the request validator already
+  // ran, but the service never trusts the caller and re-enforces both here).
+  if (cellphoneNo && !isStrictMobile(cellphoneNo)) {
+    errors.push('Mobile number must be exactly 11 digits (e.g. 09381829120).');
+  }
+  if (payload.zone !== undefined && text(payload.zone) !== '' && zone === null) {
+    errors.push('Zone must be a number from 1 to 8.');
+  }
 
   if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
 
-  return { firstName, lastName, birthDate, sex, barangay, identityNo };
+  return { firstName, lastName, birthDate, sex, barangay, identityNo, cellphoneNo, zone };
 };
 
 export const registerResident = async ({ user, payload = {} }) => {
@@ -102,9 +113,16 @@ export const registerResident = async ({ user, payload = {} }) => {
     philhealthNo: text(payload.philhealthNo),
     currentAddress: text(payload.currentAddress),
     permanentAddress: text(payload.permanentAddress),
-    cellphoneNo: text(payload.cellphoneNo),
+    cellphoneNo: fields.cellphoneNo,
     identityNo: text(payload.identityNo),
+    ...(fields.zone === null ? {} : { zone: fields.zone }),
     barangay: barangayRow.name,
+    // Populate the scope columns explicitly from the resolved barangay so the
+    // Health Supervisor verification queue (which filters by barangay AND
+    // municipality) can always find a newly-registered resident, instead of
+    // relying on a database trigger to backfill them.
+    barangayId: barangayRow.id,
+    municipalityId: barangayRow.municipalityId || user.municipalityId || null,
     verificationStatus: 'pending',
     submittedForVerificationAt: new Date().toISOString(),
     createdById: user.id,

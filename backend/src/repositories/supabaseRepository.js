@@ -5,7 +5,7 @@
  * service-role client after `authenticate` + `authorize` have run, so
  * application-level RBAC is enforced in the service layer; the SQL migration
  * additionally enables RLS policies for defense in depth (see
- * database/migrations).
+ * supabase/migrations).
  *
  * Human-readable identifiers (RES-/SUB-/REF-) are minted from the
  * `record_counters` table so records look identical across drivers.
@@ -18,6 +18,7 @@ const TABLES = Object.freeze({
   referrals: 'referrals',
   households: 'households',
   householdMembers: 'household_members',
+  householdMemberHealth: 'household_member_health_profiles',
   counters: 'record_counters',
   verificationLogs: 'resident_verification_logs',
   profiles: 'profiles',
@@ -116,6 +117,39 @@ const memberFromRow = (row) => ({
   createdAt: row.created_at,
 });
 
+// Member-level health profile (1:1 with a household member). BMI is a recorded,
+// unclassified value recomputed server-side; scope columns are trigger-managed.
+const MEMBER_HEALTH_TO_DB = {
+  householdMemberId: 'household_member_id',
+  heightCm: 'height_cm',
+  weightKg: 'weight_kg',
+  bmi: 'bmi',
+  bmiMeasuredAt: 'bmi_measured_at',
+  dateOfDeath: 'date_of_death',
+  causeOfDeath: 'cause_of_death',
+  transOut: 'trans_out',
+  remarks: 'remarks',
+  createdBy: 'created_by',
+};
+
+const DB_TO_MEMBER_HEALTH = Object.fromEntries(
+  Object.entries(MEMBER_HEALTH_TO_DB).map(([k, v]) => [v, k]),
+);
+
+const memberHealthToRow = (profile) => mapKeys(profile, MEMBER_HEALTH_TO_DB);
+
+const memberHealthFromRow = (row) => {
+  if (!row) return null;
+  const profile = mapKeys(row, DB_TO_MEMBER_HEALTH);
+  profile.id = row.id;
+  profile.householdId = row.household_id;
+  profile.municipalityId = row.municipality_id;
+  profile.barangayId = row.barangay_id;
+  profile.createdAt = row.created_at;
+  profile.updatedAt = row.updated_at;
+  return profile;
+};
+
 const DOCUMENT_TO_DB = {
   id: 'id',
   residentId: 'resident_id',
@@ -174,6 +208,7 @@ const RESIDENT_TO_DB = {
   permanentAddress: 'permanent_address',
   cellphoneNo: 'cellphone_no',
   identityNo: 'identity_no',
+  zone: 'zone',
   barangay: 'barangay',
   barangayId: 'barangay_id',
   municipalityId: 'municipality_id',
@@ -353,6 +388,41 @@ const throwOnError = (error, fallback) => {
   }
 };
 
+// ----- profiles (Admin User Management) -----------------------------------
+// The curated column set the Admin console needs. `profiles` holds no secret
+// material (no password/token columns exist on it), but we still select an
+// explicit allow-list so the API can never leak columns added later.
+const PROFILE_ADMIN_COLUMNS =
+  'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,position,license_no,contact,created_at,updated_at';
+const PROFILE_ADMIN_SELECT = `${PROFILE_ADMIN_COLUMNS},barangay:barangays(name),municipality:municipalities(name)`;
+const PROFILE_ADMIN_BASE_SELECT = PROFILE_ADMIN_COLUMNS;
+
+/** Only the embedded barangay/municipality relationship lookup is unavailable. */
+const isEmbeddedResourceUnavailable = (error) => {
+  const code = error?.code || '';
+  const message = error?.message || '';
+  return code === 'PGRST200' || /could not find a relationship/i.test(message);
+};
+
+/** Map a profiles row to the curated admin-user shape (no secrets). */
+const profileToAdminUser = (row) => ({
+  id: row.id,
+  email: row.email,
+  name: row.full_name || row.email,
+  role: row.role,
+  status: row.status,
+  municipalityId: row.municipality_id ?? null,
+  municipality: row.municipality?.name ?? null,
+  barangayId: row.barangay_id ?? null,
+  barangay: row.barangay?.name ?? null,
+  facilityId: row.facility_id ?? null,
+  position: row.position || '',
+  licenseNo: row.license_no || '',
+  contact: row.contact || '',
+  createdAt: row.created_at ?? null,
+  updatedAt: row.updated_at ?? null,
+});
+
 const counterRpc = async (name) => {
   const supabase = getServiceClient();
   // One retry on transport failures only. supabase-js surfaces those either as
@@ -421,7 +491,7 @@ export const supabaseRepository = {
    * trigger); `municipalityId` limits rows to the caller's municipality.
    * Returns { rows, total }.
    */
-  async listResidents({ q = '', limit = 50, offset = 0, barangay = null, municipalityId = null } = {}) {
+  async listResidents({ q = '', limit = 50, offset = 0, barangay = null, municipalityId = null, verificationStatuses = null } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.residents)
@@ -436,9 +506,52 @@ export const supabaseRepository = {
     }
     if (barangay) query = query.eq('barangay', barangay);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
+    if (verificationStatuses && verificationStatuses.length) query = query.in('verification_status', verificationStatuses);
     const { data, error, count } = await query;
     throwOnError(error, 'Could not list residents');
     return { rows: (data || []).map(residentFromRow), total: count ?? (data || []).length };
+  },
+
+  /**
+   * Resident ids that belong to a VERIFIED household within the given scope.
+   * Only members explicitly linked to a resident record (resident_id) count;
+   * free-form roster entries are ignored. Used to include household-verified
+   * residents in the verified directory without a second verification system.
+   */
+  async verifiedHouseholdResidentIds({ barangay = null, municipalityId = null } = {}) {
+    const supabase = getServiceClient();
+    let query = supabase
+      .from('household_members')
+      .select('resident_id, households!inner(verification_status, barangay, municipality_id)')
+      .not('resident_id', 'is', null)
+      .eq('households.verification_status', 'Verified');
+    if (barangay) query = query.eq('households.barangay', barangay);
+    if (municipalityId) query = query.eq('households.municipality_id', municipalityId);
+    const { data, error } = await query;
+    throwOnError(error, 'Could not load verified household members');
+    return [...new Set((data || []).map((row) => row.resident_id).filter(Boolean))];
+  },
+
+  /** Fetch residents by id, scope- and search-filtered. Returns mapped rows. */
+  async listResidentsByIds({ ids = [], q = '', barangay = null, municipalityId = null } = {}) {
+    if (!ids.length) return [];
+    const supabase = getServiceClient();
+    let query = supabase
+      .from(TABLES.residents)
+      .select('*')
+      .in('id', ids)
+      .order('created_at', { ascending: false });
+    if (barangay) query = query.eq('barangay', barangay);
+    if (municipalityId) query = query.eq('municipality_id', municipalityId);
+    if (q) {
+      const term = String(q).trim();
+      query = query.or(
+        `first_name.ilike.%${term}%,last_name.ilike.%${term}%,middle_name.ilike.%${term}%,health_record_no.ilike.%${term}%,philhealth_no.ilike.%${term}%,cellphone_no.ilike.%${term}%`,
+      );
+    }
+    const { data, error } = await query;
+    throwOnError(error, 'Could not list residents');
+    return (data || []).map(residentFromRow);
   },
 
   /** Barangay reference lookup (name, optionally restricted to a municipality). */
@@ -460,6 +573,32 @@ export const supabaseRepository = {
       municipalityId: row.municipality_id,
       municipality: row.municipality?.name || null,
     };
+  },
+
+  /** Barangays (with map coordinates) in a municipality, or all when null. */
+  async listBarangays({ municipalityId = null } = {}) {
+    const supabase = getServiceClient();
+    let query = supabase
+      .from('barangays')
+      .select('id, name, latitude, longitude, municipality_id, status')
+      .order('name', { ascending: true });
+    if (municipalityId) query = query.eq('municipality_id', municipalityId);
+    const { data, error } = await query;
+    throwOnError(error, 'Could not list barangays');
+    return data || [];
+  },
+
+  /** One municipality (with its centre coordinates) by id, or null. */
+  async getMunicipality(municipalityId) {
+    if (!municipalityId) return null;
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('municipalities')
+      .select('id, name, province, region, latitude, longitude')
+      .eq('id', municipalityId)
+      .maybeSingle();
+    throwOnError(error, 'Could not load municipality');
+    return data || null;
   },
 
   // ----- households ----------------------------------------------------------
@@ -579,6 +718,48 @@ export const supabaseRepository = {
     return Boolean(data);
   },
 
+  /** Member health profile (1:1) or null when none has been recorded yet. */
+  async getMemberHealthProfile(householdMemberId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from(TABLES.householdMemberHealth)
+      .select('*')
+      .eq('household_member_id', householdMemberId)
+      .maybeSingle();
+    throwOnError(error, 'Could not load member health profile');
+    return memberHealthFromRow(data);
+  },
+
+  /**
+   * Insert-or-update the member health profile. The parent household id and
+   * scope columns are set by a database trigger from the linked member, so they
+   * are never accepted here. Returns the persisted row.
+   */
+  async upsertMemberHealthProfile(householdMemberId, patch = {}) {
+    const supabase = getServiceClient();
+    const existing = await this.getMemberHealthProfile(householdMemberId);
+    const row = memberHealthToRow({ ...patch, householdMemberId });
+    if (existing) {
+      // Preserve the original creator on updates.
+      delete row.created_by;
+      const { data, error } = await supabase
+        .from(TABLES.householdMemberHealth)
+        .update(row)
+        .eq('household_member_id', householdMemberId)
+        .select('*')
+        .single();
+      throwOnError(error, 'Could not update member health profile');
+      return memberHealthFromRow(data);
+    }
+    const { data, error } = await supabase
+      .from(TABLES.householdMemberHealth)
+      .insert(row)
+      .select('*')
+      .single();
+    throwOnError(error, 'Could not save member health profile');
+    return memberHealthFromRow(data);
+  },
+
   async findResidentByIdentity({ lastName, firstName, middleName, birthDate, identityNo } = {}) {
     const supabase = getServiceClient();
     let query = supabase
@@ -681,6 +862,73 @@ export const supabaseRepository = {
       .maybeSingle();
     throwOnError(error, 'Could not update the resident account status');
     return data || null;
+  },
+
+  // ----- account administration (Admin User Management) --------------------
+  // profiles is the single source of truth for a user's application role,
+  // account status and coverage assignment. Reads/writes here run on the
+  // service-role client and are only reachable after authenticate +
+  // authorize(admin); the profile guard trigger allows service-role writes.
+  async listProfiles({ q = '', role = null, status = null, limit = 50, offset = 0 } = {}) {
+    const supabase = getServiceClient();
+    const read = (select) => {
+      let query = supabase
+        .from(TABLES.profiles)
+        .select(select, { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+      if (role) query = query.eq('role', role);
+      if (status) query = query.eq('status', status);
+      if (q) {
+        const term = String(q).trim();
+        query = query.or(`full_name.ilike.%${term}%,email.ilike.%${term}%`);
+      }
+      return query;
+    };
+    let { data, error, count } = await read(PROFILE_ADMIN_SELECT);
+    if (error && isEmbeddedResourceUnavailable(error)) {
+      ({ data, error, count } = await read(PROFILE_ADMIN_BASE_SELECT));
+    }
+    throwOnError(error, 'Could not list user accounts');
+    return { rows: (data || []).map(profileToAdminUser), total: count ?? (data || []).length };
+  },
+
+  async getProfileById(id) {
+    if (!id) return null;
+    const supabase = getServiceClient();
+    const read = (select) => supabase.from(TABLES.profiles).select(select).eq('id', id).maybeSingle();
+    let { data, error } = await read(PROFILE_ADMIN_SELECT);
+    if (error && isEmbeddedResourceUnavailable(error)) {
+      ({ data, error } = await read(PROFILE_ADMIN_BASE_SELECT));
+    }
+    throwOnError(error, 'Could not load the user account');
+    return data ? profileToAdminUser(data) : null;
+  },
+
+  async updateProfileFields(id, fields) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from(TABLES.profiles)
+      .update(fields)
+      .eq('id', id)
+      .select(PROFILE_ADMIN_BASE_SELECT)
+      .maybeSingle();
+    throwOnError(error, 'Could not update the user account');
+    return data ? profileToAdminUser(data) : null;
+  },
+
+  /** Count active (non-disabled) administrators, optionally excluding one id. */
+  async countActiveAdmins({ excludeId = null } = {}) {
+    const supabase = getServiceClient();
+    let query = supabase
+      .from(TABLES.profiles)
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'admin')
+      .neq('status', 'disabled');
+    if (excludeId) query = query.neq('id', excludeId);
+    const { count, error } = await query;
+    throwOnError(error, 'Could not count administrator accounts');
+    return count ?? 0;
   },
 
   // ----- resident verification audit log -----------------------------------
@@ -878,16 +1126,38 @@ export const supabaseRepository = {
     return residentFromRow(data);
   },
 
-  async createTransferRequest({ authUserId, otpHash, otpExpiresAt }) {
+  async createTransferRequest({
+    authUserId,
+    residentId = null,
+    fromBarangayId = null,
+    toBarangayId = null,
+    reason = '',
+    status = 'draft',
+    otpHash = null,
+    otpExpiresAt = null,
+  }) {
     const supabase = getServiceClient();
     const { data, error } = await supabase.from('transfer_requests').insert({
       auth_user_id: authUserId,
-      status: 'pending',
+      resident_id: residentId,
+      from_barangay_id: fromBarangayId,
+      to_barangay_id: toBarangayId,
+      reason,
+      status,
       otp_hash: otpHash,
       otp_expires_at: otpExpiresAt,
     }).select('*').single();
     throwOnError(error, 'Could not create transfer request');
     return data;
+  },
+
+  /** Every transfer request for one account, newest first (transfer history). */
+  async listTransferRequestsByUser(authUserId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from('transfer_requests').select('*')
+      .eq('auth_user_id', authUserId).order('created_at', { ascending: false });
+    throwOnError(error, 'Could not load transfer history');
+    return data || [];
   },
 
   async getTransferRequest(id, authUserId = null) {
@@ -924,10 +1194,10 @@ export const supabaseRepository = {
     return { rows: data || [], total: count ?? (data || []).length };
   },
 
-  async approveTransferRequest({ requestId, reviewerId, residentId }) {
+  async approveTransferRequest({ requestId, reviewerId }) {
     const supabase = getServiceClient();
     const { data, error } = await supabase.rpc('approve_transfer_request', {
-      p_request_id: requestId, p_reviewer_id: reviewerId, p_resident_id: residentId,
+      p_request_id: requestId, p_reviewer_id: reviewerId,
     });
     throwOnError(error, 'Could not approve transfer request');
     return data || null;

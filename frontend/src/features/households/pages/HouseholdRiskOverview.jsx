@@ -7,6 +7,7 @@ import {
   RISK_LEVELS, RISK_LEVEL_LABELS, RISK_CLASSIFICATION_BASIS, getRiskConfig,
 } from "@/lib/householdRisk";
 import { BARANGAYS } from "@/lib/barangays";
+import { formatShortDate } from "@/lib/dateUtils";
 import { FollowUpModal } from "../components/RiskActionModals";
 import {
   Search, Home, ShieldCheck, AlertTriangle, PhoneCall, X, ChevronRight, Users, Info, MapPin, RefreshCw,
@@ -21,12 +22,7 @@ const levelTone = {
 
 const levelOrder = [RISK_LEVELS.PRIORITY, RISK_LEVELS.INTERVENTION, RISK_LEVELS.MONITOR, RISK_LEVELS.STABLE];
 
-const formatDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-};
+const formatDate = (iso) => formatShortDate(iso) || "—";
 
 const daysAgo = (iso) => {
   const d = householdRiskStore.daysSince(iso);
@@ -219,10 +215,13 @@ export default function HouseholdRiskOverview() {
       />
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
-        <Card className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0"><Users className="w-5 h-5" /></div>
-          <div><p className="text-xs text-brand-gray uppercase tracking-wide">Total Households</p><p className="text-2xl font-semibold text-brand-ink">{counts.total}</p></div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5 mb-6">
+        <Card className="flex h-full flex-col justify-between p-4">
+          <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-brand-gray">
+            <span className="flex h-5 w-5 items-center justify-center rounded-md bg-brand-blue/10 text-brand-blue"><Users className="h-3.5 w-3.5" /></span>
+            Total Households
+          </p>
+          <p className="mt-3 text-2xl font-stat font-bold tracking-tight text-brand-ink">{counts.total}</p>
         </Card>
         {[
           { level: RISK_LEVELS.PRIORITY, label: "Priority Review" },
@@ -233,64 +232,95 @@ export default function HouseholdRiskOverview() {
           <button
             key={c.level}
             onClick={() => setLevelFilter(levelFilter === c.level ? "all" : c.level)}
-            className={`rounded-2xl border p-4 text-left transition-colors ${levelFilter === c.level ? "border-brand-blue bg-brand-light/60" : "border-slate-200 bg-white hover:border-brand-blue/40"}`}
+            className={`flex h-full flex-col justify-between rounded-2xl border p-4 text-left transition-colors ${levelFilter === c.level ? "border-brand-blue bg-brand-light/60" : "border-slate-200 bg-white hover:border-brand-blue/40"}`}
           >
-            <p className="text-xs text-brand-gray uppercase tracking-wide flex items-center gap-1.5">
-              <span className={`w-2.5 h-2.5 rounded-full ${levelTone[c.level].dot}`} /> {c.label}
+            <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-brand-gray">
+              <span className={`h-2.5 w-2.5 rounded-full ${levelTone[c.level].dot}`} /> {c.label}
             </p>
-            <p className="mt-1 text-2xl font-semibold text-brand-ink">{counts[c.level]}</p>
+            <p className="mt-3 text-2xl font-stat font-bold tracking-tight text-brand-ink">{counts[c.level]}</p>
           </button>
         ))}
       </div>
 
       {/* Filters */}
       <Card className="p-4 mb-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 rounded-input border border-slate-200 dark:border-border bg-brand-bg/60 dark:bg-input px-3 py-2.5 min-w-[200px] flex-1 sm:flex-none">
-            <Search className="h-4 w-4 shrink-0 text-brand-gray dark:text-slate-400" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search household, ID, barangay..." className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
+          {/* Search — widest control */}
+          <div className="sm:col-span-2 lg:col-span-4">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Search</label>
+            <div className="flex h-10 items-center gap-2 rounded-input border border-slate-200 dark:border-border bg-brand-bg/60 dark:bg-input px-3">
+              <Search className="h-4 w-4 shrink-0 text-brand-gray dark:text-slate-400" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Household, ID, barangay..." className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500" />
+            </div>
           </div>
-          <select value={barangayFilter} onChange={(e) => setBarangayFilter(e.target.value)} className="rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 py-2.5 text-sm outline-none text-brand-ink dark:text-foreground">
-            <option value="All">All Barangays</option>
-            {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
-            {byBarangay.filter(([n]) => !BARANGAYS.includes(n)).map(([n]) => <option key={n} value={n}>{n}</option>)}
-          </select>
-          <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className="rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 py-2.5 text-sm outline-none text-brand-ink dark:text-foreground">
-            <option value="all">All Risk Levels</option>
-            {levelOrder.map((l) => <option key={l} value={l}>{RISK_LEVEL_LABELS[l]}</option>)}
-          </select>
-          <select value={indicatorFilter} onChange={(e) => setIndicatorFilter(e.target.value)} className="rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 py-2.5 text-sm outline-none text-brand-ink dark:text-foreground max-w-[220px]">
-            <option value="all">All Indicators</option>
-            {indicatorOptions.map((k) => {
-              const def = getRiskConfig().indicators.find((i) => i.key === k);
-              return <option key={k} value={k}>{def?.label || k}</option>;
-            })}
-          </select>
-          <select value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className="rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 py-2.5 text-sm outline-none text-brand-ink dark:text-foreground">
-            <option value="all">All Follow-up</option>
-            <option value="required">Required</option>
-            <option value="scheduled">Scheduled</option>
-            <option value="overdue">Overdue</option>
-            <option value="resolved">Resolved</option>
-          </select>
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 py-2.5 text-sm outline-none text-brand-ink dark:text-foreground" />
-          <span className="text-xs text-brand-gray">—</span>
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 py-2.5 text-sm outline-none text-brand-ink dark:text-foreground" />
-          <button onClick={clearFilters} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm font-medium text-brand-gray hover:bg-brand-bg">
-            <X className="h-4 w-4" /> Clear Filters
-          </button>
+
+          <div className="lg:col-span-2">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Barangay</label>
+            <select value={barangayFilter} onChange={(e) => setBarangayFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
+              <option value="All">All Barangays</option>
+              {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
+              {byBarangay.filter(([n]) => !BARANGAYS.includes(n)).map(([n]) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+
+          <div className="lg:col-span-2">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Risk Level</label>
+            <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
+              <option value="all">All Risk Levels</option>
+              {levelOrder.map((l) => <option key={l} value={l}>{RISK_LEVEL_LABELS[l]}</option>)}
+            </select>
+          </div>
+
+          <div className="lg:col-span-2">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Indicators</label>
+            <select value={indicatorFilter} onChange={(e) => setIndicatorFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
+              <option value="all">All Indicators</option>
+              {indicatorOptions.map((k) => {
+                const def = getRiskConfig().indicators.find((i) => i.key === k);
+                return <option key={k} value={k}>{def?.label || k}</option>;
+              })}
+            </select>
+          </div>
+
+          <div className="lg:col-span-2">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Follow-up</label>
+            <select value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
+              <option value="all">All Follow-up</option>
+              <option value="required">Required</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="overdue">Overdue</option>
+              <option value="resolved">Resolved</option>
+            </select>
+          </div>
+
+          {/* Start + End dates stay together */}
+          <div className="sm:col-span-2 lg:col-span-4">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Date Range</label>
+            <div className="flex items-center gap-2">
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue" />
+              <span className="text-xs text-brand-gray">to</span>
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue" />
+            </div>
+          </div>
+
+          <div className="sm:col-span-2 lg:col-span-3">
+            <label className="mb-1.5 hidden text-xs font-semibold uppercase tracking-wide text-brand-gray lg:block">&nbsp;</label>
+            <button onClick={clearFilters} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 text-sm font-medium text-brand-gray hover:bg-brand-bg">
+              <X className="h-4 w-4" /> Clear Filters
+            </button>
+          </div>
         </div>
       </Card>
 
       {/* Empty state */}
       {noData && (
-        <Card className="p-10 text-center mb-6">
+        <Card className="mb-6 px-6 py-12 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
             <ShieldCheck className="h-7 w-7 text-emerald-600" />
           </div>
-          <h3 className="mt-4 text-lg font-semibold text-brand-ink">All Households Are Currently Stable</h3>
+          <h3 className="mt-4 text-lg font-semibold text-brand-ink">No Households Currently Require Intervention</h3>
           <p className="mx-auto mt-1.5 max-w-md text-sm text-brand-gray">
-            No household risk clusters requiring intervention have been identified based on the current monitoring rules. This is a good outcome.
+            Based on the current monitoring rules, no household risk clusters requiring intervention have been identified in the available records. This is a good outcome.
           </p>
           <a href="/app/bhw/households" className="mt-5 inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-dark">
             <Home className="h-4 w-4" /> View All Households
@@ -301,7 +331,7 @@ export default function HouseholdRiskOverview() {
       {/* Priority households */}
       <Card className="p-5 mb-6">
         <div className="flex items-center justify-between gap-3 mb-4">
-          <h3 className="font-semibold text-brand-ink">Priority Households</h3>
+          <h3 className="text-base font-semibold text-brand-ink">Priority Households</h3>
           <span className="text-xs text-brand-gray">{priorityList.length} households</span>
         </div>
         {priorityList.length === 0 ? (
@@ -347,7 +377,7 @@ export default function HouseholdRiskOverview() {
       {/* Distribution + Indicator breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <Card className="p-5">
-          <h3 className="font-semibold text-brand-ink text-sm mb-4">Household Risk Distribution</h3>
+          <h3 className="text-base font-semibold text-brand-ink mb-4">Household Risk Distribution</h3>
           {counts.total === 0 ? (
             <p className="py-8 text-center text-sm text-brand-gray">No distribution data available.</p>
           ) : (
@@ -374,7 +404,7 @@ export default function HouseholdRiskOverview() {
         </Card>
 
         <Card className="p-5 lg:col-span-2">
-          <h3 className="font-semibold text-brand-ink text-sm mb-4">Top Household Risk Indicators</h3>
+          <h3 className="text-base font-semibold text-brand-ink mb-4">Top Household Risk Indicators</h3>
           {indicatorBreakdown.length === 0 ? (
             <p className="py-8 text-center text-sm text-brand-gray">No risk indicators recorded yet.</p>
           ) : (
@@ -396,7 +426,7 @@ export default function HouseholdRiskOverview() {
       {/* Basis of risk classification */}
       <Card className="p-5 mb-6">
         <div className="flex items-center gap-2 mb-1">
-          <h3 className="font-semibold text-brand-ink text-sm">Basis of Risk Classification</h3>
+          <h3 className="text-base font-semibold text-brand-ink">Basis of Risk Classification</h3>
           <span className="group relative inline-flex">
             <Info className="h-4 w-4 text-brand-gray cursor-help" strokeWidth={1.8} />
             <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-64 -translate-x-1/2 rounded-btn border border-slate-200 bg-white p-3 text-xs leading-relaxed text-brand-gray opacity-0 shadow-float transition-opacity group-hover:opacity-100">
@@ -437,7 +467,7 @@ export default function HouseholdRiskOverview() {
 
       {/* Risk by barangay */}
       <Card className="p-5 mb-6">
-        <h3 className="font-semibold text-brand-ink text-sm mb-4">Risk by Barangay</h3>
+        <h3 className="text-base font-semibold text-brand-ink mb-4">Risk by Barangay</h3>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[520px] text-sm">
             <thead>
@@ -466,7 +496,6 @@ export default function HouseholdRiskOverview() {
                         // reflect only this barangay.
                         setBarangayFilter(name);
                         setLevelFilter("all");
-                        setViewingBarangay(null);
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
                       className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
@@ -487,7 +516,7 @@ export default function HouseholdRiskOverview() {
       {/* Household table */}
       <Card className="overflow-hidden">
         <div className="border-b border-slate-200 px-5 py-4 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="font-semibold text-brand-ink">Household Risk List</h3>
+          <h3 className="text-base font-semibold text-brand-ink">Household Risk List</h3>
           <div className="flex items-center gap-2">
             {barangayFilter !== "All" && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-blue">

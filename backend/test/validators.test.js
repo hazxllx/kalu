@@ -40,24 +40,25 @@ test('registerResidentValidator requires core fields and rejects future DOB / ba
   assert.ok(blank.error.cellphoneNo);
 
   const future = registerResidentValidator({
-    resident: { firstName: 'A', lastName: 'B', birthDate: '2999-01-01', sex: 'Male', civilStatus: 'Single', cellphoneNo: '09171234567', barangay: 'X', currentAddress: 'Y' },
+    resident: { firstName: 'A', lastName: 'B', birthDate: '2999-01-01', sex: 'Male', civilStatus: 'Single', cellphoneNo: '09171234567', barangay: 'X', currentAddress: 'Y', zone: '1' },
   });
   assert.equal(future.error.birthDate, 'Date of birth cannot be in the future.');
 
   const badPhone = registerResidentValidator({
-    resident: { firstName: 'A', lastName: 'B', birthDate: '1990-01-01', sex: 'Male', civilStatus: 'Single', cellphoneNo: '123', barangay: 'X', currentAddress: 'Y' },
+    resident: { firstName: 'A', lastName: 'B', birthDate: '1990-01-01', sex: 'Male', civilStatus: 'Single', cellphoneNo: '123', barangay: 'X', currentAddress: 'Y', zone: '1' },
   });
-  assert.equal(badPhone.error.cellphoneNo, 'Contact number must be a valid PH mobile number (e.g. 0917 123 4567).');
+  assert.equal(badPhone.error.cellphoneNo, 'Mobile number must be exactly 11 digits with no spaces or symbols (e.g. 09381829120).');
 });
 
 test('registerResidentValidator accepts valid input and normalizes fields', () => {
   const result = registerResidentValidator({
-    resident: { firstName: 'A', lastName: 'B', birthDate: '1990-01-01', sex: 'Male', civilStatus: 'Single', cellphoneNo: '0917 123 4567', barangay: 'X', currentAddress: 'Y' },
+    resident: { firstName: 'A', lastName: 'B', birthDate: '1990-01-01', sex: 'Male', civilStatus: 'Single', cellphoneNo: '09171234567', barangay: 'X', currentAddress: 'Y', zone: '1' },
   });
   assert.ok(result.value);
   assert.equal(result.value.resident.firstName, 'A');
   assert.equal(result.value.resident.lastName, 'B');
   assert.equal(result.value.resident.permanentAddress, 'Y');
+  assert.equal(result.value.resident.zone, 1);
 });
 
 test('verification param validators require ids and reject unsafe characters', () => {
@@ -110,6 +111,30 @@ test('household validators enforce required fields, enums, numbers, contact and 
   assert.equal(updatePartial.error.monthlyIncome, 'Monthly income must be zero or a positive number.');
 });
 
+test('updateHouseholdValidator passes the verification outcome through but never a client-supplied verifier identity', () => {
+  // Regression guard for the household-verification bug: the update validator
+  // must forward verificationStatus + correctionReason to the service (they were
+  // previously stripped, silently breaking Verify / Return-for-Correction).
+  const verified = updateHouseholdValidator({ household: { verificationStatus: 'Verified' } });
+  assert.equal(verified.error, undefined);
+  assert.equal(verified.value.household.verificationStatus, 'Verified');
+
+  const returned = updateHouseholdValidator({ household: { verificationStatus: 'Returned for Correction', correctionReason: 'Incomplete WASH data' } });
+  assert.equal(returned.error, undefined);
+  assert.equal(returned.value.household.verificationStatus, 'Returned for Correction');
+  assert.equal(returned.value.household.correctionReason, 'Incomplete WASH data');
+
+  // Invalid status values are rejected by the enum check.
+  const bogus = updateHouseholdValidator({ household: { verificationStatus: 'Bogus' } });
+  assert.ok(bogus.error.verificationStatus);
+
+  // verifiedBy / verifiedAt are ALWAYS derived server-side and must never be
+  // accepted from the client, even if supplied.
+  const forged = updateHouseholdValidator({ household: { verificationStatus: 'Verified', verifiedBy: 'attacker-uuid', verifiedAt: '2000-01-01T00:00:00.000Z' } });
+  assert.equal(forged.value.household.verifiedBy, undefined);
+  assert.equal(forged.value.household.verifiedAt, undefined);
+});
+
 test('household member validator rejects invalid age/sex/philhealth', () => {
   const result = householdMemberValidator({ member: { name: 'A', relationship: 'Head', sex: 'X', age: -1, philhealth: 'maybe' } });
   assert.equal(result.error.sex, 'Member 1: sex must be "Male" or "Female".');
@@ -124,6 +149,15 @@ test('householdParamsValidator validates id and optional memberId', () => {
   const ok = householdParamsValidator({ id: 'HH-001', memberId: 'M1' });
   assert.equal(ok.value.id, 'HH-001');
   assert.equal(ok.value.memberId, 'M1');
+
+  // Household member ids are 36-char database UUIDs; the validator must accept
+  // them so a member can actually be removed (regression guard).
+  const uuid = 'db3a9e38-f804-486e-ab7f-03b8b633e0c6';
+  const withUuid = householdParamsValidator({ id: 'HH-001', memberId: uuid });
+  assert.equal(withUuid.value?.memberId, uuid);
+
+  const badMember = householdParamsValidator({ id: 'HH-001', memberId: 'not a valid id!' });
+  assert.equal(badMember.error.memberId, 'The member id is not valid.');
 });
 
 test('validate middleware forwards field errors via next(ApiError)', () => {

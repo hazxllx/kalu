@@ -30,6 +30,7 @@ test('registerResidentValidator accepts valid payload', () => {
     cellphoneNo: '09171234567',
     currentAddress: '123 Main St',
     barangay: 'San Isidro',
+    zone: '1',
     email: 'ana@example.com',
   });
   assert.ok(!result.error, JSON.stringify(result));
@@ -93,30 +94,115 @@ test('registration blocks an identity-number duplicate without using names as pr
   }
 });
 
-test('transfer OTP accepts leading-zero four-digit strings and invalidates them after use', async () => {
-  // The stored hash is purpose-bound (transfer_residency), so a registration
-  // verification code can never satisfy a transfer OTP and vice versa.
-  const otpHash = createHmac('sha256', process.env.OTP_PEPPER || 'development-only-change-me').update('transfer_residency:0427').digest('hex');
-  const changes = [];
-  const repo = {
-    getTransferRequest: async () => ({ id: 'TR-1', auth_user_id: 'AUTH-1', status: 'pending', otp_hash: otpHash, otp_expires_at: new Date(Date.now() + 60000).toISOString(), otp_attempts: 0 }),
-    updateTransferRequest: async (_id, patch) => { changes.push(patch); return { id: 'TR-1', status: 'pending', ...patch }; },
-    insertTransferAuditLog: async () => null,
-  };
+// Transfer of Residency = change of the EXISTING resident's barangay.
+// A linked resident record must NOT block the transfer; it identifies who is
+// transferring. Only an OPEN (pending) request blocks a new one.
+
+const BARANGAYS = [
+  { id: 'B-ISIDRO', name: 'San Isidro', municipality_id: 'M1', status: 'Active' },
+  { id: 'B-ANTONIO', name: 'San Antonio', municipality_id: 'M1', status: 'Active' },
+  { id: 'B-ROQUE', name: 'Old San Roque', municipality_id: 'M1', status: 'Active' },
+  { id: 'B-CLOSED', name: 'Inactive Barangay', municipality_id: 'M1', status: 'Inactive' },
+];
+const withRepo = async (repo, fn) => {
   const keys = Object.keys(repo);
-  const originals = Object.fromEntries(keys.map((key) => [key, repository[key]]));
-  keys.forEach((key) => { repository[key] = repo[key]; });
-  try {
-    const result = await transferService.verifyOtp({ user: { id: 'AUTH-1', role: 'resident' }, requestId: 'TR-1', otp: '0427' });
-    assert.equal(result.verified, true);
-    assert.equal(changes[0].otp_hash, null);
+  const originals = Object.fromEntries(keys.map((k) => [k, repository[k]]));
+  keys.forEach((k) => { repository[k] = repo[k]; });
+  try { return await fn(); }
+  finally { keys.forEach((k) => { repository[k] = originals[k]; }); }
+};
+
+test('transfer: an existing linked resident is allowed and current barangay is excluded from destinations', async () => {
+  await withRepo({
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', firstName: 'Ana', lastName: 'Dela Cruz', barangayId: 'B-ISIDRO', barangay: 'San Isidro', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    listTransferRequestsByUser: async () => [],
+  }, async () => {
+    const ctx = await transferService.getContext({ user: { id: 'AUTH-1', role: 'resident' } });
+    assert.equal(ctx.resident.id, 'RES-1');
+    assert.ok(!ctx.activeRequest, 'no open request');
+    // Active title-case barangays must be offered (regression: a lowercase
+    // 'active' comparison against title-case 'Active' emptied the dropdown).
+    assert.ok(ctx.destinations.some((b) => b.id === 'B-ANTONIO'), 'active barangay must appear');
+    assert.ok(ctx.destinations.some((b) => b.id === 'B-ROQUE'), 'active barangay must appear');
+    assert.ok(!ctx.destinations.some((b) => b.id === 'B-ISIDRO'), 'current barangay must be excluded');
+    assert.ok(!ctx.destinations.some((b) => b.id === 'B-CLOSED'), 'inactive barangay must be excluded');
+    // No duplicates.
+    const ids = ctx.destinations.map((b) => b.id);
+    assert.equal(new Set(ids).size, ids.length, 'no duplicate barangays');
+    assert.equal(ctx.destinations.length, 2);
+  });
+});
+
+test('transfer: submitting an ineligible (inactive) destination is rejected server-side', async () => {
+  await withRepo({
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', barangayId: 'B-ISIDRO', barangay: 'San Isidro', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    getLatestTransferRequest: async () => null,
+  }, async () => {
     await assert.rejects(
-      transferService.verifyOtp({ user: { id: 'AUTH-1', role: 'resident' }, requestId: 'TR-1', otp: '042' }),
-      (error) => error.statusCode === 400,
+      transferService.startTransfer({ user: { id: 'AUTH-1', role: 'resident' }, toBarangayId: 'B-CLOSED' }),
+      (error) => error.statusCode === 422 && /eligible/i.test(error.message),
     );
-  } finally {
-    keys.forEach((key) => { repository[key] = originals[key]; });
-  }
+  });
+});
+
+test('transfer: an open pending request blocks starting another transfer', async () => {
+  await withRepo({
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', barangayId: 'B-ISIDRO', barangay: 'San Isidro', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    getLatestTransferRequest: async () => ({ id: 'TR-1', status: 'pending', to_barangay_id: 'B-ANTONIO' }),
+  }, async () => {
+    await assert.rejects(
+      transferService.startTransfer({ user: { id: 'AUTH-1', role: 'resident' }, toBarangayId: 'B-ROQUE' }),
+      (error) => error.statusCode === 409 && /pending transfer request/i.test(error.message),
+    );
+  });
+});
+
+test('transfer: a previous approved request does NOT block a new transfer (same resident id kept)', async () => {
+  let created = null;
+  await withRepo({
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', barangayId: 'B-ANTONIO', barangay: 'San Antonio', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    getLatestTransferRequest: async () => ({ id: 'TR-OLD', status: 'approved' }),
+    createTransferRequest: async (payload) => { created = payload; return { id: 'TR-NEW', status: 'draft' }; },
+    insertTransferAuditLog: async () => null,
+  }, async () => {
+    const res = await transferService.startTransfer({ user: { id: 'AUTH-1', role: 'resident' }, toBarangayId: 'B-ROQUE' });
+    assert.equal(res.status, 'draft');
+    assert.equal(created.residentId, 'RES-1', 'reuses the SAME resident id — never creates a new resident');
+    assert.equal(created.fromBarangayId, 'B-ANTONIO');
+    assert.equal(created.toBarangayId, 'B-ROQUE');
+  });
+});
+
+test('transfer: choosing the current barangay as destination is rejected', async () => {
+  await withRepo({
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', barangayId: 'B-ISIDRO', barangay: 'San Isidro', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    getLatestTransferRequest: async () => null,
+  }, async () => {
+    await assert.rejects(
+      transferService.startTransfer({ user: { id: 'AUTH-1', role: 'resident' }, toBarangayId: 'B-ISIDRO' }),
+      (error) => error.statusCode === 422 && /different barangay/i.test(error.message),
+    );
+  });
+});
+
+test('transfer: approval changes only the barangay and keeps the same resident id', async () => {
+  const audits = [];
+  await withRepo({
+    getTransferRequest: async () => ({ id: 'TR-1', status: 'pending', resident_id: 'RES-1', from_barangay_id: 'B-ISIDRO', to_barangay_id: 'B-ANTONIO' }),
+    getResident: async () => ({ id: 'RES-1', barangayId: 'B-ISIDRO', barangay: 'San Isidro', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    approveTransferRequest: async (args) => { audits.push(args); return { id: 'TR-1', status: 'approved' }; },
+    insertTransferAuditLog: async () => null,
+  }, async () => {
+    const res = await transferService.approve({ user: { id: 'STAFF-1', role: 'phn', municipalityId: 'M1' }, requestId: 'TR-1' });
+    assert.equal(res.status, 'approved');
+    assert.deepEqual(audits[0], { requestId: 'TR-1', reviewerId: 'STAFF-1' }, 'resident id is read from the request, never from the client');
+  });
 });
 
 test('document upload validation preserves residentId through the validate middleware', async () => {
@@ -183,78 +269,66 @@ test('registration still conflicts when an already-verified resident is linked t
   }
 });
 
-test('transfer OTP rejects a 5-digit code (must stay exactly four digits)', async () => {
-  // A 6-digit registration-style code (or any non-4-digit value) must never be
-  // accepted by the transfer flow. Length is validated before any hash compare.
-  const repo = {
-    getTransferRequest: async () => ({ id: 'TR-3', auth_user_id: 'AUTH-1', status: 'pending', otp_hash: 'x', otp_expires_at: new Date(Date.now() + 60000).toISOString(), otp_attempts: 0 }),
-    updateTransferRequest: async (_id, patch) => ({ id: 'TR-3', status: 'pending', ...patch }),
-    insertTransferAuditLog: async () => null,
-  };
-  const keys = Object.keys(repo);
-  const originals = Object.fromEntries(keys.map((key) => [key, repository[key]]));
-  keys.forEach((key) => { repository[key] = repo[key]; });
-  try {
-    await assert.rejects(
-      transferService.verifyOtp({ user: { id: 'AUTH-1', role: 'resident' }, requestId: 'TR-3', otp: '01234' }),
-      (error) => error.statusCode === 400,
-    );
-  } finally {
-    keys.forEach((key) => { repository[key] = originals[key]; });
-  }
+test('transfer: getMine reports a resident-facing residency status and read-only documents', async () => {
+  await withRepo({
+    getLatestTransferRequest: async () => ({ id: 'TR-1', status: 'pending', resident_id: 'RES-1', from_barangay_id: 'B-ISIDRO', to_barangay_id: 'B-ANTONIO', submitted_at: '2026-09-27T00:00:00Z' }),
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    listDocumentsByTransferRequest: async () => [],
+  }, async () => {
+    const mine = await transferService.getMine({ user: { id: 'AUTH-1', role: 'resident' } });
+    assert.equal(mine.status, 'pending');
+    assert.equal(mine.residencyStatus, 'transfer_pending');
+    assert.equal(mine.fromBarangay, 'San Isidro');
+    assert.equal(mine.toBarangay, 'San Antonio');
+    assert.deepEqual(mine.documents, []);
+  });
 });
 
-test('a non-transfer-purpose OTP hash cannot verify a transfer request', async () => {
-  // Hash built WITHOUT the transfer_residency purpose binding (e.g. how a
-  // registration-style code would hash). It must be rejected by transfer
-  // verification, proving the two OTP purposes are not interchangeable.
-  const wrongPurposeHash = createHmac('sha256', process.env.OTP_PEPPER || 'development-only-change-me').update('0427').digest('hex');
-  const changes = [];
-  const repo = {
-    getTransferRequest: async () => ({ id: 'TR-2', auth_user_id: 'AUTH-1', status: 'pending', otp_hash: wrongPurposeHash, otp_expires_at: new Date(Date.now() + 60000).toISOString(), otp_attempts: 0 }),
-    updateTransferRequest: async (_id, patch) => { changes.push(patch); return { id: 'TR-2', status: 'pending', ...patch }; },
-    insertTransferAuditLog: async () => null,
-  };
-  const keys = Object.keys(repo);
-  const originals = Object.fromEntries(keys.map((key) => [key, repository[key]]));
-  keys.forEach((key) => { repository[key] = repo[key]; });
-  try {
-    await assert.rejects(
-      transferService.verifyOtp({ user: { id: 'AUTH-1', role: 'resident' }, requestId: 'TR-2', otp: '0427' }),
-      (error) => error.statusCode === 401,
-    );
-  } finally {
-    keys.forEach((key) => { repository[key] = originals[key]; });
-  }
+test('transfer: getMine maps approved and rejected to their residency statuses', async () => {
+  await withRepo({
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    listDocumentsByTransferRequest: async () => [],
+    getLatestTransferRequest: async () => ({ id: 'TR-A', status: 'approved', resident_id: 'RES-1', from_barangay_id: 'B-ISIDRO', to_barangay_id: 'B-ANTONIO' }),
+  }, async () => {
+    const mine = await transferService.getMine({ user: { id: 'AUTH-1', role: 'resident' } });
+    assert.equal(mine.residencyStatus, 'transfer_approved');
+  });
+  await withRepo({
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    listDocumentsByTransferRequest: async () => [],
+    getLatestTransferRequest: async () => ({ id: 'TR-R', status: 'rejected', resident_id: 'RES-1', from_barangay_id: 'B-ISIDRO', to_barangay_id: 'B-ANTONIO', rejection_reason: 'Proof of residency could not be verified.' }),
+  }, async () => {
+    const mine = await transferService.getMine({ user: { id: 'AUTH-1', role: 'resident' } });
+    assert.equal(mine.residencyStatus, 'transfer_rejected');
+    assert.equal(mine.rejectionReason, 'Proof of residency could not be verified.');
+  });
 });
 
 test('transfer review cannot be performed by a resident account', async () => {
   await assert.rejects(
-    transferService.approve({ user: { id: 'AUTH-1', role: 'resident' }, requestId: 'TR-1', residentId: 'RES-1' }),
+    transferService.approve({ user: { id: 'AUTH-1', role: 'resident' }, requestId: 'TR-1' }),
     (error) => error.statusCode === 403,
   );
 });
 
-test('transfer OTP reports a migration dependency without exposing PostgREST schema details', async () => {
-  const repo = {
-    getResidentByAuthUserId: async () => null,
-    getLatestTransferRequest: async () => {
+test('transfer reports a migration dependency without exposing PostgREST schema details', async () => {
+  await withRepo({
+    getResidentByAuthUserId: async () => ({ id: 'RES-1', barangayId: 'B-ISIDRO', barangay: 'San Isidro', municipalityId: 'M1' }),
+    listBarangays: async () => BARANGAYS,
+    listTransferRequestsByUser: async () => {
       const error = new Error("Could not find the table 'public.transfer_requests' in the schema cache");
       error.details = { code: 'PGRST205', message: error.message };
       throw error;
     },
-  };
-  const keys = Object.keys(repo);
-  const originals = Object.fromEntries(keys.map((key) => [key, repository[key]]));
-  keys.forEach((key) => { repository[key] = repo[key]; });
-  try {
+  }, async () => {
     await assert.rejects(
-      transferService.requestOtp({ user: { id: 'AUTH-1', role: 'resident', email: 'user@example.com' } }),
+      transferService.getContext({ user: { id: 'AUTH-1', role: 'resident', email: 'user@example.com' } }),
       (error) => error.statusCode === 503 && /migration is applied/.test(error.message) && !/schema cache|transfer_requests/.test(error.message),
     );
-  } finally {
-    keys.forEach((key) => { repository[key] = originals[key]; });
-  }
+  });
 });
 
 test('document upload accepts valid proof-of-residency file metadata after ownership/duplicate checks', async () => {

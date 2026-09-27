@@ -26,8 +26,19 @@ export const MIN_REJECTION_REASON = 5;
 
 /** PH mobile number: 09XXXXXXXXX or +639XXXXXXXXX (spaces/dashes tolerated). */
 const PH_MOBILE = /^(?:\+63|0)9\d{9}$/;
+/**
+ * STRICT registration mobile rule: exactly 11 numeric digits, no separators,
+ * no country-code prefix, no letters. Must start 09 to be a valid PH mobile.
+ * This is intentionally stricter than PH_MOBILE (which tolerates +63 and
+ * spaces/dashes) because the resident registration form must store a clean
+ * 11-digit string with its leading zero preserved (e.g. 09381829120).
+ */
+const PH_MOBILE_STRICT = /^09\d{9}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Controlled Zone values for a resident/household address. */
+export const ZONE_VALUES = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8]);
 
 export const asString = (value) => (value === null || value === undefined ? '' : String(value));
 export const text = (value) => asString(value).trim();
@@ -38,8 +49,24 @@ export const hasMinLength = (value, min) => text(value).length >= min;
 
 export const normalizePhone = (value) => asString(value).replace(/[\s()\-.]/g, '');
 export const isPhonePH = (value) => PH_MOBILE.test(normalizePhone(value));
+/**
+ * Strict mobile check for registration: the raw value must be EXACTLY 11
+ * numeric digits starting 09 — no spaces, dashes, letters or +63 prefix. The
+ * value is NOT normalised first: separators or letters cause rejection.
+ */
+export const isStrictMobile = (value) => PH_MOBILE_STRICT.test(asString(value));
 export const isEmail = (value) => EMAIL.test(text(value));
 export const isUuid = (value) => UUID.test(text(value));
+
+/** Coerce a Zone input to an integer 1..8, or null when out of range/blank. */
+export const toZone = (value) => {
+  const raw = text(value).replace(/^zone\s*/i, '');
+  if (raw === '') return null;
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return ZONE_VALUES.includes(n) ? n : null;
+};
+export const isZone = (value) => toZone(value) !== null;
 
 /** Parse "YYYY-MM-DD" (or ISO) into a date at local midnight, or null. */
 export const parseDate = (value) => {
@@ -98,6 +125,7 @@ export default {
   SEX_OPTIONS,
   CIVIL_STATUSES,
   MIN_REJECTION_REASON,
+  ZONE_VALUES,
   asString,
   text,
   isBlank,
@@ -105,6 +133,9 @@ export default {
   hasMinLength,
   normalizePhone,
   isPhonePH,
+  isStrictMobile,
+  toZone,
+  isZone,
   isEmail,
   isUuid,
   parseDate,

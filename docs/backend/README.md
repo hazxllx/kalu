@@ -1,106 +1,70 @@
-# KALUSAGAP Backend Preparation (NOT IMPLEMENTED)
+# Backend overview
 
-This document prepares the backend structure for features that are currently
-frontend-only. **No backend logic, API endpoint, database connection, or
-authentication is implemented.** Each section below describes the future
-purpose and TODO work for one area. The frontend continues to use its mock
-stores until these are built.
+The backend is an Express API (Node.js, ES modules) that uses the Supabase
+JavaScript client for authentication and PostgreSQL access. Every request goes
+through the same layers:
 
----
+```
+route -> authenticate -> authorize(roles) -> controller -> service -> repository
+```
 
-## 1. User Management
+- `authenticate` verifies the Supabase JWT and loads the caller's active profile
+  (role, status, municipality/barangay). The role is always read from the
+  database, never from client input.
+- `authorize(roles)` checks the caller's role against the feature's allowed
+  roles (`src/config/roles.js`).
+- Services hold the business rules and barangay/municipality scope checks;
+  repositories talk to the database (a Supabase driver, with a JSON file driver
+  for local development when Supabase is not configured).
 
-// TODO: Add the database model for user accounts (name, email, contact,
-// role, assigned barangay, status, password hash).
-// TODO: Add endpoints for create / update / disable / enable / reset-password
-// / delete (disabled only) with admin-only authorization.
-// Frontend reference: frontend/src/services/local/adminUserStore.js
+Routes are mounted under `/api` in `src/routes/index.js`. `/api/health` is
+public; everything else requires authentication.
 
-## 2. Staff Registration Requests
+## Implemented API groups
 
-// TODO: Add the database model for staff registration requests
-// (applicant info, documents, status, notes, reviewer, timestamps).
-// TODO: Add endpoints for list / review (approve, reject, request documents)
-// with required-notes validation on the server.
-// Frontend reference: frontend/src/services/local/staffRequestStore.js
+- `/api/auth` — session and profile resolution.
+- `/api/registration` — resident self-registration and linked resident record.
+- `/api/verifications` — manual resident verification (Health Supervisor / PHN).
+- `/api/residents` — master resident directory (PHN / Health Supervisor / MHO).
+- `/api/households` — household profiling: BHW collection, Health Supervisor
+  verification with reasons, server-computed risk, and an audit trail.
+- `/api/consultations` — clinical consultations with server-side vitals and
+  follow-up validation.
+- `/api/operational` — follow-ups, TCL, maternal records, immunizations, and
+  notifications (staff writes, per-recipient notification reads).
+- `/api/resident` — resident self-service follow-ups (list/read own,
+  approve/reject); ownership is derived from the session.
+- `/api/referrals` — referral coordination (`health_referrals`), barangay-scoped.
+- `/api/m1` — FHSIS M1 monthly report recording and aggregation.
+- `/api/intake` and `/api/phn` — the RHU intake to PHN processing workflow.
+- `/api/analytics` — barangay-level aggregates and early-warning signals for the
+  community health map (aggregate-only, no resident-level detail).
+- `/api/users` — admin user management on the `profiles` table.
+- Document upload/review and residency-transfer requests.
 
-## 3. Health Supervisor Account Verification
+## Audit trail
 
-// TODO: Add the database model for supervisor verification accounts
-// (assigned barangay, document status, PHN endorsement note, status, reason).
-// TODO: Add endpoints for admin review decisions and PHN endorsements.
-// Frontend reference: frontend/src/services/local/supervisorVerificationStore.js
+Domain actions are written to `health_audit_logs` (households, referrals,
+operational records, M1). Resident verification and transfer decisions have
+their own append-only log tables (`resident_verification_logs`,
+`transfer_request_audit_logs`).
 
-## 4. Role and Barangay Assignment
+## Not yet backed by the API
 
-// TODO: Add role and barangay assignment columns to the user model.
-// TODO: Add server-side validation of role/barangay combinations
-// (barangay-scoped roles require a barangay; others must have none).
-// Frontend reference: adminUserStore.validateAssignment
+A few admin/clinical screens still use the frontend mock stores under
+`frontend/src/services/local/` and are not connected to storage yet. The
+corresponding legacy resource routes return `501`:
 
-## 5. Audit Logs
+- staff registration requests and Health Supervisor *account* verification
+- medical certificate status history
+- resident PhilPEN assessment results and resident health-record export
 
-// TODO: Add the database model for audit events (user, role, action,
-// description, status, timestamp, IP address).
-// TODO: Add login/logout event capture and an admin-only query endpoint with
-// search, action, role, and date filters.
-// Frontend reference: frontend/src/services/local/auditStore.js
+These are future work, not part of the current backend.
 
-## 6. Medical Certificate Status History
+## Tests
 
-// TODO: Add the database model for medical certificates and their status
-// history (previous status, new status, actor, notes, timestamp).
-// TODO: Add server-side enforcement of the allowed transitions
-// (Draft â†’ For Review â†’ Approved | Rejected; Approved â†’ Issued) and
-// confirmation-before-issuing.
-// Frontend reference: medicalCertificateStore.ALLOWED_TRANSITIONS
+Backend tests use the Node.js built-in test runner:
 
-## 7. Household Verification Records
-
-// TODO: Add verification columns to the household model (verification status,
-// reviewer, review date, correction reason).
-// TODO: Add endpoints so the Health Supervisor's verification decisions are
-// persisted and visible to the submitting BHW.
-// Frontend reference: householdStore.applyVerification
-
-## 8. Resident Health Record Export
-
-// TODO: Add an export endpoint that generates a resident-owned health record
-// bundle (resident info, assessments, vitals, diagnoses, treatments,
-// referrals, follow-ups) with resident-only authorization.
-// Frontend reference: HealthRecord.exportHealthRecord
-
-## 9. Resident PhilPEN Results
-
-// TODO: Add the database model for PhilPEN assessment results (date, risk
-// classification, findings, recommendations, follow-up advice, status).
-// TODO: Add a resident-scoped read endpoint â€” residents must never see or
-// edit another resident's results.
-// Frontend reference: HealthRecord philpenResults
-
-## 10. RHU Referrals
-
-// TODO: Add the database model for referrals (resident, referring personnel,
-// receiving facility, reason, priority, status, notes, assigned personnel).
-// TODO: Add endpoints for list / detail / status updates with role-based
-// authorization (RHU Personnel manage; MHO monitors).
-// Frontend reference: frontend/src/services/local/referralTrackingStore.js
-
-## 11. MHO Referral Tracking
-
-// TODO: Add a referral status history table powering the tracking timeline.
-// TODO: Add municipality-wide, read-mostly query endpoints for the MHO
-// dashboard and referral tracking views.
-// Frontend reference: referralTrackingStore (shared with RHU referrals)
-
-## 12. Barangay Hotspot Data
-
-// TODO: Add the database model / query for barangay-level health aggregates
-// feeding the community monitoring (hotspot) map.
-// TODO: Add an analytics endpoint scoped to the requesting role's municipality.
-// Frontend reference: features/analytics/pages/Barangays.jsx
-
----
-
-**Reminder:** Everything in this file is preparation only. Do not treat any
-backend functionality as implemented or working.
+```bash
+npm test --prefix backend
+```

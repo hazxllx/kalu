@@ -4,7 +4,7 @@ import ApiError from '../utils/apiError.js';
 /**
  * Profile service — the server-side source of truth for a user's application
  * role, account status and coverage assignment (the `profiles` table created
- * by database/migrations/20260915100000_create_core_org_and_profiles.sql).
+ * by supabase/migrations/20260915100000_create_core_org_and_profiles.sql).
  *
  * Everything here runs on the service-role client and is only called after the
  * caller's Supabase token has been verified. The client never supplies a role:

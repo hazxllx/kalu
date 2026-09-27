@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Check, ChevronDown, Edit3 } from "lucide-react";
+import { Check, ChevronDown, Edit3, Lock } from "lucide-react";
 import GovSeal from "@/components/branding/GovSeal";
 
 /**
@@ -106,6 +106,165 @@ export function SelectField({
         />
       </div>
     </Field>
+  );
+}
+
+/**
+ * Accessible custom dropdown for options with long labels (e.g. the Health
+ * Personnel Role). Unlike a native <select>, the options popover renders each
+ * label in full (wrapping when needed) and the trigger keeps the chosen value
+ * readable — truncating with an ellipsis + tooltip only when it genuinely does
+ * not fit, without shrinking the font. Styled to match the native inputs and
+ * remaps cleanly under the dark theme via the shared surface utilities.
+ *
+ * `onChange` is called with the raw option value (not an event), which the
+ * form `set()` helpers already accept.
+ */
+export function SelectDropdown({
+  label,
+  required = false,
+  optional = false,
+  error = null,
+  hint = null,
+  value,
+  onChange,
+  options = [],
+  placeholder = "Select...",
+  className = "",
+}) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+  const selected = options.find((o) => o.value === value) || null;
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const pick = (val) => {
+    onChange(val);
+    setOpen(false);
+  };
+
+  return (
+    <Field
+      label={label}
+      required={required}
+      optional={optional}
+      error={error}
+      hint={hint}
+      className={className}
+    >
+      <div className="relative" ref={rootRef}>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          title={selected?.label || undefined}
+          className={`${inputCls(error)} flex cursor-pointer items-center pr-10 text-left`}
+        >
+          <span className={`min-w-0 flex-1 truncate ${selected ? "text-brand-ink" : "text-slate-400"}`}>
+            {selected ? selected.label : placeholder}
+          </span>
+        </button>
+        <ChevronDown
+          className={`pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-transform duration-200 ${
+            open ? "rotate-180" : ""
+          }`}
+          aria-hidden="true"
+        />
+        {open && (
+          <ul
+            role="listbox"
+            aria-label={label}
+            className="absolute z-30 mt-2 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_40px_-16px_rgba(3,20,45,0.4)] ring-1 ring-black/5"
+          >
+            {options.map((o) => {
+              const active = o.value === value;
+              return (
+                <li key={o.value ?? o.label} role="option" aria-selected={active}>
+                  <button
+                    type="button"
+                    onClick={() => pick(o.value)}
+                    className={`flex w-full items-start gap-2 rounded-lg px-3 py-2.5 text-left text-sm leading-snug transition-colors ${
+                      active
+                        ? "bg-brand-blue/10 font-semibold text-brand-blue"
+                        : "text-brand-ink hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1">{o.label}</span>
+                    {active && <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" strokeWidth={2.5} />}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+/**
+ * System-derived, read-only value presentation.
+ *
+ * Deliberately distinct from the editable `Field`/`SelectField` inputs: a
+ * subtle blue-tinted surface, a lock indicator and a "Read-only" badge make it
+ * obvious the value is derived and cannot be typed into — without the washed-out
+ * look of a disabled input. The value stays fully readable in light and dark.
+ */
+export function ReadonlyField({
+  label,
+  hint = null,
+  value,
+  placeholder = "—",
+  icon: Icon = Lock,
+  badge = "Read-only",
+  className = "",
+}) {
+  const hasValue = Boolean(value);
+  return (
+    <div className={className}>
+      <label className={labelCls}>{label}</label>
+      <div className="mt-1.5">
+        <div
+          className="flex items-center gap-2.5 rounded-xl border border-brand-blue/20 bg-brand-blue/5 px-4 py-3"
+          aria-readonly="true"
+        >
+          {Icon && (
+            <Icon className="h-4 w-4 shrink-0 text-brand-blue" strokeWidth={2} aria-hidden="true" />
+          )}
+          <span
+            title={hasValue ? String(value) : undefined}
+            className={`min-w-0 flex-1 break-words text-sm ${
+              hasValue ? "font-medium text-brand-ink" : "text-slate-400"
+            }`}
+          >
+            {hasValue ? value : placeholder}
+          </span>
+          {badge && (
+            <span className="shrink-0 rounded-md bg-brand-blue/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-brand-blue">
+              {badge}
+            </span>
+          )}
+        </div>
+      </div>
+      {hint && (
+        <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">{hint}</p>
+      )}
+    </div>
   );
 }
 

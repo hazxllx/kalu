@@ -10,6 +10,7 @@ import { PageSkeleton } from "@/components/common/Skeleton";
 import ErrorState from "@/components/common/ErrorState";
 import { useAuth } from "@/context/AuthContext";
 import { getAssignedBarangay } from "@/lib/barangayScope";
+import { toLocalISODate, formatDateRange } from "@/lib/dateUtils";
 import { resolveEarlyWarningData } from "@/services/local/earlyWarning";
 import { fetchEarlyWarningData, fetchCommunityMap } from "@/services/api/earlyWarningApi";
 
@@ -112,7 +113,9 @@ export default function HealthTrends() {
 
   const muniRange = useMemo(() => {
     const now = new Date();
-    const iso = (d) => d.toISOString().slice(0, 10);
+    // Local calendar days only — toISOString() would shift the boundary back a
+    // day (and, at year start, back a year) under Philippine time.
+    const iso = (d) => toLocalISODate(d);
     const months = period === "3m" ? 3 : period === "6m" ? 6 : 12;
     return { from: iso(new Date(now.getFullYear(), now.getMonth() - months, now.getDate())), to: iso(now) };
   }, [period]);
@@ -530,7 +533,7 @@ export default function HealthTrends() {
           <div className="grid lg:grid-cols-3 gap-5 mt-5">
             <Card className="lg:col-span-2 p-6">
               <h3 className="font-semibold text-brand-ink mb-1">Consultations by Barangay</h3>
-              <p className="text-xs text-brand-gray mb-4">Recorded consultations per barangay ({muniRange.from} to {muniRange.to})</p>
+              <p className="text-xs text-brand-gray mb-4">Recorded consultations per barangay ({formatDateRange(muniRange.from, muniRange.to)})</p>
               {consultationsByBarangay.length > 0 ? (
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={consultationsByBarangay} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>

@@ -14,6 +14,57 @@ const inputCls = (error) =>
     error ? "border-brand-danger bg-red-50/40" : "border-brand-border"
   }`;
 
+/** A value is a valid, positive measurement, or empty (the field is optional). */
+const isPositiveOrEmpty = (value) => {
+  if (value === "" || value == null) return true;
+  const n = Number.parseFloat(value);
+  return Number.isFinite(n) && n > 0;
+};
+
+/**
+ * UI-only BMI = weight(kg) / heightMeters². Returns a 2-decimal string, or ""
+ * when either input is missing or invalid. Guards against NaN/Infinity/division
+ * by zero and negative values so "NaN"/"Infinity" never reach the field. BMI is
+ * never persisted from this form — the server owns any stored BMI value.
+ */
+const computeBmiDisplay = (heightCm, weightKg) => {
+  const h = Number.parseFloat(heightCm);
+  const w = Number.parseFloat(weightKg);
+  if (!Number.isFinite(h) || !Number.isFinite(w) || h <= 0 || w <= 0) return "";
+  const heightM = h / 100;
+  const bmi = w / (heightM * heightM);
+  if (!Number.isFinite(bmi)) return "";
+  return bmi.toFixed(2);
+};
+
+/**
+ * Map a failed save to a clear, status-appropriate message. The backend's
+ * specific message (e.g. a 422 validation reason) is preferred when present;
+ * otherwise a friendly per-status fallback is used. Credentials/tokens are
+ * never surfaced here.
+ */
+const submitErrorMessage = (err) => {
+  const status = err?.status;
+  const backendMsg = err?.message && !/^Request failed with status/i.test(err.message) ? err.message : "";
+  switch (status) {
+    case 400:
+    case 422:
+      return backendMsg || "Some consultation details are invalid. Please review the highlighted fields.";
+    case 401:
+      return "Your session has expired. Please sign in again and retry.";
+    case 403:
+      return backendMsg || "You are not allowed to save a consultation for this resident.";
+    case 404:
+      return "The selected resident could not be found in your assigned area.";
+    case 409:
+      return backendMsg || "This consultation conflicts with an existing record.";
+    case 500:
+    default:
+      if (status >= 500) return "The server could not save the consultation. Please try again.";
+      return backendMsg || "Unable to save consultation. Please try again.";
+  }
+};
+
 const emptyForm = () => ({
   consultationDate: new Date().toISOString().split("T")[0],
   consultationTime: "",
@@ -99,6 +150,12 @@ export default function TreatmentConsultation() {
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
 
+  // Read-only BMI, recomputed immediately whenever height or weight changes.
+  const bmiDisplay = useMemo(
+    () => computeBmiDisplay(formData.height, formData.weight),
+    [formData.height, formData.weight],
+  );
+
   const load = useCallback(() => {
     setLoading(true);
     setLoadError(null);
@@ -143,17 +200,21 @@ export default function TreatmentConsultation() {
   const openForEdit = (record) => {
     setEditingId(record.id);
     setSelectedResident(record.resident || null);
+    // Vitals are returned nested under record.vitals (bp/temperature/hr/rr/
+    // heightCm/weightKg/o2sat); map them back to the flat form fields so an
+    // edited consultation shows its saved vitals instead of blanks.
+    const v = record.vitals || {};
     setFormData({
       consultationDate: record.consultationDate || new Date().toISOString().split("T")[0],
       consultationTime: record.consultationTime || "",
       chiefComplaint: record.chiefComplaint || "",
-      bloodPressure: record.bloodPressure || "",
-      temperature: record.temperature || "",
-      pulseRate: record.pulseRate || "",
-      respiratoryRate: record.respiratoryRate || "",
-      height: record.height || "",
-      weight: record.weight || "",
-      oxygenSaturation: record.oxygenSaturation || "",
+      bloodPressure: v.bp ?? record.bloodPressure ?? "",
+      temperature: v.temperature ?? record.temperature ?? "",
+      pulseRate: v.hr ?? record.pulseRate ?? "",
+      respiratoryRate: v.rr ?? record.respiratoryRate ?? "",
+      height: v.heightCm ?? record.height ?? "",
+      weight: v.weightKg ?? record.weight ?? "",
+      oxygenSaturation: v.o2sat ?? record.oxygenSaturation ?? "",
       findings: record.findings || "",
       diagnosis: record.diagnosis || "",
       treatmentGiven: record.treatmentGiven || "",
@@ -186,6 +247,8 @@ export default function TreatmentConsultation() {
     if (!formData.findings.trim()) next.findings = "Findings are required.";
     if (!formData.diagnosis.trim()) next.diagnosis = "Diagnosis is required.";
     if (!formData.treatmentGiven.trim()) next.treatmentGiven = "Treatment provided is required.";
+    if (!isPositiveOrEmpty(formData.height)) next.height = "Height must be a number greater than 0.";
+    if (!isPositiveOrEmpty(formData.weight)) next.weight = "Weight must be a number greater than 0.";
     if (formData.followUpRequired === "Yes" && !formData.nextVisitDate) {
       next.nextVisitDate = "Next visit date is required when a follow-up is needed.";
     }
@@ -193,6 +256,7 @@ export default function TreatmentConsultation() {
   };
 
   const handleSave = () => {
+    if (busy) return; // guard against double submission while a save is in flight
     const nextErrors = validate();
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
@@ -211,7 +275,12 @@ export default function TreatmentConsultation() {
         : [saved, ...current]);
       showToast(editingId ? "Consultation updated successfully." : "Consultation saved successfully.");
       cancelForm();
-    }).catch((err) => setErrors((prev) => ({ ...prev, submit: err?.message || "Could not save consultation." })))
+    }).catch((err) => {
+      // Never fail silently: log the real error for debugging (no secrets) and
+      // show the user a clear, status-appropriate message.
+      console.error("Consultation save failed:", err?.status, err?.message, err?.payload);
+      setErrors((prev) => ({ ...prev, submit: submitErrorMessage(err) }));
+    })
       .finally(() => setBusy(false));
   };
 
@@ -372,7 +441,7 @@ export default function TreatmentConsultation() {
         {/* Vital Signs */}
         <div className="mb-6">
           <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-3">Vital Signs</h4>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <p className="text-xs text-brand-gray mb-1">Blood Pressure (mmHg)</p>
               <input type="text" placeholder="e.g. 120/80" value={formData.bloodPressure} onChange={(e) => setFormData({ ...formData, bloodPressure: e.target.value })} className={inputCls()} />
@@ -390,12 +459,29 @@ export default function TreatmentConsultation() {
               <input type="text" placeholder="e.g. 18" value={formData.respiratoryRate} onChange={(e) => setFormData({ ...formData, respiratoryRate: e.target.value })} className={inputCls()} />
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Height (cm)</p>
-              <input type="text" placeholder="e.g. 158" value={formData.height} onChange={(e) => setFormData({ ...formData, height: e.target.value })} className={inputCls()} />
+              <label htmlFor="vital-height" className="block text-xs text-brand-gray mb-1">Height (cm)</label>
+              <input id="vital-height" type="text" placeholder="e.g. 158" value={formData.height} onChange={(e) => setFormData({ ...formData, height: e.target.value })} className={inputCls(errors.height)} />
+              {errors.height && <p className="mt-1 text-xs text-brand-danger">{errors.height}</p>}
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Weight (kg)</p>
-              <input type="text" placeholder="e.g. 62" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} className={inputCls()} />
+              <label htmlFor="vital-weight" className="block text-xs text-brand-gray mb-1">Weight (kg)</label>
+              <input id="vital-weight" type="text" placeholder="e.g. 62" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} className={inputCls(errors.weight)} />
+              {errors.weight && <p className="mt-1 text-xs text-brand-danger">{errors.weight}</p>}
+            </div>
+            <div>
+              <label htmlFor="vital-bmi" className="block text-xs text-brand-gray mb-1">BMI (auto)</label>
+              <input
+                id="vital-bmi"
+                type="text"
+                readOnly
+                aria-readonly="true"
+                aria-label="Body Mass Index, calculated automatically from height and weight"
+                title="Calculated automatically from height and weight"
+                tabIndex={-1}
+                value={bmiDisplay}
+                placeholder="—"
+                className={`${inputCls()} bg-brand-bg text-brand-blue font-medium cursor-default`}
+              />
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Oxygen Saturation (%)</p>
@@ -509,19 +595,32 @@ export default function TreatmentConsultation() {
         </div>
 
         {/* Buttons */}
-        <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-brand-border">
-          <button
-            onClick={handleSave}
-            className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
-          >
-            <Save className="w-4 h-4" /> {editingId ? "Update Consultation" : "Save Consultation"}
-          </button>
-          <button
-            onClick={cancelForm}
-            className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
-          >
-            <X className="w-4 h-4" /> Cancel
-          </button>
+        <div className="pt-4 border-t border-brand-border">
+          {errors.submit && (
+            <div className="mb-3 rounded-btn border border-brand-danger/30 bg-red-50/60 px-3 py-2" role="alert" aria-live="assertive">
+              <p className="text-sm text-brand-danger">{errors.submit}</p>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={busy}
+              aria-busy={busy}
+              className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Save className="w-4 h-4" />
+              {busy
+                ? (editingId ? "Updating Consultation..." : "Saving Consultation...")
+                : (editingId ? "Update Consultation" : "Save Consultation")}
+            </button>
+            <button
+              onClick={cancelForm}
+              disabled={busy}
+              className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <X className="w-4 h-4" /> Cancel
+            </button>
+          </div>
         </div>
       </Card>
     </div>

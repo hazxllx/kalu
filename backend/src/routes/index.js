@@ -14,6 +14,10 @@ import documentsRoutes from './documents.routes.js';
 import transferRoutes from './transfer.routes.js';
 import consultationsRoutes from './consultations.routes.js';
 import operationalRoutes from './operational.routes.js';
+import residentFollowupsRoutes from './residentFollowups.routes.js';
+import referralsRoutes from './referrals.routes.js';
+import m1Routes from './m1.routes.js';
+import usersRoutes from './users.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -22,10 +26,10 @@ import createResourceRouter from '../utils/resourceRouter.js';
  * Request flow for every resource:
  *   route -> authenticate -> authorize(roles) -> controller -> service -> data
  *
- * `/api/health` is public. `/api/auth/*` handles authentication (Supabase Auth
- * when configured; a local dev session otherwise). The resident -> RHU -> PHN
- * workflow lives under `/api/intake` and `/api/phn`. Remaining groups keep the
- * generic resource router (501) until their verified schema is connected.
+ * `/api/health` is public. Authentication uses Supabase Auth; protected routes
+ * verify the token and load the active application profile. Database-backed
+ * workflows are mounted below; legacy resource groups return 501 until their
+ * storage is connected.
  */
 const router = Router();
 
@@ -41,6 +45,19 @@ router.use('/registration', registrationRoutes);
 router.use('/consultations', consultationsRoutes);
 router.use('/operational', operationalRoutes);
 
+// Resident self-service follow-ups (list/read own + approve/reject). Separate
+// from the staff /operational endpoints; ownership is derived from the session.
+router.use('/resident', residentFollowupsRoutes);
+
+// Referral coordination — real Supabase-backed workflow (health_referrals):
+// barangay-scoped create/list/update/status/delete for Health Supervisor / PHN,
+// resident read of their own referrals.
+router.use('/referrals', referralsRoutes);
+
+// FHSIS M1 monthly report — barangay-scoped recording + aggregation over the
+// existing health records (public.m1_records + immunizations/households/mortality).
+router.use('/m1', m1Routes);
+
 // Resident -> RHU -> PHN submission workflow
 router.use('/intake', intakeRoutes);          // BHW / RHU personnel intake
 router.use('/phn', phnRoutes);                // PHN processing (queue, referrals)
@@ -52,10 +69,11 @@ router.use('/residents', residentsRoutes);
 // Resident verification review (Health Supervisor / PHN, barangay-scoped)
 router.use('/verifications', verificationsRoutes);
 
-// Account / system administration
-router.use('/users', createResourceRouter('users', { readRoles: FEATURE_ROLES.users }));
+// Account / system administration — Admin User Management (admin-only): real
+// Supabase-backed reads + role/status/profile updates on the `profiles` table.
+router.use('/users', usersRoutes);
 
-// Household Profiling — real Supabase-backed workflow (Phase 5): BHW
+// Household Profiling — real Supabase-backed workflow: BHW
 // collection, Health Supervisor verification, server-computed risk.
 router.use('/households', householdsRoutes);
 
@@ -64,8 +82,9 @@ router.use('/health-records', createResourceRouter('health-records', { readRoles
 router.use('/assessments', createResourceRouter('assessments', { readRoles: FEATURE_ROLES.assessments }));
 router.use('/consultations', createResourceRouter('consultations', { readRoles: FEATURE_ROLES.consultations }));
 router.use('/triage', createResourceRouter('triage', { readRoles: FEATURE_ROLES.triage }));
-router.use('/referrals', createResourceRouter('referrals', { readRoles: FEATURE_ROLES.referralRecords }));
-router.use('/follow-ups', createResourceRouter('follow-ups', { readRoles: FEATURE_ROLES.followUps }));
+// Follow-ups are served by the real operational router at
+// `/operational/followups` (follow_ups table). No standalone `/follow-ups`
+// mount: it would only shadow the real endpoint with a misleading 501.
 
 // Monitoring / aggregate information
 router.use('/reports', createResourceRouter('reports', { readRoles: FEATURE_ROLES.reports }));
@@ -77,7 +96,9 @@ router.use('/analytics', analyticsRoutes);
 router.use(documentsRoutes);
 router.use(transferRoutes);
 
-// Cross-cutting
-router.use('/notifications', createResourceRouter('notifications', { readRoles: FEATURE_ROLES.notifications }));
+// Notifications are served by the real operational router at
+// `/operational/notifications` (notifications table), which enforces
+// per-recipient scope. No standalone `/notifications` mount: it would only
+// shadow the real endpoint with a misleading 501.
 
 export default router;

@@ -117,10 +117,10 @@ export default function DashboardLayout({ roleKey }) {
         return (
           <div
             key={it.label}
-            className="flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none"
             title="Available after account verification"
           >
-            <Icon name={it.icon} className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} />
+            <Icon name={it.icon} className="w-5 h-5 shrink-0" strokeWidth={1.8} />
             <span className="flex-1 truncate">{it.label}</span>
             <Lock className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 shrink-0" strokeWidth={1.8} />
           </div>
@@ -133,9 +133,9 @@ export default function DashboardLayout({ roleKey }) {
             <button
               type="button"
               onClick={() => setExpandedGroups((prev) => ({ ...prev, [it.label]: !openGroup }))}
-              className="flex w-full items-center gap-3 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+              className="flex w-full items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
             >
-              <Icon name={it.icon} className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} />
+              <Icon name={it.icon} className="w-5 h-5 shrink-0" strokeWidth={1.8} />
               <span className="flex-1 text-left truncate">{it.label}</span>
               <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${openGroup ? "rotate-180" : ""}`} />
             </button>
@@ -155,8 +155,8 @@ export default function DashboardLayout({ roleKey }) {
   }
 
   return (
-                      <Link key={child.path} to={child.path} onClick={() => setOpen(false)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${active ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15" : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"}`}>
-                        <Icon name={child.icon} className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} />
+                      <Link key={child.path} to={child.path} onClick={() => setOpen(false)} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${active ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15" : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"}`}>
+                        <Icon name={child.icon} className="w-5 h-5 shrink-0" strokeWidth={1.8} />
                         <span className="truncate">{child.label}</span>
                       </Link>
                     );
@@ -173,13 +173,13 @@ export default function DashboardLayout({ roleKey }) {
           key={it.path}
           to={it.path}
           onClick={() => setOpen(false)}
-          className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
             active
               ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
               : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
           }`}
         >
-          <Icon name={it.icon} className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} />
+          <Icon name={it.icon} className="w-5 h-5 shrink-0" strokeWidth={1.8} />
           <span className="truncate">{it.label}</span>
         </Link>
       );
@@ -188,9 +188,9 @@ export default function DashboardLayout({ roleKey }) {
     return (
       <nav className="px-3">
         {blocks.map((block, i) => (
-          <div key={block.group || `block-${i}`} className={i === 0 ? "" : "mt-4"}>
+          <div key={block.group || `block-${i}`} className={i === 0 ? "" : "mt-5"}>
             {block.group && (
-              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+              <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-500 select-none">
                 {block.group}
               </p>
             )}
@@ -241,7 +241,7 @@ export default function DashboardLayout({ roleKey }) {
         {/* Fixed account footer */}
         <div className="shrink-0 p-3 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
           <button onClick={() => logout()} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors">
-            <LogOut className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} /> Log out
+            <LogOut className="w-5 h-5 shrink-0" strokeWidth={1.8} /> Log out
           </button>
         </div>
       </aside>
@@ -264,7 +264,7 @@ export default function DashboardLayout({ roleKey }) {
               </nav>
               <div className="shrink-0 p-3 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
                 <button onClick={() => logout()} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors">
-                  <LogOut className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} /> Log out
+                  <LogOut className="w-5 h-5 shrink-0" strokeWidth={1.8} /> Log out
                 </button>
               </div>
             </motion.aside>

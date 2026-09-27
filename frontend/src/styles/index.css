@@ -297,6 +297,31 @@
     cursor: not-allowed;
   }
 
+  /* Date picker — dark mode. The popup surface already remaps via `.bg-white`;
+     these override the calendar internals (hardcoded light text/dropdown) so
+     days, weekday headers and the month/year dropdowns stay legible on dark. */
+  .dark .kalusagap-datepicker .rdp-caption_label,
+  .dark .kalusagap-datepicker .rdp-dropdown { color: hsl(var(--foreground)); }
+  .dark .kalusagap-datepicker .rdp-dropdown {
+    background: hsl(var(--input));
+    border-color: hsl(var(--border));
+  }
+  .dark .kalusagap-datepicker .rdp-nav_button { color: hsl(210 86% 66%); }
+  .dark .kalusagap-datepicker .rdp-nav_button:hover { background-color: hsl(var(--hover)); }
+  .dark .kalusagap-datepicker .rdp-head_cell { color: hsl(var(--muted-foreground)); }
+  .dark .kalusagap-datepicker .rdp-day { color: hsl(var(--foreground)); }
+  .dark .kalusagap-datepicker .rdp-day:hover:not(.rdp-day_selected):not(.rdp-day_disabled) {
+    background-color: hsl(var(--hover));
+    color: hsl(210 86% 70%);
+  }
+  .dark .kalusagap-datepicker .rdp-day_today {
+    color: hsl(210 86% 70%);
+    box-shadow: inset 0 0 0 1px hsl(210 86% 58% / 0.5);
+  }
+  .dark .kalusagap-datepicker .rdp-day_today.rdp-day_selected { color: #fff; box-shadow: none; }
+  .dark .kalusagap-datepicker .rdp-day_outside { color: hsl(214 12% 45%); }
+  .dark .kalusagap-datepicker .rdp-day_disabled { color: hsl(214 12% 40%); }
+
   .gov-link {
     color: #0B4A8F;
     text-decoration-line: underline;
@@ -389,6 +414,17 @@
 .dark input, .dark select, .dark textarea { color-scheme: dark; }
 /* Placeholders: muted but readable (lighter than disabled, darker than text) */
 .dark input::placeholder, .dark textarea::placeholder { color: hsl(214 16% 62%); }
+
+/* Translucent slate fills used by the registration inputs, the DatePicker
+   trigger and nested info boxes (`bg-slate-50/60`). The base `.bg-slate-50`
+   remap above misses the opacity variant, so in dark mode these rendered as a
+   washed-out, semi-transparent light box — making editable fields look
+   disabled. Map them to a solid nested surface so fields read as editable. */
+.dark .bg-slate-50\/60 { background-color: hsl(var(--card-nested)); }
+/* Error field fill (`bg-rose-50/50`) — tinted dark danger wash, not pale rose. */
+.dark .bg-rose-50\/50 { background-color: hsl(350 50% 18% / 0.55); }
+/* Focused fields must never flash a bright white background in dark mode. */
+.dark .focus\:bg-white:focus { background-color: hsl(var(--input)); }
 
 /* Dropdowns / popovers use the popover surface (slightly lighter than cards) */
 .dark .bg-popover, .dark .bg-white\/95, .dark [role="listbox"], .dark [role="menu"] {

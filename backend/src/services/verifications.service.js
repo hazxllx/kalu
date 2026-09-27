@@ -386,7 +386,22 @@ export const getMine = async ({ user } = {}) => {
     return { hasResidentRecord: false, verification: null, history: [] };
   }
   const history = await repository.listResidentVerificationLogs(resident.id, { limit: 50 });
-  return { hasResidentRecord: true, verification: toVerification(resident), history };
+  // Resolve the municipality NAME (system-controlled) from the resident's
+  // barangay for the Settings → Profile display, reusing the existing lookup.
+  let municipality = '';
+  try {
+    const brgy = resident.barangay
+      ? await repository.findBarangayByName(resident.barangay, resident.municipalityId || null)
+      : null;
+    municipality = brgy?.municipality || '';
+  } catch {
+    municipality = '';
+  }
+  return {
+    hasResidentRecord: true,
+    verification: { ...toVerification(resident), municipality },
+    history,
+  };
 };
 
 // ---------------------------------------------------------------------------

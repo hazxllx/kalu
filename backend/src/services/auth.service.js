@@ -1,4 +1,4 @@
-import { getServiceClient } from '../config/supabase.js';
+import { getServiceClient, createAuthClient } from '../config/supabase.js';
 import { loadActiveProfile, profileToSessionUser } from './profile.service.js';
 import ApiError from '../utils/apiError.js';
 
@@ -22,8 +22,13 @@ const metadataUser = (user) => ({
 export const signIn = async ({ email, password }) => {
   if (!email || !password) throw ApiError.badRequest('Email and password are required');
 
-  const supabase = getServiceClient();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  // Use an isolated, throwaway auth client for the password grant. signInWith
+  // Password sets the client's Authorization header to the signed-in user's
+  // JWT, so it must NEVER run on the shared service-role singleton (that is
+  // BUG-001: one login corrupting every other request's auth context). This
+  // instance is discarded when signIn returns; no user JWT is stored globally.
+  const authClient = createAuthClient();
+  const { data, error } = await authClient.auth.signInWithPassword({ email, password });
 
   if (error || !data?.session) {
     throw ApiError.unauthorized('Invalid email or password');
@@ -37,7 +42,10 @@ export const signIn = async ({ email, password }) => {
     profileResult = await loadActiveProfile(data.user.id);
   } catch (err) {
     try {
-      await supabase.auth.admin.signOut(data.session.access_token);
+      // Revocation uses the service-role admin API (never the anon auth
+      // client). admin.signOut authenticates with the service-role key and does
+      // not mutate the client's session, so it is safe on the singleton.
+      await getServiceClient().auth.admin.signOut(data.session.access_token);
     } catch {
       /* best-effort revocation */
     }

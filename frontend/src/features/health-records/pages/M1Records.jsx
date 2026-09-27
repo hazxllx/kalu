@@ -10,7 +10,7 @@ import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import {
   Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { maternalApi, residentsApi } from "@/services/api";
+import { maternalApi, residentsApi, referralsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 import {
@@ -305,6 +305,8 @@ export default function M1Records() {
 
   const [records, setRecords] = useState([]);
   const [residents, setResidents] = useState([]);
+  const [referrals, setReferrals] = useState([]);
+  const [referralsLoaded, setReferralsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -354,6 +356,27 @@ export default function M1Records() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Maternal referrals (public.health_referrals). Loaded separately and best-effort:
+  // the M1 form joins these to the maternal caseload on resident_id to populate
+  // the "clients referred" indicators. A role without referral access simply
+  // yields an empty set (the form then prints those rows at 0 with a remark).
+  useEffect(() => {
+    let active = true;
+    referralsApi
+      .list()
+      .then((res) => {
+        if (!active) return;
+        setReferrals(res?.rows || res || []);
+        setReferralsLoaded(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setReferrals([]);
+        setReferralsLoaded(false);
+      });
+    return () => { active = false; };
+  }, []);
+
   // --- Derived reporting data (pure; from loaded records) -----------------
   const yearsList = useMemo(() => availableYears(records), [records]);
   const periodRecords = useMemo(
@@ -388,14 +411,20 @@ export default function M1Records() {
   const periodLabel = period === "monthly" ? `${MONTH_LABELS[month]} ${year}` : `${year}`;
 
   const handleExport = () => {
+    // Complete official-style M1 Maternal Care monthly form. The renderer builds
+    // the full FHSIS Section B form (registration, prenatal, delivery, postpartum,
+    // outcomes, referrals, natality, lifestyle) from the real maternal_records —
+    // every indicator row is preserved, including zeros. We pass the FULL scoped
+    // record set (not the search/status-filtered participant view) so the report
+    // reflects the barangay's cumulative caseload for the reporting period.
     downloadM1Report({
+      records,
+      referrals,
+      referralsLoaded,
       barangay: assignedBarangay || "All barangays in scope",
       period,
       year,
       month,
-      summary,
-      monthly,
-      participants,
     });
   };
 

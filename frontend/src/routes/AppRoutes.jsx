@@ -59,6 +59,10 @@ const PersonnelRegistration = publicPage(() => import('@/features/registration/p
 const RegistrationSuccess = publicPage(() => import('@/features/registration/pages/RegistrationSuccess'));
 const VerificationStatus = publicPage(() => import('@/features/verification/pages/VerificationStatus'));
 
+// Password recovery (Supabase Auth)
+const ForgotPassword = publicPage(() => import('@/features/authentication/pages/ForgotPassword'));
+const ResetPassword = publicPage(() => import('@/features/authentication/pages/ResetPassword'));
+
 // Verification
 const PendingVerifications = appPage(() => import('@/features/verification/pages/PendingVerifications'));
 const ResidentVerificationStatus = appPage(() => import('@/features/verification/pages/ResidentVerificationStatus'));
@@ -95,7 +99,6 @@ const M1Records = appPage(() => import('@/features/health-records/pages/M1Record
 const M1Fhsis = appPage(() => import('@/features/health-records/pages/M1Fhsis'));
 const Immunization = appPage(() => import('@/features/health-records/pages/Immunization'));
 const ResidentFollowUps = appPage(() => import('@/features/follow-ups/pages/ResidentFollowUps'));
-const ResidentFollowUpCalendar = appPage(() => import('@/features/follow-ups/pages/ResidentFollowUpCalendar'));
 const MidwifeFollowUp = appPage(() => import('@/features/follow-ups/pages/MidwifeFollowUp'));
 const FollowUpCalendar = appPage(() => import('@/features/follow-ups/pages/FollowUpCalendar'));
 const PhnFollowUps = appPage(() => import('@/features/follow-ups/pages/PhnFollowUps'));
@@ -146,6 +149,8 @@ const AppRoutes = () => (
   <Routes>
     <Route path="/" element={<Landing />} />
     <Route path="/login" element={<Login />} />
+    <Route path="/forgot-password" element={<ForgotPassword />} />
+    <Route path="/reset-password" element={<ResetPassword />} />
     <Route path="/register" element={<RegistrationTypeSelection />} />
     <Route path="/register/new/step-1" element={<NewResidentRegistration />} />
     <Route path="/register/transfer" element={<TransferRegistration />} />
@@ -163,7 +168,8 @@ const AppRoutes = () => (
         <Route path="consultations" element={<ConsultationsPage showResidentSearch={false} />} />
         <Route path="referrals" element={<HealthReferrals />} />
         <Route path="followups" element={<ResidentFollowUps />} />
-        <Route path="followup-calendar" element={<ResidentFollowUpCalendar />} />
+        {/* Consolidated into "Follow-ups & Schedule"; keep the old path as a redirect. */}
+        <Route path="followup-calendar" element={<Navigate to="../followups" replace />} />
         <Route path="appointments" element={<Appointments />} />
         <Route path="services" element={<ResidentHealthServices />} />
         <Route path="verification" element={<ResidentVerificationStatus />} />
@@ -180,7 +186,8 @@ const AppRoutes = () => (
         <Route path="announcements" element={<NotificationsPage roleKey="resident-limited" />} />
         <Route path="follow-ups" element={<ResidentFollowUps />} />
         <Route path="followups" element={<ResidentFollowUps />} />
-        <Route path="followup-calendar" element={<ResidentFollowUpCalendar />} />
+        {/* Consolidated into "Follow-ups & Schedule"; keep the old path as a redirect. */}
+        <Route path="followup-calendar" element={<Navigate to="../follow-ups" replace />} />
         <Route path="services" element={<ResidentHealthServices />} />
         <Route path="profile" element={<SettingsPage roleKey="resident-limited" />} />
         <Route path="verification" element={<ResidentVerificationStatus />} />

@@ -12,6 +12,8 @@ import {
   PageHeading,
   Field,
   SelectField,
+  SelectDropdown,
+  ReadonlyField,
   inputCls,
   SectionKicker,
   InfoNote,
@@ -56,8 +58,6 @@ const ROLE_OPTIONS = [
 
 /** Roles that are assigned to a barangay (mirrors adminUserStore scope rules). */
 const BARANGAY_SCOPED_ROLES = ["health_supervisor", "bhw"];
-
-const EMPLOYMENT_STATUSES = ["Permanent", "Contractual", "Job Order", "Casual", "Volunteer"];
 
 const roleById = (id) => ROLE_OPTIONS.find((r) => r.id === id) || null;
 
@@ -161,10 +161,6 @@ export default function PersonnelRegistration() {
     municipality: "Pili",
     barangay: "",
     facility: "RHU",
-    position: "",
-    department: "",
-    employmentStatus: "",
-    yearsOfService: "",
     documents: {},
     // Step 4 — confirmation
     confirm: false,
@@ -185,6 +181,10 @@ export default function PersonnelRegistration() {
   const role = roleById(form.roleId);
   const documentList = useMemo(() => docRequirementsFor(form.roleId), [form.roleId]);
   const isBarangayScoped = BARANGAY_SCOPED_ROLES.includes(form.roleId);
+  // Facility is system-derived from the selected barangay (barangay → health
+  // center). Empty until a barangay is chosen so the read-only field can prompt
+  // the user rather than show a misleading default.
+  const derivedFacility = form.barangay ? barangayHealthCenter(form.barangay) : "";
   const composedName = [form.firstName, form.middleName, form.lastName, form.suffix].filter(Boolean).join(" ").trim();
 
   /** Pure validation: returns an error map for a step (does not mutate state). */
@@ -232,8 +232,6 @@ export default function PersonnelRegistration() {
       } else if (!form.facility) {
         errs.facility = "Health facility is required.";
       }
-      if (!form.position.trim()) errs.position = "Position / designation is required.";
-      if (!form.employmentStatus) errs.employmentStatus = "Employment status is required.";
       documentList.filter((r) => r.required).forEach((r) => {
         if (!form.documents[r.key]) errs[`doc_${r.key}`] = `Please upload: ${r.label}`;
       });
@@ -280,15 +278,11 @@ export default function PersonnelRegistration() {
       contact: form.contact.trim(),
       roleId: form.roleId,
       role: role?.label || "",
-      position: form.position.trim(),
       licenseNumber: role?.licenseRequired ? form.licenseNumber.trim() : "",
       licenseExpiry: role?.licenseRequired ? form.licenseExpiry : "",
       municipality: form.municipality.trim(),
       barangay: isBarangayScoped ? form.barangay : "",
       facility: isBarangayScoped ? barangayHealthCenter(form.barangay) : form.facility,
-      department: form.department.trim(),
-      employmentStatus: form.employmentStatus,
-      yearsOfService: form.yearsOfService.trim(),
       documents,
       // NOTE: password / confirmPassword are intentionally NOT included — the
       // account is provisioned by the administrator after verification and the
@@ -559,16 +553,19 @@ export default function PersonnelRegistration() {
             {/* STEP 3 — Professional Information */}
             {step === 3 && (
               <div className="space-y-5">
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-[2fr_3fr]">
                   <Field label="Full Name" hint="Composed from your personal information.">
                     <input type="text" readOnly value={composedName} className={`${inputCls()} cursor-not-allowed text-slate-500`} />
                   </Field>
-                  <SelectField label="Health Personnel Role" required error={errors.roleId} value={form.roleId} onChange={set("roleId")}>
-                    <option value="">Select role</option>
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r.id} value={r.id}>{r.label}</option>
-                    ))}
-                  </SelectField>
+                  <SelectDropdown
+                    label="Health Personnel Role"
+                    required
+                    error={errors.roleId}
+                    value={form.roleId}
+                    onChange={set("roleId")}
+                    placeholder="Select role"
+                    options={ROLE_OPTIONS.map((r) => ({ value: r.id, label: r.label }))}
+                  />
                 </div>
 
                 {role?.licenseRequired && (
@@ -609,28 +606,13 @@ export default function PersonnelRegistration() {
                 </div>
 
                 {isBarangayScoped && (
-                  <Field label="Assigned Facility" hint="Derived from your selected barangay.">
-                    <input type="text" readOnly value={barangayHealthCenter(form.barangay)} className={`${inputCls()} cursor-not-allowed text-slate-500`} />
-                  </Field>
+                  <ReadonlyField
+                    label="Assigned Facility"
+                    hint="Automatically derived from your selected barangay — it cannot be edited manually."
+                    value={derivedFacility}
+                    placeholder="Select a barangay to view your assigned facility"
+                  />
                 )}
-
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                  <Field label="Position / Designation" required error={errors.position}>
-                    <input type="text" placeholder="e.g. Public Health Nurse" value={form.position} onChange={set("position")} className={inputCls(errors.position)} />
-                  </Field>
-                  <SelectField label="Employment Status" required error={errors.employmentStatus} value={form.employmentStatus} onChange={set("employmentStatus")}>
-                    <option value="">Select status</option>
-                    {EMPLOYMENT_STATUSES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </SelectField>
-                  <Field label="Department / Office" optional>
-                    <input type="text" placeholder="e.g. Rural Health Unit 1" value={form.department} onChange={set("department")} className={inputCls()} />
-                  </Field>
-                  <Field label="Years of Service" optional>
-                    <input type="number" min="0" max="80" placeholder="e.g. 5" value={form.yearsOfService} onChange={set("yearsOfService")} className={inputCls()} />
-                  </Field>
-                </div>
 
                 <div className="border-t border-slate-100 pt-5">
                   <SectionKicker>Supporting Documents</SectionKicker>
@@ -692,10 +674,6 @@ export default function PersonnelRegistration() {
                   ["License Expiration", role?.licenseRequired ? (form.licenseExpiry || "—") : "Not applicable"],
                   ["Municipality / LGU", form.municipality ? `${form.municipality}, Camarines Sur` : "—"],
                   [isBarangayScoped ? "Barangay" : "Health Facility", isBarangayScoped ? (form.barangay || "—") : (form.facility || "—")],
-                  ["Department / Office", form.department || "—"],
-                  ["Position / Designation", form.position || "—"],
-                  ["Employment Status", form.employmentStatus || "—"],
-                  ["Years of Service", form.yearsOfService || "—"],
                 ]} />
 
                 <ReviewBlock

@@ -32,6 +32,12 @@ router.use(authenticate, resolveBarangayScope);
 router.get('/', authorize(FEATURE_ROLES.residents), asyncHandler(residentsController.listResidents));
 router.post('/', authorize(FEATURE_ROLES.residents), asyncHandler(residentsController.createResident));
 
+// Resident self-service. Must be declared before '/:id' so these are not
+// captured as an id. Resident is derived from the session; barangay scope is a
+// no-op for residents.
+router.patch('/me', authorize(FEATURE_ROLES.residentSelf), asyncHandler(residentsController.updateMyProfile));
+router.get('/me/health-records', authorize(FEATURE_ROLES.residentSelf), asyncHandler(residentsController.getMyHealthRecords));
+
 router.get('/:id', authorize(FEATURE_ROLES.referralRecords), asyncHandler(residentsController.getResident));
 router.put('/:id', authorize(['phn', 'health_supervisor']), asyncHandler(residentsController.updateResident));
 
