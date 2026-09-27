@@ -1,13 +1,11 @@
 import React, { useState } from "react";
 import { Card } from "@/components/common/Card";
-import {
-  medicalCertificateStore,
-  CERT_PURPOSES,
-} from "@/services/local/medicalCertificateStore";
+import { useCertificateMeta } from "@/features/certificates/hooks/useCertificateRegister";
+import { medicalCertificatesApi } from "@/services/api";
 import MedicalCertificateDocument from "./MedicalCertificateDocument";
 import { useCertificatePrint } from "./useCertificatePrint.jsx";
 import { useAuth } from "@/context/AuthContext";
-import { X, FileText, Printer, CheckCircle2, ClipboardCheck, Ban, Send, RefreshCw } from "lucide-react";
+import { X, FileText, Printer, CheckCircle2, ClipboardCheck, Ban, Send, RefreshCw, Loader2 } from "lucide-react";
 
 const inputCls = (error) =>
   `mt-1.5 w-full rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${
@@ -49,10 +47,14 @@ function Field({ label, required, error, children }) {
  * Shared Medical Certificate modal.
  *
  * Modes:
- *  - "create" (Triage / PHN): prepare a certificate for the given patient,
- *    save as Draft or submit For Review.
- *  - "view": read-only certificate preview with audit trail.
- *  - "review" (MHO): preview + Approve/Issue/Reject actions with notes.
+ *  - "create" (RHU Personnel / PHN / MHO): prepare a certificate for the given
+ *    resident, save as Draft or submit For Review.
+ *  - "view": read-only certificate preview with its real decision history.
+ *  - "review" (PHN / MHO): preview + Approve/Issue/Reject actions with notes.
+ *
+ * Every write goes to `/api/medical-certificates`; the service resolves the
+ * resident's scope, validates the transition and writes the certificate log
+ * plus a `health_audit_logs` entry.
  */
 export default function MedicalCertificateModal({
   mode = "create",
@@ -60,11 +62,14 @@ export default function MedicalCertificateModal({
   certificate = null,
   currentUser = "",
   currentUserRole = "",
+  purposes: purposesProp = null,
   onClose,
   onSaved,
   onRequestStatusChange = null,
 }) {
 const { user } = useAuth();
+const meta = useCertificateMeta();
+const CERT_PURPOSES = purposesProp?.length ? purposesProp : meta.purposes;
 /**
  * Authorized signatory — the signed-in account's name (from the active
  * session), falling back to the caller-provided user and finally to the
@@ -74,7 +79,7 @@ const signatoryName =
   String(user?.name || currentUser || certificate?.medicalOfficer || "").trim() ||
   "Signatory name not set";
 const [form, setForm] = useState(() => ({
-  purpose: certificate?.purpose || CERT_PURPOSES[0],
+  purpose: certificate?.purpose || "",
   findings: certificate?.findings || "",
   dateOfExamination: certificate?.dateOfExamination || new Date().toISOString().slice(0, 10),
   medicalOfficer: certificate?.medicalOfficer || String(user?.name || currentUser || "").trim(),
@@ -83,6 +88,7 @@ const [form, setForm] = useState(() => ({
 }));
 const [errors, setErrors] = useState({});
 const [actionNotes, setActionNotes] = useState("");
+const [busy, setBusy] = useState("");
 const { printCertificate, portal } = useCertificatePrint();
 
   const isCreate = mode === "create";
@@ -104,39 +110,51 @@ const { printCertificate, portal } = useCertificatePrint();
     return Object.keys(next).length === 0;
   };
 
-  const handleSave = (submit) => {
+  const handleSave = async (submit) => {
     if (!validate()) return;
-    const payload = {
-      ...patient,
-      purpose: form.purpose,
-      findings: form.findings.trim(),
-      dateOfExamination: form.dateOfExamination,
-      medicalOfficer: form.medicalOfficer.trim(),
-      licenseNumber: form.licenseNumber.trim(),
-      preparedBy: currentUser,
-      preparedByRole: currentUserRole,
-    };
-    const record = medicalCertificateStore.createCertificate(payload);
-    if (submit) {
-      medicalCertificateStore.submitForReview(record.id, { by: currentUser });
+    setBusy("save");
+    try {
+      // The resident is identified by id only — the API resolves the resident's
+      // barangay/municipality scope server-side and never trusts the client.
+      const { record } = await medicalCertificatesApi.create({
+        residentId: patient.patientId,
+        purpose: form.purpose,
+        findings: form.findings.trim(),
+        dateOfExamination: form.dateOfExamination,
+        medicalOfficer: form.medicalOfficer.trim(),
+        licenseNumber: form.licenseNumber.trim(),
+        notes: form.notes,
+      });
+      if (submit) await medicalCertificatesApi.submitForReview(record.id);
+      onSaved?.(submit ? "For Review" : "Draft");
+      onClose();
+    } catch (err) {
+      setErrors((p) => ({ ...p, submit: err?.message || "The certificate could not be saved." }));
+    } finally {
+      setBusy("");
     }
-    onSaved?.(submit ? "For Review" : "Draft");
-    onClose();
   };
 
-  const decide = (decision) => {
+  const decide = async (decision) => {
     if (decision === "reject" && !actionNotes.trim()) {
       setErrors((p) => ({ ...p, decision: "A reason is required to reject a certificate." }));
       return;
     }
-    const actions = {
-      approve: medicalCertificateStore.approveCertificate,
-      issue: medicalCertificateStore.issueCertificate,
-      reject: medicalCertificateStore.rejectCertificate,
-    };
-    actions[decision]?.(certificate.id, { by: currentUser, notes: actionNotes.trim() });
-    onSaved?.(decision === "approve" ? "Approved" : decision === "issue" ? "Issued" : "Rejected");
-    onClose();
+    setBusy(decision);
+    try {
+      const actions = {
+        approve: medicalCertificatesApi.approve,
+        issue: medicalCertificatesApi.issue,
+        reject: medicalCertificatesApi.reject,
+      };
+      await actions[decision]?.(certificate.id, actionNotes.trim());
+      onSaved?.(decision === "approve" ? "Approved" : decision === "issue" ? "Issued" : "Rejected");
+      onClose();
+    } catch (err) {
+      setErrors((p) => ({ ...p, decision: err?.message || "The decision could not be saved." }));
+    } finally {
+      setBusy("");
+    }
   };
 
   const view = certificate;
@@ -194,14 +212,24 @@ const { printCertificate, portal } = useCertificatePrint();
                 </Field>
               </div>
               <p className="rounded-btn border border-brand-blue/15 bg-brand-light/50 dark:bg-card-nested px-3.5 py-2.5 text-xs leading-relaxed text-brand-gray">
-                Certificates prepared at triage or by a PHN are submitted for MHO review before they become official.
+                Certificates prepared at triage or by a PHN are submitted for PHN or MHO review before they become
+                official.
               </p>
+              {errors.submit && <p className="text-xs text-brand-danger">{errors.submit}</p>}
               <div className="flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
                 <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-                <button onClick={() => handleSave(false)} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
-                  <FileText className="h-4 w-4" /> Save Draft
+                <button
+                  onClick={() => handleSave(false)}
+                  disabled={Boolean(busy)}
+                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
+                >
+                  {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save Draft
                 </button>
-                <button onClick={() => handleSave(true)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
+                <button
+                  onClick={() => handleSave(true)}
+                  disabled={Boolean(busy)}
+                  className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                >
                   <Send className="h-4 w-4" /> Submit for Review
                 </button>
               </div>
@@ -213,10 +241,10 @@ const { printCertificate, portal } = useCertificatePrint();
                 <MedicalCertificateDocument certificate={view} signatoryName={signatoryName} />
               </div>
 
-              {/* MHO decisions */}
+              {/* Reviewer decisions (PHN / MHO) */}
               {canDecide && (
                 <div className="rounded-2xl border border-brand-blue/15 bg-brand-light/50 p-4 dark:bg-card-nested">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">MHO Decision</p>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Review Decision</p>
                   <textarea
                     rows={2}
                     value={actionNotes}
@@ -226,24 +254,36 @@ const { printCertificate, portal } = useCertificatePrint();
                   />
                   {errors.decision && <p className="mt-1 text-xs text-brand-danger">{errors.decision}</p>}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button onClick={() => decide("approve")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
+                    <button
+                      onClick={() => decide("approve")}
+                      disabled={Boolean(busy) || certificate.status !== "For Review"}
+                      className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg disabled:opacity-50 dark:bg-card dark:hover:bg-hover"
+                    >
                       <ClipboardCheck className="h-4 w-4" /> Approve
                     </button>
-                    <button onClick={() => decide("issue")} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
+                    <button
+                      onClick={() => decide("issue")}
+                      disabled={Boolean(busy) || certificate.status !== "Approved"}
+                      className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+                    >
                       <CheckCircle2 className="h-4 w-4" /> Issue Certificate
                     </button>
-                    <button onClick={() => decide("reject")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/10">
+                    <button
+                      onClick={() => decide("reject")}
+                      disabled={Boolean(busy) || certificate.status !== "For Review"}
+                      className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/10 disabled:opacity-50"
+                    >
                       <Ban className="h-4 w-4" /> Reject
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Audit trail */}
+              {/* Certificate history (real medical_certificate_logs rows) */}
               <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-card">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Audit Trail</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">History</p>
                 <div className="space-y-2">
-                  {view.audit.map((a, i) => (
+                  {(view.audit || []).map((a, i) => (
                     <div key={i} className="flex items-start justify-between gap-3 text-sm">
                       <div>
                         <p className="font-medium text-brand-ink">{a.action}</p>
@@ -252,6 +292,9 @@ const { printCertificate, portal } = useCertificatePrint();
                       <p className="shrink-0 text-xs text-brand-gray">{a.by}</p>
                     </div>
                   ))}
+                  {(view.audit || []).length === 0 && (
+                    <p className="text-sm text-brand-gray">No history recorded.</p>
+                  )}
                 </div>
               </div>
 

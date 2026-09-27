@@ -22,7 +22,7 @@ export default function AdminDashboard() {
               <div key={i} className="flex flex-col sm:flex-row sm:items-start gap-3 border-b border-brand-border pb-3 last:border-0 last:pb-0">
                 <div className="w-9 h-9 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-xs font-semibold shrink-0">{l.user.split(" ").map(n=>n[0]).slice(0,2).join("")}</div>
                 <div className="flex-1">
-                  <p className="text-sm text-brand-ink"><span className="font-medium">{l.user}</span> Â· <span className="text-brand-gray">{l.role}</span></p>
+                  <p className="text-sm text-brand-ink"><span className="font-medium">{l.user}</span> · <span className="text-brand-gray">{l.role}</span></p>
                   <p className="text-sm text-brand-gray">{l.action}</p>
                 </div>
                 <span className="text-xs text-brand-gray whitespace-nowrap">{l.time.split(" ")[1]}</span>

@@ -487,12 +487,12 @@ export default function M1Records() {
   return (
     <>
       <PageHeader
-        crumbs={["M1 / Maternal Health"]}
-        title="M1 / Maternal Health"
+        crumbs={["Maternal Record"]}
+        title="Maternal Record"
         subtitle={
           assignedBarangay
-            ? `Maternal health monitoring and M1 service participation for Brgy. ${assignedBarangay}.`
-            : "Maternal health monitoring and M1 service participation for your assigned barangay."
+            ? `Maternal health monitoring and service participation for Brgy. ${assignedBarangay}, reported on the official FHSIS Monthly Form M1.`
+            : "Maternal health monitoring and service participation for your assigned barangay, reported on the official FHSIS Monthly Form M1."
         }
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -500,7 +500,7 @@ export default function M1Records() {
               onClick={handleExport}
               disabled={records.length === 0}
               className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue disabled:opacity-50"
-              title={period === "monthly" ? "Export monthly M1 summary" : "Export annual M1 summary"}
+              title={period === "monthly" ? "Export the monthly maternal summary" : "Export the annual maternal summary"}
             >
               <Download className="h-4 w-4" /> Export {period === "monthly" ? "Monthly" : "Annual"}
             </button>

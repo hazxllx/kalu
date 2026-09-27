@@ -31,7 +31,7 @@ export default function LimitedResidentDashboard() {
       <PageHeader
         crumbs={["Dashboard"]}
         title={`Welcome, ${first}`}
-        subtitle="Your account is pending verification. Some features are temporarily locked."
+        subtitle="Your account is pending verification by the Health Supervisor. Some features are temporarily locked."
       />
 
       <div className="mb-6">

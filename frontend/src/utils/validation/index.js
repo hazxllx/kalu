@@ -149,6 +149,27 @@ export const rejectionReason = (value, { label = 'reason', min = MIN_REJECTION_R
   return '';
 };
 
+/** Password strength checks (mirrors registration pages). */
+export const checkPasswordStrength = (pw) => {
+  const checks = [
+    { label: 'At least 8 characters', pass: pw.length >= 8 },
+    { label: 'Uppercase letter', pass: /[A-Z]/.test(pw) },
+    { label: 'Lowercase letter', pass: /[a-z]/.test(pw) },
+    { label: 'Number', pass: /\d/.test(pw) },
+    { label: 'Special character', pass: /[^A-Za-z0-9]/.test(pw) },
+  ];
+  const score = checks.filter((c) => c.pass).length;
+  return { checks, score };
+};
+
+/** Validate password meets all requirements (score >= 5). */
+export const validatePassword = (value, { label = 'Password', isRequired = true } = {}) => {
+  if (isBlank(value)) return isRequired ? `${label} is required.` : '';
+  const { score } = checkPasswordStrength(value);
+  if (score < 5) return 'Password must meet all requirements: at least 8 characters, uppercase, lowercase, number, and special character.';
+  return '';
+};
+
 /**
  * Run a rule map against a values object and return a field -> message map.
  * Rules receive `(value, values)` and return a message or ''.
@@ -201,6 +222,8 @@ export default {
   numeric,
   maxLength,
   rejectionReason,
+  checkPasswordStrength,
+  validatePassword,
   validateFields,
   firstErrorField,
   hasErrors,

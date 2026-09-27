@@ -15,17 +15,17 @@ export const stats = {
   landing: [],
 };
 
-// Static landing-page copy (icon + label configuration) â€” not a data record.
+// Static landing-page copy (icon + label configuration) — not a data record.
 export const features = [
   { icon: "FileHeart", title: "Resident Health Records", desc: "Centralized, secure health records for every resident in the barangay." },
   { icon: "Home", title: "Household Profiling", desc: "Capture household conditions, water, sanitation and risk factors." },
   { icon: "Activity", title: "Risk Monitoring", desc: "Automatically flag high-risk residents needing closer attention." },
   { icon: "HeartPulse", title: "Early Intervention", desc: "Act early with guided care pathways and priority alerts." },
   { icon: "CalendarClock", title: "Follow-up Scheduling", desc: "Never miss a visit with smart follow-up reminders." },
-  { icon: "RefreshCw", title: "Offline Sync", desc: "Work in remote areas â€” data syncs automatically when online." },
+  { icon: "RefreshCw", title: "Offline Sync", desc: "Work in remote areas — data syncs automatically when online." },
 ];
 
-// Static service registry copy (icon + service name) â€” not a data record.
+// Static service registry copy (icon + service name) — not a data record.
 export const services = [
   { icon: "Stethoscope", name: "Medical Consultation" },
   { icon: "Smile", name: "Dental Services" },
@@ -44,7 +44,7 @@ export const services = [
   { icon: "Dog", name: "Anti-Rabies Vaccination" },
 ];
 
-// Static onboarding copy (icon + label configuration) â€” not a data record.
+// Static onboarding copy (icon + label configuration) — not a data record.
 export const howItWorks = [
   { icon: "UserPlus", title: "Register Residents", desc: "Enroll residents and households into the barangay registry." },
   { icon: "ClipboardList", title: "Record Health Information", desc: "Log vitals, consultations, and medical history." },

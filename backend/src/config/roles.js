@@ -39,6 +39,12 @@ export const FEATURE_ROLES = Object.freeze({
   users: [ROLES.ADMIN],
   system: [ROLES.ADMIN],
 
+  // Operational account verification queue. The gate is deliberately NOT the
+  // admin list: PHN reviews Health Supervisor + RHU Personnel requests and the
+  // Health Supervisor reviews BHW + Resident requests (see
+  // config/staffApprovals.js and public.can_approve_staff_role()).
+  staffAccounts: [ROLES.PHN, ROLES.HEALTH_SUPERVISOR],
+
   // Household / community data collection (BHW's domain)
   households: [ROLES.BHW, ROLES.HEALTH_SUPERVISOR, ROLES.PHN],
   dataCollection: [ROLES.BHW],
@@ -68,6 +74,13 @@ export const FEATURE_ROLES = Object.freeze({
   intakeSubmit: [ROLES.BHW, ROLES.RHU_PERSONNEL, ROLES.HEALTH_SUPERVISOR],
   phnProcessing: [ROLES.PHN],
   referralRecords: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
+
+  // Medical certificates. Prepared at the point of care (RHU Personnel, PHN,
+  // MHO) and reviewed by the PHN or the MHO. Deliberately excludes the BHW —
+  // a BHW never sees a clinical document — and System Admin, which is a
+  // system-administration role, not a clinical reviewer.
+  certificates: [ROLES.RHU_PERSONNEL, ROLES.PHN, ROLES.MHO],
+  certificateReview: [ROLES.PHN, ROLES.MHO],
 
   // Monitoring / aggregate information
   reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],

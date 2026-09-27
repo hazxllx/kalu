@@ -23,7 +23,7 @@ import {
 } from "@/features/registration/components/RegistrationDesign";
 import UploadComponent from "@/features/registration/components/UploadComponent";
 import DatePicker from "@/components/common/DatePicker";
-import { staffRequestStore } from "@/services/local/staffRequestStore";
+import { staffAccountsApi } from "@/services/api";
 import { BARANGAYS } from "@/lib/barangays";
 import { CONSULTATION_LOCATIONS, barangayHealthCenter } from "@/lib/consultationLocations";
 
@@ -44,17 +44,31 @@ const STEPS_META = [
 ];
 
 /**
- * Health personnel roles supported by KALUSAGAP. Ids match the canonical role
- * ids (`@/lib/roles` / backend `config/roles.js`). Licensed professions require
- * a PRC license; BHW and RHU personnel require different supporting documents.
+ * Health personnel roles that may be requested through this form. Ids match the
+ * canonical role ids (`@/lib/roles` / backend `config/roles.js`). Licensed
+ * professions require a PRC license; BHW and RHU personnel require different
+ * supporting documents.
+ *
+ * `mho` and `phn` are deliberately NOT here. Under the operational approval
+ * model no role may approve them — the PHN approves Health Supervisor and RHU
+ * Personnel, the Health Supervisor approves BHW and Resident — so offering
+ * them would create a request nobody can action. Those two accounts are
+ * provisioned administratively instead (see
+ * `backend/scripts/provision-official-accounts.mjs`). This mirrors
+ * `REQUESTABLE_ROLES` in `backend/src/config/staffApprovals.js`.
  */
 const ROLE_OPTIONS = [
-  { id: "mho", label: "Municipal Health Officer (MHO)", licenseRequired: true },
-  { id: "phn", label: "Public Health Nurse", licenseRequired: true },
   { id: "health_supervisor", label: "Health Supervisor (Barangay Nurse / Midwife)", licenseRequired: true },
   { id: "rhu_personnel", label: "Rural Health Unit (RHU) Personnel", licenseRequired: false, employmentDocRequired: true },
   { id: "bhw", label: "Barangay Health Worker (BHW)", licenseRequired: false, endorsementRequired: true },
 ];
+
+/** The operational officer who reviews the request for each requestable role. */
+const APPROVER_FOR_ROLE = {
+  health_supervisor: "Public Health Nurse",
+  rhu_personnel: "Public Health Nurse",
+  bhw: "Health Supervisor",
+};
 
 /** Roles that are assigned to a barangay (mirrors adminUserStore scope rules). */
 const BARANGAY_SCOPED_ROLES = ["health_supervisor", "bhw"];
@@ -134,6 +148,7 @@ export default function PersonnelRegistration() {
   const [show, setShow] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [submitted, setSubmitted] = useState(null);
   const [showStatus, setShowStatus] = useState(false);
   /** @type {[Record<string, string>, Function]} */
@@ -206,7 +221,6 @@ export default function PersonnelRegistration() {
     if (s === 2) {
       if (!form.email.trim()) errs.email = "Official email is required.";
       else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errs.email = "Enter a valid email address.";
-      else if (staffRequestStore.hasEmail(form.email)) errs.email = "This email is already registered.";
       if (!form.contact.trim()) errs.contact = "Contact number is required.";
       else if (!isValidPHMobile(form.contact)) errs.contact = "Enter a valid Philippine mobile number (e.g. 0917 123 4567).";
       if (!form.password) errs.password = "Password is required.";
@@ -219,7 +233,6 @@ export default function PersonnelRegistration() {
       if (!form.roleId) errs.roleId = "Health personnel role is required.";
       if (role?.licenseRequired) {
         if (!form.licenseNumber.trim()) errs.licenseNumber = "License number is required for this role.";
-        else if (staffRequestStore.hasLicense(form.licenseNumber)) errs.licenseNumber = "This license number is already registered.";
         if (!form.licenseExpiry) errs.licenseExpiry = "License expiration date is required.";
         else {
           const d = new Date(form.licenseExpiry);
@@ -263,34 +276,29 @@ export default function PersonnelRegistration() {
   const buildPayload = () => {
     const documents = documentList
       .filter((r) => form.documents[r.key])
-      .map((r) => `${r.label} — ${form.documents[r.key].name}`);
+      .map((r) => ({
+        type: r.label,
+        name: form.documents[r.key].name,
+      }));
+
     return {
-      name: composedName,
-      firstName: form.firstName.trim(),
-      middleName: form.middleName.trim(),
-      lastName: form.lastName.trim(),
-      suffix: form.suffix.trim(),
-      dob: form.dob,
-      sex: form.sex,
-      civilStatus: form.civilStatus,
+      // Backend field names (POST /api/staff-accounts/register).
+      fullName: composedName,
       email: form.email.trim(),
-      username: form.username.trim(),
-      contact: form.contact.trim(),
-      roleId: form.roleId,
-      role: role?.label || "",
-      licenseNumber: role?.licenseRequired ? form.licenseNumber.trim() : "",
+      phone: form.contact.trim(),
+      password: form.password,
+      role: form.roleId,
+      position: role?.label || "",
+      licenseNo: role?.licenseRequired ? form.licenseNumber.trim() : "",
       licenseExpiry: role?.licenseRequired ? form.licenseExpiry : "",
-      municipality: form.municipality.trim(),
+      // Names, not uuids — the API resolves them against the reference tables.
       barangay: isBarangayScoped ? form.barangay : "",
-      facility: isBarangayScoped ? barangayHealthCenter(form.barangay) : form.facility,
+      facility: isBarangayScoped ? "" : form.facility,
       documents,
-      // NOTE: password / confirmPassword are intentionally NOT included — the
-      // account is provisioned by the administrator after verification and the
-      // plaintext credential is never persisted with the application.
     };
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!form.confirm) {
       setErrors((prev) => ({ ...prev, confirm: "Please confirm that the information provided is accurate and complete." }));
       return;
@@ -302,18 +310,36 @@ export default function PersonnelRegistration() {
       return;
     }
     setSubmitting(true);
-    setTimeout(() => {
-      const record = staffRequestStore.addRequest(buildPayload());
+    setSubmitError("");
+    try {
+      const { request } = await staffAccountsApi.register(buildPayload());
+      setSubmitted({
+        id: request?.id || "—",
+        email: request?.email || form.email.trim(),
+        municipality: request?.municipality || "Pili, Camarines Sur",
+        role: request?.role || form.roleId,
+      });
+    } catch (err) {
+      // A 409 usually means the email already has a live request; send the user
+      // back to the account step rather than failing on the review screen.
+      const status = err?.status ?? err?.response?.status;
+      if (status === 409) {
+        setErrors((prev) => ({ ...prev, email: err.message }));
+        setStep(2);
+      } else {
+        setSubmitError(err?.message || "Your registration could not be submitted. Please try again.");
+      }
+    } finally {
       setSubmitting(false);
-      setSubmitted(record);
-    }, 900);
+    }
   };
 
   /* ----------------------------- success view ----------------------------- */
   if (submitted) {
+    const approverLabel = APPROVER_FOR_ROLE[submitted.role] || "your approving officer";
     const summary = [
       ["Application ID", submitted.id],
-      ["Account Type", "Health Personnel"],
+      ["Account Type", roleById(submitted.role)?.label || "Health Personnel"],
       ["Status", "Pending Verification"],
       ["Municipality / LGU", submitted.municipality || "—"],
       ["Official Email", submitted.email],
@@ -328,9 +354,9 @@ export default function PersonnelRegistration() {
             <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">Registration Submitted Successfully</h1>
             <div className="mx-auto mt-2 h-[3px] w-14 rounded-full bg-brand-gold" aria-hidden="true" />
             <p className="mx-auto mt-4 max-w-md text-[13px] leading-relaxed text-slate-500">
-              Your Health Personnel account has been submitted for verification. It is now{" "}
-              <span className="font-semibold text-brand-amber">Pending Verification</span> and will be reviewed by the
-              System Administrator before account access is granted.
+              Your account request has been submitted. It is now{" "}
+              <span className="font-semibold text-brand-amber">Pending Verification</span> and will be reviewed by
+              the {approverLabel}. Your sign-in works as soon as the account is approved.
             </p>
 
             <dl className="mx-auto mt-6 grid max-w-lg grid-cols-1 gap-3 text-left sm:grid-cols-2">
@@ -348,7 +374,7 @@ export default function PersonnelRegistration() {
                 <ul className="mt-3 space-y-2.5">
                   {[
                     ["Submitted", "Your application was received."],
-                    ["Pending Verification", "Awaiting review by the System Administrator."],
+                      ["Pending Verification", `Awaiting review by the ${approverLabel}.`],
                     ["Verified", "Your account is activated and you may sign in."],
                   ].map(([title, copy], i) => (
                     <li key={title} className="flex items-start gap-2.5">
@@ -544,8 +570,11 @@ export default function PersonnelRegistration() {
                 </Field>
 
                 <InfoNote icon={ShieldCheck}>
-                  Sign-in credentials are provisioned by the System Administrator after your account is verified.
-                  Passwords entered here are validated for strength and are never stored with your application.
+                  The password you set here becomes your sign-in password. It is used only to create your account and is
+                  never written to the application record. Your account stays locked (Pending Verification) until the
+                  {form.roleId && APPROVER_FOR_ROLE[form.roleId]
+                    ? ` ${APPROVER_FOR_ROLE[form.roleId]} approves it`
+                    : " approving officer reviews it"}.
                 </InfoNote>
               </div>
             )}
@@ -567,6 +596,13 @@ export default function PersonnelRegistration() {
                     options={ROLE_OPTIONS.map((r) => ({ value: r.id, label: r.label }))}
                   />
                 </div>
+
+                <InfoNote icon={ShieldCheck}>
+                  This form is for roles with an operational approving officer — the Public Health Nurse
+                  approves Health Supervisor and RHU Personnel requests, and the Health Supervisor approves BHW
+                  requests. Public Health Nurse and Municipal Health Officer accounts are issued directly by the
+                  LGU administration and cannot be requested here.
+                </InfoNote>
 
                 {role?.licenseRequired && (
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -644,6 +680,9 @@ export default function PersonnelRegistration() {
             {/* STEP 4 — Review & Submit */}
             {step === 4 && (
               <div className="space-y-5">
+                {submitError && (
+                  <InfoNote tone="danger" icon={AlertCircle}>{submitError}</InfoNote>
+                )}
                 {missingItems.length > 0 && (
                   <InfoNote tone="danger" icon={AlertCircle}>
                     <p className="font-semibold">Some required information is still missing:</p>

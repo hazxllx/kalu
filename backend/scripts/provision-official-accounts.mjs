@@ -57,7 +57,7 @@ const ACCOUNTS = [
   { email: 'mho@kalusagap.test',            password: 'CS*GTe5dmJMRsEY8J#',   role: 'mho',               status: 'active', scope: 'municipality', fullName: 'Municipal Health Officer' },
   { email: 'rhu.personnel@kalusagap.test',  password: '*YmXmTMr3MH3%DLFwU',   role: 'rhu_personnel',     status: 'active', scope: 'municipality', fullName: 'RHU Personnel' },
   { email: 'phn@kalusagap.test',            password: 'RuoVRzXN55!!Jr7&bc',   role: 'phn',               status: 'active', scope: 'municipality', fullName: 'Public Health Nurse' },
-  { email: 'supervisor@kalusagap.test',     password: 'QWZ3r5HpMg%pMpAf2B',   role: 'health_supervisor', status: 'active', scope: 'barangay',     fullName: 'Health Supervisor', barangay: DEFAULT_SUPERVISOR_BARANGAY },
+  { email: 'supervisor@kalusagap.test',     password: 'k43FyFHccggKE!epsc8E',  role: 'health_supervisor', status: 'active', scope: 'barangay',     fullName: 'Health Supervisor', barangay: DEFAULT_SUPERVISOR_BARANGAY },
   { email: 'mollie.greenholt@forms.lat',    password: 'Holyshit12!',          role: 'resident',          status: 'active', scope: 'none',         fullName: 'Mollie Greenholt' },
 ];
 

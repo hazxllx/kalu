@@ -7,6 +7,9 @@ import intakeRoutes from './intake.routes.js';
 import phnRoutes, { phnReadsRouter } from './phnQueue.routes.js';
 import residentsRoutes from './residents.routes.js';
 import registrationRoutes from './registration.routes.js';
+import staffAccountsRoutes from './staffAccounts.routes.js';
+import medicalCertificatesRoutes from './medicalCertificates.routes.js';
+import observabilityRoutes from './observability.routes.js';
 import householdsRoutes from './households.routes.js';
 import analyticsRoutes from './analytics.routes.js';
 import verificationsRoutes from './verifications.routes.js';
@@ -44,6 +47,18 @@ router.use('/auth', authRoutes);
 router.use('/registration', registrationRoutes);
 router.use('/consultations', consultationsRoutes);
 router.use('/operational', operationalRoutes);
+
+// Personnel registration + operational account verification.
+//   POST /staff-accounts/register                 public registration
+//   GET  /staff-accounts/queue, /:id/approve ...  PHN + Health Supervisor only
+router.use('/staff-accounts', staffAccountsRoutes);
+
+// Medical certificate register (RHU Personnel prepare, PHN/MHO review).
+router.use('/medical-certificates', medicalCertificatesRoutes);
+
+// Administration observability — Audit Trail (business events) and System Log
+// (request-level events). Both are backed by real database tables.
+router.use(observabilityRoutes);
 
 // Resident self-service follow-ups (list/read own + approve/reject). Separate
 // from the staff /operational endpoints; ownership is derived from the session.

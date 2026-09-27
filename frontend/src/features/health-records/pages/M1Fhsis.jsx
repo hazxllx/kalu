@@ -179,13 +179,23 @@ export default function M1Fhsis() {
   );
 
   const summary = useMemo(() => {
-    if (!monthly) return { participants: 0, fp: 0, maternal: 0, child: 0 };
+    if (!monthly) return { participants: 0, male: 0, female: 0, fp: 0, maternal: 0, child: 0 };
     const by = monthly.byCode || {};
     const sum = (codes) => codes.reduce((s, c) => s + (by[c]?.total || 0), 0);
     const sectionSum = (sec) =>
       (monthly.indicators || []).filter((i) => i.section === sec).reduce((s, i) => s + (i.total || 0), 0);
+    // Sex split across the indicators that are disaggregated by sex — the same
+    // Male/Female figures the printed FHSIS M1 form shows in its columns.
+    const sexSplit = (monthly.indicators || []).reduce(
+      (acc, i) => (i.sexBreakdown && i.bySex
+        ? { male: acc.male + (i.bySex.Male || 0), female: acc.female + (i.bySex.Female || 0) }
+        : acc),
+      { male: 0, female: 0 },
+    );
     return {
       participants: (monthly.indicators || []).reduce((s, i) => s + (i.total || 0), 0),
+      male: sexSplit.male,
+      female: sexSplit.female,
       fp: sectionSum("A"),
       maternal: sectionSum("B"),
       child: sectionSum("C"),
@@ -197,9 +207,9 @@ export default function M1Fhsis() {
   return (
     <div className="pb-16">
       <PageHeader
-        crumbs={["Monitoring", "M1 / FHSIS Report"]}
-        title="M1 / Maternal & Family Health Report"
-        subtitle={`FHSIS M1 monthly service-coverage report${assignedBarangay ? ` — Barangay ${assignedBarangay}` : ""}`}
+        crumbs={["Monitoring", "Maternal & Family Health Report"]}
+        title="Maternal & Family Health Report"
+        subtitle={`FHSIS Monthly Form M1 service-coverage report${assignedBarangay ? ` — Barangay ${assignedBarangay}` : ""}`}
         meta={
           <span className="rounded-full bg-brand-blue/10 px-3 py-1 text-xs font-semibold text-brand-blue">
             {tab === "annual" ? `Year ${year}` : tab === "daily" ? date : periodLabel}
@@ -268,12 +278,27 @@ export default function M1Fhsis() {
 
       {/* Summary cards (monthly) */}
       {tab === "monthly" && (
-        <div className="no-print mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-          <StatCard icon="Activity" tone="blue" index={0} label="Total M1 Services (month)" value={loading ? "…" : summary.participants} />
-          <StatCard icon="HeartPulse" tone="accent" index={1} label="Family Planning" value={loading ? "…" : summary.fp} />
-          <StatCard icon="Baby" tone="green" index={2} label="Maternal Care" value={loading ? "…" : summary.maternal} />
-          <StatCard icon="Users" tone="yellow" index={3} label="Child Care" value={loading ? "…" : summary.child} />
-        </div>
+        <>
+          <div className="no-print mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+            <StatCard icon="Activity" tone="blue" index={0} label="Total Services (month)" value={loading ? "…" : summary.participants} />
+            <StatCard icon="HeartPulse" tone="accent" index={1} label="Family Planning" value={loading ? "…" : summary.fp} />
+            <StatCard icon="Baby" tone="green" index={2} label="Maternal Care" value={loading ? "…" : summary.maternal} />
+            <StatCard icon="Users" tone="yellow" index={3} label="Child Care" value={loading ? "…" : summary.child} />
+          </div>
+          {/* Sex disaggregation — mirrors the Male/Female columns of the
+              printed FHSIS M1 form, so screen and paper always agree. */}
+          <Card className="no-print mb-6 p-4">
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+              <p className="text-sm font-semibold text-brand-ink">Sex breakdown (this month)</p>
+              <p className="text-sm text-brand-gray">
+                Male <span className="font-semibold text-brand-ink">{loading ? "…" : summary.male}</span>
+              </p>
+              <p className="text-sm text-brand-gray">
+                Female <span className="font-semibold text-brand-ink">{loading ? "…" : summary.female}</span>
+              </p>
+            </div>
+          </Card>
+        </>
       )}
 
       {/* Body */}

@@ -60,7 +60,7 @@ const mergeLiveScopedData = (base, live) => ({
 
 export default function HealthTrends() {
   const { user } = useAuth();
-  // Barangay scope comes from the signed-in user's assignment â€” never from a
+  // Barangay scope comes from the signed-in user's assignment — never from a
   // selector, URL or filter the user controls.
   const assignedBarangay = getAssignedBarangay(user);
   const [period, setPeriod] = useState("12m");
@@ -84,7 +84,7 @@ export default function HealthTrends() {
         if (!cancelled && payload) setLiveData(payload);
       })
       .catch(() => {
-        /* API unavailable â€” the empty dataset is shown instead */
+        /* API unavailable — the empty dataset is shown instead */
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -381,7 +381,7 @@ export default function HealthTrends() {
   }
 
   /* ------------------------------------------------------------------ */
-  /* Municipality-wide view (MHO â€” unchanged behaviour)                  */
+  /* Municipality-wide view (MHO — unchanged behaviour)                  */
   /* ------------------------------------------------------------------ */
   /* ------------------------------------------------------------------ */
   /* Municipality-wide view (MHO) — live figures from the analytics API. */

@@ -84,6 +84,28 @@ const TRANSIENT_PROFILE_NOTICE =
   'Signed in, but your profile could not be loaded from the server (service unavailable). Some details may be incomplete — refresh in a moment.';
 
 /**
+ * True when the current page load is a Supabase password-recovery flow.
+ *
+ * A recovery link establishes a short-lived Supabase session so the user can
+ * set a new password on `/reset-password`. That session must NOT be treated as
+ * a normal application sign-in: resolving the account profile here would run
+ * the backend `GET /api/auth/me`, and any account-state rejection (403 — e.g. a
+ * resident still pending verification) would call `signOut()` and destroy the
+ * recovery session before the user can reset their password, leaving the reset
+ * page showing an "invalid link" error. The ResetPassword page owns this
+ * session instead. Detected from the route and the recovery hash (the hash is
+ * stripped quickly by `detectSessionInUrl`, so the route check is the durable
+ * signal).
+ */
+const RECOVERY_PATH = '/reset-password';
+const isRecoveryFlow = () => {
+  if (typeof window === 'undefined') return false;
+  const onResetRoute = (window.location.pathname || '').startsWith(RECOVERY_PATH);
+  const hash = window.location.hash || '';
+  return onResetRoute || hash.includes('type=recovery');
+};
+
+/**
  * Authentication provider.
  *
  * Supabase Auth is the ONLY sign-in path: credentials are verified by Supabase
@@ -113,6 +135,10 @@ export const AuthProvider = ({ children }) => {
   // The auth user id currently being resolved, to de-duplicate concurrent
   // profile fetches triggered by rapid auth-state events.
   const resolvingForRef = useRef(null);
+  // True once a PASSWORD_RECOVERY event is seen (or the page loaded inside the
+  // recovery flow). While set, auth-state changes for the recovery session are
+  // ignored so the ResetPassword page can own it — see `isRecoveryFlow`.
+  const recoveryActiveRef = useRef(false);
 
   const applyUser = useCallback((nextUser, nextSession = null) => {
     setUser(nextUser);
@@ -160,8 +186,15 @@ export const AuthProvider = ({ children }) => {
 
     const init = async () => {
       if (isSupabaseConfigured && supabase) {
+        // A password-recovery link establishes a Supabase session purely so the
+        // user can set a new password. Do NOT resolve the profile or treat it as
+        // a sign-in here — the ResetPassword page owns that session. Resolving it
+        // could 403 for a pending account and sign the user out mid-reset.
+        const inRecovery = isRecoveryFlow();
+        if (inRecovery) recoveryActiveRef.current = true;
+
         const { data } = await supabase.auth.getSession();
-        if (data?.session?.user) {
+        if (data?.session?.user && !inRecovery) {
           applyUser(toUser(data.session.user), data.session);
           // Refresh with the authoritative profile (role/status/coverage from
           // the profiles table) when the backend is reachable. A 403/401 means
@@ -183,7 +216,29 @@ export const AuthProvider = ({ children }) => {
             }
           }
         }
-        const listener = supabase.auth.onAuthStateChange((_event, nextSession) => {
+        const listener = supabase.auth.onAuthStateChange((event, nextSession) => {
+          // Password recovery: flag it and leave the session untouched so the
+          // ResetPassword page can update the password. The follow-up SIGNED_IN
+          // for the same recovery session is ignored below.
+          if (event === 'PASSWORD_RECOVERY') {
+            recoveryActiveRef.current = true;
+            return;
+          }
+          // Once the recovery session is signed out (after a successful reset,
+          // or if the user leaves), clear the flag and the local user.
+          if (event === 'SIGNED_OUT') {
+            recoveryActiveRef.current = false;
+            resolvedProfileUser.current = null;
+            applyUser(null, null);
+            return;
+          }
+          // While a recovery session is active — or the page is still on the
+          // recovery route — never hijack it into a normal authenticated
+          // session (which would resolve the profile and risk a 403 signOut).
+          if ((recoveryActiveRef.current || isRecoveryFlow()) && nextSession?.user) {
+            return;
+          }
+
           if (nextSession?.user) {
             const resolved = resolvedProfileUser.current;
             if (resolved && resolved.id === nextSession.user.id) {

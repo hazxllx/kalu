@@ -144,7 +144,7 @@ export default function PhnHealthServices() {
       .join("\n");
     setEditingService(null);
     setForm({
-      name: monitoring ? `${draft.resident} â€” Monitoring` : `${draft.resident} â€” Health Service`,
+      name: monitoring ? `${draft.resident} — Monitoring` : `${draft.resident} — Health Service`,
       date: new Date().toISOString().slice(0, 10),
       time: "09:00",
       barangay: draft.barangay || phnDefaultBarangay(user, coverage),
@@ -331,7 +331,7 @@ export default function PhnHealthServices() {
                     </div>
                     <div className="min-w-0">
                       <h3 className="font-semibold text-brand-ink text-sm sm:text-base leading-tight truncate">{s.name}</h3>
-                      <p className="text-xs text-brand-gray mt-0.5">{scopeLabel(s, user)} Â· {s.count}</p>
+                      <p className="text-xs text-brand-gray mt-0.5">{scopeLabel(s, user)} · {s.count}</p>
                     </div>
                   </div>
                   <StatusBadge value={s.status} />

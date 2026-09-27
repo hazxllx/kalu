@@ -46,6 +46,9 @@ const RiskBadge = ({ level }) => (
 );
 
 const buildDraftBase = (patient) => ({
+  // The resident's real id lets the referral page file the referral directly
+  // instead of making the PHN re-select the patient from the directory.
+  residentId: patient?.id || "",
   resident: patient?.patient || "",
   age: patient?.age ?? "",
   sex: patient?.sex || "",
@@ -287,7 +290,7 @@ export default function PhnCheckups() {
                         </div>
                         <div>
                           <p className="text-sm font-medium text-brand-ink">{p.patient}</p>
-                          <p className="text-xs text-brand-gray">{p.age} yrs Â· {p.sex}</p>
+                          <p className="text-xs text-brand-gray">{p.age} yrs · {p.sex}</p>
                         </div>
                       </div>
                     </td>

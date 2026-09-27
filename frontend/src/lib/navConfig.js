@@ -60,6 +60,7 @@ export const NAV = {
     { label: "Household Risk Overview", icon: "AlertTriangle", path: "/app/phn/households/risk-overview", group: "Risk & Monitoring" },
     { label: "Community Monitoring", icon: "Map", path: "/app/phn/barangays", permission: "reports.analytics.view", group: "Risk & Monitoring" },
     { label: "Medical Certificates", icon: "FileText", path: "/app/phn/certificates", group: "Documents & Reports" },
+    { label: "Account Approvals", icon: "ShieldCheck", path: "/app/phn/account-approvals", group: "Documents & Reports" },
     { label: "Reports", icon: "BarChart3", path: "/app/phn/reports", permission: "reports.view", group: "Documents & Reports" },
     { label: "Notifications", icon: "Bell", path: "/app/phn/notifications", group: "System" },
     { label: "Settings", icon: "Settings", path: "/app/phn/settings", group: "System" },
@@ -73,20 +74,22 @@ export const NAV = {
   health_supervisor: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/health_supervisor/dashboard", group: "Main" },
     { label: "Resident Directory", icon: "Users", path: "/app/health_supervisor/residents", permission: "residents.directory.view", group: "Main" },
-    { label: "Verifications", icon: "ShieldCheck", path: "/app/health_supervisor/verifications", permission: "residents.registration.approve", group: "Main" },
-    { label: "Household Verifications", icon: "Home", path: "/app/health_supervisor/household-verifications", permission: "households.verify", group: "Main" },
+    { label: "Resident Verifications", icon: "ShieldCheck", path: "/app/health_supervisor/verifications", permission: "residents.registration.approve", group: "Verification & Approvals" },
+    { label: "Household Verifications", icon: "Home", path: "/app/health_supervisor/household-verifications", permission: "households.verify", group: "Verification & Approvals" },
+    { label: "Account Approvals", icon: "ShieldCheck", path: "/app/health_supervisor/account-approvals", group: "Verification & Approvals" },
     { label: "Consultation", icon: "Stethoscope", path: "/app/health_supervisor/consultations", permission: "consultation.conduct", group: "Health Services" },
     { label: "Records", icon: "ClipboardList", group: "Health Services", children: [
-      { label: "TCLS", icon: "ClipboardList", path: "/app/health_supervisor/tcls" },
-      { label: "M1", icon: "FileHeart", path: "/app/health_supervisor/m1" },
+      { label: "TCL", icon: "ClipboardList", path: "/app/health_supervisor/tcls" },
+      { label: "Maternal Record", icon: "FileHeart", path: "/app/health_supervisor/m1" },
+      { label: "Immunization", icon: "Syringe", path: "/app/health_supervisor/immunization" },
+      { label: "TB Records", icon: "Activity", path: "/app/health_supervisor/tb" },
+      { label: "Follow-ups", icon: "CalendarClock", path: "/app/health_supervisor/followups", permission: "followups.view" },
     ] },
-    { label: "Follow-ups", icon: "CalendarClock", path: "/app/health_supervisor/followups", permission: "followups.view", group: "Health Services" },
     { label: "Schedule Calendar", icon: "CalendarDays", path: "/app/health_supervisor/followup-calendar", permission: "followups.view", group: "Health Services" },
     { label: "Health Services", icon: "Activity", path: "/app/health_supervisor/services", group: "Health Services" },
-    { label: "Immunization", icon: "Syringe", path: "/app/health_supervisor/immunization", group: "Health Services" },
     { label: "Referrals", icon: "Send", path: "/app/health_supervisor/referrals", permission: "referrals.view", group: "Health Services" },
     { label: "Community Monitoring", icon: "Map", path: "/app/health_supervisor/barangays", permission: "reports.analytics.view", group: "Monitoring" },
-    { label: "M1 / Maternal Monitoring", icon: "FileHeart", path: "/app/health_supervisor/m1-report", group: "Monitoring" },
+    { label: "Maternal Monitoring", icon: "FileHeart", path: "/app/health_supervisor/m1-report", group: "Monitoring" },
     { label: "Household Risk Clusters", icon: "AlertTriangle", path: "/app/health_supervisor/households/risk-clusters", group: "Monitoring" },
     { label: "Early Warning", icon: "TrendingUp", path: "/app/health_supervisor/trends", permission: "reports.analytics.view", group: "Monitoring" },
     { label: "Reports", icon: "BarChart3", path: "/app/health_supervisor/reports", permission: "reports.view", group: "Monitoring" },
@@ -97,10 +100,11 @@ export const NAV = {
   // are pending the verified requirements; monitoring pages remain available.
   // RHU Personnel do not have a Resident Directory entry — residents are owned
   // by the barangay Health Supervisor.
+  // RHU Personnel have NO Referrals entry: the API denies them referral access
+  // outright (403), so offering the page would only ever show an error.
   rhu_personnel: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/rhu_personnel/dashboard" },
     { label: "Triage", icon: "Activity", path: "/app/rhu_personnel/triage", permission: "triage.view" },
-    { label: "Referrals", icon: "Send", path: "/app/rhu_personnel/referrals" },
     { label: "Medical Certificates", icon: "FileText", path: "/app/rhu_personnel/certificates" },
     { label: "Health Programs", icon: "HeartPulse", path: "/app/rhu_personnel/programs" },
     { label: "Notifications", icon: "Bell", path: "/app/rhu_personnel/notifications" },
@@ -108,6 +112,7 @@ export const NAV = {
   ],
   mho: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/mho/dashboard", group: "Main" },
+    { label: "Resident Directory", icon: "Users", path: "/app/mho/residents", group: "Main" },
     { label: "Health Trends", icon: "TrendingUp", path: "/app/mho/trends", permission: "reports.analytics.view", group: "Monitoring" },
     { label: "Household Risk Overview", icon: "AlertTriangle", path: "/app/mho/households/risk-overview", group: "Monitoring" },
     { label: "Community Monitoring", icon: "Map", path: "/app/mho/barangays", permission: "reports.analytics.view", group: "Monitoring" },
@@ -121,8 +126,6 @@ export const NAV = {
   admin: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/admin/dashboard" },
     { label: "User Management", icon: "Users", path: "/app/admin/users", permission: "accounts.view" },
-    { label: "Staff Requests", icon: "ClipboardList", path: "/app/admin/staff-requests", permission: "accounts.view" },
-    { label: "Supervisor Verification", icon: "ShieldCheck", path: "/app/admin/supervisor-verifications", permission: "accounts.view" },
     { label: "Early Intervention Rules", icon: "AlertTriangle", path: "/app/admin/risk-rules" },
     { label: "Roles", icon: "Shield", path: "/app/admin/roles" },
     { label: "Role & Permissions", icon: "KeyRound", path: "/app/admin/permissions", permission: "accounts.roles.manage" },

@@ -37,7 +37,7 @@ export default function MidwifeDashboard() {
               <div key={s.name} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2">
                 <div>
                   <p className="font-medium text-brand-ink text-sm">{s.name}</p>
-                  <p className="text-xs text-brand-gray">{s.schedule} Â· {s.enrolled} enrolled</p>
+                  <p className="text-xs text-brand-gray">{s.schedule} · {s.enrolled} enrolled</p>
                 </div>
                 <StatusBadge value={s.status} />
               </div>

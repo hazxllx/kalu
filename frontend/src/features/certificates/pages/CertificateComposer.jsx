@@ -1,18 +1,15 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
 import { ROLES } from "@/lib/brand";
-import { useResidents } from "@/services/local/residentStore";
-import {
-  medicalCertificateStore,
-  CERT_PURPOSES,
-} from "@/services/local/medicalCertificateStore";
+import { residentsApi, medicalCertificatesApi } from "@/services/api";
+import { useCertificateMeta } from "@/features/certificates/hooks/useCertificateRegister";
 import MedicalCertificateDocument from "../components/MedicalCertificateDocument";
 import { useCertificatePrint } from "../components/useCertificatePrint.jsx";
 import {
-  Search, ChevronRight, ShieldAlert, Eye, Printer, RotateCcw, CheckCircle2, Users,
+  Search, ChevronRight, ShieldAlert, Eye, Printer, RotateCcw, CheckCircle2, Users, Loader2, AlertCircle,
 } from "lucide-react";
 
 /** Roles authorized to prepare and print medical certificates. */
@@ -56,7 +53,24 @@ const defaultForm = () => ({
 
 export default function CertificateComposer() {
   const { user } = useAuth();
-  const residents = useResidents();
+  const meta = useCertificateMeta();
+  const [residents, setResidents] = useState([]);
+  const [residentsError, setResidentsError] = useState("");
+
+  // Real resident directory, scoped by the API to the caller's
+  // barangay/municipality. No browser-local resident list.
+  useEffect(() => {
+    let active = true;
+    residentsApi
+      .list({ limit: 500 })
+      .then((payload) => {
+        if (active) setResidents(payload?.rows || payload?.records || []);
+      })
+      .catch((err) => active && setResidentsError(err?.message || "The resident directory could not be loaded."));
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Authorized healthcare personnel only — the route already sits inside the
   // role's protected area; this guard is a second line of defense.
@@ -85,21 +99,37 @@ export default function CertificateComposer() {
       base={base}
       roleLabel={roleLabel}
       residents={residents}
+      residentsError={residentsError}
+      purposes={meta.purposes}
     />
   );
 }
 
-function ComposerContent({ base, roleLabel, residents }) {
+function ComposerContent({ base, roleLabel, residents, residentsError, purposes }) {
   const { user } = useAuth();
   const { printCertificate, portal } = useCertificatePrint();
 
   const [patientQuery, setPatientQuery] = useState("");
   const [resident, setResident] = useState(null);
-  const [form, setForm] = useState(() => ({ ...defaultForm(), certificateNumber: medicalCertificateStore.nextReference() }));
+  const [form, setForm] = useState(() => ({ ...defaultForm(), certificateNumber: "" }));
   const [errors, setErrors] = useState({});
   const [previewOpen, setPreviewOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [savedId, setSavedId] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  // The certificate number is allocated by the API from real stored
+  // references, so it is pre-filled rather than typed by the user.
+  useEffect(() => {
+    let active = true;
+    medicalCertificatesApi
+      .nextReference()
+      .then((payload) => active && setForm((p) => ({ ...p, certificateNumber: payload?.reference || "" })))
+      .catch(() => active && setForm((p) => ({ ...p, certificateNumber: "" })));
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -109,11 +139,10 @@ function ComposerContent({ base, roleLabel, residents }) {
   const residentOptions = useMemo(
     () =>
       [...residents]
-        .sort((a, b) => a.name.localeCompare(b.name))
         .filter(
           (r) =>
             !patientQuery.trim() ||
-            r.name.toLowerCase().includes(patientQuery.trim().toLowerCase()) ||
+            r.name?.toLowerCase().includes(patientQuery.trim().toLowerCase()) ||
             String(r.id).toLowerCase().includes(patientQuery.trim().toLowerCase())
         )
         .slice(0, 6),
@@ -140,13 +169,15 @@ function ComposerContent({ base, roleLabel, residents }) {
     sex: resident.gender,
     barangay: resident.barangay,
     address: resident.address || resident.barangay,
-    purpose: CERT_PURPOSES[0],
+    purpose: purposes?.[0] || "General Medical Certificate",
     certificateNumber: form.certificateNumber.trim(),
     civilStatus: form.civilStatus,
     dateOfExamination: form.dateExamined,
     findings: form.diagnosis.trim(),
     recommendation: form.recommendation.trim(),
     remarks: form.remarks.trim(),
+    // Print-only field: the official issuance date is stamped by the API when a
+    // reviewer issues the certificate, but the preview shows the chosen date.
     issuedAt: form.issuedAt,
     preparedBy: user?.name || roleLabel,
     preparedByRole: roleLabel,
@@ -154,13 +185,23 @@ function ComposerContent({ base, roleLabel, residents }) {
     licenseNumber: "",
   });
 
+  /** The subset of fields the API accepts on create/update. */
+  const writePayload = () => ({
+    residentId: resident.id,
+    purpose: purposes?.[0] || "General Medical Certificate",
+    civilStatus: form.civilStatus,
+    dateOfExamination: form.dateExamined,
+    findings: form.diagnosis.trim(),
+    recommendation: form.recommendation.trim(),
+    remarks: form.remarks.trim(),
+    medicalOfficer: officerName,
+  });
+
   const validate = () => {
     const next = {};
     if (!resident) next.resident = "Please select a resident.";
-    if (!form.certificateNumber.trim()) next.certificateNumber = "Certificate number is required.";
     if (!form.dateExamined) next.dateExamined = "Date examined is required.";
     if (!form.diagnosis.trim()) next.diagnosis = "Diagnosis / medical impression is required.";
-    if (!form.issuedAt) next.issuedAt = "Issuance date is required.";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -175,32 +216,40 @@ function ComposerContent({ base, roleLabel, residents }) {
 
   /**
    * Print the certificate. Printing only persists the document data — it NEVER
-   * changes the certificate status. The status workflow is owned by the MHO in
-   * the register: Draft → For Review → Approved | Rejected → Issued. A
-   * certificate only becomes "Issued" through the MHO's register action on an
-   * already-Approved record.
+   * changes the certificate status. The status workflow lives in the register:
+   * Draft → For Review → Approved | Rejected → Issued, and only a PHN or the MHO
+   * can move a certificate past "For Review".
    */
-  const handlePrint = () => {
-    const cert = buildCertificate();
-    // Track the record id created on the first print so later prints update
-    // the same record. Status is never changed here — only document fields.
-    if (savedId) {
-      medicalCertificateStore.updateCertificate(savedId, cert);
-    } else {
-      const record = medicalCertificateStore.createCertificate({ ...cert, status: "Draft" });
-      setSavedId(record.id);
+  const handlePrint = async () => {
+    if (!validate()) return;
+    setSaving(true);
+    try {
+      if (savedId) {
+        await medicalCertificatesApi.update(savedId, writePayload());
+      } else {
+        const { record } = await medicalCertificatesApi.create(writePayload());
+        setSavedId(record.id);
+      }
+      showToast("Certificate saved as Draft — printing does not issue the certificate.");
+      printCertificate(buildCertificate(), officerName);
+    } catch (err) {
+      showToast(err?.message || "The certificate could not be saved.");
+    } finally {
+      setSaving(false);
     }
-    showToast("Certificate saved as Draft — printing does not issue the certificate.");
-    printCertificate(cert, officerName);
   };
 
   const handleReset = () => {
     setResident(null);
     setPatientQuery("");
-    setForm({ ...defaultForm(), certificateNumber: medicalCertificateStore.nextReference() });
+    setForm({ ...defaultForm(), certificateNumber: "" });
     setErrors({});
     setSavedId(null);
     setPreviewOpen(false);
+    medicalCertificatesApi
+      .nextReference()
+      .then((payload) => setForm((p) => ({ ...p, certificateNumber: payload?.reference || "" })))
+      .catch(() => {});
     showToast("Form reset.");
   };
 
@@ -243,6 +292,11 @@ function ComposerContent({ base, roleLabel, residents }) {
                 className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
               />
             </div>
+            {residentsError && (
+              <p className="mt-2 flex items-center gap-1.5 text-xs text-brand-danger">
+                <AlertCircle className="h-3.5 w-3.5" /> {residentsError}
+              </p>
+            )}
             {patientQuery.trim() && (
               <div className="mt-2 max-h-56 overflow-y-auto rounded-btn border border-slate-200 divide-y divide-slate-200 dark:border-border dark:divide-border">
                 {residentOptions.map((r) => (
@@ -308,13 +362,12 @@ function ComposerContent({ base, roleLabel, residents }) {
           <Card className="p-5 mb-5">
             <h3 className="mb-4 text-sm font-semibold text-brand-ink sm:text-base">Certificate Information</h3>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Certificate No." required error={errors.certificateNumber}>
+              <Field label="Certificate No." hint="Allocated automatically by the register.">
                 <input
                   type="text"
-                  value={form.certificateNumber}
-                  onChange={(e) => set("certificateNumber")(e.target.value)}
-                  placeholder="e.g. MC-2026-0006"
-                  className={inputCls(errors.certificateNumber)}
+                  readOnly
+                  value={form.certificateNumber || "Allocating..."}
+                  className={`${inputCls()} bg-brand-bg/60 dark:bg-card-nested`}
                 />
               </Field>
               <Field label="Date Examined" required error={errors.dateExamined}>
@@ -370,12 +423,12 @@ function ComposerContent({ base, roleLabel, residents }) {
                   />
                 </Field>
               </div>
-              <Field label="Issuance Date" required error={errors.issuedAt}>
+              <Field label="Issuance Date" hint="Stamped automatically when a reviewer issues the certificate.">
                 <input
                   type="date"
                   value={form.issuedAt}
                   onChange={(e) => set("issuedAt")(e.target.value)}
-                  className={inputCls(errors.issuedAt)}
+                  className={inputCls()}
                 />
               </Field>
             </div>
@@ -398,7 +451,7 @@ function ComposerContent({ base, roleLabel, residents }) {
 
           <p className="text-center text-xs text-brand-gray">
             Preview the certificate before printing. Printing saves the certificate as a Draft in the
-            register — issuing requires MHO review and approval under the status workflow.
+            register — issuing requires PHN or MHO review and approval under the status workflow.
           </p>
         </>
       )}
@@ -415,9 +468,10 @@ function ComposerContent({ base, roleLabel, residents }) {
               <div className="flex items-center gap-2">
                 <button
                   onClick={handlePrint}
-                  className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
                 >
-                  <Printer className="h-4 w-4" /> Print Certificate
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Print Certificate
                 </button>
                 <button onClick={() => setPreviewOpen(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">
                   Close Preview

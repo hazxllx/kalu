@@ -194,8 +194,8 @@ export default function MunicipalHealthReports() {
 
   const recentActivity = useMemo(() => {
     const items = [];
-    submissions.slice(0, 4).forEach((s) => items.push({ title: `${s.type} submitted by Barangay ${s.barangay}`, time: `${s.reference} Â· ${s.period}`, tag: "Submission" }));
-    clusters.filter((c) => c.risk?.level === RISK_LEVELS.INTERVENTION || c.risk?.level === RISK_LEVELS.PRIORITY).slice(0, 2).forEach((c) => items.push({ title: `New household risk cluster â€” ${c.head} Household`, time: `Barangay ${c.barangay}`, tag: "Risk" }));
+    submissions.slice(0, 4).forEach((s) => items.push({ title: `${s.type} submitted by Barangay ${s.barangay}`, time: `${s.reference} · ${s.period}`, tag: "Submission" }));
+    clusters.filter((c) => c.risk?.level === RISK_LEVELS.INTERVENTION || c.risk?.level === RISK_LEVELS.PRIORITY).slice(0, 2).forEach((c) => items.push({ title: `New household risk cluster — ${c.head} Household`, time: `Barangay ${c.barangay}`, tag: "Risk" }));
     recentHealthAlerts.slice(0, 2).forEach((a) => items.push({ title: a.msg || a.title, time: a.time, tag: a.level || "Alert" }));
     return items.slice(0, 6);
   }, [submissions, clusters, recentHealthAlerts]);
@@ -209,12 +209,12 @@ export default function MunicipalHealthReports() {
 
   const exportReport = (format) => {
     const scopeLabel = isAll ? "All Barangays" : brgy;
-    showToast(`${format} export generated for ${period} Â· ${scopeLabel} Â· ${reportType}.`);
+    showToast(`${format} export generated for ${period} · ${scopeLabel} · ${reportType}.`);
   };
 
   const generateReport = () => {
     const scopeLabel = isAll ? "All Barangays" : brgy;
-    showToast(`Municipal report generated for ${period} Â· ${scopeLabel} Â· ${reportType}.`);
+    showToast(`Municipal report generated for ${period} · ${scopeLabel} · ${reportType}.`);
   };
 
   const filterCls = "rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 py-2.5 text-sm outline-none dark:text-foreground";
@@ -263,7 +263,7 @@ export default function MunicipalHealthReports() {
 
       {toast && <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg"><span className="text-sm">{toast}</span></div>}
 
-      {/* Filter bar â€” evenly sized, labeled, stacking on mobile */}
+      {/* Filter bar — evenly sized, labeled, stacking on mobile */}
       <Card className="p-4 mb-6">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Filter label="Reporting Period" value={period} onChange={setPeriod} options={PERIODS} />
@@ -381,7 +381,7 @@ export default function MunicipalHealthReports() {
               const pct = barangayRows.length ? Math.round((count / Math.max(barangayRows.length, 1)) * 100) : 0;
               return (
                 <div key={label}>
-                  <div className="flex items-center justify-between text-sm"><span className="text-brand-ink">{label}</span><span className="text-brand-gray">{count} / {barangayRows.length} barangays Â· {pct}%</span></div>
+                  <div className="flex items-center justify-between text-sm"><span className="text-brand-ink">{label}</span><span className="text-brand-gray">{count} / {barangayRows.length} barangays · {pct}%</span></div>
                   <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-brand-blue" style={{ width: `${pct}%` }} /></div>
                 </div>
               );
@@ -485,7 +485,7 @@ export default function MunicipalHealthReports() {
       {reportType === "All Reports" ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card className="p-5">
-            <SectionHeader title="Top Health Conditions" subtitle={`Most recorded conditions Â· ${period}`} />
+            <SectionHeader title="Top Health Conditions" subtitle={`Most recorded conditions · ${period}`} />
             {derived.healthConditions.length === 0 ? (
               <p className="text-sm text-brand-gray">No health conditions recorded for this period.</p>
             ) : (

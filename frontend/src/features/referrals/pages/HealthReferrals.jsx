@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -89,21 +90,47 @@ const EMPTY_FORM = () => ({
   notes: "",
 });
 
-function ReferralFormModal({ initial, resident, residents, saving, onClose, onSave, onSelectResident }) {
+/**
+ * Notes assembled from the PHN check-up a referral draft was created from, so
+ * the findings captured during the encounter are carried into the referral
+ * instead of being re-typed.
+ */
+const draftNotesOf = (d) =>
+  [
+    d?.consultationLocation ? `Consultation Location: ${d.consultationLocation}` : "",
+    d?.findings ? `PHN Findings: ${d.findings}` : "",
+    d?.riskLevel ? `Risk Level: ${d.riskLevel}` : "",
+    d?.clinicalNotes ? `Clinical Notes: ${d.clinicalNotes}` : "",
+    d?.recommendations ? `Recommendations: ${d.recommendations}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+function ReferralFormModal({ initial, draft, resident, residents, saving, onClose, onSave, onSelectResident }) {
   const isEdit = Boolean(initial);
-  const [form, setForm] = useState(() =>
-    initial
-      ? {
-          referralDate: initial.referralDate || todayIso(),
-          destinationFacility: initial.destinationFacility || "RHU Pili",
-          destinationService: initial.destinationService || "",
-          reason: initial.reason || "",
-          priority: initial.priority || "High",
-          referringFacility: initial.referringFacility || "",
-          notes: initial.notes || "",
-        }
-      : EMPTY_FORM(),
-  );
+  const [form, setForm] = useState(() => {
+    if (initial) {
+      return {
+        referralDate: initial.referralDate || todayIso(),
+        destinationFacility: initial.destinationFacility || "RHU Pili",
+        destinationService: initial.destinationService || "",
+        reason: initial.reason || "",
+        priority: initial.priority || "High",
+        referringFacility: initial.referringFacility || "",
+        notes: initial.notes || "",
+      };
+    }
+    if (draft) {
+      // Pre-fill from the completed check-up the draft came from.
+      return {
+        ...EMPTY_FORM(),
+        reason: draft.reason || draft.findings || "",
+        priority: ["Low", "Medium", "High"].includes(draft.riskLevel) ? draft.riskLevel : "High",
+        notes: draftNotesOf(draft),
+      };
+    }
+    return EMPTY_FORM();
+  });
   const [errors, setErrors] = useState({});
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
@@ -206,6 +233,15 @@ export default function HealthReferrals() {
   const isResident = user?.role === ROLE.RESIDENT || user?.role === ROLE.RESIDENT_LIMITED;
   const scope = getSupervisorScope(user);
   const assignedBarangay = scope && scope.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
+  /**
+   * Roles that may raise or edit referrals. The API's WRITE_ROLES are the
+   * Health Supervisor and the PHN, so the MHO (municipal monitoring) and the
+   * RHU Personnel (triage) get a read-only view rather than buttons that would
+   * come back as 403.
+   */
+  const isReadOnlyRole = user?.role === ROLE.MHO || user?.role === ROLE.RHU_PERSONNEL;
+  const canWrite = !isResident && !isReadOnlyRole;
+  const isSupervisorOnly = user?.role === ROLE.MHO;
 
   const [records, setRecords] = useState([]);
   const [residents, setResidents] = useState([]);
@@ -226,6 +262,22 @@ export default function HealthReferrals() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [toast, setToast] = useState(null);
+  // Pre-filled draft from a completed PHN check-up ("Create Referral" on the
+  // check-up page navigates here with `state.referralDraft`), so the findings
+  // captured during the encounter are never re-typed.
+  const [draft, setDraft] = useState(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const incoming = location.state?.referralDraft;
+    if (!incoming) return;
+    setDraft(incoming);
+    setEditing(null);
+    setSelectedResident(null);
+    setFormOpen(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, navigate]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -269,8 +321,21 @@ export default function HealthReferrals() {
     });
   }, [records, search, statusFilter, priorityFilter]);
 
-  const openCreate = () => { setEditing(null); setSelectedResident(null); setFormOpen(true); };
-  const openEdit = (record) => { setEditing(record); setSelectedResident(null); setDetail(null); setFormOpen(true); };
+  const openCreate = () => { setEditing(null); setDraft(null); setSelectedResident(null); setFormOpen(true); };
+  const openEdit = (record) => { setEditing(record); setDraft(null); setSelectedResident(null); setDetail(null); setFormOpen(true); };
+
+  /**
+   * The resident a create will be filed against: the one picked in the modal, or
+   * the one the referral draft was created from (matched by id, then by name —
+   * the check-up page may carry only the resident's name).
+   */
+  const targetResident =
+    selectedResident ||
+    (draft
+      ? residents.find((r) => r.id === draft.residentId) ||
+        residents.find((r) => r.name.toLowerCase() === String(draft.resident || "").toLowerCase()) ||
+        null
+      : null);
 
   const toPayload = (form) => ({
     referral_date: form.referralDate || null,
@@ -291,13 +356,17 @@ export default function HealthReferrals() {
         setRecords((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...mapped } : r)));
         showToast("Referral updated.");
       } else {
-        const result = await referralsApi.create({ residentId: selectedResident.id, ...toPayload(form) });
+        if (!targetResident) {
+          showToast("Select the resident before saving the referral.");
+          return;
+        }
+        const result = await referralsApi.create({ residentId: targetResident.id, ...toPayload(form) });
         const mapped = {
           ...mapRecord(result?.record || result),
-          residentName: selectedResident.name,
-          barangay: selectedResident.barangay,
-          age: selectedResident.age,
-          sex: selectedResident.gender,
+          residentName: targetResident.name,
+          barangay: targetResident.barangay,
+          age: targetResident.age,
+          sex: targetResident.gender,
         };
         setRecords((prev) => [mapped, ...prev]);
         showToast("Referral created.");
@@ -305,6 +374,7 @@ export default function HealthReferrals() {
       setFormOpen(false);
       setEditing(null);
       setSelectedResident(null);
+      setDraft(null);
     } catch (err) {
       showToast(err?.message || "Could not save the referral.");
     } finally {
@@ -353,20 +423,22 @@ export default function HealthReferrals() {
     <>
       <PageHeader
         crumbs={["Referrals"]}
-        title={isResident ? "My Referrals" : "Referrals"}
+        title={isResident ? "My Referrals" : isSupervisorOnly ? "Referral Tracking" : "Referrals"}
         subtitle={
           isResident
             ? "Referrals your health workers have made for you and their current status."
-            : assignedBarangay
-              ? `Manage resident referrals to RHU and higher-level facilities in Brgy. ${assignedBarangay}.`
-              : "Manage resident referrals to RHU and higher-level healthcare facilities."
+            : isSupervisorOnly
+              ? "Monitor referred residents and track referral progress across the municipality."
+              : assignedBarangay
+                ? `Manage resident referrals to RHU and higher-level facilities in Brgy. ${assignedBarangay}.`
+                : "Manage resident referrals to RHU and higher-level healthcare facilities."
         }
         action={
-          isResident ? null : (
+          canWrite ? (
             <button onClick={openCreate} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark">
-              <Plus className="h-4 w-4" /> New Referral
+              <Plus className="w-4 h-4" /> New Referral
             </button>
-          )
+          ) : null
         }
       />
 
@@ -432,17 +504,21 @@ export default function HealthReferrals() {
                       </button>
                       {!isResident && (
                         <>
-                          <button onClick={() => openEdit(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Edit Referral">
-                            <Edit2 className="w-4 h-4" />
-                          </button>
+                          {canWrite && (
+                            <button onClick={() => openEdit(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Edit Referral">
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                          )}
                           {r.status !== "Completed" && r.status !== "Cancelled" && (
                             <button onClick={() => openStatus(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Update Status">
                               <RefreshCw className="w-4 h-4" />
                             </button>
                           )}
-                          <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-brand-danger hover:bg-brand-danger/10 rounded transition-colors" title="Delete Referral">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canWrite && (
+                            <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-brand-danger hover:bg-brand-danger/10 rounded transition-colors" title="Delete Referral">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -523,13 +599,14 @@ export default function HealthReferrals() {
       )}
 
       {/* Create / Edit modal */}
-      {formOpen && !isResident && (
+      {formOpen && canWrite && (
         <ReferralFormModal
           initial={editing}
-          resident={selectedResident}
+          draft={draft}
+          resident={targetResident}
           residents={residents}
           saving={saving}
-          onClose={() => { setFormOpen(false); setEditing(null); setSelectedResident(null); }}
+          onClose={() => { setFormOpen(false); setEditing(null); setSelectedResident(null); setDraft(null); }}
           onSave={handleSave}
           onSelectResident={setSelectedResident}
         />

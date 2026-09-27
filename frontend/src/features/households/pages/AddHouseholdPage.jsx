@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronDown,
@@ -10,6 +10,10 @@ import {
   CheckCircle2,
   Home,
   ArrowLeft,
+  Pencil,
+  Search,
+  Users,
+  X,
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
 import { Card } from "@/components/common/Card";
@@ -55,11 +59,6 @@ const inputCls = (error) =>
     error ? "border-red-400 bg-red-50/40" : "border-brand-border"
   }`;
 
-const cellCls = (error) =>
-  `w-full bg-white border rounded-input px-2 py-1.5 text-xs text-brand-ink outline-none transition-colors focus:border-brand-blue ${
-    error ? "border-red-400 bg-red-50/40" : "border-brand-border"
-  }`;
-
 const readOnlyCls =
   "w-full rounded-input border border-brand-border bg-brand-bg px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none";
 
@@ -93,6 +92,22 @@ function ageFromBirthday(birthday) {
   if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age -= 1;
   return age >= 0 ? String(age) : "";
 }
+
+/** Human-readable birthdate for the read-only member list, e.g. "Jan 9, 2026". */
+function formatBirthday(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** Full classification description used as a tooltip on the short code badge. */
+const classificationLabel = (value) =>
+  CLASSIFICATIONS.find((c) => c.value === value)?.label || value;
+
+/** Member PhilHealth code -> label for read-only display. */
+const philhealthLabel = (value) =>
+  value === "member" ? "Member" : value === "non-member" ? "Non-member" : "—";
 
 function Field({ label, required, error, hint, children, className = "" }) {
   return (
@@ -131,148 +146,238 @@ function RadioRow({ name, value, options, onChange }) {
 }
 
 /**
- * Mobile/tablet household member editor. Each member is a card with labelled
- * full-width inputs, so BHWs on phones are not forced into a wide horizontal
- * data grid. The compact wide table is only shown on `md+` screens.
+ * Add / Edit Household Member dialog.
+ *
+ * Replaces the previous ultra-wide inline data grid. Every field the row used
+ * to expose (name, relationship, sex, birthday, auto age, classification, PWD,
+ * PhilHealth, contact, quarterly visit status, family planning, remarks) is
+ * kept — laid out in a readable responsive grid so a BHW is never forced into a
+ * horizontally scrolling row of tiny inputs. Age stays auto-calculated from the
+ * birthdate and is shown read-only. Styling reuses the existing brand tokens so
+ * it themes correctly in light and dark mode.
  */
-function MemberCard({ member, index, error = {}, onUpdate, onRemove, canRemove }) {
-  const optionsFor = (key) => {
-    if (key === "relationship")
-      return (
-        <>
-          <option value="">Select...</option>
-          {RELATIONSHIPS.map((r) => <option key={r} value={r}>{r}</option>)}
-        </>
-      );
-    if (key === "sex")
-      return (
-        <>
-          <option value="">Select...</option>
-          {SEX_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-        </>
-      );
-    if (key === "classification")
-      return (
-        <>
-          <option value="">Select...</option>
-          {CLASSIFICATIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </>
-      );
-    return null;
-  };
+function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
-  const field = "block text-sm font-medium text-brand-ink";
   const input = inputCls();
   const inputErr = inputCls("x");
-  const threeCol = "grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-3";
-
-  const quarterSel = (q) => (
-    <select value={member[q]} onChange={(e) => onUpdate(q, e.target.value)} className={`${input} cursor-pointer`}>
-      <option value="">{q.toUpperCase()}</option>
-      {QUARTER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-    </select>
-  );
 
   return (
-    <div className="rounded-btn border border-brand-border bg-white p-4">
-      <div className="mb-4 flex items-center justify-between gap-2 border-b border-dashed border-brand-border pb-2.5">
-        <p className="text-sm font-semibold text-brand-ink">Member {index + 1}</p>
-        <button
-          type="button"
-          onClick={onRemove}
-          disabled={!canRemove}
-          className="flex h-9 w-9 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
-          aria-label={`Remove member ${index + 1}`}
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="space-y-4">
-        <div>
-          <label className={`${field} mb-1.5`}>Name {error.name && <span className="text-red-600">*</span>}</label>
-          <input type="text" value={member.name} onChange={(e) => onUpdate("name", e.target.value)} placeholder="Member name" className={error.name ? inputErr : input} />
-          {error.name && <p className="mt-1 text-xs text-red-600">{error.name}</p>}
-        </div>
-
-        <div>
-          <label className={`${field} mb-1.5`}>Contact Number (optional)</label>
-          <input
-            type="text"
-            value={member.contact}
-            onChange={(e) => onUpdate("contact", e.target.value)}
-            placeholder="e.g. 0917 123 4567"
-            className={error.contact ? inputErr : input}
-          />
-          {error.contact && <p className="mt-1 text-xs text-red-600">{error.contact}</p>}
-        </div>
-
-        <div className={threeCol}>
-          <div>
-            <label className={`${field} mb-1.5`}>Relationship {error.relationship && <span className="text-red-600">*</span>}</label>
-            <select value={member.relationship} onChange={(e) => onUpdate("relationship", e.target.value)} className={`${error.relationship ? inputErr : input} cursor-pointer`}>
-              {optionsFor("relationship")}
-            </select>
-            {error.relationship && <p className="mt-1 text-xs text-red-600">{error.relationship}</p>}
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={isEdit ? "Edit household member" : "Add household member"}
+    >
+      <Card className="max-h-[90vh] w-full max-w-2xl overflow-y-auto">
+        <div onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-start justify-between gap-3 border-b border-brand-border bg-brand-bg/70 px-5 py-4 sm:px-6">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">
+                Household Member
+              </p>
+              <h3 className="text-lg font-semibold text-brand-ink">
+                {isEdit ? "Edit Household Member" : "Add Household Member"}
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="shrink-0 text-brand-gray transition-colors hover:text-brand-ink"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <div>
-            <label className={`${field} mb-1.5`}>Sex {error.sex && <span className="text-red-600">*</span>}</label>
-            <select value={member.sex} onChange={(e) => onUpdate("sex", e.target.value)} className={`${error.sex ? inputErr : input} cursor-pointer`}>
-              {optionsFor("sex")}
-            </select>
-            {error.sex && <p className="mt-1 text-xs text-red-600">{error.sex}</p>}
+
+          <div className="space-y-5 p-5 sm:p-6">
+            {/* Row 1 — Name / Relationship / Sex */}
+            <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-3">
+              <Field label="Full Name" required error={errors.name}>
+                <input
+                  type="text"
+                  value={draft.name}
+                  onChange={(e) => onChange("name", e.target.value)}
+                  placeholder="e.g. Juan Dela Cruz"
+                  className={errors.name ? inputErr : input}
+                />
+              </Field>
+              <Field label="Relationship to Household Head" required error={errors.relationship}>
+                <select
+                  value={draft.relationship}
+                  onChange={(e) => onChange("relationship", e.target.value)}
+                  className={`${errors.relationship ? inputErr : input} cursor-pointer`}
+                >
+                  <option value="">Select...</option>
+                  {RELATIONSHIPS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Sex" required error={errors.sex}>
+                <select
+                  value={draft.sex}
+                  onChange={(e) => onChange("sex", e.target.value)}
+                  className={`${errors.sex ? inputErr : input} cursor-pointer`}
+                >
+                  <option value="">Select...</option>
+                  {SEX_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            {/* Row 2 — Birthdate / Age (auto) / Classification */}
+            <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-3">
+              <Field label="Birthdate">
+                <input
+                  type="date"
+                  value={draft.birthday}
+                  max={today()}
+                  onChange={(e) => onChange("birthday", e.target.value)}
+                  className={input}
+                />
+              </Field>
+              <Field label="Age" hint="Auto-calculated from birthdate">
+                <input
+                  type="text"
+                  value={draft.age === "" || draft.age == null ? "" : draft.age}
+                  readOnly
+                  disabled
+                  tabIndex={-1}
+                  placeholder="—"
+                  className={readOnlyCls}
+                  aria-label="Age (auto-calculated)"
+                />
+              </Field>
+              <Field label="Classification">
+                <select
+                  value={draft.classification}
+                  onChange={(e) => onChange("classification", e.target.value)}
+                  className={`${input} cursor-pointer`}
+                >
+                  <option value="">Select...</option>
+                  {CLASSIFICATIONS.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            {/* Row 3 — PWD / PhilHealth / Contact */}
+            <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-3">
+              <Field label="PWD">
+                <label className="flex h-[42px] cursor-pointer items-center gap-2 text-sm text-brand-ink">
+                  <input
+                    type="checkbox"
+                    checked={draft.pwd}
+                    onChange={(e) => onChange("pwd", e.target.checked)}
+                    className="h-4 w-4 accent-brand-blue"
+                  />
+                  Person with disability
+                </label>
+              </Field>
+              <Field label="PhilHealth Membership">
+                <select
+                  value={draft.philhealth}
+                  onChange={(e) => onChange("philhealth", e.target.value)}
+                  className={`${input} cursor-pointer`}
+                >
+                  <option value="">Unspecified</option>
+                  <option value="member">Member</option>
+                  <option value="non-member">Non-member</option>
+                </select>
+              </Field>
+              <Field label="Contact Number" hint="Optional" error={errors.contact}>
+                <input
+                  type="text"
+                  value={draft.contact}
+                  onChange={(e) => onChange("contact", e.target.value)}
+                  placeholder="e.g. 0917 123 4567"
+                  className={errors.contact ? inputErr : input}
+                />
+              </Field>
+            </div>
+
+            {/* Quarterly Visit Status */}
+            <div>
+              <p className="mb-2 text-sm font-medium text-brand-ink">Quarterly Visit Status</p>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4">
+                {["q1", "q2", "q3", "q4"].map((q) => (
+                  <div key={q}>
+                    <label
+                      htmlFor={`member-${q}`}
+                      className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-brand-gray"
+                    >
+                      {q.toUpperCase()}
+                    </label>
+                    <select
+                      id={`member-${q}`}
+                      value={draft[q]}
+                      onChange={(e) => onChange(q, e.target.value)}
+                      className={`${input} cursor-pointer`}
+                    >
+                      <option value="">—</option>
+                      {QUARTER_STATUSES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Family Planning / Remarks */}
+            <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
+              <Field label="Family Planning Method">
+                <select
+                  value={draft.fpMethod}
+                  onChange={(e) => onChange("fpMethod", e.target.value)}
+                  className={`${input} cursor-pointer`}
+                >
+                  {FP_METHODS.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Remarks">
+                <input
+                  type="text"
+                  value={draft.remarks}
+                  onChange={(e) => onChange("remarks", e.target.value)}
+                  placeholder="Optional notes"
+                  className={input}
+                />
+              </Field>
+            </div>
           </div>
-          <div>
-            <label className={`${field} mb-1.5`}>Age</label>
-            <input type="number" min="0" value={member.age} onChange={(e) => onUpdate("age", e.target.value)} placeholder="â€”" className={input} />
+
+          <div className="flex flex-col-reverse items-stretch gap-3 border-t border-brand-border px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center justify-center rounded-btn border border-brand-border bg-white px-5 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:bg-brand-bg"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onSubmit}
+              className="inline-flex items-center justify-center rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+            >
+              {isEdit ? "Save Changes" : "Add Member"}
+            </button>
           </div>
         </div>
-
-        <div className={threeCol}>
-          <div>
-            <label className={`${field} mb-1.5`}>Birthday</label>
-            <input type="date" value={member.birthday} onChange={(e) => onUpdate("birthday", e.target.value)} className={input} />
-          </div>
-          <div>
-            <label className={`${field} mb-1.5`}>Classification</label>
-            <select value={member.classification} onChange={(e) => onUpdate("classification", e.target.value)} className={`${input} cursor-pointer`}>
-              {optionsFor("classification")}
-            </select>
-          </div>
-          <div>
-            <label className={`${field} mb-1.5`}>PhilHealth</label>
-            <select value={member.philhealth} onChange={(e) => onUpdate("philhealth", e.target.value)} className={`${input} cursor-pointer`}>
-              <option value="">Unspecified</option>
-              <option value="member">Member</option>
-              <option value="non-member">Non-member</option>
-            </select>
-          </div>
-        </div>
-
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-brand-ink">
-          <input type="checkbox" checked={member.pwd} onChange={(e) => onUpdate("pwd", e.target.checked)} className="h-4 w-4 accent-brand-blue" />
-          Person with disability (PWD)
-        </label>
-
-        <div>
-          <label className={`${field} mb-1.5`}>Quarterly Visit Status</label>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-            {["q1", "q2", "q3", "q4"].map((q) => <div key={q}>{quarterSel(q)}</div>)}
-          </div>
-        </div>
-
-        <div>
-          <label className={`${field} mb-1.5`}>Family Planning Method</label>
-          <select value={member.fpMethod} onChange={(e) => onUpdate("fpMethod", e.target.value)} className={`${input} cursor-pointer`}>
-            {FP_METHODS.map((f) => <option key={f} value={f}>{f}</option>)}
-          </select>
-        </div>
-
-        <div>
-          <label className={`${field} mb-1.5`}>Remarks</label>
-          <input type="text" value={member.remarks} onChange={(e) => onUpdate("remarks", e.target.value)} placeholder="â€”" className={input} />
-        </div>
-      </div>
+      </Card>
     </div>
   );
 }
@@ -334,7 +439,7 @@ const SECTION_INDEX = {
 };
 
 /**
- * Add New Household â€” dedicated full-page workflow.
+ * Add New Household — dedicated full-page workflow.
  *
  * Replaces the previous right-side drawer with a routed page (`households/new`)
  * that renders in the normal application shell. All fields, validations, the
@@ -375,6 +480,11 @@ export default function AddHouseholdPage() {
   });
   const [errors, setErrors] = useState({});
   const [memberErrors, setMemberErrors] = useState([]);
+  const [memberListError, setMemberListError] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberModal, setMemberModal] = useState({ open: false, index: null });
+  const [memberDraft, setMemberDraft] = useState(emptyMember());
+  const [memberDraftErrors, setMemberDraftErrors] = useState({});
   const [form, setForm] = useState(() => ({
     head: "",
     purok: "",
@@ -405,7 +515,7 @@ export default function AddHouseholdPage() {
     sanitationAccess: "",
     wasteDisposal: "",
     segregation: "",
-    members: [emptyMember()],
+    members: [],
   }));
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
@@ -420,27 +530,63 @@ export default function AddHouseholdPage() {
 
   const toggleSection = (id) => setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
 
-  const updateMember = (idx, key, value) =>
-    setForm((prev) => ({
-      ...prev,
-      members: prev.members.map((m, i) => {
-        if (i !== idx) return m;
-        const next = { ...m, [key]: value };
-        if (key === "birthday") {
-          const age = ageFromBirthday(value);
-          if (age !== "") next.age = age;
-        }
-        return next;
-      }),
-    }));
+  const openAddMember = () => {
+    setMemberDraft(emptyMember());
+    setMemberDraftErrors({});
+    setMemberModal({ open: true, index: null });
+  };
 
-  const addMember = () => setForm((prev) => ({ ...prev, members: [...prev.members, emptyMember()] }));
+  const openEditMember = (idx) => {
+    setMemberDraft({ ...emptyMember(), ...form.members[idx] });
+    setMemberDraftErrors({});
+    setMemberModal({ open: true, index: idx });
+  };
+
+  const closeMemberModal = () => setMemberModal({ open: false, index: null });
+
+  const updateDraft = (key, value) =>
+    setMemberDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === "birthday") next.age = ageFromBirthday(value);
+      return next;
+    });
+
+  const validateMemberDraft = (d) => {
+    let name = "";
+    if (!d.name.trim()) name = "Name is required.";
+    else name = maxLength(d.name, 120, "Member name") || "";
+    return {
+      name,
+      relationship: d.relationship ? "" : "Relationship is required.",
+      sex: d.sex ? "" : "Sex is required.",
+      contact: d.contact ? validatePhone(d.contact, { isRequired: false, label: "Member contact number" }) || "" : "",
+    };
+  };
+
+  const saveMemberDraft = () => {
+    const errs = validateMemberDraft(memberDraft);
+    if (Object.values(errs).some(Boolean)) {
+      setMemberDraftErrors(errs);
+      return;
+    }
+    const cleaned = {
+      ...memberDraft,
+      name: memberDraft.name.trim(),
+      contact: memberDraft.contact ? memberDraft.contact.trim() : "",
+    };
+    setForm((prev) => {
+      const members = [...prev.members];
+      if (memberModal.index === null) members.push(cleaned);
+      else members[memberModal.index] = cleaned;
+      return { ...prev, members };
+    });
+    setMemberErrors([]);
+    setMemberListError("");
+    closeMemberModal();
+  };
 
   const removeMember = (idx) =>
-    setForm((prev) => ({
-      ...prev,
-      members: prev.members.length > 1 ? prev.members.filter((_, i) => i !== idx) : prev.members,
-    }));
+    setForm((prev) => ({ ...prev, members: prev.members.filter((_, i) => i !== idx) }));
 
   const toggleTreatment = (method) =>
     setForm((prev) => ({
@@ -458,6 +604,15 @@ export default function AddHouseholdPage() {
   const riskReady = Boolean(form.waterSource && form.toilet);
   const hasMemberErrors = memberErrors.some((m) => Object.values(m).some(Boolean));
   const showDistance = form.waterSource && form.waterSource !== "level3";
+
+  const memberQuery = memberSearch.trim().toLowerCase();
+  const filteredMembers = form.members
+    .map((m, i) => ({ m, i }))
+    .filter(
+      ({ m }) =>
+        !memberQuery ||
+        `${m.name} ${m.relationship} ${m.sex} ${m.classification}`.toLowerCase().includes(memberQuery)
+    );
 
   const validate = () => {
     const next = {};
@@ -496,16 +651,18 @@ export default function AddHouseholdPage() {
   const handleSave = async () => {
     const { errors: nextErrors, memberErrors: nextMemberErrors } = validate();
     const membersInvalid = nextMemberErrors.some((m) => Object.values(m).some(Boolean));
+    const noMembers = form.members.length === 0;
     setErrors(nextErrors);
     setMemberErrors(nextMemberErrors);
-    if (Object.keys(nextErrors).length > 0 || membersInvalid) {
+    setMemberListError(noMembers ? "Add at least one household member before saving." : "");
+    if (Object.keys(nextErrors).length > 0 || membersInvalid || noMembers) {
       setOpenSections((prev) => {
         const toOpen = { ...prev };
         Object.keys(nextErrors).forEach((k) => {
           const s = FIELD_SECTIONS[k];
           if (s) toOpen[s] = true;
         });
-        if (membersInvalid) toOpen.members = true;
+        if (membersInvalid || noMembers) toOpen.members = true;
         return toOpen;
       });
       return;
@@ -644,9 +801,9 @@ export default function AddHouseholdPage() {
         </div>
       )}
 
-      {/* Form body â€” fills the content area; two columns on md+ */}
+      {/* Form body — fills the content area; two columns on md+ */}
       <div className="w-full space-y-5 pb-6">
-        {/* 1 â€” Household Information */}
+        {/* 1 — Household Information */}
         <Section
           id="info"
           index={SECTION_INDEX.info}
@@ -700,7 +857,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 2 â€” Household Details */}
+        {/* 2 — Household Details */}
         <Section
           id="details"
           index={SECTION_INDEX.details}
@@ -719,7 +876,7 @@ export default function AddHouseholdPage() {
                 className={inputCls(errors.families)}
               />
             </Field>
-            <Field label="Estimated Monthly Income (â‚±)" hint="Optional â€” used in risk classification" error={errors.income}>
+            <Field label="Estimated Monthly Income (₱)" hint="Optional — used in risk classification" error={errors.income}>
               <input
                 type="number"
                 min="0"
@@ -729,7 +886,7 @@ export default function AddHouseholdPage() {
                 className={inputCls(errors.income)}
               />
             </Field>
-            <Field label="Assigned Data Collector / BHW" hint="Auto-filled with the logged-in user â€” editable">
+            <Field label="Assigned Data Collector / BHW" hint="Auto-filled with the logged-in user — editable">
               <select value={form.collector} onChange={(e) => set("collector", e.target.value)} className={`${inputCls()} cursor-pointer`}>
                 {bhwOptions.map((b) => (
                   <option key={b} value={b}>{b}</option>
@@ -753,7 +910,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 3 â€” Respondent Information */}
+        {/* 3 — Respondent Information */}
         <Section
           id="respondent"
           index={SECTION_INDEX.respondent}
@@ -783,7 +940,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 4 â€” Visit Tracking */}
+        {/* 4 — Visit Tracking */}
         <Section
           id="visits"
           index={SECTION_INDEX.visits}
@@ -811,7 +968,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 5 â€” HH Head PhilHealth Info */}
+        {/* 5 — HH Head PhilHealth Info */}
         <Section
           id="philhealth"
           index={SECTION_INDEX.philhealth}
@@ -846,7 +1003,7 @@ export default function AddHouseholdPage() {
           )}
         </Section>
 
-        {/* 6 â€” Water Source & Sanitation Details */}
+        {/* 6 — Water Source & Sanitation Details */}
         <Section
           id="water"
           index={SECTION_INDEX.water}
@@ -950,7 +1107,7 @@ export default function AddHouseholdPage() {
           </div>
         </Section>
 
-        {/* 7 â€” Household Members */}
+        {/* 7 — Household Members */}
         <Section
           id="members"
           index={SECTION_INDEX.members}
@@ -976,8 +1133,8 @@ export default function AddHouseholdPage() {
                   {CLASSIFICATIONS.map((c) => (
                     <p key={c.value} className="text-xs text-brand-gray">
                       <span className="font-semibold text-brand-ink">{c.value}</span>
-                      {" â€” "}
-                      {c.label.split("â€” ")[1]}
+                      {" — "}
+                      {c.label.split("— ")[1]}
                     </p>
                   ))}
                 </div>
@@ -985,177 +1142,214 @@ export default function AddHouseholdPage() {
             </div>
           }
         >
-          {hasMemberErrors && (
+          {(hasMemberErrors || memberListError) && (
             <div className="mb-3 flex items-center gap-2 rounded-btn border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
               <AlertTriangle className="h-4 w-4 shrink-0" />
-              Some member rows are incomplete â€” fill in the highlighted fields or remove the row.
+              {memberListError || "Some members are incomplete — edit the highlighted member or remove it."}
             </div>
           )}
-          <div className="hidden overflow-x-auto rounded-btn border border-brand-border bg-white lg:block">
-            <table className="w-full min-w-[1150px] text-left">
-              <thead>
-                <tr className="border-b border-brand-border bg-brand-bg text-[10px] uppercase tracking-wide text-brand-gray">
-                  <th className="px-2 py-2">#</th>
-                  <th className="px-2 py-2">Name</th>
-                  <th className="px-2 py-2">Relationship to HH Head</th>
-                  <th className="px-2 py-2">Sex</th>
-                  <th className="px-2 py-2">Birthday</th>
-                  <th className="px-2 py-2">Age</th>
-                  <th className="px-2 py-2">Classification</th>
-                  <th className="px-2 py-2 text-center">PWD</th>
-                  <th className="px-2 py-2">PhilHealth</th>
-                  <th className="px-2 py-2">Q1</th>
-                  <th className="px-2 py-2">Q2</th>
-                  <th className="px-2 py-2">Q3</th>
-                  <th className="px-2 py-2">Q4</th>
-                   <th className="px-2 py-2">Remarks</th>
-                   <th className="px-2 py-2">Family Planning Method</th>
-                   <th className="px-2 py-2">Contact Number</th>
-                   <th className="px-2 py-2" />
-                 </tr>
-              </thead>
-              <tbody>
-                {form.members.map((m, i) => {
-                  const me = memberErrors[i] || {};
-                  return (
-                    <tr key={i} className="border-b border-brand-border last:border-0 align-top">
-                      <td className="px-2 py-2 text-xs font-semibold text-brand-gray">{i + 1}</td>
-                      <td className="px-2 py-2">
-                        <input
-                          type="text"
-                          value={m.name}
-                          onChange={(e) => updateMember(i, "name", e.target.value)}
-                          placeholder="Member name"
-                          className={cellCls(me.name)}
-                        />
-                        {me.name && <p className="mt-1 text-[10px] text-red-600">{me.name}</p>}
-                      </td>
-                      <td className="px-2 py-2">
-                        <select value={m.relationship} onChange={(e) => updateMember(i, "relationship", e.target.value)} className={`${cellCls(me.relationship)} cursor-pointer`}>
-                          <option value="">Select...</option>
-                          {RELATIONSHIPS.map((r) => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-2">
-                        <select value={m.sex} onChange={(e) => updateMember(i, "sex", e.target.value)} className={`${cellCls(me.sex)} cursor-pointer`}>
-                          <option value="">Select...</option>
-                          {SEX_OPTIONS.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-2">
-                        <input type="date" value={m.birthday} onChange={(e) => updateMember(i, "birthday", e.target.value)} className={cellCls()} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <input
-                          type="number"
-                          min="0"
-                          value={m.age}
-                          onChange={(e) => updateMember(i, "age", e.target.value)}
-                          placeholder="â€”"
-                          className={`${cellCls()} w-14`}
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <select value={m.classification} onChange={(e) => updateMember(i, "classification", e.target.value)} className={`${cellCls()} cursor-pointer`}>
-                          <option value="">Select...</option>
-                          {CLASSIFICATIONS.map((c) => (
-                            <option key={c.value} value={c.value}>{c.label}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        <input
-                          type="checkbox"
-                          checked={m.pwd}
-                          onChange={(e) => updateMember(i, "pwd", e.target.checked)}
-                          className="h-4 w-4 accent-brand-blue"
-                          aria-label={`Member ${i + 1} is a PWD`}
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <select value={m.philhealth} onChange={(e) => updateMember(i, "philhealth", e.target.value)} className={`${cellCls()} w-24 cursor-pointer`}>
-                          <option value="">Unspecified</option>
-                          <option value="member">Member</option>
-                          <option value="non-member">Non-member</option>
-                        </select>
-                      </td>
-                      {["q1", "q2", "q3", "q4"].map((q) => (
-                        <td key={q} className="px-2 py-2">
-                          <select value={m[q]} onChange={(e) => updateMember(i, q, e.target.value)} className={`${cellCls()} w-[74px] cursor-pointer`}>
-                            <option value="">â€”</option>
-                            {QUARTER_STATUSES.map((s) => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        </td>
-                      ))}
-                      <td className="px-2 py-2">
-                        <input type="text" value={m.remarks} onChange={(e) => updateMember(i, "remarks", e.target.value)} placeholder="â€”" className={`${cellCls()} w-28`} />
-                      </td>
-                       <td className="px-2 py-2">
-                        <select value={m.fpMethod} onChange={(e) => updateMember(i, "fpMethod", e.target.value)} className={`${cellCls()} w-32 cursor-pointer`}>
-                          {FP_METHODS.map((f) => (
-                            <option key={f} value={f}>{f}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-2">
-                        <input
-                          type="text"
-                          value={m.contact}
-                          onChange={(e) => updateMember(i, "contact", e.target.value)}
-                          placeholder="09XX XXX XXXX"
-                          className={cellCls(me.contact)}
-                        />
-                        {me.contact && <p className="mt-1 text-[10px] text-red-600">{me.contact}</p>}
-                      </td>
-                      <td className="px-2 py-2">
-                        <button
-                          type="button"
-                          onClick={() => removeMember(i)}
-                          disabled={form.members.length === 1}
-                          className="flex h-7 w-7 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label={`Remove member ${i + 1}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+
+          {/* Add member — opens the member form dialog */}
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={openAddMember}
+              className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+            >
+              <Plus className="h-4 w-4" /> Add Member
+            </button>
           </div>
 
-          {/* Mobile/tablet member cards */}
-          <div className="space-y-4 lg:hidden">
-            {form.members.map((m, i) => (
-              <MemberCard
-                key={i}
-                member={m}
-                index={i}
-                error={memberErrors[i] || {}}
-                onUpdate={(key, value) => updateMember(i, key, value)}
-                onRemove={() => removeMember(i)}
-                canRemove={form.members.length > 1}
+          {/* Search + member count */}
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-gray" />
+              <input
+                type="text"
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                placeholder="Search household member..."
+                className={`${inputCls()} pl-9`}
+                aria-label="Search household member"
               />
-            ))}
+            </div>
+            <p className="text-xs text-brand-gray sm:text-sm">
+              Total: <span className="font-semibold text-brand-ink">{form.members.length}</span>{" "}
+              member{form.members.length === 1 ? "" : "s"}
+            </p>
           </div>
 
-          <button
-            type="button"
-            onClick={addMember}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-btn border border-dashed border-brand-border bg-white py-2.5 text-sm font-medium text-brand-blue transition-colors hover:border-brand-blue hover:bg-brand-light"
-          >
-            <Plus className="h-4 w-4" /> Add Member
-          </button>
+          {form.members.length === 0 ? (
+            <div className="rounded-btn border border-dashed border-brand-border bg-brand-bg/40 px-4 py-10 text-center">
+              <Users className="mx-auto mb-2 h-8 w-8 text-brand-gray" />
+              <p className="text-sm font-medium text-brand-ink">No household members added yet</p>
+              <p className="mt-1 text-xs text-brand-gray">
+                Use “Add Member” to record the individuals living in this household.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Desktop / laptop — readable table */}
+              <div className="hidden overflow-hidden rounded-btn border border-brand-border bg-white lg:block">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-brand-border bg-brand-bg text-xs uppercase tracking-wide text-brand-gray">
+                      <th className="px-3 py-3 font-semibold">#</th>
+                      <th className="px-3 py-3 font-semibold">Full Name</th>
+                      <th className="px-3 py-3 font-semibold">Relationship</th>
+                      <th className="px-3 py-3 font-semibold">Sex</th>
+                      <th className="px-3 py-3 font-semibold">Birthdate</th>
+                      <th className="px-3 py-3 font-semibold">Age</th>
+                      <th className="px-3 py-3 font-semibold">Classification</th>
+                      <th className="px-3 py-3 text-center font-semibold">PWD</th>
+                      <th className="px-3 py-3 font-semibold">PhilHealth</th>
+                      <th className="px-3 py-3 text-right font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMembers.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="px-3 py-8 text-center text-sm text-brand-gray">
+                          No members match your search.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredMembers.map(({ m, i }) => (
+                        <tr key={i} className="border-b border-brand-border last:border-0">
+                          <td className="px-3 py-3 text-xs font-semibold text-brand-gray">{i + 1}</td>
+                          <td className="px-3 py-3 font-medium text-brand-ink">{m.name || "—"}</td>
+                          <td className="px-3 py-3 text-brand-ink">{m.relationship || "—"}</td>
+                          <td className="px-3 py-3 text-brand-ink">{m.sex || "—"}</td>
+                          <td className="whitespace-nowrap px-3 py-3 text-brand-ink">{formatBirthday(m.birthday)}</td>
+                          <td className="px-3 py-3 text-brand-ink">
+                            {m.age === "" || m.age == null ? "—" : m.age}
+                          </td>
+                          <td className="px-3 py-3">
+                            {m.classification ? (
+                              <span
+                                title={classificationLabel(m.classification)}
+                                className="inline-flex items-center rounded-full bg-brand-light px-2 py-0.5 text-xs font-semibold text-brand-blue"
+                              >
+                                {m.classification}
+                              </span>
+                            ) : (
+                              <span className="text-brand-gray">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            {m.pwd ? (
+                              <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                                Yes
+                              </span>
+                            ) : (
+                              <span className="text-xs text-brand-gray">No</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-brand-ink">{philhealthLabel(m.philhealth)}</td>
+                          <td className="px-3 py-3">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => openEditMember(i)}
+                                title="Edit member"
+                                aria-label={`Edit ${m.name || `member ${i + 1}`}`}
+                                className="flex h-8 w-8 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-brand-blue hover:bg-brand-light hover:text-brand-blue"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeMember(i)}
+                                title="Delete member"
+                                aria-label={`Delete ${m.name || `member ${i + 1}`}`}
+                                className="flex h-8 w-8 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Tablet / mobile — compact member cards */}
+              <div className="space-y-3 lg:hidden">
+                {filteredMembers.length === 0 ? (
+                  <div className="rounded-btn border border-brand-border bg-white px-4 py-8 text-center text-sm text-brand-gray">
+                    No members match your search.
+                  </div>
+                ) : (
+                  filteredMembers.map(({ m, i }) => (
+                    <div key={i} className="rounded-btn border border-brand-border bg-white p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="flex items-center gap-2 text-sm font-semibold text-brand-ink">
+                            <span className="text-xs font-semibold text-brand-gray">#{i + 1}</span>
+                            <span className="truncate">{m.name || "—"}</span>
+                          </p>
+                          <p className="mt-0.5 text-xs text-brand-gray">
+                            {[
+                              m.relationship,
+                              m.sex,
+                              m.age === "" || m.age == null ? null : `${m.age} yrs`,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || "—"}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditMember(i)}
+                            title="Edit member"
+                            aria-label={`Edit ${m.name || `member ${i + 1}`}`}
+                            className="flex h-9 w-9 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-brand-blue hover:bg-brand-light hover:text-brand-blue"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeMember(i)}
+                            title="Delete member"
+                            aria-label={`Delete ${m.name || `member ${i + 1}`}`}
+                            className="flex h-9 w-9 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-dashed border-brand-border pt-3 text-xs">
+                        <div>
+                          <dt className="text-brand-gray">Birthdate</dt>
+                          <dd className="font-medium text-brand-ink">{formatBirthday(m.birthday)}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-brand-gray">Classification</dt>
+                          <dd className="font-medium text-brand-ink" title={m.classification ? classificationLabel(m.classification) : undefined}>
+                            {m.classification || "—"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-brand-gray">PWD</dt>
+                          <dd className="font-medium text-brand-ink">{m.pwd ? "Yes" : "No"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-brand-gray">PhilHealth</dt>
+                          <dd className="font-medium text-brand-ink">{philhealthLabel(m.philhealth)}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
         </Section>
 
-        {/* 8 â€” Auto-Calculated Risk Classification */}
+        {/* 8 — Auto-Calculated Risk Classification */}
         <Section
           id="risk"
           index={SECTION_INDEX.risk}
@@ -1179,7 +1373,7 @@ export default function AddHouseholdPage() {
               <div className="flex items-center gap-3">
                 <HHBadge value={risk.level} label={`${risk.level} Risk`} />
                 <span className="text-xs text-brand-gray">
-                  Risk score <span className="font-semibold text-brand-ink">{risk.score}/100</span> â€” computed live
+                  Risk score <span className="font-semibold text-brand-ink">{risk.score}/100</span> — computed live
                 </span>
               </div>
               <span className="text-[11px] text-brand-gray">
@@ -1193,7 +1387,7 @@ export default function AddHouseholdPage() {
                 ))}
               </div>
             ) : (
-              <p className="mt-3 text-xs text-brand-gray">No risk factors recorded yet â€” fill in the sections above.</p>
+              <p className="mt-3 text-xs text-brand-gray">No risk factors recorded yet — fill in the sections above.</p>
             )}
               </>
             )}
@@ -1203,7 +1397,7 @@ export default function AddHouseholdPage() {
                 <div className="flex items-start gap-2.5 rounded-btn border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
-                    <strong>Sanitation Risk</strong> â€” unsafe water source (Level I / Unimproved) or no toilet
+                    <strong>Sanitation Risk</strong> — unsafe water source (Level I / Unimproved) or no toilet
                     facility. Tagged for environmental sanitation follow-up.
                   </span>
                 </div>
@@ -1245,12 +1439,23 @@ export default function AddHouseholdPage() {
                 disabled={saving}
                 className="inline-flex items-center justify-center rounded-btn bg-brand-blue px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60 sm:py-2.5"
               >
-                {saving ? "Savingâ€¦" : "Save Household"}
+                {saving ? "Saving…" : "Save Household"}
               </button>
             </div>
           </div>
         </Card>
       </div>
+
+      {memberModal.open && (
+        <MemberFormModal
+          draft={memberDraft}
+          errors={memberDraftErrors}
+          isEdit={memberModal.index !== null}
+          onChange={updateDraft}
+          onClose={closeMemberModal}
+          onSubmit={saveMemberDraft}
+        />
+      )}
     </>
   );
 }

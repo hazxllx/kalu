@@ -19,7 +19,7 @@ import asyncHandler from '../utils/asyncHandler.js';
  *
  * Account states:
  *   disabled                              -> 403 (account disabled)
- *   staff role + pending_verification     -> 403 (pending activation)
+ *   staff role + pending_verification     -> 403 (pending verification)
  *   resident + pending_verification       -> served as 'resident-limited'
  *
  * When Supabase is NOT configured the API reports 503 — accounts are managed
@@ -64,7 +64,7 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   const { user } = data;
 
   // Resolve the application profile. loadActiveProfile throws the 403s for
-  // disabled / pending-activation accounts described above.
+  // disabled / pending-verification accounts described above.
   const { profile, unavailable, error: profileError } = await loadActiveProfile(user.id);
 
   // A broken/absent profile LAYER is a service problem, not a missing account.

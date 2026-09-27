@@ -131,6 +131,39 @@ const audit = async (supabase, user, action, entityType, entityId, resident) => 
   throwOnError(error, 'Could not write audit log');
 };
 
+// Records that render a resident name embed the CURRENT resident row (already
+// authorized by the scope filters + RLS), so the UI shows the live name instead
+// of a create-time placeholder.
+//
+// READ and WRITE responses MUST use the same select. create()/update()
+// previously returned `.select('*')` with no embed, so the frontend mappers
+// (which read `row.resident.first_name`) fell back to the literal string
+// "Resident" and overwrote the correct name after any edit.
+const RESIDENT_EMBED = 'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, cellphone_no)';
+const selectFor = (kind) => (kind === 'followups' || kind === 'maternal') ? `*, ${RESIDENT_EMBED}` : '*';
+
+/** Statuses a follow-up can no longer leave. */
+const CLOSED_FOLLOW_UP_STATUSES = new Set(['Completed', 'Cancelled', 'Rejected', 'Missed']);
+
+/**
+ * Derive the scheduling facts a follow-up list needs to show its current state
+ * at a glance. `isOverdue` is intentionally DERIVED, not a stored status: the
+ * `follow_ups.status` vocabulary is fixed by the table's CHECK constraint
+ * (Scheduled, Pending, Today, Upcoming, Ongoing, Completed, Missed, Cancelled)
+ * and adding an 'Overdue' value would let a stale flag outlive its date. A row
+ * is overdue when its scheduled date has passed and it is still open.
+ */
+export const withScheduleState = (row, today = manilaDateString()) => {
+  if (!row) return row;
+  const scheduledDate = text(row.scheduled_date);
+  const open = !CLOSED_FOLLOW_UP_STATUSES.has(text(row.status));
+  return {
+    ...row,
+    is_due_today: scheduledDate === today,
+    is_overdue: Boolean(scheduledDate) && scheduledDate < today && open,
+  };
+};
+
 export const list = async ({ user, kind, residentId = null, status = null, supabase = getServiceClient() }) => {
   if (!TABLES[kind] && kind !== 'notifications') throw ApiError.badRequest('Unknown operational record type.');
   if (kind === 'notifications') {
@@ -155,8 +188,7 @@ export const list = async ({ user, kind, residentId = null, status = null, supab
   // authorized by the scope filters + RLS below), so the UI shows the live name
   // after a reload instead of a create-time snapshot. No extra/unrestricted
   // resident query is issued — the embed only resolves each row's own resident.
-  const residentEmbed = 'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, cellphone_no)';
-  const select = (kind === 'followups' || kind === 'maternal') ? `*, ${residentEmbed}` : '*';
+  const select = selectFor(kind);
   let query = supabase.from(TABLES[kind]).select(select).order('created_at', { ascending: false }).limit(200);
   // Server-side barangay/municipality scope (defense in depth beyond RLS): a
   // barangay-assigned Health Supervisor only ever sees their own barangay, and
@@ -172,6 +204,7 @@ export const list = async ({ user, kind, residentId = null, status = null, supab
   if (status) query = query.eq('status', status);
   const { data, error } = await query;
   throwOnError(error, `Could not load ${kind}`);
+  if (kind === 'followups') return (data || []).map((row) => withScheduleState(row));
   return data || [];
 };
 
@@ -217,11 +250,11 @@ export const create = async ({ user, kind, payload = {} }) => {
       throw ApiError.unprocessable('The scheduled date is invalid.');
     }
   }
-  const { data, error } = await supabase.from(table).insert(row).select('*').single();
+  const { data, error } = await supabase.from(table).insert(row).select(selectFor(kind)).single();
   throwOnError(error, `Could not create ${kind}`);
   await audit(supabase, user, `${kind.toUpperCase()}_CREATED`, table, data.id, resident);
   await notifyResident(supabase, resident, kind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);
-  return data;
+  return kind === 'followups' ? withScheduleState(data) : data;
 };
 
 export const update = async ({ user, kind, id, payload = {} }) => {
@@ -261,7 +294,7 @@ export const update = async ({ user, kind, id, payload = {} }) => {
   if (kind === 'followups' && Object.prototype.hasOwnProperty.call(payload, 'status')) {
     assertFollowUpTransition(existing, payload.status);
   }
-  const { data, error } = await supabase.from(table).update(row).eq('id', id).select('*').single();
+  const { data, error } = await supabase.from(table).update(row).eq('id', id).select(selectFor(kind)).single();
   throwOnError(error, `Could not update ${kind}`);
   await audit(supabase, user, `${kind.toUpperCase()}_UPDATED`, table, id, resident);
 
@@ -284,7 +317,7 @@ export const update = async ({ user, kind, id, payload = {} }) => {
       await notifyResident(supabase, resident, 'followups', 'rescheduled', data);
     }
   }
-  return data;
+  return kind === 'followups' ? withScheduleState(data) : data;
 };
 
 /** Recipient marks one of their own notifications read. */
@@ -301,4 +334,4 @@ export const markNotificationRead = async ({ user, id, supabase = getServiceClie
   return data;
 };
 
-export default { list, create, update, markNotificationRead };
+export default { list, create, update, markNotificationRead, withScheduleState };

@@ -16,7 +16,7 @@ function riskLevel(score) {
   return "Low";
 }
 
-// Household-level concerns, aggregated across the barangay. Community data only â€”
+// Household-level concerns, aggregated across the barangay. Community data only —
 // no individual resident is identified.
 const concernSummary = Object.entries(
   households.reduce((acc, h) => {
@@ -49,7 +49,7 @@ export default function BHWDashboard() {
         {bhwDashboard.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
       </div>
 
-      {/* Household Risk Clusters â€” early intervention */}
+      {/* Household Risk Clusters — early intervention */}
       <Link to="/app/bhw/households/risk-clusters" className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-brand-blue/40 transition-colors">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue">
           <AlertTriangle className="h-5 w-5" />
@@ -81,7 +81,7 @@ export default function BHWDashboard() {
               <div key={h.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2">
                 <div>
                   <p className="font-medium text-brand-ink text-sm">{h.address}</p>
-                  <p className="text-xs text-brand-gray">{h.id} Â· {h.members} members</p>
+                  <p className="text-xs text-brand-gray">{h.id} · {h.members} members</p>
                 </div>
                 <StatusBadge value={riskLevel(h.riskScore)} />
               </div>

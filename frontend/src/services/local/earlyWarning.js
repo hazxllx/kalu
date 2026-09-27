@@ -68,10 +68,10 @@ export const BARANGAY_EARLY_WARNING = {
 const buildBarangayDataset = (barangay) => ({
   scope: barangay,
   summary: {
-    consultationsThisMonth: { value: "â€”", change: "No data yet", up: true },
-    referralsThisMonth: { value: "â€”", change: "No data yet", up: true },
-    topCondition: { name: "Not enough data", cases: "â€”" },
-    highRiskResidents: { value: "â€”", change: "No data yet", up: false },
+    consultationsThisMonth: { value: "—", change: "No data yet", up: true },
+    referralsThisMonth: { value: "—", change: "No data yet", up: true },
+    topCondition: { name: "Not enough data", cases: "—" },
+    highRiskResidents: { value: "—", change: "No data yet", up: false },
   },
   consultationTrends: [],
   diseaseDistribution: [],
@@ -92,7 +92,7 @@ const buildBarangayDataset = (barangay) => ({
 
 /**
  * The dataset a caller may see. `assignedBarangay` comes from the signed-in
- * user's assignment â€” null returns the municipal dataset (MHO).
+ * user's assignment — null returns the municipal dataset (MHO).
  */
 export const resolveEarlyWarningData = (assignedBarangay) =>
   assignedBarangay

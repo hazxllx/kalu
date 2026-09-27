@@ -8,12 +8,12 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { barangayOverview, monthlyConsultations } from "@/services/local/dashboardData";
 import { FileText, Calendar, BarChart3, Eye, Activity, HeartPulse } from "lucide-react";
 
-const RECENT_REFERRALS = [];
+const RECENT_TRIAGE = [];
 
 const QUICK_ACTIONS = [
   { icon: Activity, label: "Triage", description: "Send a patient to the PHN for check-up", path: "/app/rhu_personnel/triage" },
   { icon: HeartPulse, label: "Health Programs", description: "Manage health programs and initiatives", path: "/app/rhu_personnel/programs" },
-  { icon: FileText, label: "Referrals", description: "Review RHU referral activity", path: "/app/rhu_personnel/dashboard" },
+  { icon: FileText, label: "Medical Certificates", description: "Prepare and review resident certificates", path: "/app/rhu_personnel/certificates" },
   { icon: Calendar, label: "Notifications", description: "Check your notifications", path: "/app/rhu_personnel/notifications" },
 ];
 
@@ -43,13 +43,13 @@ export default function RHUDashboard() {
   };
   return (
     <>
-      <PageHeader crumbs={["Dashboard"]} title="RHU Overview" subtitle="Manage consultations, treatments, referrals, and follow-ups across the municipality." />
+      <PageHeader crumbs={["Dashboard"]} title="RHU Overview" subtitle="Manage consultations, treatments, medical certificates, and health programs across the municipality." />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 mb-6">
         {stats.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         <Card className="p-4 sm:p-6 lg:col-span-2">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Disease Trend â€” Monthly Consultations</h3>
+          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Disease Trend — Monthly Consultations</h3>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={monthlyConsultations}>
               <CartesianGrid vertical={false} stroke="#E5EAF1" />
@@ -61,19 +61,19 @@ export default function RHUDashboard() {
           </ResponsiveContainer>
         </Card>
         <Card className="p-4 sm:p-6 h-fit">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Recent Referrals</h3>
+          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Triage Queue</h3>
           <div className="space-y-3">
-            {RECENT_REFERRALS.length === 0 && (
-              <p className="text-sm text-brand-gray py-6 text-center">No referrals available yet.</p>
+            {RECENT_TRIAGE.length === 0 && (
+              <p className="text-sm text-brand-gray py-6 text-center">No patients waiting in triage.</p>
             )}
-            {RECENT_REFERRALS.slice(0, 5).map((r) => (
-              <div key={r.id} className="flex items-center justify-between py-2 border-b border-brand-border last:border-0">
+            {RECENT_TRIAGE.slice(0, 5).map((t) => (
+              <div key={t.id} className="flex items-center justify-between py-2 border-b border-brand-border last:border-0">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-brand-ink truncate">{r.resident}</p>
-                  <p className="text-xs text-brand-gray">{r.barangay} â€¢ {r.date}</p>
+                  <p className="text-sm font-medium text-brand-ink truncate">{t.resident}</p>
+                  <p className="text-xs text-brand-gray">{t.barangay} • {t.date}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <StatusBadge value={r.status} />
+                  <StatusBadge value={t.status} />
                   <button className="p-1 text-brand-blue hover:bg-brand-light rounded">
                     <Eye className="w-4 h-4" />
                   </button>
@@ -82,7 +82,7 @@ export default function RHUDashboard() {
             ))}
           </div>
           <button className="w-full mt-4 text-sm font-medium text-brand-blue hover:underline">
-            View All Referrals
+            Open Triage Queue
           </button>
         </Card>
       </div>

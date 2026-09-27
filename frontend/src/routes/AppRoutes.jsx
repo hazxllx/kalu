@@ -98,14 +98,11 @@ const TCLS = appPage(() => import('@/features/health-records/pages/TCLS'));
 const M1Records = appPage(() => import('@/features/health-records/pages/M1Records'));
 const M1Fhsis = appPage(() => import('@/features/health-records/pages/M1Fhsis'));
 const Immunization = appPage(() => import('@/features/health-records/pages/Immunization'));
+const TBRecords = appPage(() => import('@/features/health-records/pages/TBRecords'));
 const ResidentFollowUps = appPage(() => import('@/features/follow-ups/pages/ResidentFollowUps'));
 const MidwifeFollowUp = appPage(() => import('@/features/follow-ups/pages/MidwifeFollowUp'));
 const FollowUpCalendar = appPage(() => import('@/features/follow-ups/pages/FollowUpCalendar'));
-const PhnFollowUps = appPage(() => import('@/features/follow-ups/pages/PhnFollowUps'));
-const Referrals = appPage(() => import('@/features/referrals/pages/Referrals'));
 const HealthReferrals = appPage(() => import('@/features/referrals/pages/HealthReferrals'));
-const MHOReferrals = appPage(() => import('@/features/referrals/pages/MHOReferrals'));
-const RhuReferrals = appPage(() => import('@/features/referrals/pages/RhuReferrals'));
 const Appointments = appPage(() => import('@/features/appointments/pages/Appointments'));
 const ResidentHealthServices = appPage(() => import('@/features/health-services/pages/ResidentHealthServices'));
 const MidwifeHealthServices = appPage(() => import('@/features/health-services/pages/MidwifeHealthServices'));
@@ -124,8 +121,7 @@ const RolePermissionsPage = appPage(() => import('@/features/access-control/page
 const SettingsPage = appPage(() => import('@/features/settings/pages/SettingsPage'));
 const MedicalCertificates = appPage(() => import('@/features/certificates/pages/MedicalCertificates'));
 const CertificateComposer = appPage(() => import('@/features/certificates/pages/CertificateComposer'));
-const StaffRequests = appPage(() => import('@/features/users/pages/StaffRequests'));
-const SupervisorVerifications = appPage(() => import('@/features/users/pages/SupervisorVerifications'));
+const StaffAccountApprovals = appPage(() => import('@/features/accounts/pages/StaffAccountApprovals'));
 
 /**
  * Central route table for KALUSAGAP.
@@ -141,7 +137,9 @@ const SupervisorVerifications = appPage(() => import('@/features/users/pages/Sup
  *   phn              — health records, assessments, referrals, follow-ups
  *   health_supervisor— barangay nurse/midwife: verification, directory, records,
  *                      consultation, referrals, follow-ups, barangay monitoring
- *   rhu_personnel    — triage (dedicated triage UI pending verified requirements)
+ *   rhu_personnel    — triage (dedicated triage UI pending verified
+ *                      requirements). No referrals: the API denies that role
+ *                      referral access, so no referral page is routed.
  *   bhw              — DATA COLLECTION ONLY (household profiling / community data)
  *   resident         — own profile, records, services, notifications
  */
@@ -201,12 +199,17 @@ const AppRoutes = () => (
       <Route path="/app/mho" element={<DashboardLayout roleKey="mho" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<MHODashboard />} />
+        {/* Municipal resident directory — read-only; the MHO supervises the
+            register but resident demographics are edited by the PHN / Health
+            Supervisor. */}
+        <Route path="residents" element={<ResidentsPage />} />
         <Route path="trends" element={<HealthTrends />} />
         <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="submissions" element={<MunicipalSubmissions />} />
         <Route path="transfer-requests" element={<TransferRequests />} />
-        <Route path="referrals" element={<MHOReferrals />} />
+        {/* Read-only municipal monitoring view of the same referral register. */}
+        <Route path="referrals" element={<HealthReferrals />} />
         <Route path="barangays" element={<CommunityMonitoring />} />
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
@@ -226,12 +229,15 @@ const AppRoutes = () => (
         <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="consultations" element={<PhnCheckups />} />
-        <Route path="referrals" element={<Referrals roleKey="phn" />} />
-        <Route path="followups" element={<PhnFollowUps />} />
+        <Route path="referrals" element={<HealthReferrals />} />
+        <Route path="followups" element={<MidwifeFollowUp />} />
         <Route path="services" element={<PhnHealthServices />} />
         <Route path="barangays" element={<CommunityMonitoring />} />
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
+        {/* Account approval authority: the PHN approves Health Supervisor and
+            RHU Personnel accounts. */}
+        <Route path="account-approvals" element={<StaffAccountApprovals />} />
         <Route path="reports" element={<ReportsPage roleKey="phn" />} />
         <Route path="notifications" element={<NotificationsPage roleKey="phn" />} />
         <Route path="settings" element={<SettingsPage roleKey="phn" />} />
@@ -257,6 +263,10 @@ const AppRoutes = () => (
         <Route path="followup-calendar" element={<FollowUpCalendar />} />
         <Route path="services" element={<MidwifeHealthServices />} />
         <Route path="immunization" element={<Immunization />} />
+        <Route path="tb" element={<TBRecords />} />
+        {/* Account approval authority: the Health Supervisor approves BHW and
+            Resident accounts. */}
+        <Route path="account-approvals" element={<StaffAccountApprovals />} />
         <Route path="referrals" element={<HealthReferrals />} />
         <Route path="households" element={<Households />} />
         <Route path="households/new" element={<AddHouseholdPage />} />
@@ -279,7 +289,10 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<RHUDashboard />} />
         <Route path="triage" element={<RhuTriage />} />
-        <Route path="referrals" element={<RhuReferrals />} />
+        {/* No referrals route: the API denies RHU Personnel referral access
+            (403), so there is no referral page for this role. The catch-all
+            below sends a direct /app/rhu_personnel/referrals visit to the
+            RHU dashboard rather than rendering an unreachable register. */}
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="programs" element={<Programs />} />
@@ -314,8 +327,6 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<UserManagement />} />
-        <Route path="staff-requests" element={<StaffRequests />} />
-        <Route path="supervisor-verifications" element={<SupervisorVerifications />} />
         <Route path="risk-rules" element={<RiskRuleConfig />} />
         <Route path="roles" element={<SystemManagementPage variant="roles" />} />
         {/* Privilege & permission management (admin only). */}

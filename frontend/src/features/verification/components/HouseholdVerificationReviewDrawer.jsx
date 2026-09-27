@@ -18,7 +18,7 @@ function InfoCell({ icon: Icon, label, value }) {
         {Icon && <Icon className="w-3.5 h-3.5 text-brand-gray" strokeWidth={1.8} />}
         <p className="text-[11px] text-brand-gray uppercase tracking-wide">{label}</p>
       </div>
-      <p className="mt-1 text-sm font-medium text-brand-ink">{value || "â€”"}</p>
+      <p className="mt-1 text-sm font-medium text-brand-ink">{value || "—"}</p>
     </div>
   );
 }
@@ -118,7 +118,7 @@ export default function HouseholdVerificationReviewDrawer({
                 <VerificationBadge status="pending" size="sm" />
               </div>
               <p className="text-xs text-brand-gray">
-                HH Head: {household.head} Â· Barangay {household.barangay}
+                HH Head: {household.head} · Barangay {household.barangay}
               </p>
             </div>
           </div>

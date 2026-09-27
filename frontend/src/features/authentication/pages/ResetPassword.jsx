@@ -12,6 +12,7 @@ import {
   btnPrimary,
 } from "@/features/registration/components/RegistrationDesign";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { validatePassword } from "@/utils/validation";
 
 /**
  * Reset Password — set a new password from a Supabase recovery link.
@@ -44,6 +45,30 @@ export default function ResetPassword() {
     }
     let active = true;
     let timer;
+
+    // A recovery link that is expired, already used or otherwise rejected by
+    // Supabase redirects back with the error in the URL (implicit flow uses the
+    // hash, PKCE uses the query string) instead of a session, e.g.
+    //   #error=access_denied&error_code=otp_expired&error_description=...
+    // Detect that immediately so the user gets the correct message rather than
+    // waiting for the generic timeout.
+    const readUrlError = () => {
+      const parse = (str) => new URLSearchParams(str.startsWith("#") || str.startsWith("?") ? str.slice(1) : str);
+      const hashParams = parse(window.location.hash || "");
+      const queryParams = parse(window.location.search || "");
+      return (
+        hashParams.get("error_code") ||
+        hashParams.get("error") ||
+        queryParams.get("error_code") ||
+        queryParams.get("error") ||
+        null
+      );
+    };
+
+    if (readUrlError()) {
+      setStatus("invalid");
+      return undefined;
+    }
 
     const markReady = () => {
       if (!active) return;
@@ -85,10 +110,9 @@ export default function ResetPassword() {
       setError("Please fill in both password fields.");
       return;
     }
-    const meetsPolicy =
-      newPassword.length >= 8 && /[A-Z]/.test(newPassword) && /[a-z]/.test(newPassword) && /\d/.test(newPassword);
-    if (!meetsPolicy) {
-      setError("Password must be at least 8 characters and include an uppercase letter, a lowercase letter, and a number.");
+    const policyError = validatePassword(newPassword, { label: "Password" });
+    if (policyError) {
+      setError(policyError);
       return;
     }
     if (newPassword !== confirmPassword) {

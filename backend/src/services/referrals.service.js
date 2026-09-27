@@ -27,14 +27,29 @@ const TABLE = 'health_referrals';
 
 // Roles allowed to create / mutate referrals (barangay/municipality scoped).
 const WRITE_ROLES = new Set(['health_supervisor', 'phn']);
-// Municipality-wide staff (see the referrals list scope).
-const MUNICIPALITY_ROLES = new Set(['mho', 'phn', 'rhu_personnel']);
+// Municipality-wide staff that may READ referrals. RHU Personnel is not part
+// of the referral workflow, so it is deliberately absent here, in the Express
+// route gate and in the health_referrals RLS policy.
+const MUNICIPALITY_ROLES = new Set(['mho', 'phn']);
 // Barangay-scoped staff.
-const BARANGAY_ROLES = new Set(['health_supervisor', 'bhw']);
+const BARANGAY_ROLES = new Set(['health_supervisor']);
 const RESIDENT_ROLES = new Set(['resident', 'resident-limited']);
 
 const VALID_STATUSES = ['Pending', 'Accepted', 'In Progress', 'Completed', 'Cancelled'];
 const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
+
+/**
+ * The resident columns every referral response embeds.
+ *
+ * READ and WRITE responses MUST share this list. The create/update/status
+ * endpoints used to return `.select('*')` with no embed, so the frontend
+ * mapper (which reads `row.resident.first_name`) fell back to a placeholder
+ * name and silently overwrote the correct resident name in the table after any
+ * edit. One constant keeps the payload identical on every path.
+ */
+const RESIDENT_EMBED =
+  'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, auth_user_id, municipality_id)';
+const REFERRAL_SELECT = `*, ${RESIDENT_EMBED}`;
 
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
@@ -136,8 +151,7 @@ const ownResident = async (supabase, user) => {
  *   resident                    -> only their own referrals
  */
 export const list = async ({ user, residentId = null, status = null, supabase = getServiceClient() }) => {
-  const select = '*, resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date)';
-  let query = supabase.from(TABLE).select(select).order('created_at', { ascending: false }).limit(200);
+  let query = supabase.from(TABLE).select(REFERRAL_SELECT).order('created_at', { ascending: false }).limit(200);
 
   if (RESIDENT_ROLES.has(user?.role)) {
     const mine = await ownResident(supabase, user);
@@ -163,8 +177,7 @@ export const list = async ({ user, residentId = null, status = null, supabase = 
 
 /** Fetch one referral, enforcing the same scope as list(). */
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
-  const select = '*, resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, auth_user_id, municipality_id)';
-  const { data, error } = await supabase.from(TABLE).select(select).eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from(TABLE).select(REFERRAL_SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load referral');
   if (!data) throw ApiError.notFound('Referral not found.');
 
@@ -211,7 +224,7 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   row.created_by = user.id;
   // municipality_id / barangay_id are set by the DB trigger from the resident.
 
-  const { data, error } = await supabase.from(TABLE).insert(row).select('*').single();
+  const { data, error } = await supabase.from(TABLE).insert(row).select(REFERRAL_SELECT).single();
   throwOnError(error, 'Could not create referral');
   await audit(supabase, user, 'REFERRAL_CREATED', data.id, resident);
   await notifyResident(supabase, resident, 'created', data);
@@ -243,9 +256,9 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
     if (!VALID_STATUSES.includes(payload.status)) throw ApiError.unprocessable('Invalid referral status.');
     row.status = payload.status;
   }
-  if (Object.keys(row).length === 0) return existing;
+  if (Object.keys(row).length === 0) return getById({ user, id, supabase });
 
-  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select('*').single();
+  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(REFERRAL_SELECT).single();
   throwOnError(error, 'Could not update referral');
   await audit(supabase, user, 'REFERRAL_UPDATED', id, resident);
   return data;
@@ -260,7 +273,7 @@ export const updateStatus = async ({ user, id, status, resolutionNotes, supabase
   if (status === 'Completed' && !existing.completed_at) row.completed_at = new Date().toISOString();
   if (status !== 'Completed') row.completed_at = existing.completed_at ?? null;
 
-  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select('*').single();
+  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(REFERRAL_SELECT).single();
   throwOnError(error, 'Could not update referral status');
   await audit(supabase, user, 'REFERRAL_STATUS_CHANGED', id, resident, { from: existing.status, to: status });
 

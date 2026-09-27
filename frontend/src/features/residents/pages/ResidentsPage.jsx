@@ -157,6 +157,13 @@ export default function ResidentsPage() {
   const assignedBarangay = scope && scope.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
   const allowedBarangays = assignedBarangay ? [assignedBarangay] : [...BARANGAYS];
 
+  /**
+   * The MHO browses the same directory municipally but may not correct
+   * resident demographics (the API's edit roles are the PHN and the Health
+   * Supervisor), so the edit action is hidden rather than shown and 403'd.
+   */
+  const canEdit = user?.role === "phn" || user?.role === "health_supervisor";
+
   /** Load the directory from the API (search term is applied server-side). */
   const load = useCallback(
     async (searchTerm = "") => {
@@ -474,12 +481,14 @@ export default function ResidentsPage() {
                     >
                       <Eye className="w-4 h-4" /> View
                     </button>
-                    <button
-                      onClick={() => openEdit(row)}
-                      className="flex items-center gap-1 text-brand-gray text-sm font-medium hover:underline"
-                    >
-                      <Pencil className="w-4 h-4" /> Edit
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => openEdit(row)}
+                        className="flex items-center gap-1 text-brand-gray text-sm font-medium hover:underline"
+                      >
+                        <Pencil className="w-4 h-4" /> Edit
+                      </button>
+                    )}
                   </div>
                 );
               return row[key] || "—";

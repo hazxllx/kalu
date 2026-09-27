@@ -13,9 +13,7 @@ import {
   btnPrimary,
 } from "@/features/registration/components/RegistrationDesign";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-
-/** Basic email shape check (mirrors the registration form's inline rule). */
-const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+import { isEmail } from "@/utils/validation";
 
 /**
  * Forgot Password — request a Supabase Auth password-reset email.
@@ -41,7 +39,7 @@ export default function ForgotPassword() {
       setError("Please enter your registered email address.");
       return;
     }
-    if (!isValidEmail(email)) {
+    if (!isEmail(email)) {
       setError("Please enter a valid email address.");
       return;
     }
@@ -117,7 +115,7 @@ export default function ForgotPassword() {
                 subtitle="Enter your registered email address and we'll send you a link to reset your password."
               />
 
-              <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+              <form onSubmit={handleSubmit} className="mt-6 space-y-5" noValidate>
                 {error && (
                   <InfoNote tone="danger" icon={AlertTriangle}>
                     {error}

@@ -21,7 +21,7 @@ import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
  *   ONLY the supervisor's assigned barangay. Adding barangays is a municipality
  *   administration function, so no Add button is offered.
  * - Health Supervisor (no assignment): an empty state that asks the
- *   municipality administrator for an assignment â€” never a fallback list of
+ *   municipality administrator for an assignment — never a fallback list of
  *   every barangay.
  * - Municipality-level roles (e.g. MHO): the existing multi-barangay overview
  *   and registration flow, unchanged.

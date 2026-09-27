@@ -38,3 +38,6 @@ Thumbs.db
 
 # Deployment
 .vercel
+
+# Local AI/agent tool artifacts (never part of the project)
+.kilo/

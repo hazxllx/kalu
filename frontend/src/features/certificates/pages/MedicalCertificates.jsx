@@ -3,10 +3,9 @@ import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import MedicalCertificateModal, { CertificateStatusBadge } from "@/features/certificates/components/MedicalCertificateModal";
-import { useMedicalCertificates, medicalCertificateStore, ALLOWED_TRANSITIONS } from "@/services/local/medicalCertificateStore";
-import { auditStore } from "@/services/local/auditStore";
+import { useCertificateMeta, useCertificateRegister } from "@/features/certificates/hooks/useCertificateRegister";
 import { useAuth } from "@/context/AuthContext";
-import { Search, FileText, Plus, X, ChevronRight, CheckCircle2 } from "lucide-react";
+import { Search, FileText, Plus, X, ChevronRight, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 const formatDate = (iso) => {
   if (!iso) return "—";
@@ -15,29 +14,30 @@ const formatDate = (iso) => {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
-/** Valid next statuses for the MHO workflow (Draft→For Review→Approved/Rejected→Issued). */
-const nextStatusesFor = (status) => ALLOWED_TRANSITIONS[status] || [];
+/** Roles that may approve / issue / reject a certificate (server enforces too). */
+const REVIEW_ROLES = ["mho", "phn"];
 
 /**
- * Medical Certificates list.
+ * Medical Certificates register.
  *
- * - All roles see the register for their authorized scope.
- * - Triage / PHN rows open a read-only certificate view (they prepare
- *   certificates from the patient workflow, not from this list).
- * - The MHO can change a certificate's status — by clicking the status badge
- *   in the row, or via "Change Status" in the certificate details.
+ * Served by `GET /api/medical-certificates`, scoped server-side to the caller's
+ * barangay (Health Supervisor) or municipality (PHN, MHO, RHU Personnel). The
+ * status vocabulary and legal transitions come from `GET /meta`, and every
+ * status change is a `PATCH /:id/status` that the service re-validates — an
+ * illegal transition is refused by the API, not just hidden in the dropdown.
  */
 export default function MedicalCertificates() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const certificates = useMedicalCertificates();
-  const isMho = user?.role === "mho";
+  const meta = useCertificateMeta();
+  const { rows: certificates, loading, error, refresh, setStatus } = useCertificateRegister();
+  const isReviewer = REVIEW_ROLES.includes(user?.role);
   const base = user?.role ? `/app/${user.role}` : "";
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [selected, setSelected] = useState(null);
-  const [statusTarget, setStatusTarget] = useState(null); // certificate id (MHO status change)
+  const [statusTarget, setStatusTarget] = useState(null); // certificate id
   const [toast, setToast] = useState(null);
 
   const showToast = (msg) => {
@@ -52,35 +52,27 @@ export default function MedicalCertificates() {
       .filter(
         (c) =>
           !q ||
-          c.reference.toLowerCase().includes(q) ||
-          c.patient.toLowerCase().includes(q) ||
-          c.patientId.toLowerCase().includes(q) ||
-          c.barangay.toLowerCase().includes(q)
+          c.reference?.toLowerCase().includes(q) ||
+          c.patient?.toLowerCase().includes(q) ||
+          c.patientId?.toLowerCase().includes(q) ||
+          c.barangay?.toLowerCase().includes(q)
       )
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [certificates, query, statusFilter]);
 
-  const statuses = ["All", ...medicalStatuses()];
+  const statuses = ["All", ...(meta.statuses || [])];
 
-  /** MHO saves a new status from the Change Status modal (transition-validated). */
-  const handleStatusChange = (newStatus, remarks) => {
+  /** Persist a status change through the API, then refresh the register. */
+  const handleStatusChange = async (newStatus, remarks) => {
     const cert = certificates.find((c) => c.id === statusTarget);
     setStatusTarget(null);
     if (!cert) return;
-    // Guard against invalid transitions (belt-and-braces; the dropdown already
-    // only offers valid next statuses).
-    if (!nextStatusesFor(cert.status).includes(newStatus)) return;
-    medicalCertificateStore.setStatus(cert.id, newStatus, {
-      by: user?.name || "MHO",
-      notes: remarks,
-    });
-    auditStore.addEvent({
-      user: user?.name || "MHO",
-      role: "Municipal Health Officer",
-      action: "Certificate status changed",
-      description: `Set certificate ${cert.reference} from ${cert.status} to ${newStatus}.`,
-    });
-    showToast(`Certificate ${cert.reference} status changed to ${newStatus}.`);
+    try {
+      await setStatus(cert.id, newStatus, remarks);
+      showToast(`Certificate ${cert.reference} status changed to ${newStatus}.`);
+    } catch (err) {
+      showToast(err?.message || "The status change could not be saved.");
+    }
   };
 
   return (
@@ -88,7 +80,7 @@ export default function MedicalCertificates() {
       <PageHeader
         crumbs={["Medical Certificates"]}
         title="Medical Certificates"
-        subtitle={isMho ? "Review, approve, and issue medical certificates for the municipality." : "Medical certificate register for your authorized scope."}
+        subtitle={isReviewer ? "Review, approve, and issue medical certificates for your scope." : "Medical certificate register for your authorized scope."}
         action={
           <button
             onClick={() => navigate(`${base}/certificates/new`)}
@@ -128,69 +120,85 @@ export default function MedicalCertificates() {
               <X className="h-3.5 w-3.5" /> Clear
             </button>
           )}
-          <span className="ml-auto text-xs text-brand-gray">{filtered.length} certificates</span>
+          <span className="ml-auto text-xs text-brand-gray">
+            {loading ? "Loading..." : `${filtered.length} certificate${filtered.length === 1 ? "" : "s"}`}
+          </span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-sm">
-            <thead>
-              <tr className="bg-brand-bg text-left">
-                <th className="px-5 py-3 font-medium text-brand-gray">Reference</th>
-                <th className="px-5 py-3 font-medium text-brand-gray">Patient</th>
-                <th className="px-5 py-3 font-medium text-brand-gray">Barangay</th>
-                <th className="px-5 py-3 font-medium text-brand-gray">Purpose</th>
-                <th className="px-5 py-3 font-medium text-brand-gray">Examined</th>
-                <th className="px-5 py-3 font-medium text-brand-gray">Prepared By</th>
-                <th className="px-5 py-3 font-medium text-brand-gray">Status</th>
-                <th className="px-5 py-3 font-medium text-brand-gray text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-border">
-              {filtered.map((c) => (
-                <tr key={c.id} className="hover:bg-brand-bg/50">
-                  <td className="px-5 py-3 font-medium text-brand-ink">{c.reference}</td>
-                  <td className="px-5 py-3">
-                    <p className="font-medium text-brand-ink">{c.patient}</p>
-                    <p className="text-xs text-brand-gray">{c.patientId}</p>
-                  </td>
-                  <td className="px-5 py-3 text-brand-gray">{c.barangay}</td>
-                  <td className="px-5 py-3 text-brand-gray">{c.purpose}</td>
-                  <td className="px-5 py-3 text-brand-gray whitespace-nowrap">{formatDate(c.dateOfExamination)}</td>
-                  <td className="px-5 py-3 text-brand-gray">{c.preparedBy}</td>
-                  <td className="px-5 py-3">
-                    {isMho ? (
-                      <button
-                        type="button"
-                        onClick={() => setStatusTarget(c.id)}
-                        title="Change status"
-                        aria-label={`Change status of certificate ${c.reference}`}
-                        className="rounded-full transition-opacity hover:opacity-75 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
-                      >
-                        <CertificateStatusBadge value={c.status} />
-                      </button>
-                    ) : (
-                      <CertificateStatusBadge value={c.status} />
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <button
-                      onClick={() => setSelected(c.id)}
-                      className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
-                    >
-                      {isMho && c.status === "For Review" ? "Review" : "View"} <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
+        {error && (
+          <div className="flex items-center gap-2 border-b border-brand-danger/20 bg-brand-danger/5 px-5 py-3 text-sm text-brand-danger">
+            <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+          </div>
+        )}
+
+        {!error && (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[820px] text-sm">
+              <thead>
+                <tr className="bg-brand-bg text-left">
+                  <th className="px-5 py-3 font-medium text-brand-gray">Reference</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Patient</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Barangay</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Purpose</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Examined</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Prepared By</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Status</th>
+                  <th className="px-5 py-3 text-right font-medium text-brand-gray">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-border">
+                {filtered.map((c) => (
+                  <tr key={c.id} className="hover:bg-brand-bg/50">
+                    <td className="px-5 py-3 font-medium text-brand-ink">{c.reference}</td>
+                    <td className="px-5 py-3">
+                      <p className="font-medium text-brand-ink">{c.patient}</p>
+                      <p className="text-xs text-brand-gray">{c.patientId}</p>
+                    </td>
+                    <td className="px-5 py-3 text-brand-gray">{c.barangay || "—"}</td>
+                    <td className="px-5 py-3 text-brand-gray">{c.purpose}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-brand-gray">{formatDate(c.dateOfExamination)}</td>
+                    <td className="px-5 py-3 text-brand-gray">{c.preparedBy}</td>
+                    <td className="px-5 py-3">
+                      {isReviewer ? (
+                        <button
+                          type="button"
+                          onClick={() => setStatusTarget(c.id)}
+                          title="Change status"
+                          aria-label={`Change status of certificate ${c.reference}`}
+                          className="rounded-full transition-opacity hover:opacity-75 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                        >
+                          <CertificateStatusBadge value={c.status} />
+                        </button>
+                      ) : (
+                        <CertificateStatusBadge value={c.status} />
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <button
+                        onClick={() => setSelected(c.id)}
+                        className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
+                      >
+                        {isReviewer && c.status === "For Review" ? "Review" : "View"} <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-        {filtered.length === 0 && (
+        {!loading && !error && filtered.length === 0 && (
           <div className="px-5 py-12 text-center">
             <FileText className="mx-auto h-8 w-8 text-brand-gray/50" />
             <p className="mt-3 text-sm font-medium text-brand-ink">No Medical Certificates Found</p>
             <p className="mt-1 text-xs text-brand-gray">No certificates match the current filters.</p>
+          </div>
+        )}
+
+        {loading && (
+          <div className="flex items-center justify-center gap-2 px-5 py-12 text-sm text-brand-gray">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading certificates...
           </div>
         )}
       </Card>
@@ -200,30 +208,33 @@ export default function MedicalCertificates() {
         if (!cert) return null;
         return (
           <MedicalCertificateModal
-            mode={isMho && cert.status === "For Review" ? "review" : "view"}
+            mode={isReviewer && cert.status === "For Review" ? "review" : "view"}
             certificate={cert}
             currentUser={user?.name || ""}
             currentUserRole={user?.role || ""}
+            purposes={meta.purposes}
             onClose={() => setSelected(null)}
             onRequestStatusChange={
-              isMho
+              isReviewer
                 ? (target) => { setSelected(null); setStatusTarget(target.id); }
                 : undefined
             }
-            onSaved={(status) => {
+            onSaved={async (status) => {
               showToast(`Certificate ${cert.reference} marked as ${status}.`);
+              await refresh();
             }}
           />
         );
       })()}
 
-      {/* MHO status change */}
+      {/* Reviewer status change */}
       {statusTarget && (() => {
         const cert = certificates.find((c) => c.id === statusTarget);
         if (!cert) return null;
         return (
           <StatusChangeModal
             certificate={cert}
+            allowed={meta.allowedTransitions?.[cert.status] || []}
             onClose={() => setStatusTarget(null)}
             onSave={handleStatusChange}
           />
@@ -234,14 +245,13 @@ export default function MedicalCertificates() {
 }
 
 /**
- * Change Status modal (MHO only). Shows the certificate context — purpose,
- * patient, examined date, prepared by, current status — plus a new-status
- * dropdown and an optional remarks/reason field. Every change is recorded in
- * the certificate's audit trail by the store.
+ * Change Status modal (reviewer only: PHN / MHO). Shows the certificate
+ * context — purpose, patient, examined date, prepared by, current status —
+ * plus a new-status dropdown limited to the transitions the API reports as
+ * legal and an optional remarks/reason field. Issuing is confirmed separately
+ * because it is irreversible.
  */
-function StatusChangeModal({ certificate, onClose, onSave }) {
-  // Only the allowed next statuses for the current status are selectable.
-  const allowed = nextStatusesFor(certificate.status);
+function StatusChangeModal({ certificate, allowed, onClose, onSave }) {
   const [newStatus, setNewStatus] = useState(allowed[0] || "");
   const [remarks, setRemarks] = useState("");
   const [showIssueConfirm, setShowIssueConfirm] = useState(false);
@@ -294,7 +304,7 @@ function StatusChangeModal({ certificate, onClose, onSave }) {
                 <select
                   value={newStatus}
                   onChange={(e) => setNewStatus(e.target.value)}
-                  className="mt-1.5 w-full rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
+                  className="mt-1.5 w-full cursor-pointer rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
                 >
                   {allowed.map((s) => (
                     <option key={s} value={s}>{s}</option>
@@ -305,19 +315,19 @@ function StatusChangeModal({ certificate, onClose, onSave }) {
                   This certificate is final — no further status changes are allowed.
                 </p>
               )}
-              {allowed.length > 0 && newStatus === certificate.status && (
-                <p className="mt-1 text-xs text-brand-gray">
-                  Select a different status to update this certificate.
-                </p>
+              {newStatus === "Rejected" && (
+                <p className="mt-1 text-xs text-brand-gray">A reason is required to reject a certificate.</p>
               )}
             </div>
             <div>
-              <label className="text-sm font-medium text-brand-ink">Remarks / Reason</label>
+              <label className="text-sm font-medium text-brand-ink">
+                Remarks / Reason {newStatus === "Rejected" ? <span className="text-brand-danger">*</span> : null}
+              </label>
               <textarea
                 rows={3}
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
-                placeholder="Optional remarks or reason for the status change..."
+                placeholder="Optional remarks, or the reason when rejecting..."
                 className="mt-1.5 w-full resize-none rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
               />
             </div>
@@ -333,7 +343,7 @@ function StatusChangeModal({ certificate, onClose, onSave }) {
                 if (newStatus === "Issued") setShowIssueConfirm(true);
                 else onSave(newStatus, remarks.trim());
               }}
-              disabled={isUnchanged}
+              disabled={isUnchanged || (newStatus === "Rejected" && !remarks.trim())}
               className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               <CheckCircle2 className="h-4 w-4" /> Save Changes
@@ -368,8 +378,4 @@ function StatusChangeModal({ certificate, onClose, onSave }) {
       </div>
     </div>
   );
-}
-
-function medicalStatuses() {
-  return ["Draft", "For Review", "Approved", "Issued", "Rejected", "Cancelled"];
 }

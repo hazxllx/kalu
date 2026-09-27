@@ -1,11 +1,12 @@
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Download, Filter, KeyRound, Search, ShieldCheck } from "lucide-react";
+import { AlertCircle, ArrowRight, Download, Filter, KeyRound, Loader2, Search, ShieldCheck } from "lucide-react";
 
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import Icon from "@/components/common/Icon";
 import { usePermissions } from "@/context/PermissionsContext";
+import { systemLogsApi } from "@/services/api";
 import {
   ALL_PERMISSION_IDS,
   MANAGED_ROLES,
@@ -14,8 +15,6 @@ import {
   countGranted,
   countGrantedInModule,
 } from "@/lib/permissions";
-
-const LOGS = [];
 
 /**
  * Roles overview.
@@ -112,72 +111,189 @@ const RolesOverview = () => {
   );
 };
 
-const SystemLogs = () => (
-  <>
-    <PageHeader crumbs={["Logs"]} title="System Logs" subtitle="Review recent administrator and user activity." />
-    <Card className="p-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-        <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-input px-3.5 py-2.5 w-full md:max-w-sm">
-          <Search className="w-4 h-4 text-brand-gray" />
-          <input placeholder="Search logs" className="bg-transparent text-sm outline-none w-full" />
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-input px-3.5 py-2.5">
-            <Filter className="w-4 h-4 text-brand-gray" />
-            <select className="bg-transparent text-sm outline-none">
-              <option>All Status</option>
-              <option>Success</option>
-              <option>Failed</option>
-            </select>
-          </div>
-          <button className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors">
+const OUTCOME_TONES = {
+  Success: "bg-brand-green/10 text-brand-green",
+  Failed: "bg-brand-goldpale text-brand-amber",
+  Error: "bg-brand-danger/10 text-brand-danger",
+};
+
+const formatStamp = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString("en-US", { hour12: false });
+};
+
+/**
+ * System Logs (administrator only) — the request-level runtime log served by
+ * `GET /api/system-logs`.
+ *
+ * Rows are written by the API's request logger into `public.system_logs` and
+ * carry the method, path, status code, duration and acting role. The logger
+ * deliberately records no bodies, headers, tokens or query strings, so no
+ * personal health data or credential can reach this view.
+ *
+ * This is NOT the Audit Trail: that is the business-event record
+ * (`/api/audit-trail`), while this is the technical request log. The previous
+ * version of this page rendered a hardcoded empty array, so it could never
+ * show anything at all.
+ */
+const SystemLogs = () => {
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [modules, setModules] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const payload = await systemLogsApi.list({
+        q: debouncedQuery || undefined,
+        status: status || undefined,
+        limit: 100,
+      });
+      setRows(payload?.rows || []);
+      setTotal(payload?.total || 0);
+      if (payload?.facets?.modules) setModules(payload.facets.modules);
+    } catch (err) {
+      setRows([]);
+      setError(err?.message || "The system log could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  }, [debouncedQuery, status]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <>
+      <PageHeader
+        crumbs={["Logs"]}
+        title="System Logs"
+        subtitle="Request-level runtime log — which endpoint was called, by whom, and with what result."
+        action={
+          <button
+            onClick={() => {
+              const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = "kalusagap-system-logs.json";
+              link.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
+          >
             <Download className="w-4 h-4" /> Export Logs
           </button>
+        }
+      />
+
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+          <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-input px-3.5 py-2.5 w-full md:max-w-sm">
+            <Search className="w-4 h-4 text-brand-gray" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search path, method, or user..."
+              className="bg-transparent text-sm outline-none w-full"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-input px-3.5 py-2.5">
+              <Filter className="w-4 h-4 text-brand-gray" />
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                aria-label="Filter by outcome"
+                className="bg-transparent text-sm outline-none"
+              >
+                <option value="">All Status</option>
+                <option value="success">Success</option>
+                <option value="error">Failed / Error</option>
+              </select>
+            </div>
+          </div>
         </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b border-brand-border text-brand-gray">
-              <th className="py-3 pr-3">Timestamp</th>
-              <th className="py-3 pr-3">User</th>
-              <th className="py-3 pr-3">Role</th>
-              <th className="py-3 pr-3">Action</th>
-              <th className="py-3 pr-3">Module</th>
-              <th className="py-3 pr-3">Status</th>
-              <th className="py-3">IP Address</th>
-            </tr>
-          </thead>
-          <tbody>
-            {LOGS.map((log, i) => (
-              <tr key={i} className="border-b border-brand-border last:border-0">
-                <td className="py-3 pr-3 text-brand-ink">{log.timestamp}</td>
-                <td className="py-3 pr-3 text-brand-ink">{log.user}</td>
-                <td className="py-3 pr-3 text-brand-gray">{log.role}</td>
-                <td className="py-3 pr-3 text-brand-ink">{log.action}</td>
-                <td className="py-3 pr-3 text-brand-gray">{log.module}</td>
-                <td className="py-3 pr-3"><span className="text-xs text-brand-green bg-brand-green/10 px-2 py-1 rounded-full">{log.status}</span></td>
-                <td className="py-3 text-brand-gray">{log.ip}</td>
-              </tr>
-            ))}
-            {LOGS.length === 0 && (
-              <tr>
-                <td colSpan={7} className="py-8 text-center text-brand-gray">No system logs recorded.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-4 flex items-center justify-between text-sm text-brand-gray">
-        <span>Showing {LOGS.length} of {LOGS.length} entries</span>
-        <div className="flex items-center gap-2">
-          <button className="px-3 py-1.5 rounded-btn border border-brand-border hover:bg-brand-bg">Previous</button>
-          <button className="px-3 py-1.5 rounded-btn border border-brand-border hover:bg-brand-bg">Next</button>
+
+        {error && (
+          <div className="mb-4 flex items-center gap-2 rounded-btn border border-brand-danger/20 bg-brand-danger/5 px-3.5 py-2.5 text-sm text-brand-danger">
+            <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-brand-gray">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading system log...
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b border-brand-border text-brand-gray">
+                  <th className="py-3 pr-3">Timestamp</th>
+                  <th className="py-3 pr-3">User</th>
+                  <th className="py-3 pr-3">Role</th>
+                  <th className="py-3 pr-3">Request</th>
+                  <th className="py-3 pr-3">Module</th>
+                  <th className="py-3 pr-3">Status</th>
+                  <th className="py-3">Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((log) => (
+                  <tr key={log.id} className="border-b border-brand-border last:border-0">
+                    <td className="whitespace-nowrap py-3 pr-3 text-brand-ink">{formatStamp(log.occurredAt)}</td>
+                    <td className="py-3 pr-3 text-brand-ink">{log.actorName}</td>
+                    <td className="py-3 pr-3 text-brand-gray">{log.actorRole || "—"}</td>
+                    <td className="py-3 pr-3">
+                      <span className="font-mono text-xs text-brand-ink">
+                        <span className="font-semibold">{log.method}</span> {log.path}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-3 text-brand-gray">{log.module}</td>
+                    <td className="py-3 pr-3">
+                      <span className={`text-xs px-2 py-1 rounded-full ${OUTCOME_TONES[log.outcome] || OUTCOME_TONES.Success}`}>
+                        {log.statusCode} {log.outcome}
+                      </span>
+                    </td>
+                    <td className="num py-3 text-brand-gray">{log.durationMs} ms</td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-brand-gray">No system log entries match these filters.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-between text-sm text-brand-gray">
+          <span>Showing {rows.length} of {total} entries</span>
+          {modules.length > 0 && (
+            <span className="text-xs text-slate-400">
+              {modules.length} module{modules.length === 1 ? "" : "s"} seen
+            </span>
+          )}
         </div>
-      </div>
-    </Card>
-  </>
-);
+      </Card>
+    </>
+  );
+};
 
 export default function SystemManagementPage({ variant }) {
   if (variant === "roles") return <RolesOverview />;

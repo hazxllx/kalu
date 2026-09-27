@@ -797,6 +797,10 @@ const DEFAULT_GRANTS = Object.freeze({
   // to the resident directory — resident records are owned by the barangay
   // Health Supervisor / municipal roles. Their triage flow only ever searches
   // residents as a reference and never opens the directory page.
+  // RHU Personnel are granted NO referral permissions: the API denies them
+  // referral access outright (backend config/roles.js excludes rhu_personnel
+  // from the referral read/write scope), so granting them here would only
+  // advertise a capability the server refuses.
   [ROLE.RHU_PERSONNEL]: [
     'consultation.requests.view',
     'consultation.history.view',
@@ -804,9 +808,6 @@ const DEFAULT_GRANTS = Object.freeze({
     'triage.perform',
     'triage.assessment.update',
     'triage.forward',
-    'referrals.view',
-    'referrals.create',
-    'referrals.history.view',
     'followups.view',
     'followups.history.view',
     'services.view',

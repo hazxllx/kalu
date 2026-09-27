@@ -626,6 +626,13 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
     const months = Array.from({ length: 12 }, () => 0);
     const uniquePerMonth = Array.from({ length: 12 }, () => new Set());
     const uniqueYear = new Set();
+    // Annual sex split for indicators that report one. Counted from the same
+    // rows that produce `annual` so the breakdown can never disagree with the
+    // total. Male + Female + Other + Unknown === annual.
+    const bySex = ind.sexBreakdown ? { Male: 0, Female: 0, Other: 0, Unknown: 0 } : null;
+    const addSex = (record, resident, val) => {
+      if (bySex) bySex[resolveSex(record, resident)] += val;
+    };
 
     if (ind.source === 'immunizations') {
       const aliases = (ind.match?.aliases || [ind.match?.vaccine || ind.name]).map((a) => text(a).toLowerCase());
@@ -634,11 +641,16 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
         if (!aliases.some((a) => vac === a || vac.includes(a) || a.includes(vac))) continue;
         const m = monthOf(im.administered_date);
         if (m) months[m - 1] += 1;
+        addSex({ record_date: im.administered_date, sex: '' }, im.resident, 1);
       }
     } else if (ind.source === 'household_member_health_profiles') {
       for (const mrec of mort || []) {
         const m = monthOf(mrec.date_of_death);
         if (m) months[m - 1] += 1;
+        if (bySex) {
+          const memberSex = text(mrec.member?.sex);
+          bySex[memberSex === 'Male' || memberSex === 'Female' ? memberSex : 'Unknown'] += 1;
+        }
       }
     } else if (ind.source === 'households') {
       // WASH is a cumulative snapshot, not a monthly event: report the current
@@ -654,7 +666,9 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
         if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
           if (r.resident_id) { uniquePerMonth[m - 1].add(r.resident_id); uniqueYear.add(r.resident_id); }
         } else {
-          months[m - 1] += Number(r.value) || 1;
+          const val = Number(r.value) || 1;
+          months[m - 1] += val;
+          addSex(r, r.resident, val);
         }
       }
       if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
@@ -668,10 +682,23 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
     else if (ind.source === 'households') annual = months[11];
     else annual = months.reduce((a, b) => a + b, 0);
 
+    // Unique-resident indicators are deduplicated per person for the total, so
+    // the split is recounted from the same deduplicated set to stay consistent.
+    if (bySex && ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+      const seen = new Set();
+      for (const r of recs || []) {
+        if (r.indicator_code !== ind.code || !r.resident_id || seen.has(r.resident_id)) continue;
+        seen.add(r.resident_id);
+        addSex(r, r.resident, 1);
+      }
+    }
+
     return {
       code: ind.code, section: ind.section, subsection: ind.subsection, name: ind.name,
       aggregation: ind.aggregation, source: ind.source, frequency: ind.frequency,
+      sexBreakdown: ind.sexBreakdown,
       months, annual,
+      bySex,
     };
   });
 

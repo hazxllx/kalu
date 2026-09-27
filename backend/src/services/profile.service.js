@@ -1,4 +1,5 @@
 import { getServiceClient } from '../config/supabase.js';
+import { approverLabelForRole } from '../config/staffApprovals.js';
 import ApiError from '../utils/apiError.js';
 
 /**
@@ -145,7 +146,16 @@ const assertAccountUsable = (profile) => {
     throw ApiError.forbidden('Your account has been disabled. Contact your administrator.');
   }
   if (isStaffRole(profile.role) && profile.status === 'pending_verification') {
-    throw ApiError.forbidden('Your account is pending activation by an administrator.');
+    // Name the officer who actually reviews this role's request. Account
+    // verification is an operational duty (PHN / Health Supervisor), not a
+    // system-administration one, so "an administrator" would misdirect the user
+    // to someone with no queue for their request.
+    const approver = approverLabelForRole(profile.role);
+    throw ApiError.forbidden(
+      approver
+        ? `Your account is pending verification by the ${approver}.`
+        : 'Your account is pending verification. Please contact your approving officer.',
+    );
   }
 };
 

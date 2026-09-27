@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
@@ -91,7 +92,7 @@ const formatTime = (hhmm) => {
 };
 
 /**
- * New follow-ups are saved as Scheduled â€” never Completed. They surface
+ * New follow-ups are saved as Scheduled — never Completed. They surface
  * under "Today" or "Upcoming" depending on the scheduled date.
  */
 const deriveStatus = (isoDate) => {
@@ -148,6 +149,8 @@ const PRIORITY_COLORS = {
 
 export default function MidwifeFollowUp() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   // Health Supervisor scope: only their single assigned barangay. Rows,
   // statistics, resident options and personnel options are all limited to it.
   const supervisor = isHealthSupervisor(user);
@@ -219,7 +222,7 @@ export default function MidwifeFollowUp() {
     }
   };
 
-  // Auto-assign the logged-in user where possible â€” the dashboard shell
+  // Auto-assign the logged-in user where possible — the dashboard shell
   // displays the role's display name, so prefer that for consistency.
   const currentUserName =
     (user?.role && ROLES[user.role] && ROLES[user.role].name) || user?.name || "";
@@ -349,7 +352,52 @@ export default function MidwifeFollowUp() {
     setShowScheduleModal(true);
   };
 
-  // Inline validation â€” fields are flagged once touched, not on every keystroke.
+  // "Schedule Follow-up" from a completed PHN check-up arrives through router
+  // state and pre-fills the patient and the encounter details, so nothing from
+  // the check-up is re-typed.
+  useEffect(() => {
+    const draft = location.state?.followUpDraft;
+    if (!draft) return;
+    const notes = [
+      draft.consultationLocation ? `Consultation Location: ${draft.consultationLocation}` : "",
+      draft.reason ? `Reason for visit: ${draft.reason}` : "",
+      draft.findings ? `PHN findings: ${draft.findings}` : "",
+      draft.recommendations ? `Recommendations: ${draft.recommendations}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    // Match the draft's resident against the real directory (by id, then name).
+    const matched =
+      residentsFromApi.find((r) => r.id === draft.residentId) ||
+      residentsFromApi.find(
+        (r) =>
+          [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" ").toLowerCase() ===
+          String(draft.resident || "").toLowerCase(),
+      ) ||
+      null;
+
+    setScheduleForm({
+      ...emptyScheduleForm(defaultPersonnel),
+      reason: draft.reason || draft.findings || "",
+      priority: ["Low", "Medium", "High"].includes(draft.riskLevel) ? draft.riskLevel : "Medium",
+      notes,
+    });
+    setSelectedResident(
+      matched
+        ? {
+            ...matched,
+            name: [matched.firstName, matched.middleName, matched.lastName].filter(Boolean).join(" "),
+            gender: matched.sex || "",
+          }
+        : null,
+    );
+    setTouched({});
+    setShowScheduleModal(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, navigate, residentsFromApi, defaultPersonnel]);
+
+  // Inline validation — fields are flagged once touched, not on every keystroke.
   const scheduleErrors = {
     resident: touched.resident && !selectedResident ? "Please select a resident." : "",
     date: !scheduleForm.date
@@ -371,7 +419,7 @@ export default function MidwifeFollowUp() {
     Boolean(scheduleForm.reason.trim());
 
   const handleSchedule = async () => {
-    // Backstop â€” the primary button is disabled until the form is complete.
+    // Backstop — the primary button is disabled until the form is complete.
     if (!canSchedule) {
       setTouched({ resident: true, date: true, time: true, reason: true });
       return;
@@ -651,7 +699,7 @@ export default function MidwifeFollowUp() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-brand-ink">{selectedResident.name}</p>
                         <p className="text-xs text-brand-gray">
-                          {selectedResident.id} Â· {selectedResident.age} yrs Â· {selectedResident.gender} Â·{" "}
+                          {selectedResident.id} · {selectedResident.age} yrs · {selectedResident.gender} ·{" "}
                           {selectedResident.barangay}
                         </p>
                       </div>
@@ -764,7 +812,7 @@ export default function MidwifeFollowUp() {
                             <option key={p} value={p}>{p}</option>
                           ))}
                         </select>
-                        <p className="mt-1 text-xs text-brand-gray">Auto-assigned to you â€” change if needed.</p>
+                        <p className="mt-1 text-xs text-brand-gray">Auto-assigned to you — change if needed.</p>
                       </div>
                     </div>
                     <div>
@@ -793,7 +841,7 @@ export default function MidwifeFollowUp() {
                   {deriveStatus(scheduleForm.date)}
                 </span>
                 <span>
-                  Follow-ups are saved as Scheduled â€” appearing under Today or Upcoming based on the date.
+                  Follow-ups are saved as Scheduled — appearing under Today or Upcoming based on the date.
                 </span>
               </p>
             </div>
@@ -844,7 +892,7 @@ export default function MidwifeFollowUp() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.resident}</p>
-                    <p className="text-xs text-brand-gray">{selectedFollowUp.sex} â€¢ {selectedFollowUp.age} years old</p>
+                    <p className="text-xs text-brand-gray">{selectedFollowUp.sex} • {selectedFollowUp.age} years old</p>
                   </div>
                 </div>
                 <div className="space-y-1 text-xs">
@@ -866,7 +914,7 @@ export default function MidwifeFollowUp() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Calendar className="w-3.5 h-3.5 text-brand-gray" />
-                  <p className="text-sm text-brand-ink">{selectedFollowUp.scheduledDate} â€¢ {selectedFollowUp.scheduledTime}</p>
+                  <p className="text-sm text-brand-ink">{selectedFollowUp.scheduledDate} • {selectedFollowUp.scheduledTime}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <MapPin className="w-3.5 h-3.5 text-brand-gray" />

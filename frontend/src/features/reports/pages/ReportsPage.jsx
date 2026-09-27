@@ -45,7 +45,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const coverageLabel = coverage ? (coverage === "RHU" ? "RHU" : coverage) : null;
   const rhuCoverage = coverage === "RHU";
 
-  // Health Supervisor scope â€” reports are limited to the supervisor's single
+  // Health Supervisor scope — reports are limited to the supervisor's single
   // assigned barangay; the RHU/municipality-level figures are never shown.
   const supervisorScope = getSupervisorScope(user);
   const assignedBarangay = supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
@@ -199,7 +199,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     ];
   }, [isPhn, coverage, coverageLabel, rhuCoverage, user, assignedBarangay, scopedReports.length]);
 
-  // A PHN works at the RHU â€” reports are submitted upward to the MHO, while
+  // A PHN works at the RHU — reports are submitted upward to the MHO, while
   // barangay-level roles submit theirs to the RHU.
   const summaryItems = isPhn ? scopeSummary : summaryCards;
   const submitTarget = isPhn ? "MHO" : "RHU";
@@ -345,7 +345,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                           <span className="flex items-center gap-1 text-brand-green">
                             <Check className="w-3 h-3" /> Submitted
                           </span>
-                          <div className="mt-1">{report.submittedDate} â€¢ {report.submittedTime}</div>
+                          <div className="mt-1">{report.submittedDate} • {report.submittedTime}</div>
                         </div>
                       )}
                       {report.status === "Draft" && (

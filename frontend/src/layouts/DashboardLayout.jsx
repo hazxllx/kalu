@@ -32,6 +32,27 @@ export default function DashboardLayout({ roleKey }) {
   // that privilege from the role; everything else behaves exactly as before.
   const items = useMemo(() => filterNavByPermission(NAV[roleKey] || [], can), [roleKey, can]);
 
+  // Keep an expandable submenu (e.g. Records) open while the user is on one of
+  // its child pages — including on a direct URL visit — so the active child
+  // stays visible and highlighted. Manual toggling still works: this only ever
+  // opens the group that owns the current route, it never forces others closed.
+  useEffect(() => {
+    setExpandedGroups((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      items.forEach((it) => {
+        const owns = it.children?.some(
+          (c) => c.path && (location.pathname === c.path || location.pathname.startsWith(`${c.path}/`))
+        );
+        if (owns && !next[it.label]) {
+          next[it.label] = true;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [location.pathname, items]);
+
   // The profile reflects the signed-in demo user (name/role per account),
   // falling back to the role's placeholder only when no user is available.
   const displayName = user?.name || role.name;
@@ -91,7 +112,7 @@ export default function DashboardLayout({ roleKey }) {
     // An item is active when its path matches exactly OR when the current
     // location is a child page of that module (e.g. `/app/bhw/households/new`
     // keeps "Household Profiling" highlighted instead of leaving no active
-    // item â€” and never highlights Dashboard).
+    // item — and never highlights Dashboard).
     const isItemActive = (item) => {
       if (!item.path || item.path === "#") return false;
       return (
@@ -203,7 +224,7 @@ export default function DashboardLayout({ roleKey }) {
 
   /**
    * Sidebar identity block: logo mark plus the system name.
-   * The artwork is a square symbol, so the name is spelled out beside it â€”
+   * The artwork is a square symbol, so the name is spelled out beside it —
    * mirroring the AgencyMark used on the public and auth pages.
    */
   const SidebarBrand = () => (
@@ -223,12 +244,12 @@ export default function DashboardLayout({ roleKey }) {
   return (
     <div className="min-h-screen bg-[color:#f5f7fa] dark:bg-background">
       <aside className="hidden lg:flex fixed inset-y-0 left-0 w-72 flex-col bg-white dark:bg-sidebar border-r border-slate-200 dark:border-border">
-        {/* Brand header â€” fixed */}
+        {/* Brand header — fixed */}
         <div className="h-20 shrink-0 flex items-center px-5 border-b border-slate-200 dark:border-border">
           <SidebarBrand />
         </div>
 
-        {/* Scrollable navigation â€” independent of brand + footer. The
+        {/* Scrollable navigation — independent of brand + footer. The
             scrollbar appears on hover/focus (.nav-scroll) so long menus stay
             obviously scrollable; the flex column guarantees items can never be
             covered by the account footer below. */}

@@ -11,7 +11,9 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "verify:live": "node scripts/verify-live-workflows.mjs",
+    "provision:accounts": "node scripts/provision-official-accounts.mjs --apply"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

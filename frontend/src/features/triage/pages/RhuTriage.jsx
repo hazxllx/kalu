@@ -92,7 +92,7 @@ const inputCls = (error) =>
   }`;
 
 const metaLine = (age, sex, barangay) =>
-  [age ? `${age} years old` : null, sex, barangay || "RHU"].filter(Boolean).join(" â€¢ ");
+  [age ? `${age} years old` : null, sex, barangay || "RHU"].filter(Boolean).join(" • ");
 
 const numeric = (value) => (value !== "" && value != null && !Number.isNaN(Number(value)) ? Number(value) : null);
 
@@ -469,7 +469,7 @@ export default function RhuTriage() {
         </div>
       )}
 
-      {/* Single column â€” fills the application content area */}
+      {/* Single column — fills the application content area */}
       <div className="w-full space-y-5 sm:space-y-6">
         {/* ============ NEW TRIAGE ============ */}
         <Card className="overflow-hidden">
@@ -488,7 +488,7 @@ export default function RhuTriage() {
           <div className="px-4 py-5 sm:px-6 sm:py-6">
             {hasPatient && progress}
 
-            {/* ============ STEP 1 Â· PATIENT ============ */}
+            {/* ============ STEP 1 · PATIENT ============ */}
             {currentStep === "patient" && (
               <div>
                 {!hasPatient ? (
@@ -740,7 +740,7 @@ export default function RhuTriage() {
               </div>
             )}
 
-            {/* ============ STEP 2 Â· VITAL SIGNS & MEASUREMENTS ============ */}
+            {/* ============ STEP 2 · VITAL SIGNS & MEASUREMENTS ============ */}
             {currentStep === "vitals" && (
               <div>
                 {stepIndicator(
@@ -791,7 +791,7 @@ export default function RhuTriage() {
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-brand-ink">BMI</label>
                     <div className="flex items-center gap-3 rounded-btn border border-dashed border-brand-blue/40 bg-brand-blue/5 px-3.5 py-2.5">
-                      <span className="text-lg font-semibold text-brand-blue">{bmi.value || "â€”"}</span>
+                      <span className="text-lg font-semibold text-brand-blue">{bmi.value || "—"}</span>
                       <span className="text-xs text-brand-gray">
                         {bmi.value
                           ? "Auto-computed from height and weight"
@@ -835,7 +835,7 @@ export default function RhuTriage() {
               </div>
             )}
 
-            {/* ============ STEP 3 Â· REASON FOR VISIT ============ */}
+            {/* ============ STEP 3 · REASON FOR VISIT ============ */}
             {currentStep === "reason" && (
               <div>
                 {stepIndicator(3, "Reason for Visit", "Why is the patient here today?")}
@@ -880,7 +880,7 @@ export default function RhuTriage() {
               </div>
             )}
 
-            {/* ============ STEP 4 Â· LOCATION ============ */}
+            {/* ============ STEP 4 · LOCATION ============ */}
             {currentStep === "location" && (
               <div>
                 {stepIndicator(4, "Location", "Where will the patient be seen?")}
@@ -912,7 +912,7 @@ export default function RhuTriage() {
               </div>
             )}
 
-            {/* ============ STEP 5 Â· REVIEW ============ */}
+            {/* ============ STEP 5 · REVIEW ============ */}
             {currentStep === "review" && (
               <div>
                 {stepIndicator(5, "Review", "Check the details before sending the patient to the PHN.")}
@@ -931,23 +931,23 @@ export default function RhuTriage() {
                     <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
                       <div>
                         <p className="text-xs text-brand-gray">Height</p>
-                        <p className="font-medium text-brand-ink">{vitals.heightCm ? `${vitals.heightCm} cm` : "â€”"}</p>
+                        <p className="font-medium text-brand-ink">{vitals.heightCm ? `${vitals.heightCm} cm` : "—"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-brand-gray">Weight</p>
-                        <p className="font-medium text-brand-ink">{vitals.weightKg ? `${vitals.weightKg} kg` : "â€”"}</p>
+                        <p className="font-medium text-brand-ink">{vitals.weightKg ? `${vitals.weightKg} kg` : "—"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-brand-gray">BMI</p>
-                        <p className="font-medium text-brand-blue">{bmi.value || "â€”"}</p>
+                        <p className="font-medium text-brand-blue">{bmi.value || "—"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-brand-gray">Blood Pressure</p>
-                        <p className="font-medium text-brand-ink">{vitals.bloodPressure ? `${vitals.bloodPressure} mmHg` : "â€”"}</p>
+                        <p className="font-medium text-brand-ink">{vitals.bloodPressure ? `${vitals.bloodPressure} mmHg` : "—"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-brand-gray">Blood Sugar</p>
-                        <p className="font-medium text-brand-ink">{vitals.bloodSugar ? `${vitals.bloodSugar} mg/dL` : "â€”"}</p>
+                        <p className="font-medium text-brand-ink">{vitals.bloodSugar ? `${vitals.bloodSugar} mg/dL` : "—"}</p>
                       </div>
                     </div>
                   </div>
@@ -1037,7 +1037,7 @@ export default function RhuTriage() {
                         </span>
                         <div className="min-w-0">
                           <p className="truncate font-medium text-brand-ink">{p.patient}</p>
-                          <p className="truncate text-xs text-brand-gray">{p.age ?? "â€”"} yrs â€¢ {p.sex}</p>
+                          <p className="truncate text-xs text-brand-gray">{p.age ?? "—"} yrs • {p.sex}</p>
                         </div>
                       </div>
                       <div className="md:pr-3">

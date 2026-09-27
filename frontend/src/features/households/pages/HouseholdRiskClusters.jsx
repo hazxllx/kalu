@@ -1,137 +1,143 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { useAuth } from "@/context/AuthContext";
-import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
+import EmptyState from "@/components/common/EmptyState";
+import ErrorState from "@/components/common/ErrorState";
+import { SkeletonList } from "@/components/common/Skeleton";
+import { householdsApi } from "@/services/api";
 import {
-  useHouseholdRiskClusters,
-  householdRiskStore,
-} from "@/services/local/householdRiskStore";
-import { RISK_LEVELS, RISK_LEVEL_LABELS, RISK_WORKFLOW_STATUSES, householdRiskBasis } from "@/lib/householdRisk";
-import { Link } from "react-router-dom";
+  HOUSEHOLD_RISK_META as RISK_META,
+  normalizeHouseholdRiskLevel as normalizeLevel,
+  householdRiskRank,
+  countByRiskLevel,
+} from "@/lib/householdRiskLevel";
 import {
-  Search, PhoneCall, ArrowUpRight, Home, CheckCircle2, X,
+  Search, Home, ShieldAlert, X, Users, ClipboardList,
 } from "lucide-react";
 
-const levelTone = {
-  [RISK_LEVELS.STABLE]: { chip: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400", dot: "bg-brand-green" },
-  [RISK_LEVELS.MONITOR]: { chip: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400", dot: "bg-brand-yellow" },
-  [RISK_LEVELS.INTERVENTION]: { chip: "bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400", dot: "bg-brand-accent" },
-  [RISK_LEVELS.PRIORITY]: { chip: "bg-rose-50 text-rose-700", dot: "bg-brand-danger" },
-};
+/**
+ * Household Risk Clusters (BHW / Health Supervisor).
+ *
+ * Backed by the REAL, scope-enforced households endpoint (GET /api/households):
+ * the backend limits the result to the caller's barangay (BHW / assigned HS) or
+ * municipality (unassigned HS) and computes `riskLevel` server-side from the
+ * ported household-risk rules (backend/src/utils/householdRisk.js). This page
+ * only groups those authorized households by their server risk classification —
+ * it does NOT run a second risk algorithm and never fabricates data.
+ *
+ * The risk-level mapping lives in `@/lib/householdRiskLevel` (single source of
+ * truth), identical to Household Profiling and the Health Supervisor dashboard.
+ */
 
-const formatDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-};
-
-/** Household detail base path for the current role area. */
-function locationPathForRole() {
-  const raw = typeof window !== "undefined" ? window.location.pathname : "/app/bhw/households/risk-clusters";
-  const parts = raw.split("/").filter(Boolean);
+/** Household detail base path for the current role area (bhw / health_supervisor). */
+function useRoleBasePath() {
+  const location = useLocation();
+  const parts = location.pathname.split("/").filter(Boolean);
   const appIdx = parts.indexOf("app");
   const role = appIdx >= 0 && parts[appIdx + 1] ? parts[appIdx + 1] : "bhw";
   return `/app/${role}`;
 }
 
 export default function HouseholdRiskClusters() {
-  const { user } = useAuth();
-  const clusters = useHouseholdRiskClusters();
-  const scope = getSupervisorScope(user);
-  const scopedBarangays =
-    scope && scope.level === HS_SCOPE.BARANGAY ? [scope.assignedBarangay] : null;
+  const basePath = useRoleBasePath();
 
-  const scoped = useMemo(
-    () => clusters.filter((c) => !scopedBarangays || scopedBarangays.includes(c.barangay)),
-    [clusters, scopedBarangays]
-  );
+  const [households, setHouseholds] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const [query, setQuery] = useState("");
   const [levelFilter, setLevelFilter] = useState("all");
   const [detailId, setDetailId] = useState(null);
-  const [followUpFor, setFollowUpFor] = useState(null);
-  const [escalateFor, setEscalateFor] = useState(null);
-  const [toast, setToast] = useState(null);
 
-  const counts = useMemo(() => {
-    const c = { priority: 0, intervention: 0, monitor: 0, stable: 0 };
-    scoped.forEach((h) => {
-      if (h.risk.level === RISK_LEVELS.PRIORITY) c.priority += 1;
-      else if (h.risk.level === RISK_LEVELS.INTERVENTION) c.intervention += 1;
-      else if (h.risk.level === RISK_LEVELS.MONITOR) c.monitor += 1;
-      else c.stable += 1;
-    });
-    return c;
-  }, [scoped]);
+  /** Load the scope-enforced household list from the API. */
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const result = await householdsApi.list({ limit: 100 });
+      setHouseholds(result?.rows || []);
+    } catch (err) {
+      setHouseholds([]);
+      setLoadError(err?.message || "Unable to load household risk clusters.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const filtered = useMemo(
-    () =>
-      scoped
-        .filter((h) => levelFilter === "all" || h.risk.level === levelFilter)
-        .filter(
-          (h) =>
-            h.head.toLowerCase().includes(query.toLowerCase()) ||
-            h.barangay.toLowerCase().includes(query.toLowerCase()) ||
-            h.id.toLowerCase().includes(query.toLowerCase())
-        )
-        .sort((a, b) => b.risk.score - a.risk.score),
-    [scoped, levelFilter, query]
-  );
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const detail = detailId ? scoped.find((h) => h.id === detailId) : null;
-  const followUpTarget = followUpFor ? scoped.find((h) => h.id === followUpFor) : null;
-  const escalateTarget = escalateFor ? scoped.find((h) => h.id === escalateFor) : null;
+  // Real, server-computed counts per risk level.
+  const counts = useMemo(() => countByRiskLevel(households), [households]);
 
-  const showToast = (message) => {
-    setToast(message);
-    setTimeout(() => setToast(null), 3000);
-  };
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return households
+      .filter((h) => levelFilter === "all" || normalizeLevel(h.riskLevel) === levelFilter)
+      .filter(
+        (h) =>
+          !q ||
+          String(h.headName || "").toLowerCase().includes(q) ||
+          String(h.barangay || "").toLowerCase().includes(q) ||
+          String(h.id || "").toLowerCase().includes(q)
+      )
+      .sort(
+        (a, b) =>
+          householdRiskRank(b.riskLevel) - householdRiskRank(a.riskLevel) ||
+          (b.riskScore ?? 0) - (a.riskScore ?? 0)
+      );
+  }, [households, levelFilter, query]);
+
+  const detail = detailId ? households.find((h) => h.id === detailId) : null;
+
+  const CARDS = [
+    { key: "High", label: "High Risk", value: counts.High },
+    { key: "Moderate", label: "Moderate Risk", value: counts.Moderate },
+    { key: "Low", label: "Low Risk", value: counts.Low },
+    { key: "all", label: "Total Households", value: households.length, plain: true },
+  ];
 
   return (
     <>
       <PageHeader
         crumbs={["Early Intervention", "Household Risk Clusters"]}
         title="Household Risk Clusters"
-        subtitle="Identify households where multiple health-monitoring indicators cluster — for early intervention, not diagnosis."
+        subtitle="Households grouped by their server-computed risk classification — for early intervention, not diagnosis."
       />
 
-      {toast && (
-        <div className="fixed bottom-4 right-4 z-[60] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg animate-in slide-in-from-bottom-2">
-          <CheckCircle2 className="h-4 w-4 text-brand-green" />
-          <span className="text-sm">{toast}</span>
-        </div>
-      )}
-
-      {/* Cluster overview counts */}
+      {/* Cluster overview counts (real, server-computed classification). */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
-        {[
-          { key: RISK_LEVELS.PRIORITY, label: "Priority Review", value: counts.priority },
-          { key: RISK_LEVELS.INTERVENTION, label: "Needs Intervention", value: counts.intervention },
-          { key: RISK_LEVELS.MONITOR, label: "Monitor", value: counts.monitor },
-          { key: RISK_LEVELS.STABLE, label: "Stable", value: counts.stable },
-        ].map((c) => (
-          <button
-            key={c.key}
-            onClick={() => setLevelFilter(levelFilter === c.key ? "all" : c.key)}
-            className={`rounded-2xl border p-4 text-left transition-colors ${
-              levelFilter === c.key
-                ? "border-brand-blue bg-brand-light/60"
-                : "border-slate-200 bg-white hover:border-brand-blue/40"
-            }`}
-          >
-            <p className="text-xs text-brand-gray uppercase tracking-wide flex items-center gap-1.5">
-              <span className={`w-2.5 h-2.5 rounded-full ${levelTone[c.key].dot}`} /> {c.label}
-            </p>
-            <p className="mt-1 text-3xl font-semibold text-brand-ink">{c.value}</p>
-          </button>
-        ))}
+        {CARDS.map((c) => {
+          const active = levelFilter === c.key;
+          const meta = RISK_META[c.key];
+          return (
+            <button
+              key={c.key}
+              onClick={() => setLevelFilter(c.plain ? "all" : active ? "all" : c.key)}
+              disabled={c.plain}
+              className={`rounded-2xl border p-4 text-left transition-colors ${
+                active && !c.plain
+                  ? "border-brand-blue bg-brand-light/60"
+                  : "border-slate-200 bg-white hover:border-brand-blue/40"
+              } ${c.plain ? "cursor-default" : ""}`}
+            >
+              <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-brand-gray">
+                {meta && <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />}
+                {c.label}
+              </p>
+              <p className="mt-1 text-3xl font-semibold text-brand-ink">
+                {loading ? "…" : loadError ? "—" : c.value}
+              </p>
+            </button>
+          );
+        })}
       </div>
 
       <Card className="overflow-hidden">
-        <div className="border-b border-slate-200 px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="flex items-center gap-2 rounded-input border border-slate-200 bg-brand-bg/60 px-3.5 py-2.5 w-full sm:max-w-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center">
+          <div className="flex w-full items-center gap-2 rounded-input border border-slate-200 bg-brand-bg/60 px-3.5 py-2.5 sm:max-w-sm">
             <Search className="h-4 w-4 text-brand-gray" />
             <input
               value={query}
@@ -140,50 +146,89 @@ export default function HouseholdRiskClusters() {
               className="w-full bg-transparent text-sm outline-none"
             />
           </div>
-          <p className="text-xs text-brand-gray sm:ml-auto">{filtered.length} households</p>
+          {!loading && !loadError && (
+            <p className="text-xs text-brand-gray sm:ml-auto">{filtered.length} households</p>
+          )}
         </div>
 
-        {/* Priority household cards */}
         <div className="p-5">
-          {filtered.length === 0 ? (
-            <p className="py-10 text-center text-sm text-brand-gray">No household risk clusters match.</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* LOADING */}
+          {loading && <SkeletonList rows={6} />}
+
+          {/* ERROR — never shown as an empty "0 households" state. */}
+          {!loading && loadError && (
+            <ErrorState
+              title="Unable to load household risk clusters"
+              message={loadError}
+              onRetry={load}
+            />
+          )}
+
+          {/* EMPTY — genuinely no households in scope. */}
+          {!loading && !loadError && households.length === 0 && (
+            <EmptyState
+              icon={Home}
+              title="No household risk clusters found"
+              description="Household records will appear here once they are registered for your barangay."
+              className="py-8"
+            />
+          )}
+
+          {/* EMPTY after search / filter. */}
+          {!loading && !loadError && households.length > 0 && filtered.length === 0 && (
+            <EmptyState
+              icon={Search}
+              title="No matching household risk clusters"
+              description="Try a different search term or clear the risk-level filter."
+              className="py-8"
+            />
+          )}
+
+          {/* RESULTS */}
+          {!loading && !loadError && filtered.length > 0 && (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {filtered.map((h) => {
-                const tone = levelTone[h.risk.level] || levelTone[RISK_LEVELS.STABLE];
-                const days = householdRiskStore.daysSince(h.lastHouseholdVisit);
+                const level = normalizeLevel(h.riskLevel);
+                const meta = RISK_META[level];
+                const factors = Array.isArray(h.riskFactors) ? h.riskFactors : [];
                 return (
                   <div key={h.id} className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate font-semibold text-brand-ink">{h.head} Household</p>
+                        <p className="truncate font-semibold text-brand-ink">{h.headName} Household</p>
                         <p className="text-xs text-brand-gray">{h.id} · {h.barangay}</p>
                       </div>
-                      <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${tone.chip}`}>
-                        <span className={`h-2 w-2 rounded-full ${tone.dot}`} /> {RISK_LEVEL_LABELS[h.risk.level]}
+                      <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${meta.chip}`}>
+                        <span className={`h-2 w-2 rounded-full ${meta.dot}`} /> {meta.label}
                       </span>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                       <div className="rounded-btn bg-brand-bg px-2.5 py-2">
-                        <p className="text-brand-gray">Indicators</p>
-                        <p className="font-semibold text-brand-ink">{h.risk.count}</p>
+                        <p className="text-brand-gray">Risk score</p>
+                        <p className="font-semibold text-brand-ink">{h.riskScore ?? 0}/100</p>
                       </div>
                       <div className="rounded-btn bg-brand-bg px-2.5 py-2">
                         <p className="text-brand-gray">Members</p>
-                        <p className="font-semibold text-brand-ink">{h.members}</p>
+                        <p className="font-semibold text-brand-ink">{h.memberCount ?? 0}</p>
                       </div>
                       <div className="rounded-btn bg-brand-bg px-2.5 py-2">
-                        <p className="text-brand-gray">Last visit</p>
-                        <p className="font-semibold text-brand-ink">{days === null ? "—" : `${days}d ago`}</p>
+                        <p className="text-brand-gray">Factors</p>
+                        <p className="font-semibold text-brand-ink">{factors.length}</p>
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <Link to={`${locationPathForRole()}/households/${h.id}`} className="inline-flex items-center gap-1 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue dark:bg-card">
-                        <Home className="h-3.5 w-3.5" /> View Household
-                      </Link>
-                      <button onClick={() => setFollowUpFor(h.id)} className="inline-flex items-center gap-1 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-green hover:border-brand-green dark:bg-card">
-                        <PhoneCall className="h-3.5 w-3.5" /> Create Follow-up
+                      <button
+                        onClick={() => setDetailId(h.id)}
+                        className="inline-flex items-center gap-1 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue dark:bg-card"
+                      >
+                        <ShieldAlert className="h-3.5 w-3.5" /> Risk Details
                       </button>
+                      <Link
+                        to={`${basePath}/households`}
+                        className="inline-flex items-center gap-1 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-ink hover:border-brand-blue dark:bg-card"
+                      >
+                        <Home className="h-3.5 w-3.5" /> Open Profiling
+                      </Link>
                     </div>
                   </div>
                 );
@@ -193,14 +238,14 @@ export default function HouseholdRiskClusters() {
         </div>
       </Card>
 
-      {/* Detail drawer */}
+      {/* Detail drawer — real server risk factors + classification. */}
       {detail && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/60" onClick={() => setDetailId(null)} />
-          <div className="absolute right-0 top-0 flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
+          <div className="absolute right-0 top-0 flex h-full w-full max-w-xl flex-col bg-white shadow-2xl dark:bg-card">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
               <div>
-                <h3 className="text-base font-semibold text-brand-ink">{detail.head} Household</h3>
+                <h3 className="text-base font-semibold text-brand-ink">{detail.headName} Household</h3>
                 <p className="text-xs text-brand-gray">{detail.id} · {detail.barangay} · {detail.purok}</p>
               </div>
               <button onClick={() => setDetailId(null)} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
@@ -209,218 +254,73 @@ export default function HouseholdRiskClusters() {
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
-              {/* Risk & early intervention summary */}
-              <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-3">Risk &amp; Early Intervention</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:bg-card">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">Risk Classification</p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <div className="rounded-btn bg-brand-bg px-3 py-2.5">
-                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Current Status</p>
+                    <p className="text-[11px] uppercase tracking-wide text-brand-gray">Level</p>
                     <p className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-brand-ink">
-                      <span className={`h-2 w-2 rounded-full ${levelTone[detail.risk.level].dot}`} /> {RISK_LEVEL_LABELS[detail.risk.level]}
+                      <span className={`h-2 w-2 rounded-full ${RISK_META[normalizeLevel(detail.riskLevel)].dot}`} />
+                      {RISK_META[normalizeLevel(detail.riskLevel)].label}
                     </p>
                   </div>
                   <div className="rounded-btn bg-brand-bg px-3 py-2.5">
-                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Risk Indicators</p>
-                    <p className="mt-0.5 text-sm font-semibold text-brand-ink">{detail.risk.count}</p>
+                    <p className="text-[11px] uppercase tracking-wide text-brand-gray">Risk Score</p>
+                    <p className="mt-0.5 text-sm font-semibold text-brand-ink">{detail.riskScore ?? 0}/100</p>
                   </div>
                   <div className="rounded-btn bg-brand-bg px-3 py-2.5">
-                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Last Assessment</p>
-                    <p className="mt-0.5 text-sm font-semibold text-brand-ink">{formatDate(detail.lastAssessment)}</p>
-                  </div>
-                  <div className="rounded-btn bg-brand-bg px-3 py-2.5">
-                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Last Household Visit</p>
-                    <p className="mt-0.5 text-sm font-semibold text-brand-ink">{formatDate(detail.lastHouseholdVisit)}</p>
+                    <p className="text-[11px] uppercase tracking-wide text-brand-gray">Members</p>
+                    <p className="mt-0.5 text-sm font-semibold text-brand-ink">{detail.memberCount ?? 0}</p>
                   </div>
                 </div>
+                <p className="mt-3 text-xs text-brand-gray">
+                  Classification reflects the configured household monitoring criteria (water source, sanitation,
+                  vulnerable members and income) — it is not a clinical diagnosis.
+                </p>
               </section>
 
-              {/* Identified indicators */}
-              <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-3">Identified Indicators</p>
-                {detail.risk.indicators.length > 0 ? (
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:bg-card">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">Contributing Risk Factors</p>
+                {Array.isArray(detail.riskFactors) && detail.riskFactors.length > 0 ? (
                   <ul className="space-y-1.5">
-                    {detail.risk.indicators.map((ind) => (
-                      <li key={ind.key} className="flex items-start gap-2 text-sm text-brand-ink">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-brand-green" />
-                        {ind.label}
+                    {detail.riskFactors.map((f) => (
+                      <li key={f} className="flex items-start gap-2 text-sm text-brand-ink">
+                        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-brand-accent" />
+                        {f}
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm text-brand-gray">No significant indicators detected.</p>
+                  <p className="text-sm text-brand-gray">No significant risk factors detected.</p>
                 )}
               </section>
 
-              {/* Risk classification — basis + contributing indicators */}
-              <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-1">Risk Classification</p>
-                <p className="text-base font-semibold text-brand-ink">{RISK_LEVEL_LABELS[detail.risk.level]}</p>
-                <p className="mt-2 text-xs text-brand-gray">
-                  <span className="font-medium text-brand-ink">Basis:</span>{" "}
-                  {householdRiskBasis({ level: detail.risk.level, count: detail.risk.count, indicators: detail.risk.indicators }).headline}
-                </p>
-                {detail.risk.indicators.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {detail.risk.indicators.map((ind) => (
-                      <li key={ind.key} className="flex items-start gap-2 text-xs text-brand-gray">
-                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-green" />
-                        {ind.label}
+              {Array.isArray(detail.flags) && detail.flags.length > 0 && (
+                <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Auto-Flags</p>
+                  <ul className="space-y-1.5">
+                    {detail.flags.map((f) => (
+                      <li key={f} className="flex items-start gap-2 text-sm text-amber-800">
+                        <ClipboardList className="mt-0.5 h-4 w-4 shrink-0" />
+                        {f}
                       </li>
                     ))}
                   </ul>
-                )}
-                <p className="mt-2 text-xs text-brand-gray">
-                  <span className="font-medium text-brand-ink">Risk Score:</span> {detail.risk.score} · classification reflects configured monitoring criteria, not a clinical diagnosis.
-                </p>
-              </section>
-
-              {/* Recommended action */}
-              <section className="rounded-2xl border border-brand-blue/15 bg-brand-light/50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-1">Recommended Action</p>
-                <p className="text-sm text-brand-ink">{detail.risk.recommendedAction}</p>
-                <p className="mt-2 text-xs text-brand-gray">Assigned worker: {detail.assignedWorker || "—"} · Workflow: {detail.workflowStatus}</p>
-              </section>
-
-              {/* Risk history */}
-              <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-3">Risk History</p>
-                <div className="space-y-1.5">
-                  {detail.history.map((h) => (
-                    <div key={`${h.month}-${h.year}`} className="flex items-center justify-between gap-3 text-sm">
-                      <span className="text-brand-gray">{h.month} {h.year}</span>
-                      <span className="inline-flex items-center gap-1.5 text-brand-ink">
-                        <span className={`h-2 w-2 rounded-full ${levelTone[h.level].dot}`} /> {RISK_LEVEL_LABELS[h.level]}
-                        <span className="ml-1.5 text-xs text-brand-gray">({h.count} indicators)</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
+                </section>
+              )}
 
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => { const id = detail.id; setDetailId(null); setFollowUpFor(id); }} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-                  <PhoneCall className="h-4 w-4" /> Create Follow-up
-                </button>
-                <button
-                  onClick={() => {
-                    householdRiskStore.resolveHousehold(detail.id, { outcome: "Resolved" });
-                    showToast(`Risk resolved for the ${detail.surname} household.`);
-                    setDetailId(null);
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-green hover:border-brand-green"
+                <Link
+                  to={`${basePath}/households`}
+                  className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
                 >
-                  <CheckCircle2 className="h-4 w-4" /> Mark Resolved
-                </button>
-                <button onClick={() => { const id = detail.id; setDetailId(null); setEscalateFor(id); }} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:border-brand-danger">
-                  <ArrowUpRight className="h-4 w-4" /> Escalate Case
-                </button>
+                  <Users className="h-4 w-4" /> Open Household Profiling
+                </Link>
               </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Follow-up modal */}
-      {followUpTarget && (
-        <FollowUpModal
-          household={followUpTarget}
-          onClose={() => setFollowUpFor(null)}
-          onSave={(status, notes) => {
-            householdRiskStore.recordFollowUp(followUpTarget.id, { status, notes });
-            showToast(`Follow-up recorded for the ${followUpTarget.surname} household.`);
-            setFollowUpFor(null);
-          }}
-        />
-      )}
-
-      {/* Escalation modal */}
-      {escalateTarget && (
-        <EscalationModal
-          household={escalateTarget}
-          onClose={() => setEscalateFor(null)}
-          onSave={(reason) => {
-            householdRiskStore.escalateHousehold(escalateTarget.id, { reason, assignment: "Public Health Nurse" });
-            showToast(`Case escalated for the ${escalateTarget.surname} household.`);
-            setEscalateFor(null);
-          }}
-        />
-      )}
     </>
-  );
-}
-
-function FollowUpModal({ household, onClose, onSave }) {
-  const [status, setStatus] = useState(RISK_WORKFLOW_STATUSES[1]);
-  const [notes, setNotes] = useState("");
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-      <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-start justify-between gap-3 mb-1">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">Create Follow-up</h3>
-              <p className="text-sm text-brand-gray mt-0.5">{household.head} Household · {household.barangay}</p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink"><X className="w-5 h-5" /></button>
-          </div>
-          <div className="mt-4 space-y-4">
-            <div>
-              <label className="text-sm font-medium text-brand-ink">Follow-up Status</label>
-              <select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1.5 w-full rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue">
-                {RISK_WORKFLOW_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-brand-ink">Notes / Findings</label>
-              <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Assessment notes from the household visit..." className="mt-1.5 w-full resize-none rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue" />
-            </div>
-            <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
-              <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-              <button onClick={() => onSave(status, notes.trim())} className="rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark">Save Follow-up</button>
-            </div>
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function EscalationModal({ household, onClose, onSave }) {
-  const [reason, setReason] = useState("");
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-      <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-start justify-between gap-3 mb-1">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">Escalate Case</h3>
-              <p className="text-sm text-brand-gray mt-0.5">{household.head} Household</p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink"><X className="w-5 h-5" /></button>
-          </div>
-          <div className="mt-4 space-y-4">
-            <div className="rounded-btn border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800">
-              <span className="font-semibold">Reason:</span> {household.followUpCount} follow-up attempt(s) have not fully resolved the identified concerns.
-            </div>
-            <div>
-              <label className="text-sm font-medium text-brand-ink">Current assignment</label>
-              <p className="mt-1 text-sm text-brand-ink">{household.assignedWorker || "Barangay Health Worker"}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-brand-ink">Recommended escalation</label>
-              <p className="mt-1 text-sm text-brand-ink">Public Health Nurse</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-brand-ink">Reason for escalation</label>
-              <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe why this case should be escalated..." className="mt-1.5 w-full resize-none rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue" />
-            </div>
-            <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
-              <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-              <button onClick={() => onSave(reason.trim())} className="rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90">Escalate Case</button>
-            </div>
-          </div>
-        </div>
-      </Card>
-    </div>
   );
 }

@@ -388,6 +388,52 @@ const throwOnError = (error, fallback) => {
   }
 };
 
+// ----- resident free-text search -------------------------------------------
+
+/** Columns a resident directory search matches against, in priority order. */
+const RESIDENT_SEARCH_COLUMNS = Object.freeze([
+  'first_name',
+  'middle_name',
+  'last_name',
+  'health_record_no',
+  'philhealth_no',
+  'cellphone_no',
+]);
+
+/** PostgREST `or=` treats , ( ) and . as syntax, so a typed term must not. */
+const escapeSearchToken = (value) =>
+  String(value ?? '')
+    .replace(/[,()%*\\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Build a PostgREST `or=` filter for a resident name / identifier search.
+ *
+ * The term is tokenised on whitespace and every token must match at least one
+ * column (AND across tokens, OR across columns). This is what makes a real
+ * name search work: the previous single-pattern form turned "Maria Santos" into
+ * `first_name.ilike.%Maria Santos%`, which can never match because a first
+ * name has no space in it. Matching is case-insensitive through `ilike`.
+ */
+const residentSearchFilter = (term, { includeBarangay = false } = {}) => {
+  const columns = includeBarangay ? [...RESIDENT_SEARCH_COLUMNS, 'barangay'] : RESIDENT_SEARCH_COLUMNS;
+  const tokens = String(term ?? '')
+    .split(/\s+/)
+    .map(escapeSearchToken)
+    .filter(Boolean);
+
+  if (!tokens.length) return null;
+
+  // OR across columns within a token, AND across tokens.
+  const perToken = tokens.map((token) => {
+    const anyColumn = columns.map((column) => `${column}.ilike.%${token}%`).join(',');
+    return `or(${anyColumn})`;
+  });
+
+  return tokens.length > 1 ? `and(${perToken.join(',')})` : `or(${perToken[0]})`;
+};
+
 // ----- profiles (Admin User Management) -----------------------------------
 // The curated column set the Admin console needs. `profiles` holds no secret
 // material (no password/token columns exist on it), but we still select an
@@ -471,15 +517,24 @@ export const supabaseRepository = {
   },
 
   // ----- residents ----------------------------------------------------------
+  /**
+   * PostgREST `or=` filter for a free-text resident search.
+   *
+   * The previous implementation injected the WHOLE search string into every
+   * column pattern, so a multi-word query such as "Maria Santos" became
+   * `first_name.ilike.%Maria Santos%` and matched nothing (a first name never
+   * contains a space). The term is now split on whitespace and every token must
+   * match at least one column, so "Maria Santos", "santos maria" and "maria"
+   * all work regardless of which name part holds the token.
+   *
+   * Matching stays case-insensitive (ilike) and the OR across columns means
+   * first / middle / last name, record number, PhilHealth number and mobile
+   * are all searchable from one field.
+   */
   async searchResidents({ q = '', limit = 20 } = {}) {
     const supabase = getServiceClient();
     let query = supabase.from(TABLES.residents).select('*').order('created_at', { ascending: false }).limit(limit);
-    if (q) {
-      const term = String(q).trim();
-      query = query.or(
-        `first_name.ilike.%${term}%,last_name.ilike.%${term}%,middle_name.ilike.%${term}%,health_record_no.ilike.%${term}%,philhealth_no.ilike.%${term}%,cellphone_no.ilike.%${term}%,barangay.ilike.%${term}%`,
-      );
-    }
+    if (q) query = query.or(residentSearchFilter(q, { includeBarangay: true }));
     const { data, error } = await query;
     throwOnError(error, 'Could not search residents');
     return (data || []).map(residentFromRow);
@@ -498,12 +553,7 @@ export const supabaseRepository = {
       .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
-    if (q) {
-      const term = String(q).trim();
-      query = query.or(
-        `first_name.ilike.%${term}%,last_name.ilike.%${term}%,middle_name.ilike.%${term}%,health_record_no.ilike.%${term}%,philhealth_no.ilike.%${term}%,cellphone_no.ilike.%${term}%`,
-      );
-    }
+    if (q) query = query.or(residentSearchFilter(q));
     if (barangay) query = query.eq('barangay', barangay);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
     if (verificationStatuses && verificationStatuses.length) query = query.in('verification_status', verificationStatuses);
@@ -543,12 +593,7 @@ export const supabaseRepository = {
       .order('created_at', { ascending: false });
     if (barangay) query = query.eq('barangay', barangay);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
-    if (q) {
-      const term = String(q).trim();
-      query = query.or(
-        `first_name.ilike.%${term}%,last_name.ilike.%${term}%,middle_name.ilike.%${term}%,health_record_no.ilike.%${term}%,philhealth_no.ilike.%${term}%,cellphone_no.ilike.%${term}%`,
-      );
-    }
+    if (q) query = query.or(residentSearchFilter(q));
     const { data, error } = await query;
     throwOnError(error, 'Could not list residents');
     return (data || []).map(residentFromRow);

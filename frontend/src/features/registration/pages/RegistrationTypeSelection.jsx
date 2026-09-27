@@ -29,7 +29,7 @@ const options = [
       { icon: MapPin, label: "Current address and barangay" },
       { icon: Camera, label: "Recent photograph for verification" },
     ],
-    note: "Your registration will be reviewed by the appropriate health personnel within 2–3 working days.",
+    note: "Your resident registration will be reviewed by your barangay Health Supervisor within 2–3 working days.",
   },
   {
     key: "transfer",
@@ -51,7 +51,7 @@ const options = [
     icon: UserPlus,
     code: "FORM C",
     title: "Health personnel account",
-    copy: "For authorized health workers and municipal health personnel. Staff accounts require verification by the Municipal Health Office.",
+    copy: "For authorized health workers and municipal health personnel. Staff accounts are verified by your operational approving officer.",
     to: "/register/personnel",
     cta: "Continue",
     requirements: [
@@ -59,7 +59,7 @@ const options = [
       { icon: IdCard, label: "Office-issued identification card" },
       { icon: Building2, label: "Endorsement from your assigned health unit" },
     ],
-    note: "Accounts are activated by the System Administrator after credential review.",
+    note: "Your sign-in unlocks once your request is approved — by the Public Health Nurse for Health Supervisor and RHU Personnel accounts, or by the Health Supervisor for BHW accounts.",
   },
 ];
 
