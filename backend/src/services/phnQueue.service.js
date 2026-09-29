@@ -24,6 +24,32 @@ import { validateVitals } from './intake.service.js';
 
 const isPHN = (user) => user?.role === 'phn';
 
+const MUNICIPALITY_ROLES = new Set(['mho', 'phn', 'rhu_personnel']);
+const BARANGAY_ROLES = new Set(['health_supervisor', 'bhw']);
+
+/**
+ * BUG-002: is this clinical record inside the caller's coverage?
+ * Scope is derived from the AUTHENTICATED profile and compared against the
+ * record's resident scope (municipality/barangay), never from a client id.
+ * Mirrors the residents/visits/referrals RLS in 20260915100100 so a
+ * barangay-scoped Health Supervisor cannot read another barangay's PHI and a
+ * municipality-scoped role cannot read another municipality's PHI, even when
+ * the record id is known.
+ */
+const recordInScope = (user, resident) => {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const municipalityId = resident?.municipalityId ?? null;
+  const barangayId = resident?.barangayId ?? null;
+  if (BARANGAY_ROLES.has(user.role)) {
+    return Boolean(user.barangayId) && barangayId === user.barangayId;
+  }
+  if (MUNICIPALITY_ROLES.has(user.role)) {
+    return Boolean(user.municipalityId) && municipalityId === user.municipalityId;
+  }
+  return false;
+};
+
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 const withoutMeta = (obj) => {
@@ -43,22 +69,30 @@ export const listQueue = async ({ statuses = null, q = '', user } = {}) => {
   const effectiveStatuses = allowed && allowed.length
     ? allowed
     : [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.COMPLETED];
-  return repository.listVisits({ statuses: effectiveStatuses, q, limit: 100 });
+  const result = await repository.listVisits({ statuses: effectiveStatuses, q, limit: 100 });
+  // BUG-002: the PHN queue is limited to the PHN's own municipality.
+  const rows = (result?.rows ?? result ?? []).filter((v) => recordInScope(user, v.resident));
+  return Array.isArray(result) ? rows : { ...result, rows, total: rows.length };
 };
 
 export const viewSubmission = async ({ id, user }) => {
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
 
+  // The recorder may always reopen their own submission (any draft state).
+  const isRecorder = submission.recordedById === user?.id;
+  // BUG-002: every other reader must be BOTH an allowed role AND inside the
+  // record's municipality/barangay scope. Out-of-scope reads return 404 so a
+  // known id cannot be used to probe or read another barangay's PHI.
   const canView =
-    isPHN(user) ||
-    ['mho', 'health_supervisor'].includes(user?.role) ||
-    (['bhw', 'rhu_personnel', 'health_supervisor'].includes(user?.role) && submission.recordedById === user.id);
+    isRecorder ||
+    ((isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role)) &&
+      recordInScope(user, submission.resident));
   if (!canView) throw ApiError.notFound('Submission not found');
 
   if (!isPHN(user) && submission.status === SUBMISSION_STATUS.DRAFT) {
     // Staff other than the recorder cannot view drafts.
-    if (submission.recordedById !== user.id) throw ApiError.notFound('Submission not found');
+    if (!isRecorder) throw ApiError.notFound('Submission not found');
   }
   return submission;
 };
@@ -288,7 +322,11 @@ export const listReferrals = async ({ q = '', user } = {}) => {
   const canView =
     isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role);
   if (!canView) throw ApiError.forbidden();
-  return repository.listReferrals({ q, limit: 100 });
+  const result = await repository.listReferrals({ q, limit: 100 });
+  // BUG-002: filter the queue to the caller's scope. The repository has no
+  // scope columns of its own, so filter on the embedded resident scope.
+  const rows = (result?.rows ?? result ?? []).filter((r) => recordInScope(user, r.resident));
+  return Array.isArray(result) ? rows : { ...result, rows, total: rows.length };
 };
 
 export const getReferral = async ({ id, user }) => {
@@ -296,6 +334,8 @@ export const getReferral = async ({ id, user }) => {
   if (!canView) throw ApiError.notFound('Referral not found');
   const referral = await repository.getReferral(id);
   if (!referral) throw ApiError.notFound('Referral not found');
+  // BUG-002: out-of-scope referral reads return 404 even with a known id.
+  if (!recordInScope(user, referral.resident)) throw ApiError.notFound('Referral not found');
   return referral;
 };
 
@@ -304,6 +344,7 @@ export const getReferralByVisitId = async ({ visitId, user }) => {
   if (!canView) throw ApiError.notFound('Referral not found');
   const referral = await repository.getReferralByVisitId(visitId);
   if (!referral) throw ApiError.notFound('Referral not found');
+  if (!recordInScope(user, referral.resident)) throw ApiError.notFound('Referral not found');
   return referral;
 };
 

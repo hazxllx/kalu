@@ -6,7 +6,7 @@ const TIMELINE = [
   { label: "Registration Submitted", desc: "Your registration was received.", status: "done" },
   { label: "Profile Completed", desc: "All required fields filled.", status: "done" },
   { label: "Identity Uploaded", desc: "ID documents uploaded.", status: "done" },
-  { label: "Barangay Health Worker Review", desc: "Awaiting review by assigned BHW.", status: "current" },
+  { label: "Health Supervisor Review", desc: "Awaiting review by your Health Supervisor.", status: "current" },
   { label: "Verified", desc: "Account approved and activated.", status: "pending" },
 ];
 

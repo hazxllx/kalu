@@ -186,9 +186,21 @@ npm run typecheck --prefix frontend   # TypeScript type checking of the JS sourc
 npm run build --prefix frontend       # production build check
 ```
 
-Backend and frontend tests both use Node's built-in test runner. ESLint, the
-TypeScript type checker, and the Vite build provide the frontend static checks.
-The backend has no separate lint step.
+Backend and frontend tests both use Node's built-in test runner. ESLint and the
+Vite production build provide the frontend static checks; the backend has no
+separate lint step. The `typecheck` script runs `tsc` in `checkJs` mode over the
+JavaScript sources as an advisory diagnostic — the sources are plain JavaScript,
+so it reports type-inference notices rather than gating the build.
+
+An optional end-to-end suite lives in `frontend/tests/` and runs with Playwright:
+
+```bash
+npm run test:e2e --prefix frontend   # requires running dev servers + local test credentials
+```
+
+The E2E suite drives a real browser against the running frontend and backend and
+reads all sign-in credentials from environment variables (never from source).
+It is not part of the unit-test baseline above.
 
 ## Security
 
@@ -204,7 +216,33 @@ The backend has no separate lint step.
 - Registration documents live in a private storage bucket and are served only
   through backend-mediated signed URLs.
 
-## Documentation
+## Deployment
+
+The frontend is a static Vite single-page application. `vercel.json` configures
+a Vercel deployment that installs and builds the frontend, serves
+`frontend/dist`, and rewrites all routes to `index.html` for client-side
+routing. Set the `VITE_` environment variables in the hosting project settings.
+
+The Express API in `backend/` is a separate Node.js service and is deployed and
+scaled independently of the frontend. Point the frontend `VITE_API_URL` at the
+deployed API origin, and set the backend's `CLIENT_URL` to the deployed frontend
+origin so CORS permits it. The Supabase project provides authentication and the
+PostgreSQL database for both.
+
+## Scope and Limitations
+
+- The application is online-only; it requires network access to the backend API
+  and the Supabase project and has no offline mode.
+- Access is strictly role-scoped and enforced server-side. Frontend route guards
+  hide navigation but are not the security boundary.
+- Resident and personnel onboarding is by application plus manual review; there
+  is no self-service account provisioning that bypasses verification.
+- Community and map analytics are aggregated by municipality or barangay and do
+  not expose resident-level personally identifiable information.
+- The user-facing "Household Risk Clusters" view has been removed; household
+  profiling and the retained household risk overview/detail pages remain.
+
+
 
 - [Database and migrations](docs/database/README.md)
 - [Backend overview](docs/backend/README.md)

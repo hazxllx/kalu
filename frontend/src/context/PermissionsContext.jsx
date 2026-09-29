@@ -11,13 +11,8 @@ import {
   normalizePermissionValue,
   roleLabel,
 } from '@/lib/permissions';
-import {
-  AUDIT_LIMIT,
-  loadAuditEntries,
-  loadMatrix,
-  persistAuditEntries,
-  persistMatrix,
-} from '@/services/accessControl/permissionsStore';
+import { AUDIT_LIMIT, hydrateMatrix } from '@/services/accessControl/permissionsStore';
+import { rolesApi } from '@/services/api/rolesApi';
 
 const PermissionsContext = createContext(null);
 
@@ -72,20 +67,36 @@ const buildAuditEntries = ({ actor, roleId, changedIds, previous, next, source }
 export const PermissionsProvider = ({ children }) => {
   const { user, role } = useAuth();
 
-  const [matrix, setMatrix] = useState(() => loadMatrix());
-  const [auditEntries, setAuditEntries] = useState(() => loadAuditEntries());
+  // BUG-011: the authoritative matrix is the server (public.role_permissions).
+  // Start from the registry defaults, then load the persisted overrides from the
+  // API. localStorage is no longer the source of truth.
+  const [matrix, setMatrix] = useState(() => hydrateMatrix(null));
+  const [auditEntries, setAuditEntries] = useState([]);
 
-  // Keep other tabs of the same admin session in step.
   useEffect(() => {
-    const onStorage = (event) => {
-      if (!event.key || event.key.startsWith('kalusagap.access.')) {
-        setMatrix(loadMatrix());
-        setAuditEntries(loadAuditEntries());
-      }
+    let active = true;
+    // The permission matrix endpoint is authenticated. Only load it once a user
+    // is signed in; before authentication, use the safe registry defaults so no
+    // unauthenticated request is issued (which would 401).
+    if (!user?.id) {
+      setMatrix(hydrateMatrix(null));
+      return () => {
+        active = false;
+      };
+    }
+    rolesApi
+      .getMatrix()
+      .then((serverMatrix) => {
+        if (active) setMatrix(hydrateMatrix(serverMatrix));
+      })
+      .catch(() => {
+        // On failure keep the safe registry defaults; never trust local storage.
+        if (active) setMatrix(hydrateMatrix(null));
+      });
+    return () => {
+      active = false;
     };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
+  }, [user?.id]);
 
   const permissionsForRole = useCallback(
     (roleId) => matrix[roleId] || defaultPermissionsForRole(roleId),
@@ -120,19 +131,20 @@ export const PermissionsProvider = ({ children }) => {
   const appendAudit = useCallback(
     (entries) => {
       if (entries.length === 0) return;
-      const next = [...entries, ...auditEntries].slice(0, AUDIT_LIMIT);
-      setAuditEntries(next);
-      persistAuditEntries(next);
+      // Session-local display only; the authoritative audit trail is recorded
+      // server-side (health_audit_logs) when the change is persisted.
+      setAuditEntries((current) => [...entries, ...current].slice(0, AUDIT_LIMIT));
     },
-    [auditEntries],
+    [],
   );
 
   /**
-   * Commit a role's draft permission map.
-   * Returns the changed permission ids so the caller can report the result.
+   * Commit a role's draft permission map. Persists to the server (admin-only,
+   * enforced by the API and RLS) and returns the changed permission ids so the
+   * caller can report the result. Throws if the server rejects the change.
    */
   const saveRolePermissions = useCallback(
-    (roleId, draft, options = {}) => {
+    async (roleId, draft, options = {}) => {
       const previous = permissionsForRole(roleId);
 
       const next = ALL_PERMISSION_IDS.reduce((acc, id) => {
@@ -143,9 +155,10 @@ export const PermissionsProvider = ({ children }) => {
       const changedIds = diffPermissionMaps(previous, next);
       if (changedIds.length === 0) return { changedIds: [], entries: [] };
 
-      const nextMatrix = { ...matrix, [roleId]: next };
-      setMatrix(nextMatrix);
-      persistMatrix(nextMatrix);
+      // Persist to the authoritative store FIRST; only reflect locally on success.
+      await rolesApi.updateRolePermissions(roleId, next);
+
+      setMatrix((current) => ({ ...current, [roleId]: next }));
 
       const entries = buildAuditEntries({
         actor: user,
@@ -159,7 +172,7 @@ export const PermissionsProvider = ({ children }) => {
 
       return { changedIds, entries };
     },
-    [appendAudit, matrix, permissionsForRole, user],
+    [appendAudit, permissionsForRole, user],
   );
 
   /** Restore a role to the defaults declared in the registry. */

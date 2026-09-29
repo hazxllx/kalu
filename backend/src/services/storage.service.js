@@ -51,6 +51,21 @@ export const uploadTransferDocument = async ({ file, transferRequestId, document
 };
 
 /**
+ * Upload a personnel-registration verification document to the private bucket
+ * under 'staff-documents/<requestId>/<documentId>.<ext>'. Returns the storage
+ * path (never a public URL); downloads are served through fresh signed URLs.
+ */
+export const uploadStaffDocument = async ({ file, requestId, documentId }) => {
+  const supabase = getServiceClient();
+  const path = storagePath(requestId, documentId, file.name, 'staff-documents');
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+    cacheControl: 'private, max-age=3600', upsert: false, contentType: file.type,
+  });
+  if (error) throw new Error(`Upload failed: ${error.message}`);
+  return { storagePath: path };
+};
+
+/**
  * Generate a fresh signed URL for an existing document.
  */
 export const getDocumentSignedUrl = async (storagePath) => {
@@ -74,4 +89,4 @@ export const deleteDocument = async (storagePath) => {
   return true;
 };
 
-export default { uploadDocument, uploadTransferDocument, getDocumentSignedUrl, deleteDocument, storagePath };
+export default { uploadDocument, uploadTransferDocument, uploadStaffDocument, getDocumentSignedUrl, deleteDocument, storagePath };

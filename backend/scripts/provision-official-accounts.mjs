@@ -52,13 +52,26 @@ const DEFAULT_SUPERVISOR_BARANGAY = 'San Isidro';
 // scope: 'municipality' -> set municipality_id (barangay must stay null);
 //        'barangay'     -> set municipality_id + barangay_id;
 //        'none'         -> admin/resident (no scope needed).
+//
+// BUG-026: account passwords are NEVER hardcoded. Each comes from its own
+// environment variable so no credential is committed to source. A missing
+// variable is a clear configuration error (see requirePassword()).
+const requirePassword = (envName) => {
+  const value = process.env[envName];
+  if (!value) {
+    console.error(`Missing ${envName} in backend/.env — set every official-account password before provisioning.`);
+    process.exit(1);
+  }
+  return value;
+};
+
 const ACCOUNTS = [
-  { email: 'admin@kalusagap.test',          password: 'SyDXk?jcsAd@kBG8vq',   role: 'admin',             status: 'active', scope: 'none',         fullName: 'System Administrator' },
-  { email: 'mho@kalusagap.test',            password: 'CS*GTe5dmJMRsEY8J#',   role: 'mho',               status: 'active', scope: 'municipality', fullName: 'Municipal Health Officer' },
-  { email: 'rhu.personnel@kalusagap.test',  password: '*YmXmTMr3MH3%DLFwU',   role: 'rhu_personnel',     status: 'active', scope: 'municipality', fullName: 'RHU Personnel' },
-  { email: 'phn@kalusagap.test',            password: 'RuoVRzXN55!!Jr7&bc',   role: 'phn',               status: 'active', scope: 'municipality', fullName: 'Public Health Nurse' },
-  { email: 'supervisor@kalusagap.test',     password: 'k43FyFHccggKE!epsc8E',  role: 'health_supervisor', status: 'active', scope: 'barangay',     fullName: 'Health Supervisor', barangay: DEFAULT_SUPERVISOR_BARANGAY },
-  { email: 'mollie.greenholt@forms.lat',    password: 'Holyshit12!',          role: 'resident',          status: 'active', scope: 'none',         fullName: 'Mollie Greenholt' },
+  { email: 'admin@kalusagap.test',          password: requirePassword('KALUSAGAP_ADMIN_PASSWORD'),      role: 'admin',             status: 'active', scope: 'none',         fullName: 'System Administrator' },
+  { email: 'mho@kalusagap.test',            password: requirePassword('KALUSAGAP_MHO_PASSWORD'),        role: 'mho',               status: 'active', scope: 'municipality', fullName: 'Municipal Health Officer' },
+  { email: 'rhu.personnel@kalusagap.test',  password: requirePassword('KALUSAGAP_RHU_PASSWORD'),        role: 'rhu_personnel',     status: 'active', scope: 'municipality', fullName: 'RHU Personnel' },
+  { email: 'phn@kalusagap.test',            password: requirePassword('KALUSAGAP_PHN_PASSWORD'),        role: 'phn',               status: 'active', scope: 'municipality', fullName: 'Public Health Nurse' },
+  { email: 'supervisor@kalusagap.test',     password: requirePassword('KALUSAGAP_SUPERVISOR_PASSWORD'), role: 'health_supervisor', status: 'active', scope: 'barangay',     fullName: 'Health Supervisor', barangay: DEFAULT_SUPERVISOR_BARANGAY },
+  { email: 'mollie.greenholt@forms.lat',    password: requirePassword('KALUSAGAP_RESIDENT_PASSWORD'),   role: 'resident',          status: 'active', scope: 'none',         fullName: 'Mollie Greenholt' },
 ];
 
 const mask = (pw) => (pw ? `${pw.slice(0, 2)}***${pw.slice(-2)} (len ${pw.length})` : '(empty)');

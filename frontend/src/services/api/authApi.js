@@ -8,6 +8,8 @@ import { api } from './apiClient';
 export const authApi = {
   login: (email, password) => api.post('/auth/login', { email, password }),
   me: () => api.get('/auth/me'),
+  // Self-service update of the signed-in account's own contact number.
+  updateMe: (payload) => api.patch('/auth/me', payload),
   logout: () => api.post('/auth/logout'),
 };
 

@@ -47,17 +47,18 @@ export default function MedicalCertificates() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return certificates
+    const has = (value) => String(value ?? "").toLowerCase().includes(q);
+    return (Array.isArray(certificates) ? certificates : [])
       .filter((c) => statusFilter === "All" || c.status === statusFilter)
       .filter(
         (c) =>
           !q ||
-          c.reference?.toLowerCase().includes(q) ||
-          c.patient?.toLowerCase().includes(q) ||
-          c.patientId?.toLowerCase().includes(q) ||
-          c.barangay?.toLowerCase().includes(q)
+          has(c.reference) ||
+          has(c.patient) ||
+          has(c.patientId) ||
+          has(c.barangay)
       )
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [certificates, query, statusFilter]);
 
   const statuses = ["All", ...(meta.statuses || [])];
@@ -231,10 +232,17 @@ export default function MedicalCertificates() {
       {statusTarget && (() => {
         const cert = certificates.find((c) => c.id === statusTarget);
         if (!cert) return null;
+        // Only the MHO may approve (the required signatory step). A PHN can
+        // submit for review, reject or cancel, but never mark a certificate
+        // MHO-approved — the backend enforces this too, so hiding the option
+        // keeps the UI honest instead of surfacing a 403.
+        const allowed = (meta.allowedTransitions?.[cert.status] || []).filter(
+          (s) => s !== "Approved" || user?.role === "mho"
+        );
         return (
           <StatusChangeModal
             certificate={cert}
-            allowed={meta.allowedTransitions?.[cert.status] || []}
+            allowed={allowed}
             onClose={() => setStatusTarget(null)}
             onSave={handleStatusChange}
           />

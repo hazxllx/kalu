@@ -165,7 +165,6 @@ export default function PersonnelRegistration() {
     civilStatus: "",
     // Step 2 — account & contact
     email: "",
-    username: "",
     contact: "",
     password: "",
     confirmPassword: "",
@@ -274,28 +273,26 @@ export default function PersonnelRegistration() {
   const goTo = (s) => { setErrors(computeErrors(s)); setStep(s); };
 
   const buildPayload = () => {
-    const documents = documentList
-      .filter((r) => form.documents[r.key])
-      .map((r) => ({
-        type: r.label,
-        name: form.documents[r.key].name,
-      }));
-
-    return {
-      // Backend field names (POST /api/staff-accounts/register).
-      fullName: composedName,
-      email: form.email.trim(),
-      phone: form.contact.trim(),
-      password: form.password,
-      role: form.roleId,
-      position: role?.label || "",
-      licenseNo: role?.licenseRequired ? form.licenseNumber.trim() : "",
-      licenseExpiry: role?.licenseRequired ? form.licenseExpiry : "",
-      // Names, not uuids — the API resolves them against the reference tables.
-      barangay: isBarangayScoped ? form.barangay : "",
-      facility: isBarangayScoped ? "" : form.facility,
-      documents,
-    };
+    // Submit as multipart so the ACTUAL verification files are uploaded (stored
+    // privately server-side), not just their labels. Each file is appended under
+    // `documents`; a parallel `documentTypes` JSON array carries the label for
+    // each file in the same order.
+    const uploaded = documentList.filter((r) => form.documents[r.key]);
+    const fd = new FormData();
+    fd.append("fullName", composedName);
+    fd.append("email", form.email.trim());
+    fd.append("phone", form.contact.trim());
+    fd.append("password", form.password);
+    fd.append("role", form.roleId);
+    fd.append("position", role?.label || "");
+    fd.append("licenseNo", role?.licenseRequired ? form.licenseNumber.trim() : "");
+    fd.append("licenseExpiry", role?.licenseRequired ? form.licenseExpiry : "");
+    // Names, not uuids — the API resolves them against the reference tables.
+    fd.append("barangay", isBarangayScoped ? form.barangay : "");
+    fd.append("facility", isBarangayScoped ? "" : form.facility);
+    fd.append("documentTypes", JSON.stringify(uploaded.map((r) => r.label)));
+    uploaded.forEach((r) => fd.append("documents", form.documents[r.key], form.documents[r.key].name));
+    return fd;
   };
 
   const submit = async () => {
@@ -490,14 +487,9 @@ export default function PersonnelRegistration() {
                 <Field label="Official Email Address" required error={errors.email} hint="Used to sign in once your account is verified.">
                   <input type="email" placeholder="name@example.gov.ph" value={form.email} onChange={set("email")} className={inputCls(errors.email)} />
                 </Field>
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                  <Field label="Contact Number" required error={errors.contact}>
-                    <input type="tel" placeholder="0917 123 4567" value={form.contact} onChange={set("contact")} className={inputCls(errors.contact)} />
-                  </Field>
-                  <Field label="Username" optional hint="Sign-in uses your official email; a username is optional.">
-                    <input type="text" placeholder="e.g. j.delacruz" value={form.username} onChange={set("username")} className={inputCls()} />
-                  </Field>
-                </div>
+                <Field label="Contact Number" required error={errors.contact}>
+                  <input type="tel" placeholder="0917 123 4567" value={form.contact} onChange={set("contact")} className={inputCls(errors.contact)} />
+                </Field>
 
                 <Field
                   label="Password"
@@ -703,7 +695,6 @@ export default function PersonnelRegistration() {
                 <ReviewBlock title="Account & Contact" onEdit={() => goTo(2)} items={[
                   ["Official Email", form.email || "—"],
                   ["Contact Number", form.contact || "—"],
-                  ["Username", form.username || "—"],
                 ]} />
 
                 <ReviewBlock title="Professional Information" onEdit={() => goTo(3)} items={[

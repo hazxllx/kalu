@@ -8,22 +8,38 @@ const STATUS_ICON = {
   "Needs Attention": AlertCircle,
 };
 
+// BUG-025: use the KALUSAGAP brand theme tokens (which the rest of the app uses
+// with the same translucent tint pattern and adapt correctly in dark mode)
+// instead of arbitrary hardcoded hex values that render identically — and with
+// poor contrast — in dark mode.
 const STATUS_BG = {
-  Healthy: "bg-[#28B463]/10",
-  Stable: "bg-[#2A7DE1]/10",
-  "Needs Attention": "bg-[#E67E22]/10",
+  Healthy: "bg-brand-green/10",
+  Stable: "bg-brand-accent/10",
+  "Needs Attention": "bg-brand-yellow/10",
 };
 
 const STATUS_BORDER = {
-  Healthy: "border-[#28B463]/20",
-  Stable: "border-[#2A7DE1]/20",
-  "Needs Attention": "border-[#E67E22]/20",
+  Healthy: "border-brand-green/20",
+  Stable: "border-brand-accent/20",
+  "Needs Attention": "border-brand-yellow/20",
 };
 
 const STATUS_ICON_BG = {
-  Healthy: "bg-[#28B463]/15 text-[#28B463]",
-  Stable: "bg-[#2A7DE1]/15 text-[#2A7DE1]",
-  "Needs Attention": "bg-[#E67E22]/15 text-[#E67E22]",
+  Healthy: "bg-brand-green/15 text-brand-green",
+  Stable: "bg-brand-accent/15 text-brand-accent",
+  "Needs Attention": "bg-brand-yellow/15 text-[#B07E00]",
+};
+
+const STATUS_ACCENT = {
+  Healthy: "text-brand-green",
+  Stable: "text-brand-accent",
+  "Needs Attention": "text-[#B07E00]",
+};
+
+const STATUS_BAR = {
+  Healthy: "bg-brand-green",
+  Stable: "bg-brand-accent",
+  "Needs Attention": "bg-brand-yellow",
 };
 
 export default function HealthStatusSummary({ summary }) {
@@ -45,7 +61,7 @@ export default function HealthStatusSummary({ summary }) {
               <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${STATUS_ICON_BG[s.status]}`}>
                 <Icon className="w-5 h-5" strokeWidth={1.8} />
               </div>
-              <div className="flex items-center gap-1" style={{ color: s.color }}>
+              <div className={`flex items-center gap-1 ${STATUS_ACCENT[s.status] || "text-brand-gray"}`}>
                 <TrendIcon className="w-4 h-4" />
                 <span className="text-sm font-body font-medium">{s.trend}</span>
               </div>
@@ -56,8 +72,8 @@ export default function HealthStatusSummary({ summary }) {
               <span className="text-sm text-brand-gray mb-1">residents</span>
             </div>
             <div className="flex items-center gap-2 mt-2">
-              <div className="flex-1 h-1.5 bg-white/60 rounded-full overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${s.percentage}%`, background: s.color }} />
+              <div className="flex-1 h-1.5 bg-black/10 dark:bg-white/15 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full ${STATUS_BAR[s.status] || "bg-brand-accent"}`} style={{ width: `${s.percentage}%` }} />
               </div>
               <span className="text-xs font-stat font-bold text-brand-ink">{s.percentage}%</span>
             </div>

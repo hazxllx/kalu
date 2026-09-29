@@ -30,10 +30,10 @@ let referrals; // id -> referral
 let identityMatch; // optional resident returned by findResidentByIdentity
 let seq;
 
-const RHU = { id: 'rhu-1', role: 'rhu_personnel', name: 'RHU One' };
-const PHN = { id: 'phn-1', role: 'phn', name: 'PHN One' };
+const RHU = { id: 'rhu-1', role: 'rhu_personnel', name: 'RHU One', municipalityId: 'mun-1' };
+const PHN = { id: 'phn-1', role: 'phn', name: 'PHN One', municipalityId: 'mun-1' };
 const RESIDENT_USER = { id: 'ru-1', role: 'resident-limited', name: 'Res' };
-const HS = { id: 'hs-1', role: 'health_supervisor', name: 'HS', barangay: 'San Isidro' };
+const HS = { id: 'hs-1', role: 'health_supervisor', name: 'HS', barangay: 'San Isidro', barangayId: 'brgy-si', municipalityId: 'mun-1' };
 
 const goodVitals = (over = {}) => ({
   bp: '120/80', hr: 80, rr: 18, o2sat: 98, temperature: 37,
@@ -82,7 +82,7 @@ beforeEach(() => {
   referrals = new Map();
   identityMatch = null;
   seq = 0;
-  residents.set('RES-1', { id: 'RES-1', firstName: 'Juan', lastName: 'Dela Cruz', barangay: 'San Isidro' });
+  residents.set('RES-1', { id: 'RES-1', firstName: 'Juan', lastName: 'Dela Cruz', barangay: 'San Isidro', barangayId: 'brgy-si', municipalityId: 'mun-1' });
 });
 
 const createTriage = (user = RHU, visitOver = {}) =>
@@ -137,6 +137,38 @@ test('7+8. PHN adds findings/treatment then completes', async () => {
   const completed = await phn.completeSubmission({ id: sub.id, user: PHN });
   assert.equal(completed.status, 'completed');
   assert.ok(completed.completedAt);
+});
+
+test('BUG-008. the full triage -> queue -> checkup -> completion state PERSISTS across a reload', async () => {
+  // Simulates: RHU triages, PHN works the queue, then a fresh session (or a
+  // browser refresh / another device) re-reads the record from the repository.
+  const sub = await createTriage();
+  await intake.submitSubmission({ id: sub.id, user: RHU });
+
+  // "Reload" 1 — a brand-new read sees the record in the PHN queue.
+  const afterSubmit = await repository.getVisit(sub.id);
+  assert.equal(afterSubmit.status, 'submitted');
+
+  await phn.receiveSubmission({ id: sub.id, user: PHN });
+  await phn.markInReview({ id: sub.id, user: PHN });
+  await phn.updateSubmissionForPhn({
+    id: sub.id,
+    patch: { findings: 'Persisted findings', treatmentGiven: 'Persisted treatment', recommendation: 'Follow-up' },
+    user: PHN,
+  });
+  await phn.completeSubmission({ id: sub.id, user: PHN });
+
+  // "Reload" 2 — a fresh read (new session) still sees the completed clinical
+  // record with its findings/treatment. Nothing lived only in the browser.
+  const reloaded = await repository.getVisit(sub.id);
+  assert.equal(reloaded.status, 'completed');
+  assert.equal(reloaded.findings, 'Persisted findings');
+  assert.equal(reloaded.treatmentGiven, 'Persisted treatment');
+  assert.ok(reloaded.completedAt);
+
+  // And it appears in the PHN queue read used by the frontend hook.
+  const queue = await phn.listQueue({ user: PHN });
+  assert.ok(queue.rows.some((r) => r.id === sub.id && r.status === 'completed'));
 });
 
 test('8b. completion is blocked until findings AND treatment exist', async () => {
@@ -232,6 +264,37 @@ test('12d/scope. a new resident with no barangay is forced to the scoped callers
   });
   const created = residents.get(sub.residentId);
   assert.equal(created.barangay, 'San Isidro');
+});
+
+/* ---------------------- BUG-002 cross-scope PHI reads ------------------- */
+
+const OTHER_BRGY_RES = { id: 'RES-9', firstName: 'Out', lastName: 'OfBarangay', barangay: 'Cadlan', barangayId: 'brgy-cadlan', municipalityId: 'mun-1' };
+const OTHER_MUNI_RES = { id: 'RES-8', firstName: 'Out', lastName: 'OfMunicipality', barangay: 'San Jose', barangayId: 'brgy-sj', municipalityId: 'mun-2' };
+
+test('BUG-002. a Health Supervisor cannot view a submission from another barangay (404)', async () => {
+  residents.set(OTHER_BRGY_RES.id, OTHER_BRGY_RES);
+  visits.set('SUB-B', { id: 'SUB-B', residentId: OTHER_BRGY_RES.id, recordedById: 'phn-1', status: 'submitted' });
+  await assert.rejects(() => phn.viewSubmission({ id: 'SUB-B', user: HS }), (e) => e.statusCode === 404);
+});
+
+test('BUG-002. a municipality role cannot view a submission from another municipality (404)', async () => {
+  residents.set(OTHER_MUNI_RES.id, OTHER_MUNI_RES);
+  visits.set('SUB-M', { id: 'SUB-M', residentId: OTHER_MUNI_RES.id, recordedById: 'mho-2', status: 'submitted' });
+  await assert.rejects(() => phn.viewSubmission({ id: 'SUB-M', user: PHN }), (e) => e.statusCode === 404);
+});
+
+test('BUG-002. a Health Supervisor cannot read a referral from another barangay (404)', async () => {
+  referrals.set('REF-X', { id: 'REF-X', residentId: OTHER_BRGY_RES.id, visitId: 'SUB-X', resident: OTHER_BRGY_RES });
+  await assert.rejects(() => phn.getReferral({ id: 'REF-X', user: HS }), (e) => e.statusCode === 404);
+});
+
+test('BUG-002. listReferrals is filtered to the caller scope', async () => {
+  referrals.set('REF-IN', { id: 'REF-IN', residentId: 'RES-1', visitId: 'SUB-1', resident: residents.get('RES-1') });
+  referrals.set('REF-OUT', { id: 'REF-OUT', residentId: OTHER_MUNI_RES.id, visitId: 'SUB-8', resident: OTHER_MUNI_RES });
+  const result = await phn.listReferrals({ user: PHN });
+  const ids = result.rows.map((r) => r.id);
+  assert.ok(ids.includes('REF-IN'));
+  assert.ok(!ids.includes('REF-OUT'));
 });
 
 /* --------------------------------- BMI ---------------------------------- */

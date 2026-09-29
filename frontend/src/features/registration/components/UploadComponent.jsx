@@ -15,7 +15,7 @@ export default function UploadComponent({
   onRemove,
   accept = ACCEPTED,
   allowedExts = DEFAULT_EXTS,
-  hint,
+  hint = "",
 }) {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");

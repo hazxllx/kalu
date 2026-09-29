@@ -1,5 +1,6 @@
 import { getServiceClient } from '../config/supabase.js';
 import { approverLabelForRole } from '../config/staffApprovals.js';
+import { isPhonePH, normalizePhone } from '../validators/common.js';
 import ApiError from '../utils/apiError.js';
 
 /**
@@ -24,6 +25,7 @@ const PROFILE_SELECT = [
   'position',
   'license_no',
   'contact',
+  'created_at',
   'barangay:barangays(name)',
   'municipality:municipalities(name)',
 ].join(',');
@@ -45,6 +47,7 @@ const PROFILE_BASE_SELECT = [
   'position',
   'license_no',
   'contact',
+  'created_at',
 ].join(',');
 
 /** The `profiles` table itself is missing (migrations not applied here). */
@@ -134,7 +137,57 @@ export const profileToSessionUser = (profile) => ({
   barangay: profile.barangay?.name ?? null,
   facilityId: profile.facility_id ?? null,
   position: profile.position || '',
+  // Self-service account details surfaced to the account owner (Settings page):
+  // editable contact number, plus read-only registration date and a stable
+  // account reference. These are the account holder's OWN values only.
+  contact: profile.contact || '',
+  createdAt: profile.created_at ?? null,
+  referenceNumber: profile.id,
 });
+
+/**
+ * Self-service update of the authenticated user's OWN contact number.
+ *
+ * Runs on the service-role client (RLS is bypassed) but is strictly scoped to
+ * `id = user.id`, so it can only ever touch the caller's own profile row and
+ * never role/status/municipality/barangay/facility/verification. Returns the
+ * refreshed session user so the client reflects the persisted value.
+ */
+export const updateOwnContact = async ({ user, contact }) => {
+  if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+  const raw = String(contact ?? '').trim();
+  // Allow clearing the number, otherwise require a valid PH mobile.
+  if (raw !== '' && !isPhonePH(raw)) {
+    throw ApiError.badRequest('Enter a valid Philippine mobile number (e.g. 0917 123 4567).');
+  }
+  const value = raw === '' ? '' : normalizePhone(raw);
+
+  const supabase = getServiceClient();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ contact: value })
+    .eq('id', user.id)
+    .select(PROFILE_SELECT)
+    .maybeSingle();
+
+  if (error) {
+    // Retry without the embedded lookups if PostgREST cannot resolve them.
+    if (isEmbeddedResourceUnavailable(error)) {
+      const retry = await supabase
+        .from('profiles')
+        .update({ contact: value })
+        .eq('id', user.id)
+        .select(PROFILE_BASE_SELECT)
+        .maybeSingle();
+      if (retry.error) throw ApiError(500, 'Could not update your contact number. Please try again.');
+      if (!retry.data) throw ApiError.notFound('Your profile was not found.');
+      return profileToSessionUser(retry.data);
+    }
+    throw ApiError(500, 'Could not update your contact number. Please try again.');
+  }
+  if (!data) throw ApiError.notFound('Your profile was not found.');
+  return profileToSessionUser(data);
+};
 
 /**
  * Account-state gate shared by login and the authenticate middleware.
@@ -167,4 +220,4 @@ export const loadActiveProfile = async (userId) => {
   return result;
 };
 
-export default { loadProfile, loadActiveProfile, effectiveRole, isStaffRole, profileToSessionUser };
+export default { loadProfile, loadActiveProfile, effectiveRole, isStaffRole, profileToSessionUser, updateOwnContact };

@@ -16,6 +16,7 @@ import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
 import { isPhonePH } from '../validators/common.js';
 import { computeBMI } from '../utils/bmi.js';
+import { riskFromVitals } from './analytics.service.js';
 
 const SELF_ROLES = ['resident', 'resident-limited'];
 
@@ -101,6 +102,17 @@ export const getOwnHealthRecords = async ({ user } = {}) => {
     .map(toResidentRecord)
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
+  // Health risk level for the resident dashboard. It reuses the SAME
+  // KALUSAGAP risk heuristic used by the staff analytics (riskFromVitals) — no
+  // separate frontend formula — applied to the most recent completed visit's
+  // vitals. Null when there is no vitals-bearing consultation to assess.
+  const latestVisit = (result.rows || [])
+    .slice()
+    .sort((a, b) => String(b.visitDate || '').localeCompare(String(a.visitDate || '')))[0] || null;
+  const hasVitals = latestVisit?.vitals && (latestVisit.vitals.bp || latestVisit.vitals.o2sat);
+  const riskLevel = hasVitals ? riskFromVitals(latestVisit.vitals) : null;
+  const lastConsultationDate = consultations[0]?.date || '';
+
   return {
     resident: {
       name: [resident.firstName, resident.middleName, resident.lastName, resident.suffix]
@@ -113,6 +125,8 @@ export const getOwnHealthRecords = async ({ user } = {}) => {
       sex: resident.sex || '',
       verificationStatus: resident.verificationStatus || '',
     },
+    riskLevel,
+    lastConsultationDate,
     consultations,
   };
 };

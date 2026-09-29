@@ -21,6 +21,10 @@ import residentFollowupsRoutes from './residentFollowups.routes.js';
 import referralsRoutes from './referrals.routes.js';
 import m1Routes from './m1.routes.js';
 import usersRoutes from './users.routes.js';
+import reportsRoutes from './reports.routes.js';
+import healthServicesRoutes from './healthServices.routes.js';
+import rolesRoutes from './roles.routes.js';
+import municipalSubmissionsRoutes from './municipalSubmissions.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -88,6 +92,14 @@ router.use('/verifications', verificationsRoutes);
 // Supabase-backed reads + role/status/profile updates on the `profiles` table.
 router.use('/users', usersRoutes);
 
+// Role & permission matrix (BUG-011) — authoritative access-control config in
+// public.role_permissions. Read by any staff (drives UI), written by admins.
+router.use('/roles', rolesRoutes);
+
+// MHO municipal submission review (BUG-010) — persistent review decisions in
+// public.municipal_submission_reviews (MHO-only writes, municipality-scoped).
+router.use('/municipal-submissions', municipalSubmissionsRoutes);
+
 // Household Profiling — real Supabase-backed workflow: BHW
 // collection, Health Supervisor verification, server-computed risk.
 router.use('/households', householdsRoutes);
@@ -102,7 +114,15 @@ router.use('/triage', createResourceRouter('triage', { readRoles: FEATURE_ROLES.
 // mount: it would only shadow the real endpoint with a misleading 501.
 
 // Monitoring / aggregate information
-router.use('/reports', createResourceRouter('reports', { readRoles: FEATURE_ROLES.reports }));
+// Report submission workflow — real Supabase-backed table (public.reports):
+// role-routed delivery (PHN -> MHO, Health Supervisor -> RHU) with per-recipient
+// scope and notifications. Replaces the previous 501 stub.
+router.use('/reports', reportsRoutes);
+
+// Health services catalog + personnel assignment — real Supabase-backed tables
+// (public.health_services + public.health_service_assignments). Scoped by
+// municipality/facility/barangay; an assigned service follows the assignee.
+router.use('/health-services', healthServicesRoutes);
 
 // Early Warning analytics — barangay scope enforced from the session
 router.use('/analytics', analyticsRoutes);

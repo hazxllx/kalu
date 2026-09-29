@@ -52,7 +52,7 @@ const inputCls = (error) =>
   }`;
 const labelCls = "text-sm font-medium text-brand-ink";
 
-function Field({ label, required, error, hint, children }) {
+function Field({ label, required = false, error = "", hint = "", children }) {
   return (
     <div>
       <label className={labelCls}>

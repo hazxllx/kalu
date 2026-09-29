@@ -53,6 +53,11 @@ const profileToFrontendUser = (profileUser) => ({
   municipalityId: profileUser.municipalityId ?? null,
   municipality: profileUser.municipality ?? null,
   facilityId: profileUser.facilityId ?? null,
+  // Self-service account details (Settings page): own editable contact number,
+  // read-only registration date and stable account reference.
+  contact: profileUser.contact ?? '',
+  createdAt: profileUser.createdAt ?? null,
+  referenceNumber: profileUser.referenceNumber ?? profileUser.id ?? null,
 });
 
 /**

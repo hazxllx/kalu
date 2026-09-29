@@ -3,7 +3,6 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { deleteDocument, getDocumentSignedUrl, uploadTransferDocument } from './storage.service.js';
 import { validateDocumentUpload } from '../validators/documents.validators.js';
-import { assignedBarangay } from '../config/scope.js';
 import { notifyResident } from './notifications.service.js';
 
 /**
@@ -457,17 +456,43 @@ const assertReviewer = (user) => {
   }
 };
 
+/**
+ * BUG-005: is this transfer request inside the reviewer's scope?
+ *   admin / mho / phn  -> municipality-wide (single-municipality deployment)
+ *   health_supervisor  -> only requests whose ORIGIN or DESTINATION barangay is
+ *                         their assigned barangay
+ * Scope is derived from the authenticated session, never a client id, so a
+ * barangay-scoped reviewer can neither list nor open another barangay's request.
+ */
+const transferInReviewerScope = (user, request) => {
+  if (!user) return false;
+  if (['admin', 'mho', 'phn'].includes(user.role)) return true;
+  if (user.role === 'health_supervisor') {
+    if (!user.barangayId) return false;
+    const from = field(request, 'from_barangay_id', 'fromBarangayId');
+    const to = field(request, 'to_barangay_id', 'toBarangayId');
+    return from === user.barangayId || to === user.barangayId;
+  }
+  return false;
+};
+
 export const listQueue = async ({ user, status = 'pending' }) => {
   assertReviewer(user);
   const result = await repository.listTransferRequests({ status });
   const { byId } = await barangayIndex(user?.municipalityId);
-  return { ...result, rows: result.rows.map((row) => shapeRequest(row, byId)) };
+  // BUG-005: a barangay-scoped reviewer only sees requests touching their barangay.
+  const rows = result.rows
+    .filter((row) => transferInReviewerScope(user, row))
+    .map((row) => shapeRequest(row, byId));
+  return { ...result, rows, total: rows.length };
 };
 
 export const getForReview = async ({ user, requestId }) => {
   assertReviewer(user);
   const request = await repository.getTransferRequest(requestId);
   if (!request) throw ApiError.notFound('Transfer request not found.');
+  // BUG-005: out-of-scope requests return 404 even with a known id.
+  if (!transferInReviewerScope(user, request)) throw ApiError.notFound('Transfer request not found.');
   const resident = field(request, 'resident_id', 'residentId')
     ? await repository.getResident(field(request, 'resident_id', 'residentId'))
     : null;
@@ -502,17 +527,10 @@ export const approve = async ({ user, requestId }) => {
   const resident = residentId ? await repository.getResident(residentId) : null;
   if (!resident) throw ApiError.conflict('The resident for this transfer request could not be found.');
 
-  // A barangay-scoped reviewer may only act on transfers touching their own
-  // barangay (the origin or the destination).
-  const scope = assignedBarangay(user);
-  if (scope) {
-    const { byId } = await barangayIndex(resident.municipalityId || user?.municipalityId);
-    const fromName = byId.get(field(request, 'from_barangay_id', 'fromBarangayId')) || '';
-    const toName = byId.get(field(request, 'to_barangay_id', 'toBarangayId')) || '';
-    const s = scope.toLowerCase();
-    if (fromName.toLowerCase() !== s && toName.toLowerCase() !== s) {
-      throw ApiError.forbidden('This transfer request is outside your assigned barangay.');
-    }
+  // BUG-005: a barangay-scoped reviewer may only act on transfers touching their
+  // own barangay (origin or destination). Derived from the session id, not names.
+  if (!transferInReviewerScope(user, request)) {
+    throw ApiError.forbidden('This transfer request is outside your assigned barangay.');
   }
 
   const result = await repository.approveTransferRequest({ requestId, reviewerId: user.id });
@@ -537,6 +555,8 @@ export const reject = async ({ user, requestId, reason }) => {
   if (!String(reason || '').trim()) throw ApiError.badRequest('A rejection reason is required.');
   const request = await repository.getTransferRequest(requestId);
   if (!request) throw ApiError.notFound('Transfer request not found.');
+  // BUG-005: a barangay-scoped reviewer may only reject a request in their scope.
+  if (!transferInReviewerScope(user, request)) throw ApiError.notFound('Transfer request not found.');
   if (!OPEN_STATUSES.has(request.status)) {
     throw ApiError.conflict('This transfer request is no longer awaiting review.');
   }

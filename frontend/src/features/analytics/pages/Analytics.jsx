@@ -16,6 +16,7 @@ import {
   comparisonMaternalTrend, comparisonChildHealth, comparisonSeniorTrend,
   comparisonProgramParticipation, healthStatusSummary, recentHealthAlerts,
 } from "@/services/local/dashboardData";
+import { BARANGAYS } from "@/lib/barangays";
 
 const CHART_COLORS = { "San Antonio": "#28B463", "San Isidro": "#2A7DE1", "Old San Roque": "#E67E22" };
 const DONUT_COLORS = ["#0B5CAD", "#2A7DE1", "#28B463", "#F5B400", "#E74C3C"];
@@ -42,7 +43,7 @@ function ChartCard({ title, subtitle, children, delay = 0 }) {
 function AreaGradients({ idPrefix }) {
   return (
     <defs>
-      {["San Antonio", "San Isidro", "Old San Roque"].map((name, i) => (
+      {BARANGAYS.map((name, i) => (
         <linearGradient key={i} id={`grad-${idPrefix}-${i}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={CHART_COLORS[name]} stopOpacity={0.25} />
           <stop offset="100%" stopColor={CHART_COLORS[name]} stopOpacity={0} />

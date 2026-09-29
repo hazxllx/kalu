@@ -24,3 +24,8 @@ export { auditTrailApi, systemLogsApi } from './observabilityApi';
 export { followUpsApi, tclApi, maternalApi, immunizationsApi, notificationsApi } from './operationalApi';
 export { residentFollowUpsApi } from './residentFollowUpsApi';
 export { m1Api } from './m1Api';
+export { reportsApi } from './reportsApi';
+export { healthServicesApi } from './healthServicesApi';
+export { rolesApi } from './rolesApi';
+export { householdRiskApi } from './householdRiskApi';
+export { municipalSubmissionsApi } from './municipalSubmissionsApi';

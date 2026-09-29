@@ -42,6 +42,7 @@ export default function HouseholdVerificationReviewDrawer({
   household,
   reviewerName,
   reviewerRoleLabel,
+  saving = false,
   onClose,
   onDecision,
 }) {
@@ -213,7 +214,8 @@ export default function HouseholdVerificationReviewDrawer({
               <div className="space-y-2.5">
                 <button
                   onClick={() => setShowVerifyConfirm(true)}
-                  className="flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue py-3 text-sm font-medium text-white shadow-soft transition-colors hover:bg-brand-dark"
+                  disabled={saving}
+                  className="flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue py-3 text-sm font-medium text-white shadow-soft transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <CheckCircle2 className="w-4 h-4" /> Verify Household
                 </button>
@@ -224,7 +226,8 @@ export default function HouseholdVerificationReviewDrawer({
                     setRemarks("");
                     setError("");
                   }}
-                  className="flex w-full items-center justify-center gap-2 rounded-btn border border-brand-danger/30 bg-brand-danger/5 py-3 text-sm font-medium text-brand-danger transition-colors hover:bg-brand-danger/10"
+                  disabled={saving}
+                  className="flex w-full items-center justify-center gap-2 rounded-btn border border-brand-danger/30 bg-brand-danger/5 py-3 text-sm font-medium text-brand-danger transition-colors hover:bg-brand-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <XCircle className="w-4 h-4" /> Return for Correction
                 </button>
@@ -285,9 +288,10 @@ export default function HouseholdVerificationReviewDrawer({
                   </button>
                   <button
                     onClick={confirmReturn}
-                    className="flex items-center gap-2 rounded-btn bg-brand-danger px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-danger/90"
+                    disabled={saving}
+                    className="flex items-center gap-2 rounded-btn bg-brand-danger px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-danger/90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <XCircle className="w-4 h-4" /> Confirm Return
+                    <XCircle className="w-4 h-4" /> {saving ? "Saving…" : "Confirm Return"}
                   </button>
                 </div>
               </div>
@@ -348,9 +352,10 @@ export default function HouseholdVerificationReviewDrawer({
                       reviewedAt: new Date().toISOString(),
                     })
                   }
-                  className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+                  disabled={saving}
+                  className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Verify Household
+                  {saving ? "Saving…" : "Verify Household"}
                 </button>
               </div>
             </Card>

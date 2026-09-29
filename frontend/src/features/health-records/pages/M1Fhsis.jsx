@@ -111,7 +111,7 @@ export default function M1Fhsis() {
           id: r.id,
           name: fullName(r) || r.name || r.id,
           barangay: r.barangay,
-          age: r.birth_date ? Math.floor((Date.now() - new Date(r.birth_date)) / 31557600000) : undefined,
+          age: r.birth_date ? Math.floor((Date.now() - new Date(r.birth_date).getTime()) / 31557600000) : undefined,
           sex: r.sex,
           birth_date: r.birth_date,
         }));
@@ -561,7 +561,7 @@ function RecordModal({ catalog, residents, onClose, onSaved }) {
   const [code, setCode] = useState(sectionInds[0]?.code || "");
   const [resident, setResident] = useState(null);
   const [recordDate, setRecordDate] = useState(todayStr());
-  const [value, setValue] = useState(1);
+  const [value, setValue] = useState("1");
   const [sex, setSex] = useState("");
   const [ageGroup, setAgeGroup] = useState("");
   const [remarks, setRemarks] = useState("");

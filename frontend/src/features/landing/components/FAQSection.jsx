@@ -11,12 +11,12 @@ const faqs = [
   {
     question: "Is there a fee for registration?",
     answer:
-      "No. Registration and all frontline services listed in this portal are provided free of charge. No representative of this office is authorised to collect payment for enrolment.",
+      "No. Registration and all frontline services listed in this portal are provided free of charge. No representative of this office is authorized to collect payment for enrolment.",
   },
   {
     question: "How is my personal and health information protected?",
     answer:
-      "Records are processed in accordance with the Data Privacy Act of 2012 (R.A. 10173). Access is limited to authorised health personnel assigned to your barangay, and every record access is logged in the system audit trail.",
+      "Records are processed in accordance with the Data Privacy Act of 2012 (R.A. 10173). Access is limited to authorized health personnel assigned to your barangay, and every record access is logged in the system audit trail.",
   },
   {
     question: "How long does account verification take?",

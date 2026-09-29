@@ -4,6 +4,7 @@ import {
   getRiskConfig,
   RISK_WORKFLOW_STATUSES,
 } from "@/lib/householdRisk";
+import { householdRiskApi } from "@/services/api/householdRiskApi";
 
 /**
  * Household Risk Cluster store.
@@ -105,16 +106,29 @@ const updateRecord = (id, patch) => {
   emit();
 };
 
+/**
+ * BUG-009: persist the workflow change to PostgreSQL
+ * (public.household_risk_workflow) so follow-up/assignment/escalation/
+ * resolution survive refresh, logout/login and other devices. The local cache
+ * is only an optimistic mirror; the database is authoritative. Failures are
+ * surfaced to the console (and the write can be retried) without corrupting the
+ * on-screen state.
+ */
+const persistWorkflow = (id, workflow) => {
+  householdRiskApi.saveWorkflow(id, workflow).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error(`Failed to persist household risk workflow for ${id}:`, err?.message || err);
+  });
+};
+
 /** Record a follow-up for a household (updates workflow status + attempt count). */
 const recordFollowUp = (id, { status = "Follow-up Scheduled", notes = "" } = {}) => {
   const h = read().find((x) => x.id === id);
   if (!h) return null;
-  updateRecord(id, {
-    workflowStatus: status,
-    followUpCount: (h.followUpCount || 0) + 1,
-    lastFollowUpAt: new Date().toISOString().slice(0, 10),
-    lastNote: notes,
-  });
+  const followUpCount = (h.followUpCount || 0) + 1;
+  const lastFollowUpAt = new Date().toISOString().slice(0, 10);
+  updateRecord(id, { workflowStatus: status, followUpCount, lastFollowUpAt, lastNote: notes });
+  persistWorkflow(id, { workflowStatus: status, followUpCount, lastFollowUpAt, lastNote: notes });
   return getClusters().find((x) => x.id === id);
 };
 
@@ -122,10 +136,9 @@ const recordFollowUp = (id, { status = "Follow-up Scheduled", notes = "" } = {})
 const escalateHousehold = (id, { reason = "", assignment = "Public Health Nurse" } = {}) => {
   const h = read().find((x) => x.id === id);
   if (!h) return null;
-  updateRecord(id, {
-    workflowStatus: "Escalated",
-    escalation: { reason, assignment, at: new Date().toISOString() },
-  });
+  const escalation = { reason, assignment, at: new Date().toISOString() };
+  updateRecord(id, { workflowStatus: "Escalated", escalation });
+  persistWorkflow(id, { workflowStatus: "Escalated", escalation });
   return getClusters().find((x) => x.id === id);
 };
 
@@ -133,11 +146,10 @@ const escalateHousehold = (id, { reason = "", assignment = "Public Health Nurse"
 const assignWorker = (id, { worker = "", role = "Barangay Health Worker" } = {}) => {
   const h = read().find((x) => x.id === id);
   if (!h) return null;
-  updateRecord(id, {
-    assignedWorker: worker || h.assignedWorker || "",
-    assignedWorkerRole: role,
-    assignmentAt: new Date().toISOString(),
-  });
+  const assignedWorker = worker || h.assignedWorker || "";
+  const assignmentAt = new Date().toISOString();
+  updateRecord(id, { assignedWorker, assignedWorkerRole: role, assignmentAt });
+  persistWorkflow(id, { assignedWorker, assignedWorkerRole: role, assignmentAt });
   return getClusters().find((x) => x.id === id);
 };
 
@@ -147,11 +159,10 @@ const resolveHousehold = (id, { outcome = RISK_WORKFLOW_STATUSES[0] } = {}) => {
   if (!h) return null;
   const now = new Date();
   const month = now.toLocaleString("en-US", { month: "long" });
-  const risk = computeHouseholdRisk({ indicatorKeys: h.indicatorKeys });
-  updateRecord(id, {
-    workflowStatus: outcome,
-    history: [...(h.history || []), { month, year: now.getFullYear(), level: risk.level, count: risk.count }],
-  });
+  const risk = computeHouseholdRisk({ indicatorKeys: h.indicatorKeys, config: getRiskConfig() });
+  const history = [...(h.history || []), { month, year: now.getFullYear(), level: risk.level, count: risk.count }];
+  updateRecord(id, { workflowStatus: outcome, history });
+  persistWorkflow(id, { workflowStatus: outcome, history });
   return getClusters().find((x) => x.id === id);
 };
 

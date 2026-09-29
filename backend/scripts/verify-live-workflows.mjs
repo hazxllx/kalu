@@ -60,13 +60,23 @@ const api = async (token, path, options = {}) => {
   return { status: res.status, body };
 };
 
-const CRED = {
-  admin: ['admin@kalusagap.test', 'SyDXk?jcsAd@kBG8vq', 'admin'],
-  mho: ['mho@kalusagap.test', 'CS*GTe5dmJMRsEY8J#', 'mho'],
-  rhu: ['rhu.personnel@kalusagap.test', '*YmXmTMr3MH3%DLFwU', 'rhu_personnel'],
-  phn: ['phn@kalusagap.test', 'RuoVRzXN55!!Jr7&bc', 'phn'],
-  supervisor: ['supervisor@kalusagap.test', 'QWZ3r5HpMg%pMpAf2B', 'health_supervisor'],
+// BUG-026: live-account credentials come from the environment, never source.
+const reqEnv = (name) => {
+  const v = process.env[name];
+  if (!v) { console.error(`Missing ${name} in the environment — required to run live verification.`); process.exit(1); }
+  return v;
 };
+const CRED = {
+  admin: ['admin@kalusagap.test', reqEnv('KALUSAGAP_ADMIN_PASSWORD'), 'admin'],
+  mho: ['mho@kalusagap.test', reqEnv('KALUSAGAP_MHO_PASSWORD'), 'mho'],
+  rhu: ['rhu.personnel@kalusagap.test', reqEnv('KALUSAGAP_RHU_PASSWORD'), 'rhu_personnel'],
+  phn: ['phn@kalusagap.test', reqEnv('KALUSAGAP_PHN_PASSWORD'), 'phn'],
+  supervisor: ['supervisor@kalusagap.test', reqEnv('KALUSAGAP_SUPERVISOR_PASSWORD'), 'health_supervisor'],
+};
+
+// Ephemeral password for the throwaway QA applicant accounts this script
+// creates; sourced from the environment so no credential is committed.
+const QA_APPLICANT_PASSWORD = reqEnv('KALUSAGAP_QA_APPLICANT_PASSWORD');
 
 const run = async () => {
   const T = {};
@@ -86,7 +96,7 @@ const run = async () => {
 
   // ------------------------------------------------- 2. personnel registration
   const email = `bhw.qa.${Date.now()}@kalusagap.test`;
-  const password = 'BhwQa!2026secure';
+  const password = QA_APPLICANT_PASSWORD;
   const reg = await api(null, '/staff-accounts/register', {
     method: 'POST',
     body: JSON.stringify({
@@ -105,7 +115,7 @@ const run = async () => {
     method: 'POST',
     body: JSON.stringify({
       fullName: 'QA Unapprovable PHN', email: `qa.unapprovable.${Date.now()}@kalusagap.test`,
-      password: 'BhwQa!2026secure', phone: '09171234567', role: 'phn',
+      password: QA_APPLICANT_PASSWORD, phone: '09171234567', role: 'phn',
     }),
   });
   check('registration rejects PHN (no operational approver)', unapprovable.status === 400, `status=${unapprovable.status}`);
@@ -155,13 +165,13 @@ const run = async () => {
   const rejectEmail = `bhw.reject.${Date.now()}@kalusagap.test`;
   const rej = await api(null, '/staff-accounts/register', {
     method: 'POST',
-    body: JSON.stringify({ fullName: 'QA Rejected BHW', email: rejectEmail, password: 'BhwQa!2026secure', role: 'bhw', barangayId: brgyId }),
+    body: JSON.stringify({ fullName: 'QA Rejected BHW', email: rejectEmail, password: QA_APPLICANT_PASSWORD, role: 'bhw', barangayId: brgyId }),
   });
   const rejId = rej.body?.data?.request?.id;
   const rejected = await api(T.supervisor, `/staff-accounts/${rejId}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'Incomplete barangay assignment' }) });
   check('Health Supervisor rejects a BHW with a reason', rejected.status === 200 && rejected.body?.data?.request?.status === 'rejected', JSON.stringify(rejected.body?.error || ''));
   check('Rejection reason is stored and returned', Boolean(rejected.body?.data?.request?.rejectionReason));
-  const rejToken = await signIn(rejectEmail, 'BhwQa!2026secure');
+  const rejToken = await signIn(rejectEmail, QA_APPLICANT_PASSWORD);
   const rejMe = await api(rejToken, '/auth/me');
   check('REJECTED BHW cannot access the protected system (403)', rejMe.status === 403, `status=${rejMe.status}`);
 

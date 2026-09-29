@@ -158,6 +158,18 @@ export default function MidwifeFollowUp() {
   const assignedBarangay = supervisorScope && supervisorScope.level === "barangay" ? supervisorScope.assignedBarangay : null;
   const inScope = (f) => !assignedBarangay || f.barangay === assignedBarangay;
 
+  // A FOLLOW-UP happens within the Health Supervisor's own assigned barangay
+  // context, so its venue is their assigned Barangay Health Station (or a Home
+  // Visit inside that barangay) — never an arbitrary facility/barangay. This is
+  // distinct from a REFERRAL, which routes a resident to another facility and
+  // therefore keeps its own destination-facility selection. The follow-up
+  // record's barangay is already force-derived from the resident server-side
+  // (sync_operational_scope trigger); this only fixes the human venue label so a
+  // barangay-scoped supervisor cannot mislabel a follow-up at an unrelated site.
+  const assignedBHS = assignedBarangay ? `${assignedBarangay} Barangay Health Station` : null;
+  const followUpLocationOptions = assignedBarangay ? [assignedBHS, "Home Visit"] : FOLLOW_UP_LOCATIONS;
+  const defaultFollowUpLocation = assignedBHS || FOLLOW_UP_LOCATIONS[0];
+
   const [followUps, setFollowUps] = useState([]);
   const [residentsFromApi, setResidentsFromApi] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -348,7 +360,7 @@ export default function MidwifeFollowUp() {
   const openScheduleModal = () => {
     setSelectedResident(null);
     setTouched({});
-    setScheduleForm(emptyScheduleForm(defaultPersonnel));
+    setScheduleForm({ ...emptyScheduleForm(defaultPersonnel), location: defaultFollowUpLocation });
     setShowScheduleModal(true);
   };
 
@@ -379,6 +391,7 @@ export default function MidwifeFollowUp() {
 
     setScheduleForm({
       ...emptyScheduleForm(defaultPersonnel),
+      location: defaultFollowUpLocation,
       reason: draft.reason || draft.findings || "",
       priority: ["Low", "Medium", "High"].includes(draft.riskLevel) ? draft.riskLevel : "Medium",
       notes,
@@ -796,10 +809,15 @@ export default function MidwifeFollowUp() {
                           onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })}
                           className={`${inputCls()} cursor-pointer`}
                         >
-                          {FOLLOW_UP_LOCATIONS.map((l) => (
+                          {followUpLocationOptions.map((l) => (
                             <option key={l} value={l}>{l}</option>
                           ))}
                         </select>
+                        {assignedBarangay && (
+                          <p className="mt-1 text-xs text-brand-gray">
+                            Follow-ups use your assigned Barangay Health Station in {assignedBarangay}. Use a referral to send a resident to another facility.
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="mb-1.5 block text-sm font-medium text-brand-ink">Assigned Personnel</label>

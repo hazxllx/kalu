@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { fetchMyVerification } from "@/services/api/verificationsApi";
-import { residentsApi } from "@/services/api";
+import { residentsApi, authApi } from "@/services/api";
 import { supabase } from "@/lib/supabase";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, FileText,
@@ -35,7 +35,7 @@ function checkPasswordStrength(pw) {
 
 export default function SettingsPage({ roleKey = "resident" }) {
   const role = ROLES[roleKey];
-  const { user, refreshProfile } = useAuth();
+  const { user, refreshProfile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [showCur, setShowCur] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -115,10 +115,63 @@ export default function SettingsPage({ roleKey = "resident" }) {
   const [contactInput, setContactInput] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState(null); // { type: 'success' | 'error', text }
+
+  // Staff accounts edit their contact number too. Their value comes from the
+  // authoritative profile (GET /api/auth/me -> profiles.contact); seed the input
+  // from it so the field is pre-filled and editable (not a read-only "—").
+  useEffect(() => {
+    if (!isResident) setContactInput(user?.contact || "");
+  }, [isResident, user?.contact]);
+
   const phoneValid = (v) => {
     const cleaned = String(v || "").replace(/[\s-]/g, "");
     return cleaned === "" || /^(\+?63|0)9\d{9}$/.test(cleaned);
   };
+
+  // Login Sessions — only the CURRENT authenticated session is available from
+  // the existing Supabase Auth setup (there is no server-side session history
+  // table). We display the real current session and never fabricate historical
+  // device rows. Access/refresh tokens are never read into or shown by the UI.
+  const [sessionInfo, setSessionInfo] = useState(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    if (!supabase) { setSessionLoading(false); return () => { active = false; }; }
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!active) return;
+        const s = data?.session || null;
+        setSessionInfo(
+          s
+            ? {
+                signedInEmail: s.user?.email || displayEmail,
+                expiresAt: s.expires_at ? new Date(s.expires_at * 1000) : null,
+              }
+            : null
+        );
+      })
+      .catch(() => active && setSessionInfo(null))
+      .finally(() => active && setSessionLoading(false));
+    return () => { active = false; };
+  }, [displayEmail]);
+
+  const deviceLabel = (() => {
+    if (typeof navigator === "undefined") return "This device";
+    const ua = navigator.userAgent || "";
+    const os =
+      /Windows/i.test(ua) ? "Windows" :
+      /Mac OS X|Macintosh/i.test(ua) ? "macOS" :
+      /Android/i.test(ua) ? "Android" :
+      /iPhone|iPad|iOS/i.test(ua) ? "iOS" :
+      /Linux/i.test(ua) ? "Linux" : "Unknown OS";
+    const browser =
+      /Edg\//i.test(ua) ? "Edge" :
+      /Chrome\//i.test(ua) && !/Edg\//i.test(ua) ? "Chrome" :
+      /Firefox\//i.test(ua) ? "Firefox" :
+      /Safari\//i.test(ua) && !/Chrome\//i.test(ua) ? "Safari" : "Browser";
+    return `${browser} on ${os}`;
+  })();
 
   // Change password via Supabase Auth (the password authority). The current
   // password is verified with signInWithPassword (supported reauth flow); the
@@ -184,12 +237,6 @@ export default function SettingsPage({ roleKey = "resident" }) {
   };
 
   const handleProfileSave = async () => {
-    // Staff accounts have no self-service profile edit here.
-    if (!isResident) {
-      setProfileMsg({ type: "success", text: "No changes to save." });
-      setTimeout(() => setProfileMsg(null), 2500);
-      return;
-    }
     if (!phoneValid(contactInput)) {
       setProfileMsg({ type: "error", text: "Enter a valid PH mobile number (e.g. 0917 123 4567)." });
       return;
@@ -197,11 +244,20 @@ export default function SettingsPage({ roleKey = "resident" }) {
     setSavingProfile(true);
     setProfileMsg(null);
     try {
-      const result = await residentsApi.updateMine({ cellphoneNo: contactInput.trim() });
-      const saved = result?.profile || null;
-      // Reflect the persisted value (keeps the displayed data in step with the DB).
-      setAccount((prev) => (prev ? { ...prev, contactNumber: saved?.cellphoneNo ?? contactInput.trim() } : prev));
-      setContactInput(saved?.cellphoneNo ?? contactInput.trim());
+      if (isResident) {
+        const result = await residentsApi.updateMine({ cellphoneNo: contactInput.trim() });
+        const saved = result?.profile || null;
+        // Reflect the persisted value (keeps the displayed data in step with the DB).
+        setAccount((prev) => (prev ? { ...prev, contactNumber: saved?.cellphoneNo ?? contactInput.trim() } : prev));
+        setContactInput(saved?.cellphoneNo ?? contactInput.trim());
+      } else {
+        // Staff: persist to profiles.contact via the self-scoped endpoint, then
+        // re-resolve the authoritative profile so the session reflects the DB.
+        const result = await authApi.updateMe({ contact: contactInput.trim() });
+        const saved = result?.user || null;
+        setContactInput(saved?.contact ?? contactInput.trim());
+        await refreshProfile();
+      }
       setProfileMsg({ type: "success", text: "Profile updated successfully." });
       setTimeout(() => setProfileMsg(null), 2500);
     } catch (err) {
@@ -255,24 +311,16 @@ export default function SettingsPage({ roleKey = "resident" }) {
                   />
                 </div>
 
-                {/* Contact Number — the one resident-editable field. */}
+                {/* Contact Number — editable self-service field for every role. */}
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Contact Number</label>
-                  {isResident ? (
-                    <input
-                      value={accountLoading ? "" : contactInput}
-                      onChange={(e) => setContactInput(e.target.value)}
-                      disabled={accountLoading || savingProfile}
-                      placeholder={accountLoading ? "Loading…" : "e.g. 0917 123 4567"}
-                      className="mt-1.5 w-full bg-white border border-brand-border rounded-input px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue disabled:bg-brand-bg"
-                    />
-                  ) : (
-                    <input
-                      value={user?.contact || "—"}
-                      readOnly
-                      className="mt-1.5 w-full bg-brand-bg border border-brand-border rounded-input px-3.5 py-2.5 text-sm text-brand-gray outline-none"
-                    />
-                  )}
+                  <input
+                    value={isResident && accountLoading ? "" : contactInput}
+                    onChange={(e) => setContactInput(e.target.value)}
+                    disabled={(isResident && accountLoading) || savingProfile}
+                    placeholder={isResident && accountLoading ? "Loading…" : "e.g. 0917 123 4567"}
+                    className="mt-1.5 w-full bg-white border border-brand-border rounded-input px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue disabled:bg-brand-bg dark:bg-input dark:text-foreground dark:border-border"
+                  />
                 </div>
 
                 {showAssignedBarangay && (
@@ -492,20 +540,33 @@ export default function SettingsPage({ roleKey = "resident" }) {
                   {
                     label: "Registration Date",
                     icon: Calendar,
-                    value: isResident ? (formatAccountDate(account?.registeredDate) || dash) : dash,
+                    value: isResident
+                      ? (formatAccountDate(account?.registeredDate) || dash)
+                      : (formatAccountDate(user?.createdAt) || dash),
                   },
                   {
                     label: "Reference Number",
                     icon: FileText,
-                    value: isResident ? (account?.ref || dash) : dash,
+                    value: isResident ? (account?.ref || dash) : (user?.referenceNumber || dash),
                   },
-                  {
-                    label: "Verification Status",
-                    icon: ShieldCheck,
-                    badge: isResident,
-                    status: account?.status,
-                  },
+                  isResident
+                    ? {
+                        label: "Verification Status",
+                        icon: ShieldCheck,
+                        badge: true,
+                        status: account?.status,
+                      }
+                    : {
+                        label: "Account Status",
+                        icon: ShieldCheck,
+                        value: user?.status
+                          ? user.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                          : dash,
+                      },
                 ];
+                if (!isResident) {
+                  fields.push({ label: "Role", value: role?.name || user?.role || dash, icon: ShieldCheck });
+                }
                 return fields.map((f) => (
                   <div key={f.label} className="bg-brand-bg rounded-btn p-4">
                     <div className="flex items-center gap-1.5 mb-1">
@@ -517,7 +578,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
                     ) : f.badge ? (
                       f.status ? <VerificationBadge status={f.status} size="sm" /> : <p className="text-sm font-medium text-brand-ink">N/A</p>
                     ) : (
-                      <p className="text-sm font-medium text-brand-ink">{f.value}</p>
+                      <p className="text-sm font-medium text-brand-ink break-words">{f.value}</p>
                     )}
                   </div>
                 ));
@@ -531,18 +592,42 @@ export default function SettingsPage({ roleKey = "resident" }) {
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4 sm:mb-5 flex items-center gap-2">
             <Monitor className="w-4 h-4 text-brand-blue" strokeWidth={1.8} /> Login Sessions
           </h3>
-          <div className="space-y-3">
-            <p className="text-sm text-brand-gray">No active sessions to display.</p>
-          </div>
-          <button
-            onClick={() => {
-              setProfileMsg({ type: "success", text: "No other active sessions." });
-              setTimeout(() => setProfileMsg(null), 2500);
-            }}
-            className="mt-4 sm:mt-5 flex items-center gap-2 border border-brand-border text-brand-gray px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-bg transition-colors"
-          >
-            <LogOut className="w-4 h-4" /> Logout Other Devices
-          </button>
+          {sessionLoading ? (
+            <p className="text-sm text-brand-gray">Loading session…</p>
+          ) : sessionInfo ? (
+            <div className="space-y-3">
+              <div className="flex flex-col gap-2 rounded-btn border border-brand-border bg-brand-bg p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-light text-brand-blue">
+                    <Monitor className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-brand-ink">{deviceLabel}</p>
+                    <p className="text-xs text-brand-gray">
+                      Signed in as {sessionInfo.signedInEmail}
+                      {sessionInfo.expiresAt ? ` · Session valid until ${sessionInfo.expiresAt.toLocaleString("en-US")}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-brand-green/10 px-2.5 py-1 text-xs font-medium text-brand-green">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand-green" /> Current session
+                </span>
+              </div>
+              <p className="text-xs text-brand-gray">
+                Only your current session is shown. KALUSAGAP does not keep a history of past sign-ins or other devices.
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-brand-gray">No active session information is available.</p>
+          )}
+          {sessionInfo && (
+            <button
+              onClick={() => logout()}
+              className="mt-4 sm:mt-5 flex items-center gap-2 border border-brand-border text-brand-gray px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-bg transition-colors"
+            >
+              <LogOut className="w-4 h-4" /> Sign Out This Session
+            </button>
+          )}
         </Card>
       </div>
     </>

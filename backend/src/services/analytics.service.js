@@ -49,7 +49,7 @@ const systolicOf = (vitals) => {
   return match ? parseInt(match[1], 10) : null;
 };
 
-const riskFromVitals = (vitals) => {
+export const riskFromVitals = (vitals) => {
   const systolic = systolicOf(vitals);
   const o2 = Number(vitals?.o2sat);
   if ((systolic && systolic >= 140) || (Number.isFinite(o2) && o2 < 95)) return 'High';

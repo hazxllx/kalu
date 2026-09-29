@@ -39,7 +39,7 @@ const toDisplay = (hhmm) => {
  * the popover is width-locked to its field.
  *
  * @param {string} props.value 24-hour "HH:MM" string (e.g. "09:00")
- * @param (hhmm: string) => void props.onChange
+ * @param {(hhmm: string) => void} props.onChange
  * @param {boolean} [props.error] show the invalid (red) border
  */
 export default function TimePicker({ value, onChange, error = false }) {

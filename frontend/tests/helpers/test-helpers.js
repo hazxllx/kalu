@@ -7,33 +7,50 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
-// Test credentials from environment variables
-const CREDENTIALS = {
-  admin: {
-    email: process.env.KALUSAGAP_ADMIN_EMAIL || 'admin@kalusagap.test',
-    password: process.env.KALUSAGAP_ADMIN_PASSWORD || 'SyDXk?jcsAd@kBG8vq',
-  },
-  mho: {
-    email: process.env.KALUSAGAP_MHO_EMAIL || 'mho@kalusagap.test',
-    password: process.env.KALUSAGAP_MHO_PASSWORD || 'CS*GTe5dmJMRsEY8J#',
-  },
-  rhu: {
-    email: process.env.KALUSAGAP_RHU_EMAIL || 'rhu.personnel@kalusagap.test',
-    password: process.env.KALUSAGAP_RHU_PASSWORD || '*YmXmTMr3MH3%DLFwU',
-  },
-  phn: {
-    email: process.env.KALUSAGAP_PHN_EMAIL || 'phn@kalusagap.test',
-    password: process.env.KALUSAGAP_PHN_PASSWORD || 'RuoVRzXN55!!Jr7&bc',
-  },
-  supervisor: {
-    email: process.env.KALUSAGAP_SUPERVISOR_EMAIL || 'supervisor@kalusagap.test',
-    password: process.env.KALUSAGAP_SUPERVISOR_PASSWORD || 'holyshit12',
-  },
-  resident: {
-    email: process.env.KALUSAGAP_RESIDENT_EMAIL || 'mollie.greenholt@forms.lat',
-    password: process.env.KALUSAGAP_RESIDENT_PASSWORD || 'Holyshit12!',
-  },
+// Test credentials come EXCLUSIVELY from environment variables. No password,
+// email, or other secret is hardcoded here (BUG-026): committed fallback
+// credentials are a leak and were removed. Provide them via the environment
+// (e.g. an untracked .env / CI secret store) before running the E2E suite.
+const CREDENTIAL_ENV = {
+  admin: { email: 'KALUSAGAP_ADMIN_EMAIL', password: 'KALUSAGAP_ADMIN_PASSWORD' },
+  mho: { email: 'KALUSAGAP_MHO_EMAIL', password: 'KALUSAGAP_MHO_PASSWORD' },
+  rhu: { email: 'KALUSAGAP_RHU_EMAIL', password: 'KALUSAGAP_RHU_PASSWORD' },
+  phn: { email: 'KALUSAGAP_PHN_EMAIL', password: 'KALUSAGAP_PHN_PASSWORD' },
+  supervisor: { email: 'KALUSAGAP_SUPERVISOR_EMAIL', password: 'KALUSAGAP_SUPERVISOR_PASSWORD' },
+  resident: { email: 'KALUSAGAP_RESIDENT_EMAIL', password: 'KALUSAGAP_RESIDENT_PASSWORD' },
 };
+
+/**
+ * Resolve a role's credentials from the environment, or fail with a clear
+ * configuration error. Never falls back to a real/default password and never
+ * prints the secret value.
+ */
+function getCredentials(role) {
+  const map = CREDENTIAL_ENV[role];
+  if (!map) throw new Error(`Unknown role: ${role}`);
+  const email = process.env[map.email];
+  const password = process.env[map.password];
+  const missing = [];
+  if (!email) missing.push(map.email);
+  if (!password) missing.push(map.password);
+  if (missing.length) {
+    throw new Error(
+      `Missing test credentials for role "${role}". Set the environment variable(s): ${missing.join(', ')}. ` +
+        'Test credentials must never be hardcoded in source.',
+    );
+  }
+  return { email, password };
+}
+
+const CREDENTIALS = new Proxy(
+  {},
+  {
+    get(_target, role) {
+      if (typeof role !== 'string') return undefined;
+      return getCredentials(role);
+    },
+  },
+);
 
 // Role descriptions for reporting
 const ROLE_DESCRIPTIONS = {
@@ -57,10 +74,7 @@ export const SEVERITY = {
  * Login as a specific role
  */
 export async function login(page, role, options = {}) {
-  const creds = CREDENTIALS[role];
-  if (!creds) {
-    throw new Error(`Unknown role: ${role}`);
-  }
+  const creds = getCredentials(role);
 
   await page.goto('/login');
   await page.waitForLoadState('networkidle');

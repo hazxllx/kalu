@@ -380,6 +380,14 @@ const verificationLogFromRow = (row) => ({
 
 const SELECT_RESIDENT = Object.keys(DB_TO_RESIDENT).join(',');
 
+// BUG-012: transfer_requests carries OTP secret material (otp_hash,
+// otp_expires_at, otp_attempts, otp_verified_at, otp_locked_until). API reads
+// must NEVER select those columns — this explicit allow-list replaces SELECT *
+// on every transfer read/write path. OTP verification stays server-side inside
+// public.approve_transfer_request().
+const TRANSFER_SAFE_COLUMNS =
+  'id, auth_user_id, status, resident_id, target_resident_id, from_barangay_id, to_barangay_id, reason, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at';
+
 const throwOnError = (error, fallback) => {
   if (error) {
     const err = new Error(error.message || fallback);
@@ -1191,7 +1199,7 @@ export const supabaseRepository = {
       status,
       otp_hash: otpHash,
       otp_expires_at: otpExpiresAt,
-    }).select('*').single();
+    }).select(TRANSFER_SAFE_COLUMNS).single();
     throwOnError(error, 'Could not create transfer request');
     return data;
   },
@@ -1199,7 +1207,7 @@ export const supabaseRepository = {
   /** Every transfer request for one account, newest first (transfer history). */
   async listTransferRequestsByUser(authUserId) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase.from('transfer_requests').select('*')
+    const { data, error } = await supabase.from('transfer_requests').select(TRANSFER_SAFE_COLUMNS)
       .eq('auth_user_id', authUserId).order('created_at', { ascending: false });
     throwOnError(error, 'Could not load transfer history');
     return data || [];
@@ -1207,7 +1215,7 @@ export const supabaseRepository = {
 
   async getTransferRequest(id, authUserId = null) {
     const supabase = getServiceClient();
-    let query = supabase.from('transfer_requests').select('*').eq('id', id);
+    let query = supabase.from('transfer_requests').select(TRANSFER_SAFE_COLUMNS).eq('id', id);
     if (authUserId) query = query.eq('auth_user_id', authUserId);
     const { data, error } = await query.maybeSingle();
     throwOnError(error, 'Could not load transfer request');
@@ -1216,7 +1224,7 @@ export const supabaseRepository = {
 
   async getLatestTransferRequest(authUserId) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase.from('transfer_requests').select('*')
+    const { data, error } = await supabase.from('transfer_requests').select(TRANSFER_SAFE_COLUMNS)
       .eq('auth_user_id', authUserId).order('created_at', { ascending: false }).limit(1).maybeSingle();
     throwOnError(error, 'Could not load transfer request');
     return data || null;
@@ -1224,14 +1232,14 @@ export const supabaseRepository = {
 
   async updateTransferRequest(id, patch) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase.from('transfer_requests').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await supabase.from('transfer_requests').update(patch).eq('id', id).select(TRANSFER_SAFE_COLUMNS).single();
     throwOnError(error, 'Could not update transfer request');
     return data;
   },
 
   async listTransferRequests({ status = null, limit = 100, offset = 0 } = {}) {
     const supabase = getServiceClient();
-    let query = supabase.from('transfer_requests').select('*', { count: 'exact' })
+    let query = supabase.from('transfer_requests').select(TRANSFER_SAFE_COLUMNS, { count: 'exact' })
       .order('created_at', { ascending: true }).range(offset, offset + limit - 1);
     if (status) query = query.eq('status', status);
     const { data, error, count } = await query;

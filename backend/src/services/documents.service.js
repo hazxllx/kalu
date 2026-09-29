@@ -132,19 +132,18 @@ export const listResidentDocuments = async ({ user, residentId }) => {
 };
 
 export const getResidentDocument = async ({ user, residentId, documentId }) => {
+  // BUG-015: this read must allow the SAME reviewers the route authorizes and
+  // that listResidentDocuments already allows — Admin, Health Supervisor (own
+  // barangay) and PHN (own municipality) — instead of silently excluding the
+  // PHN. Scope is still enforced via assertReviewerScope.
+  if (!REVIEW_ROLES.includes(user?.role)) {
+    throw ApiError.forbidden('You are not authorized to view this document.');
+  }
   const resident = await repository.getResident(residentId);
   if (!resident) {
     throw ApiError.notFound('Resident not found.');
   }
-
-  const isAdmin = user?.role === 'admin';
-  const isInScope =
-    user?.role === 'health_supervisor' &&
-    resident.barangayId === user?.barangayId;
-
-  if (!isAdmin && !isInScope) {
-    throw ApiError.forbidden('You are not authorized to view this document.');
-  }
+  assertReviewerScope(user, resident);
 
   const document = await repository.getDocument(documentId);
   if (!document || document.residentId !== residentId) {

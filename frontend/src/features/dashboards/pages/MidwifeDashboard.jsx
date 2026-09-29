@@ -18,7 +18,10 @@ const actions = [
 export default function MidwifeDashboard() {
   const { user } = useAuth();
   const firstName = (user?.name || "").trim().split(" ")[0];
-  const welcome = firstName ? `Welcome, Midwife ${firstName}` : "Welcome, Midwife";
+  // BUG-023: canonical role terminology is "Health Supervisor" (not "Midwife").
+  // NOTE: this component is currently unrouted/dead (no AppRoutes reference); the
+  // terminology is corrected in place rather than deleting unrouted code.
+  const welcome = firstName ? `Welcome, ${firstName}` : "Welcome, Health Supervisor";
   return (
     <>
       <PageHeader crumbs={["Dashboard"]} title={welcome} subtitle="Today's clinical summary for the Barangay Health Station." />

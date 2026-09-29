@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { useHouseholdRiskClusters, householdRiskStore } from "@/services/local/householdRiskStore";
+import { householdsApi } from "@/services/api/householdsApi";
+import { householdRiskApi } from "@/services/api/householdRiskApi";
+import { toRiskCluster, daysSince } from "../lib/riskClusterAdapter";
 import {
   RISK_LEVELS, RISK_LEVEL_LABELS, RISK_CLASSIFICATION_BASIS, getRiskConfig,
 } from "@/lib/householdRisk";
@@ -25,7 +27,7 @@ const levelOrder = [RISK_LEVELS.PRIORITY, RISK_LEVELS.INTERVENTION, RISK_LEVELS.
 const formatDate = (iso) => formatShortDate(iso) || "—";
 
 const daysAgo = (iso) => {
-  const d = householdRiskStore.daysSince(iso);
+  const d = daysSince(iso);
   return d === null ? "—" : `${d} days ago`;
 };
 
@@ -51,9 +53,31 @@ function householdDetailPath(id) {
 }
 
 export default function HouseholdRiskOverview() {
-  const [phase, setPhase] = useState("ready"); // "loading" | "error" | "ready"
+  const [phase, setPhase] = useState("loading"); // "loading" | "error" | "ready"
+  const [clusters, setClusters] = useState([]);
 
-  const clusters = useHouseholdRiskClusters();
+  // Load persisted households (server risk classification) and merge each
+  // household's persisted risk workflow. Scope/role are enforced server-side;
+  // this never sends a scope id and cannot widen access.
+  const load = useCallback(async () => {
+    setPhase("loading");
+    try {
+      const res = await householdsApi.list({ limit: 200 });
+      const rows = Array.isArray(res?.rows) ? res.rows : [];
+      const workflows = await Promise.all(
+        rows.map((h) => householdRiskApi.getWorkflow(h.id).catch(() => null))
+      );
+      setClusters(rows.map((h, i) => toRiskCluster(h, workflows[i])));
+      setPhase("ready");
+    } catch {
+      setClusters([]);
+      setPhase("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // --- Filters ---
   const [query, setQuery] = useState("");
@@ -188,7 +212,7 @@ export default function HouseholdRiskOverview() {
           <p className="mx-auto mt-1.5 max-w-md text-sm text-brand-gray">
             We couldn&apos;t retrieve the latest household risk information.
           </p>
-          <button onClick={() => setPhase("ready")} className="mt-5 inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-dark">
+          <button onClick={() => load()} className="mt-5 inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-dark">
             <RefreshCw className="h-4 w-4" /> Retry
           </button>
         </Card>
@@ -593,8 +617,15 @@ export default function HouseholdRiskOverview() {
             household={target}
             onClose={() => setFollowUpFor(null)}
             onSave={(status, notes) => {
-              householdRiskStore.recordFollowUp(target.id, { status, notes });
-              showToast(`Follow-up recorded for the ${target.surname} household.`);
+              const followUpCount = (target.followUpCount || 0) + 1;
+              const lastFollowUpAt = new Date().toISOString().slice(0, 10);
+              householdRiskApi
+                .saveWorkflow(target.id, { workflowStatus: status, followUpCount, lastFollowUpAt, lastNote: notes })
+                .then(() => {
+                  showToast(`Follow-up recorded for the ${target.surname} household.`);
+                  load();
+                })
+                .catch((err) => showToast(err?.message || "Could not save the follow-up."));
               setFollowUpFor(null);
             }}
           />

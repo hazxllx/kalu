@@ -3,7 +3,7 @@ import { Outlet, useLocation, Link, Navigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Bell, Menu, X, LogOut, ChevronDown, User, Settings,
-  LifeBuoy, ShieldCheck, ShieldAlert, Lock,
+  ShieldCheck, ShieldAlert, Lock,
 } from "lucide-react";
 import Icon from "@/components/common/Icon";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
@@ -370,7 +370,9 @@ export default function DashboardLayout({ roleKey }) {
                       {[
                         { icon: User, label: "Profile", to: profilePath },
                         { icon: Settings, label: "Settings", to: settingsPath },
-                        { icon: LifeBuoy, label: "Help Center", to: "#" },
+                        // BUG-021: the "Help Center" item pointed at "#" (dead link). There
+                        // is no Help Center destination, so it is removed rather than left
+                        // as a misleading no-op link.
                       ].map((item) => (
                         <Link
                           key={item.label}

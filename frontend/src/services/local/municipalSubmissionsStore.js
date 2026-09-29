@@ -1,6 +1,7 @@
 import React, { useSyncExternalStore } from "react";
 
 import { BARANGAYS } from "@/lib/barangays";
+import { municipalSubmissionsApi } from "@/services/api/municipalSubmissionsApi";
 
 /**
  * MHO Municipal Submission Monitoring store.
@@ -126,6 +127,23 @@ const reviewSubmission = (id, { decision, notes, reviewer }) => {
     lastUpdated: todayIso(),
     audit: [...(rec.audit || []), auditEntry],
   });
+
+  // BUG-010: persist the decision to PostgreSQL (MHO-only, municipality-scoped
+  // server-side). sessionStorage is only an optimistic mirror; the database is
+  // authoritative and the decision survives refresh/logout/device.
+  municipalSubmissionsApi
+    .reviewSubmission({
+      submissionRef: rec.reference || rec.id || String(id),
+      submissionType: rec.type || "",
+      period: rec.period || "",
+      decision,
+      notes: notes || "",
+    })
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(`Failed to persist submission review for ${id}:`, err?.message || err);
+    });
+
   return getSubmissions().find((s) => s.id === id);
 };
 

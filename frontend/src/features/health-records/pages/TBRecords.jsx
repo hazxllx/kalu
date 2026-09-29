@@ -2,10 +2,19 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
-import { X, Search, RefreshCw, Activity, User, MapPin, Stethoscope } from "lucide-react";
+import { X, Search, RefreshCw, Activity, User, MapPin, Stethoscope, Plus, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { tclApi, residentsApi } from "@/services/api";
+
+// TB records are stored in the shared tcl_entries register. Every program value
+// below satisfies isTbProgram() so the record is listed as a TB record, and the
+// priority/status values match the tcl_entries CHECK constraints exactly
+// (priority: Low/Medium/High; status: Active/Inactive/Completed/Transferred),
+// so a create is never rejected by the database.
+const TB_PROGRAMS = ["TB Patients", "TB Monitoring", "TB Prevention (TPT)"];
+const TB_PRIORITIES = ["Low", "Medium", "High"];
+const TB_STATUSES = ["Active", "Inactive", "Completed", "Transferred"];
 
 /**
  * TB Records.
@@ -36,6 +45,15 @@ const formatDate = (iso) => {
   if (Number.isNaN(d.getTime())) return String(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const inputCls = (error) =>
+  `mt-1.5 w-full bg-white border rounded-btn px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${
+    error ? "border-brand-danger" : "border-brand-border dark:border-border"
+  }`;
+const labelCls = "text-sm font-medium text-brand-ink";
+const errorCls = "mt-1 text-xs text-brand-danger";
 
 const formatDateTime = (iso) => {
   if (!iso) return "—";
@@ -100,6 +118,34 @@ export default function TBRecords() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [detail, setDetail] = useState(null);
 
+  // Add TB Record modal state. Creating a TB record enrolls an existing resident
+  // into a TB program via the same authorized tcl create endpoint the TCL page
+  // uses (POST /operational/tcl). Health Supervisor / PHN / MHO are authorized
+  // server-side and by RLS, so the action the button exposes always succeeds for
+  // an authorized account and is refused for anyone else.
+  const [showAdd, setShowAdd] = useState(false);
+  const [residentQuery, setResidentQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [toast, setToast] = useState(null);
+  const [form, setForm] = useState({
+    residentId: "",
+    program: TB_PROGRAMS[0],
+    bhw: "",
+    priority: "Medium",
+    status: "Active",
+    lastVisit: todayIso(),
+    nextVisit: "",
+    nextVisitTime: "",
+    notes: "",
+  });
+  const [formErrors, setFormErrors] = useState({});
+
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 3000);
+  };
+
   const load = useCallback(() => {
     setLoading(true);
     setLoadError(null);
@@ -161,6 +207,80 @@ export default function TBRecords() {
     });
   }, [scopedRecords, search, statusFilter]);
 
+  // Residents selectable in the Add form — restricted to the supervisor's
+  // assigned barangay when barangay-scoped, matching the record scope above.
+  const pickerResidents = useMemo(() => {
+    const pool = scopedBarangays
+      ? residents.filter((r) => r.barangay && scopedBarangays.includes(r.barangay))
+      : residents;
+    const q = residentQuery.trim().toLowerCase();
+    return pool
+      .filter(
+        (r) =>
+          !q ||
+          (r.name || "").toLowerCase().includes(q) ||
+          String(r.id ?? "").toLowerCase().includes(q)
+      )
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+      .slice(0, 8);
+  }, [residents, residentQuery, scopedBarangays]);
+
+  const selectedResident = useMemo(
+    () => residents.find((r) => r.id === form.residentId) || null,
+    [residents, form.residentId]
+  );
+
+  const openAdd = () => {
+    setForm({
+      residentId: "",
+      program: TB_PROGRAMS[0],
+      bhw: "",
+      priority: "Medium",
+      status: "Active",
+      lastVisit: todayIso(),
+      nextVisit: "",
+      nextVisitTime: "",
+      notes: "",
+    });
+    setResidentQuery("");
+    setFormErrors({});
+    setSubmitError("");
+    setShowAdd(true);
+  };
+
+  const saveRecord = async () => {
+    const errs = {};
+    if (!form.residentId) errs.resident = "Please select a resident.";
+    if (!form.program) errs.program = "Please select a TB program.";
+    setFormErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSaving(true);
+    setSubmitError("");
+    try {
+      const result = await tclApi.create({
+        residentId: form.residentId,
+        program: form.program,
+        assigned_bhw: form.bhw,
+        priority: form.priority,
+        status: form.status,
+        last_visit: form.lastVisit || null,
+        next_visit: form.nextVisit || null,
+        next_visit_time: form.nextVisitTime || null,
+        notes: form.notes,
+      });
+      // Reflect the new record immediately, then reconcile with the server on
+      // the next load so the displayed resident/barangay stay authoritative.
+      setRecords((current) => [mapRecord(result?.record || {}), ...current]);
+      setShowAdd(false);
+      showToast(`${selectedResident?.name || "Resident"} added to ${form.program}.`);
+      load();
+    } catch (err) {
+      setSubmitError(err?.message || "The TB record could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -172,14 +292,29 @@ export default function TBRecords() {
             : "Residents enrolled in TB monitoring."
         }
         action={
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={load}
+              className="inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
+            >
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </button>
+            <button
+              onClick={openAdd}
+              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+            >
+              <Plus className="h-4 w-4" /> Add TB Record
+            </button>
+          </div>
         }
       />
+
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
+          <CheckCircle2 className="h-4 w-4 text-brand-green" />
+          <span className="text-sm">{toast}</span>
+        </div>
+      )}
 
       <Card className="p-4 mb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -337,6 +472,132 @@ export default function TBRecords() {
 
               <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
                 <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Close</button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Add TB Record */}
+      {showAdd && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto">
+            <div className="p-6">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-ink">Add TB Record</h3>
+                  <p className="mt-0.5 text-sm text-brand-gray">Enroll an existing resident into TB monitoring. This links a TB record to the resident; it does not create or modify a resident record.</p>
+                </div>
+                <button onClick={() => setShowAdd(false)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Resident selection */}
+                <div>
+                  <label className={labelCls}>Resident <span className="text-brand-danger">*</span></label>
+                  {!selectedResident ? (
+                    <>
+                      <div className="mt-1.5 flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2.5 focus-within:border-brand-blue dark:bg-input dark:border-border">
+                        <Search className="h-4 w-4 shrink-0 text-brand-gray" />
+                        <input
+                          value={residentQuery}
+                          onChange={(e) => setResidentQuery(e.target.value)}
+                          placeholder="Search resident by name or ID..."
+                          className="w-full bg-transparent text-sm outline-none"
+                        />
+                      </div>
+                      {formErrors.resident && <p className={errorCls}>{formErrors.resident}</p>}
+                      <div className="mt-2 max-h-44 overflow-y-auto rounded-btn border border-brand-border divide-y divide-brand-border dark:border-border dark:divide-border">
+                        {pickerResidents.map((r) => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => { setForm((p) => ({ ...p, residentId: r.id })); if (formErrors.resident) setFormErrors((p) => ({ ...p, resident: "" })); }}
+                            className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-brand-light dark:hover:bg-hover"
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-medium text-brand-ink">{r.name}</span>
+                              <span className="block text-xs text-brand-gray">
+                                {[r.id, r.age !== "" ? `${r.age} yrs` : null, r.gender, r.barangay].filter(Boolean).join(" · ")}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                        {pickerResidents.length === 0 && (
+                          <p className="px-3 py-3 text-sm text-brand-gray">No residents found.</p>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-1.5 flex items-center justify-between gap-3 rounded-btn border border-emerald-200 bg-emerald-50/70 px-3.5 py-2.5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-brand-ink">{selectedResident.name}</p>
+                        <p className="text-xs text-brand-gray">
+                          {[selectedResident.id, selectedResident.age !== "" ? `${selectedResident.age} yrs` : null, selectedResident.gender, selectedResident.barangay].filter(Boolean).join(" · ")}
+                        </p>
+                      </div>
+                      <button onClick={() => setForm((p) => ({ ...p, residentId: "" }))} className="shrink-0 text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">Change</button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className={labelCls}>TB Program <span className="text-brand-danger">*</span></label>
+                    <select value={form.program} onChange={(e) => setForm((p) => ({ ...p, program: e.target.value }))} className={`${inputCls(formErrors.program)} cursor-pointer`}>
+                      {TB_PROGRAMS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    {formErrors.program && <p className={errorCls}>{formErrors.program}</p>}
+                  </div>
+                  <div>
+                    <label className={labelCls}>Assigned BHW / Provider</label>
+                    <input value={form.bhw} onChange={(e) => setForm((p) => ({ ...p, bhw: e.target.value }))} placeholder="e.g. BHW J. Santos" className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Priority</label>
+                    <select value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))} className={`${inputCls()} cursor-pointer`}>
+                      {TB_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Treatment Status</label>
+                    <select value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} className={`${inputCls()} cursor-pointer`}>
+                      {TB_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Last Visit</label>
+                    <input type="date" value={form.lastVisit} onChange={(e) => setForm((p) => ({ ...p, lastVisit: e.target.value }))} className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Next Follow-up</label>
+                    <input type="date" value={form.nextVisit} onChange={(e) => setForm((p) => ({ ...p, nextVisit: e.target.value }))} className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Next Follow-up Time</label>
+                    <input type="time" value={form.nextVisitTime} onChange={(e) => setForm((p) => ({ ...p, nextVisitTime: e.target.value }))} className={inputCls()} />
+                  </div>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Notes / History</label>
+                  <textarea rows={2} value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} className={`${inputCls()} resize-none`} />
+                </div>
+
+                {submitError && (
+                  <div className="rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-3.5 py-2.5 text-sm text-brand-danger">{submitError}</div>
+                )}
+
+                <div className="flex justify-end gap-3 border-t border-brand-border pt-4">
+                  <button onClick={() => setShowAdd(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
+                  <button
+                    onClick={saveRecord}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
+                  >
+                    <Plus className="h-4 w-4" /> {saving ? "Saving…" : "Add TB Record"}
+                  </button>
+                </div>
               </div>
             </div>
           </Card>

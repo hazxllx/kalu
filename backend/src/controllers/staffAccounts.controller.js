@@ -15,7 +15,10 @@ import { sendCreated, sendData } from '../utils/apiResponse.js';
  */
 
 export const register = async (req, res) => {
-  const request = await staffAccountsService.submitRequest(req.body || {});
+  // Verification document files (when the registration is multipart) are parsed
+  // by uploadStaffDocuments into req.staffDocuments; a plain JSON registration
+  // simply has none.
+  const request = await staffAccountsService.submitRequest(req.body || {}, req.staffDocuments || []);
   sendCreated(res, { request });
 };
 

@@ -87,7 +87,8 @@ const PhnHealthServices = appPage(() => import('@/features/health-services/pages
 const ResidentsPage = appPage(() => import('@/features/residents/pages/ResidentsPage'));
 const Households = appPage(() => import('@/features/households/pages/Households'));
 const AddHouseholdPage = appPage(() => import('@/features/households/pages/AddHouseholdPage'));
-const HouseholdRiskClusters = appPage(() => import('@/features/households/pages/HouseholdRiskClusters'));
+// BUG/product decision: the user-facing "Household Risk Clusters" feature has
+// been removed. Its old routes now redirect to Household Profiling.
 const HouseholdRiskOverview = appPage(() => import('@/features/households/pages/HouseholdRiskOverview'));
 const HouseholdRiskDetail = appPage(() => import('@/features/households/pages/HouseholdRiskDetail'));
 const RiskRuleConfig = appPage(() => import('@/features/households/pages/RiskRuleConfig'));
@@ -110,6 +111,7 @@ const Programs = appPage(() => import('@/features/health-services/pages/Programs
 const NotificationsPage = appPage(() => import('@/features/notifications/pages/NotificationsPage'));
 const ReportsPage = appPage(() => import('@/features/reports/pages/ReportsPage'));
 const MunicipalHealthReports = appPage(() => import('@/features/reports/pages/MunicipalHealthReports'));
+const IncomingReportsPage = appPage(() => import('@/features/reports/pages/IncomingReportsPage'));
 const MunicipalSubmissions = appPage(() => import('@/features/submissions/pages/MunicipalSubmissions'));
 const HealthTrends = appPage(() => import('@/features/analytics/pages/HealthTrends'));
 const Barangays = appPage(() => import('@/features/analytics/pages/Barangays'));
@@ -204,8 +206,14 @@ const AppRoutes = () => (
             Supervisor. */}
         <Route path="residents" element={<ResidentsPage />} />
         <Route path="trends" element={<HealthTrends />} />
-        <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
-        <Route path="households/:id" element={<HouseholdRiskDetail />} />
+        {/* The MHO is a municipality-wide supervisor and is NOT authorized for
+            the barangay/BHW household-profiling data (see FEATURE_ROLES.households:
+            BHW / Health Supervisor / PHN). The retained Household Risk Overview /
+            Detail are backed by those household endpoints, so for the MHO the old
+            paths redirect to municipal Community Monitoring instead of rendering a
+            guaranteed-403 page. Household Risk Clusters remains removed. */}
+        <Route path="households/risk-overview" element={<Navigate to="/app/mho/barangays" replace />} />
+        <Route path="households/:id" element={<Navigate to="/app/mho/barangays" replace />} />
         <Route path="submissions" element={<MunicipalSubmissions />} />
         <Route path="transfer-requests" element={<TransferRequests />} />
         {/* Read-only municipal monitoring view of the same referral register. */}
@@ -270,7 +278,7 @@ const AppRoutes = () => (
         <Route path="referrals" element={<HealthReferrals />} />
         <Route path="households" element={<Households />} />
         <Route path="households/new" element={<AddHouseholdPage />} />
-        <Route path="households/risk-clusters" element={<HouseholdRiskClusters />} />
+        <Route path="households/risk-clusters" element={<Navigate to="/app/health_supervisor/households" replace />} />
         <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="trends" element={<HealthTrends />} />
@@ -296,6 +304,7 @@ const AppRoutes = () => (
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="programs" element={<Programs />} />
+        <Route path="reports" element={<IncomingReportsPage />} />
         <Route path="notifications" element={<NotificationsPage roleKey="rhu_personnel" />} />
         <Route path="settings" element={<SettingsPage roleKey="rhu_personnel" />} />
         {/* Barangays/Reports/Analytics are no longer part of the RHU Personnel
@@ -314,7 +323,7 @@ const AppRoutes = () => (
         <Route path="dashboard" element={<BHWDashboard />} />
         <Route path="households" element={<Households />} />
         <Route path="households/new" element={<AddHouseholdPage />} />
-        <Route path="households/risk-clusters" element={<HouseholdRiskClusters />} />
+        <Route path="households/risk-clusters" element={<Navigate to="/app/bhw/households" replace />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="notifications" element={<NotificationsPage roleKey="bhw" />} />
         <Route path="settings" element={<SettingsPage roleKey="bhw" />} />

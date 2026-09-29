@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { useHouseholdRiskClusters, householdRiskStore } from "@/services/local/householdRiskStore";
+import { householdsApi } from "@/services/api/householdsApi";
+import { householdRiskApi } from "@/services/api/householdRiskApi";
+import { toRiskCluster, daysSince } from "../lib/riskClusterAdapter";
 import {
   RISK_LEVELS, RISK_LEVEL_LABELS, householdRiskBasis,
 } from "@/lib/householdRisk";
@@ -40,36 +42,64 @@ function InfoCell({ icon: Icon, label, value }) {
 
 export default function HouseholdRiskDetail() {
   const { id } = useParams();
-  const clusters = useHouseholdRiskClusters();
 
   const [phase, setPhase] = useState("loading"); // loading | ready | error | notfound
   const [loadError, setLoadError] = useState(null);
+  const [household, setHousehold] = useState(null);
   const [action, setAction] = useState(null); // followup | assign | escalate
   const [toast, setToast] = useState(null);
 
-  const household = useMemo(
-    () => clusters.find((h) => h.id === id) || null,
-    [clusters, id]
-  );
-
-  // Simulated load so the loading + error states are demonstrable; a real API
-  // would resolve from the request lifecycle instead.
-  useEffect(() => {
+  // Load the real household (server risk classification + members) and merge
+  // its persisted risk workflow. Out-of-scope households resolve as 404 (the
+  // server never leaks existence across barangay/municipality scope).
+  const load = useCallback(async () => {
+    if (!id) {
+      setPhase("notfound");
+      return;
+    }
     setPhase("loading");
-    const t = setTimeout(() => {
-      setLoadError(null);
-      if (!id || !clusters.some((h) => h.id === id)) {
+    setLoadError(null);
+    try {
+      const res = await householdsApi.get(id);
+      const record = res?.household || null;
+      if (!record) {
+        setHousehold(null);
         setPhase("notfound");
         return;
       }
+      const workflow = await householdRiskApi.getWorkflow(id).catch(() => null);
+      setHousehold(toRiskCluster(record, workflow));
       setPhase("ready");
-    }, 350);
-    return () => clearTimeout(t);
-  }, [id, clusters]);
+    } catch (err) {
+      if (err?.status === 404) {
+        setHousehold(null);
+        setPhase("notfound");
+        return;
+      }
+      setLoadError(err);
+      setPhase("error");
+    }
+  }, [id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const showToast = (message) => {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // Persist a workflow change, then refresh from the server so the on-screen
+  // state always reflects the authoritative persisted record.
+  const persistWorkflow = async (patch, successMessage) => {
+    try {
+      await householdRiskApi.saveWorkflow(id, patch);
+      showToast(successMessage);
+      await load();
+    } catch (err) {
+      showToast(err?.message || "Could not save the change.");
+    }
   };
 
   const backPath = locationPathForRole();
@@ -123,10 +153,7 @@ export default function HouseholdRiskDetail() {
           </p>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
             <button
-              onClick={() => {
-                setPhase("loading");
-                setTimeout(() => { setLoadError(null); setPhase(household ? "ready" : "notfound"); }, 350);
-              }}
+              onClick={() => load()}
               className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-dark"
             >
               <RefreshCw className="h-4 w-4" /> Retry
@@ -192,7 +219,7 @@ export default function HouseholdRiskDetail() {
             <InfoCell icon={Activity} label="Risk Level" value={RISK_LEVEL_LABELS[h.risk.level]} />
             <InfoCell icon={FileText} label="Risk Indicators" value={h.risk.count} />
             <InfoCell icon={Activity} label="Risk Score" value={h.risk.score} />
-            <InfoCell icon={Home} label="Last Household Visit" value={householdRiskStore.daysSince(h.lastHouseholdVisit) === null ? "—" : `${householdRiskStore.daysSince(h.lastHouseholdVisit)} days ago`} />
+            <InfoCell icon={Home} label="Last Household Visit" value={daysSince(h.lastHouseholdVisit) === null ? "—" : `${daysSince(h.lastHouseholdVisit)} days ago`} />
           </div>
 
           {/* Basis + contributing indicators */}
@@ -283,9 +310,13 @@ export default function HouseholdRiskDetail() {
           household={h}
           onClose={() => setAction(null)}
           onSave={(status, notes) => {
-            householdRiskStore.recordFollowUp(h.id, { status, notes });
+            const followUpCount = (h.followUpCount || 0) + 1;
+            const lastFollowUpAt = new Date().toISOString().slice(0, 10);
             setAction(null);
-            showToast(`Follow-up recorded for the ${h.surname} household.`);
+            persistWorkflow(
+              { workflowStatus: status, followUpCount, lastFollowUpAt, lastNote: notes },
+              `Follow-up recorded for the ${h.surname} household.`
+            );
           }}
         />
       )}
@@ -294,9 +325,11 @@ export default function HouseholdRiskDetail() {
           household={h}
           onClose={() => setAction(null)}
           onSave={(worker, role) => {
-            householdRiskStore.assignWorker(h.id, { worker, role });
             setAction(null);
-            showToast(`Worker assigned to the ${h.surname} household.`);
+            persistWorkflow(
+              { assignedWorker: worker, assignedWorkerRole: role, assignmentAt: new Date().toISOString() },
+              `Worker assigned to the ${h.surname} household.`
+            );
           }}
         />
       )}
@@ -305,9 +338,11 @@ export default function HouseholdRiskDetail() {
           household={h}
           onClose={() => setAction(null)}
           onSave={(reason) => {
-            householdRiskStore.escalateHousehold(h.id, { reason, assignment: "Public Health Nurse" });
             setAction(null);
-            showToast(`Case escalated for the ${h.surname} household.`);
+            persistWorkflow(
+              { workflowStatus: "Escalated", escalation: { reason, assignment: "Public Health Nurse", at: new Date().toISOString() } },
+              `Case escalated for the ${h.surname} household.`
+            );
           }}
         />
       )}
@@ -315,13 +350,17 @@ export default function HouseholdRiskDetail() {
   );
 }
 
-/** Derive the "back to risk overview" path from the current role area. */
+/**
+ * Derive the "back" path from the current role area. Only PHN and Health
+ * Supervisor have a Household Risk Overview; the BHW (data-collection only)
+ * returns to the Household Profiling list instead.
+ */
 function locationPathForRole() {
-  const raw = typeof window !== "undefined" ? window.location.pathname : "/app/mho/households/risk-overview";
+  const raw = typeof window !== "undefined" ? window.location.pathname : "/app/health_supervisor/households";
   const parts = raw.split("/").filter(Boolean);
   const appIdx = parts.indexOf("app");
-  if (appIdx >= 0 && parts[appIdx + 1]) {
-    return `/${parts.slice(0, appIdx + 2).join("/")}/households/risk-overview`;
-  }
-  return "/app/mho/households/risk-overview";
+  const role = appIdx >= 0 && parts[appIdx + 1] ? parts[appIdx + 1] : "health_supervisor";
+  const base = `/app/${role}`;
+  if (role === "phn" || role === "health_supervisor") return `${base}/households/risk-overview`;
+  return `${base}/households`;
 }

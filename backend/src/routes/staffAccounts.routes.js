@@ -4,6 +4,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import rateLimit from '../middleware/rateLimit.js';
 import validate from '../middleware/validate.js';
+import uploadStaffDocuments from '../middleware/uploadStaffDocuments.js';
 import { APPROVER_ROLES } from '../config/staffApprovals.js';
 import {
   registerPersonnelValidator,
@@ -45,7 +46,7 @@ const registerLimiter = rateLimit({
 const reviewer = [authenticate, authorize(APPROVER_ROLES)];
 const idParam = validate(staffAccountIdParamValidator, 'params');
 
-router.post('/register', registerLimiter, validate(registerPersonnelValidator), asyncHandler(staffAccountsController.register));
+router.post('/register', registerLimiter, uploadStaffDocuments, validate(registerPersonnelValidator), asyncHandler(staffAccountsController.register));
 
 // Specific paths before '/:id'.
 router.get('/queue', ...reviewer, asyncHandler(staffAccountsController.listQueue));

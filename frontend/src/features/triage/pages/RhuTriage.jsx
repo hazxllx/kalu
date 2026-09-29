@@ -3,7 +3,8 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { intakeApi } from "@/services/api";
-import { CHECKUP_STATUS, useWorkflowStore, sendToPhnQueue } from "@/services/local/workflowStore";
+import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
+import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { BARANGAYS } from "@/lib/barangays";
 import { barangayHealthCenter } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
@@ -98,7 +99,9 @@ const numeric = (value) => (value !== "" && value != null && !Number.isNaN(Numbe
 
 export default function RhuTriage() {
   const { user } = useAuth();
-  const store = useWorkflowStore();
+  // BUG-008: the "recently sent" list and the triage hand-off are backed by the
+  // persistent database (the caller's own /intake submissions), not localStorage.
+  const { patients: sentPatients, sendToPhnQueue } = usePhnWorkflow({ source: "intake" });
 
   /* --------------------------- Workflow state --------------------------- */
   const [currentStep, setCurrentStep] = useState("patient"); // see STEP_ORDER
@@ -128,8 +131,6 @@ export default function RhuTriage() {
   // carries a real residents.id resolved from the backend.
   const [matches, setMatches] = useState([]);
   const [searching, setSearching] = useState(false);
-
-  const sentPatients = store.patients;
 
   const visibleHistory = useMemo(
     () =>
@@ -357,7 +358,9 @@ export default function RhuTriage() {
   };
 
   /* ----------------------------- Final action --------------------------- */
-  const handleSendToPhn = () => {
+  const [sending, setSending] = useState(false);
+  const handleSendToPhn = async () => {
+    if (sending) return;
     const payload = {
       // Registered patients carry their real residents.id (from the backend
       // search); walk-ins have none until they are created through intake.
@@ -387,9 +390,16 @@ export default function RhuTriage() {
         day: "numeric",
       }),
     };
-    sendToPhnQueue(payload);
-    resetAll();
-    showToast("Patient successfully sent to PHN.");
+    setSending(true);
+    try {
+      await sendToPhnQueue(payload);
+      resetAll();
+      showToast("Patient successfully sent to PHN.");
+    } catch (err) {
+      showToast(err?.message || "Could not send the patient to PHN. Please try again.");
+    } finally {
+      setSending(false);
+    }
   };
 
   /* ------------------------------ UI helpers ---------------------------- */
@@ -977,9 +987,10 @@ export default function RhuTriage() {
                   <button
                     type="button"
                     onClick={handleSendToPhn}
-                    className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-dark"
+                    disabled={sending}
+                    className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Send className="h-4 w-4" /> Send to PHN
+                    <Send className="h-4 w-4" /> {sending ? "Sending…" : "Send to PHN"}
                   </button>
                 </div>
                 <p className="mt-2 text-center text-xs text-brand-gray sm:text-left">

@@ -117,7 +117,7 @@ export default function MunicipalSubmissions() {
   }, [submissions, tab, barangayFilter, periodFilter, statusFilter, reviewFilter, query]);
 
   const sorted = useMemo(
-    () => [...filtered].sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)),
+    () => [...filtered].sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()),
     [filtered]
   );
 

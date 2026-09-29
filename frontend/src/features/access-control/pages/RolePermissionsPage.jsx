@@ -223,12 +223,20 @@ export default function RolePermissionsPage() {
   /* Commit / discard / reset                                              */
   /* --------------------------------------------------------------------- */
 
-  const handleSave = () => {
-    const { changedIds: applied } = saveRolePermissions(selectedRoleId, draft);
-    toast({
-      title: "Permissions updated successfully.",
-      description: `${plural(applied.length, "change")} saved for ${selectedRole.label}.`,
-    });
+  const handleSave = async () => {
+    try {
+      const { changedIds: applied } = await saveRolePermissions(selectedRoleId, draft);
+      toast({
+        title: "Permissions updated successfully.",
+        description: `${plural(applied.length, "change")} saved for ${selectedRole.label}.`,
+      });
+    } catch (err) {
+      toast({
+        tone: "danger",
+        title: "Could not save permissions.",
+        description: err?.message || "The server rejected the change. Only administrators can edit permissions.",
+      });
+    }
   };
 
   const handleDiscard = () => setDraft(saved);
@@ -257,13 +265,21 @@ export default function RolePermissionsPage() {
         ? `${plural(changedIds.length, "unsaved change")} on this role will be discarded.`
         : undefined,
       confirmLabel: "Reset to defaults",
-      onConfirm: () => {
-        const { changedIds: applied } = resetRoleToDefaults(selectedRoleId);
-        setDraft(defaultPermissionsForRole(selectedRoleId));
-        toast({
-          title: "Permissions updated successfully.",
-          description: `${selectedRole.label} restored to defaults — ${plural(applied.length, "change")} recorded.`,
-        });
+      onConfirm: async () => {
+        try {
+          const { changedIds: applied } = await resetRoleToDefaults(selectedRoleId);
+          setDraft(defaultPermissionsForRole(selectedRoleId));
+          toast({
+            title: "Permissions updated successfully.",
+            description: `${selectedRole.label} restored to defaults — ${plural(applied.length, "change")} recorded.`,
+          });
+        } catch (err) {
+          toast({
+            tone: "danger",
+            title: "Could not reset permissions.",
+            description: err?.message || "The server rejected the change.",
+          });
+        }
       },
     });
   };

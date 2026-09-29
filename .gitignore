@@ -41,3 +41,15 @@ Thumbs.db
 
 # Local AI/agent tool artifacts (never part of the project)
 .kilo/
+.kilocode/
+.roo/
+.clinerules/
+
+# QA runtime credentials + local test artifacts (never committed)
+qa/
+
+# QA / E2E evidence and run artifacts (regenerated locally, never committed)
+evidence/
+evidence1/
+test-results/
+playwright-report/

@@ -37,7 +37,7 @@ export default function FamilyCareSection() {
             <SectionHeading
               kicker="Senior Citizens & Families"
               title="Care that reaches the household"
-              lede="Under the Expanded Senior Citizens Act and the municipal family health program, services are brought to residents who cannot travel to the health centre."
+              lede="Under the Expanded Senior Citizens Act and the municipal family health program, services are brought to residents who cannot travel to the health center."
             />
 
             <ul className="mt-10 divide-y divide-brand-border border-y border-brand-border">

@@ -1,6 +1,6 @@
 ﻿import React from "react";
 import { Link } from "react-router-dom";
-import { Facebook, Mail, MapPin, Phone, Clock, ArrowUpRight } from "lucide-react";
+import { Mail, MapPin, Phone, Clock, ArrowUpRight } from "lucide-react";
 import GovSeal from "@/components/branding/GovSeal";
 
 const quickLinks = [
@@ -45,14 +45,10 @@ export default function Footer() {
                 the Municipality of Pili, Camarines Sur. Established to serve
                 residents through accountable and accessible public health records.
               </p>
+              {/* BUG-021: the Facebook icon linked to "#" (dead placeholder). Removed
+                  rather than pointing at an invented URL; the real email contact
+                  remains. */}
               <div className="mt-6 flex gap-2.5">
-                <a
-                  href="#"
-                  aria-label="Facebook page"
-                  className="flex h-9 w-9 items-center justify-center border border-white/20 text-white/70 transition-colors hover:border-brand-goldlight hover:text-brand-goldlight"
-                >
-                  <Facebook className="h-4 w-4" />
-                </a>
                 <a
                   href="mailto:health@pili.gov.ph"
                   aria-label="Send email"
@@ -156,12 +152,11 @@ export default function Footer() {
             <Link to="/login" className="transition-colors hover:text-white">
               Personnel Log In
             </Link>
-            <a href="#faq" className="transition-colors hover:text-white">
-              Privacy Notice
-            </a>
-            <a href="#faq" className="transition-colors hover:text-white">
-              Terms of Use
-            </a>
+            {/* BUG-021: "Privacy Notice" / "Terms of Use" pointed at #faq (a
+                mislabeled dead placeholder, not a real policy page). The
+                transparency strip above already cites the governing laws
+                (R.A. 10173 / 11223 / 11032), so the misleading links are removed
+                rather than pointed at an invented destination. */}
           </div>
         </div>
       </div>

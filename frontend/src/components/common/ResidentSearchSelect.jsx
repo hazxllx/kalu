@@ -24,7 +24,7 @@ const residentMeta = (r) =>
  *
  * @param {{ id: string, name: string, barangay?: string }[]} props.residents
  * @param {{ id: string, name: string } | null} props.value selected resident
- * @param (resident: object | null) => void props.onChange
+ * @param {(resident: object | null) => void} props.onChange
  */
 export default function ResidentSearchSelect({
   residents = [],

@@ -38,11 +38,13 @@ import {
   required,
   validateFields,
 } from "@/utils/validation";
+import { BARANGAYS } from "@/lib/barangays";
 
 // Fallback barangays for the Pili deployment. The live list is loaded from the
 // backend (public.barangays) on mount so this is only a resilience fallback and
-// is never the source of truth.
-const FALLBACK_BARANGAYS = ["San Isidro", "San Antonio", "Old San Roque"];
+// is never the source of truth. BUG-022: reuse the canonical list instead of a
+// duplicate hardcoded copy.
+const FALLBACK_BARANGAYS = [...BARANGAYS];
 
 // Government ID types selectable in Step 3. Values match the backend
 // `GOVERNMENT_ID_TYPES` in backend/src/validators/documents.validators.js.
@@ -1008,7 +1010,9 @@ export default function NewResidentRegistration() {
                       />
                       <span>
                         I certify that the information provided is true and correct, and I agree to the{" "}
-                        <a href="#" className="font-semibold text-brand-blue underline underline-offset-2">Terms and Conditions</a> of this portal.
+                        {/* BUG-021: no standalone Terms page exists yet, so this is plain
+                            emphasized text rather than a dead "#" link. */}
+                        <span className="font-semibold text-brand-blue">Terms and Conditions</span> of this portal.
                       </span>
                     </label>
                     <label className="flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-slate-600">

@@ -31,10 +31,15 @@ export default defineConfig({
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
+    // BUG-026: no keys are hardcoded here. The Supabase URL and the (public,
+    // RLS-guarded) anon key are read from the environment. The anon key is
+    // designed to ship in the client bundle so it is not a secret in the way the
+    // service-role key is — but it is still sourced from the environment for
+    // hygiene and to keep all credentials out of source.
     env: {
-      VITE_API_URL: 'http://localhost:5000/api',
-      VITE_SUPABASE_URL: 'https://lblawqeoixojyytkmfqy.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxibGF3cWVvaXhvanl5dGttZnF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk0NTcyMjgsImV4cCI6MjEwNTAzMzIyOH0.CSmv38XdRvxd3kST64cQgBpj9CXuPTBR1vsQb-sp3GA',
+      VITE_API_URL: process.env.VITE_API_URL || 'http://localhost:5000/api',
+      VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || '',
+      VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY || '',
     },
   },
   expect: {

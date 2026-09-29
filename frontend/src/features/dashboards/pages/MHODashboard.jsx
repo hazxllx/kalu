@@ -109,13 +109,19 @@ export default function MHODashboard() {
   const maxCondition = topConditions.reduce((m, c) => Math.max(m, c.value), 0) || 1;
 
   // Submission Status has no persisted backend equivalent — kept local.
+  // BUG-019: the reporting period is derived from the actual current date
+  // ("Month YYYY"), never a hardcoded month/year.
+  const currentPeriod = useMemo(
+    () => new Date().toLocaleString("en-US", { month: "long", year: "numeric" }),
+    [],
+  );
   const submissionStatus = useMemo(() => ({
-    tclSubmitted: submissions.filter((s) => s.type === "TCL" && s.period === "September 2026").length,
-    m1Submitted: submissions.filter((s) => s.type === "M1" && s.period === "September 2026").length,
+    tclSubmitted: submissions.filter((s) => s.type === "TCL" && s.period === currentPeriod).length,
+    m1Submitted: submissions.filter((s) => s.type === "M1" && s.period === currentPeriod).length,
     pending: submissions.filter((s) => s.reviewStatus === "Pending Review" || s.status === "Under Review").length,
     needsCorrection: submissions.filter((s) => s.reviewStatus === "Needs Correction" || s.reviewStatus === "Returned").length,
     totalBarangays: barangays.length,
-  }), [submissions, barangays.length]);
+  }), [submissions, barangays.length, currentPeriod]);
 
   const dash = loading ? "…" : loadError ? "—" : undefined;
   const statCards = [

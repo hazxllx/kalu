@@ -1,0 +1,417 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import PageHeader from "@/components/common/PageHeader";
+import { Card } from "@/components/common/Card";
+import { useAuth } from "@/context/AuthContext";
+import { healthServicesApi } from "@/services/api";
+import {
+  Plus, X, CheckCircle2, RefreshCw, Search, Users, MapPin, Building2, Activity, UserPlus, UserMinus,
+} from "lucide-react";
+
+/**
+ * Health Services manager — the database-backed catalog + personnel assignment
+ * UI shared by the PHN and Health Supervisor "Health Services" pages.
+ *
+ * Source of truth is the backend (/api/health-services -> Supabase
+ * public.health_services + public.health_service_assignments). No localStorage.
+ * Municipality/barangay scope, RHU-vs-barangay modeling and assignment
+ * visibility are enforced server-side and by RLS; this UI reads/writes through
+ * the API and revalidates after every mutation.
+ */
+
+const CATEGORY_LABELS = {
+  Maternal: "Maternal Services",
+  TCLS: "TCLS",
+  Immunization: "Immunization",
+  "Family Planning": "Family Planning",
+  Consultation: "Consultation",
+  Other: "Other Health Services",
+};
+const CATEGORY_ORDER = ["Maternal", "TCLS", "Immunization", "Family Planning", "Consultation", "Other"];
+
+const ROLE_LABELS = {
+  phn: "PHN",
+  mho: "MHO",
+  health_supervisor: "Health Supervisor",
+  rhu_personnel: "RHU Personnel",
+  bhw: "BHW",
+};
+
+// Suggested service names per category (names, not the M1/FHSIS report itself).
+const NAME_SUGGESTIONS = {
+  Maternal: ["Prenatal", "Postpartum", "Maternal Immunization"],
+  TCLS: ["TB Case Finding", "Leprosy Screening"],
+  Immunization: ["Routine Immunization", "Anti-Rabies Vaccination"],
+  "Family Planning": ["Family Planning Counseling"],
+  Consultation: ["Medical Consultation"],
+  Other: [],
+};
+
+const inputCls = (error) =>
+  `mt-1.5 w-full rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${
+    error ? "border-brand-danger" : "border-brand-border dark:border-border"
+  }`;
+
+export default function HealthServicesManager({ subtitle }) {
+  const { user } = useAuth();
+  const isSupervisor = user?.role === "health_supervisor";
+
+  const [services, setServices] = useState([]);
+  const [categories, setCategories] = useState(CATEGORY_ORDER);
+  const [barangays, setBarangays] = useState([]);
+  const [facilities, setFacilities] = useState([]);
+  const [personnel, setPersonnel] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [toast, setToast] = useState(null);
+
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [form, setForm] = useState(null);
+  const [manageTarget, setManageTarget] = useState(null);
+  const [busyAssign, setBusyAssign] = useState("");
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const loadServices = useCallback(() => {
+    setLoading(true);
+    setError("");
+    return healthServicesApi
+      .list()
+      .then((res) => setServices(res?.rows || res?.records || []))
+      .catch((err) => setError(err?.message || "Unable to load health services. Please try again."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadServices();
+    // Reference + personnel are for the create/assign forms; a failure here
+    // must not blank the catalog, so they are best-effort.
+    healthServicesApi.meta().then((m) => m?.categories && setCategories(m.categories)).catch(() => {});
+    healthServicesApi.reference().then((r) => { setBarangays(r?.barangays || []); setFacilities(r?.facilities || []); }).catch(() => {});
+    healthServicesApi.personnel().then((r) => setPersonnel(r?.rows || [])).catch(() => {});
+  }, [loadServices]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return services.filter((s) => !q || s.name.toLowerCase().includes(q) || (s.category || "").toLowerCase().includes(q));
+  }, [services, search]);
+
+  const grouped = useMemo(() => {
+    const groups = {};
+    for (const s of filtered) (groups[s.category] ||= []).push(s);
+    const order = [...new Set([...CATEGORY_ORDER, ...categories])];
+    return order.filter((c) => groups[c]?.length).map((c) => ({ category: c, items: groups[c] }));
+  }, [filtered, categories]);
+
+  const openCreate = () => {
+    setForm({
+      name: "",
+      category: "Maternal",
+      facilityId: "",
+      barangayId: isSupervisor && barangays[0] ? barangays[0].id : "",
+      description: "",
+      personnelIds: [],
+    });
+    setFormError("");
+    setShowForm(true);
+  };
+
+  const togglePersonnel = (id) =>
+    setForm((f) => ({
+      ...f,
+      personnelIds: f.personnelIds.includes(id) ? f.personnelIds.filter((p) => p !== id) : [...f.personnelIds, id],
+    }));
+
+  const saveService = async () => {
+    if (!form.name.trim()) { setFormError("A service name is required."); return; }
+    setSaving(true);
+    setFormError("");
+    try {
+      await healthServicesApi.create({
+        name: form.name.trim(),
+        category: form.category,
+        facilityId: form.facilityId || null,
+        barangayId: form.barangayId || null,
+        description: form.description.trim(),
+        personnelIds: form.personnelIds,
+      });
+      setShowForm(false);
+      showToast("Health service created.");
+      await loadServices();
+    } catch (err) {
+      setFormError(err?.message || "The health service could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isAssigned = (service, personnelId) => (service.assignedPersonnel || []).some((p) => p.id === personnelId);
+
+  const toggleAssign = async (service, person) => {
+    setBusyAssign(person.id);
+    try {
+      const updated = isAssigned(service, person.id)
+        ? await healthServicesApi.unassign(service.id, person.id)
+        : await healthServicesApi.assign(service.id, person.id);
+      const record = updated?.record || null;
+      if (record) {
+        setServices((prev) => prev.map((s) => (s.id === record.id ? record : s)));
+        setManageTarget(record);
+      }
+      showToast(isAssigned(service, person.id) ? "Personnel removed from service." : "Personnel assigned to service.");
+    } catch (err) {
+      showToast(err?.message || "The assignment could not be updated.");
+    } finally {
+      setBusyAssign("");
+    }
+  };
+
+  const facilityLabel = (s) => {
+    if (s.facility) return `${s.facility}${s.facilityType === "rhu" ? " (RHU)" : ""}`;
+    return s.barangayId ? "Barangay Health Station" : "RHU / Municipality-wide";
+  };
+
+  return (
+    <>
+      <PageHeader
+        crumbs={["Health Services"]}
+        title="Health Services"
+        subtitle={subtitle || "Catalog of health services and their assigned personnel."}
+        action={
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+          >
+            <Plus className="h-4 w-4" /> Add Health Service
+          </button>
+        }
+      />
+
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
+          <CheckCircle2 className="h-4 w-4 text-brand-green" />
+          <span className="text-sm">{toast}</span>
+        </div>
+      )}
+
+      <Card className="mb-5 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 dark:border-border dark:bg-input sm:max-w-md sm:flex-1">
+            <Search className="h-4 w-4 text-brand-gray" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search service or category..."
+              className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
+            />
+          </div>
+          <button
+            onClick={loadServices}
+            className="inline-flex items-center gap-2 rounded-btn border border-brand-border px-3 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </button>
+        </div>
+      </Card>
+
+      {error ? (
+        <Card className="p-10 text-center">
+          <p className="text-sm font-medium text-brand-danger">{error}</p>
+          <button onClick={loadServices} className="mt-3 inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
+            <RefreshCw className="h-4 w-4" /> Retry
+          </button>
+        </Card>
+      ) : loading ? (
+        <Card className="p-12 text-center"><p className="text-sm text-brand-gray">Loading health services...</p></Card>
+      ) : services.length === 0 ? (
+        <Card className="p-12 text-center">
+          <Activity className="mx-auto mb-3 h-10 w-10 text-brand-gray/50" />
+          <p className="text-sm text-brand-gray">No health services available.</p>
+        </Card>
+      ) : grouped.length === 0 ? (
+        <Card className="p-12 text-center"><p className="text-sm text-brand-gray">No services match your search.</p></Card>
+      ) : (
+        <div className="space-y-6">
+          {grouped.map(({ category, items }) => (
+            <div key={category}>
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-brand-gray">{CATEGORY_LABELS[category] || category}</h3>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {items.map((s) => (
+                  <Card key={s.id} className="flex h-full flex-col p-4 sm:p-5">
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <h4 className="min-w-0 truncate font-semibold text-brand-ink">{s.name}</h4>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${s.active ? "bg-brand-green/10 text-brand-green" : "bg-brand-gray/10 text-brand-gray"}`}>
+                        {s.active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                    <div className="flex-1 space-y-1.5 text-sm text-brand-gray">
+                      <p className="flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5" /> {facilityLabel(s)}</p>
+                      <p className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" /> {s.barangay || "Municipality-wide"}</p>
+                      <p className="flex items-start gap-1.5">
+                        <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          {(s.assignedPersonnel || []).length === 0
+                            ? "No personnel assigned"
+                            : s.assignedPersonnel.map((p) => `${p.name}${p.role ? ` (${ROLE_LABELS[p.role] || p.role})` : ""}`).join(", ")}
+                        </span>
+                      </p>
+                      {s.description && <p className="line-clamp-2 pt-1">{s.description}</p>}
+                    </div>
+                    <div className="mt-4 border-t border-brand-border pt-3 dark:border-border">
+                      <button
+                        onClick={() => setManageTarget(s)}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                      >
+                        <UserPlus className="h-3.5 w-3.5" /> Manage assignments
+                      </button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Create service */}
+      {showForm && form && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <Card className="max-h-[92vh] w-full max-w-xl overflow-y-auto">
+            <div className="p-6">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-ink">Add Health Service</h3>
+                  <p className="mt-0.5 text-sm text-brand-gray">RHU is a facility, not a barangay. Leave the barangay blank for a municipality/RHU-wide service.</p>
+                </div>
+                <button onClick={() => setShowForm(false)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Category</label>
+                    <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} className={`${inputCls()} cursor-pointer`}>
+                      {categories.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c] || c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Service Name <span className="text-brand-danger">*</span></label>
+                    <input
+                      list="hs-name-suggestions"
+                      value={form.name}
+                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. Prenatal"
+                      className={inputCls(formError && !form.name.trim())}
+                    />
+                    <datalist id="hs-name-suggestions">
+                      {(NAME_SUGGESTIONS[form.category] || []).map((n) => <option key={n} value={n} />)}
+                    </datalist>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Facility</label>
+                    <select value={form.facilityId} onChange={(e) => setForm((f) => ({ ...f, facilityId: e.target.value }))} className={`${inputCls()} cursor-pointer`}>
+                      <option value="">Municipality-wide (no specific facility)</option>
+                      {facilities.map((fa) => <option key={fa.id} value={fa.id}>{fa.name}{fa.type === "rhu" ? " (RHU)" : fa.type === "barangay_health_station" ? " (BHS)" : ""}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Barangay</label>
+                    <select
+                      value={form.barangayId}
+                      onChange={(e) => setForm((f) => ({ ...f, barangayId: e.target.value }))}
+                      disabled={isSupervisor}
+                      className={`${inputCls()} cursor-pointer disabled:opacity-70`}
+                    >
+                      {!isSupervisor && <option value="">Municipality-wide (no barangay)</option>}
+                      {barangays.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                    {isSupervisor && <p className="mt-1 text-xs text-brand-gray">Scoped to your assigned barangay.</p>}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Description</label>
+                  <textarea rows={2} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} className={`${inputCls()} resize-none`} />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Assign Personnel</label>
+                  <div className="mt-1.5 max-h-44 space-y-1 overflow-y-auto rounded-btn border border-brand-border p-2 dark:border-border">
+                    {personnel.length === 0 && <p className="px-2 py-2 text-sm text-brand-gray">No assignable personnel found.</p>}
+                    {personnel.map((p) => (
+                      <label key={p.id} className="flex cursor-pointer items-center gap-2.5 rounded-btn px-2 py-1.5 hover:bg-brand-bg dark:hover:bg-hover">
+                        <input type="checkbox" checked={form.personnelIds.includes(p.id)} onChange={() => togglePersonnel(p.id)} className="h-4 w-4 accent-brand-blue" />
+                        <span className="text-sm text-brand-ink">{p.name} <span className="text-brand-gray">({ROLE_LABELS[p.role] || p.role})</span></span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {formError && <div className="rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-3.5 py-2.5 text-sm text-brand-danger">{formError}</div>}
+
+                <div className="flex justify-end gap-3 border-t border-brand-border pt-4 dark:border-border">
+                  <button onClick={() => setShowForm(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
+                  <button onClick={saveService} disabled={saving} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">
+                    <Plus className="h-4 w-4" /> {saving ? "Saving..." : "Add Service"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Manage assignments */}
+      {manageTarget && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <Card className="max-h-[92vh] w-full max-w-md overflow-y-auto">
+            <div className="p-6">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-ink">{manageTarget.name}</h3>
+                  <p className="mt-0.5 text-sm text-brand-gray">Assign or remove personnel for this service.</p>
+                </div>
+                <button onClick={() => setManageTarget(null)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+              </div>
+              <div className="space-y-1">
+                {personnel.length === 0 && <p className="py-4 text-center text-sm text-brand-gray">No assignable personnel found.</p>}
+                {personnel.map((p) => {
+                  const assigned = isAssigned(manageTarget, p.id);
+                  return (
+                    <div key={p.id} className="flex items-center justify-between gap-3 rounded-btn border border-brand-border px-3 py-2.5 dark:border-border">
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-brand-ink">{p.name}</span>
+                        <span className="text-xs text-brand-gray">{ROLE_LABELS[p.role] || p.role}</span>
+                      </span>
+                      <button
+                        onClick={() => toggleAssign(manageTarget, p)}
+                        disabled={busyAssign === p.id}
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
+                          assigned ? "border border-brand-danger/30 text-brand-danger hover:bg-brand-danger/5" : "bg-brand-blue text-white hover:bg-brand-dark"
+                        }`}
+                      >
+                        {assigned ? <><UserMinus className="h-3.5 w-3.5" /> Remove</> : <><UserPlus className="h-3.5 w-3.5" /> Assign</>}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-5 flex justify-end border-t border-brand-border pt-4 dark:border-border">
+                <button onClick={() => setManageTarget(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Close</button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+    </>
+  );
+}

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
-import { useWorkflowStore } from "@/services/local/workflowStore";
+import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { referralsApi, followUpsApi, householdsApi } from "@/services/api";
 import { fetchEarlyWarningData } from "@/services/api/earlyWarningApi";
 import {
@@ -13,7 +13,6 @@ import {
 } from "@/lib/supervisorScope";
 import { riskOfPatient } from "@/lib/riskRules";
 import { useAuth } from "@/context/AuthContext";
-import { Link } from "react-router-dom";
 import { X, ChevronRight, Eye, AlertTriangle } from "lucide-react";
 
 // Referral statuses that count as "still pending" (mirrors the DB check
@@ -79,7 +78,9 @@ export default function HealthSupervisorDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const scope = getSupervisorScope(user);
-  const workflow = useWorkflowStore();
+  // BUG-008: triage patients come from the persistent DB (the supervisor's own
+  // /intake submissions), not a browser store.
+  const { patients: workflowPatients } = usePhnWorkflow({ source: "intake" });
 
   // DATABASE-BACKED sources:
   //   - referrals   -> /api/referrals            (health_referrals)
@@ -165,12 +166,11 @@ export default function HealthSupervisorDashboard() {
     return alerts;
   }, [earlyWarning]);
 
-  // Patients (RHU triage -> PHN check-up queue) have NO backend source: they
-  // are an in-session PHN workflow, not a persisted entity. They stay on the
-  // workflow store and are filtered to the supervisor's coverage before use.
+  // Patients (RHU triage -> PHN check-up queue) are read from the persistent
+  // backend and filtered to the supervisor's coverage before use.
   const visiblePatients = useMemo(
-    () => filterSupervisorRows(workflow.patients, user),
-    [workflow.patients, user]
+    () => filterSupervisorRows(workflowPatients, user),
+    [workflowPatients, user]
   );
 
   const [caseModal, setCaseModal] = useState(null);
@@ -357,9 +357,6 @@ export default function HealthSupervisorDashboard() {
         <StatCard icon="CalendarClock" label="Overdue Follow-ups" value={loading ? "…" : loadError ? "—" : stats.overdueFollowUps} tone="accent" />
         <StatCard icon="Bell" label="Health Alerts" value={loading ? "…" : loadError ? "—" : stats.alerts} tone="blue" />
       </div>
-
-      {/* Household Risk Clusters — real server-computed household risk. */}
-      <RiskClusterStrip households={households} loading={loading} error={loadError} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Cases Requiring Attention */}
@@ -552,40 +549,4 @@ export default function HealthSupervisorDashboard() {
       )}
     </>
   );
-
-  function RiskClusterStrip({ households: rows = [], loading: isLoading, error }) {
-    // Counts come from the REAL server-computed household risk classification
-    // (public.households.risk_level: High / Moderate / Low), scoped to the
-    // supervisor's coverage by the /api/households endpoint.
-    const counts = {
-      high: rows.filter((h) => h.riskLevel === "High").length,
-      moderate: rows.filter((h) => h.riskLevel === "Moderate").length,
-      low: rows.filter((h) => h.riskLevel === "Low").length,
-    };
-    const summary = isLoading
-      ? "Loading household risk…"
-      : error
-        ? "Household risk unavailable — retry above."
-        : null;
-    return (
-      <Link to="/app/health_supervisor/households/risk-clusters" className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-brand-blue/40 transition-colors">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue">
-          <AlertTriangle className="h-5 w-5" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-brand-ink">Household Risk Clusters</p>
-          {summary ? (
-            <p className="text-xs text-brand-gray">{summary}</p>
-          ) : (
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-gray">
-              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-danger" /> {counts.high} High risk</span>
-              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-accent" /> {counts.moderate} Moderate risk</span>
-              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-green" /> {counts.low} Low risk</span>
-            </p>
-          )}
-        </div>
-        <ChevronRight className="h-4 w-4 shrink-0 text-brand-gray" />
-      </Link>
-    );
-  }
 }

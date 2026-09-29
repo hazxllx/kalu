@@ -84,6 +84,13 @@ export const FEATURE_ROLES = Object.freeze({
 
   // Monitoring / aggregate information
   reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
+
+  // Health services catalog. Managed (create/assign) by PHN, MHO and the
+  // barangay-scoped Health Supervisor. Read by all staff who can be assigned a
+  // service (adds BHW and RHU Personnel), so an assigned service shows up in the
+  // assignee's account. Scope is re-enforced in the service and by RLS.
+  healthServices: [ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR],
+  healthServicesRead: [ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR, ROLES.RHU_PERSONNEL, ROLES.BHW],
   // Community Health Monitoring / map analytics. MHO + PHN are municipality-wide
   // (they see every authorised barangay in Pili); a Health Supervisor is scoped
   // by the session to their assigned barangay only. RHU Personnel is NOT here:

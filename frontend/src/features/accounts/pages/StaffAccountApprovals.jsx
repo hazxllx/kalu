@@ -271,11 +271,31 @@ function RequestReviewModal({ record, onClose, onDecide }) {
   const [busy, setBusy] = useState("");
   const firstField = useRef(null);
 
+  // The queue list does not carry the uploaded verification documents; fetch the
+  // full request (with fresh, short-lived signed URLs) when the modal opens.
+  const [full, setFull] = useState(record);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [docsError, setDocsError] = useState("");
+
   useEffect(() => {
     firstField.current?.focus();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    setDocsLoading(true);
+    setDocsError("");
+    staffAccountsApi
+      .get(record.id)
+      .then((payload) => { if (active) setFull(payload?.request || record); })
+      .catch((err) => { if (active) setDocsError(err?.message || "The verification documents could not be loaded."); })
+      .finally(() => { if (active) setDocsLoading(false); });
+    return () => { active = false; };
+  }, [record.id]);
+
   const pending = record.status === "pending";
+
+  const verificationDocuments = Array.isArray(full?.verificationDocuments) ? full.verificationDocuments : [];
 
   const rows = [
     { label: "Reference", value: record.id },
@@ -322,19 +342,41 @@ function RequestReviewModal({ record, onClose, onDecide }) {
         </div>
       </ModalSection>
 
-      <ModalSection label="Supporting Documents">
+      <ModalSection label="Verification Documents">
         <div className="space-y-2">
-          {(record.documents || []).map((d, i) => (
-            <div
-              key={`${d.type || d.name}-${i}`}
-              className="flex items-center justify-between gap-3 rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 dark:border-border"
-            >
-              <p className="text-sm font-medium text-brand-ink">{d.type || d.name}</p>
-              <FileText className="h-4 w-4 shrink-0 text-brand-gray" />
-            </div>
-          ))}
-          {(record.documents || []).length === 0 && (
-            <p className="text-sm text-brand-gray">No documents uploaded.</p>
+          {docsLoading ? (
+            <p className="flex items-center gap-2 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Loading documents…</p>
+          ) : docsError ? (
+            <p className="text-sm text-brand-danger">{docsError}</p>
+          ) : verificationDocuments.length > 0 ? (
+            verificationDocuments.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center justify-between gap-3 rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 dark:border-border dark:bg-card"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <FileText className="h-4 w-4 shrink-0 text-brand-gray" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-brand-ink">{d.documentType}</p>
+                    {d.originalFilename && <p className="truncate text-xs text-brand-gray">{d.originalFilename}</p>}
+                  </div>
+                </div>
+                {d.url ? (
+                  <a
+                    href={d.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:border-brand-blue"
+                  >
+                    View Document
+                  </a>
+                ) : (
+                  <span className="shrink-0 text-xs text-brand-gray">Unavailable</span>
+                )}
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-brand-gray">No document uploaded</p>
           )}
         </div>
       </ModalSection>

@@ -19,6 +19,49 @@ const CIVIL_STATUSES = ["Single", "Married", "Widowed", "Separated"];
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * The resident directory API returns domain-shaped rows (firstName/middleName/
+ * lastName, sex, birthDate) — not name/age/gender. Derive the display fields the
+ * certificate UI needs so searching or selecting a resident can never crash on
+ * an undefined `name`/`age`/`gender`.
+ */
+const residentFullName = (r) =>
+  [r?.firstName, r?.middleName, r?.lastName, r?.suffix]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const ageFromBirthDate = (iso) => {
+  if (!iso) return "";
+  const born = new Date(String(iso).length === 10 ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(born.getTime())) return "";
+  const now = new Date();
+  let age = now.getFullYear() - born.getFullYear();
+  const m = now.getMonth() - born.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < born.getDate())) age -= 1;
+  return age >= 0 && age < 200 ? age : "";
+};
+
+const initialsOf = (name) => {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return parts.map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+};
+
+/**
+ * Normalize an API resident row into the display shape the composer renders.
+ * Existing name/age/gender values are respected; otherwise they are derived
+ * from the canonical firstName/lastName/birthDate/sex fields.
+ */
+const normalizeResident = (r) => {
+  if (!r) return r;
+  const name = r.name || residentFullName(r) || String(r.id || "").trim() || "Unnamed resident";
+  const age = r.age ?? ageFromBirthDate(r.birthDate);
+  const gender = r.gender || r.sex || "";
+  return { ...r, name, age, gender };
+};
+
 const inputCls = (error) =>
   `mt-1.5 w-full rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${
     error ? "border-brand-danger" : "border-slate-200 dark:border-border"
@@ -136,18 +179,18 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
     setTimeout(() => setToast(null), 3200);
   };
 
-  const residentOptions = useMemo(
-    () =>
-      [...residents]
-        .filter(
-          (r) =>
-            !patientQuery.trim() ||
-            r.name?.toLowerCase().includes(patientQuery.trim().toLowerCase()) ||
-            String(r.id).toLowerCase().includes(patientQuery.trim().toLowerCase())
-        )
-        .slice(0, 6),
-    [residents, patientQuery]
-  );
+  const residentOptions = useMemo(() => {
+    const q = patientQuery.trim().toLowerCase();
+    return (Array.isArray(residents) ? residents : [])
+      .map(normalizeResident)
+      .filter(
+        (r) =>
+          !q ||
+          r.name.toLowerCase().includes(q) ||
+          String(r.id ?? "").toLowerCase().includes(q)
+      )
+      .slice(0, 6);
+  }, [residents, patientQuery]);
 
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
@@ -307,12 +350,14 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                     className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-brand-light dark:hover:bg-hover"
                   >
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-light text-brand-blue text-xs font-semibold">
-                      {r.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                      {initialsOf(r.name)}
                     </span>
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium text-brand-ink">{r.name}</span>
                       <span className="block text-xs text-brand-gray">
-                        {r.id} · {r.age} yrs · {r.gender} · {r.barangay}
+                        {[r.id, r.age !== "" ? `${r.age} yrs` : null, r.gender, r.barangay]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                     </span>
                   </button>

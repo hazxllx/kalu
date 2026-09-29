@@ -4,6 +4,7 @@ import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
 import { phnResidents } from "@/services/local/phnData";
 import { useWorkflowStore } from "@/services/local/workflowStore";
+import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import PhnCheckupWorkbench from "@/features/consultations/components/PhnCheckupWorkbench";
 import {
@@ -18,17 +19,11 @@ import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
 import { Search, Plus, Eye, Edit2, Trash2, X, CheckCircle2, ClipboardCheck, ArrowRight } from "lucide-react";
 
-const LAST_VISITS = [
-  "September 5, 2026",
-  "September 3, 2026",
-  "September 2, 2026",
-  "September 1, 2026",
-  "August 30, 2026",
-  "August 28, 2026",
-];
-
 // Health records are derived from the resident registry so the scope of each
 // row always matches the resident's scope (null = RHU-level resident).
+// BUG-020: no fabricated visit dates or canned notes are injected — records
+// carry only real fields. When there is no resident data the table shows its
+// empty state rather than invented patients.
 const RECORDS = phnResidents.map((r, i) => ({
   id: i + 1,
   recordNo: `HR-2026-${String(110 + i).padStart(4, "0")}`,
@@ -37,10 +32,10 @@ const RECORDS = phnResidents.map((r, i) => ({
   sex: r.gender,
   barangay: r.barangay,
   program: r.program,
-  lastVisit: LAST_VISITS[i % LAST_VISITS.length],
+  lastVisit: r.lastVisit || "",
   risk: r.risk,
   status: r.status === "Active" ? "Active" : "Inactive",
-  notes: "Routine monitoring record.",
+  notes: r.notes || "",
 }));
 
 const RISK_COLORS = {
@@ -103,12 +98,13 @@ export default function PhnHealthRecords() {
   const { coverage } = usePhnCoverage();
   const phn = isPHN(user);
   const workflow = useWorkflowStore();
+  const { patients: workflowPatients } = usePhnWorkflow({ source: "queue" });
 
   // Triaged/check-up patients are matched by name so the record shows the live
-  // status of the RHU â†’ PHN workflow without storing a second patient list.
+  // status of the RHU -> PHN workflow without storing a second patient list.
   const visiblePatients = useMemo(
-    () => filterRowsByScope(workflow.patients, user, coverage),
-    [workflow.patients, user, coverage]
+    () => filterRowsByScope(workflowPatients, user, coverage),
+    [workflowPatients, user, coverage]
   );
   const patientByName = useMemo(() => {
     const map = {};
@@ -135,10 +131,16 @@ export default function PhnHealthRecords() {
   // registry rows and any triaged patients). The active coverage decides which
   // of those rows are actually rendered, so switching coverage does not lose
   // records that were created under the other coverage.
-  const [masterRecords, setMasterRecords] = useState(() => {
+  // BUG-008: health-record rows are derived from the persistent PHN queue
+  // (DB-backed workflowPatients), not a browser store. masterRecords stays
+  // stateful so local add/edit still work, and is re-synced whenever the
+  // persistent workflow rows load/change.
+  const [masterRecords, setMasterRecords] = useState(() => RECORDS.map((r) => ({ ...r })));
+
+  useEffect(() => {
     const base = RECORDS.map((r) => ({ ...r }));
     const known = new Set(base.map((r) => r.resident));
-    const extras = workflow.patients
+    const extras = (workflowPatients || [])
       .filter((p) => !known.has(p.patient))
       .map((p, i) => ({
         id: 1000 + i,
@@ -148,13 +150,13 @@ export default function PhnHealthRecords() {
         sex: p.sex,
         barangay: p.barangay,
         program: "Routine Monitoring",
-        lastVisit: p.visitDate || p.triage?.date || LAST_VISITS[0],
+        lastVisit: p.visitDate || p.triage?.date || "",
         risk: p.checkup?.riskLevel || "Low",
         status: "Active",
-        notes: p.triage?.notes || "Triaged at the RHU.",
+        notes: p.triage?.notes || "",
       }));
-    return [...base, ...extras];
-  });
+    setMasterRecords([...base, ...extras]);
+  }, [workflowPatients]);
 
   const records = useMemo(
     () => filterRowsByScope(masterRecords, user, coverage),

@@ -17,10 +17,19 @@ import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { CREDENTIALS } from '../helpers/test-helpers.js';
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://lblawqeoixojyytkmfqy.supabase.co';
-const SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxibGF3cWVvaXhvanl5dGttZnF5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTQ1NzIyOCwiZXhwIjoyMTA1MDMzMjI4fQ.idSat_SrDnGTfbcOAfVBWFNIGTzBhKyrfOXdHAAmltA';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+// BUG-026: the service-role key is a top-level secret and must NEVER be
+// committed. It is read from the environment only; a hardcoded fallback that
+// used to live here has been removed and MUST be treated as compromised and
+// rotated. Test credentials also come from the environment (see test-helpers).
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+  throw new Error(
+    'password-recovery.spec requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment. ' +
+      'These must not be hardcoded in source.',
+  );
+}
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -28,7 +37,7 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
 
 const TARGET = CREDENTIALS.resident; // { email, password }
 const ORIGINAL_PASSWORD = TARGET.password;
-const NEW_PASSWORD = 'NewRecovery1!';
+const NEW_PASSWORD = process.env.KALUSAGAP_RECOVERY_TEST_PASSWORD || 'NewRecovery1!';
 
 /** Reproduce the emailed recovery link and return only its URL fragment. */
 async function getRecoveryHash(email) {

@@ -4,14 +4,9 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
 import { consultationsApi } from "@/services/api";
-import {
-  CHECKUP_STATUS,
-  useWorkflowStore,
-  startPatientCheckup,
-  completePatientCheckup,
-  setCheckupOutcome,
-  workflowHelpers,
-} from "@/services/local/workflowStore";
+import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
+import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
+import { workflowHelpers } from "@/services/local/workflowStore";
 import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
 import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
@@ -67,7 +62,10 @@ export default function PhnCheckups() {
   const { coverage } = usePhnCoverage();
   const navigate = useNavigate();
   const location = useLocation();
-  const store = useWorkflowStore();
+  // BUG-008: the check-up pipeline is the persistent PHN queue (DB-backed), not
+  // a browser store. Mutations persist to /phn and refresh from the database.
+  const { patients: workflowPatients, startCheckup, completeCheckup } =
+    usePhnWorkflow({ source: "queue" });
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -105,8 +103,8 @@ export default function PhnCheckups() {
   );
 
   const visiblePatients = useMemo(
-    () => filterRowsByScope(store.patients, user, coverage),
-    [store.patients, user, coverage]
+    () => filterRowsByScope(workflowPatients, user, coverage),
+    [workflowPatients, user, coverage]
   );
 
   const showToast = (message) => {
@@ -152,13 +150,17 @@ export default function PhnCheckups() {
   }, [toast]);
 
   const activePatient = activePatientId
-    ? store.patients.find((p) => p.id === activePatientId) || null
+    ? workflowPatients.find((p) => p.id === activePatientId) || null
     : null;
 
-  const handleStart = (patient) => {
-    startPatientCheckup(patient.id, user?.name);
-    showToast("Check-up started.");
-    setActivePatientId(patient.id);
+  const handleStart = async (patient) => {
+    try {
+      await startCheckup(patient.id);
+      showToast("Check-up started.");
+      setActivePatientId(patient.id);
+    } catch (err) {
+      showToast(err?.message || "Could not start the check-up.");
+    }
   };
 
   const handleContinue = (patient) => {
@@ -169,16 +171,23 @@ export default function PhnCheckups() {
     setActivePatientId(patient.id);
   };
 
-  const handleComplete = (patientId, recorded) => {
-    completePatientCheckup(patientId, recorded, user?.name);
-    showToast("Check-up completed successfully.");
+  const handleComplete = async (patientId, recorded) => {
+    try {
+      await completeCheckup(patientId, recorded);
+      showToast("Check-up completed successfully.");
+      loadConsults();
+    } catch (err) {
+      showToast(err?.message || "Could not complete the check-up.");
+    }
   };
 
   const handleOutcome = (kind) => {
     if (!activePatient) return;
     const patient = activePatient;
     const outcome = OUTCOME_MAP[kind] || "No Further Action";
-    setCheckupOutcome(patient.id, outcome);
+    // The outcome only routes the PHN to the next persistent workflow
+    // (referral / follow-up / health service), each of which saves through its
+    // own backend endpoint. No browser-only workflow write remains here.
     const base = buildDraftBase({ ...patient, checkup: { ...(patient.checkup || {}), outcome } });
     setActivePatientId(null);
     if (kind === "referral") {

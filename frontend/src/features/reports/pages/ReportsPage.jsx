@@ -20,6 +20,7 @@ import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { monthlyConsultations, comparisonMonthlyConsultations, barangayOverview } from "@/services/local/dashboardData";
+import { reportsApi } from "@/services/api";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 
 const summaryCards = [];
@@ -34,6 +35,7 @@ const STATUS_COLORS = {
   Draft: "bg-brand-gray/10 text-brand-gray",
   Generated: "bg-brand-blue/10 text-brand-blue",
   "Submitted to RHU": "bg-brand-green/10 text-brand-green",
+  "Submitted to MHO": "bg-brand-green/10 text-brand-green",
 };
 
 const REPORT_TYPE_LABELS = ["Health Records", "Referrals", "Follow-ups", "Health Services", "Community Health Trends"];
@@ -135,12 +137,28 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     setShowSubmitConfirm(true);
   };
 
-  const confirmSubmit = () => {
+  const confirmSubmit = async () => {
+    const report = reportToSubmit;
+    if (!report) return;
     const now = new Date();
+    // Persist and route the report through the backend so it actually reaches
+    // the recipient (PHN -> MHO, Health Supervisor -> RHU). The recipient role
+    // is resolved server-side from the sender's role; scope comes from the
+    // session. Local status is updated for immediate feedback only.
+    try {
+      await reportsApi.create({
+        reportType: report.type || report.name || "Report",
+        reportPeriod: report.period || "",
+        title: report.name || "",
+      });
+    } catch (err) {
+      showToast(err?.message || "The report could not be submitted. Please try again.");
+      return;
+    }
     setReports((prev) =>
-      prev.map((r) => (r.id === reportToSubmit.id ? {
+      prev.map((r) => (r.id === report.id ? {
         ...r,
-        status: "Submitted to RHU",
+        status: isPhn ? "Submitted to MHO" : "Submitted to RHU",
         submittedDate: now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
         submittedTime: now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
       } : r))

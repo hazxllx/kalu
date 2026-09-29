@@ -10,12 +10,12 @@ import {
   phnAlerts,
 } from "@/services/local/phnData";
 import {
-  CHECKUP_STATUS,
   useWorkflowStore,
-  startPatientCheckup,
   patchReferral,
   workflowHelpers,
 } from "@/services/local/workflowStore";
+import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
+import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { riskOfPatient } from "@/lib/riskRules";
@@ -80,12 +80,15 @@ export default function PHNDashboard() {
   const subtitle = "Today's health summary across check-ups, referrals, follow-ups, and community services.";
 
   const store = useWorkflowStore();
+  // BUG-008: the check-up pipeline is the persistent DB-backed PHN queue.
+  // Referrals/follow-ups remain on their existing collections.
+  const { patients: workflowPatients, startCheckup } = usePhnWorkflow({ source: "queue" });
 
   // Every collection below is the RHU workflow (already RHU-scoped by the
   // datasets feeding the pages); counts are rendered straight from them.
   const allPatients = useMemo(
-    () => filterRowsByScope(store.patients, user, coverage),
-    [store.patients, user, coverage]
+    () => filterRowsByScope(workflowPatients, user, coverage),
+    [workflowPatients, user, coverage]
   );
   const visibleQueue = useMemo(
     () => allPatients.filter((p) => p.status === CHECKUP_STATUS.WAITING),
@@ -212,10 +215,14 @@ export default function PHNDashboard() {
     showToast("Referral updated successfully.");
   };
 
-  const startCheckup = (patient) => {
-    startPatientCheckup(patient.id, user?.name);
-    showToast("Check-up started.");
-    navigate("/app/phn/consultations", { state: { openCheckup: patient.id } });
+  const handleStartCheckup = async (patient) => {
+    try {
+      await startCheckup(patient.id);
+      showToast("Check-up started.");
+      navigate("/app/phn/consultations", { state: { openCheckup: patient.id } });
+    } catch (err) {
+      showToast(err?.message || "Could not start the check-up.");
+    }
   };
 
   return (
@@ -310,7 +317,7 @@ export default function PHNDashboard() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button
-                          onClick={() => startCheckup(q)}
+                          onClick={() => handleStartCheckup(q)}
                           className="text-sm font-medium text-brand-blue hover:underline whitespace-nowrap"
                         >
                           Start Check-up

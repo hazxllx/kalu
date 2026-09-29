@@ -26,6 +26,7 @@
  * the Audit Trail shows real activity rather than browser-local events.
  */
 import { getServiceClient } from '../config/supabase.js';
+import { randomUUID } from 'node:crypto';
 import {
   BARANGAY_ASSIGNED_ROLES,
   FACILITY_ASSIGNED_ROLES,
@@ -35,8 +36,10 @@ import {
 } from '../config/staffApprovals.js';
 import ApiError from '../utils/apiError.js';
 import { notifyResident } from './notifications.service.js';
+import { uploadStaffDocument, getDocumentSignedUrl } from './storage.service.js';
 
 const TABLE = 'staff_account_requests';
+const DOCUMENTS_TABLE = 'staff_registration_documents';
 const REQUEST_STATUS = Object.freeze({ PENDING: 'pending', APPROVED: 'approved', REJECTED: 'rejected' });
 
 const REQUEST_SELECT = [
@@ -118,10 +121,32 @@ const requireRequest = async (id) => {
   return data;
 };
 
+/**
+ * BUG-006: approval authority is not only role-based but scoped.
+ *   PHN               -> municipality-wide (own municipality)
+ *   Health Supervisor -> their assigned barangay only
+ * Scope is derived from the authenticated approver, never a client id, so a
+ * Health Supervisor cannot approve/reject a request from another barangay and a
+ * PHN cannot act outside their municipality.
+ */
+const inApproverScope = (user, row) => {
+  if (!user || !row) return false;
+  if (user.role === 'phn') return Boolean(user.municipalityId) && row.municipality_id === user.municipalityId;
+  if (user.role === 'health_supervisor') return Boolean(user.barangayId) && row.barangay_id === user.barangayId;
+  return false;
+};
+
+/** Apply the approver's municipality/barangay scope to a queue/count query. */
+const applyApproverScope = (query, user) => {
+  if (user.role === 'phn') return query.eq('municipality_id', user.municipalityId || '__none__');
+  if (user.role === 'health_supervisor') return query.eq('barangay_id', user.barangayId || '__none__');
+  return query;
+};
+
 /** Out-of-authority requests read as "not found" so the API never reveals them. */
 const requireApprovable = async (user, id) => {
   const row = await requireRequest(id);
-  if (!canApproveRole(user?.role, row.role)) {
+  if (!canApproveRole(user?.role, row.role) || !inApproverScope(user, row)) {
     throw ApiError.notFound('Account request not found.');
   }
   return row;
@@ -143,7 +168,7 @@ const emailTaken = async (email) => {
  * If anything after the auth user is created fails, the auth user is removed
  * again so a half-registered identity is never left behind.
  */
-export const submitRequest = async (input = {}) => {
+export const submitRequest = async (input = {}, documents = []) => {
   assertRoleIsRequestable(input.role);
 
   const email = String(input.email || '').trim().toLowerCase();
@@ -215,6 +240,26 @@ export const submitRequest = async (input = {}) => {
       .single();
 
     if (insertError) throw dbError(insertError, 'request insert');
+
+    // Upload any verification documents to the private bucket and record their
+    // storage paths, linked to this request. Files never touch JSONB; only the
+    // storage path is stored, and downloads are backend-mediated signed URLs.
+    const uploaded = Array.isArray(documents) ? documents : [];
+    for (const doc of uploaded) {
+      if (!doc?.file) continue;
+      const documentId = randomUUID();
+      const { storagePath } = await uploadStaffDocument({ file: doc.file, requestId: request.id, documentId });
+      const { error: docError } = await supabase.from(DOCUMENTS_TABLE).insert({
+        id: documentId,
+        request_id: request.id,
+        document_type: doc.documentType || 'Supporting Document',
+        storage_path: storagePath,
+        original_filename: doc.originalFilename || '',
+        mime_type: doc.mimeType || '',
+        file_size: Number(doc.fileSize) || 0,
+      });
+      if (docError) throw dbError(docError, 'document record insert');
+    }
 
     return toRequest(request);
   } catch (err) {
@@ -326,6 +371,7 @@ export const listQueue = async ({ user, status = 'pending', q = '', limit = 100,
 
   const supabase = getServiceClient();
   let query = supabase.from(TABLE).select(REQUEST_SELECT, { count: 'exact' }).in('role', roles);
+  query = applyApproverScope(query, user); // BUG-006: municipality/barangay scope
 
   if (requested !== 'all') query = query.eq('status', requested);
 
@@ -348,7 +394,52 @@ export const listQueue = async ({ user, status = 'pending', q = '', limit = 100,
   return { rows: (data || []).map(toRequest), total: count ?? (data || []).length, status: requested };
 };
 
-export const getRequest = async ({ user, id }) => toRequest(await requireApprovable(user, id));
+export const getRequest = async ({ user, id }) => {
+  const row = await requireApprovable(user, id);
+  const request = toRequest(row);
+  request.verificationDocuments = await loadRequestDocuments(id);
+  return request;
+};
+
+/**
+ * Load the uploaded verification documents for a request and attach a fresh,
+ * short-lived signed URL for each. Only ever called for a request the caller is
+ * authorized to approve (see requireApprovable). No public URL is exposed.
+ */
+const loadRequestDocuments = async (requestId) => {
+  const supabase = getServiceClient();
+  const { data, error } = await supabase
+    .from(DOCUMENTS_TABLE)
+    .select('id, document_type, storage_path, original_filename, mime_type, file_size, uploaded_at')
+    .eq('request_id', requestId)
+    .order('uploaded_at', { ascending: true });
+  if (error) {
+    // A missing documents table (migration not yet applied) or read error must
+    // not break the approval view — surface an empty document list instead.
+    console.error(`staffAccounts: document lookup failed: ${error?.message}`);
+    return [];
+  }
+  const rows = data || [];
+  return Promise.all(
+    rows.map(async (d) => {
+      let url = null;
+      try {
+        url = await getDocumentSignedUrl(d.storage_path);
+      } catch (err) {
+        console.error(`staffAccounts: signed URL failed for ${d.id}: ${err?.message}`);
+      }
+      return {
+        id: d.id,
+        documentType: d.document_type,
+        originalFilename: d.original_filename || '',
+        mimeType: d.mime_type || '',
+        fileSize: d.file_size || 0,
+        uploadedAt: d.uploaded_at,
+        url,
+      };
+    }),
+  );
+};
 
 /** Pending count for the reviewer's own roles — drives the nav badge. */
 export const pendingCount = async ({ user } = {}) => {
@@ -358,7 +449,14 @@ export const pendingCount = async ({ user } = {}) => {
     .from(TABLE)
     .select('id', { count: 'exact', head: true })
     .in('role', approvableRolesFor(user.role))
-    .eq('status', REQUEST_STATUS.PENDING);
+    .eq('status', REQUEST_STATUS.PENDING)
+    .match(
+      user.role === 'phn'
+        ? { municipality_id: user.municipalityId || '__none__' }
+        : user.role === 'health_supervisor'
+          ? { barangay_id: user.barangayId || '__none__' }
+          : {},
+    );
   if (error) throw dbError(error, 'pending count');
   return { count: count || 0 };
 };

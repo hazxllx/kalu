@@ -22,6 +22,7 @@ import authorize from '../middleware/authorize.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import householdsController from '../controllers/households.controller.js';
+import householdRiskWorkflowController from '../controllers/householdRiskWorkflow.controller.js';
 import validate from '../middleware/validate.js';
 import {
   createHouseholdValidator,
@@ -51,5 +52,10 @@ router.delete('/:id/members/:memberId', authorize(HOUSEHOLD_ROLES), params, asyn
 // remarks). Same scope + role gates as the parent household.
 router.get('/:id/members/:memberId/health', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.getMemberHealth));
 router.put('/:id/members/:memberId/health', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.saveMemberHealth));
+
+// BUG-009: household risk-cluster workflow (follow-up / assignment / escalation
+// / resolution) — persistent, scope-enforced (service + RLS).
+router.get('/:id/risk-workflow', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdRiskWorkflowController.getWorkflow));
+router.put('/:id/risk-workflow', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdRiskWorkflowController.saveWorkflow));
 
 export default router;

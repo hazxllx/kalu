@@ -412,6 +412,16 @@ export const changeStatus = async ({ user, id, status, notes = '', supabase = ge
   if (isDecision && !REVIEW_ROLES.has(user?.role)) {
     throw ApiError.forbidden('Only the PHN or the MHO may approve, issue or reject a medical certificate.');
   }
+  // BUSINESS RULE: the MHO is the authorized signatory/approver. Approval is the
+  // required MHO step, so only the MHO may move a certificate to Approved — a
+  // PHN preparing/reviewing a certificate can submit it for review or reject it,
+  // but can never mark it MHO-approved. Issuance is only reachable FROM Approved
+  // (see ALLOWED_TRANSITIONS), so a certificate can never be issued without a
+  // real MHO approval on record. No electronic/digital signature is involved;
+  // the approval is recorded as the approving MHO's id + timestamp below.
+  if (target === CERT_STATUS.APPROVED && user?.role !== ROLES.MHO) {
+    throw ApiError.forbidden('Only the Municipal Health Officer may approve a medical certificate.');
+  }
   if (!isDecision && !PREPARE_ROLES.has(user?.role)) {
     throw ApiError.forbidden('You are not authorized to change a medical certificate status.');
   }
