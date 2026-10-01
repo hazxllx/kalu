@@ -40,9 +40,9 @@ const REASON_OPTIONS = [
 ];
 
 const STATUS_META = {
-  [CHECKUP_STATUS.WAITING]: { text: "Waiting for PHN", note: "Not seen yet" },
-  [CHECKUP_STATUS.IN_CHECKUP]: { text: "In Check-up", note: "With the PHN now" },
-  [CHECKUP_STATUS.COMPLETED]: { text: "Consultation Completed", note: "Check-up done" },
+  [CHECKUP_STATUS.WAITING]: { text: "Waiting for Consultation", note: "In the consultation queue" },
+  [CHECKUP_STATUS.IN_CHECKUP]: { text: "In Consultation", note: "Being seen now" },
+  [CHECKUP_STATUS.COMPLETED]: { text: "Consultation Completed", note: "Consultation done" },
 };
 
 const STATUS_TONES = {
@@ -120,6 +120,9 @@ export default function RhuTriage() {
   const [reasonDetail, setReasonDetail] = useState("");
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
+  // Assigned personnel (name & designation) who performed the triage. Optional;
+  // falls back to the signed-in account name on the server.
+  const [assignedPersonnel, setAssignedPersonnel] = useState("");
   const [errors, setErrors] = useState({});
   const [listSearch, setListSearch] = useState("");
   const [toast, setToast] = useState(null);
@@ -243,6 +246,7 @@ export default function RhuTriage() {
     setReasonDetail("");
     setLocation("");
     setNotes("");
+    setAssignedPersonnel("");
     setErrors({});
   };
 
@@ -384,6 +388,7 @@ export default function RhuTriage() {
       notes: notes.trim(),
       consultationLocation: location || "RHU",
       personnel: user?.name || "RHU Personnel",
+      assignedPersonnel: assignedPersonnel.trim(),
       visitDate: new Date().toLocaleDateString("en-US", {
         year: "numeric",
         month: "long",
@@ -394,9 +399,9 @@ export default function RhuTriage() {
     try {
       await sendToPhnQueue(payload);
       resetAll();
-      showToast("Patient successfully sent to PHN.");
+      showToast("Triage completed. Patient sent to the consultation queue.");
     } catch (err) {
-      showToast(err?.message || "Could not send the patient to PHN. Please try again.");
+      showToast(err?.message || "Could not send the patient to the consultation queue. Please try again.");
     } finally {
       setSending(false);
     }
@@ -468,7 +473,7 @@ export default function RhuTriage() {
       <PageHeader
         crumbs={["RHU", "Triage"]}
         title="RHU Triage"
-        subtitle="Record a patient's visit and send them to the PHN for check-up."
+        subtitle="Record a patient's visit and send them to the RHU consultation station."
       />
 
       {/* Toast */}
@@ -490,7 +495,7 @@ export default function RhuTriage() {
             <div>
               <h3 className="text-base font-semibold text-brand-ink">New Triage</h3>
               <p className="mt-0.5 text-xs text-brand-gray">
-                First identify the patient, record today's visit, then send them to the PHN.
+                First identify the patient, record today's visit, then send them to the consultation station.
               </p>
             </div>
           </div>
@@ -925,7 +930,7 @@ export default function RhuTriage() {
             {/* ============ STEP 5 · REVIEW ============ */}
             {currentStep === "review" && (
               <div>
-                {stepIndicator(5, "Review", "Check the details before sending the patient to the PHN.")}
+                {stepIndicator(5, "Review", "Check the details before sending the patient to the consultation station.")}
 
                 <div className="max-w-2xl space-y-3">
                   <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
@@ -974,6 +979,23 @@ export default function RhuTriage() {
                       </p>
                     </div>
                   </div>
+
+                  <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
+                    <label htmlFor="assignedPersonnel" className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">
+                      Assigned Personnel (Name &amp; Designation)
+                    </label>
+                    <input
+                      id="assignedPersonnel"
+                      type="text"
+                      value={assignedPersonnel}
+                      onChange={(e) => setAssignedPersonnel(e.target.value)}
+                      placeholder="e.g. Juana Dela Cruz, RN"
+                      className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue"
+                    />
+                    <p className="mt-1 text-[11px] text-brand-gray">
+                      Optional. Who performed this triage. Defaults to your account name if left blank.
+                    </p>
+                  </div>
                 </div>
 
                 <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -990,11 +1012,11 @@ export default function RhuTriage() {
                     disabled={sending}
                     className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Send className="h-4 w-4" /> {sending ? "Sending…" : "Send to PHN"}
+                    <Send className="h-4 w-4" /> {sending ? "Sending…" : "Send to Consultation"}
                   </button>
                 </div>
                 <p className="mt-2 text-center text-xs text-brand-gray sm:text-left">
-                  The patient will be added to the PHN's check-up queue.
+                  The patient will be added to the RHU consultation queue (the PHN can also review it).
                 </p>
               </div>
             )}
@@ -1007,7 +1029,7 @@ export default function RhuTriage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-semibold text-brand-ink">Recently Sent Patients</h3>
-                <p className="mt-0.5 text-xs text-brand-gray">Patients recently sent for PHN check-up.</p>
+                <p className="mt-0.5 text-xs text-brand-gray">Patients recently sent to the consultation queue.</p>
               </div>
               <Users className="h-4 w-4 shrink-0 text-brand-gray" />
             </div>

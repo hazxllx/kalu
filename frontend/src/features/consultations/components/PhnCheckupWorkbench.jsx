@@ -82,6 +82,10 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const [healthConcern, setHealthConcern] = useState("");
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [recommendations, setRecommendations] = useState("");
+  // Assigned personnel (name & designation) who performed this consultation /
+  // assessment. Distinct from the triage personnel; defaults to the signed-in
+  // account name and is editable (e.g. shared station accounts).
+  const [assignedPersonnel, setAssignedPersonnel] = useState("");
   const [errors, setErrors] = useState({});
   const [justCompleted, setJustCompleted] = useState(false);
   const [certOpen, setCertOpen] = useState(false);
@@ -118,8 +122,15 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       setHealthConcern(checkup.healthConcern || "");
       setClinicalNotes(checkup.clinicalNotes || "");
       setRecommendations(checkup.recommendations || "");
+      setAssignedPersonnel(checkup.personnel || "");
     }
   }, [checkup]);
+
+  // Pre-fill the assigned personnel with the signed-in account name for a new
+  // (not-yet-completed) consultation; the user can edit it or add a designation.
+  useEffect(() => {
+    if (!checkup && !assignedPersonnel && user?.name) setAssignedPersonnel(user.name);
+  }, [user?.name, checkup, assignedPersonnel]);
 
   // Automatic, rule-based risk level that re-evaluates live as the PHN types.
   const autoRisk = useMemo(
@@ -137,6 +148,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     const next = {};
     if (!assessment.trim()) next.assessment = "Please record your assessment or findings.";
     if (!healthConcern.trim()) next.healthConcern = "Health concern is required.";
+    if (!assignedPersonnel.trim()) next.assignedPersonnel = "The assessing personnel is required.";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -151,6 +163,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       consultationLocation,
       clinicalNotes: clinicalNotes.trim(),
       recommendations: recommendations.trim(),
+      assignedPersonnel: assignedPersonnel.trim(),
     };
     setJustCompleted(true);
     onComplete?.(recorded);
@@ -280,6 +293,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                       <RiskPill level={checkup.riskLevel || autoRisk.level} />
                     </div>
                     <InfoItem label="Consultation Location" value={checkup.consultationLocation || consultationLocation} />
+                    <InfoItem label="Assessed By" value={checkup.personnel} />
                     <InfoItem label="Completed By" value={checkup.completedBy} />
                     <InfoItem label="Completed" value={checkup.completedAt} />
                   </div>
@@ -410,6 +424,22 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                       onChange={(e) => setRecommendations(e.target.value)}
                       className={`${inputCls()} resize-none`}
                     />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink block mb-1.5">
+                      Assessed By — Assigned Personnel (Name &amp; Designation) <span className="text-brand-danger">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Dr. Juan Dela Cruz, MD / Nurse Maria Santos, RN"
+                      value={assignedPersonnel}
+                      onChange={(e) => {
+                        setAssignedPersonnel(e.target.value);
+                        if (errors.assignedPersonnel) setErrors((prev) => ({ ...prev, assignedPersonnel: "" }));
+                      }}
+                      className={inputCls(errors.assignedPersonnel)}
+                    />
+                    {errors.assignedPersonnel && <p className="text-xs text-brand-danger mt-1">{errors.assignedPersonnel}</p>}
                   </div>
                 </div>
               </div>

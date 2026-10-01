@@ -100,6 +100,7 @@ export const mapVisitToPatient = (visit) => {
           recommendations: visit.recommendation || visit.treatmentGiven || "",
           riskLevel: visit.riskLevel || "",
           outcome: visit.outcome || "No Further Action",
+          personnel: phn.personnel || "",
           completedBy: visit.completedByName || "PHN",
           completedAt: visit.completedAt || "",
         }
@@ -128,6 +129,10 @@ export const triageToVisitPayload = (payload = {}) => ({
   visitDate: new Date().toISOString(),
   chiefComplaint: payload.chiefComplaint || payload.reason || "",
   clinicalHistory: payload.notes || "",
+  // Assigned personnel (name & designation) for the triage encounter. The
+  // backend uses it to label the recorder; the authenticated user is still the
+  // authoritative actor.
+  assignedPersonnel: payload.assignedPersonnel || payload.personnel || "",
   vitals: {
     bp: payload.bloodPressure || null,
     temperature: payload.temperature != null ? Number(payload.temperature) : null,

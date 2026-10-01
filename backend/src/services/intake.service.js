@@ -109,10 +109,14 @@ export const validateVitals = (vitals = {}) => {
   if (vitals.bp && !/^\s*\d{2,3}\s*\/\s*\d{2,3}\s*$/.test(String(vitals.bp))) {
     errors.push('Blood pressure must be in systolic/diastolic form, e.g. 120/80.');
   }
-  if (!isPlausibleVital(vitals.hr, { min: 20, max: 250 })) errors.push('Heart rate must be a number between 20 and 250 bpm.');
-  if (!isPlausibleVital(vitals.rr, { min: 4, max: 90 })) errors.push('Respiratory rate must be a number between 4 and 90.');
-  if (!isPlausibleVital(vitals.o2sat, { min: 50, max: 100 })) errors.push('Oxygen saturation must be a number between 50 and 100%.');
-  if (!isPlausibleVital(vitals.temperature, { min: 25, max: 46 })) errors.push('Temperature must be a number between 25 and 46 °C.');
+  // Heart rate / respiratory rate / O2 sat / temperature are OPTIONAL at the
+  // triage hand-off (a triage may not capture every vital). They are only
+  // range-checked when actually provided; a missing value is accepted. Blood
+  // pressure, height and weight are likewise validated only when present.
+  if (!isPlausibleVital(vitals.hr, { min: 20, max: 250, required: false })) errors.push('Heart rate must be a number between 20 and 250 bpm.');
+  if (!isPlausibleVital(vitals.rr, { min: 4, max: 90, required: false })) errors.push('Respiratory rate must be a number between 4 and 90.');
+  if (!isPlausibleVital(vitals.o2sat, { min: 50, max: 100, required: false })) errors.push('Oxygen saturation must be a number between 50 and 100%.');
+  if (!isPlausibleVital(vitals.temperature, { min: 25, max: 46, required: false })) errors.push('Temperature must be a number between 25 and 46 °C.');
   if (vitals.heightCm !== null && (!Number.isFinite(vitals.heightCm) || vitals.heightCm <= 0)) {
     errors.push('Height must be a positive number (cm).');
   }
@@ -201,13 +205,18 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
   }
 
   const normalized = normalizeVisit(visit);
+  // Assigned personnel (name & designation) entered on the triage form. When
+  // provided it labels the encounter's recorder; the authoritative actor id
+  // (recordedById) is always the authenticated user, so the audit trail is
+  // unaffected. Falls back to the account name.
+  const assignedPersonnel = String(visit.assignedPersonnel ?? '').trim();
   const submissionId = await repository.nextSubmissionId();
   const submission = {
     id: submissionId.id,
     residentId: residentRow.id,
     recordedById: user.id,
     recordedByRole: user.role,
-    recordedByName: user.name || user.email || '',
+    recordedByName: assignedPersonnel || user.name || user.email || '',
     status: SUBMISSION_STATUS.DRAFT,
     ...normalized,
   };

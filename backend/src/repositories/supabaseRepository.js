@@ -377,6 +377,7 @@ const visitToRow = (visit) => {
   if (visit.phn) {
     if (visit.phn.assessment !== undefined) row.phn_assessment = visit.phn.assessment;
     if (visit.phn.notes !== undefined) row.phn_notes = visit.phn.notes;
+    if (visit.phn.personnel !== undefined) row.phn_personnel = visit.phn.personnel;
   }
   return row;
 };
@@ -386,10 +387,11 @@ const visitFromRow = (row) => {
   const out = mapBack(row, DB_TO_VISIT);
   const vitals = vitalsFromRow(row);
   if (Object.keys(vitals).length) out.vitals = vitals;
-  if (row.phn_assessment !== null || row.phn_notes !== null) {
+  if (row.phn_assessment !== null || row.phn_notes !== null || row.phn_personnel !== null) {
     out.phn = {};
     if (row.phn_assessment !== null && row.phn_assessment !== undefined) out.phn.assessment = row.phn_assessment;
     if (row.phn_notes !== null && row.phn_notes !== undefined) out.phn.notes = row.phn_notes;
+    if (row.phn_personnel !== null && row.phn_personnel !== undefined) out.phn.personnel = row.phn_personnel;
   }
   return out;
 };

@@ -104,9 +104,9 @@ export const NAV = {
   rhu_personnel: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/rhu_personnel/dashboard" },
     { label: "Triage", icon: "Activity", path: "/app/rhu_personnel/triage", permission: "triage.view" },
+    { label: "Consultation", icon: "Stethoscope", path: "/app/rhu_personnel/consultation", permission: "consultation.requests.view" },
     { label: "Medical Certificates", icon: "FileText", path: "/app/rhu_personnel/certificates" },
     { label: "Health Programs", icon: "HeartPulse", path: "/app/rhu_personnel/programs" },
-    { label: "Incoming Reports", icon: "BarChart3", path: "/app/rhu_personnel/reports" },
     { label: "Notifications", icon: "Bell", path: "/app/rhu_personnel/notifications" },
     { label: "Settings", icon: "Settings", path: "/app/rhu_personnel/settings" },
   ],

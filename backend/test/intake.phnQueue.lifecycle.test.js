@@ -200,12 +200,16 @@ test('9. existing referral behavior still works from in_review', async () => {
 
 /* --------------------------- authz / integrity -------------------------- */
 
-test('10. non-intake role cannot create; non-PHN cannot receive/complete', async () => {
+test('10. authz: residents cannot create; barangay roles cannot process; RHU consultation can', async () => {
   await assert.rejects(() => createTriage(RESIDENT_USER), (e) => e.statusCode === 403);
   const sub = await createTriage();
   await intake.submitSubmission({ id: sub.id, user: RHU });
+  // Health Supervisor is NOT in the consultation processing group.
   await assert.rejects(() => phn.receiveSubmission({ id: sub.id, user: HS }), (e) => e.statusCode === 403);
-  await assert.rejects(() => phn.completeSubmission({ id: sub.id, user: RHU }), (e) => e.statusCode === 403);
+  await assert.rejects(() => phn.completeSubmission({ id: sub.id, user: HS }), (e) => e.statusCode === 403);
+  // RHU Consultation Station may now process the shared queue (receive/review).
+  const received = await phn.receiveSubmission({ id: sub.id, user: RHU });
+  assert.equal(received.status, 'received');
 });
 
 test('11. only the record owner may submit', async () => {

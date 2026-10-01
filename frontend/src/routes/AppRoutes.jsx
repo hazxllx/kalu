@@ -79,6 +79,7 @@ const MHODashboard = appPage(() => import('@/features/dashboards/pages/MHODashbo
 const AdminDashboard = appPage(() => import('@/features/dashboards/pages/AdminDashboard'));
 const PHNDashboard = appPage(() => import('@/features/dashboards/pages/PHNDashboard'));
 const RhuTriage = appPage(() => import('@/features/triage/pages/RhuTriage'));
+const RhuConsultation = appPage(() => import('@/features/consultations/pages/RhuConsultation'));
 const PhnCheckups = appPage(() => import('@/features/consultations/pages/PhnAssessments'));
 const PhnHealthRecords = appPage(() => import('@/features/health-records/pages/PhnHealthRecords'));
 const PhnHealthServices = appPage(() => import('@/features/health-services/pages/PhnHealthServices'));
@@ -111,7 +112,6 @@ const Programs = appPage(() => import('@/features/health-services/pages/Programs
 const NotificationsPage = appPage(() => import('@/features/notifications/pages/NotificationsPage'));
 const ReportsPage = appPage(() => import('@/features/reports/pages/ReportsPage'));
 const MunicipalHealthReports = appPage(() => import('@/features/reports/pages/MunicipalHealthReports'));
-const IncomingReportsPage = appPage(() => import('@/features/reports/pages/IncomingReportsPage'));
 const MunicipalSubmissions = appPage(() => import('@/features/submissions/pages/MunicipalSubmissions'));
 const HealthTrends = appPage(() => import('@/features/analytics/pages/HealthTrends'));
 const Barangays = appPage(() => import('@/features/analytics/pages/Barangays'));
@@ -305,6 +305,7 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<RHUDashboard />} />
         <Route path="triage" element={<RhuTriage />} />
+        <Route path="consultation" element={<RhuConsultation />} />
         {/* No referrals route: the API denies RHU Personnel referral access
             (403), so there is no referral page for this role. The catch-all
             below sends a direct /app/rhu_personnel/referrals visit to the
@@ -312,7 +313,6 @@ const AppRoutes = () => (
         <Route path="certificates/new" element={<CertificateComposer />} />
         <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="programs" element={<Programs />} />
-        <Route path="reports" element={<IncomingReportsPage />} />
         <Route path="notifications" element={<NotificationsPage roleKey="rhu_personnel" />} />
         <Route path="profile" element={<SettingsPage roleKey="rhu_personnel" />} />
         <Route path="settings" element={<SettingsPage roleKey="rhu_personnel" />} />
