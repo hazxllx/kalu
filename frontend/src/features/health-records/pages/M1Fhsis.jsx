@@ -9,6 +9,8 @@ import {
 import { m1Api, residentsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
+import M1PrintDocument from "@/features/health-records/components/M1PrintDocument";
+import { useM1Print } from "@/features/health-records/components/useM1Print";
 
 /**
  * FHSIS M1 — complete monthly service-coverage report.
@@ -38,7 +40,7 @@ const MONTHS = [
 ];
 
 const fullName = (r) =>
-  r ? [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(" ") : "";
+  r ? [r.firstName || r.first_name, r.middleName || r.middle_name, r.lastName || r.last_name].filter(Boolean).join(" ") : "";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const shiftDate = (d, days) => {
@@ -67,6 +69,7 @@ const groupBySection = (indicators = []) => {
 
 export default function M1Fhsis() {
   const { user } = useAuth();
+  const { startPrint, portal } = useM1Print();
   const supervisor = isHealthSupervisor(user);
   const scope = supervisor ? getSupervisorScope(user) : null;
   const assignedBarangay = scope && scope.level === "barangay" ? scope.assignedBarangay : (user?.barangay || null);
@@ -103,18 +106,18 @@ export default function M1Fhsis() {
       try {
         const [cat, res] = await Promise.all([
           m1Api.catalog(),
-          residentsApi.list({ limit: 300 }).catch(() => ({ rows: [] })),
+          residentsApi.list({ limit: 300, verified: true }).catch(() => ({ rows: [] })),
         ]);
         if (!alive) return;
         setCatalog(cat);
         const rows = (res?.rows || res || []).map((r) => ({
           id: r.id,
-          name: fullName(r) || r.name || r.id,
+          name: fullName(r) || r.name || "",
           barangay: r.barangay,
-          age: r.birth_date ? Math.floor((Date.now() - new Date(r.birth_date).getTime()) / 31557600000) : undefined,
+          age: (r.birthDate || r.birth_date) ? Math.floor((Date.now() - new Date(r.birthDate || r.birth_date).getTime()) / 31557600000) : undefined,
           sex: r.sex,
-          birth_date: r.birth_date,
-        }));
+          birth_date: r.birthDate || r.birth_date,
+        })).filter((r) => r.name);
         setResidents(assignedBarangay ? rows.filter((r) => !r.barangay || r.barangay === assignedBarangay) : rows);
       } catch (e) {
         if (alive) setError(e?.message || "Failed to load M1 catalog.");
@@ -204,12 +207,39 @@ export default function M1Fhsis() {
 
   const periodLabel = `${MONTHS[month - 1]} ${year}`;
 
+  // Print always uses freshly fetched data for the selected period (never a
+  // stale snapshot), then hands it to the print portal. The preview tab shows
+  // the same data, so what prints and what is previewed are identical.
+  const handlePrint = useCallback(async () => {
+    setTab("print");
+    setError("");
+    setLoading(true);
+    try {
+      const [m, mt] = await Promise.all([
+        m1Api.monthly({ year, month }),
+        m1Api.getMeta({ year, month }).catch(() => null),
+      ]);
+      setMonthly(m);
+      setMeta(mt);
+      startPrint({
+        groups: groupBySection(m?.indicators || []),
+        meta: mt,
+        periodLabel: `${MONTHS[month - 1]} ${year}`,
+        barangay: assignedBarangay,
+      });
+    } catch (e) {
+      setError(e?.message || "Failed to load M1 data.");
+    } finally {
+      setLoading(false);
+    }
+  }, [year, month, assignedBarangay, startPrint]);
+
   return (
     <div className="pb-16">
       <PageHeader
         crumbs={["Monitoring", "Maternal & Family Health Report"]}
         title="Maternal & Family Health Report"
-        subtitle={`FHSIS Monthly Form M1 service-coverage report${assignedBarangay ? ` — Barangay ${assignedBarangay}` : ""}`}
+        subtitle={`FHSIS — MONTHLY FORM M1${assignedBarangay ? ` — Barangay ${assignedBarangay}` : ""}`}
         meta={
           <span className="rounded-full bg-brand-blue/10 px-3 py-1 text-xs font-semibold text-brand-blue">
             {tab === "annual" ? `Year ${year}` : tab === "daily" ? date : periodLabel}
@@ -224,7 +254,7 @@ export default function M1Fhsis() {
               <Plus className="h-4 w-4" /> Record M1 Activity
             </button>
             <button
-              onClick={() => { setTab("print"); setTimeout(() => window.print(), 400); }}
+              onClick={handlePrint}
               className="inline-flex items-center gap-2 rounded-btn border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               <Printer className="h-4 w-4" /> Print M1 Report
@@ -311,7 +341,22 @@ export default function M1Fhsis() {
       ) : tab === "annual" ? (
         <AnnualView groups={annualGroups} expanded={expanded} toggle={toggle} openDrill={openDrill} year={year} />
       ) : (
-        <PrintReport monthly={monthly} groups={monthlyGroups} meta={meta} periodLabel={periodLabel} barangay={assignedBarangay} />
+        <div>
+          <div className="no-print mb-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-slate-600">
+              Print preview — this is the exact FHSIS M1 form that will be printed or saved as PDF (A4).
+            </p>
+            <button
+              onClick={() => startPrint({ groups: monthlyGroups, meta, periodLabel, barangay: assignedBarangay })}
+              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90"
+            >
+              <Printer className="h-4 w-4" /> Print / Save as PDF
+            </button>
+          </div>
+          <div className="m1-preview overflow-x-auto rounded-card border border-slate-200 bg-slate-100 p-4">
+            <M1PrintDocument groups={monthlyGroups} meta={meta} periodLabel={periodLabel} barangay={assignedBarangay} />
+          </div>
+        </div>
       )}
 
       {drill && (
@@ -331,6 +376,8 @@ export default function M1Fhsis() {
           onSaved={() => { setRecordOpen(false); loadData(); }}
         />
       )}
+
+      {portal}
     </div>
   );
 }
@@ -626,7 +673,7 @@ function RecordModal({ catalog, residents, onClose, onSaved }) {
 
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-slate-600">Resident (optional for barangay-level indicators)</span>
-            <ResidentSearchSelect residents={residents} value={resident} onChange={setResident} />
+            <ResidentSearchSelect residents={residents} value={resident} onChange={setResident} showId={false} />
           </label>
 
           <div className="grid grid-cols-2 gap-3">
@@ -680,99 +727,6 @@ function RecordModal({ catalog, residents, onClose, onSaved }) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Print report — compact, official-style M1 form (all sections, all indicators)
-// ---------------------------------------------------------------------------
-function PrintReport({ monthly, groups, meta, periodLabel, barangay }) {
-  return (
-    <div className="m1-print">
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          .m1-print, .m1-print * { visibility: visible; }
-          .m1-print { position: absolute; left: 0; top: 0; width: 100%; }
-          .no-print { display: none !important; }
-          .m1-print table { page-break-inside: auto; }
-          .m1-print tr { page-break-inside: avoid; }
-          .m1-print .m1-section { page-break-inside: avoid; }
-          @page { size: A4 portrait; margin: 12mm; }
-        }
-        .m1-print table { border-collapse: collapse; width: 100%; }
-        .m1-print th, .m1-print td { border: 1px solid #94a3b8; padding: 2px 5px; font-size: 10px; }
-        .m1-print thead th { background: #0B4A8F; color: #fff; }
-        .m1-print .m1-sec-head { background: #0B4A8F; color: #fff; font-weight: 700; padding: 4px 6px; font-size: 11px; }
-      `}</style>
-
-      <div className="mb-3 text-center">
-        <h2 className="text-lg font-bold">FHSIS — Monthly Form M1</h2>
-        <p className="text-sm">Program Accomplishment / Service Coverage Report</p>
-      </div>
-      <table className="mb-3">
-        <tbody>
-          <tr>
-            <td><strong>Reporting Period:</strong> {periodLabel}</td>
-            <td><strong>Barangay:</strong> {meta?.barangay?.name || barangay || ""}</td>
-            <td><strong>BHS / Facility:</strong> {meta?.meta?.bhs_name || meta?.barangay?.healthStation || ""}</td>
-          </tr>
-          <tr>
-            <td><strong>Municipality/City:</strong> {meta?.municipality || ""}</td>
-            <td><strong>Province:</strong> {meta?.province || ""}</td>
-            <td><strong>Projected Population:</strong> {meta?.meta?.projected_population ?? ""}</td>
-          </tr>
-          <tr>
-            <td><strong>Prepared by:</strong> {meta?.meta?.prepared_by || ""}</td>
-            <td><strong>Designation:</strong> {meta?.meta?.designation || ""}</td>
-            <td><strong>Validated by:</strong> {meta?.meta?.validated_by || ""}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      {!monthly ? (
-        <p>No data.</p>
-      ) : (
-        groups.map((g) => (
-          <div key={g.section} className="m1-section mb-4">
-            <div className="m1-sec-head">SECTION {g.section} — {g.title}</div>
-            {g.subsections.map((sub) => (
-              <div key={sub.subsection}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ width: "6%" }}>Code</th>
-                      <th style={{ textAlign: "left" }}>{sub.subsection}</th>
-                      <th style={{ width: "10%" }}>Male</th>
-                      <th style={{ width: "10%" }}>Female</th>
-                      <th style={{ width: "10%" }}>Total</th>
-                      <th style={{ width: "18%" }}>Remarks</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sub.items.map((it) => (
-                      <tr key={it.code}>
-                        <td>{it.code}</td>
-                        <td style={{ textAlign: "left" }}>
-                          {it.name}
-                          {it.ageGroups?.length > 1 && (
-                            <span style={{ color: "#475569" }}> ({it.ageGroups.map((a) => `${a}: ${it.byAge?.[a] ?? 0}`).join(", ")})</span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right" }}>{it.sexBreakdown ? (it.bySex?.Male ?? 0) : ""}</td>
-                        <td style={{ textAlign: "right" }}>{it.sexBreakdown ? (it.bySex?.Female ?? 0) : ""}</td>
-                        <td style={{ textAlign: "right", fontWeight: 700 }}>{it.total ?? 0}</td>
-                        <td>{it.remarks || ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-          </div>
-        ))
-      )}
     </div>
   );
 }

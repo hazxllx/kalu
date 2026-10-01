@@ -6,10 +6,19 @@
  * stay in the service layer and the components only render. No values are
  * fabricated: every number is derived from the supplied records.
  *
- * Participation is keyed on the record's first-recorded date (`recordedAt`,
- * i.e. maternal_records.created_at) because the schema has no per-visit table.
- * `prenatalVisits` is the recorded visit count on the record.
+ * REPORTING DATE FIELD: participation is keyed on the record's first-recorded
+ * date (`recordedAt`, i.e. maternal_records.created_at). The maternal_records
+ * schema has no dedicated maternal-event/service date column (only clinical
+ * dates such as lmp/edd and post-partum check-up dates), so `created_at` — the
+ * date the maternal record was entered for the resident — is the reporting
+ * date for Monthly / Quarterly / Annual aggregation. `prenatalVisits` is the
+ * recorded visit count on the record.
+ *
+ * The Monthly / Quarterly / Annual definitions and date ranges come from the
+ * shared `reportingPeriod` abstraction so the screen, chart, label and the
+ * exported M1 report all agree on what each period covers.
  */
+import { inReportingPeriod, quarterMonths0 } from "./reportingPeriod.js";
 
 export const MONTH_LABELS = [
   "January", "February", "March", "April", "May", "June",
@@ -26,24 +35,16 @@ const dateOf = (value) => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-/** True when `recordedAt` falls in the given year (and month, when provided). */
-const inPeriod = (record, year, month /* 0-11 or null */) => {
-  const d = dateOf(record.recordedAt);
-  if (!d) return false;
-  if (d.getFullYear() !== year) return false;
-  if (month != null && d.getMonth() !== month) return false;
-  return true;
-};
-
 /**
- * Filter records to the selected reporting period.
- *   period = 'monthly' → year + month
- *   period = 'annual'  → year
+ * Filter records to the selected reporting period, using the shared half-open
+ * [start, end) range so a record is counted in exactly one period.
+ *   period = 'monthly'   → year + month (0-11)
+ *   period = 'quarterly' → year + quarter (1-4) → aggregates its three months
+ *   period = 'annual'    → whole year (Jan–Dec)
  */
-export const filterByPeriod = (records, { period, year, month }) => {
+export const filterByPeriod = (records, descriptor) => {
   if (!Array.isArray(records)) return [];
-  const m = period === "monthly" ? month : null;
-  return records.filter((r) => inPeriod(r, year, m));
+  return records.filter((r) => inReportingPeriod(r.recordedAt, descriptor));
 };
 
 /** Distinct calendar years present in the records, newest first (always incl. current year). */
@@ -86,7 +87,20 @@ export const monthlyBreakdown = (records, year) => {
     const d = dateOf(r.recordedAt);
     if (d && d.getFullYear() === year) counts[d.getMonth()] += 1;
   });
-  return counts.map((count, i) => ({ month: MONTH_SHORT[i], label: MONTH_LABELS[i], count }));
+  return counts.map((count, i) => ({ idx: i, month: MONTH_SHORT[i], label: MONTH_LABELS[i], count }));
+};
+
+/**
+ * Chart breakdown scoped to the selected reporting period:
+ *   annual    → all 12 months (January–December),
+ *   quarterly → only the three months of the selected quarter,
+ *   monthly   → all 12 months (the component highlights the selected month).
+ * Every bucket is derived from the supplied records — no hardcoded values.
+ */
+export const periodBreakdown = (records, { period, year, quarter }) => {
+  const full = monthlyBreakdown(records, year);
+  if (period === "quarterly") return quarterMonths0(quarter).map((i) => full[i]);
+  return full;
 };
 
 /** A short, human follow-up status for a participant row. */
@@ -99,4 +113,4 @@ export const followUpStatus = (record) => {
   return visits < PRENATAL_TARGET ? "Follow-up due" : "On track";
 };
 
-export default { filterByPeriod, availableYears, summarize, monthlyBreakdown, followUpStatus, MONTH_LABELS, MONTH_SHORT };
+export default { filterByPeriod, availableYears, summarize, monthlyBreakdown, periodBreakdown, followUpStatus, MONTH_LABELS, MONTH_SHORT };

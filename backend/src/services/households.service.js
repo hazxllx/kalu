@@ -36,6 +36,22 @@ const VERIFICATION_STATUSES = ['Pending Verification', 'Verified', 'Returned for
 const text = (value) => String(value ?? '').trim();
 
 /**
+ * Parse an optional GPS coordinate. Returns:
+ *   - a finite number within [lo, hi] when a valid value is supplied,
+ *   - null when the value is blank/absent (coordinate cleared / not provided),
+ *   - NaN when the value is present but invalid (caller reports an error).
+ *
+ * RULE 10: coordinates are NEVER fabricated. A missing coordinate stays null so
+ * the map falls back to the barangay reference point rather than a fake pin.
+ */
+export const parseCoordinate = (value, lo, hi) => {
+  if (value === '' || value === null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < lo || n > hi) return NaN;
+  return n;
+};
+
+/**
  * Completeness gate for verification/approval (issue #5).
  *
  * A Health Supervisor must not be able to approve/verify a household that is
@@ -166,6 +182,15 @@ export const createHousehold = async ({ user, payload = {} }) => {
   if (!Number.isFinite(families) || families < 1) errors.push('There must be at least 1 family.');
   if (waterSource && !WATER_SOURCES.includes(waterSource)) errors.push('Invalid water source.');
   if (toiletType && !TOILET_TYPES.includes(toiletType)) errors.push('Invalid toilet facility type.');
+  // Optional household GPS coordinates (map pinpointing). Both must be present
+  // together or both absent. Never fabricated — a blank value stays null.
+  const latitude = parseCoordinate(payload.latitude, -90, 90);
+  const longitude = parseCoordinate(payload.longitude, -180, 180);
+  if (Number.isNaN(latitude)) errors.push('Latitude must be a valid coordinate between -90 and 90.');
+  if (Number.isNaN(longitude)) errors.push('Longitude must be a valid coordinate between -180 and 180.');
+  if ((latitude !== null && longitude === null) || (latitude === null && longitude !== null)) {
+    errors.push('Both latitude and longitude are required to pinpoint a household on the map.');
+  }
   const { members, errors: memberErrors } = normalizeMembers(payload.members);
   errors.push(...memberErrors);
   if (errors.length) throw ApiError.unprocessable('Please complete the required household fields.', errors);
@@ -233,6 +258,8 @@ export const createHousehold = async ({ user, payload = {} }) => {
     wasteDisposal: text(payload.wasteDisposal),
     wasteSegregation: text(payload.wasteSegregation),
     quarterVisits: payload.quarterVisits && typeof payload.quarterVisits === 'object' ? payload.quarterVisits : {},
+    latitude: latitude === null || Number.isNaN(latitude) ? null : latitude,
+    longitude: longitude === null || Number.isNaN(longitude) ? null : longitude,
     ...risk,
     collectorId: user?.id || null,
     collectorName: text(payload.collectorName ?? payload.collector) || user?.name || user?.email || '',
@@ -302,6 +329,18 @@ export const updateHousehold = async ({ id, user, patch = {} }) => {
   }
   if (patch.toiletType !== undefined && patch.toiletType !== '' && !TOILET_TYPES.includes(patch.toiletType)) {
     errors.push('Invalid toilet facility type.');
+  }
+  // Optional household GPS coordinates. Never fabricated: a blank value clears
+  // the stored coordinate; an invalid value is rejected.
+  if (patch.latitude !== undefined) {
+    const lat = parseCoordinate(patch.latitude, -90, 90);
+    if (Number.isNaN(lat)) errors.push('Latitude must be a valid coordinate between -90 and 90.');
+    else patch.latitude = lat;
+  }
+  if (patch.longitude !== undefined) {
+    const lng = parseCoordinate(patch.longitude, -180, 180);
+    if (Number.isNaN(lng)) errors.push('Longitude must be a valid coordinate between -180 and 180.');
+    else patch.longitude = lng;
   }
   if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
 

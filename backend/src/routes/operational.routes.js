@@ -27,6 +27,11 @@ for (const kind of kinds) {
   } else {
     router.post(`/${kind}`, withKind(kind), authorize(staff), asyncHandler(controller.create));
     router.put(`/${kind}/:id`, withKind(kind), authorize(staff), asyncHandler(controller.update));
+    // Maternal records support deletion (spec PART 13). Other operational kinds
+    // keep their append-only history, so no DELETE route is exposed for them.
+    if (kind === 'maternal') {
+      router.delete(`/${kind}/:id`, withKind(kind), authorize(staff), asyncHandler(controller.remove));
+    }
   }
 }
 

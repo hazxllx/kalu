@@ -156,6 +156,9 @@ export const validateSubmissionForSubmit = (resident, visit) => {
  */
 export const createSubmission = async ({ residentId = null, resident = null, visit = {}, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
+  if (user.role === 'rhu_personnel' && !user.facilityId) {
+    throw ApiError.unprocessable('Your account must be assigned to an RHU facility before submitting triage.');
+  }
 
   const scope = assignedBarangay(user);
 
@@ -208,6 +211,7 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
     recordedById: user.id,
     recordedByRole: user.role,
     recordedByName: user.name || user.email || '',
+    facilityId: user.facilityId || null,
     status: SUBMISSION_STATUS.DRAFT,
     ...normalized,
   };

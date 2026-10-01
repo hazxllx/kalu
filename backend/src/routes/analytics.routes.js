@@ -9,6 +9,7 @@ import {
   getCommunityMap,
   getCommunityMapTrends,
   getConditions,
+  getHouseholdMap,
 } from '../controllers/analytics.controller.js';
 
 /**
@@ -23,6 +24,7 @@ const router = Router();
 
 router.get('/early-warning', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getEarlyWarning);
 router.get('/community-map', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getCommunityMap);
+router.get('/household-map', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getHouseholdMap);
 router.get('/community-map/trends', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getCommunityMapTrends);
 router.get('/conditions', authenticate, authorize(FEATURE_ROLES.analytics), getConditions);
 

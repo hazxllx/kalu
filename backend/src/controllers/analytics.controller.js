@@ -77,4 +77,23 @@ export const getConditions = async (req, res) => {
   sendData(res, await analyticsService.getConditionOptions());
 };
 
-export default { getEarlyWarning, getCommunityMap, getCommunityMapTrends, getConditions };
+/**
+ * GET /api/analytics/household-map
+ *
+ * Household markers (clustered per family) for the Community Health Map. One
+ * marker per household, scoped from the session exactly like the community map.
+ * Only households with valid stored coordinates are plotted (no fabricated
+ * coordinates); households without coordinates are returned separately. The
+ * payload is household-level only — no resident identity reaches the map.
+ */
+export const getHouseholdMap = async (req, res) => {
+  const barangay =
+    req.assignedBarangay || (typeof req.query.barangay === 'string' ? req.query.barangay.trim() : '') || null;
+  const data = await analyticsService.getHouseholdMap({
+    barangay,
+    municipalityId: req.user?.municipalityId || null,
+  });
+  sendData(res, data);
+};
+
+export default { getEarlyWarning, getCommunityMap, getCommunityMapTrends, getConditions, getHouseholdMap };

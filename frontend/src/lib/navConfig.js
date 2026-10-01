@@ -79,7 +79,7 @@ export const NAV = {
     { label: "Consultation", icon: "Stethoscope", path: "/app/health_supervisor/consultations", permission: "consultation.conduct", group: "Health Services" },
     { label: "Records", icon: "ClipboardList", group: "Health Services", children: [
       { label: "TCL", icon: "ClipboardList", path: "/app/health_supervisor/tcls" },
-      { label: "Maternal Record", icon: "FileHeart", path: "/app/health_supervisor/m1" },
+      { label: "M1", icon: "FileHeart", path: "/app/health_supervisor/m1" },
       { label: "Immunization", icon: "Syringe", path: "/app/health_supervisor/immunization" },
       { label: "TB Records", icon: "Activity", path: "/app/health_supervisor/tb" },
       { label: "Follow-ups", icon: "CalendarClock", path: "/app/health_supervisor/followups", permission: "followups.view" },
@@ -88,34 +88,26 @@ export const NAV = {
     { label: "Health Services", icon: "Activity", path: "/app/health_supervisor/services", group: "Health Services" },
     { label: "Referrals", icon: "Send", path: "/app/health_supervisor/referrals", permission: "referrals.view", group: "Health Services" },
     { label: "Community Monitoring", icon: "Map", path: "/app/health_supervisor/barangays", permission: "reports.analytics.view", group: "Monitoring" },
-    { label: "Maternal Monitoring", icon: "FileHeart", path: "/app/health_supervisor/m1-report", group: "Monitoring" },
     { label: "Early Warning", icon: "TrendingUp", path: "/app/health_supervisor/trends", permission: "reports.analytics.view", group: "Monitoring" },
     { label: "Reports", icon: "BarChart3", path: "/app/health_supervisor/reports", permission: "reports.view", group: "Monitoring" },
     { label: "Notifications", icon: "Bell", path: "/app/health_supervisor/notifications", group: "Account" },
     { label: "Settings", icon: "Settings", path: "/app/health_supervisor/settings", group: "Account" },
   ],
-  // RHU Personnel: triage. Dedicated Triage Queue / Triage Assessment screens
-  // are pending the verified requirements; monitoring pages remain available.
-  // RHU Personnel do not have a Resident Directory entry — residents are owned
-  // by the barangay Health Supervisor.
-  // RHU Personnel have NO Referrals entry: the API denies them referral access
-  // outright (403), so offering the page would only ever show an error.
+  // RHU Personnel navigation is limited to their operational workspace.
   rhu_personnel: [
-    { label: "Dashboard", icon: "LayoutDashboard", path: "/app/rhu_personnel/dashboard" },
-    { label: "Triage", icon: "Activity", path: "/app/rhu_personnel/triage", permission: "triage.view" },
-    { label: "Medical Certificates", icon: "FileText", path: "/app/rhu_personnel/certificates" },
-    { label: "Health Programs", icon: "HeartPulse", path: "/app/rhu_personnel/programs" },
-    { label: "Incoming Reports", icon: "BarChart3", path: "/app/rhu_personnel/reports" },
-    { label: "Notifications", icon: "Bell", path: "/app/rhu_personnel/notifications" },
-    { label: "Settings", icon: "Settings", path: "/app/rhu_personnel/settings" },
+    { label: "Dashboard", icon: "LayoutDashboard", path: "/app/rhu_personnel/dashboard", group: "Main" },
+    { label: "Triage", icon: "Activity", path: "/app/rhu_personnel/triage", permission: "triage.view", group: "Operations" },
+    { label: "Health Programs", icon: "HeartPulse", path: "/app/rhu_personnel/programs", group: "Operations" },
+    { label: "Notifications", icon: "Bell", path: "/app/rhu_personnel/notifications", group: "Operations" },
+    { label: "Settings", icon: "Settings", path: "/app/rhu_personnel/settings", group: "System" },
   ],
   mho: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/mho/dashboard", group: "Main" },
     { label: "Resident Directory", icon: "Users", path: "/app/mho/residents", group: "Main" },
     { label: "Health Trends", icon: "TrendingUp", path: "/app/mho/trends", permission: "reports.analytics.view", group: "Monitoring" },
     { label: "Community Monitoring", icon: "Map", path: "/app/mho/barangays", permission: "reports.analytics.view", group: "Monitoring" },
+    { label: "Referrals", icon: "Send", path: "/app/mho/referrals", permission: "referrals.view", group: "Monitoring" },
     { label: "TCL & M1 Submissions", icon: "ClipboardList", path: "/app/mho/submissions", group: "Submissions" },
-    { label: "Referrals", icon: "Send", path: "/app/mho/referrals", permission: "referrals.view", group: "Health Services" },
     { label: "Medical Certificates", icon: "FileText", path: "/app/mho/certificates", group: "Health Services" },
     { label: "Reports", icon: "BarChart3", path: "/app/mho/reports", permission: "reports.view", group: "Reports" },
     { label: "Notifications", icon: "Bell", path: "/app/mho/notifications", group: "Account" },
@@ -125,6 +117,7 @@ export const NAV = {
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/admin/dashboard" },
     { label: "User Management", icon: "Users", path: "/app/admin/users", permission: "accounts.view" },
     { label: "Early Intervention Rules", icon: "AlertTriangle", path: "/app/admin/risk-rules" },
+    { label: "Risk Assessment", icon: "ShieldAlert", path: "/app/admin/risk-assessment" },
     { label: "Roles", icon: "Shield", path: "/app/admin/roles" },
     { label: "Role & Permissions", icon: "KeyRound", path: "/app/admin/permissions", permission: "accounts.roles.manage" },
     { label: "Audit Trail", icon: "ScrollText", path: "/app/admin/audit", permission: "system.audit.view" },
@@ -132,6 +125,8 @@ export const NAV = {
     { label: "Logs", icon: "Terminal", path: "/app/admin/logs", permission: "system.activity.view" },
   ],
 };
+
+export const profilePathForRole = (roleKey) => `/app/${roleKey}/profile`;
 
 /**
  * Drops items whose declared `permission` the current role does not hold.

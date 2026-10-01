@@ -61,6 +61,8 @@ const HOUSEHOLD_TO_DB = {
   wasteDisposal: 'waste_disposal',
   wasteSegregation: 'waste_segregation',
   quarterVisits: 'quarter_visits',
+  latitude: 'latitude',
+  longitude: 'longitude',
   riskScore: 'risk_score',
   riskLevel: 'risk_level',
   riskFactors: 'risk_factors',
@@ -221,6 +223,12 @@ const RESIDENT_TO_DB = {
   createdAt: 'created_at',
   createdById: 'created_by_id',
   createdByRole: 'created_by_role',
+  // Persisted authoritative risk assessment (computed server-side; never
+  // trusted from the client). See services/residentRisk.service.js.
+  riskScore: 'risk_score',
+  riskLevel: 'risk_level',
+  riskFactors: 'risk_factors',
+  riskAssessedAt: 'risk_assessed_at',
 };
 
 const DB_TO_RESIDENT = Object.fromEntries(Object.entries(RESIDENT_TO_DB).map(([k, v]) => [v, k]));
@@ -231,6 +239,7 @@ const VISIT_TO_DB = {
   recordedById: 'recorded_by_id',
   recordedByRole: 'recorded_by_role',
   recordedByName: 'recorded_by_name',
+  facilityId: 'facility_id',
   status: 'status',
   visitDate: 'visit_date',
   chiefComplaint: 'chief_complaint',
@@ -292,6 +301,22 @@ const mapBack = (row, mapping) => {
 
 const residentToRow = (resident) => mapKeys(resident, RESIDENT_TO_DB);
 const residentFromRow = (row) => (row ? mapBack(row, DB_TO_RESIDENT) : null);
+
+const RISK_CRITERION_TO_DB = {
+  code: 'code',
+  name: 'name',
+  description: 'description',
+  field: 'field',
+  operator: 'operator',
+  value: 'value',
+  value2: 'value2',
+  weight: 'weight',
+  enabled: 'enabled',
+  priority: 'priority',
+};
+const DB_TO_RISK_CRITERION = Object.fromEntries(Object.entries(RISK_CRITERION_TO_DB).map(([k, v]) => [v, k]));
+const riskCriterionToRow = (criterion) => mapKeys(criterion, RISK_CRITERION_TO_DB);
+const riskCriterionFromRow = (row) => (row ? mapBack(row, DB_TO_RISK_CRITERION) : null);
 
 /**
  * Vitals out of the database in the DOMAIN shape (camelCase) — the same keys
@@ -378,7 +403,25 @@ const verificationLogFromRow = (row) => ({
 // Driver
 // ---------------------------------------------------------------------------
 
-const SELECT_RESIDENT = Object.keys(DB_TO_RESIDENT).join(',');
+// The persisted resident risk classification (risk_score / risk_level /
+// risk_factors / risk_assessed_at) is the authoritative, rule-based result
+// written by services/residentRisk.service.js behind the resident-risk
+// migration (supabase/migrations/20261004000000_resident_risk_configuration).
+// It is only ever READ through the resident reads that `select('*')`
+// (getResident / listResidents / searchResidents), which transparently include
+// the columns when the migration is applied and omit them when it is not.
+//
+// Embedded resident joins on visits/referrals (SELECT_RESIDENT) never render a
+// resident's risk, so they must NOT enumerate these columns by name: doing so
+// makes every visit/referral read — and the Community Map, which embeds the
+// resident through listVisits — hard-fail with "column residents_1.risk_score
+// does not exist" on any database where that risk migration has not been
+// applied yet. Keep them out of the embedded select; the risk engine and
+// resident detail reads are unaffected.
+const RESIDENT_RISK_COLUMNS = new Set(['risk_score', 'risk_level', 'risk_factors', 'risk_assessed_at']);
+const SELECT_RESIDENT = Object.keys(DB_TO_RESIDENT)
+  .filter((column) => !RESIDENT_RISK_COLUMNS.has(column))
+  .join(',');
 
 // BUG-012: transfer_requests carries OTP secret material (otp_hash,
 // otp_expires_at, otp_attempts, otp_verified_at, otp_locked_until). API reads
@@ -699,6 +742,39 @@ export const supabaseRepository = {
     if (!data) return null;
     const members = await listHouseholdMembersFor(supabase, id);
     return { ...householdFromRow(data), members };
+  },
+
+  /**
+   * Households (clustered per family) with their member resident links, scoped
+   * for the Community Health Map. Returns households with coordinates and the
+   * set of linked resident ids so the service can flag active cases per
+   * household WITHOUT exposing any resident identity on the map.
+   */
+  async listHouseholdsForMap({ barangay = null, municipalityId = null, limit = 2000 } = {}) {
+    const supabase = getServiceClient();
+    let query = supabase
+      .from(TABLES.households)
+      .select('id, barangay, barangay_id, municipality_id, latitude, longitude, risk_level, risk_score, purok, members:household_members(id, resident_id)')
+      .limit(limit);
+    if (barangay) query = query.eq('barangay', barangay);
+    if (municipalityId) query = query.eq('municipality_id', municipalityId);
+    const { data, error } = await query;
+    throwOnError(error, 'Could not list households for the map');
+    return (data || []).map((row) => ({
+      id: row.id,
+      barangay: row.barangay ?? '',
+      barangayId: row.barangay_id ?? null,
+      municipalityId: row.municipality_id ?? null,
+      latitude: row.latitude != null ? Number(row.latitude) : null,
+      longitude: row.longitude != null ? Number(row.longitude) : null,
+      riskLevel: row.risk_level ?? null,
+      riskScore: row.risk_score ?? null,
+      purok: row.purok ?? '',
+      memberCount: Array.isArray(row.members) ? row.members.length : 0,
+      residentIds: Array.isArray(row.members)
+        ? row.members.map((m) => m.resident_id).filter(Boolean)
+        : [],
+    }));
   },
 
   async insertHousehold(household) {
@@ -1087,6 +1163,27 @@ export const supabaseRepository = {
     return { rows, total: count ?? rows.length };
   },
 
+  async listTclEntries({ limit = 5000, offset = 0 } = {}) {
+    const supabase = getServiceClient();
+    const { data, error, count } = await supabase
+      .from('tcl_entries')
+      .select('id, resident_id, municipality_id, barangay_id, program, status, last_visit, created_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    throwOnError(error, 'Could not list health program records');
+    const rows = (data || []).map((row) => ({
+      id: row.id,
+      residentId: row.resident_id,
+      municipalityId: row.municipality_id,
+      barangayId: row.barangay_id,
+      program: row.program,
+      status: row.status,
+      lastVisit: row.last_visit,
+      createdAt: row.created_at,
+    }));
+    return { rows, total: count ?? rows.length };
+  },
+
   async updateVisit(id, patch) {
     const supabase = getServiceClient();
     const row = visitToRow(patch);
@@ -1361,6 +1458,89 @@ export const supabaseRepository = {
       .eq('id', id);
     throwOnError(error, 'Could not delete document');
     return true;
+  },
+
+  // ----- risk configuration -------------------------------------------------
+  // Authoritative resident risk CRITERIA + THRESHOLDS. Read by the config
+  // service (admin editing + risk computation); written only by admins (RLS +
+  // service-layer guard). Rows map to the domain criterion shape.
+  async listRiskCriteria() {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('risk_criteria')
+      .select('*')
+      .order('priority', { ascending: true });
+    throwOnError(error, 'Could not load risk criteria');
+    return (data || []).map(riskCriterionFromRow);
+  },
+
+  async getRiskCriterion(code) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from('risk_criteria').select('*').eq('code', code).maybeSingle();
+    throwOnError(error, 'Could not fetch risk criterion');
+    return data ? riskCriterionFromRow(data) : null;
+  },
+
+  async upsertRiskCriterion(criterion) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('risk_criteria')
+      .upsert(riskCriterionToRow(criterion), { onConflict: 'code' })
+      .select('*')
+      .single();
+    throwOnError(error, 'Could not save risk criterion');
+    return riskCriterionFromRow(data);
+  },
+
+  async deleteRiskCriterion(code) {
+    const supabase = getServiceClient();
+    const { error } = await supabase.from('risk_criteria').delete().eq('code', code);
+    throwOnError(error, 'Could not delete risk criterion');
+    return true;
+  },
+
+  async getRiskSettings() {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('risk_settings')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    throwOnError(error, 'Could not load risk settings');
+    if (!data) return null;
+    return { moderateMin: data.moderate_min, highMin: data.high_min, updatedAt: data.updated_at };
+  },
+
+  async saveRiskSettings({ moderateMin, highMin }) {
+    const supabase = getServiceClient();
+    // Single authoritative row (id = true singleton).
+    const { data, error } = await supabase
+      .from('risk_settings')
+      .upsert({ id: true, moderate_min: Number(moderateMin), high_min: Number(highMin), updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      .select('*')
+      .single();
+    throwOnError(error, 'Could not save risk settings');
+    return { moderateMin: data.moderate_min, highMin: data.high_min, updatedAt: data.updated_at };
+  },
+
+  async insertHealthAuditLog(log) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('health_audit_logs')
+      .insert({
+        actor_id: log.actorId || null,
+        action: log.action,
+        entity_type: log.entityType,
+        entity_id: String(log.entityId),
+        municipality_id: log.municipalityId || null,
+        barangay_id: log.barangayId || null,
+        metadata: log.metadata || {},
+      })
+      .select('*')
+      .single();
+    throwOnError(error, 'Could not record audit log');
+    return data;
   },
 
 };

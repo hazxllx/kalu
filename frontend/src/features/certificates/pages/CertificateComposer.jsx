@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 /** Roles authorized to prepare and print medical certificates. */
-const AUTHORIZED_ROLES = ["mho", "phn", "rhu_personnel"];
+const AUTHORIZED_ROLES = ["mho", "phn"];
 
 const CIVIL_STATUSES = ["Single", "Married", "Widowed", "Separated"];
 

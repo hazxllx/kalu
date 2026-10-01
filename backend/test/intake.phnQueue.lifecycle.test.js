@@ -30,7 +30,7 @@ let referrals; // id -> referral
 let identityMatch; // optional resident returned by findResidentByIdentity
 let seq;
 
-const RHU = { id: 'rhu-1', role: 'rhu_personnel', name: 'RHU One', municipalityId: 'mun-1' };
+const RHU = { id: 'rhu-1', role: 'rhu_personnel', name: 'RHU One', municipalityId: 'mun-1', facilityId: 'facility-rhu-1' };
 const PHN = { id: 'phn-1', role: 'phn', name: 'PHN One', municipalityId: 'mun-1' };
 const RESIDENT_USER = { id: 'ru-1', role: 'resident-limited', name: 'Res' };
 const HS = { id: 'hs-1', role: 'health_supervisor', name: 'HS', barangay: 'San Isidro', barangayId: 'brgy-si', municipalityId: 'mun-1' };
@@ -99,6 +99,19 @@ test('1. a valid triage visit can be created (draft, no findings/treatment)', as
   assert.equal(sub.status, 'draft');
   assert.equal(sub.findings, '');
   assert.equal(sub.treatmentGiven, '');
+  assert.equal(sub.facilityId, RHU.facilityId);
+});
+
+test('triage facility comes from the authenticated assignment, not the request payload', async () => {
+  const sub = await createTriage(RHU, { facilityId: 'another-facility' });
+  assert.equal(sub.facilityId, RHU.facilityId);
+});
+
+test('RHU triage is denied when the authenticated account has no facility assignment', async () => {
+  await assert.rejects(
+    () => createTriage({ ...RHU, facilityId: null }),
+    (error) => error.statusCode === 422,
+  );
 });
 
 test('2+3. a triage visit can be submitted without findings or treatmentGiven', async () => {

@@ -4,6 +4,7 @@ const resource = (kind) => ({
   list: (params) => api.get(`/operational/${kind}`, { params }),
   create: (record) => api.post(`/operational/${kind}`, { record }),
   update: (id, record) => api.put(`/operational/${kind}/${id}`, { record }),
+  remove: (id) => api.delete(`/operational/${kind}/${id}`),
 });
 
 export const followUpsApi = resource('followups');

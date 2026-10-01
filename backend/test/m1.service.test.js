@@ -83,7 +83,24 @@ class FakeQuery {
       return { data: row, error: null };
     }
     if (this.op === 'upsert') {
-      const row = { ...this.payload, id: this.payload.id || `U-${++this.store.seq}` };
+      // Emulate the m1_manual_entries scope trigger (municipality from barangay).
+      const incoming = { ...this.payload };
+      if (this.table === 'm1_manual_entries' && incoming.barangay_id) {
+        const b = this.store.barangays.get(incoming.barangay_id);
+        incoming.municipality_id = b?.municipality_id ?? null;
+      }
+      // Respect onConflict: update the existing row for the conflict key in
+      // place (true upsert) instead of inserting an uncontrolled duplicate.
+      if (this.onConflict) {
+        const keys = this.onConflict.split(',').map((k) => k.trim());
+        for (const r of t.values()) {
+          if (keys.every((k) => r[k] === incoming[k])) {
+            Object.assign(r, incoming);
+            return { data: this._embed(r), error: null };
+          }
+        }
+      }
+      const row = { ...incoming, id: incoming.id || `U-${++this.store.seq}` };
       t.set(row.id, row);
       return { data: row, error: null };
     }
@@ -105,6 +122,8 @@ const makeStore = () => {
     seq: 0,
     tables: {
       m1_records: new Map(),
+      m1_manual_entries: new Map(),
+      maternal_records: new Map(),
       households: new Map(),
       immunizations: new Map(),
       household_member_health_profiles: new Map(),
@@ -165,6 +184,56 @@ const seedRecord = (over = {}) => {
   return row;
 };
 
+// Seed a maternal_records case (Section B is DERIVED from this table).
+const seedMaternal = (over = {}) => {
+  const id = `MAT-${++store.seq}`;
+  const row = {
+    id,
+    resident_id: 'RES-1',
+    barangay_id: 'brgy-1',
+    municipality_id: 'M1',
+    lmp: null,
+    edd: null,
+    prenatal_visits: 0,
+    status: 'Delivered',
+    delivery_date: null,
+    delivery_outcome: '',
+    type_of_delivery: '',
+    place_of_delivery: '',
+    birth_attendant: '',
+    birth_weight: '',
+    pp_checkup_24h: null,
+    pp_checkup_day3: null,
+    pp_checkup_7_14d: null,
+    pp_checkup_6wk: null,
+    iron_folic_completed_date: null,
+    vitamin_a_given_date: null,
+    ...over,
+  };
+  store.tables.maternal_records.set(id, row);
+  return row;
+};
+
+// Seed a manual aggregate figure (m1_manual_entries).
+const seedManual = (over = {}) => {
+  const id = `MAN-${++store.seq}`;
+  const b = store.barangays.get(over.barangay_id || 'brgy-1');
+  const row = {
+    id,
+    indicator_code: 'B1_1',
+    barangay_id: 'brgy-1',
+    municipality_id: b?.municipality_id || 'M1',
+    period_year: 2026,
+    period_month: 9,
+    age_group: 'Total',
+    sex: '',
+    value: 0,
+    ...over,
+  };
+  store.tables.m1_manual_entries.set(id, row);
+  return row;
+};
+
 // --- scope --------------------------------------------------------------------
 test('resolveScope forces a barangay-scoped user to their own barangay', () => {
   // requesting another barangay must throw
@@ -198,18 +267,27 @@ test('createRecord refuses indicators sourced from existing tables', async () =>
 test('createRecord stores an underlying event scoped to the resident', async () => {
   const rec = await service.createRecord({
     user: HS,
-    payload: { indicator_code: 'B1_1', residentId: 'RES-1', record_date: '2026-09-05' },
+    payload: { indicator_code: 'A1_1', residentId: 'RES-1', record_date: '2026-09-05' },
     supabase: sb,
   });
-  assert.equal(rec.indicator_code, 'B1_1');
+  assert.equal(rec.indicator_code, 'A1_1');
   assert.equal(rec.barangay_id, 'brgy-1');
   assert.equal(rec.resident_id, 'RES-1');
 });
 
 test('createRecord blocks a resident outside the caller barangay', async () => {
   await assert.rejects(
-    service.createRecord({ user: HS, payload: { indicator_code: 'B1_1', residentId: 'RES-2' }, supabase: sb }),
+    service.createRecord({ user: HS, payload: { indicator_code: 'A1_1', residentId: 'RES-2' }, supabase: sb }),
     /not found/,
+  );
+});
+
+test('createRecord refuses manual-entry indicators (no per-event store)', async () => {
+  // B1_1 is a manual aggregate indicator now; it is entered via saveManualEntry,
+  // not the per-event create path.
+  await assert.rejects(
+    service.createRecord({ user: HS, payload: { indicator_code: 'B1_1', residentId: 'RES-1' }, supabase: sb }),
+    /aggregated from existing|m1_manual|not recorded directly/,
   );
 });
 
@@ -225,16 +303,44 @@ test('monthlyReport counts unique residents (not events) for a unique-person ind
   assert.equal(a1.byAge['15-19'], 1); // RES-3 (age ~17)
 });
 
-test('monthlyReport counts events for an event indicator', async () => {
-  seedRecord({ indicator_code: 'B2_18', resident_id: 'RES-1', record_date: '2026-09-03' });
-  seedRecord({ indicator_code: 'B2_18', resident_id: 'RES-1', record_date: '2026-09-15' });
+test('monthlyReport derives deliveries from maternal_records by delivery_date', async () => {
+  seedMaternal({ delivery_date: '2026-09-03' });
+  seedMaternal({ delivery_date: '2026-09-15' });
+  seedMaternal({ delivery_date: '2026-08-31' }); // previous month — excluded
   const report = await service.monthlyReport({ user: HS, year: 2026, month: 9, supabase: sb });
   assert.equal(report.byCode.B2_18.total, 2);
+  assert.equal(report.byCode.B2_18.source, 'maternal_records');
+});
+
+test('monthlyReport classifies derived deliveries from the maternal fields', async () => {
+  seedMaternal({ delivery_date: '2026-09-03', type_of_delivery: 'Vaginal', place_of_delivery: 'Public Facility', birth_attendant: 'Midwife', delivery_outcome: 'Live Birth', birth_weight: '3.2 kg' });
+  seedMaternal({ delivery_date: '2026-09-10', type_of_delivery: 'Cesarean', place_of_delivery: 'Private Facility', birth_attendant: 'Doctor', delivery_outcome: 'Live Birth', birth_weight: '2.1 kg' });
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 9, supabase: sb });
+  assert.equal(report.byCode.B2_18.total, 2); // deliveries
+  assert.equal(report.byCode.B2_26a.total, 1); // one vaginal
+  assert.equal(report.byCode.B2_26b.total, 1); // one cesarean
+  assert.equal(report.byCode.B2_21c.total, 1); // one midwife
+  assert.equal(report.byCode.B2_21a.total, 1); // one doctor
+  assert.equal(report.byCode.B2_21.total, 2); // both skilled
+  assert.equal(report.byCode.B2_24a.total, 1); // one public facility
+  assert.equal(report.byCode.B2_23.total, 2); // both facility-based
+  assert.equal(report.byCode.B2_20a.total, 1); // 3.2kg normal
+  assert.equal(report.byCode.B2_20b.total, 1); // 2.1kg low
+});
+
+test('monthlyReport sums manual aggregate figures by age band', async () => {
+  seedManual({ indicator_code: 'B1_1', period_month: 9, age_group: '20-49', value: 3 });
+  seedManual({ indicator_code: 'B1_1', period_month: 9, age_group: '15-19', value: 1 });
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 9, supabase: sb });
+  assert.equal(report.byCode.B1_1.total, 4);
+  assert.equal(report.byCode.B1_1.byAge['20-49'], 3);
+  assert.equal(report.byCode.B1_1.byAge['15-19'], 1);
+  assert.equal(report.byCode.B1_1.source, 'm1_manual');
 });
 
 test('monthlyReport excludes records from other barangays (scope isolation)', async () => {
-  seedRecord({ indicator_code: 'B2_18', resident_id: 'RES-1', barangay_id: 'brgy-1', record_date: '2026-09-03' });
-  seedRecord({ indicator_code: 'B2_18', resident_id: 'RES-2', barangay_id: 'brgy-2', municipality_id: 'M1', record_date: '2026-09-04' });
+  seedMaternal({ barangay_id: 'brgy-1', delivery_date: '2026-09-03' });
+  seedMaternal({ resident_id: 'RES-2', barangay_id: 'brgy-2', municipality_id: 'M1', delivery_date: '2026-09-04' });
   const report = await service.monthlyReport({ user: HS, year: 2026, month: 9, supabase: sb });
   assert.equal(report.byCode.B2_18.total, 1); // only brgy-1
 });
@@ -279,11 +385,11 @@ test('monthlyReport computes FP current users from begin + new + other - dropout
 
 // --- annual -------------------------------------------------------------------
 test('annualSummary produces a 12-month matrix with an annual total', async () => {
-  seedRecord({ indicator_code: 'B2_19', resident_id: 'RES-1', record_date: '2026-03-10' });
-  seedRecord({ indicator_code: 'B2_19', resident_id: 'RES-1', record_date: '2026-03-20' });
-  seedRecord({ indicator_code: 'B2_19', resident_id: 'RES-3', record_date: '2026-11-02' });
+  seedMaternal({ delivery_date: '2026-03-10' });
+  seedMaternal({ delivery_date: '2026-03-20' });
+  seedMaternal({ delivery_date: '2026-11-02' });
   const summary = await service.annualSummary({ user: HS, year: 2026, supabase: sb });
-  const b2 = summary.indicators.find((i) => i.code === 'B2_19');
+  const b2 = summary.indicators.find((i) => i.code === 'B2_18');
   assert.equal(b2.months[2], 2); // March index 2
   assert.equal(b2.months[10], 1); // November index 10
   assert.equal(b2.annual, 3);
@@ -299,17 +405,17 @@ test('annualSummary dedups unique-resident indicators per year', async () => {
 
 // --- drilldown ----------------------------------------------------------------
 test('drilldown returns the underlying records behind a total', async () => {
-  seedRecord({ indicator_code: 'B1_1', resident_id: 'RES-1', record_date: '2026-09-03' });
-  seedRecord({ indicator_code: 'B1_1', resident_id: 'RES-3', record_date: '2026-09-04' });
-  const dd = await service.drilldown({ user: HS, indicatorCode: 'B1_1', year: 2026, month: 9, supabase: sb });
+  seedRecord({ indicator_code: 'A1_1', resident_id: 'RES-1', record_date: '2026-09-03' });
+  seedRecord({ indicator_code: 'A1_1', resident_id: 'RES-3', record_date: '2026-09-04' });
+  const dd = await service.drilldown({ user: HS, indicatorCode: 'A1_1', year: 2026, month: 9, supabase: sb });
   assert.equal(dd.count, 2);
   assert.equal(dd.records[0].resident.id, 'RES-1');
-  assert.equal(dd.indicator.code, 'B1_1');
+  assert.equal(dd.indicator.code, 'A1_1');
 });
 
 test('drilldown enforces barangay scope', async () => {
-  seedRecord({ indicator_code: 'B1_1', resident_id: 'RES-2', barangay_id: 'brgy-2', municipality_id: 'M1', record_date: '2026-09-03' });
-  const dd = await service.drilldown({ user: HS, indicatorCode: 'B1_1', year: 2026, month: 9, supabase: sb });
+  seedRecord({ indicator_code: 'A1_1', resident_id: 'RES-2', barangay_id: 'brgy-2', municipality_id: 'M1', record_date: '2026-09-03' });
+  const dd = await service.drilldown({ user: HS, indicatorCode: 'A1_1', year: 2026, month: 9, supabase: sb });
   assert.equal(dd.count, 0); // brgy-2 record invisible to brgy-1 supervisor
 });
 
@@ -324,4 +430,152 @@ test('getReportMeta resolves the barangay header from scope', async () => {
 test('catalog validates against the shared indicator definitions', () => {
   assert.equal(getIndicator('B1_1').section, 'B');
   assert.equal(getIndicator('C1_2').source, 'immunizations');
+});
+
+// --- period report (Monthly | Quarterly | Annual) ----------------------------
+test('periodReport (monthly) aggregates only the selected month', async () => {
+  seedMaternal({ delivery_date: '2026-10-05' });
+  seedMaternal({ delivery_date: '2026-10-25' });
+  seedMaternal({ delivery_date: '2026-09-30' }); // previous month
+  seedMaternal({ delivery_date: '2026-11-01' }); // next month
+  const report = await service.periodReport({ user: HS, period: 'monthly', year: 2026, month: 10, supabase: sb });
+  assert.equal(report.period.period, 'monthly');
+  assert.equal(report.byCode.B2_18.total, 2); // only October
+});
+
+test('periodReport (quarterly Q4) aggregates October + November + December', async () => {
+  seedMaternal({ delivery_date: '2026-10-10' });
+  seedMaternal({ delivery_date: '2026-11-15' });
+  seedMaternal({ delivery_date: '2026-12-20' });
+  seedMaternal({ delivery_date: '2026-09-30' }); // Q3 — excluded
+  seedMaternal({ delivery_date: '2027-01-02' }); // next year — excluded
+  const report = await service.periodReport({ user: HS, period: 'quarterly', year: 2026, quarter: 4, supabase: sb });
+  assert.equal(report.period.quarter, 4);
+  assert.equal(report.byCode.B2_18.total, 3); // Oct + Nov + Dec only
+  assert.match(report.periodLabel, /4th Quarter/);
+});
+
+test('periodReport (quarterly) isolates each quarter (Q1 2027 excludes Dec 2026)', async () => {
+  seedMaternal({ delivery_date: '2026-12-31' }); // Q4 2026
+  seedMaternal({ delivery_date: '2027-01-15' }); // Q1 2027
+  seedMaternal({ delivery_date: '2027-03-31' }); // Q1 2027
+  const q1 = await service.periodReport({ user: HS, period: 'quarterly', year: 2027, quarter: 1, supabase: sb });
+  assert.equal(q1.byCode.B2_18.total, 2); // Jan + Mar 2027 only, not Dec 2026
+});
+
+test('periodReport (annual) aggregates the whole year, excluding other years', async () => {
+  seedMaternal({ delivery_date: '2026-01-10' });
+  seedMaternal({ delivery_date: '2026-06-10' });
+  seedMaternal({ delivery_date: '2026-12-10' });
+  seedMaternal({ delivery_date: '2027-01-10' }); // next year — excluded
+  const report = await service.periodReport({ user: HS, period: 'annual', year: 2026, supabase: sb });
+  assert.equal(report.period.period, 'annual');
+  assert.equal(report.byCode.B2_18.total, 3); // Jan + Jun + Dec 2026
+});
+
+test('periodReport respects barangay scope for quarterly and annual', async () => {
+  seedMaternal({ barangay_id: 'brgy-1', delivery_date: '2026-10-10' });
+  seedMaternal({ resident_id: 'RES-2', barangay_id: 'brgy-2', municipality_id: 'M1', delivery_date: '2026-11-10' });
+  const quarterly = await service.periodReport({ user: HS, period: 'quarterly', year: 2026, quarter: 4, supabase: sb });
+  assert.equal(quarterly.byCode.B2_18.total, 1); // only brgy-1
+  const annual = await service.periodReport({ user: HS, period: 'annual', year: 2026, supabase: sb });
+  assert.equal(annual.byCode.B2_18.total, 1); // only brgy-1
+});
+
+test('periodReport includes every indicator for a quarterly report', async () => {
+  const report = await service.periodReport({ user: HS, period: 'quarterly', year: 2026, quarter: 2, supabase: sb });
+  assert.equal(report.indicators.length, 178);
+  assert.equal(report.byCode.E8_2.total, 0); // untouched indicator still reported as 0
+});
+
+// --- maternal derivation (dated supplementation / postpartum) ----------------
+test('B1_5 iron/folic is derived from maternal_records by completion date', async () => {
+  seedMaternal({ resident_id: 'RES-1', iron_folic_completed_date: '2026-09-12' }); // 20-49
+  seedMaternal({ resident_id: 'RES-3', iron_folic_completed_date: '2026-09-20' }); // 15-19
+  seedMaternal({ resident_id: 'RES-1', iron_folic_completed_date: '2026-08-01' }); // other month
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 9, supabase: sb });
+  assert.equal(report.byCode.B1_5.total, 2);
+  assert.equal(report.byCode.B1_5.byAge['20-49'], 1);
+  assert.equal(report.byCode.B1_5.byAge['15-19'], 1);
+  assert.equal(report.byCode.B1_5.source, 'maternal_records');
+});
+
+test('B3_28 counts a mother who completed at least 2 postpartum check-ups', async () => {
+  // Completion is the 2nd check-up date; it falls in September.
+  seedMaternal({ resident_id: 'RES-1', pp_checkup_24h: '2026-09-02', pp_checkup_day3: '2026-09-05' });
+  // Only one check-up -> not counted.
+  seedMaternal({ resident_id: 'RES-3', pp_checkup_24h: '2026-09-02' });
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 9, supabase: sb });
+  assert.equal(report.byCode.B3_28.total, 1);
+  assert.equal(report.byCode.B3_28.byAge['20-49'], 1);
+});
+
+// --- manual aggregate entry: persistence, update-in-place, rollup ------------
+test('saveManualEntry persists an aggregate figure that the monthly report reflects', async () => {
+  await service.saveManualEntry({
+    user: HS, year: 2026, month: 10, indicatorCode: 'B1_1',
+    values: [{ age_group: '20-49', value: 3 }], supabase: sb,
+  });
+  const report = await service.periodReport({ user: HS, period: 'monthly', year: 2026, month: 10, supabase: sb });
+  assert.equal(report.byCode.B1_1.total, 3);
+  assert.equal(report.byCode.B1_1.byAge['20-49'], 3);
+});
+
+test('saveManualEntry updates the existing figure in place (no duplicate)', async () => {
+  await service.saveManualEntry({
+    user: HS, year: 2026, month: 10, indicatorCode: 'B1_1',
+    values: [{ age_group: '20-49', value: 3 }], supabase: sb,
+  });
+  await service.saveManualEntry({
+    user: HS, year: 2026, month: 10, indicatorCode: 'B1_1',
+    values: [{ age_group: '20-49', value: 4 }], supabase: sb,
+  });
+  // Exactly one stored row for the bucket; the value is updated to 4.
+  const stored = [...store.tables.m1_manual_entries.values()]
+    .filter((r) => r.indicator_code === 'B1_1' && r.age_group === '20-49' && r.period_month === 10);
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].value, 4);
+  const monthly = await service.periodReport({ user: HS, period: 'monthly', year: 2026, month: 10, supabase: sb });
+  assert.equal(monthly.byCode.B1_1.total, 4);
+});
+
+test('manual figures roll up into quarterly and annual totals', async () => {
+  await service.saveManualEntry({ user: HS, year: 2026, month: 10, indicatorCode: 'B1_1', values: [{ age_group: '20-49', value: 2 }], supabase: sb });
+  await service.saveManualEntry({ user: HS, year: 2026, month: 11, indicatorCode: 'B1_1', values: [{ age_group: '20-49', value: 3 }], supabase: sb });
+  const q4 = await service.periodReport({ user: HS, period: 'quarterly', year: 2026, quarter: 4, supabase: sb });
+  assert.equal(q4.byCode.B1_1.total, 5); // Oct + Nov
+  const annual = await service.periodReport({ user: HS, period: 'annual', year: 2026, supabase: sb });
+  assert.equal(annual.byCode.B1_1.total, 5);
+  const annualMatrix = await service.annualSummary({ user: HS, year: 2026, supabase: sb });
+  const b1 = annualMatrix.indicators.find((i) => i.code === 'B1_1');
+  assert.equal(b1.months[9], 2); // October
+  assert.equal(b1.months[10], 3); // November
+  assert.equal(b1.annual, 5);
+});
+
+test('saveManualEntry refuses a derived indicator (prevents double counting)', async () => {
+  await assert.rejects(
+    service.saveManualEntry({ user: HS, year: 2026, month: 10, indicatorCode: 'B2_18', values: [{ value: 5 }], supabase: sb }),
+    /cannot be entered manually|derived/,
+  );
+});
+
+test('a derived indicator is never counted from a manual entry', async () => {
+  // Deliveries derived from maternal_records…
+  seedMaternal({ delivery_date: '2026-10-05' });
+  // …and a stray manual figure for the SAME code is ignored by aggregation
+  // (source is maternal_records, so the m1_manual branch never runs for it).
+  seedManual({ indicator_code: 'B2_18', period_month: 10, age_group: 'Total', value: 99 });
+  const report = await service.periodReport({ user: HS, period: 'monthly', year: 2026, month: 10, supabase: sb });
+  assert.equal(report.byCode.B2_18.total, 1); // only the real delivery, not 1 + 99
+});
+
+test('listManualEntries returns stored figures and the manual indicator catalog', async () => {
+  await service.saveManualEntry({ user: HS, year: 2026, month: 10, indicatorCode: 'B1_1', values: [{ age_group: '20-49', value: 7 }], remarks: 'reviewed', supabase: sb });
+  const res = await service.listManualEntries({ user: HS, year: 2026, month: 10, supabase: sb });
+  assert.ok(res.indicators.some((i) => i.code === 'B1_1'));
+  assert.ok(!res.indicators.some((i) => i.code === 'B2_18')); // derived, not manual
+  const entry = res.entries.find((e) => e.indicator_code === 'B1_1' && e.age_group === '20-49');
+  assert.equal(entry.value, 7);
+  assert.equal(res.remarks.B1_1, 'reviewed');
 });

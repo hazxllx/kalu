@@ -489,6 +489,8 @@ export default function AddHouseholdPage() {
     head: "",
     purok: "",
     streetAddress: "",
+    latitude: "",
+    longitude: "",
     contact: "",
     families: "1",
     collector: defaultCollector || (bhwOptions && bhwOptions[0]) || "",
@@ -681,6 +683,8 @@ export default function AddHouseholdPage() {
           headName: form.head.trim(),
           purok: form.purok,
           streetAddress: form.streetAddress.trim(),
+          latitude: form.latitude === "" ? null : form.latitude,
+          longitude: form.longitude === "" ? null : form.longitude,
           contact: form.contact.trim(),
           families: Number(form.families) || 1,
           monthlyIncome: form.income === "" ? null : Number(form.income),
@@ -840,6 +844,26 @@ export default function AddHouseholdPage() {
                 onChange={(e) => set("streetAddress", e.target.value)}
                 placeholder="e.g. 12 Mabini St., Sitio Riverside"
                 className={inputCls(errors.streetAddress)}
+              />
+            </Field>
+            <Field label="GPS Latitude" hint="Optional — for map pinpointing" error={errors.latitude}>
+              <input
+                type="number"
+                step="0.0000001"
+                value={form.latitude}
+                onChange={(e) => { set("latitude", e.target.value); clearError("latitude"); }}
+                placeholder="e.g. 13.559700"
+                className={inputCls(errors.latitude)}
+              />
+            </Field>
+            <Field label="GPS Longitude" hint="Optional — both required to plot on the map" error={errors.longitude}>
+              <input
+                type="number"
+                step="0.0000001"
+                value={form.longitude}
+                onChange={(e) => { set("longitude", e.target.value); clearError("longitude"); }}
+                placeholder="e.g. 123.272000"
+                className={inputCls(errors.longitude)}
               />
             </Field>
             <Field label="Contact Number" hint="Optional" error={errors.contact}>

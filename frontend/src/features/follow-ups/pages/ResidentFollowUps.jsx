@@ -6,6 +6,7 @@ import { residentFollowUpsApi } from "@/services/api";
 import { ScheduleDetailModal } from "../components/ScheduleCalendarViews";
 import ScheduleStatusBadge, { ConfirmationBadge } from "../components/ScheduleStatusBadge";
 import { formatTime } from "../lib/scheduleDates";
+import { followUpDisplayStatus } from "../lib/scheduleDates";
 import {
   Calendar, CalendarDays, CheckCircle2, XCircle, Clock, MapPin, User, AlertCircle, Ban, X, CalendarClock,
 } from "lucide-react";
@@ -31,7 +32,7 @@ const isActionable = (f) =>
   f.confirmationStatus !== "Rejected";
 
 /** Statuses counted as "Upcoming" (a confirmed/scheduled future visit). */
-const UPCOMING_STATUSES = ["Scheduled", "Upcoming", "Today", "Ongoing"];
+const UPCOMING_STATUSES = ["Scheduled", "Today"];
 
 /** Human date for a YYYY-MM-DD value, parsed at LOCAL midnight (no UTC shift). */
 const fmtDate = (d) => {
@@ -49,7 +50,7 @@ const mapToSchedule = (row) => ({
   provider: row.assignedProvider || "",
   instructions: row.instructions || "",
   purpose: row.purpose || "",
-  status: row.status || "Scheduled",
+  status: followUpDisplayStatus(row.status, row.scheduledDate),
   confirmationStatus: row.confirmationStatus || (row.requiresResidentResponse ? "Awaiting Confirmation" : null),
   respondedAt: row.respondedAt || "",
   rejectionReason: row.rejectionReason || "",
@@ -87,7 +88,7 @@ export default function ResidentFollowUps() {
     actionRequired: rows.filter(isActionable).length,
     // Confirmed/scheduled visits that no longer need a response (mutually
     // exclusive with Action Required so a follow-up is never counted twice).
-    upcoming: rows.filter((f) => UPCOMING_STATUSES.includes(f.status) && !isActionable(f)).length,
+    upcoming: rows.filter((f) => UPCOMING_STATUSES.includes(followUpDisplayStatus(f.status, f.scheduledDate)) && !isActionable(f)).length,
     completed: rows.filter((f) => f.status === "Completed").length,
     cancelled: rows.filter((f) => f.status === "Cancelled").length,
   }), [rows]);
@@ -215,7 +216,7 @@ export default function ResidentFollowUps() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 sm:flex-col sm:items-end">
-                      <ScheduleStatusBadge value={f.status === "Pending" ? "Pending" : f.status} />
+                      <ScheduleStatusBadge value={followUpDisplayStatus(f.status, f.scheduledDate)} />
                       {f.confirmationStatus && <ConfirmationBadge value={f.confirmationStatus} />}
                     </div>
                   </div>

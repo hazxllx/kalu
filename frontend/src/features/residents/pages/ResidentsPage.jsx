@@ -3,6 +3,7 @@ import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, Users } from "
 import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
+import RiskBadge from "@/components/common/RiskBadge";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
@@ -208,6 +209,10 @@ export default function ResidentsPage() {
         age: calcAge(r.birthDate),
         gender: r.sex || "—",
         status: r.verificationStatus || "verified",
+        // Authoritative risk comes from the backend (persisted/recomputed from
+        // recorded vitals + the configured criteria); the directory never
+        // recalculates it locally.
+        riskLevel: r.riskLevel || null,
       }));
   }, [residents]);
 
@@ -370,6 +375,7 @@ export default function ResidentsPage() {
     { key: "gender", label: "Sex" },
     { key: "barangay", label: "Barangay" },
     { key: "healthRecordNo", label: "Health Record No." },
+    { key: "riskLevel", label: "Risk" },
     { key: "status", label: "Status" },
     { key: "actions", label: "" },
   ];
@@ -472,6 +478,7 @@ export default function ResidentsPage() {
                   </div>
                 );
               if (key === "status") return <StatusBadge value={row.status} />;
+              if (key === "riskLevel") return <RiskBadge level={row.riskLevel} />;
               if (key === "actions")
                 return (
                   <div className="flex gap-3">
@@ -621,6 +628,67 @@ export default function ResidentsPage() {
                     </p>
                   </div>
                 </div>
+              </div>
+
+              {/* Risk Assessment — the authoritative, backend-computed result for
+                  this resident. HEALTH DATA -> RISK CRITERIA -> RISK SCORE ->
+                  RISK LEVEL. Only criteria that actually applied are listed. */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-6">
+                <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Risk Assessment</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Current Risk</p>
+                    <div className="mt-1"><RiskBadge level={selected.riskLevel} /></div>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Risk Score</p>
+                    <p className="mt-0.5 text-sm font-medium text-brand-ink">
+                      {Number.isFinite(selected.riskScore) ? selected.riskScore : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Last Assessment</p>
+                    <p className="mt-0.5 text-sm font-medium text-brand-ink">
+                      {selected.riskAssessedAt ? new Date(selected.riskAssessedAt).toLocaleDateString() : "—"}
+                    </p>
+                  </div>
+                </div>
+
+                {Array.isArray(selected.riskFactors) && selected.riskFactors.length > 0 ? (
+                  <div className="mt-4">
+                    <p className="text-[11px] text-brand-gray uppercase tracking-wide mb-2">Contributing Risk Criteria</p>
+                    <div className="overflow-hidden rounded-lg border border-brand-border">
+                      <table className="w-full text-sm">
+                        <thead className="bg-brand-light/40 text-brand-gray">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium">Criterion</th>
+                            <th className="px-3 py-2 text-left font-medium">Result</th>
+                            <th className="px-3 py-2 text-right font-medium">Score</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selected.riskFactors.map((f) => (
+                            <tr key={f.code || f.name} className="border-t border-brand-border">
+                              <td className="px-3 py-2 text-brand-ink">{f.name}</td>
+                              <td className="px-3 py-2 text-brand-gray">{f.measured ?? "Present"}</td>
+                              <td className="px-3 py-2 text-right font-stat font-medium text-brand-ink">+{f.weight}</td>
+                            </tr>
+                          ))}
+                          <tr className="border-t border-brand-border bg-brand-light/20">
+                            <td className="px-3 py-2 font-medium text-brand-ink" colSpan={2}>Total Score</td>
+                            <td className="px-3 py-2 text-right font-stat font-bold text-brand-ink">{selected.riskScore ?? 0}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-brand-gray">
+                    {selected.riskLevel
+                      ? "No individual criteria contributed to this resident's score."
+                      : "No consultation with recorded vitals yet, so no risk has been assessed."}
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end gap-3">

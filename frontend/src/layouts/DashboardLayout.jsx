@@ -8,7 +8,7 @@ import {
 import Icon from "@/components/common/Icon";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { LOGO_URL, ROLES } from "@/lib/brand";
-import { NAV, filterNavByPermission } from "@/lib/navConfig";
+import { NAV, filterNavByPermission, profilePathForRole } from "@/lib/navConfig";
 import { notificationsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -106,7 +106,7 @@ export default function DashboardLayout({ roleKey }) {
   }, []);
 
   const settingsPath = `/${roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`}/settings`;
-  const profilePath = `${location.pathname.split("/").slice(0, 4).join("/")}/profile`;
+  const profilePath = profilePathForRole(roleKey);
 
   const NavList = () => {
     // An item is active when its path matches exactly OR when the current
