@@ -174,6 +174,7 @@ const AppRoutes = () => (
         <Route path="services" element={<ResidentHealthServices />} />
         <Route path="verification" element={<ResidentVerificationStatus />} />
         <Route path="notifications" element={<NotificationsPage roleKey="resident" />} />
+        <Route path="profile" element={<SettingsPage roleKey="resident" />} />
         <Route path="settings" element={<SettingsPage roleKey="resident" />} />
       </Route>
     </Route>
@@ -223,6 +224,7 @@ const AppRoutes = () => (
         <Route path="certificates" element={<MedicalCertificates />} />
         <Route path="reports" element={<MunicipalHealthReports />} />
         <Route path="notifications" element={<NotificationsPage roleKey="mho" />} />
+        <Route path="profile" element={<SettingsPage roleKey="mho" />} />
         <Route path="settings" element={<SettingsPage roleKey="mho" />} />
       </Route>
     </Route>
@@ -252,6 +254,7 @@ const AppRoutes = () => (
         <Route path="account-approvals" element={<StaffAccountApprovals />} />
         <Route path="reports" element={<ReportsPage roleKey="phn" />} />
         <Route path="notifications" element={<NotificationsPage roleKey="phn" />} />
+        <Route path="profile" element={<SettingsPage roleKey="phn" />} />
         <Route path="settings" element={<SettingsPage roleKey="phn" />} />
       </Route>
     </Route>
@@ -289,6 +292,7 @@ const AppRoutes = () => (
         <Route path="barangays" element={<CommunityMonitoring />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="notifications" element={<NotificationsPage roleKey="health_supervisor" />} />
+        <Route path="profile" element={<SettingsPage roleKey="health_supervisor" />} />
         <Route path="settings" element={<SettingsPage roleKey="health_supervisor" />} />
       </Route>
     </Route>
@@ -310,6 +314,7 @@ const AppRoutes = () => (
         <Route path="programs" element={<Programs />} />
         <Route path="reports" element={<IncomingReportsPage />} />
         <Route path="notifications" element={<NotificationsPage roleKey="rhu_personnel" />} />
+        <Route path="profile" element={<SettingsPage roleKey="rhu_personnel" />} />
         <Route path="settings" element={<SettingsPage roleKey="rhu_personnel" />} />
         {/* Barangays/Reports/Analytics are no longer part of the RHU Personnel
             role; any removed or unknown RHU sub-path falls back to the role
@@ -330,6 +335,7 @@ const AppRoutes = () => (
         <Route path="households/risk-clusters" element={<Navigate to="/app/bhw/households" replace />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />
         <Route path="notifications" element={<NotificationsPage roleKey="bhw" />} />
+        <Route path="profile" element={<SettingsPage roleKey="bhw" />} />
         <Route path="settings" element={<SettingsPage roleKey="bhw" />} />
       </Route>
     </Route>
@@ -345,6 +351,7 @@ const AppRoutes = () => (
         {/* Privilege & permission management (admin only). */}
         <Route path="permissions" element={<RolePermissionsPage />} />
         <Route path="audit" element={<AuditTrail />} />
+        <Route path="profile" element={<SettingsPage roleKey="admin" />} />
         <Route path="settings" element={<SettingsPage roleKey="admin" />} />
         <Route path="logs" element={<SystemManagementPage variant="logs" />} />
         <Route path="notifications" element={<NotificationsPage roleKey="admin" />} />

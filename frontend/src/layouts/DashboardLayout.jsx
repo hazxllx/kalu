@@ -106,7 +106,10 @@ export default function DashboardLayout({ roleKey }) {
   }, []);
 
   const settingsPath = `/${roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`}/settings`;
-  const profilePath = `${location.pathname.split("/").slice(0, 4).join("/")}/profile`;
+  // Build the profile path from the ROLE (like settingsPath), not from the
+  // current location — otherwise the active subpage (e.g. /dashboard) is kept
+  // and the link resolves to a non-existent /app/<role>/<subpage>/profile (404).
+  const profilePath = `/${roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`}/profile`;
 
   const NavList = () => {
     // An item is active when its path matches exactly OR when the current
