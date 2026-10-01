@@ -51,6 +51,7 @@ export const NAV = {
   // PHN entry point is removed.
   phn: [
     { label: "Dashboard", icon: "LayoutDashboard", path: "/app/phn/dashboard", group: "Overview" },
+    { label: "Resident Directory", icon: "Users", path: "/app/phn/residents", group: "Patient & Community Care" },
     { label: "Health Records", icon: "FileHeart", path: "/app/phn/record", group: "Patient & Community Care" },
     { label: "PHN Check-ups", icon: "ClipboardList", path: "/app/phn/consultations", permission: "consultation.requests.view", group: "Patient & Community Care" },
     { label: "Health Services", icon: "Stethoscope", path: "/app/phn/services", group: "Patient & Community Care" },

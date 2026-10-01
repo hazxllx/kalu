@@ -233,6 +233,10 @@ const AppRoutes = () => (
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<PHNDashboard />} />
         <Route path="transfer-requests" element={<TransferRequests />} />
+        {/* PHN resident registration (Add Resident). The API already authorizes
+            the PHN for POST/GET /residents; this exposes that existing
+            capability in the UI (requirement: BHS/PHN Add Resident). */}
+        <Route path="residents" element={<ResidentsPage />} />
         <Route path="record" element={<PhnHealthRecords />} />
         <Route path="households/risk-overview" element={<HouseholdRiskOverview />} />
         <Route path="households/:id" element={<HouseholdRiskDetail />} />

@@ -180,7 +180,54 @@ async function listHouseholdMembersFor(supabase, householdId) {
     .eq('household_id', householdId)
     .order('created_at', { ascending: true });
   throwOnError(error, 'Could not load household members');
-  return (data || []).map(memberFromRow);
+  const members = (data || []).map(memberFromRow);
+
+  // Attach the linked resident's login-account status (read-only, additive) so
+  // the household roster can show Active / Pending Activation / No Account. A
+  // member is "No Account" unless its linked resident has an auth user whose
+  // profile is usable. This never changes membership data or any write path.
+  const residentIds = [...new Set(members.map((m) => m.residentId).filter(Boolean))];
+  if (residentIds.length) {
+    const { data: residentRows, error: resErr } = await supabase
+      .from(TABLES.residents)
+      .select('id, auth_user_id')
+      .in('id', residentIds);
+    throwOnError(resErr, 'Could not load member account status');
+
+    const authByResident = new Map();
+    const authUserIds = [];
+    for (const row of residentRows || []) {
+      if (row.auth_user_id) {
+        authByResident.set(row.id, row.auth_user_id);
+        authUserIds.push(row.auth_user_id);
+      }
+    }
+
+    const statusByAuthUser = new Map();
+    if (authUserIds.length) {
+      const { data: profileRows, error: profErr } = await supabase
+        .from(TABLES.profiles)
+        .select('id, status')
+        .in('id', authUserIds);
+      throwOnError(profErr, 'Could not load member account status');
+      for (const row of profileRows || []) statusByAuthUser.set(row.id, row.status);
+    }
+
+    for (const member of members) {
+      const authUserId = member.residentId ? authByResident.get(member.residentId) : null;
+      if (!authUserId) {
+        member.accountStatus = 'none';
+      } else {
+        const status = statusByAuthUser.get(authUserId);
+        member.accountStatus =
+          status === 'active' ? 'active' : status === 'disabled' ? 'disabled' : 'pending';
+      }
+    }
+  } else {
+    for (const member of members) member.accountStatus = 'none';
+  }
+
+  return members;
 }
 
 // ---------------------------------------------------------------------------
@@ -915,6 +962,26 @@ export const supabaseRepository = {
       .maybeSingle();
     throwOnError(error, 'Could not update the resident account status');
     return data || null;
+  },
+
+  /**
+   * Map of auth-user-id -> profiles.status for the given ids. Read-only helper
+   * used to surface a resident's login-account status (Active / Pending
+   * Activation / Disabled) alongside the resident record, without changing any
+   * write path. Ids with no profile row are simply absent from the map.
+   */
+  async getProfileStatusesByIds(ids = []) {
+    const unique = [...new Set((ids || []).filter(Boolean))];
+    if (!unique.length) return {};
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from(TABLES.profiles)
+      .select('id, status')
+      .in('id', unique);
+    throwOnError(error, 'Could not load account statuses');
+    const map = {};
+    for (const row of data || []) map[row.id] = row.status;
+    return map;
   },
 
   // ----- account administration (Admin User Management) --------------------

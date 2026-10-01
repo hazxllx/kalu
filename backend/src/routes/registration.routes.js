@@ -35,4 +35,14 @@ router.post(
   asyncHandler(registrationController.registerResident),
 );
 
+// Resident self-service account activation (after accepting an invitation link
+// and setting a password). Authenticated; the resident is derived from the
+// session. Safe no-op unless the resident record is Verified.
+router.post(
+  '/activate',
+  authenticate,
+  authorize(FEATURE_ROLES.residentSelf),
+  asyncHandler(registrationController.activateAccount),
+);
+
 export default router;

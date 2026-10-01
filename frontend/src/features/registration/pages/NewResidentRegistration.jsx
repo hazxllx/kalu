@@ -105,6 +105,13 @@ export default function NewResidentRegistration() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [possibleExisting, setPossibleExisting] = useState(false);
+  // "Already registered by a BHW / Health Personnel?" claim flow. When enabled,
+  // the resident may supply the Resident ID of the profile a health worker
+  // created for them so the new account links to that EXISTING profile instead
+  // of creating a duplicate. Blank is allowed — the server then matches on the
+  // submitted name + date of birth.
+  const [claimMode, setClaimMode] = useState(false);
+  const [claimResidentId, setClaimResidentId] = useState("");
   const [barangayQuery, setBarangayQuery] = useState("");
   const [barangayOpen, setBarangayOpen] = useState(false);
   // Live barangay list from the backend (public.barangays for Pili). Falls back
@@ -515,6 +522,9 @@ export default function NewResidentRegistration() {
           cellphoneNo: form.mobile.trim(),
           barangay: form.barangay,
           zone: form.zone ? Number(form.zone) : undefined,
+          // Optional claim reference: link this account to an existing profile a
+          // health worker already created, instead of creating a duplicate.
+          ...(claimMode && claimResidentId.trim() ? { residentId: claimResidentId.trim() } : {}),
           // Identity metadata so the Health Supervisor can see the selected ID
           // type and the submitted identity documents. The individual files are
           // uploaded separately to the documents API below.
@@ -664,6 +674,42 @@ export default function NewResidentRegistration() {
             {/* STEP 1: Personal Information */}
             {step === 1 && (
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={claimMode}
+                      onChange={(e) => setClaimMode(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-brand-blue"
+                    />
+                    <span className="text-[13px] leading-relaxed text-slate-700">
+                      <span className="font-semibold text-brand-ink">
+                        Already registered by a Barangay Health Worker or Health Personnel?
+                      </span>
+                      <br />
+                      Tick this if a health worker already created your record. We will link this account to your
+                      existing profile instead of creating a new one.
+                    </span>
+                  </label>
+                  {claimMode && (
+                    <div className="mt-3">
+                      <Field label="Resident ID" optional error={errors.residentId}>
+                        <input
+                          type="text"
+                          placeholder="e.g. RES-000123"
+                          value={claimResidentId}
+                          onChange={(e) => setClaimResidentId(e.target.value)}
+                          className={inputCls(errors.residentId)}
+                        />
+                      </Field>
+                      <p className="mt-1 text-[11.5px] text-slate-500">
+                        Enter the Resident ID from your record for an exact match. If you don&apos;t have it, continue —
+                        we&apos;ll match your record using your name and date of birth. Your identity is confirmed before
+                        linking, so your existing health records stay with the same Resident ID.
+                      </p>
+                    </div>
+                  )}
+                </div>
                 <Field label="First Name" required error={errors.firstName}>
                   <input type="text" placeholder="Juan" value={form.firstName} onChange={set("firstName")} className={inputCls(errors.firstName)} />
                 </Field>

@@ -108,6 +108,9 @@ export const normalizeMembers = (members) => {
     if (age !== null && (!Number.isFinite(age) || age < 0 || age > 120)) {
       errors.push(`Member ${i + 1}: age must be between 0 and 120.`);
     }
+    const residentId = m.residentId === undefined || m.residentId === null || m.residentId === ''
+      ? null
+      : String(m.residentId).trim();
     return {
       name,
       birthday: text(m.birthday),
@@ -121,6 +124,7 @@ export const normalizeMembers = (members) => {
       fpMethod: text(m.fpMethod),
       quarterStatus: text(m.quarterStatus),
       isHead: text(m.relationship) === 'Head' || Boolean(m.isHead),
+      ...(residentId ? { residentId } : {}),
     };
   });
   return { members: normalized, errors };

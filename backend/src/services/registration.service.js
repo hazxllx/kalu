@@ -25,6 +25,23 @@ const toResidentResult = (resident) => ({
   verificationStatus: resident.verificationStatus || 'pending',
 });
 
+/**
+ * When a self-service account links to an existing resident profile that is
+ * already Verified, the resident has proven ownership (email OTP + their own
+ * chosen password) of a record an authorized health worker already verified,
+ * so the login account becomes Active. This NEVER changes the resident's
+ * verification_status — Account Status and Verification Status stay separate.
+ */
+const activateIfVerified = async (resident, authUserId) => {
+  if (authUserId && resident?.verificationStatus === 'approved' && repository.setProfileStatus) {
+    try {
+      await repository.setProfileStatus(authUserId, 'active');
+    } catch {
+      /* best-effort: account activation is recoverable via the verification queue */
+    }
+  }
+};
+
 const validate = (payload) => {
   const errors = [];
   const firstName = text(payload.firstName);
@@ -80,18 +97,144 @@ export const registerResident = async ({ user, payload = {} }) => {
 
   const fields = validate(payload);
 
+  // ---------------------------------------------------------------------------
+  // Explicit "already registered by a BHW / Health Personnel" claim path.
+  // The resident supplies the Resident ID of the profile a health worker
+  // created for them. We link the authenticated account to that EXISTING
+  // profile instead of creating a second one. Identity is confirmed by Resident
+  // ID + date of birth (never name alone, per the duplicate-prevention rule).
+  // ---------------------------------------------------------------------------
+  const claimResidentId = text(payload.residentId);
+  if (claimResidentId) {
+    const target = repository.getResident ? await repository.getResident(claimResidentId) : null;
+    if (!target) {
+      throw ApiError.unprocessable(
+        'We could not find a resident record for that Resident ID. Please check the ID, or continue without it and we will match your details.',
+      );
+    }
+    if (target.authUserId && target.authUserId !== user.id) {
+      throw ApiError.conflict('This resident already has an account.');
+    }
+    if (target.authUserId === user.id) {
+      return toResidentResult(target);
+    }
+    const dobMatches = text(target.birthDate) !== '' && text(target.birthDate) === text(fields.birthDate);
+    if (!dobMatches) {
+      throw ApiError.unprocessable(
+        'The information provided does not match that resident record. Please verify your date of birth.',
+      );
+    }
+    const linked = repository.updateResident
+      ? await repository.updateResident(target.id, {
+        authUserId: user.id,
+        updatedAt: new Date().toISOString(),
+      })
+      : { ...target, authUserId: user.id };
+    const result = linked || { ...target, authUserId: user.id };
+    await activateIfVerified(result, user.id);
+    try {
+      await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
+    } catch {
+      /* best-effort: do not block linking if confirmation fails */
+    }
+    return toResidentResult(result);
+  }
+
   const barangayRow = await repository.findBarangayByName(fields.barangay, user.municipalityId || null);
   if (!barangayRow) {
     throw ApiError.unprocessable(`Unknown barangay: ${fields.barangay}. Please select a valid barangay.`);
   }
 
-  const duplicate = fields.identityNo
-    ? await repository.findResidentByIdentity({ identityNo: fields.identityNo })
-    : null;
+  // Find an existing profile to link to, so a resident who was already
+  // registered by a BHW / Health Personnel is NEVER duplicated. We try the
+  // strongest signal first and fall back to weaker (but DOB-anchored) ones:
+  //   1. identity number (when the resident supplies a government ID), then
+  //   2. first + last name + date of birth (staff records usually have no
+  //      identity number, so an identity-only lookup would miss them), then
+  //   3. the same without middle name (staff records often omit it).
+  // Name is never used without the date of birth.
+  let duplicate = null;
+  if (fields.identityNo) {
+    duplicate = await repository.findResidentByIdentity({ identityNo: fields.identityNo });
+  }
+  if (!duplicate) {
+    duplicate = await repository.findResidentByIdentity({
+      lastName: fields.lastName,
+      firstName: fields.firstName,
+      middleName: text(payload.middleName),
+      birthDate: fields.birthDate,
+    });
+  }
+  if (!duplicate && text(payload.middleName)) {
+    duplicate = await repository.findResidentByIdentity({
+      lastName: fields.lastName,
+      firstName: fields.firstName,
+      birthDate: fields.birthDate,
+    });
+  }
   if (duplicate) {
-    throw ApiError.conflict(
-      'We found information that may already be associated with an existing KALUSAGAP account. Please sign in or complete the verification process.',
+    if (duplicate.authUserId && duplicate.authUserId !== user.id) {
+      throw ApiError.conflict(
+        'We found information that may already be associated with an existing KALUSAGAP account. Please sign in or complete the verification process.',
+      );
+    }
+    if (duplicate.authUserId === user.id) {
+      return toResidentResult(duplicate);
+    }
+
+    const hasClaimMatch = Boolean(
+      fields.identityNo || duplicate.identityNo || duplicate.birthDate || fields.birthDate,
     );
+    if (!hasClaimMatch) {
+      throw ApiError.conflict(
+        'We found information that may already be associated with an existing KALUSAGAP account. Please sign in or complete the verification process.',
+      );
+    }
+
+    const isValidAuthUserId = typeof user?.id === 'string' && /^[0-9a-fA-F-]{36}$/.test(user.id.trim());
+    if (!isValidAuthUserId) {
+      throw ApiError.conflict(
+        'We found information that may already be associated with an existing KALUSAGAP account. Please sign in or complete the verification process.',
+      );
+    }
+
+    // Link the SPECIFIC unlinked record we matched. The atomic claim RPC is
+    // used only when the match was by identity number (it re-checks identity +
+    // DOB and that auth_user_id is still null). Otherwise — the common case
+    // where a staff-created profile has no identity number — we link the found
+    // record directly by its id so we never create a duplicate.
+    const matchedByIdentity = Boolean(
+      fields.identityNo &&
+        duplicate.identityNo &&
+        String(fields.identityNo).trim() === String(duplicate.identityNo).trim(),
+    );
+
+    let claimed = null;
+    if (matchedByIdentity && repository.claimResidentForAccount) {
+      claimed = await repository.claimResidentForAccount({
+        authUserId: user.id,
+        identityNo: fields.identityNo,
+        birthDate: fields.birthDate || duplicate.birthDate || null,
+      });
+    }
+
+    if (!claimed) {
+      claimed = repository.updateResident
+        ? await repository.updateResident(duplicate.id, {
+          authUserId: user.id,
+          updatedAt: new Date().toISOString(),
+        })
+        : { ...duplicate, authUserId: user.id };
+    }
+
+    const linkedResident = claimed || { ...duplicate, authUserId: user.id };
+    await activateIfVerified(linkedResident, user.id);
+    try {
+      await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
+    } catch {
+      /* best-effort: do not block linking if confirmation fails */
+    }
+    return toResidentResult(linkedResident);
   }
 
   const ids = await repository.nextResidentIds();
@@ -139,4 +282,26 @@ export const registerResident = async ({ user, payload = {} }) => {
   return toResidentResult(resident);
 };
 
-export default { registerResident };
+/**
+ * Self-service account activation, called after a resident accepts their
+ * invitation link and sets a password on /reset-password. If the resident's
+ * profile is already Verified (a BHS/PHN registered them in person), the login
+ * account is switched from Pending Activation to Active. This NEVER changes the
+ * verification status, and is a safe no-op for any account whose resident
+ * record is not approved (e.g. a self-registered resident still pending review).
+ */
+export const activateOwnAccount = async ({ user } = {}) => {
+  if (!SELF_ROLES.includes(user?.role)) {
+    throw ApiError.forbidden('Only a resident account may activate itself.');
+  }
+  const resident = repository.getResidentByAuthUserId
+    ? await repository.getResidentByAuthUserId(user.id)
+    : null;
+  if (resident && resident.verificationStatus === 'approved' && repository.setProfileStatus) {
+    await repository.setProfileStatus(user.id, 'active');
+    return { activated: true };
+  }
+  return { activated: false };
+};
+
+export default { registerResident, activateOwnAccount };

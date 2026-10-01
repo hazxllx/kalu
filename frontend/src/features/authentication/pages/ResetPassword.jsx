@@ -12,6 +12,7 @@ import {
   btnPrimary,
 } from "@/features/registration/components/RegistrationDesign";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { registrationApi } from "@/services/api";
 import { validatePassword } from "@/utils/validation";
 
 /**
@@ -141,6 +142,15 @@ export default function ResetPassword() {
         return;
       }
       setStatus("done");
+      // If this was a resident accepting an invitation link, activate the
+      // account now that they have set their own password. The server only
+      // activates a Verified resident whose account is still Pending Activation,
+      // so this is a harmless no-op for an ordinary password reset.
+      try {
+        await registrationApi.activate();
+      } catch {
+        /* best-effort: activation is also recoverable via the verification flow */
+      }
       // Clear the recovery session so the user is not left signed in via the
       // recovery link; they must log in again with their new password.
       await supabase.auth.signOut();

@@ -14,6 +14,8 @@
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
+import { getServiceClient } from '../config/supabase.js';
+import env from '../config/env.js';
 import { isPhonePH } from '../validators/common.js';
 import { computeBMI } from '../utils/bmi.js';
 import { riskFromVitals } from './analytics.service.js';
@@ -21,6 +23,94 @@ import { riskFromVitals } from './analytics.service.js';
 const SELF_ROLES = ['resident', 'resident-limited'];
 
 const clean = (value) => String(value ?? '').trim();
+
+const RESIDENT_ACCOUNT_PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+
+export const generateTemporaryPassword = (length = 16) => {
+  const size = Math.max(12, Number(length) || 16);
+  const required = ['A', 'a', '1', '!'];
+  const chars = RESIDENT_ACCOUNT_PASSWORD_CHARS.split('');
+  const picks = Array.from({ length: size }, () => chars[Math.floor(Math.random() * chars.length)]);
+  for (let i = 0; i < required.length; i += 1) {
+    picks[i % picks.length] = required[i];
+  }
+  for (let i = picks.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [picks[i], picks[j]] = [picks[j], picks[i]];
+  }
+  return picks.join('').slice(0, size);
+};
+
+export const buildResidentAccountCreation = ({ email, fullName, password = generateTemporaryPassword() } = {}) => {
+  const normalizedEmail = String(email ?? '').trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw ApiError.badRequest('A valid email is required before a resident login account can be created.');
+  }
+  return {
+    email: normalizedEmail,
+    password: String(password || generateTemporaryPassword()),
+    user_metadata: {
+      full_name: String(fullName || '').trim() || normalizedEmail.split('@')[0],
+      requested_role: 'resident',
+    },
+    profile_status: 'pending_verification',
+  };
+};
+
+export const createResidentAuthUser = async ({ email, fullName, password } = {}) => {
+  const account = buildResidentAccountCreation({ email, fullName, password });
+  const supabase = getServiceClient();
+  const baseUrl = (Array.isArray(env.clientUrls) && env.clientUrls[0]) || 'http://localhost:5173';
+  const redirectTo = `${baseUrl.replace(/\/+$/, '')}/reset-password`;
+
+  // Invitation flow: create the auth user WITHOUT a password and email them a
+  // one-time invitation link. The resident clicks it, lands on /reset-password
+  // (the AuthContext treats that route as a recovery-style flow and does not
+  // hijack the session), sets their OWN password, and the account is activated.
+  // Health personnel never see, set, or manage the resident's password.
+  const { data, error } = await supabase.auth.admin.inviteUserByEmail(account.email, {
+    data: account.user_metadata,
+    redirectTo,
+  });
+
+  if (error) {
+    if (/already been registered|already exists|already registered/i.test(error.message || '')) {
+      throw ApiError.conflict('A resident account for that email already exists.');
+    }
+    throw ApiError(500, 'The resident invitation could not be sent. Please check the email and try again.');
+  }
+
+  const authUserId = data?.user?.id;
+  if (!authUserId) {
+    throw ApiError(503, 'The resident account could not be created. Please try again.');
+  }
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update({
+      email: account.email,
+      full_name: account.user_metadata.full_name,
+      role: 'resident',
+      status: account.profile_status,
+    })
+    .eq('id', authUserId);
+
+  if (profileError) {
+    try {
+      await supabase.auth.admin.deleteUser(authUserId);
+    } catch {
+      // best effort: leave the orphaned auth record for admin review
+    }
+    throw ApiError(500, 'The resident account was created but could not be set up. Please try again.');
+  }
+
+  return {
+    authUserId,
+    email: account.email,
+    invited: true,
+    profileStatus: account.profile_status,
+  };
+};
 
 /**
  * Map a stored visit to the BASIC, resident-safe view for "My Health Record".
@@ -192,6 +282,30 @@ const parsePositiveInt = (value, fallback) => {
 };
 
 /**
+ * Login-account status for a resident, derived from the linked auth user's
+ * `profiles.status`. 'none' when the resident has no linked account. This is a
+ * read-only projection — it NEVER changes the resident's verification_status,
+ * keeping Account Status and Verification Status separate.
+ */
+const deriveAccountStatus = (authUserId, statusMap = {}) => {
+  if (!authUserId) return 'none';
+  const status = statusMap[authUserId];
+  if (status === 'active') return 'active';
+  if (status === 'disabled') return 'disabled';
+  return 'pending';
+};
+
+const attachAccountStatus = async (residents = []) => {
+  const list = Array.isArray(residents) ? residents : [];
+  const authIds = list.map((r) => r?.authUserId).filter(Boolean);
+  const statusMap = authIds.length ? await repository.getProfileStatusesByIds(authIds) : {};
+  for (const resident of list) {
+    if (resident) resident.accountStatus = deriveAccountStatus(resident.authUserId, statusMap);
+  }
+  return residents;
+};
+
+/**
  * Scope-aware directory listing for authorized staff.
  *
  *   - A barangay-scoped caller (Health Supervisor) only ever sees their own
@@ -215,13 +329,15 @@ export const listResidents = async ({ user, q = '', barangay = '', limit = 50, o
   const municipalityId = user?.municipalityId || null;
 
   if (!verifiedOnly) {
-    return repository.listResidents({
+    const result = await repository.listResidents({
       q: search,
       limit: parsedLimit,
       offset: parsedOffset,
       barangay: effectiveBarangay,
       municipalityId,
     });
+    await attachAccountStatus(result.rows);
+    return result;
   }
 
   // Verified directory: a resident qualifies when EITHER their individual
@@ -259,6 +375,7 @@ export const listResidents = async ({ user, q = '', barangay = '', limit = 50, o
   const rows = [...byId.values()]
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, parsedLimit);
+  await attachAccountStatus(rows);
   return { rows, total: byId.size };
 };
 
@@ -317,8 +434,69 @@ export const createResident = async ({ user, payload = {} }) => {
   }
 
   const ids = await repository.nextResidentIds();
+  const shouldCreateLoginAccount = Boolean(
+    payload.createLoginAccount ||
+      payload.createResidentLoginAccount ||
+      payload.createAccount ||
+      payload.createResidentAccount,
+  );
+
+  if (shouldCreateLoginAccount) {
+    const residentEmail = text(payload.email);
+    if (!residentEmail) {
+      throw ApiError.unprocessable('An email is required when creating a resident login account.');
+    }
+
+    const account = await createResidentAuthUser({
+      email: residentEmail,
+      fullName: [firstName, middleName, lastName, suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(),
+      password: payload.password || undefined,
+    });
+
+    const resident = await repository.insertResident({
+      ...ids,
+      authUserId: account.authUserId,
+      // An authorized health worker registering a resident in person IS the
+      // verification, so the resident record is Verified on creation. This is
+      // independent of the login-account state below (which is Pending
+      // Activation until the resident claims it) — the two statuses never merge.
+      verificationStatus: 'approved',
+      verifiedBy: user?.id || null,
+      verifiedAt: new Date().toISOString(),
+      firstName,
+      middleName,
+      lastName,
+      suffix,
+      birthDate,
+      birthPlace: text(payload.birthPlace),
+      sex,
+      civilStatus: text(payload.civilStatus),
+      religion: text(payload.religion),
+      employmentStatus: text(payload.employmentStatus),
+      fatherName: text(payload.fatherName),
+      motherName: text(payload.motherName),
+      is4PsMember: Boolean(payload.is4PsMember),
+      philhealthNo: text(payload.philhealthNo),
+      currentAddress: text(payload.currentAddress),
+      permanentAddress: text(payload.permanentAddress),
+      cellphoneNo: text(payload.cellphoneNo),
+      identityNo: text(payload.identityNo),
+      barangay: barangayRow.name,
+      createdById: user?.id || '',
+      createdByRole: user?.role || '',
+    });
+
+    return { ...resident, authUserId: account.authUserId, accountInvited: true };
+  }
+
   return repository.insertResident({
     ...ids,
+    // Verified on creation — the staff registration in person is the
+    // verification. No login account is created on this path (Account: No
+    // Account); the resident may create/claim one later.
+    verificationStatus: 'approved',
+    verifiedBy: user?.id || null,
+    verifiedAt: new Date().toISOString(),
     firstName,
     middleName,
     lastName,
@@ -362,6 +540,7 @@ export const getResident = async ({ id, user }) => {
   const resident = await repository.getResident(id);
   if (!resident) throw ApiError.notFound('Resident record not found');
   assertWithinScope(user, resident);
+  await attachAccountStatus([resident]);
   return resident;
 };
 
