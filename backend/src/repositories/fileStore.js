@@ -30,6 +30,9 @@ const emptyData = () => ({
   residentVerificationLogs: [],
   transferRequests: [],
   transferRequestAuditLogs: [],
+  riskCriteria: [],
+  riskSettings: null,
+  healthAuditLogs: [],
 });
 
 class FileStore {
@@ -55,6 +58,9 @@ class FileStore {
     if (!Array.isArray(this.data.residentVerificationLogs)) this.data.residentVerificationLogs = [];
     if (!Array.isArray(this.data.transferRequests)) this.data.transferRequests = [];
     if (!Array.isArray(this.data.transferRequestAuditLogs)) this.data.transferRequestAuditLogs = [];
+    if (!Array.isArray(this.data.riskCriteria)) this.data.riskCriteria = [];
+    if (this.data.riskSettings === undefined) this.data.riskSettings = null;
+    if (!Array.isArray(this.data.healthAuditLogs)) this.data.healthAuditLogs = [];
   }
 
   /**
@@ -121,6 +127,21 @@ class FileStore {
   get transferRequestAuditLogs() {
     this.ensureLoaded();
     return this.data.transferRequestAuditLogs;
+  }
+
+  get riskCriteria() {
+    this.ensureLoaded();
+    return this.data.riskCriteria;
+  }
+
+  get riskSettings() {
+    this.ensureLoaded();
+    return this.data.riskSettings;
+  }
+
+  get healthAuditLogs() {
+    this.ensureLoaded();
+    return this.data.healthAuditLogs;
   }
 }
 

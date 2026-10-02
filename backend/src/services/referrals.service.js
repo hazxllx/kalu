@@ -48,7 +48,7 @@ const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
  * edit. One constant keeps the payload identical on every path.
  */
 const RESIDENT_EMBED =
-  'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, auth_user_id, municipality_id)';
+  'resident:residents(id, first_name, middle_name, last_name, barangay, barangay_id, sex, birth_date, auth_user_id, municipality_id)';
 const REFERRAL_SELECT = `*, ${RESIDENT_EMBED}`;
 
 const text = (v) => String(v ?? '').trim();
@@ -206,6 +206,9 @@ const sanitizeWrite = (payload = {}) => {
   if (payload.referral_date !== undefined) row.referral_date = payload.referral_date || null;
   if (payload.notes !== undefined) row.notes = text(payload.notes);
   if (payload.resolution_notes !== undefined) row.resolution_notes = text(payload.resolution_notes);
+  if (payload.laboratory_test_required !== undefined) row.laboratory_test_required = Boolean(payload.laboratory_test_required);
+  if (payload.laboratory_test !== undefined) row.laboratory_test = text(payload.laboratory_test);
+  if (payload.additional_instructions !== undefined) row.additional_instructions = text(payload.additional_instructions);
   return row;
 };
 
@@ -216,6 +219,9 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   const row = sanitizeWrite(payload);
   if (!row.reason) throw ApiError.unprocessable('Referral reason is required.');
   if (!row.destination_facility) throw ApiError.unprocessable('Destination facility is required.');
+  if (row.laboratory_test_required && !row.laboratory_test) {
+    throw ApiError.unprocessable('Laboratory test details are required when laboratory test is marked as required.');
+  }
   if (payload.status !== undefined) {
     if (!VALID_STATUSES.includes(payload.status)) throw ApiError.unprocessable('Invalid referral status.');
     row.status = payload.status;

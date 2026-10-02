@@ -404,7 +404,7 @@ export default function HealthTrends() {
   const summaryCards = [
     { ...SUMMARY_ICONS[0], label: "Consultations This Month", value: sm.consultationsThisMonth ?? 0, sub: "recorded this month" },
     { ...SUMMARY_ICONS[1], label: "Referrals This Month", value: sm.referralsThisMonth ?? 0, sub: "created this month" },
-    { ...SUMMARY_ICONS[2], label: "Top Condition", value: (sm.topConditionCases ?? 0) > 0 ? sm.topCondition : "—", sub: (sm.topConditionCases ?? 0) > 0 ? `${sm.topConditionCases} case${sm.topConditionCases === 1 ? "" : "s"}` : "No data yet" },
+    { ...SUMMARY_ICONS[2], label: "Top Condition", value: sm.topCondition || "No recorded condition", sub: `${sm.topConditionCases ?? 0} case${(sm.topConditionCases ?? 0) === 1 ? "" : "s"}` },
     { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: sm.highRiskResidents ?? 0, sub: "from recorded vitals" },
   ];
 

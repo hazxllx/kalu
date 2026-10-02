@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { Search, ClipboardList, Stethoscope, CalendarClock, AlertTriangle, Loader2 } from "lucide-react";
+import { Search, ClipboardList, Stethoscope, CalendarClock, AlertTriangle, Loader2, User, Building2 } from "lucide-react";
 import { consultationsApi } from "@/services/api";
 
 /**
@@ -56,7 +56,7 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
 
   return (
     <>
-      <PageHeader crumbs={["Consultations"]} title="Consultation History" subtitle="View completed consultations recorded for residents in your barangay." />
+      <PageHeader crumbs={["Consultations"]} title="Consultation History" subtitle={showResidentSearch ? "View completed consultations recorded for residents in your barangay." : "View your completed consultations."} />
 
       <div className="grid lg:grid-cols-3 gap-5">
         {showResidentSearch && (
@@ -117,6 +117,11 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
                   <div className="mt-3 grid sm:grid-cols-2 gap-3 text-sm text-brand-gray">
                     <p className="flex items-center gap-2"><CalendarClock className="w-4 h-4 text-brand-blue" /> Reason: {item.chiefComplaint || "—"}</p>
                     <p className="flex items-center gap-2"><ClipboardList className="w-4 h-4 text-brand-blue" /> Diagnosis: {item.diagnosis || "—"}</p>
+                    <p className="flex items-center gap-2"><Building2 className="w-4 h-4 text-brand-blue" /> RHU Station: {item.facilityName || item.resident?.barangay || "—"}</p>
+                    <p className="flex items-center gap-2"><User className="w-4 h-4 text-brand-blue" /> Assigned RHU Personnel: {item.attendingPersonnel?.fullName || "—"}</p>
+                    {item.resident?.barangay ? (
+                      <p className="flex items-center gap-2"><Building2 className="w-4 h-4 text-brand-blue" /> Barangay: {item.resident.barangay}</p>
+                    ) : null}
                   </div>
                 </div>
               ))}

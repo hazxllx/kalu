@@ -19,6 +19,8 @@ import env from '../config/env.js';
 import { isPhonePH } from '../validators/common.js';
 import { computeBMI } from '../utils/bmi.js';
 import { riskFromVitals } from './analytics.service.js';
+import { attachRiskToResidents, assessResidentById } from './residentRisk.service.js';
+import { getRiskConfig } from './riskConfig.service.js';
 
 const SELF_ROLES = ['resident', 'resident-limited'];
 
@@ -200,7 +202,8 @@ export const getOwnHealthRecords = async ({ user } = {}) => {
     .slice()
     .sort((a, b) => String(b.visitDate || '').localeCompare(String(a.visitDate || '')))[0] || null;
   const hasVitals = latestVisit?.vitals && (latestVisit.vitals.bp || latestVisit.vitals.o2sat);
-  const riskLevel = hasVitals ? riskFromVitals(latestVisit.vitals) : null;
+  const riskConfig = await getRiskConfig({ repo: repository });
+  const riskLevel = hasVitals ? riskFromVitals(latestVisit.vitals, riskConfig) : null;
   const lastConsultationDate = consultations[0]?.date || '';
 
   return {
@@ -329,15 +332,18 @@ export const listResidents = async ({ user, q = '', barangay = '', limit = 50, o
   const municipalityId = user?.municipalityId || null;
 
   if (!verifiedOnly) {
-    const result = await repository.listResidents({
+    const base = await repository.listResidents({
       q: search,
       limit: parsedLimit,
       offset: parsedOffset,
       barangay: effectiveBarangay,
       municipalityId,
     });
-    await attachAccountStatus(result.rows);
-    return result;
+    // Enrich with both account-linking status (V6) and the computed risk
+    // assessment (V7). attachAccountStatus mutates rows in place, then
+    // attachRiskToResidents spreads each row so accountStatus is preserved.
+    await attachAccountStatus(base.rows);
+    return { ...base, rows: await attachRiskToResidents(base.rows) };
   }
 
   // Verified directory: a resident qualifies when EITHER their individual
@@ -376,7 +382,7 @@ export const listResidents = async ({ user, q = '', barangay = '', limit = 50, o
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, parsedLimit);
   await attachAccountStatus(rows);
-  return { rows, total: byId.size };
+  return { rows: await attachRiskToResidents(rows), total: byId.size };
 };
 
 /**
@@ -540,8 +546,13 @@ export const getResident = async ({ id, user }) => {
   const resident = await repository.getResident(id);
   if (!resident) throw ApiError.notFound('Resident record not found');
   assertWithinScope(user, resident);
+  // Account-linking status (V6) plus the authoritative, freshly-computed risk
+  // assessment (V7) for the Resident Detail view. attachAccountStatus mutates
+  // the row in place; the risk fields are then spread on top. Never trusts any
+  // client-supplied risk value.
   await attachAccountStatus([resident]);
-  return resident;
+  const risk = await assessResidentById({ id: resident.id });
+  return { ...resident, ...risk };
 };
 
 export const updateResident = async ({ id, patch = {}, user }) => {

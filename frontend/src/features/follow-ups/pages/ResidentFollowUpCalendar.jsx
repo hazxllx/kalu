@@ -6,6 +6,7 @@ import { residentFollowUpsApi } from "@/services/api";
 import { DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
 import ScheduleStatusBadge, { ConfirmationBadge, STATUS_DOTS } from "../components/ScheduleStatusBadge";
 import { dayLabel, formatTime, fromKey, groupByDay, monthLabel, toKey, weekLabel } from "../lib/scheduleDates";
+import { followUpDisplayStatus, isCalendarVisibleFollowUp } from "../lib/scheduleDates";
 import {
   Bell, CalendarDays, ChevronLeft, ChevronRight, ShieldAlert, Clock, MapPin, CheckCircle2, Ban, X,
 } from "lucide-react";
@@ -16,8 +17,8 @@ const VIEWS = [
   { key: "day", label: "Day" },
 ];
 
-/** Statuses that still require the resident to attend/prepare. */
-const UPCOMING_STATUSES = ["Scheduled", "Pending"];
+/** Statuses that represent a confirmed appointment on the resident calendar. */
+const UPCOMING_STATUSES = ["Scheduled", "Today"];
 
 /** Resident-safe follow-up (camelCase from the API) → calendar schedule shape. */
 const mapToSchedule = (row) => ({
@@ -28,7 +29,7 @@ const mapToSchedule = (row) => ({
   provider: row.assignedProvider || "",
   instructions: row.instructions || "",
   purpose: row.purpose || "",
-  status: row.status || "Scheduled",
+  status: followUpDisplayStatus(row.status, row.scheduledDate),
   confirmationStatus: row.confirmationStatus || (row.requiresResidentResponse ? "Awaiting Confirmation" : null),
   respondedAt: row.respondedAt || "",
   rejectionReason: row.rejectionReason || "",
@@ -43,7 +44,9 @@ export default function ResidentFollowUpCalendar() {
   const reload = React.useCallback(
     () => residentFollowUpsApi
       .list()
-      .then((result) => setSchedules((result?.rows || []).map(mapToSchedule)))
+      .then((result) => setSchedules((result?.rows || [])
+        .map(mapToSchedule)
+        .filter(isCalendarVisibleFollowUp)))
       .catch(() => setSchedules([]))
       .finally(() => setLoaded(true)),
     []
@@ -115,7 +118,7 @@ function ResidentCalendarContent({ schedules, loaded, reload }) {
 
   const byDay = useMemo(() => groupByDay(schedules), [schedules]);
 
-  /** Upcoming appointments (reminders): Scheduled/Pending from today onward. */
+  /** Upcoming appointments (reminders): confirmed appointments from today onward. */
   const upcoming = useMemo(
     () =>
       schedules

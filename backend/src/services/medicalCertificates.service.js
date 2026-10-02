@@ -12,7 +12,7 @@
  *                 └──────> Rejected          (terminal)
  *   any non-Issued ──> Cancelled           (terminal)
  *
- *   - RHU Personnel / PHN / MHO prepare a certificate and submit it for review.
+ *   - PHN / MHO prepare a certificate and submit it for review.
  *   - Only the PHN or the MHO may approve / issue / reject; the role is checked
  *     here, in the route's `authorize(FEATURE_ROLES.certificateReview)`, and in
  *     public.can_review_medical_certificates().
@@ -65,9 +65,9 @@ export const CERT_PURPOSES = Object.freeze([
   'Travel / Camping Clearance',
 ]);
 
-const PREPARE_ROLES = new Set([ROLES.RHU_PERSONNEL, ROLES.PHN, ROLES.MHO]);
+const PREPARE_ROLES = new Set([ROLES.PHN, ROLES.MHO]);
 const REVIEW_ROLES = new Set([ROLES.PHN, ROLES.MHO]);
-const MUNICIPALITY_ROLES = new Set([ROLES.MHO, ROLES.PHN, ROLES.RHU_PERSONNEL]);
+const MUNICIPALITY_ROLES = new Set([ROLES.MHO, ROLES.PHN]);
 const BARANGAY_ROLES = new Set([ROLES.HEALTH_SUPERVISOR]);
 const RESIDENT_ROLES = new Set([ROLES.RESIDENT, ROLES.RESIDENT_LIMITED]);
 
@@ -204,7 +204,7 @@ const residentInScope = async (supabase, user, residentId) => {
   throwOnError(error, 'Could not load resident');
   if (!data) throw ApiError.notFound('Resident record not found.');
 
-  if (user.role === ROLES.PHN || user.role === ROLES.MHO || user.role === ROLES.RHU_PERSONNEL) {
+  if (user.role === ROLES.PHN || user.role === ROLES.MHO) {
     if (user.municipalityId && data.municipality_id && data.municipality_id !== user.municipalityId) {
       throw ApiError.notFound('Resident record not found.');
     }
@@ -374,8 +374,8 @@ const writableCertificate = async (supabase, user, id) => {
 /** Edit the document fields of a certificate that is not yet issued. */
 export const update = async ({ user, id, payload = {}, supabase = getServiceClient() }) => {
   const existing = await writableCertificate(supabase, user, id);
-  if (existing.status === CERT_STATUS.ISSUED) {
-    throw ApiError.conflict('An issued certificate can no longer be edited.');
+  if (![CERT_STATUS.DRAFT, CERT_STATUS.FOR_REVIEW].includes(existing.status)) {
+    throw ApiError.conflict('Only draft or pending-review certificates can be edited.');
   }
   const row = sanitizeWrite(payload);
   if (Object.prototype.hasOwnProperty.call(payload, 'findings') && !row.findings) {

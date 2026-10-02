@@ -48,6 +48,18 @@ export const annual = async (req, res) =>
     barangayId: req.query.barangayId || null,
   }));
 
+// Reporting-period report (Monthly | Quarterly | Annual) — the single source
+// used by the exported/printed M1 PDF across every period.
+export const report = async (req, res) =>
+  sendData(res, await service.periodReport({
+    user: req.user,
+    period: req.query.period || 'monthly',
+    year: num(req.query.year, now().getFullYear()),
+    month: req.query.month != null ? num(req.query.month) : null,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
+    barangayId: req.query.barangayId || null,
+  }));
+
 export const drilldown = async (req, res) =>
   sendData(res, await service.drilldown({
     user: req.user,
@@ -74,6 +86,28 @@ export const getMeta = async (req, res) =>
     barangayId: req.query.barangayId || null,
   }));
 
+// Manual M1 data entry (aggregate figures with no operational source).
+export const listManual = async (req, res) =>
+  sendData(res, await service.listManualEntries({
+    user: req.user,
+    year: num(req.query.year, now().getFullYear()),
+    month: num(req.query.month, now().getMonth() + 1),
+    barangayId: req.query.barangayId || null,
+  }));
+
+export const saveManual = async (req, res) => {
+  const body = req.body || {};
+  return sendData(res, await service.saveManualEntry({
+    user: req.user,
+    year: num(body.year ?? req.query.year, now().getFullYear()),
+    month: num(body.month ?? req.query.month, now().getMonth() + 1),
+    indicatorCode: body.indicatorCode ?? body.indicator_code,
+    values: Array.isArray(body.values) ? body.values : [],
+    remarks: body.remarks,
+    barangayId: body.barangayId ?? req.query.barangayId ?? null,
+  }));
+};
+
 export const saveMeta = async (req, res) => {
   const body = req.body?.meta || req.body || {};
   return sendData(res, await service.saveReportMeta({
@@ -98,6 +132,7 @@ export const saveRemarks = async (req, res) => {
 };
 
 export default {
-  catalog, syncCatalog, daily, monthly, annual, drilldown,
+  catalog, syncCatalog, daily, monthly, annual, report, drilldown,
   createRecord, updateRecord, removeRecord, getMeta, saveMeta, saveRemarks,
+  listManual, saveManual,
 };

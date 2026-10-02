@@ -8,7 +8,7 @@ import {
 import Icon from "@/components/common/Icon";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { LOGO_URL, ROLES } from "@/lib/brand";
-import { NAV, filterNavByPermission } from "@/lib/navConfig";
+import { NAV, filterNavByPermission, profilePathForRole } from "@/lib/navConfig";
 import { notificationsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -106,10 +106,10 @@ export default function DashboardLayout({ roleKey }) {
   }, []);
 
   const settingsPath = `/${roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`}/settings`;
-  // Build the profile path from the ROLE (like settingsPath), not from the
-  // current location — otherwise the active subpage (e.g. /dashboard) is kept
-  // and the link resolves to a non-existent /app/<role>/<subpage>/profile (404).
-  const profilePath = `/${roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`}/profile`;
+  // Build the profile path from the ROLE (not the current location) so the link
+  // never resolves to a non-existent /app/<role>/<subpage>/profile (404). V7
+  // centralizes this in the profilePathForRole helper (see navConfig).
+  const profilePath = profilePathForRole(roleKey);
 
   const NavList = () => {
     // An item is active when its path matches exactly OR when the current

@@ -7,9 +7,8 @@ import { api } from './apiClient';
  * `medical_certificates` / `medical_certificate_logs`).
  *
  * Roles (enforced server-side, not by the UI):
- *   RHU Personnel / PHN / MHO -> prepare a certificate and submit it for review
- *   PHN / MHO                 -> approve, issue or reject (the review actions)
- *   BHW / System Admin        -> 403
+ *   PHN / MHO                 -> prepare, review, approve, issue or reject
+ *   RHU Personnel / BHW / System Admin -> 403
  *
  * The status vocabulary, purposes and legal transitions are served by
  * /meta so the register never has to keep its own copy in step with the API.

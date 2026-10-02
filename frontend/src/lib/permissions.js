@@ -811,7 +811,6 @@ const DEFAULT_GRANTS = Object.freeze({
     'followups.view',
     'followups.history.view',
     'services.view',
-    'reports.view',
   ],
 
   // DATA GATHERING ONLY. No consultation, no referral approval, no resident

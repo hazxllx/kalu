@@ -5,11 +5,9 @@ import { Card } from "@/components/common/Card";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
 import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2 } from "lucide-react";
-import { systemUsers } from "@/services/local/dashboardData";
-import { ROLES } from "@/lib/brand";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
-import { followUpsApi, residentsApi } from "@/services/api";
+import { followUpsApi, healthServicesApi, residentsApi } from "@/services/api";
 
 const FOLLOW_UP_TYPES = [
   "General Check-up",
@@ -22,23 +20,6 @@ const FOLLOW_UP_TYPES = [
 ];
 
 const FOLLOW_UP_LOCATIONS = ["Barangay Health Station", "RHU", "Home Visit", "Other"];
-
-const PERSONNEL_OPTIONS = systemUsers
-  .filter((u) => u.status === "Active" && ["Midwife", "Health Supervisor", "BHW"].includes(u.role))
-  .map((u) => u.name);
-
-/** Personnel within a barangay (supervisors oversee only their own barangay's workers). */
-const personnelOptionsFor = (barangay) =>
-  barangay
-    ? systemUsers
-        .filter(
-          (u) =>
-            u.status === "Active" &&
-            ["Midwife", "Health Supervisor", "BHW"].includes(u.role) &&
-            (u.barangay === barangay || u.barangay === "Municipal")
-        )
-        .map((u) => u.name)
-    : PERSONNEL_OPTIONS;
 
 const emptyScheduleForm = (personnel) => ({
   date: new Date().toISOString().slice(0, 10),
@@ -172,6 +153,7 @@ export default function MidwifeFollowUp() {
 
   const [followUps, setFollowUps] = useState([]);
   const [residentsFromApi, setResidentsFromApi] = useState([]);
+  const [personnelFromApi, setPersonnelFromApi] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -196,11 +178,16 @@ export default function MidwifeFollowUp() {
     let active = true;
     setLoading(true);
     setLoadError(null);
-    Promise.all([followUpsApi.list(), residentsApi.list({ limit: 200 })])
-      .then(([followUpResult, residentResult]) => {
+    Promise.all([
+      followUpsApi.list(),
+      residentsApi.list({ limit: 200 }),
+      healthServicesApi.personnel().catch(() => ({ rows: [] })),
+    ])
+      .then(([followUpResult, residentResult, personnelResult]) => {
         if (!active) return;
         setFollowUps((followUpResult?.rows || []).map(mapFollowUpRow));
         setResidentsFromApi(residentResult?.rows || residentResult || []);
+        setPersonnelFromApi(personnelResult?.rows || []);
       })
       .catch((err) => {
         if (!active) return;
@@ -236,14 +223,25 @@ export default function MidwifeFollowUp() {
 
   // Auto-assign the logged-in user where possible — the dashboard shell
   // displays the role's display name, so prefer that for consistency.
-  const currentUserName =
-    (user?.role && ROLES[user.role] && ROLES[user.role].name) || user?.name || "";
-  const basePersonnelOptions = personnelOptionsFor(assignedBarangay);
-  const personnelOptions =
-    currentUserName && !basePersonnelOptions.includes(currentUserName)
-      ? [currentUserName, ...basePersonnelOptions]
-      : basePersonnelOptions;
-  const defaultPersonnel = currentUserName || basePersonnelOptions[0] || "";
+  const currentUserName = user?.name || user?.email || "";
+  const isRhuLocation = scheduleForm.location === "RHU";
+  const isBarangayStation = scheduleForm.location.includes("Barangay Health Station");
+  const assignableRoles = isRhuLocation ? ["rhu_personnel", "phn"] : ["health_supervisor", "phn"];
+  const targetBarangayId = selectedResident?.barangayId || selectedResident?.barangay_id || user?.barangayId;
+  const eligiblePersonnel = personnelFromApi.filter((person) =>
+    assignableRoles.includes(person.role) &&
+    (!isBarangayStation || person.role !== "health_supervisor" || !targetBarangayId || person.barangayId === targetBarangayId) &&
+    (!assignedBarangay || !person.barangayId || person.barangayId === user?.barangayId),
+  );
+  const currentUserCanBeAssigned = assignableRoles.includes(user?.role);
+  const currentUserOption = currentUserCanBeAssigned && currentUserName
+    ? [{ id: user.id, name: currentUserName, role: user.role }]
+    : [];
+  const personnelOptions = [
+    ...currentUserOption,
+    ...eligiblePersonnel.filter((person) => person.id !== user?.id),
+  ];
+  const defaultPersonnel = personnelOptions.find((person) => person.id === user?.id)?.name || personnelOptions[0]?.name || "";
   const residentOptions = useMemo(() => residentsFromApi.map((r) => ({
     ...r,
     name: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
@@ -603,8 +601,8 @@ export default function MidwifeFollowUp() {
                       {f.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
+                  <td className="min-w-[250px] px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="Follow-up actions">
                       <button
                         onClick={() => handleView(f)}
                         className="text-sm font-medium text-brand-blue hover:underline"
@@ -698,7 +696,10 @@ export default function MidwifeFollowUp() {
                     <ResidentSearchSelect
                       residents={residentOptions}
                       value={selectedResident}
-                      onChange={setSelectedResident}
+                        onChange={(resident) => {
+                          setSelectedResident(resident);
+                          setScheduleForm((current) => ({ ...current, personnel: currentUserName }));
+                        }}
                     />
                   </div>
                   {scheduleErrors.resident && (
@@ -806,7 +807,7 @@ export default function MidwifeFollowUp() {
                         <label className="mb-1.5 block text-sm font-medium text-brand-ink">Location</label>
                         <select
                           value={scheduleForm.location}
-                          onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })}
+                          onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value, personnel: defaultPersonnel })}
                           className={`${inputCls()} cursor-pointer`}
                         >
                           {followUpLocationOptions.map((l) => (
@@ -826,8 +827,10 @@ export default function MidwifeFollowUp() {
                           onChange={(e) => setScheduleForm({ ...scheduleForm, personnel: e.target.value })}
                           className={`${inputCls()} cursor-pointer`}
                         >
-                          {personnelOptions.map((p) => (
-                            <option key={p} value={p}>{p}</option>
+                          {personnelOptions.map((person) => (
+                            <option key={person.id} value={person.name}>
+                              {person.name} ({person.role === "rhu_personnel" ? "RHU Personnel" : person.role === "health_supervisor" ? "Health Supervisor" : "PHN"})
+                            </option>
                           ))}
                         </select>
                         <p className="mt-1 text-xs text-brand-gray">Auto-assigned to you — change if needed.</p>
@@ -1088,7 +1091,7 @@ export default function MidwifeFollowUp() {
               </div>
               <p className="text-sm text-brand-gray mb-4">Select new status for {selectedFollowUp.resident}'s follow-up:</p>
               <div className="space-y-2">
-                {["Scheduled", "Ongoing", "Completed", "Missed", "Cancelled"].map((status) => (
+                {["Scheduled", "Ongoing", "Missed", "Cancelled"].map((status) => (
                   <button
                     key={status}
                     onClick={() => handleStatusUpdate(status)}

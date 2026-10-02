@@ -61,6 +61,7 @@ const mapRecord = (row) => ({
     ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
     : row.residentName || "Resident",
   barangay: row.resident?.barangay || "",
+  barangayId: row.resident?.barangay_id || "",
   sex: row.resident?.sex || "",
   age: ageFrom(row.resident?.birth_date),
   referringFacility: row.referring_facility || "",
@@ -73,6 +74,9 @@ const mapRecord = (row) => ({
   notes: row.notes || "",
   resolutionNotes: row.resolution_notes || "",
   completedAt: row.completed_at || "",
+  laboratoryTestRequired: row.laboratory_test_required || false,
+  laboratoryTest: row.laboratory_test || "",
+  additionalInstructions: row.additional_instructions || "",
 });
 
 const inputCls = (error) =>
@@ -88,6 +92,9 @@ const EMPTY_FORM = () => ({
   priority: "High",
   referringFacility: "",
   notes: "",
+  laboratoryTestRequired: false,
+  laboratoryTest: "",
+  additionalInstructions: "",
 });
 
 /**
@@ -118,6 +125,9 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
         priority: initial.priority || "High",
         referringFacility: initial.referringFacility || "",
         notes: initial.notes || "",
+        laboratoryTestRequired: initial.laboratoryTestRequired || false,
+        laboratoryTest: initial.laboratoryTest || "",
+        additionalInstructions: initial.additionalInstructions || "",
       };
     }
     if (draft) {
@@ -142,6 +152,9 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
     if (!isEdit && !resident) next.resident = "Please select a resident.";
     if (!form.reason.trim()) next.reason = "Referral reason is required.";
     if (!form.destinationFacility.trim()) next.destinationFacility = "Destination facility is required.";
+    if (form.laboratoryTestRequired && !form.laboratoryTest.trim()) {
+      next.laboratoryTest = "Laboratory test details are required when laboratory test is marked as required.";
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -209,6 +222,36 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
             <div>
               <label className="text-sm font-medium text-brand-ink">Notes</label>
               <textarea rows={3} value={form.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Additional notes..." className={`${inputCls()} resize-none`} />
+            </div>
+
+            <div className="rounded-btn border border-brand-border p-4">
+              <p className="text-sm font-semibold text-brand-ink mb-3">Laboratory Test</p>
+              <div className="mb-3">
+                <label className="text-sm font-medium text-brand-ink">Laboratory Test Required</label>
+                <div className="mt-1.5 flex items-center gap-4">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-brand-ink">
+                    <input type="radio" checked={form.laboratoryTestRequired} onChange={() => set("laboratoryTestRequired")(true)} className="h-4 w-4 accent-brand-blue" />
+                    Yes
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-brand-ink">
+                    <input type="radio" checked={!form.laboratoryTestRequired} onChange={() => set("laboratoryTestRequired")(false)} className="h-4 w-4 accent-brand-blue" />
+                    No
+                  </label>
+                </div>
+              </div>
+              {form.laboratoryTestRequired && (
+                <>
+                  <div className="mb-3">
+                    <label className="text-sm font-medium text-brand-ink">Laboratory Test <span className="text-brand-danger">*</span></label>
+                    <input type="text" value={form.laboratoryTest} onChange={(e) => set("laboratoryTest")(e.target.value)} placeholder="e.g. Complete Blood Count, Urinalysis, FBS" className={inputCls(errors.laboratoryTest)} />
+                    {errors.laboratoryTest && <p className="mt-1 text-xs text-brand-danger">{errors.laboratoryTest}</p>}
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Additional Instructions</label>
+                    <textarea rows={2} value={form.additionalInstructions} onChange={(e) => set("additionalInstructions")(e.target.value)} placeholder="Optional instructions for the laboratory..." className={`${inputCls()} resize-none`} />
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -345,6 +388,9 @@ export default function HealthReferrals() {
     priority: form.priority,
     referring_facility: form.referringFacility.trim(),
     notes: form.notes,
+    laboratory_test_required: Boolean(form.laboratoryTestRequired),
+    laboratory_test: form.laboratoryTest ? form.laboratoryTest.trim() : "",
+    additional_instructions: form.additionalInstructions ? form.additionalInstructions.trim() : "",
   });
 
   const handleSave = async (form) => {
@@ -416,8 +462,8 @@ export default function HealthReferrals() {
   };
 
   const columns = isResident
-    ? ["Referral Date", "Reason", "Destination", "Priority", "Status", ""]
-    : ["Resident", "Referral Date", "Reason", "Destination", "Priority", "Status", "Actions"];
+    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Status", ""]
+    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Status", "Actions"];
 
   return (
     <>
@@ -493,6 +539,15 @@ export default function HealthReferrals() {
                     {r.destinationFacility}
                     {r.destinationService ? <span className="block text-xs text-brand-gray">{r.destinationService}</span> : null}
                   </td>
+                  <td className="px-4 py-3 text-sm text-brand-ink">
+                    {r.laboratoryTestRequired ? (
+                      <span className="inline-flex items-center gap-1 text-brand-blue">
+                        {r.laboratoryTest || "Required"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-brand-gray">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${PRIORITY_COLORS[r.priority] || ""}`}>{r.priority}</span>
                   </td>
@@ -566,6 +621,7 @@ export default function HealthReferrals() {
                   ["Referring Facility", detail.referringFacility || "—"],
                   ["Status", detail.status],
                   ["Completed", formatDate(detail.completedAt)],
+                  ["Lab Test Required", detail.laboratoryTestRequired ? "Yes" : "No"],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-btn bg-brand-bg px-3.5 py-2.5">
                     <p className="text-[11px] uppercase tracking-wide text-brand-gray">{label}</p>
@@ -581,6 +637,15 @@ export default function HealthReferrals() {
                 <p className="text-[11px] uppercase tracking-wide text-brand-gray">Notes</p>
                 <p className="mt-0.5 text-sm text-brand-ink">{detail.notes || "No notes recorded."}</p>
               </div>
+              {detail.laboratoryTestRequired && (
+                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
+                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Laboratory Test</p>
+                  <p className="mt-0.5 text-sm font-medium text-brand-ink">{detail.laboratoryTest || "—"}</p>
+                  {detail.additionalInstructions && (
+                    <p className="mt-1 text-sm text-brand-ink">{detail.additionalInstructions}</p>
+                  )}
+                </div>
+              )}
               {detail.resolutionNotes && (
                 <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
                   <p className="text-[11px] uppercase tracking-wide text-brand-gray">Resolution</p>

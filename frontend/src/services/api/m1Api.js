@@ -21,6 +21,12 @@ export const m1Api = {
   // Annual summary: 12-month matrix + annual total per indicator.
   annual: (params) => api.get('/m1/annual', { params }),
 
+  // Reporting-period report (Monthly | Quarterly | Annual) → byCode map.
+  // Params: { period, year, month? , quarter? }. This is the single source the
+  // exported/printed M1 PDF uses for every period, aggregated server-side and
+  // barangay-scoped — the screen and PDF never diverge.
+  report: (params) => api.get('/m1/report', { params }),
+
   // Underlying records behind one indicator total.
   drilldown: (code, params) => api.get(`/m1/drilldown/${encodeURIComponent(code)}`, { params }),
 
@@ -35,6 +41,13 @@ export const m1Api = {
   createRecord: (record) => api.post('/m1/records', { record }),
   updateRecord: (id, record) => api.put(`/m1/records/${id}`, { record }),
   deleteRecord: (id) => api.delete(`/m1/records/${id}`),
+
+  // Manual M1 data entry (aggregate figures with no operational source).
+  // listManual returns { indicators, entries, remarks } for one (year, month);
+  // saveManual upserts an indicator's buckets for one reporting month so an
+  // edited value replaces the stored one instead of duplicating it.
+  listManual: (params) => api.get('/m1/manual', { params }),
+  saveManual: (body) => api.put('/m1/manual', body),
 };
 
 export default m1Api;

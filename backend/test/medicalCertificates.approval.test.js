@@ -2,6 +2,8 @@ import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import * as certs from '../src/services/medicalCertificates.service.js';
+import authorize from '../src/middleware/authorize.js';
+import { FEATURE_ROLES } from '../src/config/roles.js';
 
 /**
  * Medical certificate approval rule tests.
@@ -15,6 +17,7 @@ import * as certs from '../src/services/medicalCertificates.service.js';
 
 const PHN = { id: 'phn-1', role: 'phn', municipalityId: 'mun-1' };
 const MHO = { id: 'mho-1', role: 'mho', municipalityId: 'mun-1' };
+const RHU = { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'mun-1' };
 
 let certRow;
 let logs;
@@ -111,4 +114,47 @@ test('a PHN may submit a Draft for review but never approve it', async () => {
   certRow.status = 'Draft';
   const result = await certs.submitForReview({ user: PHN, id: 'cert-1', supabase });
   assert.equal(result.status, 'For Review');
+});
+
+test('RHU Personnel is denied by the shared certificate API gate and create service', async () => {
+  assert.equal(FEATURE_ROLES.certificates.includes('rhu_personnel'), false);
+
+  let routeError;
+  authorize(FEATURE_ROLES.certificates)({ user: RHU }, {}, (error) => { routeError = error; });
+  assert.equal(routeError?.statusCode, 403);
+
+  await assert.rejects(
+    () => certs.create({ user: RHU, payload: { residentId: 'RES-1' }, supabase: makeSupabase() }),
+    (error) => error.statusCode === 403,
+  );
+});
+
+test('an authorized MHO can edit a certificate while it is awaiting review', async () => {
+  const supabase = makeSupabase();
+  const result = await certs.update({
+    user: MHO,
+    id: 'cert-1',
+    payload: { findings: 'Updated findings', medicalOfficer: 'Dr. Maria Santos' },
+    supabase,
+  });
+
+  assert.equal(result.findings, 'Updated findings');
+  assert.equal(certRow.findings, 'Updated findings');
+  assert.ok(logs.some((entry) => entry.action === 'Updated'));
+});
+
+test('an approved certificate cannot be edited after the approval decision', async () => {
+  certRow.status = 'Approved';
+  await assert.rejects(
+    () => certs.update({ user: MHO, id: 'cert-1', payload: { findings: 'Changed after approval' }, supabase: makeSupabase() }),
+    (error) => error.statusCode === 409,
+  );
+  assert.equal(certRow.findings, 'Fit to work');
+});
+
+test('RHU Personnel cannot edit a certificate through the service', async () => {
+  await assert.rejects(
+    () => certs.update({ user: { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'mun-1' }, id: 'cert-1', payload: { findings: 'Changed' }, supabase: makeSupabase() }),
+    (error) => error.statusCode === 403,
+  );
 });

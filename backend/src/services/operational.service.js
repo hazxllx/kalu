@@ -320,6 +320,30 @@ export const update = async ({ user, kind, id, payload = {} }) => {
   return kind === 'followups' ? withScheduleState(data) : data;
 };
 
+/**
+ * Delete a maternal record (spec PART 13). Hard delete, following the existing
+ * operational-record conventions: staff only, re-checks the record's resident
+ * is inside the caller's barangay/municipality scope BEFORE deleting, and
+ * writes an audit log. Supabase RLS (maternal_records_delete) mirrors the same
+ * boundary for any direct token access. Only `maternal` is deletable here;
+ * other operational kinds keep their append-only history.
+ */
+export const remove = async ({ user, kind, id, supabase = getServiceClient() }) => {
+  const table = TABLES[kind];
+  if (!table) throw ApiError.badRequest('Unknown operational record type.');
+  if (kind !== 'maternal') throw ApiError.forbidden('This record type cannot be deleted.');
+  assertStaff(user);
+  const { data: existing, error: readError } = await supabase.from(table).select('*').eq('id', id).maybeSingle();
+  throwOnError(readError, `Could not load ${kind}`);
+  if (!existing) throw ApiError.notFound('Operational record not found.');
+  // Enforce barangay/municipality scope via the record's resident.
+  const resident = await residentFor(supabase, user, existing.resident_id);
+  const { error } = await supabase.from(table).delete().eq('id', id);
+  throwOnError(error, `Could not delete ${kind}`);
+  await audit(supabase, user, `${kind.toUpperCase()}_DELETED`, table, id, resident);
+  return { id };
+};
+
 /** Recipient marks one of their own notifications read. */
 export const markNotificationRead = async ({ user, id, supabase = getServiceClient() }) => {
   const { data, error } = await supabase
@@ -334,4 +358,4 @@ export const markNotificationRead = async ({ user, id, supabase = getServiceClie
   return data;
 };
 
-export default { list, create, update, markNotificationRead, withScheduleState };
+export default { list, create, update, remove, markNotificationRead, withScheduleState };

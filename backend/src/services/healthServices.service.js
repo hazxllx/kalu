@@ -336,6 +336,7 @@ export const unassign = async ({ user, serviceId, personnelId, supabase = getSer
 export const assignablePersonnel = async ({ user, supabase = getServiceClient() }) => {
   assertManager(user);
   if (!user.municipalityId) return [];
+  if (user.role === ROLES.HEALTH_SUPERVISOR && !user.barangayId) return [];
   const { data, error } = await supabase
     .from('profiles')
     .select('id, full_name, email, role, barangay_id')
@@ -343,7 +344,10 @@ export const assignablePersonnel = async ({ user, supabase = getServiceClient() 
     .eq('status', 'active')
     .in('role', [ROLES.PHN, ROLES.HEALTH_SUPERVISOR, ROLES.BHW, ROLES.RHU_PERSONNEL, ROLES.MHO]);
   throwOnError(error, 'Could not load personnel');
-  return (data || []).map((p) => ({
+  const scoped = user.role === ROLES.HEALTH_SUPERVISOR
+    ? (data || []).filter((p) => p.barangay_id === user.barangayId)
+    : data || [];
+  return scoped.map((p) => ({
     id: p.id,
     name: p.full_name || p.email,
     role: p.role,

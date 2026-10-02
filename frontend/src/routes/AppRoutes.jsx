@@ -98,7 +98,6 @@ const TreatmentConsultation = appPage(() => import('@/features/consultations/pag
 const HealthRecord = appPage(() => import('@/features/health-records/pages/HealthRecord'));
 const TCLS = appPage(() => import('@/features/health-records/pages/TCLS'));
 const M1Records = appPage(() => import('@/features/health-records/pages/M1Records'));
-const M1Fhsis = appPage(() => import('@/features/health-records/pages/M1Fhsis'));
 const Immunization = appPage(() => import('@/features/health-records/pages/Immunization'));
 const TBRecords = appPage(() => import('@/features/health-records/pages/TBRecords'));
 const ResidentFollowUps = appPage(() => import('@/features/follow-ups/pages/ResidentFollowUps'));
@@ -120,6 +119,7 @@ const UserManagement = appPage(() => import('@/features/users/pages/UserManageme
 const AuditTrail = appPage(() => import('@/features/users/pages/AuditTrail'));
 const SystemManagementPage = appPage(() => import('@/features/users/pages/SystemManagementPage'));
 const RolePermissionsPage = appPage(() => import('@/features/access-control/pages/RolePermissionsPage'));
+const RiskAssessmentSettings = appPage(() => import('@/features/access-control/pages/RiskAssessmentSettings'));
 const SettingsPage = appPage(() => import('@/features/settings/pages/SettingsPage'));
 const MedicalCertificates = appPage(() => import('@/features/certificates/pages/MedicalCertificates'));
 const CertificateComposer = appPage(() => import('@/features/certificates/pages/CertificateComposer'));
@@ -139,9 +139,7 @@ const StaffAccountApprovals = appPage(() => import('@/features/accounts/pages/St
  *   phn              — health records, assessments, referrals, follow-ups
  *   health_supervisor— barangay nurse/midwife: verification, directory, records,
  *                      consultation, referrals, follow-ups, barangay monitoring
- *   rhu_personnel    — triage (dedicated triage UI pending verified
- *                      requirements). No referrals: the API denies that role
- *                      referral access, so no referral page is routed.
+ *   rhu_personnel    — triage and operational dashboard
  *   bhw              — DATA COLLECTION ONLY (household profiling / community data)
  *   resident         — own profile, records, services, notifications
  */
@@ -164,6 +162,7 @@ const AppRoutes = () => (
       <Route path="/app/resident" element={<DashboardLayout roleKey="resident" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<ResidentDashboard />} />
+        <Route path="profile" element={<SettingsPage roleKey="resident" />} />
         <Route path="record" element={<HealthRecord />} />
         <Route path="consultations" element={<ConsultationsPage showResidentSearch={false} />} />
         <Route path="referrals" element={<HealthReferrals />} />
@@ -202,6 +201,7 @@ const AppRoutes = () => (
       <Route path="/app/mho" element={<DashboardLayout roleKey="mho" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<MHODashboard />} />
+        <Route path="profile" element={<SettingsPage roleKey="mho" />} />
         {/* Municipal resident directory — read-only; the MHO supervises the
             register but resident demographics are edited by the PHN / Health
             Supervisor. */}
@@ -234,6 +234,7 @@ const AppRoutes = () => (
       <Route path="/app/phn" element={<DashboardLayout roleKey="phn" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<PHNDashboard />} />
+        <Route path="profile" element={<SettingsPage roleKey="phn" />} />
         <Route path="transfer-requests" element={<TransferRequests />} />
         {/* PHN resident registration (Add Resident). The API already authorizes
             the PHN for POST/GET /residents; this exposes that existing
@@ -266,6 +267,7 @@ const AppRoutes = () => (
       <Route path="/app/health_supervisor" element={<DashboardLayout roleKey="health_supervisor" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<HealthSupervisorDashboard />} />
+        <Route path="profile" element={<SettingsPage roleKey="health_supervisor" />} />
         <Route path="residents" element={<ResidentsPage />} />
         <Route path="verifications" element={<PendingVerifications />} />
         <Route path="transfer-requests" element={<TransferRequests />} />
@@ -273,7 +275,12 @@ const AppRoutes = () => (
         <Route path="consultations" element={<TreatmentConsultation />} />
         <Route path="tcls" element={<TCLS />} />
         <Route path="m1" element={<M1Records />} />
-        <Route path="m1-report" element={<M1Fhsis />} />
+        {/* "Maternal Monitoring" (the standalone FHSIS M1 report page) was merged
+            into the canonical Maternal Record page (./m1). The old path redirects
+            so existing bookmarks keep working. Official M1 reporting stays
+            available from Maternal Record via "Export Monthly" (same print
+            renderer, unchanged official layout). */}
+        <Route path="m1-report" element={<Navigate to="../m1" replace />} />
         <Route path="followups" element={<MidwifeFollowUp />} />
         <Route path="followup-calendar" element={<FollowUpCalendar />} />
         <Route path="services" element={<MidwifeHealthServices />} />
@@ -304,6 +311,7 @@ const AppRoutes = () => (
       <Route path="/app/rhu_personnel" element={<DashboardLayout roleKey="rhu_personnel" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<RHUDashboard />} />
+        <Route path="profile" element={<SettingsPage roleKey="rhu_personnel" />} />
         <Route path="triage" element={<RhuTriage />} />
         <Route path="consultation" element={<RhuConsultation />} />
         {/* No referrals route: the API denies RHU Personnel referral access
@@ -316,9 +324,7 @@ const AppRoutes = () => (
         <Route path="notifications" element={<NotificationsPage roleKey="rhu_personnel" />} />
         <Route path="profile" element={<SettingsPage roleKey="rhu_personnel" />} />
         <Route path="settings" element={<SettingsPage roleKey="rhu_personnel" />} />
-        {/* Barangays/Reports/Analytics are no longer part of the RHU Personnel
-            role; any removed or unknown RHU sub-path falls back to the role
-            dashboard so a user is never stranded on an inaccessible page. */}
+        {/* Unknown RHU sub-paths return to the role dashboard. */}
         <Route path="*" element={<Navigate to="dashboard" replace />} />
       </Route>
     </Route>
@@ -330,6 +336,7 @@ const AppRoutes = () => (
       <Route path="/app/bhw" element={<DashboardLayout roleKey="bhw" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<BHWDashboard />} />
+        <Route path="profile" element={<SettingsPage roleKey="bhw" />} />
         <Route path="households" element={<Households />} />
         <Route path="households/new" element={<AddHouseholdPage />} />
         <Route path="households/risk-clusters" element={<Navigate to="/app/bhw/households" replace />} />
@@ -345,8 +352,11 @@ const AppRoutes = () => (
       <Route path="/app/admin" element={<DashboardLayout roleKey="admin" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
+        <Route path="profile" element={<SettingsPage roleKey="admin" />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="risk-rules" element={<RiskRuleConfig />} />
+        {/* Resident risk assessment configuration (criteria + thresholds). */}
+        <Route path="risk-assessment" element={<RiskAssessmentSettings />} />
         <Route path="roles" element={<SystemManagementPage variant="roles" />} />
         {/* Privilege & permission management (admin only). */}
         <Route path="permissions" element={<RolePermissionsPage />} />

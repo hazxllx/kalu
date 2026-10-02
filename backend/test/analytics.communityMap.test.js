@@ -13,7 +13,7 @@ import * as service from '../src/services/analytics.service.js';
  * them. Repository is stubbed in-memory.
  */
 
-const STUBBED = ['listBarangays', 'listVisits', 'searchResidents'];
+const STUBBED = ['listBarangays', 'listVisits', 'listTclEntries', 'searchResidents'];
 const original = {};
 
 const BARANGAYS = [
@@ -22,10 +22,10 @@ const BARANGAYS = [
   { id: 'b3', name: 'Old San Roque', latitude: 13.552406, longitude: 123.276504, municipality_id: 'M1' },
 ];
 const RESIDENTS = [
-  { id: 'r1', barangay: 'San Isidro' },
-  { id: 'r2', barangay: 'San Antonio' },
-  { id: 'r3', barangay: 'San Antonio' },
-  { id: 'r4', barangay: 'Old San Roque' },
+  { id: 'r1', barangay: 'San Isidro', municipalityId: 'M1' },
+  { id: 'r2', barangay: 'San Antonio', municipalityId: 'M1' },
+  { id: 'r3', barangay: 'San Antonio', municipalityId: 'M1' },
+  { id: 'r4', barangay: 'Old San Roque', municipalityId: 'M1' },
 ];
 const VISITS = [
   // r2's latest visit is high risk (systolic 150). Two TB visits: one active
@@ -35,6 +35,7 @@ const VISITS = [
   // r4 (Old San Roque) has a Dengue visit this month, still active.
   { residentId: 'r4', visitDate: thisMonthISO(3), status: 'in_review', chiefComplaint: 'Dengue with fever', vitals: { bp: '110/70' } },
 ];
+let tclEntries = [];
 
 function thisMonthISO(day) {
   const now = new Date();
@@ -47,12 +48,13 @@ before(() => {
   repository.listBarangays = async ({ municipalityId = null } = {}) =>
     BARANGAYS.filter((b) => !municipalityId || b.municipality_id === municipalityId).map((b) => ({ ...b }));
   repository.listVisits = async () => ({ rows: VISITS.map((v) => ({ ...v })) });
+  repository.listTclEntries = async () => ({ rows: tclEntries.map((row) => ({ ...row })) });
   repository.searchResidents = async () => RESIDENTS.map((r) => ({ ...r }));
 });
 
 after(() => { for (const k of STUBBED) repository[k] = original[k]; });
 
-beforeEach(() => {});
+beforeEach(() => { tclEntries = []; });
 
 test('Health Supervisor scope returns only their assigned barangay', async () => {
   const res = await service.getCommunityMap({ barangay: 'San Isidro', municipalityId: 'M1' });
@@ -115,6 +117,32 @@ test('condition filter restricts case counts to the matching disease', async () 
   assert.equal(dengueByName['San Antonio'].caseCount, 0);
 });
 
+test('an active TB program enrollment contributes a scoped active Community Monitoring case', async () => {
+  tclEntries = [{
+    id: 'tb-1', residentId: 'r1', program: 'TB Patients', status: 'Active', createdAt: thisMonthISO(8),
+  }];
+
+  const res = await service.getCommunityMap({ barangay: 'San Isidro', municipalityId: 'M1', condition: 'Tuberculosis' });
+
+  assert.equal(res.summary.totalCases, 1);
+  assert.equal(res.summary.activeCases, 1);
+  assert.equal(res.barangays[0].caseCount, 1);
+});
+
+test('same-named barangay residents from another municipality are excluded', async () => {
+  const otherMunicipality = { id: 'r5', barangay: 'San Isidro', municipalityId: 'M2' };
+  repository.searchResidents = async () => [...RESIDENTS, otherMunicipality];
+  repository.listVisits = async () => ({ rows: [
+    ...VISITS,
+    { residentId: 'r5', visitDate: thisMonthISO(10), status: 'submitted', chiefComplaint: 'TB patient' },
+  ] });
+
+  const res = await service.getCommunityMap({ barangay: 'San Isidro', municipalityId: 'M1' });
+
+  assert.equal(res.barangays[0].residents, 1);
+  assert.equal(res.barangays[0].caseCount, 0);
+});
+
 test('date filter bounds cases by visit date', async () => {
   // Only the January 2026 window: just r2's completed TB visit qualifies.
   const res = await service.getCommunityMap({
@@ -135,6 +163,25 @@ test('intensity is relative to the busiest barangay (0..1)', async () => {
   assert.equal(byName['San Antonio'].intensity, 1); // busiest (2 cases)
   assert.equal(byName['Old San Roque'].intensity, 0.5); // 1 of 2
   assert.equal(byName['San Isidro'].intensity, 0); // no cases
+});
+
+test('per-barangay condition breakdown, headline condition and last-recorded date are DB-derived', async () => {
+  const res = await service.getCommunityMap({ barangay: null, municipalityId: 'M1' });
+  const byName = Object.fromEntries(res.barangays.map((b) => [b.name, b]));
+
+  // San Antonio: both of r2's visits classify to Tuberculosis.
+  assert.deepEqual(byName['San Antonio'].conditions, [{ name: 'Tuberculosis', value: 2 }]);
+  assert.deepEqual(byName['San Antonio'].topCondition, { name: 'Tuberculosis', value: 2 });
+  assert.equal(byName['San Antonio'].lastRecorded, thisMonthISO(2));
+
+  // Old San Roque: one Dengue visit.
+  assert.deepEqual(byName['Old San Roque'].topCondition, { name: 'Dengue', value: 1 });
+  assert.equal(byName['Old San Roque'].lastRecorded, thisMonthISO(3));
+
+  // San Isidro: no records -> empty breakdown, no headline, null date.
+  assert.deepEqual(byName['San Isidro'].conditions, []);
+  assert.deepEqual(byName['San Isidro'].topCondition, { name: 'No recorded condition', value: 0 });
+  assert.equal(byName['San Isidro'].lastRecorded, null);
 });
 
 test('monthly trends count matching visits per month for the requested year', async () => {

@@ -477,6 +477,31 @@ export const approve = async ({ user, id, remarks = '' } = {}) => {
   }
 
   const supabase = getServiceClient();
+
+  // Business rule: ONE active RHU personnel per RHU station. Before activating
+  // an RHU Personnel account, confirm no OTHER active RHU personnel is already
+  // assigned to the same facility. The database also enforces this via a
+  // partial unique index; this check surfaces a clear message instead of a
+  // raw unique-violation error.
+  if (row.role === 'rhu_personnel' && row.facility_id) {
+    const { data: existingRhu, error: rhuError } = await supabase
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('facility_id', row.facility_id)
+      .eq('role', 'rhu_personnel')
+      .eq('status', 'active')
+      .neq('id', row.auth_user_id)
+      .limit(1)
+      .maybeSingle();
+    if (rhuError) throw dbError(rhuError, 'rhu assignment check');
+    if (existingRhu) {
+      const who = existingRhu.full_name || existingRhu.email || 'another account';
+      throw ApiError.conflict(
+        `This RHU station already has an assigned RHU personnel (${who}). Only one active RHU personnel is allowed per station. Disable the existing account before approving a new one.`,
+      );
+    }
+  }
+
   const decidedAt = new Date().toISOString();
 
   const { data: updated, error } = await supabase

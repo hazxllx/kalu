@@ -3,17 +3,18 @@ import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
 import { SkeletonList } from "@/components/common/Skeleton";
-import { usersApi, auditTrailApi } from "@/services/api";
+import { api, usersApi, auditTrailApi, systemLogsApi } from "@/services/api";
 
 /**
  * System Administrator overview.
  *
- * Statistics are read live from the admin-only endpoints:
- *   - account counts come from GET /users (profiles) using the exact-count
- *     totals returned for the whole directory and per status filter,
- *   - recent activity comes from GET /audit-trail.
- * No mock/placeholder data is used; every tile shows the real persisted value
- * or an empty/loading state.
+ * Combines two live, mock-free data sources:
+ *   - Account statistics (V6): account counts come from GET /users (profiles)
+ *     using the exact-count totals returned for the whole directory and per
+ *     status filter; recent activity comes from GET /audit-trail.
+ *   - Platform health (V7): API status/uptime come from GET /health and request
+ *     logging availability from GET /system-logs.
+ * Every tile shows the real persisted value or an empty/loading state.
  */
 
 const initialsOf = (name) =>
@@ -25,11 +26,20 @@ const initialsOf = (name) =>
     .join("")
     .toUpperCase() || "?";
 
-const formatTime = (iso) => {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const formatTime = (value) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short" }).format(date);
+};
+
+const formatUptime = (seconds) => {
+  if (!Number.isFinite(seconds)) return "Unavailable";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return [days && `${days}d`, hours && `${hours}h`, `${minutes}m`].filter(Boolean).join(" ");
 };
 
 export default function AdminDashboard() {
@@ -37,16 +47,20 @@ export default function AdminDashboard() {
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [systemLogs, setSystemLogs] = useState({ state: "loading", rows: [] });
+  const [health, setHealth] = useState({ state: "loading", data: null });
 
   useEffect(() => {
     let active = true;
+
+    // Account statistics + recent activity (V6). Each list runs with limit:1 so
+    // the server returns only the exact total for that filter (no rows
+    // transferred). The audit list is tolerant: a failure there must not blank
+    // the whole dashboard.
     (async () => {
       setLoading(true);
       setError("");
       try {
-        // Each list runs with limit:1 so the server returns only the exact
-        // total for that filter (no rows transferred). The audit list is
-        // tolerant: a failure there must not blank the whole dashboard.
         const [all, act, pend, dis, audit] = await Promise.all([
           usersApi.list({ limit: 1 }),
           usersApi.list({ status: "active", limit: 1 }),
@@ -68,9 +82,23 @@ export default function AdminDashboard() {
         if (active) setLoading(false);
       }
     })();
-    return () => {
-      active = false;
-    };
+
+    // Platform health diagnostics (V7): independent and tolerant of failure so
+    // a health probe outage never blanks the account statistics above.
+    Promise.allSettled([
+      systemLogsApi.list({ limit: 1 }),
+      api.get("/health"),
+    ]).then(([logsResult, healthResult]) => {
+      if (!active) return;
+      setSystemLogs(logsResult.status === "fulfilled"
+        ? { state: "loaded", rows: logsResult.value?.rows || [] }
+        : { state: "error", rows: [] });
+      setHealth(healthResult.status === "fulfilled"
+        ? { state: "loaded", data: healthResult.value }
+        : { state: "error", data: null });
+    });
+
+    return () => { active = false; };
   }, []);
 
   const fmt = (n) => (n === null || n === undefined ? "—" : Number(n).toLocaleString());
@@ -89,9 +117,34 @@ export default function AdminDashboard() {
     { label: "Disabled", value: counts.disabled, color: "bg-brand-danger", width: pct(counts.disabled) },
   ];
 
+  const diagnostics = [
+    {
+      label: "API status",
+      value: health.state === "loading" ? "Checking…" : health.data?.status === "ok" ? "Operational" : "Unavailable",
+      detail: health.data?.message || (health.state === "error" ? "Health check failed" : ""),
+    },
+    {
+      label: "API uptime",
+      value: health.state === "loading" ? "Checking…" : formatUptime(health.data?.uptimeSeconds),
+      detail: "Current process",
+    },
+    {
+      label: "Audit trail",
+      value: loading ? "Checking…" : error ? "Unavailable" : "Available",
+      detail: !loading && !error ? `${activity.length} recent events` : "Admin audit source",
+    },
+    {
+      label: "Request logging",
+      value: systemLogs.state === "loading" ? "Checking…" : systemLogs.state === "loaded" ? "Available" : "Unavailable",
+      detail: systemLogs.rows[0]
+        ? `Last request ${formatTime(systemLogs.rows[0].occurredAt)}`
+        : systemLogs.state === "loaded" ? "No logged requests" : "Admin request log source",
+    },
+  ];
+
   return (
     <>
-      <PageHeader crumbs={["Dashboard"]} title="System Overview" subtitle="Platform accounts and recent activity." />
+      <PageHeader crumbs={["Dashboard"]} title="System Overview" subtitle="Platform accounts, health, and recent activity." />
 
       {error && <Card className="mb-5 p-4 text-sm text-brand-danger">{error}</Card>}
 
@@ -154,6 +207,21 @@ export default function AdminDashboard() {
               ))}
             </div>
           )}
+        </Card>
+      </div>
+
+      <div className="mt-4 sm:mt-5">
+        <Card className="p-4 sm:p-6">
+          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">System Health</h3>
+          {diagnostics.map((item) => (
+            <div key={item.label} className="flex items-center justify-between gap-3 py-3 border-b border-brand-border last:border-0">
+              <div>
+                <span className="text-sm text-brand-gray">{item.label}</span>
+                {item.detail && <p className="mt-0.5 text-xs text-brand-gray">{item.detail}</p>}
+              </div>
+              <span className="font-stat font-bold text-brand-ink text-right">{item.value}</span>
+            </div>
+          ))}
         </Card>
       </div>
     </>
