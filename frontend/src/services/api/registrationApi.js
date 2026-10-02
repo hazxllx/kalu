@@ -12,6 +12,10 @@ export const registrationApi = {
     const response = await api.post('/registration/resident', payload);
     return response?.resident || null;
   },
+  // Resident self-service: activate the account after accepting an invitation
+  // link and setting a password on /reset-password. Safe no-op on the server
+  // unless the resident's record is Verified. Best-effort from the client.
+  activate: () => api.post('/registration/activate'),
 };
 
 export default registrationApi;

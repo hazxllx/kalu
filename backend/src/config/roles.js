@@ -79,6 +79,13 @@ export const FEATURE_ROLES = Object.freeze({
   intake: [ROLES.BHW, ROLES.RHU_PERSONNEL, ROLES.HEALTH_SUPERVISOR],
   intakeSubmit: [ROLES.BHW, ROLES.RHU_PERSONNEL, ROLES.HEALTH_SUPERVISOR],
   phnProcessing: [ROLES.PHN],
+  // RHU Consultation Station: after triage submits an encounter, the RHU
+  // consultation personnel pick it up from the shared queue, view the triage
+  // data, record findings/assessment/treatment/recommendations and complete the
+  // consultation. The PHN keeps the SAME capability (its assessment feature is
+  // unchanged), so both roles may process the shared visit queue. Referral
+  // generation stays PHN-only (enforced per-route + in the service).
+  consultationProcessing: [ROLES.PHN, ROLES.RHU_PERSONNEL],
   referralRecords: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
 
   // Medical certificates are prepared by PHN/MHO and reviewed by PHN/MHO.

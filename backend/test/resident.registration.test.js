@@ -6,6 +6,7 @@ import { registerResidentValidator } from '../src/validators/registration.valida
 import { validateDocumentUpload } from '../src/validators/documents.validators.js';
 import validate from '../src/middleware/validate.js';
 import * as registrationService from '../src/services/registration.service.js';
+import * as residentsService from '../src/services/residents.service.js';
 import * as documentsService from '../src/services/documents.service.js';
 import * as authService from '../src/services/auth.service.js';
 import * as transferService from '../src/services/transfer.service.js';
@@ -34,6 +35,24 @@ test('registerResidentValidator accepts valid payload', () => {
     email: 'ana@example.com',
   });
   assert.ok(!result.error, JSON.stringify(result));
+});
+
+test('resident account creation uses a temporary password and resident role metadata', () => {
+  const password = residentsService.generateTemporaryPassword();
+  const account = residentsService.buildResidentAccountCreation({
+    email: '  ANA@EXAMPLE.COM ',
+    fullName: 'Ana Dela Cruz',
+    password,
+  });
+
+  assert.match(password, /[A-Z]/);
+  assert.match(password, /[a-z]/);
+  assert.match(password, /\d/);
+  assert.equal(account.email, 'ana@example.com');
+  assert.equal(account.password, password);
+  assert.equal(account.user_metadata.full_name, 'Ana Dela Cruz');
+  assert.equal(account.user_metadata.requested_role, 'resident');
+  assert.equal(account.profile_status, 'pending_verification');
 });
 
 test('registration service creates pending resident without requiring document', async () => {
@@ -89,6 +108,51 @@ test('registration blocks an identity-number duplicate without using names as pr
       }),
       (error) => error.statusCode === 409 && /may already be associated/.test(error.message),
     );
+  } finally {
+    keys.forEach((key) => { repository[key] = originals[key]; });
+  }
+});
+
+test('registration links an account to an existing unlinked resident profile when identity matches', async () => {
+  let claimed = null;
+  const repo = {
+    getResidentByAuthUserId: async () => null,
+    findBarangayByName: async () => ({ id: 'BRGY-1', name: 'San Isidro', municipalityId: 'M1' }),
+    findResidentByIdentity: async () => ({
+      id: 'RES-EXISTING',
+      authUserId: null,
+      identityNo: 'ID-1',
+      birthDate: '2000-01-01',
+      firstName: 'Ana',
+      lastName: 'Dela Cruz',
+      barangay: 'San Isidro',
+      verificationStatus: 'pending',
+    }),
+    claimResidentForAccount: async ({ authUserId, identityNo, birthDate }) => {
+      claimed = { authUserId, identityNo, birthDate };
+      return { id: 'RES-EXISTING', authUserId, identityNo, birthDate, firstName: 'Ana', lastName: 'Dela Cruz', barangay: 'San Isidro' };
+    },
+    updateResident: async () => null,
+    insertResident: async () => { throw new Error('should not create a duplicate resident'); },
+    nextResidentIds: async () => ({ id: 'RES-NEW', healthRecordNo: 'HR-NEW' }),
+  };
+  const keys = Object.keys(repo);
+  const originals = Object.fromEntries(keys.map((key) => [key, repository[key]]));
+  keys.forEach((key) => { repository[key] = repo[key]; });
+  try {
+    const result = await registrationService.registerResident({
+      user: { id: '11111111-1111-4111-8111-111111111111', role: 'resident' },
+      payload: {
+        firstName: 'Ana',
+        lastName: 'Dela Cruz',
+        birthDate: '2000-01-01',
+        sex: 'Female',
+        barangay: 'San Isidro',
+        identityNo: 'ID-1',
+      },
+    });
+    assert.equal(result.id, 'RES-EXISTING');
+    assert.deepEqual(claimed, { authUserId: '11111111-1111-4111-8111-111111111111', identityNo: 'ID-1', birthDate: '2000-01-01' });
   } finally {
     keys.forEach((key) => { repository[key] = originals[key]; });
   }

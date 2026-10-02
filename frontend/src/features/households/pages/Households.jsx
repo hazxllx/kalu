@@ -73,6 +73,28 @@ const VERIFICATION_TONES = {
   "Returned for Correction": "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
 };
 
+/**
+ * Login-account status for a household member, derived server-side from the
+ * linked resident's auth user (none when the member has no linked resident or
+ * the resident has no account). A resident profile never requires an account,
+ * so "No Account" is a normal, valid state.
+ */
+const ACCOUNT_BADGE = {
+  active: { label: "Active", className: "bg-emerald-50 text-emerald-700" },
+  pending: { label: "Pending Activation", className: "bg-amber-50 text-amber-700" },
+  disabled: { label: "Disabled", className: "bg-rose-50 text-rose-700" },
+  none: { label: "No Account", className: "bg-slate-100 text-slate-500" },
+};
+
+function AccountBadge({ status }) {
+  const meta = ACCOUNT_BADGE[status] || ACCOUNT_BADGE.none;
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${meta.className}`} title="Login account">
+      {meta.label}
+    </span>
+  );
+}
+
 /** Column header filter — text search or a dropdown of status options. */
 function ColumnFilter({ type = "list", options = [], value, onChange, placeholder, columnLabel }) {
   const [open, setOpen] = useState(false);
@@ -904,6 +926,7 @@ export default function Households() {
                               </p>
                             </div>
                             <div className="flex items-center gap-3">
+                              <AccountBadge status={m.accountStatus} />
                               <button
                                 onClick={() => setHealthMember(m)}
                                 className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue transition-colors hover:underline"

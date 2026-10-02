@@ -67,6 +67,7 @@ export const phnWorkflowApi = {
       phn: {
         assessment: recorded.healthConcern || recorded.assessment || "",
         notes: recorded.clinicalNotes || "",
+        personnel: recorded.assignedPersonnel || "",
       },
     };
     await api.put(`/phn/submissions/${id}`, { submission: patch });

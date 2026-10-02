@@ -160,6 +160,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
   const [toast, setToast] = useState(null);
   const [savedId, setSavedId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // The certificate number is allocated by the API from real stored
   // references, so it is pre-filled rather than typed by the user.
@@ -294,6 +295,49 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
       .then((payload) => setForm((p) => ({ ...p, certificateNumber: payload?.reference || "" })))
       .catch(() => {});
     showToast("Form reset.");
+  };
+
+  /**
+   * Submit the certificate to the PHN / MHO for review and issuance. The
+   * preparer (RHU Personnel / PHN) never issues a certificate directly: this
+   * saves the document (creating it when needed) and moves it Draft → For
+   * Review. Approval (MHO) and issuance are performed by the reviewer in the
+   * register. The server re-validates both the role and the transition.
+   */
+  const handleSubmitForReview = async () => {
+    if (!validate()) {
+      showToast("Please complete the required fields before submitting.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      let id = savedId;
+      if (id) {
+        await medicalCertificatesApi.update(id, writePayload());
+      } else {
+        const { record } = await medicalCertificatesApi.create(writePayload());
+        id = record.id;
+        setSavedId(id);
+      }
+      await medicalCertificatesApi.submitForReview(id);
+      showToast("Certificate submitted to the PHN/MHO for review and issuance.");
+      // Clear the form so the next certificate starts fresh and the submitted
+      // one is not accidentally re-submitted or edited here.
+      setResident(null);
+      setPatientQuery("");
+      setForm({ ...defaultForm(), certificateNumber: "" });
+      setErrors({});
+      setSavedId(null);
+      setPreviewOpen(false);
+      medicalCertificatesApi
+        .nextReference()
+        .then((payload) => setForm((p) => ({ ...p, certificateNumber: payload?.reference || "" })))
+        .catch(() => {});
+    } catch (err) {
+      showToast(err?.message || "The certificate could not be submitted for review.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -487,16 +531,23 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
               </button>
               <button
                 onClick={handlePreview}
-                className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+                className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-5 py-2.5 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg dark:bg-card dark:hover:bg-hover"
               >
                 <Eye className="h-4 w-4" /> Preview Certificate
+              </button>
+              <button
+                onClick={handleSubmitForReview}
+                disabled={submitting}
+                className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Submit for Review
               </button>
             </div>
           </Card>
 
           <p className="text-center text-xs text-brand-gray">
-            Preview the certificate before printing. Printing saves the certificate as a Draft in the
-            register — issuing requires PHN or MHO review and approval under the status workflow.
+            Submitting sends the certificate to the PHN / MHO for review and issuance. Preview and print produce a
+            working copy and save it as a Draft — only a PHN or the MHO can approve and issue the official certificate.
           </p>
         </>
       )}
@@ -514,9 +565,16 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                 <button
                   onClick={handlePrint}
                   disabled={saving}
+                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Print Draft
+                </button>
+                <button
+                  onClick={handleSubmitForReview}
+                  disabled={submitting}
                   className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
                 >
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Print Certificate
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Submit for Review
                 </button>
                 <button onClick={() => setPreviewOpen(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">
                   Close Preview

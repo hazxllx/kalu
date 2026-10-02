@@ -24,6 +24,13 @@ import { validateVitals } from './intake.service.js';
 
 const isPHN = (user) => user?.role === 'phn';
 
+// RHU Consultation Station reuses the SAME visit queue the PHN uses: both the
+// PHN and RHU personnel may receive/review/update/complete a submitted
+// encounter (record findings/assessment/treatment). This does NOT change the
+// PHN assessment feature — it only additionally admits the RHU consultation
+// role. Referral generation remains PHN-only (see createReferral/updateReferral).
+const canProcessConsultation = (user) => user?.role === 'phn' || user?.role === 'rhu_personnel';
+
 const MUNICIPALITY_ROLES = new Set(['mho', 'phn', 'rhu_personnel']);
 const BARANGAY_ROLES = new Set(['health_supervisor', 'bhw']);
 
@@ -64,7 +71,7 @@ const withoutMeta = (obj) => {
 };
 
 export const listQueue = async ({ statuses = null, q = '', user } = {}) => {
-  if (!isPHN(user)) throw ApiError.forbidden();
+  if (!canProcessConsultation(user)) throw ApiError.forbidden();
   const allowed = statuses && statuses.length ? statuses : null;
   const effectiveStatuses = allowed && allowed.length
     ? allowed
@@ -131,13 +138,14 @@ const normalizePhnVisit = (visit = {}) => {
     const phnPatch = {};
     if (visit.phn.assessment !== undefined) phnPatch.assessment = pickText(visit.phn.assessment);
     if (visit.phn.notes !== undefined) phnPatch.notes = pickText(visit.phn.notes);
+    if (visit.phn.personnel !== undefined) phnPatch.personnel = pickText(visit.phn.personnel);
     if (Object.keys(phnPatch).length) patch.phn = phnPatch;
   }
   return patch;
 };
 
 export const updateSubmissionForPhn = async ({ id, patch = {}, user }) => {
-  if (!isPHN(user)) throw ApiError.forbidden();
+  if (!canProcessConsultation(user)) throw ApiError.forbidden();
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   if (!PHN_EDITABLE_STATUSES.includes(submission.status)) {
@@ -160,7 +168,7 @@ const guardTransition = (submission, from, to) => {
 };
 
 export const receiveSubmission = async ({ id, user }) => {
-  if (!isPHN(user)) throw ApiError.forbidden();
+  if (!canProcessConsultation(user)) throw ApiError.forbidden();
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   guardTransition(submission, [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED], SUBMISSION_STATUS.RECEIVED);
@@ -169,7 +177,7 @@ export const receiveSubmission = async ({ id, user }) => {
 };
 
 export const markInReview = async ({ id, user }) => {
-  if (!isPHN(user)) throw ApiError.forbidden();
+  if (!canProcessConsultation(user)) throw ApiError.forbidden();
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   guardTransition(
@@ -186,7 +194,7 @@ export const markInReview = async ({ id, user }) => {
 };
 
 export const completeSubmission = async ({ id, user }) => {
-  if (!isPHN(user)) throw ApiError.forbidden();
+  if (!canProcessConsultation(user)) throw ApiError.forbidden();
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   guardTransition(

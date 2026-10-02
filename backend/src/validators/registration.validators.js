@@ -87,6 +87,12 @@ export const registerResidentValidator = (input = {}) => {
   const philhealthNo = str(body.philhealthNo, 40, 'philhealthNo', 'PhilHealth number', errors, { optional: true });
   const identityNo = str(body.identityNo, 60, 'identityNo', 'Identity number', errors, { optional: true });
 
+  // Optional claim reference: the Resident ID of an existing profile created by
+  // a BHW / Health Personnel. When present, the service links this account to
+  // that existing profile (verified by Resident ID + date of birth) instead of
+  // creating a duplicate. Whitelisted here so it survives validation.
+  const residentId = str(body.residentId, 40, 'residentId', 'Resident ID', errors, { optional: true });
+
   const sms = body.smsUpdates;
   const resident = {
     firstName,
@@ -107,6 +113,7 @@ export const registerResidentValidator = (input = {}) => {
     cellphoneNo,
     barangay,
     ...(zone === null ? {} : { zone }),
+    ...(residentId ? { residentId } : {}),
     ...(sms === undefined ? {} : { smsUpdates: Boolean(sms) }),
   };
 

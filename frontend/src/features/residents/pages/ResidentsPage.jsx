@@ -33,6 +33,11 @@ const EMPTY_FORM = {
   houseNo: "",
   barangay: "",
   civilStatus: "",
+  // Optional login account (health-personnel registration). A resident profile
+  // never requires an account; when the health worker opts in, the backend
+  // creates a Supabase Auth user linked to this profile in Pending Activation.
+  createAccount: false,
+  email: "",
 };
 
 const inputClass = (invalid) =>
@@ -66,6 +71,40 @@ const composeAddress = (f) =>
   [f.houseNo, f.street, f.purok ? `Purok ${f.purok}` : "", f.barangay, "Pili, Camarines Sur"]
     .filter(Boolean)
     .join(", ");
+
+/**
+ * Login-account status, separate from the resident's verification status. A
+ * resident profile is fully valid with "No Account"; an account can later be
+ * created/linked without changing the verification status.
+ */
+const ACCOUNT_STATUS_LABELS = {
+  active: "Active",
+  pending: "Pending Activation",
+  disabled: "Disabled",
+  none: "No Account",
+};
+
+const accountStatusClass = (status) => {
+  switch (status) {
+    case "active":
+      return "bg-emerald-50 text-emerald-700";
+    case "pending":
+      return "bg-amber-50 text-amber-700";
+    case "disabled":
+      return "bg-rose-50 text-rose-700";
+    default:
+      return "bg-slate-100 text-slate-500";
+  }
+};
+
+const AccountStatusPill = ({ status }) => {
+  const key = status || "none";
+  return (
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${accountStatusClass(key)}`}>
+      {ACCOUNT_STATUS_LABELS[key] || "No Account"}
+    </span>
+  );
+};
 
 function Select({ label, value, onChange, options = [], placeholder = "", error = "", emptyLabel = "", children = null }) {
   return (
@@ -269,6 +308,12 @@ export default function ResidentsPage() {
     if (form.contact && !/^[0-9+\-\s()]{7,20}$/.test(form.contact.trim())) {
       errs.contact = "Enter a valid contact number";
     }
+    // An email is required only when a login account is being created.
+    if (form.createAccount) {
+      const email = form.email.trim();
+      if (!email) errs.email = "An email is required to create a login account";
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = "Enter a valid email address";
+    }
     return errs;
   };
 
@@ -294,14 +339,37 @@ export default function ResidentsPage() {
         currentAddress: composeAddress(form),
         permanentAddress: composeAddress(form),
       };
+      // Optional login account: only sent when the health worker opts in. The
+      // backend creates the Supabase Auth user in Pending Activation and links
+      // it to this profile; the resident sets their own password later.
+      if (form.createAccount) {
+        payload.createLoginAccount = true;
+        payload.email = form.email.trim();
+      }
       const result = await residentsApi.create({ resident: payload });
       setShowAddModal(false);
       setErrors({});
       const record = result?.resident;
-      showToast(record ? `${fullNameOf(record)} added to the resident directory.` : "Resident added.");
+      const accountCreated = Boolean(record?.authUserId);
+      showToast(
+        record
+          ? accountCreated
+            ? `${fullNameOf(record)} added. An invitation link was emailed to ${form.email.trim()}.`
+            : `${fullNameOf(record)} added to the resident directory.`
+          : "Resident added.",
+      );
       await load(q.trim());
       if (record) {
-        setSelected({ ...record, name: fullNameOf(record), age: calcAge(record.birthDate), status: record.verificationStatus || "unverified" });
+        setSelected({
+          ...record,
+          name: fullNameOf(record),
+          age: calcAge(record.birthDate),
+          status: record.verificationStatus || "unverified",
+          // A freshly created account starts in Pending Activation; otherwise
+          // the resident has No Account. The directory list refresh above reads
+          // the authoritative status from the API.
+          accountStatus: accountCreated ? "pending" : "none",
+        });
         setShowViewModal(true);
       }
     } catch (err) {
@@ -377,6 +445,7 @@ export default function ResidentsPage() {
     { key: "healthRecordNo", label: "Health Record No." },
     { key: "riskLevel", label: "Risk" },
     { key: "status", label: "Status" },
+    { key: "account", label: "Account" },
     { key: "actions", label: "" },
   ];
 
@@ -479,6 +548,7 @@ export default function ResidentsPage() {
                 );
               if (key === "status") return <StatusBadge value={row.status} />;
               if (key === "riskLevel") return <RiskBadge level={row.riskLevel} />;
+              if (key === "account") return <AccountStatusPill status={row.accountStatus} />;
               if (key === "actions")
                 return (
                   <div className="flex gap-3">
@@ -559,6 +629,52 @@ export default function ResidentsPage() {
                 <Field label="House No." value={form.houseNo} onChange={set("houseNo")} placeholder="Enter house number" optional />
               </div>
 
+              {/* Optional resident login account. A resident profile never
+                  requires an account; the health worker chooses whether to
+                  create one. When Yes, the account is created in Pending
+                  Activation and the resident sets their own password later. */}
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-brand-bg/40 p-4">
+                <p className="text-sm font-medium text-brand-ink">Create Resident Login Account?</p>
+                <p className="mt-0.5 text-xs text-brand-gray">
+                  Optional. The resident profile is created either way. Choose “Yes” only if this resident should be able to log in.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => set("createAccount")(false)}
+                    className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
+                      !form.createAccount ? "bg-brand-blue text-white" : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                    }`}
+                  >
+                    No
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => set("createAccount")(true)}
+                    className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
+                      form.createAccount ? "bg-brand-blue text-white" : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                    }`}
+                  >
+                    Yes
+                  </button>
+                </div>
+                {form.createAccount && (
+                  <div className="mt-4">
+                    <Field
+                      label="Email for login account"
+                      type="email"
+                      value={form.email}
+                      onChange={set("email")}
+                      placeholder="e.g. resident@example.com"
+                      error={errors.email}
+                    />
+                    <p className="mt-1 text-xs text-brand-gray">
+                      The account starts in Pending Activation. An invitation link is emailed to this address — the resident clicks it to set their own password and activate the account.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-end gap-3 mt-6">
                 <button onClick={closeAdd} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">
                   Cancel
@@ -620,6 +736,10 @@ export default function ResidentsPage() {
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Verification Status</p>
                     <div className="mt-1"><StatusBadge value={selected.status} /></div>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Account Status</p>
+                    <div className="mt-1"><AccountStatusPill status={selected.accountStatus} /></div>
                   </div>
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Registered</p>

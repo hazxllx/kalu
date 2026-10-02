@@ -53,3 +53,10 @@ test('normalizeMembers trims valid contact and keeps null when omitted', () => {
   ]);
   assert.equal(members[0].contact, '09171234567');
 });
+
+test('normalizeMembers preserves residentId when a member is linked to an existing resident record', () => {
+  const { members } = normalizeMembers([
+    { name: 'A', relationship: 'Head', sex: 'Male', residentId: 'RES-123' },
+  ]);
+  assert.equal(members[0].residentId, 'RES-123');
+});

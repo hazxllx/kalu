@@ -106,6 +106,9 @@ export default function DashboardLayout({ roleKey }) {
   }, []);
 
   const settingsPath = `/${roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`}/settings`;
+  // Build the profile path from the ROLE (not the current location) so the link
+  // never resolves to a non-existent /app/<role>/<subpage>/profile (404). V7
+  // centralizes this in the profilePathForRole helper (see navConfig).
   const profilePath = profilePathForRole(roleKey);
 
   const NavList = () => {
