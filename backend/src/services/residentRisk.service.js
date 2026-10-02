@@ -27,6 +27,10 @@ const latestVisitMap = (visits = []) => {
   const map = new Map();
   for (const v of visits) {
     const cur = map.get(v.residentId);
+    // "Latest" is decided by a plain string comparison, which is only correct
+    // because visit dates are stored as ISO-8601 (YYYY-MM-DD / RFC 3339), where
+    // lexicographic order matches chronological order. Fall back to createdAt
+    // when a visit has no explicit visitDate.
     const vt = String(v.visitDate || v.createdAt || '');
     if (!cur || vt > String(cur.visitDate || cur.createdAt || '')) map.set(v.residentId, v);
   }

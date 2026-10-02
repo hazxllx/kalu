@@ -394,7 +394,12 @@ export default function ResidentsPage() {
 
   /** Save the permitted corrections through the API. */
   const handleEditSave = async () => {
-    if (!validateEdit() || !editTarget) return;
+    if (!editTarget) return;
+    const errs = validateEdit();
+    if (Object.keys(errs).length > 0) {
+      setEditErrors(errs);
+      return;
+    }
     setEditSubmitting(true);
     setEditError(null);
     try {
