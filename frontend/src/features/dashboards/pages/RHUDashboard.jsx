@@ -8,65 +8,130 @@ import StatusBadge from "@/components/common/StatusBadge";
 import { SkeletonList } from "@/components/common/Skeleton";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
-import { Activity, HeartPulse, FileText, Calendar } from "lucide-react";
-
-/**
- * RHU Personnel overview.
- *
- * The RHU role is the triage front door: statistics and the queue are derived
- * live from the caller's own intake submissions (GET /intake/visits via
- * usePhnWorkflow), the same authoritative source the Triage page uses. No
- * placeholder/mock data is shown — tiles reflect the real pipeline or an
- * empty/loading state.
- */
+import {
+  Activity,
+  ArrowRight,
+  Bell,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  HeartPulse,
+  RefreshCw,
+  Stethoscope,
+} from "lucide-react";
 
 const QUICK_ACTIONS = [
-  { icon: Activity, label: "Triage", description: "Send a patient to the PHN for check-up", path: "/app/rhu_personnel/triage" },
-  { icon: HeartPulse, label: "Health Programs", description: "Manage health programs and initiatives", path: "/app/rhu_personnel/programs" },
-  { icon: FileText, label: "Medical Certificates", description: "Prepare and review resident certificates", path: "/app/rhu_personnel/certificates" },
-  { icon: Calendar, label: "Notifications", description: "Check your notifications", path: "/app/rhu_personnel/notifications" },
+  {
+    icon: Stethoscope,
+    label: "Open Triage",
+    path: "/app/rhu_personnel/triage",
+    description: "Record and manage RHU triage visits.",
+  },
+  {
+    icon: HeartPulse,
+    label: "Health Programs",
+    path: "/app/rhu_personnel/programs",
+    description: "View RHU health programs and activities.",
+  },
+  {
+    icon: Bell,
+    label: "View Notifications",
+    path: "/app/rhu_personnel/notifications",
+    description: "Review RHU notifications and updates.",
+  },
 ];
 
 const formatDate = (iso) => {
   if (!iso) return "";
-  const d = new Date(String(iso).length === 10 ? `${iso}T00:00:00` : iso);
+
+  const d = new Date(
+    String(iso).length === 10 ? `${iso}T00:00:00` : iso,
+  );
+
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const formatTime = (value) => {
+  if (!value) return "Time unavailable";
+
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? "Time unavailable"
+    : date.toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+};
+
+const localDayStart = (value) => {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
 };
 
 export default function RHUDashboard() {
-  const { patients, loading, error } = usePhnWorkflow({ source: "intake" });
+  const {
+    patients,
+    loading,
+    error,
+    refresh,
+  } = usePhnWorkflow({ source: "intake" });
+
+  const patientList = Array.isArray(patients) ? patients : [];
 
   const counts = useMemo(() => {
-    const list = Array.isArray(patients) ? patients : [];
     return {
-      total: list.length,
-      waiting: list.filter((p) => p.status === CHECKUP_STATUS.WAITING).length,
-      inCheckup: list.filter((p) => p.status === CHECKUP_STATUS.IN_CHECKUP).length,
-      completed: list.filter((p) => p.status === CHECKUP_STATUS.COMPLETED).length,
+      total: patientList.length,
+      waiting: patientList.filter(
+        (p) => p.status === CHECKUP_STATUS.WAITING,
+      ).length,
+      inCheckup: patientList.filter(
+        (p) => p.status === CHECKUP_STATUS.IN_CHECKUP,
+      ).length,
+      completed: patientList.filter(
+        (p) => p.status === CHECKUP_STATUS.COMPLETED,
+      ).length,
     };
-  }, [patients]);
+  }, [patientList]);
 
   const waitingPatients = useMemo(
-    () => (Array.isArray(patients) ? patients.filter((p) => p.status === CHECKUP_STATUS.WAITING) : []),
-    [patients],
+    () =>
+      patientList.filter(
+        (p) => p.status === CHECKUP_STATUS.WAITING,
+      ),
+    [patientList],
   );
 
-  // Most recent hand-offs first for the activity table.
   const recent = useMemo(() => {
-    const list = Array.isArray(patients) ? [...patients] : [];
-    return list
-      .sort((a, b) => String(b.visitDate || "").localeCompare(String(a.visitDate || "")))
+    return [...patientList]
+      .sort((a, b) =>
+        String(b.visitDate || "").localeCompare(
+          String(a.visitDate || ""),
+        ),
+      )
       .slice(0, 8);
-  }, [patients]);
+  }, [patientList]);
 
-  const fmt = (n) => (loading ? "—" : Number(n).toLocaleString());
-  const stats = [
-    { icon: "ClipboardList", label: "Triage Patients", value: fmt(counts.total), tone: "accent" },
-    { icon: "CalendarClock", label: "Waiting for PHN", value: fmt(counts.waiting), tone: "yellow" },
-    { icon: "Stethoscope", label: "In Check-up", value: fmt(counts.inCheckup), tone: "blue" },
-    { icon: "CheckCircle2", label: "Completed", value: fmt(counts.completed), tone: "green" },
-  ];
+  const todayStart = localDayStart(new Date());
+
+  const visitsToday = useMemo(
+    () =>
+      patientList.filter(
+        (visit) =>
+          localDayStart(visit.visitDate) === todayStart,
+      ),
+    [patientList, todayStart],
+  );
 
   const columns = [
     { key: "patient", label: "Patient" },
@@ -76,91 +141,336 @@ export default function RHUDashboard() {
   ];
 
   const renderCell = (row, column) => {
-    if (column.key === "status") return <StatusBadge value={row.status} />;
-    if (column.key === "barangay") return row.barangay || "—";
-    if (column.key === "reason") return row.reason || "—";
-    return row[column.key];
+    if (column.key === "status") {
+      return <StatusBadge value={row.status} />;
+    }
+
+    if (column.key === "barangay") {
+      return row.barangay || "—";
+    }
+
+    if (column.key === "reason") {
+      return row.reason || "—";
+    }
+
+    return row[column.key] || "—";
   };
 
+  const stats = [
+    {
+      icon: "ClipboardList",
+      label: "Triage Patients",
+      value: loading ? "—" : counts.total.toLocaleString(),
+      tone: "accent",
+    },
+    {
+      icon: "CalendarClock",
+      label: "Waiting for Consultation",
+      value: loading ? "—" : counts.waiting.toLocaleString(),
+      tone: "yellow",
+    },
+    {
+      icon: "Stethoscope",
+      label: "In Consultation",
+      value: loading ? "—" : counts.inCheckup.toLocaleString(),
+      tone: "blue",
+    },
+    {
+      icon: "CheckCircle2",
+      label: "Completed",
+      value: loading ? "—" : counts.completed.toLocaleString(),
+      tone: "green",
+    },
+  ];
+
+  const todayActivity = useMemo(() => {
+    return visitsToday
+      .map((visit) => ({
+        id: visit.id,
+        kind: "Triage recorded",
+        patient: visit.patient,
+        at: visit.visitDate,
+      }))
+      .sort(
+        (left, right) =>
+          new Date(right.at).getTime() -
+          new Date(left.at).getTime(),
+      );
+  }, [visitsToday]);
+
   return (
-    <>
+    <div className="space-y-6">
       <PageHeader
         crumbs={["Dashboard"]}
         title="RHU Overview"
-        subtitle="Triage hand-offs to the PHN check-up queue."
+        subtitle="Manage RHU triage visits and the consultation workflow."
       />
 
-      {error && <Card className="mb-5 p-4 text-sm text-brand-danger">{error}</Card>}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 mb-6">
-        {stats.map((s, i) => (
-          <StatCard key={s.label} {...s} index={i} />
-        ))}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-btn border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue disabled:opacity-50"
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${
+              loading ? "animate-spin" : ""
+            }`}
+          />
+          Refresh
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-        <Card className="p-4 sm:p-6 lg:col-span-2">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Recent Triage Hand-offs</h3>
-          {loading ? (
-            <SkeletonList rows={5} />
-          ) : recent.length === 0 ? (
-            <p className="text-sm text-brand-gray py-6 text-center">No triage records yet.</p>
-          ) : (
-            <DataTable columns={columns} rows={recent} renderCell={renderCell} />
-          )}
+      {error && (
+        <Card className="p-4 text-sm text-brand-danger">
+          {error}
         </Card>
+      )}
 
-        <Card className="p-4 sm:p-6 h-fit">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Triage Queue</h3>
-          {loading ? (
-            <SkeletonList rows={4} />
-          ) : waitingPatients.length === 0 ? (
-            <p className="text-sm text-brand-gray py-6 text-center">No patients waiting for the PHN.</p>
-          ) : (
-            <div className="space-y-3">
-              {waitingPatients.slice(0, 5).map((t) => (
-                <div key={t.id} className="flex items-center justify-between py-2 border-b border-brand-border last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-brand-ink truncate">{t.patient}</p>
-                    <p className="text-xs text-brand-gray truncate">
-                      {[t.barangay, formatDate(t.visitDate)].filter(Boolean).join(" • ")}
+      <section aria-labelledby="summary-heading">
+        <div className="mb-3 flex items-center justify-between">
+          <h2
+            id="summary-heading"
+            className="text-base font-semibold text-brand-ink"
+          >
+            Operational Summary
+          </h2>
+
+          {loading && (
+            <span className="text-xs text-brand-gray">
+              Updating…
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {stats.map((stat, index) => (
+            <StatCard
+              key={stat.label}
+              {...stat}
+              index={index}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section aria-labelledby="quick-actions-heading">
+        <div className="mb-3 flex items-center justify-between">
+          <h2
+            id="quick-actions-heading"
+            className="text-base font-semibold text-brand-ink"
+          >
+            Quick Actions
+          </h2>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {QUICK_ACTIONS.map((action) => (
+            <Link
+              key={action.label}
+              to={action.path}
+              className="block"
+            >
+              <Card className="h-full p-4 transition-colors hover:border-brand-blue">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-brand-blue/10 p-2">
+                    <action.icon className="h-5 w-5 text-brand-blue" />
+                  </div>
+
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold text-brand-ink">
+                      {action.label}
+                    </h4>
+
+                    <p className="mt-1 text-xs text-brand-gray">
+                      {action.description}
                     </p>
                   </div>
-                  <StatusBadge value={t.status} />
-                </div>
-              ))}
-            </div>
-          )}
-          <Link
-            to="/app/rhu_personnel/triage"
-            className="block w-full mt-4 text-center text-sm font-medium text-brand-blue hover:underline"
-          >
-            Open Triage Queue
-          </Link>
-        </Card>
-      </div>
 
-      {/* Quick Actions */}
-      <div className="mt-6">
-        <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4">Quick Actions</h3>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {QUICK_ACTIONS.map((action) => (
-            <Link key={action.label} to={action.path} className="block">
-              <Card className="p-4 hover:border-brand-blue transition-colors cursor-pointer h-full">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-brand-blue/10 rounded-lg">
-                    <action.icon className="w-5 h-5 text-brand-blue" />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-brand-ink text-sm">{action.label}</h4>
-                    <p className="text-xs text-brand-gray mt-1">{action.description}</p>
-                  </div>
+                  <ArrowRight className="mt-1 h-4 w-4 text-brand-gray" />
                 </div>
               </Card>
             </Link>
           ))}
         </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
+        <Card className="p-4 sm:p-6 lg:col-span-2">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-brand-ink sm:text-base">
+              Recent Triage Hand-offs
+            </h3>
+
+            <Link
+              to="/app/rhu_personnel/triage"
+              className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
+            >
+              Open Triage
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+
+          {loading ? (
+            <SkeletonList rows={5} />
+          ) : recent.length === 0 ? (
+            <p className="py-6 text-center text-sm text-brand-gray">
+              No triage records yet.
+            </p>
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={recent}
+              renderCell={renderCell}
+            />
+          )}
+        </Card>
+
+        <Card className="h-fit p-4 sm:p-6">
+          <h3 className="mb-4 text-sm font-semibold text-brand-ink sm:text-base">
+            Consultation Queue
+          </h3>
+
+          {loading ? (
+            <SkeletonList rows={4} />
+          ) : waitingPatients.length === 0 ? (
+            <p className="py-6 text-center text-sm text-brand-gray">
+              No patients waiting for consultation.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {waitingPatients.slice(0, 5).map((patient) => (
+                <div
+                  key={patient.id}
+                  className="flex items-center justify-between border-b border-brand-border py-2 last:border-0"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-brand-ink">
+                      {patient.patient}
+                    </p>
+
+                    <p className="truncate text-xs text-brand-gray">
+                      {[
+                        patient.barangay,
+                        formatDate(patient.visitDate),
+                      ]
+                        .filter(Boolean)
+                        .join(" • ")}
+                    </p>
+                  </div>
+
+                  <StatusBadge value={patient.status} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Link
+            to="/app/rhu_personnel/triage"
+            className="mt-4 block w-full text-center text-sm font-medium text-brand-blue hover:underline"
+          >
+            Open Consultation Queue
+          </Link>
+        </Card>
       </div>
-    </>
+
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+        <Card className="p-4 sm:p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-brand-ink sm:text-base">
+                Today&apos;s Activity
+              </h3>
+
+              <p className="mt-1 text-xs text-brand-gray">
+                RHU activities recorded today
+              </p>
+            </div>
+
+            <Activity className="h-5 w-5 text-brand-blue" />
+          </div>
+
+          {loading ? (
+            <SkeletonList rows={3} />
+          ) : todayActivity.length === 0 ? (
+            <p className="py-6 text-center text-sm text-brand-gray">
+              No RHU activity recorded today.
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {todayActivity.slice(0, 5).map((item, index) => (
+                <li
+                  key={`${item.id || "activity"}-${index}`}
+                  className="flex items-center justify-between gap-3 py-2.5"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Activity className="h-4 w-4 shrink-0 text-brand-blue" />
+
+                    <span className="truncate text-sm text-brand-ink">
+                      {item.kind}
+                      {item.patient
+                        ? ` — ${item.patient}`
+                        : ""}
+                    </span>
+                  </div>
+
+                  <time className="shrink-0 text-xs text-brand-gray">
+                    {formatTime(item.at)}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card className="p-4 sm:p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-brand-ink sm:text-base">
+                Health Programs
+              </h3>
+
+              <p className="mt-1 text-xs text-brand-gray">
+                Access RHU health programs and activities.
+              </p>
+            </div>
+
+            <HeartPulse className="h-5 w-5 text-brand-blue" />
+          </div>
+
+          <p className="text-sm text-brand-gray">
+            Program-specific dashboard metrics are not
+            currently connected to the RHU dashboard.
+          </p>
+
+          <Link
+            to="/app/rhu_personnel/programs"
+            className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
+          >
+            View Health Programs
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </Card>
+      </div>
+
+      <Card className="p-4 text-sm text-brand-gray sm:p-6">
+        <div className="flex items-start gap-3">
+          <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-brand-blue" />
+
+          <div>
+            <p className="font-medium text-brand-ink">
+              RHU Workflow
+            </p>
+
+            <p className="mt-1">
+              Patients are recorded through RHU Triage and
+              then sent to the RHU Consultation Station for
+              consultation and findings/assessment.
+            </p>
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }

@@ -8,6 +8,7 @@
 export const getStatus = () => ({
   status: 'ok',
   message: 'KALUSAGAP backend is running',
+  uptimeSeconds: Math.floor(process.uptime()),
 });
 
 export default { getStatus };

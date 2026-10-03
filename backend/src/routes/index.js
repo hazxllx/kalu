@@ -25,6 +25,7 @@ import reportsRoutes from './reports.routes.js';
 import healthServicesRoutes from './healthServices.routes.js';
 import rolesRoutes from './roles.routes.js';
 import municipalSubmissionsRoutes from './municipalSubmissions.routes.js';
+import riskConfigRoutes from './riskConfig.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -57,7 +58,7 @@ router.use('/operational', operationalRoutes);
 //   GET  /staff-accounts/queue, /:id/approve ...  PHN + Health Supervisor only
 router.use('/staff-accounts', staffAccountsRoutes);
 
-// Medical certificate register (RHU Personnel prepare, PHN/MHO review).
+// Medical certificate register (PHN/MHO prepare; PHN/MHO review).
 router.use('/medical-certificates', medicalCertificatesRoutes);
 
 // Administration observability — Audit Trail (business events) and System Log
@@ -95,6 +96,12 @@ router.use('/users', usersRoutes);
 // Role & permission matrix (BUG-011) — authoritative access-control config in
 // public.role_permissions. Read by any staff (drives UI), written by admins.
 router.use('/roles', rolesRoutes);
+
+// Resident risk assessment configuration — authoritative criteria + thresholds
+// (public.risk_criteria + public.risk_settings). Read by clinical/monitoring
+// roles; written only by the System Administrator, audited, and propagated to
+// resident records on every change.
+router.use('/risk-config', riskConfigRoutes);
 
 // MHO municipal submission review (BUG-010) — persistent review decisions in
 // public.municipal_submission_reviews (MHO-only writes, municipality-scoped).

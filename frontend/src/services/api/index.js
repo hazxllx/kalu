@@ -28,4 +28,5 @@ export { reportsApi } from './reportsApi';
 export { healthServicesApi } from './healthServicesApi';
 export { rolesApi } from './rolesApi';
 export { householdRiskApi } from './householdRiskApi';
+export { riskConfigApi } from './riskConfigApi';
 export { municipalSubmissionsApi } from './municipalSubmissionsApi';

@@ -3,6 +3,7 @@ import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
 import { getServiceClient } from '../config/supabase.js';
 import * as operational from './operational.service.js';
+import { persistResidentRisk } from './residentRisk.service.js';
 
 const STAFF_ROLES = new Set(['health_supervisor', 'phn']);
 const text = (value) => String(value ?? '').trim();
@@ -21,11 +22,11 @@ const inRange = (value, lo, hi) => {
 };
 const present = (value) => value !== undefined && value !== null && String(value).trim() !== '';
 
-export const validateVitals = (payload = {}) => {
-  const errors = [];
+const validateVitalsByField = (payload = {}) => {
+  const errors = {};
   const check = (field, label, lo, hi) => {
     if (!present(payload[field])) return;
-    if (!inRange(payload[field], lo, hi)) errors.push(`${label} must be between ${lo} and ${hi}.`);
+    if (!inRange(payload[field], lo, hi)) errors[field] = `${label} must be between ${lo} and ${hi}.`;
   };
   check('temperature', 'Temperature (°C)', 30, 45);
   check('pulseRate', 'Pulse rate (bpm)', 20, 250);
@@ -37,17 +38,19 @@ export const validateVitals = (payload = {}) => {
   if (present(payload.bloodPressure)) {
     const m = text(payload.bloodPressure).match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/);
     if (!m) {
-      errors.push('Blood pressure must be in the form systolic/diastolic (e.g. 120/80).');
+      errors.bloodPressure = 'Blood pressure must be in the form systolic/diastolic (e.g. 120/80).';
     } else {
       const sys = Number(m[1]);
       const dia = Number(m[2]);
-      if (!inRange(sys, 50, 300)) errors.push('Systolic blood pressure must be between 50 and 300.');
-      else if (!inRange(dia, 30, 200)) errors.push('Diastolic blood pressure must be between 30 and 200.');
-      else if (sys <= dia) errors.push('Systolic blood pressure must be greater than diastolic.');
+      if (!inRange(sys, 50, 300)) errors.bloodPressure = 'Systolic blood pressure must be between 50 and 300.';
+      else if (!inRange(dia, 30, 200)) errors.bloodPressure = 'Diastolic blood pressure must be between 30 and 200.';
+      else if (sys <= dia) errors.bloodPressure = 'Systolic blood pressure must be greater than diastolic.';
     }
   }
   return errors;
 };
+
+export const validateVitals = (payload = {}) => Object.values(validateVitalsByField(payload));
 
 /**
  * Follow-up date consistency for a consultation (issue #15).
@@ -124,19 +127,46 @@ const toVisit = (payload = {}, user, residentId) => ({
   },
 });
 
-const fromVisit = (visit) => {
+const fromVisit = async (visit, supabase = getServiceClient()) => {
   const resident = visit.resident || {};
   const findings = text(visit.findings);
   const diagnosisMarker = '\nDiagnosis: ';
   const [findingsText, diagnosis] = findings.includes(diagnosisMarker)
     ? findings.split(diagnosisMarker)
     : [findings, visit.phn?.assessment || ''];
+
+  let attendingPersonnel = null;
+  let facilityName = null;
+
+  if (visit.recordedById) {
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id, full_name, position, facility_id, facilities(name)')
+        .eq('id', visit.recordedById)
+        .maybeSingle();
+      if (profile) {
+        attendingPersonnel = {
+          id: profile.id,
+          fullName: profile.full_name || '',
+          position: profile.position || '',
+        };
+        facilityName = profile.facilities?.name || null;
+      }
+    } catch {
+      attendingPersonnel = {
+        fullName: visit.recordedByName || '',
+      };
+    }
+  }
+
   return {
     id: visit.id,
     resident: {
       id: resident.id || visit.residentId,
       name: [resident.firstName, resident.middleName, resident.lastName].filter(Boolean).join(' '),
       barangay: resident.barangay || '',
+      barangayId: resident.barangayId || visit.barangay_id || '',
       sex: resident.sex || '',
       contact: resident.cellphoneNo || '',
       age: resident.birthDate ? Math.max(0, new Date().getFullYear() - new Date(resident.birthDate).getFullYear()) : '',
@@ -156,6 +186,8 @@ const fromVisit = (visit) => {
     vitals: visit.vitals || {},
     status: visit.status,
     createdAt: visit.createdAt,
+    facilityName: facilityName,
+    attendingPersonnel: attendingPersonnel,
   };
 };
 
@@ -300,48 +332,77 @@ export const syncConsultationFollowUp = async ({
   }
 };
 
-export const list = async ({ user, q = '' }) => {
+export const list = async ({ user, q = '', repo = repository, supabase = getServiceClient() }) => {
+  if (user?.role === 'resident') {
+    const resident = await repo.getResidentByAuthUserId(user.id);
+    if (!resident) return { rows: [], total: 0 };
+    const result = await repo.listVisits({ q: text(q), residentId: resident.id, limit: 200 });
+    return { rows: await Promise.all(result.rows.map((v) => fromVisit(v, supabase))), total: result.total };
+  }
+
   assertStaff(user);
-  const result = await repository.listVisits({ q: text(q), limit: 200 });
-  const rows = result.rows.filter((visit) => {
-    try { assertResidentScope(user, visit.resident); return true; } catch { return false; }
-  });
-  return { rows: rows.map(fromVisit), total: rows.length };
+  const result = await repo.listVisits({ q: text(q), limit: 200 });
+  const filtered = [];
+  for (const visit of result.rows) {
+    try { assertResidentScope(user, visit.resident); filtered.push(visit); } catch {}
+  }
+  return { rows: await Promise.all(filtered.map((v) => fromVisit(v, supabase))), total: filtered.length };
 };
 
-export const create = async ({ user, payload = {} }) => {
+const consultationFieldErrors = (payload = {}, { requireResident = false } = {}) => {
+  const errors = validateVitalsByField(payload);
+  const required = (field, message) => {
+    if (!text(payload[field])) errors[field] = message;
+  };
+  if (requireResident) required('residentId', 'Please select a resident.');
+  required('consultationDate', 'Consultation date is required.');
+  if (payload.consultationDate && Number.isNaN(Date.parse(text(payload.consultationDate)))) {
+    errors.consultationDate = 'Consultation date is invalid.';
+  }
+  required('chiefComplaint', 'Chief complaint is required.');
+  required('findings', 'Findings are required.');
+  required('diagnosis', 'Diagnosis is required.');
+  const { errors: followUpErrors } = validateFollowUp(payload);
+  if (followUpErrors.length) errors.nextVisitDate = followUpErrors.join(' ');
+  return errors;
+};
+
+export const create = async ({ user, payload = {}, supabase = getServiceClient() }) => {
   assertStaff(user);
+  const fieldErrors = consultationFieldErrors(payload, { requireResident: true });
+  if (Object.keys(fieldErrors).length) {
+    throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
+  }
   const resident = await repository.getResident(payload.residentId);
   assertResidentScope(user, resident);
-  if (!payload.consultationDate || !text(payload.chiefComplaint) || !text(payload.findings) || !text(payload.diagnosis)) {
-    throw ApiError.unprocessable('Resident, consultation date, chief complaint, findings, and diagnosis are required.');
-  }
-  const vitalErrors = validateVitals(payload);
   const { errors: followUpErrors, normalized } = validateFollowUp(payload);
-  const allErrors = [...vitalErrors, ...followUpErrors];
-  if (allErrors.length) throw ApiError.unprocessable('Please correct the highlighted consultation values.', allErrors);
+  if (followUpErrors.length) throw ApiError.unprocessable('Please correct the consultation fields shown below.', { nextVisitDate: followUpErrors.join(' ') });
   const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate };
   const ids = await repository.nextSubmissionId();
   const visit = await repository.insertVisit({ id: ids.id, ...toVisit(cleanPayload, user, resident.id) });
-  // Create the linked follow-up (own resident) when a Next Visit Date is set.
-  await syncConsultationFollowUp({ user, visit, payload: cleanPayload });
-  return fromVisit(visit);
+  await syncConsultationFollowUp({ user, visit, payload: cleanPayload, supabase });
+  // Recorded health data changed -> recompute + persist the resident's risk
+  // (backend-authoritative; best-effort so a save is never blocked by it).
+  await persistResidentRisk({ residentId: resident.id });
+  return fromVisit(visit, supabase);
 };
 
-export const update = async ({ user, id, payload = {} }) => {
+export const update = async ({ user, id, payload = {}, supabase = getServiceClient() }) => {
   assertStaff(user);
   const visit = await repository.getVisit(id);
   if (!visit) throw ApiError.notFound('Consultation not found.');
   assertResidentScope(user, visit.resident);
-  const vitalErrors = validateVitals(payload);
+  const fieldErrors = consultationFieldErrors(payload);
   const { errors: followUpErrors, normalized } = validateFollowUp(payload);
-  const allErrors = [...vitalErrors, ...followUpErrors];
-  if (allErrors.length) throw ApiError.unprocessable('Please correct the highlighted consultation values.', allErrors);
+  if (Object.keys(fieldErrors).length) {
+    throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
+  }
   const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate, residentId: visit.residentId };
   const updated = await repository.updateVisit(id, toVisit(cleanPayload, user, visit.residentId));
-  // Create / reschedule / cancel the linked follow-up to match the edited form.
-  await syncConsultationFollowUp({ user, visit: updated, payload: cleanPayload });
-  return fromVisit(updated);
+  await syncConsultationFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
+  // Recorded health data changed -> recompute + persist the resident's risk.
+  await persistResidentRisk({ residentId: visit.residentId });
+  return fromVisit(updated, supabase);
 };
 
 export default { list, create, update };

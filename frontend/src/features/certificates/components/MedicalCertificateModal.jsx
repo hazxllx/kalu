@@ -47,8 +47,9 @@ function Field({ label, required, error, children }) {
  * Shared Medical Certificate modal.
  *
  * Modes:
- *  - "create" (RHU Personnel / PHN / MHO): prepare a certificate for the given
+ *  - "create" (PHN / MHO): prepare a certificate for the given
  *    resident, save as Draft or submit For Review.
+ *  - "edit" (PHN / MHO): update a Draft or For Review document before approval.
  *  - "view": read-only certificate preview with its real decision history.
  *  - "review" (PHN / MHO): preview + Approve/Issue/Reject actions with notes.
  *
@@ -92,6 +93,8 @@ const [busy, setBusy] = useState("");
 const { printCertificate, portal } = useCertificatePrint();
 
   const isCreate = mode === "create";
+  const isEdit = mode === "edit";
+  const isFormMode = isCreate || isEdit;
   const isReview = mode === "review";
   const canDecide = isReview && certificate && ["For Review", "Approved"].includes(certificate.status);
 
@@ -116,17 +119,22 @@ const { printCertificate, portal } = useCertificatePrint();
     try {
       // The resident is identified by id only — the API resolves the resident's
       // barangay/municipality scope server-side and never trusts the client.
-      const { record } = await medicalCertificatesApi.create({
-        residentId: patient.patientId,
+      const payload = {
         purpose: form.purpose,
         findings: form.findings.trim(),
         dateOfExamination: form.dateOfExamination,
         medicalOfficer: form.medicalOfficer.trim(),
         licenseNumber: form.licenseNumber.trim(),
         notes: form.notes,
-      });
-      if (submit) await medicalCertificatesApi.submitForReview(record.id);
-      onSaved?.(submit ? "For Review" : "Draft");
+      };
+      if (isEdit) {
+        await medicalCertificatesApi.update(certificate.id, payload);
+        onSaved?.("updated");
+      } else {
+        const { record } = await medicalCertificatesApi.create({ residentId: patient.patientId, ...payload });
+        if (submit) await medicalCertificatesApi.submitForReview(record.id);
+        onSaved?.(submit ? "For Review" : "Draft");
+      }
       onClose();
     } catch (err) {
       setErrors((p) => ({ ...p, submit: err?.message || "The certificate could not be saved." }));
@@ -161,7 +169,7 @@ const { printCertificate, portal } = useCertificatePrint();
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className={`max-h-[92vh] w-full overflow-y-auto ${isCreate ? "max-w-2xl" : "max-w-4xl"}`}>
+      <Card className={`max-h-[92vh] w-full overflow-y-auto ${isFormMode ? "max-w-2xl" : "max-w-4xl"}`}>
         <div className="p-6">
           <div className="mb-1 flex items-start justify-between gap-3">
             <div>
@@ -182,7 +190,7 @@ const { printCertificate, portal } = useCertificatePrint();
             </div>
           </div>
 
-          {isCreate ? (
+          {isFormMode ? (
             <div className="mt-4 space-y-4">
               <div>
                 <Field label="Purpose of Certificate" required error={errors.purpose}>
@@ -211,27 +219,40 @@ const { printCertificate, portal } = useCertificatePrint();
                   <input type="text" value={form.licenseNumber} onChange={(e) => set("licenseNumber")(e.target.value)} className={inputCls()} />
                 </Field>
               </div>
-              <p className="rounded-btn border border-brand-blue/15 bg-brand-light/50 dark:bg-card-nested px-3.5 py-2.5 text-xs leading-relaxed text-brand-gray">
-                Certificates prepared at triage or by a PHN are submitted for PHN or MHO review before they become
-                official.
-              </p>
+              {isCreate && (
+                <p className="rounded-btn border border-brand-blue/15 bg-brand-light/50 dark:bg-card-nested px-3.5 py-2.5 text-xs leading-relaxed text-brand-gray">
+                  Certificates prepared at triage or by a PHN are submitted for PHN or MHO review before they become official.
+                </p>
+              )}
               {errors.submit && <p className="text-xs text-brand-danger">{errors.submit}</p>}
               <div className="flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
                 <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-                <button
-                  onClick={() => handleSave(false)}
-                  disabled={Boolean(busy)}
-                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
-                >
-                  {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save Draft
-                </button>
-                <button
-                  onClick={() => handleSave(true)}
-                  disabled={Boolean(busy)}
-                  className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-                >
-                  <Send className="h-4 w-4" /> Submit for Review
-                </button>
+                {isEdit ? (
+                  <button
+                    onClick={() => handleSave(false)}
+                    disabled={Boolean(busy)}
+                    className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                  >
+                    {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save Changes
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => handleSave(false)}
+                      disabled={Boolean(busy)}
+                      className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
+                    >
+                      {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Save Draft
+                    </button>
+                    <button
+                      onClick={() => handleSave(true)}
+                      disabled={Boolean(busy)}
+                      className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                    >
+                      <Send className="h-4 w-4" /> Submit for Review
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ) : (

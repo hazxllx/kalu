@@ -8,8 +8,7 @@
  * Delivery model (recipient is a ROLE within the sender's scope, never a
  * hard-coded PHN):
  *   PHN                -> MHO            (municipality-wide)
- *   Health Supervisor  -> RHU Personnel  (municipality RHU)
- *   RHU Personnel      -> MHO            (municipality-wide)
+ *   Health Supervisor  -> RHU Personnel  (municipality RHU; PHN/MHO oversight)
  *
  * SECURITY MODEL (defense in depth, mirroring referrals/medicalCertificates):
  *   - the sender is always the authenticated user; created_by is never trusted
@@ -44,7 +43,6 @@ export const REPORT_STATUSES = Object.freeze(Object.values(REPORT_STATUS));
 export const REPORT_ROUTES = Object.freeze({
   [ROLES.PHN]: [ROLES.MHO],
   [ROLES.HEALTH_SUPERVISOR]: [ROLES.RHU_PERSONNEL],
-  [ROLES.RHU_PERSONNEL]: [ROLES.MHO],
   [ROLES.MHO]: [ROLES.MHO],
 });
 
@@ -121,9 +119,10 @@ export const list = async ({ user, box = 'incoming', status = null, supabase = g
   if (box === 'outgoing') {
     query = query.eq('created_by', user.id);
   } else {
-    // Incoming: routed to the caller's role within their municipality (and
-    // barangay when the caller is barangay-scoped).
-    query = query.eq('recipient_role', user.role);
+    // MHO has read-only municipality oversight of PHN inbox submissions.
+    const recipientRoles = [user.role];
+    if (user.role === ROLES.PHN || user.role === ROLES.MHO) recipientRoles.push(ROLES.RHU_PERSONNEL);
+    query = query.in('recipient_role', recipientRoles);
     if (!user.municipalityId) return [];
     query = query.eq('municipality_id', user.municipalityId);
     if (user.role === ROLES.HEALTH_SUPERVISOR) {
@@ -145,8 +144,11 @@ export const list = async ({ user, box = 'incoming', status = null, supabase = g
 const inScope = (user, row) => {
   if (!row) return false;
   if (row.created_by === user.id) return true;
+  if ([ROLES.PHN, ROLES.MHO].includes(user.role) && row.recipient_role === ROLES.RHU_PERSONNEL) {
+    return Boolean(user.municipalityId && row.municipality_id === user.municipalityId);
+  }
   if (row.recipient_role !== user.role) return false;
-  if (user.municipalityId && row.municipality_id && row.municipality_id !== user.municipalityId) return false;
+  if (!user.municipalityId || row.municipality_id !== user.municipalityId) return false;
   if (user.role === ROLES.HEALTH_SUPERVISOR && row.barangay_id && row.barangay_id !== user.barangayId) return false;
   return true;
 };
@@ -159,9 +161,12 @@ export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   return toReport(data);
 };
 
-/** Recipient auth-user ids for a routed report, for notification. */
+/** Auth-user ids for the routed recipient or its authorized operational observers. */
 const recipientAuthUserIds = async (supabase, { recipientRole, municipalityId, barangayId }) => {
-  let query = supabase.from('profiles').select('id').eq('role', recipientRole).eq('status', 'active');
+  const roles = recipientRole === ROLES.RHU_PERSONNEL
+    ? [ROLES.PHN, ROLES.MHO]
+    : [recipientRole];
+  let query = supabase.from('profiles').select('id').in('role', roles).eq('status', 'active');
   if (municipalityId) query = query.eq('municipality_id', municipalityId);
   if (recipientRole === ROLES.HEALTH_SUPERVISOR && barangayId) query = query.eq('barangay_id', barangayId);
   const { data, error } = await query;
@@ -237,8 +242,9 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
 
   // Only the routed recipient (not the sender) may review.
   const isRecipient =
-    existing.recipient_role === user.role &&
-    (!user.municipalityId || existing.municipality_id === user.municipalityId) &&
+    (existing.recipient_role === user.role ||
+      (existing.recipient_role === ROLES.RHU_PERSONNEL && [ROLES.PHN, ROLES.MHO].includes(user.role))) &&
+    Boolean(user.municipalityId && existing.municipality_id === user.municipalityId) &&
     (user.role !== ROLES.HEALTH_SUPERVISOR || existing.barangay_id === user.barangayId);
   if (!isRecipient) throw ApiError.forbidden('Only the report recipient may review this report.');
   if (existing.status === REPORT_STATUS.DRAFT) throw ApiError.conflict('This report has not been submitted yet.');

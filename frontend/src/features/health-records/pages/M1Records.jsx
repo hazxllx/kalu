@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
@@ -8,18 +9,70 @@ import StatusBadge from "@/components/common/StatusBadge";
 import StatCard from "@/components/common/StatCard";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import {
-  Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight,
+  Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight, Trash2,
+  Users, HeartPulse, Syringe, Smile, Activity, Droplets, ShieldAlert, FileBarChart2, ChevronRight as ArrowChevron,
 } from "lucide-react";
-import { maternalApi, residentsApi, referralsApi } from "@/services/api";
+import { maternalApi, residentsApi, referralsApi, m1Api } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 import {
-  filterByPeriod, availableYears, summarize, monthlyBreakdown, followUpStatus, MONTH_LABELS,
+  filterByPeriod, availableYears, periodBreakdown, followUpStatus, MONTH_LABELS,
 } from "@/features/health-records/lib/m1Analytics";
-import { downloadM1Report } from "@/features/health-records/lib/m1Report";
+import {
+  periodLabel as makePeriodLabel, fhsisPeriodLabel, toReportParams,
+  QUARTER_RANGE_LABEL, QUARTERS, quarterOfMonth0,
+} from "@/features/health-records/lib/reportingPeriod";
+import { useM1OfficialPrint } from "@/features/health-records/components/M1OfficialForm";
+import M1DataEntryModal from "@/features/health-records/components/M1DataEntryModal";
+import M1SectionPanel from "@/features/health-records/components/M1SectionPanel";
+
+// FHSIS M1 program sections shown as the Health Services launcher. Maternal Care
+// opens the in-page operational records; Child Care and Environmental Health
+// open their existing operational modules; the remaining sections open the
+// section workspace (live indicator values + manual reporting input where an
+// indicator has no operational source). Order/labels follow the official M1 form.
+const HEALTH_SERVICES = [
+  { key: "A", title: "Family Planning", desc: "Women of reproductive age and family planning method utilization.", icon: Users, kind: "section" },
+  { key: "B", title: "Maternal Care", desc: "Prenatal, delivery and postpartum services.", icon: HeartPulse, kind: "maternal" },
+  { key: "C", title: "Child Care", desc: "Immunization, nutrition and child services.", icon: Syringe, kind: "nav", to: "../immunization" },
+  { key: "D", title: "Oral Health", desc: "Oral health care visits across age groups.", icon: Smile, kind: "section" },
+  { key: "F", title: "Non-Communicable Diseases", desc: "Risk assessment, hypertension, diabetes, cancer screening.", icon: Activity, kind: "section" },
+  { key: "G", title: "Environmental Health", desc: "Household water supply and sanitation.", icon: Droplets, kind: "nav", to: "../households" },
+  { key: "E", title: "Infectious Disease", desc: "TB, rabies, schistosomiasis, leprosy, malaria.", icon: ShieldAlert, kind: "section" },
+  { key: "H", title: "Vital Statistics", desc: "Mortality and natality.", icon: FileBarChart2, kind: "section" },
+];
+const SECTION_TITLE = Object.fromEntries(HEALTH_SERVICES.map((s) => [s.key, s.title]));
 
 const RISK_LEVELS = ["Low", "Moderate", "High"];
 const STATUSES = ["Active", "Delivered", "Transferred", "Inactive"];
+
+// Canonical delivery vocabulary. These exact values are what the FHSIS M1
+// Section B2 derivation matches on (see backend/src/config/m1Catalog.js), so the
+// delivery indicators can be computed from the maternal case instead of being
+// re-entered on the M1 form.
+const DELIVERY_TYPES = ["Vaginal", "Cesarean"];
+const DELIVERY_OUTCOMES = ["Live Birth", "Fetal Death"];
+const DELIVERY_PLACES = ["Public Facility", "Private Facility", "Home / Non-Facility"];
+const BIRTH_ATTENDANTS = ["Doctor", "Nurse", "Midwife", "Hilot/TBA", "Other"];
+
+// ---------------------------------------------------------------------------
+// FHSIS M1 export (official reporting-form layout).
+//
+// The "Export" button produces the official FHSIS Monthly Form M1 through a
+// DEDICATED print renderer (M1OfficialForm + useM1OfficialPrint → browser
+// "Save as PDF"). That print layer reproduces the official form structure
+// (navy section bars, grouped/merged column headers, the Family-Planning
+// matrix, parent/child indicator hierarchy) and is completely separate from
+// this screen UI, so cleaning up the Maternal Record screen never alters the
+// printed form. The SAME official layout is used for Monthly, Quarterly and
+// Annual exports — only the reporting period and the aggregated values change.
+//
+// Values come straight from the M1 aggregation API (`m1Api.report` → `byCode`),
+// which aggregates the persisted records server-side for the selected period
+// (barangay-scoped). Monthly uses the selected month, Quarterly aggregates its
+// three months, Annual aggregates January–December. Nothing is hardcoded and
+// the PDF never uses a separate dataset from the screen.
+// ---------------------------------------------------------------------------
 
 /** persisted maternal_records row (snake_case) → view shape. */
 const mapRecord = (row) => ({
@@ -42,6 +95,8 @@ const mapRecord = (row) => ({
   provider: row.provider || "",
   // Post-partum care & delivery outcome
   typeOfDelivery: row.type_of_delivery || "",
+  deliveryDate: row.delivery_date || "",
+  deliveryOutcome: row.delivery_outcome || "",
   birthWeight: row.birth_weight || "",
   placeOfDelivery: row.place_of_delivery || "",
   birthAttendant: row.birth_attendant || "",
@@ -72,6 +127,8 @@ const EMPTY_FORM = () => ({
   provider: "",
   notes: "",
   typeOfDelivery: "",
+  deliveryDate: "",
+  deliveryOutcome: "",
   birthWeight: "",
   placeOfDelivery: "",
   birthAttendant: "",
@@ -191,22 +248,45 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             {/* Post-partum Care and Delivery Outcome */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Post-partum Care &amp; Delivery Outcome</p>
+              <p className="mb-2 text-[11px] text-brand-gray">These delivery fields feed the FHSIS M1 Section B2 indicators automatically — enter the delivery here and they are counted in the report; do not re-enter them in M1 Data Entry.</p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="text-sm font-medium text-brand-ink">Type of Delivery</label>
-                  <input type="text" value={form.typeOfDelivery} onChange={(e) => set("typeOfDelivery")(e.target.value)} placeholder="e.g. Normal / Cesarean" className={inputCls()} />
+                  <label className="text-sm font-medium text-brand-ink">Date of Delivery</label>
+                  <input type="date" value={form.deliveryDate} onChange={(e) => set("deliveryDate")(e.target.value)} className={inputCls()} />
+                  <p className="mt-1 text-[11px] text-brand-gray">Reporting month for Section B2 delivery indicators.</p>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-brand-ink">Birth Weight</label>
-                  <input type="text" value={form.birthWeight} onChange={(e) => set("birthWeight")(e.target.value)} placeholder="e.g. 3.2 kg" className={inputCls()} />
+                  <label className="text-sm font-medium text-brand-ink">Delivery Outcome</label>
+                  <select value={form.deliveryOutcome} onChange={(e) => set("deliveryOutcome")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    {DELIVERY_OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Type of Delivery</label>
+                  <select value={form.typeOfDelivery} onChange={(e) => set("typeOfDelivery")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    {DELIVERY_TYPES.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Birth Weight (kg)</label>
+                  <input type="number" step="0.01" min={0} value={form.birthWeight} onChange={(e) => set("birthWeight")(e.target.value)} placeholder="e.g. 3.2" className={inputCls()} />
+                  <p className="mt-1 text-[11px] text-brand-gray">&lt; 2.5 kg classified as low birth weight; blank = unknown.</p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Place of Delivery</label>
-                  <input type="text" value={form.placeOfDelivery} onChange={(e) => set("placeOfDelivery")(e.target.value)} placeholder="e.g. RHU / Hospital / Home" className={inputCls()} />
+                  <select value={form.placeOfDelivery} onChange={(e) => set("placeOfDelivery")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    {DELIVERY_PLACES.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Birth Attendant</label>
-                  <input type="text" value={form.birthAttendant} onChange={(e) => set("birthAttendant")(e.target.value)} placeholder="e.g. Midwife / Doctor" className={inputCls()} />
+                  <select value={form.birthAttendant} onChange={(e) => set("birthAttendant")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    {BIRTH_ATTENDANTS.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
                 </div>
               </div>
             </div>
@@ -315,21 +395,36 @@ export default function M1Records() {
   const [selectedResident, setSelectedResident] = useState(null);
   const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [deleting, setDeleting] = useState(null); // record pending delete confirmation
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [activeSection, setActiveSection] = useState(null); // null = Health Services grid; 'B' = maternal; else section panel
+  const [m1EntryOpen, setM1EntryOpen] = useState(false);
+  const [m1EntrySection, setM1EntrySection] = useState("D");
+  // Per-section service-record counts for the Service Summary. Keyed by FHSIS
+  // section (A–H) and read from the SAME barangay-scoped aggregation API that
+  // produces the official M1 form, so the summary never duplicates data and
+  // never diverges from the report. null = not loaded yet.
+  const [sectionCounts, setSectionCounts] = useState(null);
+  const [countsLoading, setCountsLoading] = useState(false);
+  const navigate = useNavigate();
+  const { startPrint, portal } = useM1OfficialPrint();
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
-  // --- Monthly / Annual reporting controls --------------------------------
+  // --- Monthly / Quarterly / Annual reporting controls --------------------
   const now = new Date();
-  const [period, setPeriod] = useState("monthly"); // 'monthly' | 'annual'
+  const [period, setPeriod] = useState("monthly"); // 'monthly' | 'quarterly' | 'annual'
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth()); // 0-11
+  const [quarter, setQuarter] = useState(quarterOfMonth0(now.getMonth())); // 1-4
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 8;
 
   // Reset to the first page whenever the visible set changes.
-  useEffect(() => { setPage(1); }, [period, year, month, search, statusFilter]);
+  useEffect(() => { setPage(1); }, [period, year, month, quarter, search, statusFilter]);
 
   const load = React.useCallback(() => {
     setLoading(true);
@@ -378,13 +473,42 @@ export default function M1Records() {
   }, []);
 
   // --- Derived reporting data (pure; from loaded records) -----------------
+  const descriptor = useMemo(() => ({ period, year, month, quarter }), [period, year, month, quarter]);
   const yearsList = useMemo(() => availableYears(records), [records]);
+
+  // Service Summary counts — the number of operational service records
+  // consolidated into the M1 report for each FHSIS section in the selected
+  // period. Read from the shared, barangay-scoped aggregation API
+  // (GET /m1/report → byCode) that also drives the official M1 form, so the
+  // summary reuses the existing Health Services / operational records instead of
+  // storing its own, and updates automatically as records are added in their
+  // modules. Only fetched while the summary grid is visible.
+  useEffect(() => {
+    if (activeSection !== null) return undefined;
+    let active = true;
+    setCountsLoading(true);
+    m1Api
+      .report(toReportParams(descriptor))
+      .then((res) => {
+        if (!active) return;
+        const byCode = res?.byCode || {};
+        const totals = {};
+        for (const row of Object.values(byCode)) {
+          const key = row?.section;
+          if (!key) continue;
+          totals[key] = (totals[key] || 0) + (Number(row.total) || 0);
+        }
+        setSectionCounts(totals);
+      })
+      .catch(() => { if (active) setSectionCounts(null); })
+      .finally(() => { if (active) setCountsLoading(false); });
+    return () => { active = false; };
+  }, [descriptor, activeSection]);
   const periodRecords = useMemo(
-    () => filterByPeriod(records, { period, year, month }),
-    [records, period, year, month],
+    () => filterByPeriod(records, descriptor),
+    [records, descriptor],
   );
-  const summary = useMemo(() => summarize(periodRecords), [periodRecords]);
-  const monthly = useMemo(() => monthlyBreakdown(records, year), [records, year]);
+  const chartData = useMemo(() => periodBreakdown(records, { period, year, quarter }), [records, period, year, quarter]);
 
   const participants = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -398,6 +522,23 @@ export default function M1Records() {
   const pageSafe = Math.min(page, totalPages);
   const pagedParticipants = participants.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
 
+  // M1 workspace metrics (computed from the maternal operational records already
+  // loaded for the selected period — no fabricated values).
+  const m1Metrics = useMemo(() => {
+    const unique = new Set(periodRecords.map((r) => r.residentId).filter(Boolean));
+    return {
+      periodRecords: periodRecords.length,
+      residentsServed: unique.size,
+      totalRecords: records.length,
+    };
+  }, [periodRecords, records]);
+
+  const openManualEntry = (sectionKey) => { setM1EntrySection(sectionKey || "D"); setM1EntryOpen(true); };
+  const openService = (svc) => {
+    if (svc.kind === "nav" && svc.to) { navigate(svc.to); return; }
+    setActiveSection(svc.key);
+  };
+
   const ageOf = (birthDate) => {
     if (!birthDate) return "—";
     const d = new Date(birthDate);
@@ -408,24 +549,46 @@ export default function M1Records() {
     return a >= 0 ? a : "—";
   };
 
-  const periodLabel = period === "monthly" ? `${MONTH_LABELS[month]} ${year}` : `${year}`;
+  const periodLabel = makePeriodLabel(descriptor);
+  const exportLabel = period === "monthly" ? "Export Monthly" : period === "quarterly" ? "Export Quarterly" : "Export Annual";
 
-  const handleExport = () => {
-    // Complete official-style M1 Maternal Care monthly form. The renderer builds
-    // the full FHSIS Section B form (registration, prenatal, delivery, postpartum,
-    // outcomes, referrals, natality, lifestyle) from the real maternal_records —
-    // every indicator row is preserved, including zeros. We pass the FULL scoped
-    // record set (not the search/status-filtered participant view) so the report
-    // reflects the barangay's cumulative caseload for the reporting period.
-    downloadM1Report({
-      records,
-      referrals,
-      referralsLoaded,
-      barangay: assignedBarangay || "All barangays in scope",
-      period,
-      year,
-      month,
-    });
+  // Export the official FHSIS Form M1 for the SELECTED reporting period. Data is
+  // fetched fresh from the M1 aggregation API (`report` → `byCode`) for the
+  // same period shown on screen (Monthly = one month, Quarterly = three months,
+  // Annual = the whole year) and handed to the dedicated official-form print
+  // renderer (browser "Save as PDF"), so the printed form keeps its official
+  // layout and uses the same persisted data regardless of this screen's UI.
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const params = toReportParams(descriptor);
+      // Report header meta is stored per month; use the period's first month for
+      // the shared header fields (municipality/province/population/prepared-by).
+      const metaMonth = period === "quarterly" ? (quarter - 1) * 3 + 1 : period === "annual" ? 1 : month + 1;
+      const [reportData, metaData] = await Promise.all([
+        m1Api.report(params),
+        m1Api.getMeta({ year, month: metaMonth }).catch(() => null),
+      ]);
+      startPrint({
+        data: reportData?.byCode || {},
+        header: {
+          periodLabel: fhsisPeriodLabel(descriptor),
+          year,
+          municipality: metaData?.municipality || "",
+          province: metaData?.province || "",
+          projectedPopulation: metaData?.meta?.projected_population ?? "",
+          rhu: metaData?.meta?.bhs_name || "",
+          barangay: metaData?.barangay?.name || assignedBarangay || "",
+          bhs: metaData?.barangay?.healthStation || "",
+          preparedBy: metaData?.meta?.prepared_by || "",
+        },
+      });
+    } catch (err) {
+      showToast(err?.message || "Could not generate the M1 report.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const openCreate = () => { setEditing(null); setSelectedResident(null); setFormOpen(true); };
@@ -443,6 +606,8 @@ export default function M1Records() {
       provider: form.provider,
       notes: form.notes,
       type_of_delivery: form.typeOfDelivery || "",
+      delivery_date: form.deliveryDate || null,
+      delivery_outcome: form.deliveryOutcome || "",
       birth_weight: form.birthWeight || "",
       place_of_delivery: form.placeOfDelivery || "",
       birth_attendant: form.birthAttendant || "",
@@ -460,20 +625,15 @@ export default function M1Records() {
     };
     try {
       if (editing) {
-        const result = await maternalApi.update(editing.id, payload);
-        const mapped = mapRecord(result?.record || result);
-        setRecords((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...mapped } : r)));
-        showToast("Maternal record updated.");
+        await maternalApi.update(editing.id, payload);
       } else {
-        const result = await maternalApi.create({ residentId: selectedResident.id, ...payload });
-        const mapped = {
-          ...mapRecord(result?.record || result),
-          residentName: selectedResident.name,
-          barangay: selectedResident.barangay,
-        };
-        setRecords((prev) => [mapped, ...prev]);
-        showToast("Maternal record created.");
+        await maternalApi.create({ residentId: selectedResident.id, ...payload });
       }
+      // The database is the source of truth: re-fetch so every reporting view
+      // (summary cards, chart, record list, Monthly/Quarterly/Annual aggregation
+      // and the exported PDF) reflects the persisted record, not optimistic state.
+      await load();
+      showToast(editing ? "Maternal record updated." : "Maternal record created.");
       setFormOpen(false);
       setEditing(null);
       setSelectedResident(null);
@@ -484,31 +644,43 @@ export default function M1Records() {
     }
   };
 
+  // Delete a maternal record (persisted). After a successful delete the data is
+  // re-fetched so the record stops counting in every reporting period and view.
+  const handleDelete = async (record) => {
+    if (!record || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      await maternalApi.remove(record.id);
+      await load();
+      showToast("Maternal record deleted.");
+      setDeleting(null);
+      setDetail(null);
+    } catch (err) {
+      showToast(err?.message || "Could not delete the maternal record.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
-        crumbs={["Maternal Record"]}
-        title="Maternal Record"
+        crumbs={["M1"]}
+        title="M1"
         subtitle={
           assignedBarangay
-            ? `Maternal health monitoring and service participation for Brgy. ${assignedBarangay}, reported on the official FHSIS Monthly Form M1.`
-            : "Maternal health monitoring and service participation for your assigned barangay, reported on the official FHSIS Monthly Form M1."
+            ? `Monthly FHSIS service recording and reporting for Brgy. ${assignedBarangay}.`
+            : "Monthly FHSIS service recording and reporting for your assigned barangay."
         }
         action={
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleExport}
-              disabled={records.length === 0}
+              disabled={exporting}
               className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue disabled:opacity-50"
-              title={period === "monthly" ? "Export the monthly maternal summary" : "Export the annual maternal summary"}
+              title={`Export the official FHSIS Form M1 for ${periodLabel} (Save as PDF)`}
             >
-              <Download className="h-4 w-4" /> Export {period === "monthly" ? "Monthly" : "Annual"}
-            </button>
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
-            >
-              <Plus className="h-4 w-4" /> New Maternal Record
+              <Download className="h-4 w-4" /> {exporting ? "Preparing…" : exportLabel}
             </button>
           </div>
         }
@@ -535,10 +707,10 @@ export default function M1Records() {
         </Card>
       ) : (
         <>
-          {/* Period controls: Monthly | Annual */}
+          {/* Period controls: Monthly | Quarterly | Annual */}
           <div className="mb-5 flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded-btn border border-brand-border bg-white p-0.5">
-              {["monthly", "annual"].map((p) => (
+              {["monthly", "quarterly", "annual"].map((p) => (
                 <button
                   key={p}
                   onClick={() => setPeriod(p)}
@@ -550,65 +722,177 @@ export default function M1Records() {
                 </button>
               ))}
             </div>
-            <select
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue"
-            >
-              {yearsList.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-            {period === "monthly" && (
+
+            {/* Year — shown for every period */}
+            <label className="flex items-center gap-2 text-sm text-brand-gray">
+              <span>Year:</span>
               <select
-                value={month}
-                onChange={(e) => setMonth(Number(e.target.value))}
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
                 className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue"
               >
-                {MONTH_LABELS.map((label, i) => <option key={label} value={i}>{label}</option>)}
+                {yearsList.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
+            </label>
+
+            {/* Month — monthly only */}
+            {period === "monthly" && (
+              <label className="flex items-center gap-2 text-sm text-brand-gray">
+                <span>Month:</span>
+                <select
+                  value={month}
+                  onChange={(e) => setMonth(Number(e.target.value))}
+                  className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue"
+                >
+                  {MONTH_LABELS.map((label, i) => <option key={label} value={i}>{label}</option>)}
+                </select>
+              </label>
             )}
+
+            {/* Quarter — quarterly only */}
+            {period === "quarterly" && (
+              <label className="flex items-center gap-2 text-sm text-brand-gray">
+                <span>Quarter:</span>
+                <select
+                  value={quarter}
+                  onChange={(e) => setQuarter(Number(e.target.value))}
+                  className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue"
+                >
+                  {QUARTERS.map((q) => <option key={q} value={q}>Q{q} — {QUARTER_RANGE_LABEL[q]}</option>)}
+                </select>
+              </label>
+            )}
+
             <span className="text-sm text-brand-gray">Showing: <span className="font-medium text-brand-ink">{periodLabel}</span></span>
           </div>
 
-          {/* Summary cards */}
+          {/* M1 workspace metrics */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 sm:gap-5">
-            <StatCard icon="Users" tone="blue" index={0} label="Total M1 Participants" value={summary.total} />
-            <StatCard icon="HeartPulse" tone="danger" index={1} label="Active Maternal Cases" value={summary.active} />
-            <StatCard icon="CheckCircle2" tone="green" index={2} label="Completed / Monitored" value={summary.completed} />
-            <StatCard icon="CalendarClock" tone="yellow" index={3} label="Follow-ups Due" value={summary.followUpsDue} />
+            <StatCard icon="CalendarClock" tone="blue" index={0} label="Reporting Period" value={periodLabel} />
+            <StatCard icon="FileHeart" tone="danger" index={1} label="Maternal Records (period)" value={m1Metrics.periodRecords} />
+            <StatCard icon="Users" tone="green" index={2} label="Residents Served (period)" value={m1Metrics.residentsServed} />
+            <StatCard icon="ClipboardList" tone="yellow" index={3} label="Total Maternal Records" value={m1Metrics.totalRecords} />
           </div>
 
-          {/* Monthly participation chart */}
+          {/* Health Services — Service Summary of the operational records M1 consolidates. */}
+          {activeSection === null && (
+            <Card className="mt-6 p-6">
+              <h3 className="font-semibold text-brand-ink">Health Services</h3>
+              <p className="mt-0.5 text-xs text-brand-gray">
+                Operational health service records are consolidated automatically into the M1 report for {periodLabel}.
+                Services, personnel and participants are created and managed in the Health Services module — M1 only reads and totals those records.
+              </p>
+
+              <div className="mt-5 flex items-center justify-between">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Service Summary</h4>
+                {countsLoading && <span className="text-[11px] text-brand-gray">Updating…</span>}
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {HEALTH_SERVICES.map((svc) => {
+                  const Icon = svc.icon;
+                  // Maternal (B) mirrors the operational maternal records in period
+                  // (same number as the "Maternal Records (period)" summary card);
+                  // every other section reads its consolidated total from the M1
+                  // aggregation API. null = counts still loading.
+                  const count = svc.key === "B"
+                    ? m1Metrics.periodRecords
+                    : (sectionCounts ? sectionCounts[svc.key] || 0 : null);
+                  return (
+                    <button
+                      key={svc.key}
+                      onClick={() => openService(svc)}
+                      className="group flex flex-col rounded-btn border border-brand-border bg-white p-4 text-left transition-colors hover:border-brand-blue"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-10 w-10 items-center justify-center rounded-btn bg-brand-blue/10 text-brand-blue">
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        <span className="text-sm font-semibold text-brand-ink">{svc.title}</span>
+                      </div>
+                      <p className="mt-3 flex-1">
+                        <span className="font-stat text-2xl font-bold text-brand-ink">{count === null ? "—" : count}</span>
+                        <span className="ml-1.5 text-xs text-brand-gray">{count === 1 ? "record" : "records"}</span>
+                      </p>
+                      <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-brand-blue">
+                        View Records <ArrowChevron className="h-4 w-4" />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
+          {/* Non-maternal section workspace (live indicator values + reporting input) */}
+          {activeSection && activeSection !== "B" && (
+            <M1SectionPanel
+              sectionKey={activeSection}
+              sectionTitle={SECTION_TITLE[activeSection] || "FHSIS Section"}
+              descriptor={descriptor}
+              periodLabel={periodLabel}
+              navigate={navigate}
+              onBack={() => setActiveSection(null)}
+              onEditManual={openManualEntry}
+            />
+          )}
+
+          {/* Maternal Care operational records (the Maternal Care service) */}
+          {activeSection === "B" && (
+          <>
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setActiveSection(null)} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
+                <ChevronLeft className="h-4 w-4" /> Health Services
+              </button>
+              <div>
+                <h3 className="font-semibold text-brand-ink">Maternal Care Records</h3>
+                <p className="text-xs text-brand-gray">Individual maternal cases — the operational source for FHSIS Section B.</p>
+              </div>
+            </div>
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+            >
+              <Plus className="h-4 w-4" /> New Maternal Record
+            </button>
+          </div>
+
+          {/* Participation chart (period-aware) */}
           <Card className="mt-6 p-6">
             <h3 className="font-semibold text-brand-ink">M1 Participation by Month</h3>
             <p className="mt-0.5 text-xs text-brand-gray">
-              New maternal records first recorded each month in {year}
-              {period === "monthly" ? ` (highlighting ${MONTH_LABELS[month]})` : ""}.
+              {period === "monthly"
+                ? `New maternal records first recorded each month in ${year} (highlighting ${MONTH_LABELS[month]}).`
+                : period === "quarterly"
+                  ? `New maternal records recorded in Q${quarter} ${year} (${QUARTER_RANGE_LABEL[quarter]}).`
+                  : `New maternal records first recorded each month in ${year}.`}
             </p>
-            {monthly.some((mm) => mm.count > 0) ? (
+            {chartData.some((mm) => mm.count > 0) ? (
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={monthly} margin={{ top: 12, right: 10, left: -10, bottom: 0 }}>
+                <BarChart data={chartData} margin={{ top: 12, right: 10, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ fontSize: "12px", borderRadius: "8px", border: "1px solid #E5EAF1" }} cursor={{ fill: "#F8FBFF" }} />
                   <Bar dataKey="count" name="M1 participants" radius={[4, 4, 0, 0]} barSize={26}>
-                    {monthly.map((mm, i) => (
-                      <Cell key={mm.month} fill={period === "monthly" && i === month ? "#F5B400" : "#0B5CAD"} />
+                    {chartData.map((mm) => (
+                      <Cell key={mm.month} fill={period === "monthly" && mm.idx === month ? "#F5B400" : "#0B5CAD"} />
                     ))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <p className="py-10 text-center text-sm text-brand-gray">No M1 records for {year}.</p>
+              <p className="py-10 text-center text-sm text-brand-gray">No M1 records for {periodLabel}.</p>
             )}
           </Card>
 
           {/* Annual monthly breakdown table */}
-          {period === "annual" && monthly.some((mm) => mm.count > 0) && (
+          {period === "annual" && chartData.some((mm) => mm.count > 0) && (
             <Card className="mt-6 p-6">
               <h3 className="font-semibold text-brand-ink">Monthly M1 Participation — {year}</h3>
               <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
-                {monthly.map((mm) => (
+                {chartData.map((mm) => (
                   <div key={mm.month} className="flex items-center justify-between border-b border-brand-border py-1.5 text-sm">
                     <span className="text-brand-gray">{mm.label}</span>
                     <span className="font-stat font-bold text-brand-ink">{mm.count}</span>
@@ -728,6 +1012,8 @@ export default function M1Records() {
               </>
             )}
           </Card>
+          </>
+          )}
         </>
       )}
 
@@ -766,6 +1052,8 @@ export default function M1Records() {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Post-partum Care &amp; Delivery Outcome</p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   {[
+                    ["Date of Delivery", detail.deliveryDate || "—"],
+                    ["Delivery Outcome", detail.deliveryOutcome || "—"],
                     ["Type of Delivery", detail.typeOfDelivery || "—"],
                     ["Birth Weight", detail.birthWeight || "—"],
                     ["Place of Delivery", detail.placeOfDelivery || "—"],
@@ -822,11 +1110,19 @@ export default function M1Records() {
                 <p className="text-[11px] uppercase tracking-wide text-brand-gray">Notes</p>
                 <p className="mt-0.5 text-sm text-brand-ink">{detail.notes || "No notes recorded."}</p>
               </div>
-              <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
-                <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Close</button>
-                <button onClick={() => openEdit(detail)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-                  <Pencil className="h-4 w-4" /> Edit
+              <div className="mt-6 flex items-center justify-between gap-3 border-t border-brand-border pt-4">
+                <button
+                  onClick={() => setDeleting(detail)}
+                  className="inline-flex items-center gap-1.5 rounded-btn px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/10"
+                >
+                  <Trash2 className="h-4 w-4" /> Delete
                 </button>
+                <div className="flex gap-3">
+                  <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Close</button>
+                  <button onClick={() => openEdit(detail)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
+                    <Pencil className="h-4 w-4" /> Edit
+                  </button>
+                </div>
               </div>
             </div>
           </Card>
@@ -845,6 +1141,60 @@ export default function M1Records() {
           onSelectResident={setSelectedResident}
         />
       )}
+
+      {/* Section reporting-figures entry (manual indicators with no operational source) */}
+      {m1EntryOpen && (
+        <M1DataEntryModal
+          initialSection={m1EntrySection}
+          initialYear={year}
+          initialMonth={period === "monthly" ? month + 1 : (period === "quarterly" ? (quarter - 1) * 3 + 1 : 1)}
+          onClose={() => setM1EntryOpen(false)}
+          onSaved={() => showToast("M1 reporting data saved.")}
+        />
+      )}
+
+      {/* Delete confirmation */}
+      {deleting && (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-danger/10">
+                  <Trash2 className="h-5 w-5 text-brand-danger" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-ink">Delete maternal record?</h3>
+                  <p className="mt-1 text-sm text-brand-gray">
+                    This permanently deletes the maternal record for{" "}
+                    <span className="font-medium text-brand-ink">{deleting.residentName}</span>. It will no longer be
+                    counted in Monthly, Quarterly or Annual reports, the charts, or the exported M1 report. This action
+                    cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setDeleting(null)}
+                  disabled={deleteBusy}
+                  className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleDelete(deleting)}
+                  disabled={deleteBusy}
+                  className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-60"
+                >
+                  <Trash2 className="h-4 w-4" /> {deleteBusy ? "Deleting…" : "Delete Record"}
+                </button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* FHSIS M1 print portal (renders only during "Save as PDF"). */}
+      {portal}
     </>
   );
 }

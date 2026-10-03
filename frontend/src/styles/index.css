@@ -539,6 +539,24 @@
 .cert-print-portal { display: none; }
 
 /* ===========================================================================
+   FHSIS M1 — official reporting form
+   ---------------------------------------------------------------------------
+   `M1PrintDocument` owns the form's own print rules (A4 @page + pagination).
+   Here we only give the ON-SCREEN preview an A4 "paper" frame; `.m1-print-
+   portal` is the hidden body-level print copy populated by `useM1Print` and
+   revealed exclusively while printing.
+   =========================================================================== */
+.m1-preview { display: flex; justify-content: center; }
+.m1-preview .m1doc {
+  width: 297mm;
+  max-width: 100%;
+  padding: 8mm 10mm;
+  background: #fff;
+  box-shadow: 0 2px 14px rgba(15, 23, 42, 0.14);
+}
+.m1-print-portal { display: none; }
+
+/* ===========================================================================
    RESPONSIVE SAFEGUARDS
    ---------------------------------------------------------------------------
    Wide data tables live inside `overflow-x-auto` wrappers (contained

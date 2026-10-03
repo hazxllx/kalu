@@ -95,6 +95,14 @@ test('a non-manager (BHW) cannot create a health service', async () => {
   );
 });
 
+test('assignable personnel results are municipality-scoped and barangay-scoped for a Health Supervisor', async () => {
+  const hsPersonnel = await hs.assignablePersonnel({ user: HS_A, supabase });
+  assert.deepEqual(hsPersonnel.map((person) => person.id), ['hs-a']);
+
+  const phnPersonnel = await hs.assignablePersonnel({ user: PHN, supabase });
+  assert.deepEqual(phnPersonnel.map((person) => person.id).sort(), ['hs-a', 'phn-1']);
+});
+
 test('PHN creates a municipality-wide service (no barangay)', async () => {
   const svc = await hs.create({ user: PHN, payload: { name: 'Family Planning', category: 'Family Planning' }, supabase });
   assert.equal(svc.name, 'Family Planning');

@@ -6,6 +6,8 @@ import {
   getIndicator,
   isValidIndicatorCode,
   catalogTree,
+  manualIndicators,
+  sourceMapping,
   FP_MEASURES,
 } from '../config/m1Catalog.js';
 
@@ -27,6 +29,8 @@ import {
  */
 
 const RECORDS = 'm1_records';
+const MANUAL = 'm1_manual_entries';
+const MATERNAL = 'maternal_records';
 const WRITE_ROLES = new Set(['health_supervisor', 'phn', 'bhw']);
 const BARANGAY_ROLES = new Set(['health_supervisor', 'bhw']);
 const MUNICIPALITY_ROLES = new Set(['mho', 'phn', 'rhu_personnel']);
@@ -34,6 +38,39 @@ const MUNICIPALITY_ROLES = new Set(['mho', 'phn', 'rhu_personnel']);
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
+};
+
+/**
+ * True when the error means the relation does not exist yet (migration not
+ * applied in this environment). PostgREST reports PGRST205 ("Could not find the
+ * table ... in the schema cache"); Postgres reports 42P01 (undefined_table).
+ * Only the OPTIONAL m1_manual_entries store is treated as skippable this way, so
+ * a report degrades to "0 manual figures" instead of a 500 before the migration
+ * runs — the operational/derived indicators still aggregate normally.
+ */
+const isMissingRelation = (error) =>
+  !!error && (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    /schema cache|could not find the table|does not exist/i.test(error.message || '')
+  );
+
+let warnedManualMissing = false;
+const warnManualMissing = () => {
+  if (!warnedManualMissing) {
+    warnedManualMissing = true;
+    // eslint-disable-next-line no-console
+    console.warn('[m1] public.m1_manual_entries is missing — run `supabase db push` to enable manual M1 data entry. Reporting continues with 0 for manual indicators.');
+  }
+};
+
+/** Parse a numeric value out of a free-ish field (e.g. "3.2 kg" -> 3.2). */
+const parseNum = (v) => {
+  if (v === null || v === undefined) return null;
+  const s = String(v).replace(/[^0-9.+-]/g, '');
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
 };
 
 // ---------------------------------------------------------------------------
@@ -83,6 +120,20 @@ const monthRange = (year, month) => {
   return { start, end };
 };
 const yearRange = (year) => ({ start: `${year}-01-01`, end: `${year}-12-31` });
+
+// 1-based months (1-12) belonging to each quarter.
+const QUARTER_MONTHS = { 1: [1, 2, 3], 2: [4, 5, 6], 3: [7, 8, 9], 4: [10, 11, 12] };
+const QUARTER_RANGE_LABEL = {
+  1: 'January–March', 2: 'April–June', 3: 'July–September', 4: 'October–December',
+};
+const quarterOrdinal = (q) => `${q}${({ 1: 'st', 2: 'nd', 3: 'rd' }[q]) || 'th'}`;
+const quarterRange = (year, quarter) => {
+  const months = QUARTER_MONTHS[quarter] || QUARTER_MONTHS[1];
+  const firstMonth = months[0];
+  const lastMonth = months[2];
+  const endDate = new Date(Date.UTC(year, lastMonth, 0)); // last day of the quarter's final month
+  return { start: `${year}-${pad(firstMonth)}-01`, end: `${year}-${pad(lastMonth)}-${pad(endDate.getUTCDate())}`, months };
+};
 
 /** Whole-year age in years at the reference date. */
 const ageYearsAt = (birthDate, refDate) => {
@@ -167,7 +218,13 @@ export const ensureCatalog = async ({ supabase = getServiceClient() } = {}) => {
   return { synced: rows.length };
 };
 
-export const listCatalog = () => ({ sections: catalogTree(), indicators: M1_INDICATORS, fpMeasures: FP_MEASURES });
+export const listCatalog = () => ({
+  sections: catalogTree(),
+  indicators: M1_INDICATORS,
+  fpMeasures: FP_MEASURES,
+  manual: manualIndicators(),
+  sourceMapping: sourceMapping(),
+});
 
 // ---------------------------------------------------------------------------
 // Underlying record CRUD (public.m1_records)
@@ -399,22 +456,79 @@ const matchHousehold = (h, match) => {
   return true;
 };
 
-/**
- * Compute one section-by-section monthly report. Every indicator is included
- * (even zero). Values come only from real records and are traceable via
- * drilldown().
- */
-export const monthlyReport = async ({ user, year, month, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = resolveScope(user, barangayId);
-  const { start, end } = monthRange(year, month);
+// ---------------------------------------------------------------------------
+// Maternal-record derivation (spec: MATERNAL RECORD / SOURCE PRIORITY)
+// ---------------------------------------------------------------------------
 
-  // --- Bulk-load every underlying source once, filtered to scope. ---
+/**
+ * Evaluate one derivation filter against a maternal_records row. Supports:
+ *   { field, eq }                        case-insensitive equality
+ *   { field, in: [...] }                 membership (case-insensitive)
+ *   { field, numRange: { min, max, gt, lt } }  numeric comparison (min inclusive,
+ *                                         max exclusive, gt/lt exclusive)
+ *   { field, empty: true }               no usable positive numeric value
+ *   { ..., and: <filter> }               logical AND with a nested filter
+ */
+const matchMaternalFilter = (row, cond) => {
+  if (!cond) return true;
+  const raw = row[cond.field];
+  if (cond.eq !== undefined && text(raw).toLowerCase() !== text(cond.eq).toLowerCase()) return false;
+  if (cond.in) {
+    const low = cond.in.map((x) => text(x).toLowerCase());
+    if (!low.includes(text(raw).toLowerCase())) return false;
+  }
+  if (cond.numRange) {
+    const n = parseNum(raw);
+    if (n === null) return false;
+    const r = cond.numRange;
+    if (r.min !== undefined && !(n >= r.min)) return false;
+    if (r.max !== undefined && !(n < r.max)) return false;
+    if (r.gt !== undefined && !(n > r.gt)) return false;
+    if (r.lt !== undefined && !(n < r.lt)) return false;
+  }
+  if (cond.empty) {
+    const n = parseNum(raw);
+    if (n !== null && n > 0) return false; // has a usable value -> not "unknown"
+  }
+  if (cond.and && !matchMaternalFilter(row, cond.and)) return false;
+  return true;
+};
+
+const POSTPARTUM_DATE_FIELDS = ['pp_checkup_24h', 'pp_checkup_day3', 'pp_checkup_7_14d', 'pp_checkup_6wk'];
+
+/**
+ * The reporting-period date for a derived maternal indicator: either the
+ * configured `dateField`, or — for the "completed at least 2 postpartum
+ * check-ups" rule — the date of the SECOND check-up (the completion event).
+ * Returns null when the service has not happened (so it is never counted).
+ */
+const maternalKeyDate = (derive, row) => {
+  if (!derive) return null;
+  if (derive.rule === 'postpartum_2plus') {
+    const dates = POSTPARTUM_DATE_FIELDS.map((f) => row[f]).filter(Boolean).sort();
+    return dates.length >= 2 ? dates[1] : null;
+  }
+  return row[derive.dateField] || null;
+};
+
+/**
+ * Aggregate every M1 indicator over an arbitrary date range, filtered to the
+ * caller's scope. This is the ONE aggregation path shared by the monthly,
+ * quarterly and annual reports: the period only changes the [start, end] range
+ * and which months' section-remarks are loaded, so Monthly / Quarterly /
+ * Annual can never compute from different logic or a different data source.
+ *
+ * `start`/`end` are inclusive date strings (YYYY-MM-DD). The underlying columns
+ * (record_date, administered_date, date_of_death) are DATE columns, so an
+ * inclusive end has no 23:59:59 timestamp edge case.
+ */
+const aggregateOverRange = async ({ scope, start, end, year, months, supabase }) => {
   let recQ = supabase
     .from(RECORDS)
     .select(`*, resident:residents(${RESIDENT_SELECT})`)
     .gte('record_date', start)
     .lte('record_date', end)
-    .limit(20000);
+    .limit(50000);
   recQ = applyScope(recQ, scope);
   const { data: recs, error: recErr } = await recQ;
   throwOnError(recErr, 'Could not load M1 records');
@@ -425,7 +539,7 @@ export const monthlyReport = async ({ user, year, month, barangayId = null, supa
     .gte('administered_date', start)
     .lte('administered_date', end)
     .eq('status', 'Completed')
-    .limit(20000);
+    .limit(50000);
   immQ = applyScope(immQ, scope);
   const { data: imms, error: immErr } = await immQ;
   throwOnError(immErr, 'Could not load immunizations');
@@ -440,20 +554,50 @@ export const monthlyReport = async ({ user, year, month, barangayId = null, supa
     .select('*, member:household_members(id, name, sex, birthday)')
     .gte('date_of_death', start)
     .lte('date_of_death', end)
-    .limit(20000);
+    .limit(50000);
   mortQ = applyScope(mortQ, scope);
   const { data: mort, error: mortErr } = await mortQ;
   throwOnError(mortErr, 'Could not load mortality records');
 
-  // Remarks for the period.
+  // Maternal case records (Section B derivation). Loaded for the whole scope,
+  // not pre-filtered by date, because each derived indicator keys off a
+  // different maternal date (delivery / supplementation / postpartum check-up);
+  // computeIndicator filters each row to [start, end] by its own key date.
+  let matQ = supabase
+    .from(MATERNAL)
+    .select('*, resident:residents(birth_date, sex)')
+    .limit(50000);
+  matQ = applyScope(matQ, scope);
+  const { data: maternal, error: matErr } = await matQ;
+  throwOnError(matErr, 'Could not load maternal records');
+
+  // Manual aggregate figures for every month covered by the period. Summing the
+  // monthly buckets over the range yields the quarterly / annual rollup.
+  let manQ = supabase
+    .from(MANUAL)
+    .select('indicator_code, period_month, age_group, sex, value')
+    .eq('period_year', year)
+    .in('period_month', months);
+  manQ = applyScope(manQ, scope);
+  const { data: manualRows, error: manErr } = await manQ;
+  if (manErr && isMissingRelation(manErr)) warnManualMissing();
+  else throwOnError(manErr, 'Could not load manual M1 entries');
+  const manualByIndicator = new Map();
+  for (const m of (manErr ? [] : manualRows) || []) {
+    if (!manualByIndicator.has(m.indicator_code)) manualByIndicator.set(m.indicator_code, []);
+    manualByIndicator.get(m.indicator_code).push(m);
+  }
+
+  // Section remarks for every month covered by the period.
   let remQ = supabase
     .from('m1_indicator_remarks')
     .select('indicator_code, remarks')
     .eq('period_year', year)
-    .eq('period_month', month);
+    .in('period_month', months);
   remQ = applyScope(remQ, scope);
   const { data: remarks } = await remQ;
-  const remarkMap = new Map((remarks || []).map((r) => [r.indicator_code, r.remarks]));
+  const remarkMap = new Map();
+  for (const r of remarks || []) if (!remarkMap.has(r.indicator_code)) remarkMap.set(r.indicator_code, r.remarks);
 
   const recsByIndicator = new Map();
   for (const r of recs || []) {
@@ -467,12 +611,74 @@ export const monthlyReport = async ({ user, year, month, barangayId = null, supa
       imms: imms || [],
       households: households || [],
       mort: mort || [],
+      maternal: maternal || [],
+      manual: manualByIndicator.get(ind.code) || [],
+      rangeStart: start,
+      rangeEnd: end,
       remark: remarkMap.get(ind.code) || '',
     }),
   );
 
   const byCode = new Map(results.map((r) => [r.code, r]));
-  return { period: { year, month }, scope: { level: scope.level, barangayId: scope.barangayId }, indicators: results, byCode: Object.fromEntries(byCode) };
+  return { indicators: results, byCode: Object.fromEntries(byCode) };
+};
+
+/**
+ * Compute one section-by-section monthly report. Every indicator is included
+ * (even zero). Values come only from real records and are traceable via
+ * drilldown().
+ */
+export const monthlyReport = async ({ user, year, month, barangayId = null, supabase = getServiceClient() }) => {
+  const scope = resolveScope(user, barangayId);
+  const { start, end } = monthRange(year, month);
+  const { indicators, byCode } = await aggregateOverRange({ scope, start, end, year, months: [month], supabase });
+  return { period: { year, month }, scope: { level: scope.level, barangayId: scope.barangayId }, indicators, byCode };
+};
+
+/**
+ * Reporting-period report (spec PARTS 2-6, 14-18, 23-26): the single endpoint
+ * behind Monthly / Quarterly / Annual export. Monthly, Quarterly and Annual are
+ * reporting VIEWS over the SAME underlying records — a quarterly report
+ * actually aggregates its three months and an annual report the whole year
+ * (not just one month relabelled). Barangay/municipality scope is enforced by
+ * resolveScope + applyScope on every query, exactly like monthlyReport.
+ */
+export const periodReport = async ({ user, period = 'monthly', year, month = null, quarter = null, barangayId = null, supabase = getServiceClient() }) => {
+  const scope = resolveScope(user, barangayId);
+  let range;
+  let months;
+  let periodObj;
+  let periodLabel;
+
+  if (period === 'quarterly') {
+    const q = Number(quarter) || 1;
+    const r = quarterRange(year, q);
+    range = { start: r.start, end: r.end };
+    months = r.months;
+    periodObj = { period: 'quarterly', year, quarter: q };
+    periodLabel = `${quarterOrdinal(q)} Quarter (${QUARTER_RANGE_LABEL[q]})`;
+  } else if (period === 'annual') {
+    range = yearRange(year);
+    months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    periodObj = { period: 'annual', year };
+    periodLabel = 'Whole Year (January–December)';
+  } else {
+    const m = Number(month) || 1;
+    range = monthRange(year, m);
+    months = [m];
+    periodObj = { period: 'monthly', year, month: m };
+    periodLabel = null; // caller/form uses the month name
+  }
+
+  const { indicators, byCode } = await aggregateOverRange({ scope, start: range.start, end: range.end, year, months, supabase });
+  return {
+    period: periodObj,
+    periodLabel,
+    range,
+    scope: { level: scope.level, barangayId: scope.barangayId },
+    indicators,
+    byCode,
+  };
 };
 
 /** Aggregate a single indicator from the pre-loaded source sets. */
@@ -514,6 +720,37 @@ const computeIndicator = (ind, sets) => {
       if (breakdown.bySex) {
         const s = text(member.sex);
         breakdown.bySex[s === 'Male' || s === 'Female' ? s : 'Unknown'] += 1;
+      }
+    }
+  } else if (ind.source === 'maternal_records') {
+    // Derived from the maternal case: count each matching record in the month
+    // of its key date, broken down by the mother's age band when configured.
+    for (const row of sets.maternal) {
+      if (!matchMaternalFilter(row, ind.derive?.filter)) continue;
+      const key = maternalKeyDate(ind.derive, row);
+      if (!key) continue;
+      const ds = String(key).slice(0, 10);
+      if (ds < sets.rangeStart || ds > sets.rangeEnd) continue;
+      total += 1;
+      if (ind.derive?.age && ind.ageScheme !== 'none') {
+        const age = ageYearsAt(row.resident?.birth_date, key);
+        const g = bucketForAge(ind.ageScheme, age);
+        if (g && breakdown.byAge[g] !== undefined) breakdown.byAge[g] += 1;
+      }
+    }
+  } else if (ind.source === 'm1_manual') {
+    // Manual aggregate figures: sum the stored buckets. For a quarter/year this
+    // sums every month's bucket in the range (loaded in aggregateOverRange).
+    for (const e of sets.manual) {
+      const val = Number(e.value) || 0;
+      if (val <= 0) continue;
+      total += val;
+      if (ind.ageScheme !== 'none' && breakdown.byAge[text(e.age_group)] !== undefined) {
+        breakdown.byAge[text(e.age_group)] += val;
+      }
+      if (breakdown.bySex) {
+        const s = text(e.sex);
+        breakdown.bySex[s === 'Male' || s === 'Female' || s === 'Other' ? s : 'Unknown'] += val;
       }
     }
   } else {
@@ -620,6 +857,19 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
   hhQ = applyScope(hhQ, scope);
   const { data: households } = await hhQ;
 
+  let matQ = supabase.from(MATERNAL).select('*, resident:residents(birth_date, sex)').limit(50000);
+  matQ = applyScope(matQ, scope);
+  const { data: maternal } = await matQ;
+
+  let manQ = supabase.from(MANUAL).select('indicator_code, period_month, age_group, sex, value').eq('period_year', year);
+  manQ = applyScope(manQ, scope);
+  const { data: manualRows } = await manQ;
+  const manualByIndicator = new Map();
+  for (const m of manualRows || []) {
+    if (!manualByIndicator.has(m.indicator_code)) manualByIndicator.set(m.indicator_code, []);
+    manualByIndicator.get(m.indicator_code).push(m);
+  }
+
   const monthOf = (d) => (d ? Number(String(d).slice(5, 7)) : null);
 
   const indicators = M1_INDICATORS.map((ind) => {
@@ -658,6 +908,26 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
       let c = 0;
       for (const h of households || []) if (matchHousehold(h, ind.match)) c += 1;
       months[11] = c;
+    } else if (ind.source === 'maternal_records') {
+      for (const row of maternal || []) {
+        if (!matchMaternalFilter(row, ind.derive?.filter)) continue;
+        const key = maternalKeyDate(ind.derive, row);
+        const m = monthOf(key);
+        if (!m) continue;
+        months[m - 1] += 1;
+        if (bySex) bySex[resolveSex({ sex: '' }, row.resident)] += 1;
+      }
+    } else if (ind.source === 'm1_manual') {
+      for (const e of manualByIndicator.get(ind.code) || []) {
+        const val = Number(e.value) || 0;
+        if (val <= 0) continue;
+        const m = Number(e.period_month);
+        if (m >= 1 && m <= 12) months[m - 1] += val;
+        if (bySex) {
+          const s = text(e.sex);
+          bySex[s === 'Male' || s === 'Female' || s === 'Other' ? s : 'Unknown'] += val;
+        }
+      }
     } else {
       for (const r of recs || []) {
         if (r.indicator_code !== ind.code) continue;
@@ -756,6 +1026,41 @@ export const drilldown = async ({ user, indicatorCode, year, month = null, baran
       records.push({
         id: m.id, member: m.member, date: m.date_of_death, status: 'Deceased',
         detail: { cause_of_death: m.cause_of_death }, remarks: m.remarks,
+      });
+    }
+  } else if (ind.source === 'maternal_records') {
+    let q = supabase.from(MATERNAL).select('*, resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date)').limit(5000);
+    q = applyScope(q, scope);
+    const { data, error } = await q;
+    throwOnError(error, 'Could not load maternal drill-down');
+    for (const row of data || []) {
+      if (!matchMaternalFilter(row, ind.derive?.filter)) continue;
+      const key = maternalKeyDate(ind.derive, row);
+      if (!key) continue;
+      const ds = String(key).slice(0, 10);
+      if (ds < start || ds > end) continue;
+      records.push({
+        id: row.id, resident: row.resident, date: ds, status: row.status,
+        ageGroup: ind.derive?.age ? bucketForAge(ind.ageScheme, ageYearsAt(row.resident?.birth_date, key)) : 'Total',
+        detail: {
+          delivery_date: row.delivery_date, delivery_outcome: row.delivery_outcome,
+          type_of_delivery: row.type_of_delivery, place_of_delivery: row.place_of_delivery,
+          birth_attendant: row.birth_attendant, birth_weight: row.birth_weight,
+        },
+        remarks: '',
+      });
+    }
+  } else if (ind.source === 'm1_manual') {
+    let q = supabase.from(MANUAL).select('*').eq('indicator_code', indicatorCode).eq('period_year', year);
+    if (month) q = q.eq('period_month', month);
+    q = applyScope(q, scope);
+    const { data, error } = await q;
+    if (error && isMissingRelation(error)) warnManualMissing();
+    else throwOnError(error, 'Could not load manual M1 drill-down');
+    for (const e of (error ? [] : data) || []) {
+      records.push({
+        id: e.id, date: `${e.period_year}-${pad(e.period_month)}-01`, status: 'Manual entry',
+        value: e.value, ageGroup: e.age_group, sex: e.sex, detail: { period_month: e.period_month }, remarks: '',
       });
     }
   } else {
@@ -876,6 +1181,116 @@ export const saveIndicatorRemarks = async ({ user, year, month, indicatorCode, r
   return data;
 };
 
+// ---------------------------------------------------------------------------
+// Manual M1 data entry (spec: M1 DATA ENTRY / PERSISTENCE / UPDATE BEHAVIOR)
+// ---------------------------------------------------------------------------
+
+const SEX_VALUES = new Set(['', 'Male', 'Female', 'Other']);
+
+/**
+ * List the manual aggregate figures saved for one (barangay, year, month) plus
+ * the catalog of manual indicators and their stored remarks, so the M1 Data
+ * Entry screen can pre-fill the exact persisted values for editing.
+ */
+export const listManualEntries = async ({ user, year, month, barangayId = null, supabase = getServiceClient() }) => {
+  const scope = resolveScope(user, barangayId);
+  let q = supabase.from(MANUAL).select('*').eq('period_year', year).eq('period_month', month);
+  q = applyScope(q, scope);
+  const { data, error } = await q;
+  if (error && isMissingRelation(error)) {
+    warnManualMissing();
+    return {
+      period: { year, month },
+      scope: { level: scope.level, barangayId: scope.barangayId },
+      indicators: manualIndicators(),
+      entries: [],
+      remarks: {},
+      storeReady: false,
+    };
+  }
+  throwOnError(error, 'Could not load manual M1 entries');
+
+  let rq = supabase.from('m1_indicator_remarks').select('indicator_code, remarks').eq('period_year', year).eq('period_month', month);
+  rq = applyScope(rq, scope);
+  const { data: rem } = await rq;
+  const remarks = {};
+  for (const r of rem || []) if (remarks[r.indicator_code] === undefined) remarks[r.indicator_code] = r.remarks;
+
+  return {
+    period: { year, month },
+    scope: { level: scope.level, barangayId: scope.barangayId },
+    indicators: manualIndicators(),
+    entries: data || [],
+    remarks,
+    storeReady: true,
+  };
+};
+
+/**
+ * Create or UPDATE the manual figures for one indicator in one reporting month.
+ * Re-saving a bucket updates the stored value in place (the unique key
+ * barangay+indicator+year+month+age_group+sex), so an edited value replaces the
+ * old one instead of duplicating it, and every period that includes the month
+ * immediately reflects the change. Only indicators whose source is `m1_manual`
+ * can be entered here — anything derived from an operational table is rejected,
+ * which is what prevents the same event being counted from two sources.
+ */
+export const saveManualEntry = async ({ user, year, month, indicatorCode, values = [], remarks, barangayId = null, supabase = getServiceClient() }) => {
+  assertWriter(user);
+  const code = text(indicatorCode);
+  if (!isValidIndicatorCode(code)) throw ApiError.unprocessable(`Unknown M1 indicator code: ${code}`);
+  const ind = getIndicator(code);
+  if (ind.source !== 'm1_manual') {
+    throw ApiError.unprocessable(
+      `Indicator ${code} is derived from ${ind.source} and cannot be entered manually (prevents double counting).`,
+    );
+  }
+  const yr = Number(year);
+  const mo = Number(month);
+  if (!Number.isInteger(yr) || yr < 2000 || yr > 2100) throw ApiError.unprocessable('Invalid reporting year.');
+  if (!Number.isInteger(mo) || mo < 1 || mo > 12) throw ApiError.unprocessable('Invalid reporting month.');
+
+  const scope = resolveScope(user, barangayId);
+  const targetBarangay = scope.barangayId;
+  if (!targetBarangay) throw ApiError.badRequest('A barangay is required to record M1 data.');
+  if (!scopeCoversBarangay(scope, targetBarangay)) throw ApiError.forbidden('Outside your barangay scope.');
+
+  const allowedAges = ind.ageScheme === 'none' ? ['Total'] : ind.ageGroups;
+  const saved = [];
+  for (const v of values) {
+    const ageGroup = text(v.age_group ?? v.ageGroup) || 'Total';
+    const sex = SEX_VALUES.has(v.sex) ? (v.sex || '') : '';
+    if (!allowedAges.includes(ageGroup) && ageGroup !== 'Total') {
+      throw ApiError.unprocessable(`Invalid age group "${ageGroup}" for ${code}.`);
+    }
+    const value = Number(v.value);
+    if (!Number.isFinite(value) || value < 0) throw ApiError.unprocessable('Each value must be a non-negative number.');
+    const row = {
+      indicator_code: code,
+      barangay_id: targetBarangay,
+      period_year: yr,
+      period_month: mo,
+      age_group: ageGroup,
+      sex,
+      value,
+      recorded_by: user.id,
+    };
+    const { data, error } = await supabase
+      .from(MANUAL)
+      .upsert(row, { onConflict: 'barangay_id,indicator_code,period_year,period_month,age_group,sex' })
+      .select('*')
+      .single();
+    throwOnError(error, 'Could not save manual M1 entry');
+    saved.push(data);
+  }
+
+  if (remarks !== undefined && ind.remarksAllowed) {
+    await saveIndicatorRemarks({ user, year: yr, month: mo, indicatorCode: code, remarks, barangayId: targetBarangay, supabase });
+  }
+  await audit(supabase, user, 'M1_MANUAL_SAVED', `${code}:${yr}-${mo}`, { municipality_id: scope.municipalityId, barangay_id: targetBarangay, indicator_code: code });
+  return { indicatorCode: code, period: { year: yr, month: mo }, barangayId: targetBarangay, entries: saved };
+};
+
 export default {
   resolveScope,
   ensureCatalog,
@@ -885,9 +1300,12 @@ export default {
   deleteRecord,
   dailyParticipants,
   monthlyReport,
+  periodReport,
   annualSummary,
   drilldown,
   getReportMeta,
   saveReportMeta,
   saveIndicatorRemarks,
+  listManualEntries,
+  saveManualEntry,
 };

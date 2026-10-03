@@ -10,18 +10,24 @@ import React from "react";
 
 export const STATUS_TONES = {
   Scheduled: "bg-brand-blue/10 text-brand-blue dark:bg-brand-blue/15",
+  Today: "bg-brand-accent/10 text-brand-accent dark:bg-brand-accent/15",
+  Overdue: "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
   Pending: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
   Completed: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
   Missed: "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
   Cancelled: "bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-400",
+  Rejected: "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
 };
 
 export const STATUS_DOTS = {
   Scheduled: "bg-brand-blue",
+  Today: "bg-brand-accent",
+  Overdue: "bg-brand-danger",
   Pending: "bg-amber-400",
   Completed: "bg-brand-green",
   Missed: "bg-brand-danger",
   Cancelled: "bg-slate-400",
+  Rejected: "bg-brand-danger",
 };
 
 export default function ScheduleStatusBadge({ value }) {

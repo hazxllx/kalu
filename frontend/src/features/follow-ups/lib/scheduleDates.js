@@ -8,6 +8,33 @@
 
 export const pad = (n) => String(n).padStart(2, "0");
 
+/** Current application calendar day in Philippine time. */
+export const manilaDateKey = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-PH", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
+/** Display status from the date-only schedule value, without parsing it as UTC. */
+export const followUpDisplayStatus = (status, scheduledDate, now = new Date()) => {
+  const current = String(status || "Scheduled");
+  if (["Completed", "Cancelled", "Rejected", "Missed"].includes(current)) return current;
+  const due = String(scheduledDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return current;
+  const today = manilaDateKey(now);
+  if (due < today) return "Overdue";
+  if (due === today) return "Today";
+  return "Scheduled";
+};
+
+export const isCalendarVisibleFollowUp = (schedule) =>
+  !schedule?.requiresResidentResponse || schedule.confirmationStatus === "Confirmed";
+
 /** Local date → "YYYY-MM-DD" key. */
 export const toKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 

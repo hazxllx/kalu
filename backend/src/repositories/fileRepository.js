@@ -8,6 +8,7 @@
  */
 import store from './fileStore.js';
 import { residentId, healthRecordNo, submissionId, referralId } from './ids.js';
+import { DEFAULT_RISK_CRITERIA } from '../config/riskConfig.js';
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
@@ -108,6 +109,7 @@ export const fileRepository = {
   },
 
   listHouseholds: async function () { return this.householdsUnsupported(); },
+  listHouseholdsForMap: async function () { return this.householdsUnsupported(); },
   getHousehold: async function () { return this.householdsUnsupported(); },
   insertHousehold: async function () { return this.householdsUnsupported(); },
   updateHousehold: async function () { return this.householdsUnsupported(); },
@@ -282,6 +284,8 @@ export const fileRepository = {
     return { rows: rows.slice(offset, offset + limit), total: rows.length };
   },
 
+  listTclEntries: async () => ({ rows: [], total: 0 }),
+
   updateVisit: async (id, patch) => {
     return store.mutate((data) => {
       const row = data.visits.find((v) => v.id === id);
@@ -435,6 +439,70 @@ export const fileRepository = {
   }),
   listDocumentsByTransferRequest: async () => [],
   deleteDocument: async () => true,
+
+  // ----- risk configuration (dev driver) -----------------------------------
+  // Mirrors the Supabase risk_criteria / risk_settings tables. The config
+  // service falls back to the documented defaults when these are empty, so the
+  // store only needs to persist administrator overrides.
+  listRiskCriteria: async () => clone(store.riskCriteria),
+
+  getRiskCriterion: async (code) => {
+    const found = store.riskCriteria.find((c) => c.code === code);
+    return found ? clone(found) : null;
+  },
+
+  upsertRiskCriterion: async (criterion) => store.mutate((data) => {
+    // Seed the defaults on first edit so a single change does not drop the rest.
+    if (!data.riskCriteria.length) {
+      data.riskCriteria = DEFAULT_RISK_CRITERIA.map((c) => ({ ...c }));
+    }
+    const now = new Date().toISOString();
+    const idx = data.riskCriteria.findIndex((c) => c.code === criterion.code);
+    if (idx >= 0) {
+      data.riskCriteria[idx] = { ...data.riskCriteria[idx], ...criterion, updatedAt: now };
+      return clone(data.riskCriteria[idx]);
+    }
+    const row = { ...criterion, createdAt: now, updatedAt: now };
+    data.riskCriteria.push(row);
+    return clone(row);
+  }),
+
+  deleteRiskCriterion: async (code) => store.mutate((data) => {
+    if (!data.riskCriteria.length) {
+      data.riskCriteria = DEFAULT_RISK_CRITERIA.map((c) => ({ ...c }));
+    }
+    const before = data.riskCriteria.length;
+    data.riskCriteria = data.riskCriteria.filter((c) => c.code !== code);
+    return before !== data.riskCriteria.length;
+  }),
+
+  getRiskSettings: async () => (store.riskSettings ? clone(store.riskSettings) : null),
+
+  saveRiskSettings: async ({ moderateMin, highMin }) => store.mutate((data) => {
+    const now = new Date().toISOString();
+    data.riskSettings = {
+      moderateMin: Number(moderateMin),
+      highMin: Number(highMin),
+      updatedAt: now,
+    };
+    return clone(data.riskSettings);
+  }),
+
+  insertHealthAuditLog: async (log) => store.mutate((data) => {
+    const row = {
+      id: `HAL-${String(data.healthAuditLogs.length + 1).padStart(6, '0')}`,
+      actorId: log.actorId ?? null,
+      action: log.action,
+      entityType: log.entityType,
+      entityId: log.entityId,
+      municipalityId: log.municipalityId ?? null,
+      barangayId: log.barangayId ?? null,
+      metadata: log.metadata || {},
+      createdAt: new Date().toISOString(),
+    };
+    data.healthAuditLogs.push(row);
+    return clone(row);
+  }),
 
 };
 

@@ -49,7 +49,7 @@ const submitErrorMessage = (err) => {
   switch (status) {
     case 400:
     case 422:
-      return backendMsg || "Some consultation details are invalid. Please review the highlighted fields.";
+      return backendMsg || "Some consultation details are invalid. Please review the form.";
     case 401:
       return "Your session has expired. Please sign in again and retry.";
     case 403:
@@ -279,7 +279,19 @@ export default function TreatmentConsultation() {
       // Never fail silently: log the real error for debugging (no secrets) and
       // show the user a clear, status-appropriate message.
       console.error("Consultation save failed:", err?.status, err?.message, err?.payload);
-      setErrors((prev) => ({ ...prev, submit: submitErrorMessage(err) }));
+      const serverErrors = err?.payload?.error?.errors;
+      if (serverErrors && typeof serverErrors === "object" && !Array.isArray(serverErrors)) {
+        const fieldErrors = { ...serverErrors };
+        if (fieldErrors.residentId) {
+          fieldErrors.resident = fieldErrors.residentId;
+          delete fieldErrors.residentId;
+        }
+        setErrors((prev) => ({ ...prev, ...fieldErrors, submit: "" }));
+      } else {
+        const details = err?.payload?.error?.details;
+        const detailMessage = Array.isArray(details) ? details.join(" ") : "";
+        setErrors((prev) => ({ ...prev, submit: detailMessage || submitErrorMessage(err) }));
+      }
     })
       .finally(() => setBusy(false));
   };
@@ -444,19 +456,23 @@ export default function TreatmentConsultation() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <p className="text-xs text-brand-gray mb-1">Blood Pressure (mmHg)</p>
-              <input type="text" placeholder="e.g. 120/80" value={formData.bloodPressure} onChange={(e) => setFormData({ ...formData, bloodPressure: e.target.value })} className={inputCls()} />
+              <input type="text" placeholder="e.g. 120/80" value={formData.bloodPressure} onChange={(e) => setFormData({ ...formData, bloodPressure: e.target.value })} className={inputCls(errors.bloodPressure)} />
+              {errors.bloodPressure && <p className="mt-1 text-xs text-brand-danger">{errors.bloodPressure}</p>}
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Temperature (°C)</p>
-              <input type="text" placeholder="e.g. 36.7" value={formData.temperature} onChange={(e) => setFormData({ ...formData, temperature: e.target.value })} className={inputCls()} />
+              <input type="text" placeholder="e.g. 36.7" value={formData.temperature} onChange={(e) => setFormData({ ...formData, temperature: e.target.value })} className={inputCls(errors.temperature)} />
+              {errors.temperature && <p className="mt-1 text-xs text-brand-danger">{errors.temperature}</p>}
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Pulse Rate (bpm)</p>
-              <input type="text" placeholder="e.g. 74" value={formData.pulseRate} onChange={(e) => setFormData({ ...formData, pulseRate: e.target.value })} className={inputCls()} />
+              <input type="text" placeholder="e.g. 74" value={formData.pulseRate} onChange={(e) => setFormData({ ...formData, pulseRate: e.target.value })} className={inputCls(errors.pulseRate)} />
+              {errors.pulseRate && <p className="mt-1 text-xs text-brand-danger">{errors.pulseRate}</p>}
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Respiratory Rate (breaths/min)</p>
-              <input type="text" placeholder="e.g. 18" value={formData.respiratoryRate} onChange={(e) => setFormData({ ...formData, respiratoryRate: e.target.value })} className={inputCls()} />
+              <input type="text" placeholder="e.g. 18" value={formData.respiratoryRate} onChange={(e) => setFormData({ ...formData, respiratoryRate: e.target.value })} className={inputCls(errors.respiratoryRate)} />
+              {errors.respiratoryRate && <p className="mt-1 text-xs text-brand-danger">{errors.respiratoryRate}</p>}
             </div>
             <div>
               <label htmlFor="vital-height" className="block text-xs text-brand-gray mb-1">Height (cm)</label>
@@ -485,7 +501,8 @@ export default function TreatmentConsultation() {
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Oxygen Saturation (%)</p>
-              <input type="text" placeholder="e.g. 98" value={formData.oxygenSaturation} onChange={(e) => setFormData({ ...formData, oxygenSaturation: e.target.value })} className={inputCls()} />
+              <input type="text" placeholder="e.g. 98" value={formData.oxygenSaturation} onChange={(e) => setFormData({ ...formData, oxygenSaturation: e.target.value })} className={inputCls(errors.oxygenSaturation)} />
+              {errors.oxygenSaturation && <p className="mt-1 text-xs text-brand-danger">{errors.oxygenSaturation}</p>}
             </div>
           </div>
         </div>

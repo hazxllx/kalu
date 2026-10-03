@@ -16,6 +16,7 @@ const formatDate = (iso) => {
 
 /** Roles that may approve / issue / reject a certificate (server enforces too). */
 const REVIEW_ROLES = ["mho", "phn"];
+const EDIT_ROLES = ["mho", "phn"];
 
 /**
  * Medical Certificates register.
@@ -32,11 +33,13 @@ export default function MedicalCertificates() {
   const meta = useCertificateMeta();
   const { rows: certificates, loading, error, refresh, setStatus } = useCertificateRegister();
   const isReviewer = REVIEW_ROLES.includes(user?.role);
+  const canPrepare = EDIT_ROLES.includes(user?.role);
   const base = user?.role ? `/app/${user.role}` : "";
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [selected, setSelected] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
   const [statusTarget, setStatusTarget] = useState(null); // certificate id
   const [toast, setToast] = useState(null);
 
@@ -82,14 +85,14 @@ export default function MedicalCertificates() {
         crumbs={["Medical Certificates"]}
         title="Medical Certificates"
         subtitle={isReviewer ? "Review, approve, and issue medical certificates for your scope." : "Medical certificate register for your authorized scope."}
-        action={
+        action={canPrepare && (
           <button
             onClick={() => navigate(`${base}/certificates/new`)}
             className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
           >
             <Plus className="h-4 w-4" /> Create Certificate
           </button>
-        }
+        )}
       />
 
       {toast && (
@@ -175,12 +178,17 @@ export default function MedicalCertificates() {
                       )}
                     </td>
                     <td className="px-5 py-3 text-right">
-                      <button
-                        onClick={() => setSelected(c.id)}
-                        className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
-                      >
-                        {isReviewer && c.status === "For Review" ? "Review" : "View"} <ChevronRight className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-3">
+                        {EDIT_ROLES.includes(user?.role) && ["Draft", "For Review"].includes(c.status) && (
+                          <button onClick={() => setEditTarget(c.id)} className="text-sm font-medium text-brand-blue hover:underline">Edit</button>
+                        )}
+                        <button
+                          onClick={() => setSelected(c.id)}
+                          className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
+                        >
+                          {isReviewer && c.status === "For Review" ? "Review" : "View"} <ChevronRight className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -222,6 +230,27 @@ export default function MedicalCertificates() {
             }
             onSaved={async (status) => {
               showToast(`Certificate ${cert.reference} marked as ${status}.`);
+              await refresh();
+            }}
+          />
+        );
+      })()}
+
+      {editTarget && (() => {
+        const cert = certificates.find((c) => c.id === editTarget);
+        if (!cert) return null;
+        return (
+          <MedicalCertificateModal
+            key={cert.id}
+            mode="edit"
+            certificate={cert}
+            currentUser={user?.name || ""}
+            currentUserRole={user?.role || ""}
+            purposes={meta.purposes}
+            onClose={() => setEditTarget(null)}
+            onSaved={async () => {
+              showToast(`Certificate ${cert.reference} updated.`);
+              setEditTarget(null);
               await refresh();
             }}
           />

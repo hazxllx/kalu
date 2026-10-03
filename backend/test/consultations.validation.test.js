@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { validateVitals, validateFollowUp } from '../src/services/consultations.service.js';
+import { validateVitals, validateFollowUp, list, create } from '../src/services/consultations.service.js';
 
 /**
  * Consultation data-integrity tests (issue #14 / #15).
@@ -63,4 +63,64 @@ test('a valid follow-up on/after the consultation date passes', () => {
   const { errors, normalized } = validateFollowUp({ followUpRequired: 'Yes', nextVisitDate: '2026-10-05', consultationDate: '2026-09-27' });
   assert.deepEqual(errors, []);
   assert.equal(normalized.nextVisitDate, '2026-10-05');
+});
+
+test('resident consultation history is queried only for the account-linked resident', async () => {
+  const calls = [];
+  const repo = {
+    getResidentByAuthUserId: async (authUserId) => {
+      assert.equal(authUserId, 'resident-user-a');
+      return { id: 'resident-a' };
+    },
+    listVisits: async (options) => {
+      calls.push(options);
+      return {
+        rows: [{
+          id: 'visit-a', residentId: 'resident-a', visitDate: '2026-09-27T09:00:00',
+          status: 'completed', resident: { id: 'resident-a', firstName: 'Resident', lastName: 'A' },
+        }],
+        total: 1,
+      };
+    },
+  };
+
+  const result = await list({ user: { id: 'resident-user-a', role: 'resident' }, repo });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].residentId, 'resident-a');
+  assert.equal(result.rows[0].id, 'visit-a');
+  assert.equal(result.rows[0].resident.id, 'resident-a');
+});
+
+test('residents cannot create consultations', async () => {
+  await assert.rejects(
+    create({ user: { id: 'resident-user-a', role: 'resident' }, payload: {} }),
+    { statusCode: 403 },
+  );
+});
+
+test('consultation submission errors identify invalid form fields', async () => {
+  await assert.rejects(
+    create({
+      user: { id: 'hs-1', role: 'health_supervisor' },
+      payload: {
+        residentId: 'RES-1',
+        consultationDate: '2026-09-27',
+        chiefComplaint: 'Check-up',
+        findings: 'Stable',
+        diagnosis: 'None',
+        bloodPressure: 'invalid',
+        temperature: 50,
+        followUpRequired: 'Yes',
+        nextVisitDate: '2026-09-20',
+      },
+    }),
+    (error) => {
+      assert.equal(error.statusCode, 422);
+      assert.match(error.details.bloodPressure, /systolic\/diastolic/i);
+      assert.match(error.details.temperature, /between 30 and 45/i);
+      assert.match(error.details.nextVisitDate, /before the consultation date/i);
+      return true;
+    },
+  );
 });

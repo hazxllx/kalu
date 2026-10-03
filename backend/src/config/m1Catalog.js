@@ -50,13 +50,19 @@ export const AGGREGATIONS = Object.freeze([
   'TOTAL',
 ]);
 
-// Where the aggregated value is read from.
+// Where the aggregated value is read from. Every indicator resolves to exactly
+// ONE source, so no event is ever counted twice (spec: SOURCE PRIORITY / NO
+// DUPLICATE DATA ENTRY). The first four are DERIVED from existing operational
+// records; `m1_manual` is the aggregate manual-entry store (m1_manual_entries)
+// for figures that have no operational record; `m1_records` is the per-event
+// store (currently Section A family-planning service events).
 export const SOURCES = Object.freeze([
-  'm1_records', // dedicated underlying-event store (public.m1_records)
+  'm1_records', // per-event store (public.m1_records) — Section A FP service events
+  'm1_manual', // manual aggregate figures (public.m1_manual_entries)
   'immunizations', // reuse public.immunizations
   'households', // reuse public.households WASH fields
   'household_member_health_profiles', // reuse mortality fields
-  'maternal_records', // reuse public.maternal_records
+  'maternal_records', // DERIVED from public.maternal_records case data
 ]);
 
 // Age-group schemes. Each resolves to an ordered list of buckets.
@@ -107,6 +113,7 @@ const ind = (section, subsection, code, name, opts = {}) => {
     remarks = true,
     dataType = 'count',
     match = null, // adapter hint for non-m1_records sources
+    derive = null, // derivation descriptor for source === 'maternal_records'
     population = null,
   } = opts;
   rows.push({
@@ -123,6 +130,7 @@ const ind = (section, subsection, code, name, opts = {}) => {
     remarksAllowed: Boolean(remarks),
     dataType,
     match,
+    derive,
     population,
     displayOrder: (ORDER += 10),
     active: true,
@@ -178,7 +186,13 @@ ind('B', B1, 'B1_2b', 'First-trimester pregnant women with low BMI', { ageScheme
 ind('B', B1, 'B1_2c', 'First-trimester pregnant women with high BMI', { ageScheme: 'fp' });
 ind('B', B1, 'B1_3', 'Pregnant women (first time) given at least 2 doses of Td', { ageScheme: 'fp' });
 ind('B', B1, 'B1_4', 'Pregnant women (second+) given at least 3 doses of Td / Td2 Plus', { ageScheme: 'fp' });
-ind('B', B1, 'B1_5', 'Pregnant women who completed iron with folic acid supplementation', { ageScheme: 'fp' });
+// DERIVED from maternal_records: the maternal case stores the date the
+// iron/folic prenatal supplementation was completed. Counted in the month that
+// date falls in, broken down by the mother's age band.
+ind('B', B1, 'B1_5', 'Pregnant women who completed iron with folic acid supplementation', {
+  ageScheme: 'fp', aggregation: 'COUNT_EVENTS', source: 'maternal_records',
+  derive: { dateField: 'iron_folic_completed_date', age: true },
+});
 ind('B', B1, 'B1_6', 'Pregnant women who completed calcium carbonate supplementation', { ageScheme: 'fp' });
 ind('B', B1, 'B1_7', 'Pregnant women given iodine capsules', { ageScheme: 'fp' });
 ind('B', B1, 'B1_8', 'Pregnant women given one dose of deworming tablet', { ageScheme: 'fp' });
@@ -193,33 +207,52 @@ ind('B', B1, 'B1_16', 'Pregnant women screened for gestational diabetes', { ageS
 ind('B', B1, 'B1_17', 'Pregnant women tested positive for gestational diabetes', { ageScheme: 'fp', aggregation: 'COUNT_CASES' });
 
 const B2 = 'B2. Intrapartum Care and Delivery Outcome';
-ind('B', B2, 'B2_18', 'Number of deliveries', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_19', 'Number of live births', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_20a', 'Live births with normal birth weight', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_20b', 'Live births with low birth weight', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_20c', 'Live births with unknown birth weight', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_21', 'Deliveries attended by skilled health professionals', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_21a', 'Deliveries attended by a Doctor', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_21b', 'Deliveries attended by a Nurse', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_21c', 'Deliveries attended by a Midwife', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_22', 'Deliveries attended by non-skilled health professionals', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_22a', 'Deliveries attended by Hilot/TBA', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_22b', 'Deliveries attended by others', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_23', 'Health facility-based deliveries', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_24a', 'Deliveries in a public health facility', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_24b', 'Deliveries in a private health facility', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_25', 'Non-facility-based deliveries', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_26a', 'Vaginal deliveries', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_26b', 'Deliveries by cesarean section', { aggregation: 'COUNT_EVENTS' });
+// Section B2 is DERIVED from the existing maternal_records delivery data: the
+// case stores the delivery date, outcome, type, place, attendant and birth
+// weight. The report counts each delivery in the month of `delivery_date` and
+// classifies it from the recorded fields — the health worker never re-enters
+// these numbers on the M1 form (spec: NO DUPLICATE DATA ENTRY). Canonical field
+// values are the ones the Maternal Record form writes.
+const MR = (derive) => ({ aggregation: 'COUNT_EVENTS', source: 'maternal_records', derive });
+ind('B', B2, 'B2_18', 'Number of deliveries', MR({ dateField: 'delivery_date' }));
+ind('B', B2, 'B2_19', 'Number of live births', MR({ dateField: 'delivery_date', filter: { field: 'delivery_outcome', eq: 'Live Birth' } }));
+ind('B', B2, 'B2_20a', 'Live births with normal birth weight', MR({ dateField: 'delivery_date', filter: { field: 'delivery_outcome', eq: 'Live Birth', and: { field: 'birth_weight', numRange: { min: 2.5 } } } }));
+ind('B', B2, 'B2_20b', 'Live births with low birth weight', MR({ dateField: 'delivery_date', filter: { field: 'delivery_outcome', eq: 'Live Birth', and: { field: 'birth_weight', numRange: { gt: 0, lt: 2.5 } } } }));
+ind('B', B2, 'B2_20c', 'Live births with unknown birth weight', MR({ dateField: 'delivery_date', filter: { field: 'delivery_outcome', eq: 'Live Birth', and: { field: 'birth_weight', empty: true } } }));
+ind('B', B2, 'B2_21', 'Deliveries attended by skilled health professionals', MR({ dateField: 'delivery_date', filter: { field: 'birth_attendant', in: ['Doctor', 'Nurse', 'Midwife'] } }));
+ind('B', B2, 'B2_21a', 'Deliveries attended by a Doctor', MR({ dateField: 'delivery_date', filter: { field: 'birth_attendant', eq: 'Doctor' } }));
+ind('B', B2, 'B2_21b', 'Deliveries attended by a Nurse', MR({ dateField: 'delivery_date', filter: { field: 'birth_attendant', eq: 'Nurse' } }));
+ind('B', B2, 'B2_21c', 'Deliveries attended by a Midwife', MR({ dateField: 'delivery_date', filter: { field: 'birth_attendant', eq: 'Midwife' } }));
+ind('B', B2, 'B2_22', 'Deliveries attended by non-skilled health professionals', MR({ dateField: 'delivery_date', filter: { field: 'birth_attendant', in: ['Hilot/TBA', 'Other'] } }));
+ind('B', B2, 'B2_22a', 'Deliveries attended by Hilot/TBA', MR({ dateField: 'delivery_date', filter: { field: 'birth_attendant', eq: 'Hilot/TBA' } }));
+ind('B', B2, 'B2_22b', 'Deliveries attended by others', MR({ dateField: 'delivery_date', filter: { field: 'birth_attendant', eq: 'Other' } }));
+ind('B', B2, 'B2_23', 'Health facility-based deliveries', MR({ dateField: 'delivery_date', filter: { field: 'place_of_delivery', in: ['Public Facility', 'Private Facility'] } }));
+ind('B', B2, 'B2_24a', 'Deliveries in a public health facility', MR({ dateField: 'delivery_date', filter: { field: 'place_of_delivery', eq: 'Public Facility' } }));
+ind('B', B2, 'B2_24b', 'Deliveries in a private health facility', MR({ dateField: 'delivery_date', filter: { field: 'place_of_delivery', eq: 'Private Facility' } }));
+ind('B', B2, 'B2_25', 'Non-facility-based deliveries', MR({ dateField: 'delivery_date', filter: { field: 'place_of_delivery', eq: 'Home / Non-Facility' } }));
+ind('B', B2, 'B2_26a', 'Vaginal deliveries', MR({ dateField: 'delivery_date', filter: { field: 'type_of_delivery', eq: 'Vaginal' } }));
+ind('B', B2, 'B2_26b', 'Deliveries by cesarean section', MR({ dateField: 'delivery_date', filter: { field: 'type_of_delivery', eq: 'Cesarean' } }));
+// Full-term / pre-term classification and fetal death / abortion are NOT stored
+// on the maternal case, so they are entered manually (spec: MATERNAL INPUT
+// INDICATORS). Left as the default source and promoted to m1_manual below.
 ind('B', B2, 'B2_27a', 'Full-term births', { aggregation: 'COUNT_EVENTS' });
 ind('B', B2, 'B2_27b', 'Pre-term births', { aggregation: 'COUNT_EVENTS' });
 ind('B', B2, 'B2_27c', 'Fetal deaths', { aggregation: 'COUNT_CASES' });
 ind('B', B2, 'B2_27d', 'Abortion / miscarriage', { aggregation: 'COUNT_CASES' });
 
 const B3 = 'B3. Postpartum and Newborn Care';
-ind('B', B3, 'B3_28', 'Postpartum women + newborn who completed at least 2 postpartum check-ups', { ageScheme: 'fp' });
+// B3_28 / B3_30 are DERIVED from maternal_records (postpartum check-up dates and
+// the Vitamin A date). B3_29 (postpartum iron/folic) has no dedicated maternal
+// field distinct from the prenatal one, so it is entered manually.
+ind('B', B3, 'B3_28', 'Postpartum women + newborn who completed at least 2 postpartum check-ups', {
+  ageScheme: 'fp', aggregation: 'COUNT_EVENTS', source: 'maternal_records',
+  derive: { rule: 'postpartum_2plus', age: true },
+});
 ind('B', B3, 'B3_29', 'Postpartum women who completed iron with folic acid supplementation', { ageScheme: 'fp' });
-ind('B', B3, 'B3_30', 'Postpartum women with Vitamin A supplementation', { ageScheme: 'fp' });
+ind('B', B3, 'B3_30', 'Postpartum women with Vitamin A supplementation', {
+  ageScheme: 'fp', aggregation: 'COUNT_EVENTS', source: 'maternal_records',
+  derive: { dateField: 'vitamin_a_given_date', age: true },
+});
 
 // ===========================================================================
 // SECTION C — CHILD CARE
@@ -409,6 +442,16 @@ ind('H', H2, 'H2_1', 'Live births (by mother\'s age group)', { aggregation: 'COU
 // Public API
 // ---------------------------------------------------------------------------
 
+// Source priority (spec: SOURCE PRIORITY). Every indicator that still defaults
+// to the per-event store but is NOT a Section A family-planning service event
+// has no operational source, so it is promoted to the manual aggregate store
+// (m1_manual_entries). This guarantees EVERY indicator has exactly one source —
+// a derived operational table, the FP event store, or the manual store — and
+// never two, so no value can be double counted.
+for (const r of rows) {
+  if (r.source === 'm1_records' && r.section !== 'A') r.source = 'm1_manual';
+}
+
 export const M1_INDICATORS = Object.freeze(rows.map((r) => Object.freeze(r)));
 
 const BY_CODE = new Map(M1_INDICATORS.map((r) => [r.code, r]));
@@ -435,16 +478,120 @@ export const catalogTree = () => {
   });
 };
 
+/**
+ * Centralized source mapping (spec: M1 SOURCE MAPPING). One documented entry per
+ * indicator describing WHERE its reported value comes from and HOW it is
+ * aggregated, so the data flow is defined in one place instead of being
+ * hardcoded across the UI. Consumed by GET /m1/catalog and the source-mapping
+ * documentation.
+ */
+export const SOURCE_LABELS = Object.freeze({
+  m1_records: 'Per-event operational record (m1_records)',
+  m1_manual: 'Manual M1 data entry (m1_manual_entries)',
+  immunizations: 'Derived from immunizations',
+  households: 'Derived from households (WASH)',
+  household_member_health_profiles: 'Derived from recorded member mortality',
+  maternal_records: 'Derived from maternal_records',
+});
+
+/** True when an indicator is populated by the manual M1 Data Entry workflow. */
+export const isManualIndicator = (code) => getIndicator(code)?.source === 'm1_manual';
+
+/** Indicators the manual M1 Data Entry workflow is responsible for. */
+export const manualIndicators = () => M1_INDICATORS.filter((r) => r.source === 'm1_manual');
+
+// Physical table each source reads from.
+const SOURCE_TABLE = Object.freeze({
+  m1_records: 'm1_records',
+  m1_manual: 'm1_manual_entries',
+  immunizations: 'immunizations',
+  households: 'households',
+  household_member_health_profiles: 'household_member_health_profiles',
+  maternal_records: 'maternal_records',
+});
+
+// 'operational' = derived from a real service/event/household record;
+// 'manual_reporting' = a reporting-only figure with no operational source.
+const SOURCE_TYPE = Object.freeze({
+  m1_records: 'operational',
+  immunizations: 'operational',
+  households: 'operational',
+  household_member_health_profiles: 'operational',
+  maternal_records: 'operational',
+  m1_manual: 'manual_reporting',
+});
+
+const flattenCondFields = (cond, acc = []) => {
+  if (!cond) return acc;
+  if (cond.field) acc.push(cond.field);
+  if (cond.and) flattenCondFields(cond.and, acc);
+  return acc;
+};
+
+/** The concrete source fields an indicator reads, for the source audit. */
+const sourceFieldsFor = (r) => {
+  if (r.source === 'maternal_records') {
+    const f = [];
+    if (r.derive?.rule === 'postpartum_2plus') f.push('pp_checkup_24h', 'pp_checkup_day3', 'pp_checkup_7_14d', 'pp_checkup_6wk');
+    else if (r.derive?.dateField) f.push(r.derive.dateField);
+    flattenCondFields(r.derive?.filter, f);
+    return [...new Set(f)];
+  }
+  if (r.source === 'immunizations') return ['vaccine', 'administered_date', 'status'];
+  if (r.source === 'households') return [...new Set(flattenCondFields(r.match))];
+  if (r.source === 'household_member_health_profiles') return ['date_of_death', 'member.sex'];
+  if (r.source === 'm1_records') return ['indicator_code', 'record_date', 'value', 'detail.measure', 'resident_id'];
+  return ['value', 'age_group', 'sex']; // m1_manual
+};
+
+const AGG_METHOD = Object.freeze({
+  COUNT_UNIQUE_RESIDENTS: 'count distinct residents',
+  COUNT_EVENTS: 'count',
+  COUNT_CASES: 'count',
+  CURRENT_USERS: 'current users (begin + new + other − dropout, or end-of-month)',
+  SUM: 'sum',
+  TOTAL: 'sum',
+});
+
+/**
+ * The full indicator -> source mapping, in display order (spec: M1 SOURCE MAP).
+ * This is the SINGLE source of truth consumed by GET /m1/catalog, the
+ * aggregation engine, and the source-audit documentation — aggregation logic is
+ * never scattered across React components.
+ */
+export const sourceMapping = () =>
+  M1_INDICATORS.map((r) => ({
+    code: r.code,
+    section: r.section,
+    subsection: r.subsection,
+    name: r.name,
+    source: r.source,
+    sourceLabel: SOURCE_LABELS[r.source] || r.source,
+    sourceType: SOURCE_TYPE[r.source] || 'operational',
+    sourceTable: SOURCE_TABLE[r.source] || r.source,
+    sourceFields: sourceFieldsFor(r),
+    aggregation: r.aggregation,
+    aggregationMethod: AGG_METHOD[r.aggregation] || 'sum',
+    ageScheme: r.ageScheme,
+    sexBreakdown: r.sexBreakdown,
+    derive: r.derive || null,
+    match: r.match || null,
+  }));
+
 export default {
   SECTIONS,
   FREQUENCIES,
   AGGREGATIONS,
   SOURCES,
+  SOURCE_LABELS,
   AGE_SCHEMES,
   FP_MEASURES,
   M1_INDICATORS,
   getIndicator,
   isValidIndicatorCode,
+  isManualIndicator,
+  manualIndicators,
   indicatorsBySection,
   catalogTree,
+  sourceMapping,
 };

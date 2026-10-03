@@ -9,6 +9,7 @@ import VerificationBadge from "@/features/verification/components/VerificationBa
 import { fetchMyVerification } from "@/services/api/verificationsApi";
 import { residentsApi, authApi } from "@/services/api";
 import { supabase } from "@/lib/supabase";
+import { useLocation } from "react-router-dom";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, FileText,
   Calendar, Monitor, LogOut, Sun, Moon, MonitorCog, Palette, RefreshCw,
@@ -34,6 +35,8 @@ function checkPasswordStrength(pw) {
 }
 
 export default function SettingsPage({ roleKey = "resident" }) {
+  const location = useLocation();
+  const isProfileRoute = location.pathname.endsWith("/profile");
   const role = ROLES[roleKey];
   const { user, refreshProfile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -270,7 +273,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
   return (
     <>
-      <PageHeader crumbs={["Settings"]} title="Settings" subtitle="Manage your account security and information." />
+      <PageHeader crumbs={[isProfileRoute ? "Profile" : "Settings"]} title={isProfileRoute ? "Profile" : "Settings"} subtitle={isProfileRoute ? "View and update your account information." : "Manage your account security and information."} />
 
       <div className="space-y-5">
         {/* Profile Information */}

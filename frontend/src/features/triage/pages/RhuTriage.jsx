@@ -6,9 +6,7 @@ import { intakeApi } from "@/services/api";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { BARANGAYS } from "@/lib/barangays";
-import { barangayHealthCenter } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
-import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
 import {
   ArrowLeft,
   Search,
@@ -16,11 +14,9 @@ import {
   Users,
   Plus,
   Check,
-  MapPin,
   Stethoscope,
   ChevronDown,
   ChevronRight,
-  FileText,
 } from "lucide-react";
 
 /* Minimum characters before the resident search shows results. */
@@ -54,12 +50,11 @@ const STATUS_TONES = {
 const ROW_COLS = "md:grid-cols-[2.2fr_1fr_1.6fr_1.2fr_auto]";
 
 /* Workflow steps (0-indexed progress). */
-const STEP_ORDER = ["patient", "vitals", "reason", "location", "review"];
+const STEP_ORDER = ["patient", "vitals", "reason", "review"];
 const STEP_LABELS = {
   patient: "Patient",
   vitals: "Vital Signs",
   reason: "Reason for Visit",
-  location: "Location",
   review: "Review",
 };
 
@@ -118,7 +113,6 @@ export default function RhuTriage() {
   const [vitals, setVitals] = useState(emptyVitals);
   const [reason, setReason] = useState("");
   const [reasonDetail, setReasonDetail] = useState("");
-  const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
   // Assigned personnel (name & designation) who performed the triage. Optional;
   // falls back to the signed-in account name on the server.
@@ -126,7 +120,6 @@ export default function RhuTriage() {
   const [errors, setErrors] = useState({});
   const [listSearch, setListSearch] = useState("");
   const [toast, setToast] = useState(null);
-  const [certPatient, setCertPatient] = useState(null); // patient being certified
 
   // Registered-patient search is backed by the REAL resident directory
   // (GET /api/intake/residents/search), barangay/municipality-scoped on the
@@ -218,17 +211,6 @@ export default function RhuTriage() {
   const bmi = computeBmi(vitals.heightCm, vitals.weightKg);
   const finalReason = reason === "Other" ? reasonDetail.trim() : reason.trim();
 
-  const locationOptions = useMemo(() => {
-    if (!patientBarangay) return [{ value: "RHU", label: "At the RHU" }];
-    return [
-      { value: "RHU", label: "At the RHU" },
-      {
-        value: barangayHealthCenter(patientBarangay),
-        label: `At the Barangay (${patientBarangay})`,
-      },
-    ];
-  }, [patientBarangay]);
-
   const showToast = (message) => {
     setToast(message);
     setTimeout(() => setToast(null), 3200);
@@ -244,7 +226,6 @@ export default function RhuTriage() {
     setVitals(emptyVitals());
     setReason("");
     setReasonDetail("");
-    setLocation("");
     setNotes("");
     setAssignedPersonnel("");
     setErrors({});
@@ -341,15 +322,6 @@ export default function RhuTriage() {
       return;
     }
     setErrors({});
-    setCurrentStep("location");
-  };
-
-  const continueFromLocation = () => {
-    if (!location) {
-      setErrors({ location: "Please choose where the patient will be seen." });
-      return;
-    }
-    setErrors({});
     setCurrentStep("review");
   };
 
@@ -386,7 +358,6 @@ export default function RhuTriage() {
       bmi: bmi.value || null,
       bloodSugar: vitals.bloodSugar.trim() || null,
       notes: notes.trim(),
-      consultationLocation: location || "RHU",
       personnel: user?.name || "RHU Personnel",
       assignedPersonnel: assignedPersonnel.trim(),
       visitDate: new Date().toLocaleDateString("en-US", {
@@ -895,42 +866,15 @@ export default function RhuTriage() {
               </div>
             )}
 
-            {/* ============ STEP 4 · LOCATION ============ */}
-            {currentStep === "location" && (
-              <div>
-                {stepIndicator(4, "Location", "Where will the patient be seen?")}
-
-                <div className="grid max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  {locationOptions.map((opt) => {
-                    const active = location === opt.value;
-                    return (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => setLocation(opt.value)}
-                        className={`flex items-center gap-2.5 rounded-btn border-2 px-4 py-3 text-left transition-colors ${
-                          active
-                            ? "border-brand-blue bg-brand-blue/5 text-brand-ink"
-                            : "border-brand-border bg-white text-brand-gray hover:border-brand-blue/60"
-                        }`}
-                      >
-                        <MapPin className={`h-4 w-4 shrink-0 ${active ? "text-brand-blue" : "text-brand-gray"}`} />
-                        <span className="text-sm font-medium">{opt.label}</span>
-                        {active && <Check className="ml-auto h-4 w-4 text-brand-blue" />}
-                      </button>
-                    );
-                  })}
-                </div>
-                {errors.location && <p className="mt-2 text-xs text-brand-danger">{errors.location}</p>}
-
-                {backContinue(continueFromLocation)}
-              </div>
-            )}
-
-            {/* ============ STEP 5 · REVIEW ============ */}
+            {/* ============ STEP 4 · REVIEW ============ */}
             {currentStep === "review" && (
               <div>
-                {stepIndicator(5, "Review", "Check the details before sending the patient to the consultation station.")}
+
+            {stepIndicator(
+              5,
+              "Review",
+              "Check the details before sending the patient to the consultation station."
+              )}
 
                 <div className="max-w-2xl space-y-3">
                   <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
@@ -967,17 +911,9 @@ export default function RhuTriage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Reason for Visit</p>
-                      <p className="mt-0.5 text-sm font-semibold text-brand-ink">{finalReason}</p>
-                    </div>
-                    <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Location</p>
-                      <p className="mt-0.5 text-sm font-semibold text-brand-ink">
-                        {location === "RHU" ? "At the RHU" : `At the Barangay (${location.replace(" Barangay Health Center", "")})`}
-                      </p>
-                    </div>
+                  <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Reason for Visit</p>
+                    <p className="mt-0.5 text-sm font-semibold text-brand-ink">{finalReason}</p>
                   </div>
 
                   <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
@@ -1090,15 +1026,6 @@ export default function RhuTriage() {
                           {meta.text}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 md:justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setCertPatient(p)}
-                          className="inline-flex items-center gap-1 whitespace-nowrap rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue dark:bg-card"
-                        >
-                          <FileText className="h-3.5 w-3.5" /> Medical Certificate
-                        </button>
-                      </div>
                     </li>
                   );
                 })}
@@ -1108,26 +1035,6 @@ export default function RhuTriage() {
         </Card>
       </div>
 
-      {/* Medical Certificate (prepared at triage, submitted for MHO review) */}
-      {certPatient && (
-        <MedicalCertificateModal
-          mode="create"
-          patient={{
-            patientId: certPatient.residentId || String(certPatient.id),
-            patient: certPatient.patient,
-            age: certPatient.age ?? "",
-            sex: certPatient.sex || "",
-            barangay: certPatient.barangay || "RHU",
-            address: certPatient.residenceBarangay || certPatient.barangay || "RHU",
-          }}
-          currentUser={user?.name || "RHU Personnel"}
-          currentUserRole="RHU Personnel"
-          onClose={() => setCertPatient(null)}
-          onSaved={(status) => {
-            showToast(`Medical certificate ${status === "For Review" ? "submitted for MHO review" : "saved as draft"}.`);
-          }}
-        />
-      )}
     </>
   );
 }

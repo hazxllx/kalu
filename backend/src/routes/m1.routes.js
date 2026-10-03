@@ -28,12 +28,17 @@ router.post('/catalog/sync', authorize(['admin']), asyncHandler(controller.syncC
 router.get('/daily', authorize(READ), asyncHandler(controller.daily));
 router.get('/monthly', authorize(READ), asyncHandler(controller.monthly));
 router.get('/annual', authorize(READ), asyncHandler(controller.annual));
+router.get('/report', authorize(READ), asyncHandler(controller.report));
 router.get('/drilldown/:code', authorize(READ), asyncHandler(controller.drilldown));
 
 // Report header + section remarks
 router.get('/meta', authorize(READ), asyncHandler(controller.getMeta));
 router.put('/meta', authorize(WRITE), asyncHandler(controller.saveMeta));
 router.put('/remarks/:code', authorize(WRITE), asyncHandler(controller.saveRemarks));
+
+// Manual M1 data entry (aggregate figures with no operational source).
+router.get('/manual', authorize(READ), asyncHandler(controller.listManual));
+router.put('/manual', authorize(WRITE), asyncHandler(controller.saveManual));
 
 // Underlying record CRUD
 router.post('/records', authorize(WRITE), asyncHandler(controller.createRecord));

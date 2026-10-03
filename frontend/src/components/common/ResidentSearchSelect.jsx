@@ -4,9 +4,9 @@ import { Search, X, User, Check } from "lucide-react";
 const SEARCH_DEBOUNCE_MS = 250;
 
 /** Secondary identifying info, e.g. "RES-1024 · 34 yrs · San Isidro". */
-const residentMeta = (r) =>
+const residentMeta = (r, showId) =>
   [
-    r.id,
+    showId ? r.id : null,
     r.age !== undefined && r.age !== null ? `${r.age} yrs` : null,
     r.barangay || null,
   ]
@@ -32,6 +32,7 @@ export default function ResidentSearchSelect({
   onChange,
   placeholder = "Search resident by name...",
   limit = 8,
+  showId = true,
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -128,7 +129,7 @@ export default function ResidentSearchSelect({
           <span className="flex min-w-0 items-center gap-2">
             <Check className="h-4 w-4 shrink-0 text-brand-green" />
             <span className="truncate text-sm font-medium text-brand-ink">{value.name}</span>
-            <span className="shrink-0 text-xs text-brand-gray">{residentMeta(value)}</span>
+            <span className="shrink-0 text-xs text-brand-gray">{residentMeta(value, showId)}</span>
           </span>
           <button
             type="button"
@@ -201,7 +202,7 @@ export default function ResidentSearchSelect({
                           <User className="h-3.5 w-3.5 shrink-0 text-brand-gray" />
                           <span className="truncate text-sm font-medium text-brand-ink">{r.name}</span>
                         </span>
-                        <span className="shrink-0 text-xs text-brand-gray">{residentMeta(r)}</span>
+                        <span className="shrink-0 text-xs text-brand-gray">{residentMeta(r, showId)}</span>
                       </button>
                     </li>
                   ))}

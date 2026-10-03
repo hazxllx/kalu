@@ -54,4 +54,18 @@ export const fetchConditions = async () => {
   return payload?.conditions || [];
 };
 
-export default { fetchEarlyWarningData, fetchCommunityMap, fetchCommunityMapTrends, fetchConditions };
+/**
+ * Household map markers (clustered per family) for the Community Health Map.
+ * One marker per household, scoped from the session on the SERVER exactly like
+ * the community map. Only households with valid stored coordinates are plotted;
+ * the payload is household-level only (household number, barangay, risk status,
+ * member count, active-case flag) — no resident identity reaches the client.
+ */
+export const fetchHouseholdMap = async ({ barangay = null } = {}) => {
+  const params = {};
+  if (barangay) params.barangay = barangay;
+  const payload = await api.get('/analytics/household-map', Object.keys(params).length ? { params } : undefined);
+  return payload || { scope: 'municipality', households: [], unplotted: [], summary: {} };
+};
+
+export default { fetchEarlyWarningData, fetchCommunityMap, fetchCommunityMapTrends, fetchConditions, fetchHouseholdMap };

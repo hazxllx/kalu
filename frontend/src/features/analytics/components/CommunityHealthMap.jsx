@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { RefreshCw, MapPin } from "lucide-react";
+import { RefreshCw, MapPin, Home, AlertCircle } from "lucide-react";
 
-import { fetchCommunityMap } from "@/services/api/earlyWarningApi";
+import { fetchCommunityMap, fetchHouseholdMap } from "@/services/api/earlyWarningApi";
 
 /**
  * Community Health Map — real interactive Leaflet map for disease/health
@@ -79,6 +79,17 @@ function intensityColor(intensity, caseCount) {
   return "#F6C453"; // low
 }
 
+// Household risk marker colour. Active-case households are emphasised; the
+// colour reflects the household risk level reported by the backend.
+function householdColor(riskLevel, hasActiveCase) {
+  if (hasActiveCase) {
+    if (riskLevel === "High") return "#B91C1C"; // red-700
+    if (riskLevel === "Moderate" || riskLevel === "Medium") return "#EA580C"; // orange-600
+    return "#F59E0B"; // amber-500
+  }
+  return "#2563EB"; // brand blue — household with no active case
+}
+
 export default function CommunityHealthMap({
   barangays: barangaysProp = null,
   center: centerProp = null,
@@ -87,11 +98,19 @@ export default function CommunityHealthMap({
   loading: loadingProp = null,
   error: errorProp = null,
   onRetry = null,
+  onClearFilters = null,
+  showHouseholds = false,
+  householdBarangay = null,
 }) {
   const controlled = Array.isArray(barangaysProp);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(!controlled);
   const [error, setError] = useState("");
+
+  // Household markers (clustered per family). Loaded independently so the
+  // barangay heatmap keeps working even if the household layer is unavailable.
+  const [households, setHouseholds] = useState([]);
+  const [householdError, setHouseholdError] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -107,6 +126,26 @@ export default function CommunityHealthMap({
     load();
   }, [controlled, load]);
 
+  // Load household markers only when the caller asks for the household layer.
+  useEffect(() => {
+    if (!showHouseholds) {
+      setHouseholds([]);
+      return;
+    }
+    let active = true;
+    setHouseholdError("");
+    fetchHouseholdMap({ barangay: householdBarangay })
+      .then((res) => {
+        if (active) setHouseholds(res?.households || []);
+      })
+      .catch(() => {
+        if (active) setHouseholdError("Unable to load household markers.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [showHouseholds, householdBarangay]);
+
   const barangays = controlled ? barangaysProp : data?.barangays || [];
   const isLoading = controlled ? Boolean(loadingProp) : loading;
   const errText = controlled ? errorProp || "" : error;
@@ -114,27 +153,42 @@ export default function CommunityHealthMap({
 
   const plotted = useMemo(() => barangays.filter((b) => b.hasCoordinates), [barangays]);
   const missing = useMemo(() => barangays.filter((b) => !b.hasCoordinates), [barangays]);
-  const points = useMemo(() => plotted.map((b) => [b.latitude, b.longitude]), [plotted]);
+  const plottedHouseholds = useMemo(
+    () => households.filter((h) => h.hasCoordinates && h.latitude != null && h.longitude != null),
+    [households],
+  );
+  const points = useMemo(() => {
+    const barangayPoints = plotted.map((b) => [b.latitude, b.longitude]);
+    const householdPoints = plottedHouseholds.map((h) => [h.latitude, h.longitude]);
+    return [...barangayPoints, ...householdPoints];
+  }, [plotted, plottedHouseholds]);
   const centerPoint = center ? [center.latitude, center.longitude] : points[0] || PILI_CENTER;
 
   const retry = controlled ? onRetry : load;
 
   if (isLoading) {
     return (
-      <div className="flex h-[420px] items-center justify-center rounded-xl border border-brand-border bg-brand-bg">
-        <p className="text-sm text-brand-gray">Loading community health map…</p>
+      <div className="animate-pulse rounded-xl border border-brand-border bg-brand-bg p-4">
+        <div className="h-[300px] w-full rounded-lg bg-slate-200/70" />
+        <div className="mt-3 flex items-center gap-3">
+          <div className="h-2.5 w-24 rounded bg-slate-200/70" />
+          <div className="h-2.5 w-16 rounded bg-slate-200/70" />
+          <div className="h-2.5 w-16 rounded bg-slate-200/70" />
+        </div>
       </div>
     );
   }
 
   if (errText) {
     return (
-      <div className="flex h-[420px] flex-col items-center justify-center gap-3 rounded-xl border border-brand-danger/25 bg-brand-danger/5">
-        <p className="text-sm font-medium text-brand-danger">{errText}</p>
+      <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
+        <AlertCircle className="h-5 w-5 text-brand-danger" strokeWidth={1.8} />
+        <p className="text-sm font-semibold text-brand-ink">Unable to load community health data.</p>
+        <p className="text-xs text-brand-gray">Please try again.</p>
         {retry && (
           <button
             onClick={retry}
-            className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue transition-colors"
+            className="mt-1 inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
           >
             <RefreshCw className="h-4 w-4" /> Retry
           </button>
@@ -145,21 +199,41 @@ export default function CommunityHealthMap({
 
   if (barangays.length === 0) {
     return (
-      <div className="flex h-[420px] items-center justify-center rounded-xl border border-brand-border bg-brand-bg">
-        <p className="text-sm text-brand-gray">No barangays are available for your scope.</p>
+      <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
+        <MapPin className="h-5 w-5 text-brand-gray" strokeWidth={1.6} />
+        <p className="text-sm font-semibold text-brand-ink">No health data recorded</p>
+        <p className="max-w-sm text-xs text-brand-gray">
+          No barangays are available for your scope during the selected period.
+        </p>
+        {onClearFilters && (
+          <button
+            onClick={onClearFilters}
+            className="mt-1 inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
+          >
+            Clear Filters
+          </button>
+        )}
       </div>
     );
   }
 
   return (
     <div>
-      {plotted.length === 0 ? (
-        <div className="flex h-[420px] flex-col items-center justify-center gap-2 rounded-xl border border-brand-border bg-brand-bg text-center">
-          <MapPin className="h-6 w-6 text-brand-gray" strokeWidth={1.6} />
-          <p className="text-sm font-medium text-brand-ink">No geographic data available.</p>
+      {plotted.length === 0 && plottedHouseholds.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
+          <MapPin className="h-5 w-5 text-brand-gray" strokeWidth={1.6} />
+          <p className="text-sm font-semibold text-brand-ink">No mappable health data</p>
           <p className="max-w-sm text-xs text-brand-gray">
-            None of the barangays in your scope have verified map coordinates yet.
+            None of the barangays in your scope have verified map coordinates for the selected period.
           </p>
+          {onClearFilters && (
+            <button
+              onClick={onClearFilters}
+              className="mt-1 inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-brand-border">
@@ -212,6 +286,39 @@ export default function CommunityHealthMap({
                 </CircleMarker>
               );
             })}
+            {/* Household markers (clustered per family). ONE marker per household;
+                no resident identity is ever shown — household-level data only. */}
+            {plottedHouseholds.map((h) => {
+              const color = householdColor(h.riskLevel, h.hasActiveCase);
+              return (
+                <CircleMarker
+                  key={`hh-${h.id}`}
+                  center={[h.latitude, h.longitude]}
+                  radius={h.hasActiveCase ? 9 : 6}
+                  pathOptions={{
+                    color,
+                    fillColor: color,
+                    fillOpacity: h.hasActiveCase ? 0.85 : 0.5,
+                    weight: h.hasActiveCase ? 3 : 1.5,
+                  }}
+                >
+                  <Popup>
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-semibold">Household {h.householdNo}</p>
+                      {h.barangay && <p className="text-xs">Barangay: {h.barangay}</p>}
+                      <p className="text-xs">Members: {h.memberCount}</p>
+                      <p className="text-xs">Risk level: {h.riskLevel || "Low"}</p>
+                      <p className="text-xs">
+                        Status:{" "}
+                        <span className={h.hasActiveCase ? "font-semibold text-rose-700" : ""}>
+                          {h.hasActiveCase ? `Active health risk (${h.activeCases})` : "No active case"}
+                        </span>
+                      </p>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              );
+            })}
           </MapContainer>
         </div>
       )}
@@ -222,11 +329,19 @@ export default function CommunityHealthMap({
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#94A3B8" }} /> No data</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F59E0B" }} /> Lower</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#B91C1C" }} /> Higher</span>
+        {showHouseholds && (
+          <span className="inline-flex items-center gap-1.5">
+            <Home className="h-3 w-3 text-brand-blue" /> Household marker
+          </span>
+        )}
       </div>
       {missing.length > 0 && (
         <p className="mt-2 text-xs text-brand-gray">
           Coordinates unavailable (not plotted): {missing.map((b) => b.name).join(", ")}.
         </p>
+      )}
+      {showHouseholds && householdError && (
+        <p className="mt-2 text-xs text-brand-danger">{householdError}</p>
       )}
     </div>
   );

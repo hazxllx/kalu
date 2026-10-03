@@ -39,6 +39,12 @@ export const FEATURE_ROLES = Object.freeze({
   users: [ROLES.ADMIN],
   system: [ROLES.ADMIN],
 
+  // Resident risk assessment configuration (criteria + thresholds). Only the
+  // System Administrator may change it; the clinical/monitoring roles may read
+  // it so the Resident Detail breakdown and dashboards can label criteria.
+  riskConfig: [ROLES.ADMIN],
+  riskConfigRead: [ROLES.ADMIN, ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR],
+
   // Operational account verification queue. The gate is deliberately NOT the
   // admin list: PHN reviews Health Supervisor + RHU Personnel requests and the
   // Health Supervisor reviews BHW + Resident requests (see
@@ -82,15 +88,13 @@ export const FEATURE_ROLES = Object.freeze({
   consultationProcessing: [ROLES.PHN, ROLES.RHU_PERSONNEL],
   referralRecords: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
 
-  // Medical certificates. Prepared at the point of care (RHU Personnel, PHN,
-  // MHO) and reviewed by the PHN or the MHO. Deliberately excludes the BHW —
-  // a BHW never sees a clinical document — and System Admin, which is a
-  // system-administration role, not a clinical reviewer.
-  certificates: [ROLES.RHU_PERSONNEL, ROLES.PHN, ROLES.MHO],
+  // Medical certificates are prepared by PHN/MHO and reviewed by PHN/MHO.
+  // RHU Personnel, BHW and System Admin are not clinical certificate roles.
+  certificates: [ROLES.PHN, ROLES.MHO],
   certificateReview: [ROLES.PHN, ROLES.MHO],
 
   // Monitoring / aggregate information
-  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
+  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
 
   // Health services catalog. Managed (create/assign) by PHN, MHO and the
   // barangay-scoped Health Supervisor. Read by all staff who can be assigned a

@@ -10,6 +10,7 @@ import {
   formatShortDate,
   formatDateRange,
 } from '../src/lib/dateUtils.js';
+import { followUpDisplayStatus, isCalendarVisibleFollowUp } from '../src/features/follow-ups/lib/scheduleDates.js';
 
 // These tests lock the date-only behaviour that the PHN analytics screens rely
 // on. The core guarantee is that a LOCAL calendar day is never shifted to the
@@ -86,6 +87,21 @@ test('legitimate historical dates are preserved unchanged', () => {
   assert.equal(formatShortDate('2025-03-15'), 'Mar 15, 2025');
   assert.equal(formatLongDate('2025-12-31'), 'December 31, 2025');
   assert.equal(toLocalISODate(new Date(2025, 11, 31)), '2025-12-31');
+});
+
+test('follow-up display status uses the Philippine date without UTC day shifts', () => {
+  const justAfterPhilippineMidnight = new Date('2026-09-29T18:00:00.000Z');
+  assert.equal(followUpDisplayStatus('Scheduled', '2026-09-27', justAfterPhilippineMidnight), 'Overdue');
+  assert.equal(followUpDisplayStatus('Scheduled', '2026-09-30', justAfterPhilippineMidnight), 'Today');
+  assert.equal(followUpDisplayStatus('Scheduled', '2026-10-01', justAfterPhilippineMidnight), 'Scheduled');
+  assert.equal(followUpDisplayStatus('Completed', '2026-09-27', justAfterPhilippineMidnight), 'Completed');
+  assert.equal(followUpDisplayStatus('Cancelled', '2026-09-27', justAfterPhilippineMidnight), 'Cancelled');
+});
+
+test('only confirmed response-required follow-ups appear on the resident calendar', () => {
+  assert.equal(isCalendarVisibleFollowUp({ requiresResidentResponse: true, confirmationStatus: 'Awaiting Confirmation' }), false);
+  assert.equal(isCalendarVisibleFollowUp({ requiresResidentResponse: true, confirmationStatus: 'Confirmed' }), true);
+  assert.equal(isCalendarVisibleFollowUp({ requiresResidentResponse: false, confirmationStatus: null }), true);
 });
 
 test('invalid or empty input yields an empty string', () => {

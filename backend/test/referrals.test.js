@@ -253,3 +253,52 @@ test('delete removes the referral within scope and writes an audit entry', async
   assert.equal(remaining.length, 0);
   assert.ok(store.audit.some((a) => a.action === 'REFERRAL_DELETED'));
 });
+
+// --- Laboratory test (optional) --------------------------------------------
+
+test('a referral WITHOUT a laboratory test is created with lab_required = false', async () => {
+  const rec = await service.create({ user: HS, payload: { residentId: 'RES-1', ...baseReferral }, supabase: supabase() });
+  assert.equal(rec.laboratory_test_required, undefined === rec.laboratory_test_required ? rec.laboratory_test_required : false);
+  // Not required by default — no lab fields set.
+  assert.ok(!rec.laboratory_test);
+});
+
+test('a referral WITH a laboratory test stores the lab fields', async () => {
+  const rec = await service.create({
+    user: HS,
+    payload: {
+      residentId: 'RES-1',
+      ...baseReferral,
+      laboratory_test_required: true,
+      laboratory_test: 'Complete Blood Count, Urinalysis',
+      additional_instructions: 'Fasting required',
+    },
+    supabase: supabase(),
+  });
+  assert.equal(rec.laboratory_test_required, true);
+  assert.equal(rec.laboratory_test, 'Complete Blood Count, Urinalysis');
+  assert.equal(rec.additional_instructions, 'Fasting required');
+});
+
+test('marking laboratory test required WITHOUT details is rejected (422)', async () => {
+  await assert.rejects(
+    () => service.create({
+      user: HS,
+      payload: { residentId: 'RES-1', ...baseReferral, laboratory_test_required: true },
+      supabase: supabase(),
+    }),
+    (e) => e.statusCode === 422,
+  );
+});
+
+test('an update can attach laboratory test information to an existing referral', async () => {
+  const rec = await service.create({ user: HS, payload: { residentId: 'RES-1', ...baseReferral }, supabase: supabase() });
+  const updated = await service.update({
+    user: HS,
+    id: rec.id,
+    payload: { laboratory_test_required: true, laboratory_test: 'FBS' },
+    supabase: supabase(),
+  });
+  assert.equal(updated.laboratory_test_required, true);
+  assert.equal(updated.laboratory_test, 'FBS');
+});

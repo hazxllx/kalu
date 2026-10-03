@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
-import { MapPin, TrendingUp } from "lucide-react";
+import { MapPin, TrendingUp, RotateCcw } from "lucide-react";
 
 import PageHeader from "@/components/common/PageHeader";
 import { Card, CardHeader } from "@/components/common/Card";
@@ -10,7 +10,7 @@ import StatCard from "@/components/common/StatCard";
 import { useAuth } from "@/context/AuthContext";
 import { getAssignedBarangay } from "@/lib/barangayScope";
 import CommunityHealthMap from "@/features/analytics/components/CommunityHealthMap";
-import { toLocalISODate, formatDateRange, currentYear } from "@/lib/dateUtils";
+import { toLocalISODate, formatDateRange, formatLongDate, currentYear } from "@/lib/dateUtils";
 import {
   fetchCommunityMap,
   fetchCommunityMapTrends,
@@ -84,6 +84,7 @@ export default function CommunityMonitoring() {
   const [preset, setPreset] = useState("year");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [barangayFilter, setBarangayFilter] = useState("All"); // municipality-wide only
+  const [showHouseholds, setShowHouseholds] = useState(false); // household marker layer toggle
 
   const [mapData, setMapData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -133,6 +134,29 @@ export default function CommunityMonitoring() {
     if (!selected) return null;
     return barangays.find((b) => b.name === selected.name) || selected;
   }, [selected, barangays]);
+
+  // A barangay-scoped Health Supervisor is implicitly focused on their single
+  // assigned barangay, so the detail card is populated from that row without
+  // requiring a map click. A municipality-wide caller must pick a barangay.
+  const detailRow = useMemo(
+    () => (isBarangayScoped ? barangays[0] || null : selectedRow),
+    [isBarangayScoped, barangays, selectedRow],
+  );
+
+  const filtersDirty =
+    condition !== "All" ||
+    preset !== "year" ||
+    Boolean(custom.from) ||
+    Boolean(custom.to) ||
+    (!isBarangayScoped && barangayFilter !== "All");
+
+  const resetFilters = useCallback(() => {
+    setCondition("All");
+    setPreset("year");
+    setCustom({ from: "", to: "" });
+    setBarangayFilter("All");
+    setSelected(null);
+  }, []);
 
   const loadTrends = useCallback((barangayName) => {
     setTrendsLoading(true);
@@ -248,6 +272,22 @@ export default function CommunityMonitoring() {
             </div>
           </div>
         )}
+
+        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
+          <p className="text-xs text-brand-gray">
+            Showing <span className="font-semibold text-brand-ink">{condition === "All" ? "all conditions" : condition}</span>
+            {" · "}
+            <span className="font-semibold text-brand-ink">{periodLabel}</span>
+          </p>
+          <button
+            type="button"
+            onClick={resetFilters}
+            disabled={!filtersDirty}
+            className="inline-flex items-center gap-1.5 rounded-btn border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> Reset Filters
+          </button>
+        </div>
       </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -258,6 +298,17 @@ export default function CommunityMonitoring() {
               title="Health Heatmap"
               subtitle={`${condition === "All" ? "All conditions" : condition} · ${periodLabel}`}
             />
+            <div className="pt-3">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-brand-ink">
+                <input
+                  type="checkbox"
+                  checked={showHouseholds}
+                  onChange={(e) => setShowHouseholds(e.target.checked)}
+                  className="h-4 w-4 accent-brand-blue"
+                />
+                Show household markers (active cases)
+              </label>
+            </div>
             <div className="pt-4">
               <CommunityHealthMap
                 barangays={barangays}
@@ -265,8 +316,11 @@ export default function CommunityMonitoring() {
                 loading={loading}
                 error={error}
                 onRetry={loadMap}
+                onClearFilters={filtersDirty ? resetFilters : null}
                 onSelect={(b) => { setSelected(b); if (!isBarangayScoped) loadTrends(b.name); }}
                 selectedName={selectedRow?.name || (isBarangayScoped ? assignedBarangay : null)}
+                showHouseholds={showHouseholds}
+                householdBarangay={isBarangayScoped ? assignedBarangay : drillBarangay}
               />
             </div>
           </Card>
@@ -300,36 +354,26 @@ export default function CommunityMonitoring() {
         {/* Right column: Barangay detail panel */}
         <div>
           <Card className="p-5">
-            <CardHeader title="Barangay Details" subtitle={selectedRow ? selectedRow.name : "Select a barangay on the map"} />
+            <CardHeader
+              title="Barangay Details"
+              subtitle={condition === "All" ? "All conditions" : condition}
+            />
             <div className="pt-4">
-              {selectedRow ? (
-                <div className="space-y-3 text-sm">
-                  <DetailRow label="Selected Condition" value={condition === "All" ? "All conditions" : condition} />
-                  <DetailRow label="Reporting Period" value={periodLabel} />
-                  <DetailRow label="Total Cases" value={selectedRow.caseCount ?? 0} />
-                  <DetailRow label="New Cases (this month)" value={selectedRow.newCases ?? 0} />
-                  <DetailRow label="Active Cases" value={selectedRow.activeCases ?? 0} />
-                  <DetailRow label="Completed / Resolved" value={selectedRow.completedCases ?? 0} />
-                  <button
-                    type="button"
-                    onClick={() => loadTrends(selectedRow.name)}
-                    className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90"
-                  >
-                    <TrendingUp className="h-4 w-4" /> View Health Trends
-                  </button>
-                </div>
+              {detailRow ? (
+                <BarangayDetail
+                  row={detailRow}
+                  periodLabel={periodLabel}
+                  showTrendsButton={!isBarangayScoped}
+                  onViewTrends={() => loadTrends(detailRow.name)}
+                />
               ) : (
-                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 bg-brand-bg/40 px-6 py-10 text-center">
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue">
-                    <MapPin className="h-6 w-6" strokeWidth={1.6} />
+                <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue">
+                    <MapPin className="h-5 w-5" strokeWidth={1.6} />
                   </span>
-                  <p className="text-sm font-semibold text-brand-ink">
-                    {isBarangayScoped ? "Assigned Barangay" : "Select a barangay on the map"}
-                  </p>
-                  <p className="max-w-xs text-sm text-slate-500">
-                    {isBarangayScoped
-                      ? "Showing your assigned barangay. Trends are displayed below."
-                      : "Click a barangay marker to see its case breakdown and trends."}
+                  <p className="text-sm font-semibold text-brand-ink">Select a barangay</p>
+                  <p className="max-w-xs text-xs text-slate-500">
+                    Click a barangay on the map to see its case breakdown, top condition and trends.
                   </p>
                 </div>
               )}
@@ -341,11 +385,71 @@ export default function CommunityMonitoring() {
   );
 }
 
-function DetailRow({ label, value }) {
+/** Database-driven detail card for one barangay. */
+function BarangayDetail({ row, periodLabel, showTrendsButton, onViewTrends }) {
+  const activeCases = row.activeCases ?? 0;
+  const top = row.topCondition || { name: "No recorded condition", value: 0 };
+  const hasTop = Number(top.value) > 0;
+  const conditions = (row.conditions || []).filter((c) => Number(c.value) > 0);
+  const hasConditions = conditions.length > 0;
+  const lastRecorded = row.lastRecorded ? formatLongDate(row.lastRecorded) : null;
+
   return (
-    <div className="flex items-center justify-between border-b border-slate-100 pb-2 last:border-b-0">
-      <span className="text-slate-500">{label}</span>
-      <span className="font-semibold text-slate-900">{value}</span>
+    <div className="space-y-4 text-sm">
+      <div>
+        <p className="text-lg font-semibold text-brand-ink">{row.name}</p>
+        <p className="text-xs text-slate-500">{periodLabel}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+          <p className="text-xs font-medium text-slate-500">Active health cases</p>
+          <p className="text-xl font-semibold text-brand-ink">{activeCases}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+          <p className="text-xs font-medium text-slate-500">Total cases</p>
+          <p className="text-xl font-semibold text-brand-ink">{row.caseCount ?? 0}</p>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+        <p className="text-xs font-medium text-slate-500">Top condition</p>
+        <p className="text-base font-semibold text-brand-ink">{top.name}</p>
+        <p className="text-xs text-slate-500">{hasTop ? `${top.value} ${top.value === 1 ? "case" : "cases"}` : "0 cases"}</p>
+      </div>
+
+      <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+        <span className="text-slate-500">Last recorded</span>
+        <span className="font-semibold text-slate-900">{lastRecorded || "—"}</span>
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Health conditions</p>
+        {hasConditions ? (
+          <ul className="space-y-1.5">
+            {conditions.map((c) => (
+              <li key={c.name} className="flex items-center justify-between border-b border-slate-100 pb-1.5 last:border-b-0">
+                <span className="text-slate-600">{c.name}</span>
+                <span className="font-semibold text-slate-900">{c.value}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-lg bg-slate-50 px-3 py-3 text-xs text-slate-500">
+            No health conditions recorded for this period.
+          </p>
+        )}
+      </div>
+
+      {showTrendsButton && (
+        <button
+          type="button"
+          onClick={onViewTrends}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90"
+        >
+          <TrendingUp className="h-4 w-4" /> View Health Trends
+        </button>
+      )}
     </div>
   );
 }

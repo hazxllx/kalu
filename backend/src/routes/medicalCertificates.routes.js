@@ -17,10 +17,10 @@ import asyncHandler from '../utils/asyncHandler.js';
  * Medical certificate register.
  *
  * Every route authenticates and requires `FEATURE_ROLES.certificates`
- * (RHU Personnel, PHN, MHO). The service additionally enforces the caller's
+ * (PHN, MHO only). The service additionally enforces the caller's
  * barangay/municipality scope, and `FEATURE_ROLES.certificateReview` (PHN,
  * MHO) is what the register uses to decide whether a status change is a review
- * decision. A BHW and System Admin receive 403 here even by direct URL.
+ * decision. RHU Personnel, BHW and System Admin receive 403 here even by direct URL.
  */
 const router = Router();
 
