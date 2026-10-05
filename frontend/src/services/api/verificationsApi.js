@@ -50,12 +50,30 @@ export const fetchResidentDocuments = async (residentId) => {
   return payload?.documents || [];
 };
 
+/**
+ * @typedef {Object} VerificationDecisionOptions
+ * @property {string} [remarks]
+ * @property {string} [reason]
+ */
+
+/**
+ * @param {string} id
+ * @param {VerificationDecisionOptions} options
+ */
 export const approveResident = async (id, { remarks } = {}) =>
   api.patch(`/verifications/${encodeURIComponent(id)}/approve`, { remarks });
 
+/**
+ * @param {string} id
+ * @param {VerificationDecisionOptions} options
+ */
 export const rejectResident = async (id, { reason, remarks } = {}) =>
   api.patch(`/verifications/${encodeURIComponent(id)}/reject`, { reason, remarks });
 
+/**
+ * @param {string} id
+ * @param {VerificationDecisionOptions} options
+ */
 export const requestResubmission = async (id, { reason, remarks } = {}) =>
   api.patch(`/verifications/${encodeURIComponent(id)}/request-resubmission`, { reason, remarks });
 

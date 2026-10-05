@@ -20,11 +20,16 @@ import "react-day-picker/dist/style.css";
  *   - closes on outside click / Escape (the surrounding modal stays open),
  *   - offers Clear / Today, month + year dropdowns and disabled-date styling.
  *
- * @param {string}   props.value     ISO date "yyyy-MM-dd" ("" when empty)
- * @param {(v: string) => void} props.onChange  receives ISO date, or "" when cleared
- * @param {string}   [props.min]     earliest selectable ISO date
- * @param {string}   [props.max]     latest selectable ISO date
- * @param {boolean}  [props.error]   invalid (red) border
+ * @param {Object} props
+ * @param {string} props.value ISO date "yyyy-MM-dd" ("" when empty)
+ * @param {(value: string) => void} props.onChange receives ISO date, or "" when cleared
+ * @param {string} [props.min] earliest selectable ISO date
+ * @param {string} [props.max] latest selectable ISO date
+ * @param {boolean} [props.error] invalid (red) border
+ * @param {string} [props.placeholder] placeholder label shown when empty
+ * @param {boolean} [props.disabled] disables field interaction
+ * @param {string} [props.id] input/button id
+ * @param {string} [props.className] extra classes for wrapper
  */
 export default function DatePicker({
   value,

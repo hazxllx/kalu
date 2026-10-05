@@ -10,7 +10,7 @@ import StatCard from "@/components/common/StatCard";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import {
   Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight, Trash2,
-  Users, HeartPulse, Syringe, Smile, Activity, Droplets, ShieldAlert, FileBarChart2, ChevronRight as ArrowChevron,
+  Users, HeartPulse, Syringe, Smile, Activity, Droplets, ShieldAlert, FileBarChart2, Printer, ChevronRight as ArrowChevron,
 } from "lucide-react";
 import { maternalApi, residentsApi, referralsApi, m1Api } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
@@ -23,6 +23,7 @@ import {
   QUARTER_RANGE_LABEL, QUARTERS, quarterOfMonth0,
 } from "@/features/health-records/lib/reportingPeriod";
 import { useM1OfficialPrint } from "@/features/health-records/components/M1OfficialForm";
+import { useMaternalRecordPrint } from "@/features/health-records/components/MaternalRecordPrint";
 import M1DataEntryModal from "@/features/health-records/components/M1DataEntryModal";
 import M1SectionPanel from "@/features/health-records/components/M1SectionPanel";
 
@@ -152,8 +153,9 @@ const YES_NO = [
 
 function MaternalFormModal({ initial, resident, residents, saving, onClose, onSave, onSelectResident }) {
   const isEdit = Boolean(initial);
-  const [form, setForm] = useState(() => (initial ? { ...initial } : EMPTY_FORM()));
-  const [errors, setErrors] = useState({});
+  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initial ? { ...initial } : EMPTY_FORM()));
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
+  const [activeFormTab, setActiveFormTab] = useState("prenatal");
 
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
@@ -183,7 +185,42 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             </button>
           </div>
 
+          <div className="mb-4 flex gap-2 overflow-x-auto border-b border-brand-border" role="tablist" aria-label="Maternal record sections">
+            {[
+              { id: "prenatal", label: "Prenatal" },
+              { id: "postpartum", label: "Delivery & Postpartum" },
+              { id: "additional", label: "Additional Care" },
+            ].map((tab) => {
+              const selected = activeFormTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  id={`maternal-form-tab-${tab.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-controls={`maternal-form-panel-${tab.id}`}
+                  onClick={() => setActiveFormTab(tab.id)}
+                  className={`shrink-0 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
+                    selected
+                      ? "border-brand-blue text-brand-blue"
+                      : "border-transparent text-brand-gray hover:text-brand-ink"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
           <div className="space-y-4">
+            <div
+              id="maternal-form-panel-prenatal"
+              role="tabpanel"
+              aria-labelledby="maternal-form-tab-prenatal"
+              hidden={activeFormTab !== "prenatal"}
+              className="space-y-4"
+            >
             {isEdit ? (
               <div className="rounded-btn bg-brand-bg px-3.5 py-2.5">
                 <p className="text-[11px] uppercase tracking-wide text-brand-gray">Resident</p>
@@ -244,7 +281,15 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 <p className="mt-1 text-[11px] text-brand-gray">Zone No. and HH No. are managed in the household profile.</p>
               </div>
             )}
+            </div>
 
+            <div
+              id="maternal-form-panel-postpartum"
+              role="tabpanel"
+              aria-labelledby="maternal-form-tab-postpartum"
+              hidden={activeFormTab !== "postpartum"}
+              className="space-y-4"
+            >
             {/* Post-partum Care and Delivery Outcome */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Post-partum Care &amp; Delivery Outcome</p>
@@ -313,7 +358,15 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
               </div>
             </div>
+            </div>
 
+            <div
+              id="maternal-form-panel-additional"
+              role="tabpanel"
+              aria-labelledby="maternal-form-tab-additional"
+              hidden={activeFormTab !== "additional"}
+              className="space-y-4"
+            >
             {/* Supplementation / preventive care (documentation dates only) */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Supplementation / Preventive Care</p>
@@ -358,13 +411,20 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
               <label className="text-sm font-medium text-brand-ink">Notes</label>
               <textarea rows={3} value={form.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Relevant maternal information..." className={`${inputCls()} resize-none`} />
             </div>
+            </div>
           </div>
 
           <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
             <button
               disabled={saving}
-              onClick={() => { if (validate()) onSave({ ...form, prenatalVisits: Number(form.prenatalVisits) || 0 }); }}
+              onClick={() => {
+                if (!validate()) {
+                  setActiveFormTab("prenatal");
+                  return;
+                }
+                onSave({ ...form, prenatalVisits: Number(form.prenatalVisits) || 0 });
+              }}
               className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
             >
               <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : isEdit ? "Save Changes" : "Create Record"}
@@ -409,6 +469,7 @@ export default function M1Records() {
   const [countsLoading, setCountsLoading] = useState(false);
   const navigate = useNavigate();
   const { startPrint, portal } = useM1OfficialPrint();
+  const { startPrint: startMaternalPrint, portal: maternalPrintPortal } = useMaternalRecordPrint();
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -1118,6 +1179,12 @@ export default function M1Records() {
                   <Trash2 className="h-4 w-4" /> Delete
                 </button>
                 <div className="flex gap-3">
+                  <button
+                    onClick={() => startMaternalPrint(detail)}
+                    className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg"
+                  >
+                    <Printer className="h-4 w-4" /> Print
+                  </button>
                   <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Close</button>
                   <button onClick={() => openEdit(detail)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
                     <Pencil className="h-4 w-4" /> Edit
@@ -1195,6 +1262,7 @@ export default function M1Records() {
 
       {/* FHSIS M1 print portal (renders only during "Save as PDF"). */}
       {portal}
+      {maternalPrintPortal}
     </>
   );
 }

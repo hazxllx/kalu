@@ -254,23 +254,9 @@ export const NAV = {
       group: "Main",
     },
     {
-      label: "Resident Verifications",
+      label: "Verifications & Approvals",
       icon: "ShieldCheck",
       path: "/app/health_supervisor/verifications",
-      permission: "residents.registration.approve",
-      group: "Verification & Approvals",
-    },
-    {
-      label: "Household Verifications",
-      icon: "Home",
-      path: "/app/health_supervisor/household-verifications",
-      permission: "households.verify",
-      group: "Verification & Approvals",
-    },
-    {
-      label: "Account Approvals",
-      icon: "ShieldCheck",
-      path: "/app/health_supervisor/account-approvals",
       group: "Verification & Approvals",
     },
     {
@@ -314,13 +300,6 @@ export const NAV = {
       ],
     },
     {
-      label: "Schedule Calendar",
-      icon: "CalendarDays",
-      path: "/app/health_supervisor/followup-calendar",
-      permission: "followups.view",
-      group: "Health Services",
-    },
-    {
       label: "Health Services",
       icon: "Activity",
       path: "/app/health_supervisor/services",
@@ -332,13 +311,6 @@ export const NAV = {
       path: "/app/health_supervisor/referrals",
       permission: "referrals.view",
       group: "Health Services",
-    },
-    {
-      label: "Community Monitoring",
-      icon: "Map",
-      path: "/app/health_supervisor/barangays",
-      permission: "reports.analytics.view",
-      group: "Monitoring",
     },
     {
       label: "Early Warning",

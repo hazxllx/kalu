@@ -40,11 +40,17 @@ const CONTENT_W = PAGE_W - MARGIN * 2;
 const FOOTER_RESERVE = 44;
 
 // Grayscale-only palette (printable black & white).
+/** @type {[number, number, number]} */
 const BLACK = [0, 0, 0];
+/** @type {[number, number, number]} */
 const DARK = [30, 30, 30];
+/** @type {[number, number, number]} */
 const LABEL = [70, 70, 70];
+/** @type {[number, number, number]} */
 const RULE = [0, 0, 0];
+/** @type {[number, number, number]} */
 const HEADER_FILL = [225, 225, 225]; // light gray table header
+/** @type {[number, number, number]} */
 const ZEBRA = [244, 244, 244]; // very light gray alternating rows
 
 const str = (v) => (v === undefined || v === null ? "" : String(v).trim());

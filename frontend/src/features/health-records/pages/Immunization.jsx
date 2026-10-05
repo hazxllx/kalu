@@ -57,8 +57,8 @@ const EMPTY_FORM = () => ({
 
 function ImmunizationFormModal({ initial, resident, residents, saving, onClose, onSave, onSelectResident }) {
   const isEdit = Boolean(initial);
-  const [form, setForm] = useState(() => (initial ? { ...initial } : EMPTY_FORM()));
-  const [errors, setErrors] = useState({});
+  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initial ? { ...initial } : EMPTY_FORM()));
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));

@@ -4,6 +4,8 @@ import React from "react";
  * Shared empty state: icon, title, description, and an optional action.
  * Used wherever a list or page has nothing to show so the pattern is
  * consistent across the app.
+ *
+ * @param {{icon?: any, title: string, description?: string, action?: any, className?: string}} props
  */
 export default function EmptyState({
   icon: Icon,

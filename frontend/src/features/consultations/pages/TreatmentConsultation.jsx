@@ -37,6 +37,18 @@ const computeBmiDisplay = (heightCm, weightKg) => {
   return bmi.toFixed(2);
 };
 
+const classifyBloodPressure = (value) => {
+  const match = String(value || "").trim().match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/);
+  if (!match) return null;
+  const systolic = Number(match[1]);
+  const diastolic = Number(match[2]);
+  if (systolic > 180 || diastolic > 110) return { label: "Hypertensive Crisis", tone: "bg-brand-danger text-white", emergency: true };
+  if (systolic >= 160 || diastolic >= 100) return { label: "Stage 2 hypertension", tone: "bg-brand-danger/10 text-brand-danger" };
+  if (systolic >= 140 || diastolic >= 90) return { label: "Stage 1 hypertension", tone: "bg-brand-amber/10 text-brand-amber" };
+  if (systolic >= 120 || diastolic >= 80) return { label: "Prehypertension", tone: "bg-brand-goldpale text-brand-amber" };
+  return { label: "Normal", tone: "bg-brand-green/10 text-brand-green" };
+};
+
 /**
  * Map a failed save to a clear, status-appropriate message. The backend's
  * specific message (e.g. a 422 validation reason) is preferred when present;
@@ -86,6 +98,25 @@ const emptyForm = () => ({
   referralRequired: "No",
   remarks: "",
 });
+
+/**
+ * @typedef {Object} FormErrors
+ * @property {string} [resident]
+ * @property {string} [consultationDate]
+ * @property {string} [chiefComplaint]
+ * @property {string} [bloodPressure]
+ * @property {string} [temperature]
+ * @property {string} [pulseRate]
+ * @property {string} [respiratoryRate]
+ * @property {string} [height]
+ * @property {string} [weight]
+ * @property {string} [oxygenSaturation]
+ * @property {string} [findings]
+ * @property {string} [diagnosis]
+ * @property {string} [treatmentGiven]
+ * @property {string} [nextVisitDate]
+ * @property {string} [submit]
+ */
 
 const toResidentOption = (r) => ({
   id: r.id,
@@ -147,13 +178,17 @@ export default function TreatmentConsultation() {
   const [selectedResident, setSelectedResident] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [formData, setFormData] = useState(emptyForm());
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState(/** @type {FormErrors} */ ({}));
   const [toast, setToast] = useState(null);
 
   // Read-only BMI, recomputed immediately whenever height or weight changes.
   const bmiDisplay = useMemo(
     () => computeBmiDisplay(formData.height, formData.weight),
     [formData.height, formData.weight],
+  );
+  const bloodPressureCategory = useMemo(
+    () => classifyBloodPressure(formData.bloodPressure),
+    [formData.bloodPressure],
   );
 
   const load = useCallback(() => {
@@ -458,6 +493,16 @@ export default function TreatmentConsultation() {
               <p className="text-xs text-brand-gray mb-1">Blood Pressure (mmHg)</p>
               <input type="text" placeholder="e.g. 120/80" value={formData.bloodPressure} onChange={(e) => setFormData({ ...formData, bloodPressure: e.target.value })} className={inputCls(errors.bloodPressure)} />
               {errors.bloodPressure && <p className="mt-1 text-xs text-brand-danger">{errors.bloodPressure}</p>}
+              {bloodPressureCategory && (
+                <span className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${bloodPressureCategory.tone}`}>
+                  {bloodPressureCategory.label}
+                  {bloodPressureCategory.emergency && (
+                    <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold tracking-wide">
+                      EMERGENCY
+                    </span>
+                  )}
+                </span>
+              )}
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Temperature (°C)</p>

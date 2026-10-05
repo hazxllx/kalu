@@ -6,6 +6,7 @@ import {
 import { TrendingUp, TrendingDown, Activity, Send, MapPin } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import RiskOverview from "@/features/analytics/components/RiskOverview";
 import { PageSkeleton } from "@/components/common/Skeleton";
 import ErrorState from "@/components/common/ErrorState";
 import { useAuth } from "@/context/AuthContext";
@@ -220,31 +221,13 @@ export default function HealthTrends() {
             const low = riskValue("Low Risk");
             const assessed = high + moderate + low;
             const highPct = assessed > 0 ? Math.round((high / assessed) * 100) : null;
-            const rows = [
-              { label: "High Risk", value: high, tone: "text-brand-danger", bar: "bg-brand-danger" },
-              { label: "Moderate Risk", value: moderate, tone: "text-brand-blue", bar: "bg-brand-blue" },
-              { label: "Low Risk", value: low, tone: "text-brand-green", bar: "bg-brand-green" },
-            ];
             return (
               <div className="grid gap-6 lg:grid-cols-3">
                 <div className="lg:col-span-2 space-y-3">
-                  {rows.map((r) => {
-                    const p = assessed > 0 ? Math.round((r.value / assessed) * 100) : 0;
-                    return (
-                      <div key={r.label}>
-                        <div className="mb-1 flex items-center justify-between text-sm">
-                          <span className="text-brand-gray">{r.label}</span>
-                          <span className={`font-stat font-bold ${r.tone}`}>{r.value}</span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-brand-border">
-                          <div className={`h-full rounded-full ${r.bar}`} style={{ width: `${p}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {assessed === 0 && (
-                    <p className="text-xs text-brand-gray">No consultations with vitals have been recorded yet, so no risk levels can be computed for this barangay.</p>
-                  )}
+                  <RiskOverview
+                    distribution={s.riskDistribution}
+                    emptyMessage="No consultations with vitals have been recorded yet, so no risk levels can be computed for this barangay."
+                  />
                 </div>
                 <div className="space-y-3">
                   <div className="rounded-lg border border-brand-border bg-brand-light/30 p-4">

@@ -22,9 +22,13 @@ const residentMeta = (r, showId) =>
  * last names match ("mar" finds "Maria Santos"); every space-separated token
  * must appear in the name.
  *
- * @param {{ id: string, name: string, barangay?: string }[]} props.residents
- * @param {{ id: string, name: string } | null} props.value selected resident
- * @param {(resident: object | null) => void} props.onChange
+ * @param {Object} props
+ * @param {{ id: string, name: string, barangay?: string, age?: number }[]} [props.residents]
+ * @param {{ id: string, name: string, barangay?: string, age?: number } | null} props.value selected resident
+ * @param {(resident: { id: string, name: string, barangay?: string, age?: number } | null) => void} props.onChange
+ * @param {string} [props.placeholder]
+ * @param {number} [props.limit]
+ * @param {boolean} [props.showId]
  */
 export default function ResidentSearchSelect({
   residents = [],

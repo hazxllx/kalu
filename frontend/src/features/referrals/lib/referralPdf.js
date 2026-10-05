@@ -16,10 +16,15 @@ const PAGE_H = 11;
 const MARGIN = 0.45;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
+/** @type {[number, number, number]} */
 const NAVY = [11, 74, 143]; // brand-blue
+/** @type {[number, number, number]} */
 const INK = [18, 38, 63]; // brand-ink
+/** @type {[number, number, number]} */
 const GRAY = [84, 99, 122]; // brand-gray
+/** @type {[number, number, number]} */
 const RULE = [203, 206, 220]; // rule lines
+/** @type {[number, number, number]} */
 const LIGHT = [237, 243, 250]; // brand-light
 
 const MUNICIPALITY = "Municipality of Pili";

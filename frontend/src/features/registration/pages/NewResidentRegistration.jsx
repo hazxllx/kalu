@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Eye, EyeOff, ArrowRight, ArrowLeft, Check, MapPin, ChevronDown, Shield, Loader2, Mail, Camera,
+  CheckCircle2, AlertTriangle, XCircle, FileText,
 } from "lucide-react";
 import {
   RegistrationShell,
@@ -24,6 +25,22 @@ import { supabase } from "@/lib/supabase";
 import { registrationApi } from "@/services/api";
 import { postFormData } from "@/services/api/apiClient";
 import UploadComponent from "@/features/registration/components/UploadComponent";
+import {
+  SLOT_STATUS,
+  SLOT_DOCUMENT_TYPE,
+  REQUIRED_DOCUMENT_SLOTS,
+  initialSlotState,
+  initialScreeningState,
+  slotStateFromScreening,
+  isSlotEligible,
+  canSubmitDocuments,
+  firstBlockingSlot,
+  slotStatusLabel,
+  slotStatusTone,
+  blockingSlotError,
+  isSlotBlocking,
+} from "@/features/registration/documentScreening";
+import { isPasswordReuseError } from "@/features/registration/passwordErrors";
 import {
   CIVIL_STATUSES,
   NAME_SUFFIXES,
@@ -98,6 +115,50 @@ const STEPS = [
   { num: 4, label: "Review" },
 ];
 
+// Semantic status treatments for the review page. Keep backgrounds subtle so
+// text stays readable (the previous washed-out header reduced contrast).
+const REVIEW_TONE = {
+  success: "border-emerald-200 bg-emerald-50/70 text-emerald-800",
+  warning: "border-amber-200 bg-amber-50/70 text-amber-800",
+  danger: "border-brand-danger/25 bg-brand-danger/5 text-brand-danger",
+  neutral: "border-slate-200 bg-slate-100 text-slate-600",
+};
+
+/** Plain label/value review row. */
+function ReviewPlainRow({ label, value }) {
+  return (
+    <div className="flex flex-col gap-1 px-4 py-3.5 sm:flex-row sm:items-start sm:gap-4">
+      <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500 sm:w-40 sm:shrink-0 sm:pt-0.5">
+        {label}
+      </p>
+      <p className="min-w-0 break-words text-[13px] font-medium text-brand-ink">{value || "—"}</p>
+    </div>
+  );
+}
+
+/** Review row that shows the document's OWN automated screening status. */
+function ReviewDocRow({ label, slot, fileName }) {
+  const tone = slotStatusTone(slot);
+  const Icon =
+    tone === "success" ? CheckCircle2 : tone === "warning" ? AlertTriangle : tone === "danger" ? XCircle : FileText;
+  return (
+    <div className="flex flex-col gap-1 px-4 py-3.5 sm:flex-row sm:items-start sm:gap-4">
+      <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500 sm:w-40 sm:shrink-0 sm:pt-0.5">
+        {label}
+      </p>
+      <div className="min-w-0">
+        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${REVIEW_TONE[tone]}`}>
+          <Icon className="h-3.5 w-3.5" /> {slotStatusLabel(slot)}
+        </span>
+        {fileName && <p className="mt-1 truncate text-[12px] text-slate-500">{fileName}</p>}
+        {isSlotBlocking(slot) && slot?.message && (
+          <p className="mt-1 text-[12px] text-brand-ink">{slot.message}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function NewResidentRegistration() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
@@ -118,8 +179,42 @@ export default function NewResidentRegistration() {
   // to the canonical three if the lookup is unavailable, so the field always
   // works, but the DB is the source of truth.
   const [barangayList, setBarangayList] = useState(FALLBACK_BARANGAYS);
-  /** @type {[Record<string, string>, Function]} */
+  /**
+   * @typedef {Object} RegistrationErrors
+   * @property {string} [confirmPassword]
+   * @property {string} [emailVerified]
+   * @property {string} [agree]
+   * @property {string} [governmentIdType]
+   * @property {string} [identityNo]
+   * @property {string} [governmentIdTypeOther]
+   * @property {string} [agreeReview]
+   * @property {string} [submit]
+   * @property {string} [email]
+   * @property {string} [mobile]
+   * @property {string} [dob]
+   * @property {string} [barangay]
+   * @property {string} [zone]
+   * @property {string} [governmentIdFront]
+   * @property {string} [governmentIdBack]
+   * @property {string} [identityPhoto]
+   * @property {string} [residentId]
+   * @property {string} [firstName]
+   * @property {string} [lastName]
+   * @property {string} [suffix]
+   * @property {string} [sex]
+   * @property {string} [civilStatus]
+   * @property {string} [password]
+   */
+  /** @type {[RegistrationErrors, React.Dispatch<React.SetStateAction<RegistrationErrors>>]} */
   const [errors, setErrors] = useState({});
+
+  // Automated document screening state, one entry per required slot. A slot is
+  // only eligible for submission when its OWN result is passed/flagged; front and
+  // back are screened independently and a replacement always re-screens.
+  const [screening, setScreening] = useState(initialScreeningState);
+  // Per-slot request sequence so an out-of-order response from a previous file
+  // can never overwrite the result of a newer replacement.
+  const screeningSeq = useRef({ governmentIdFront: 0, governmentIdBack: 0, identityPhoto: 0 });
 
   // Load the real barangay list for the Municipality of Pili from the backend
   // (public.barangays is public-readable). This keeps the dropdown data-driven
@@ -148,7 +243,7 @@ export default function NewResidentRegistration() {
 
   // Email verification (real Supabase Confirm Signup OTP — no local/fake OTP)
   // emailPhase: "idle" | "sending" | "sent" | "verifying" | "verified"
-  const [emailPhase, setEmailPhase] = useState("idle");
+  const [emailPhase, setEmailPhase] = useState(/** @type {string} */ ("idle"));
   const [otpDigits, setOtpDigits] = useState(new Array(OTP_LENGTH).fill(""));
   const [otpError, setOtpError] = useState("");
   const [sendError, setSendError] = useState("");
@@ -379,6 +474,15 @@ export default function NewResidentRegistration() {
   const setIdType = (e) => {
     setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdType: e.target.value } }));
     setErrors((prev) => ({ ...prev, governmentIdType: "", governmentIdTypeOther: "" }));
+    // The indicator set for the front/back screen depends on the SELECTED ID
+    // type (postal_id, passport, philsys, …). A changed type invalidates the
+    // previous results so the new type's indicators are applied.
+    if (screening.governmentIdFront.status !== SLOT_STATUS.NOT_CHECKED) {
+      setScreening((p) => ({ ...p, governmentIdFront: initialSlotState() }));
+    }
+    if (screening.governmentIdBack.status !== SLOT_STATUS.NOT_CHECKED) {
+      setScreening((p) => ({ ...p, governmentIdBack: initialSlotState() }));
+    }
   };
   const setIdTypeOther = (e) => {
     setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdTypeOther: e.target.value } }));
@@ -388,18 +492,53 @@ export default function NewResidentRegistration() {
     setForm((p) => ({ ...p, identity: { ...p.identity, identityNo: e.target.value } }));
     setErrors((prev) => ({ ...prev, identityNo: "" }));
   };
-  const setIdFront = (file) => {
-    setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdFront: file } }));
-    setErrors((prev) => ({ ...prev, governmentIdFront: "" }));
+  /**
+   * Set/clear one identity document slot and run the automated screen on it.
+   * Passing `null` clears BOTH the file and its screening result, so a replaced
+   * file can never inherit a stale result. Front/back/photo each keep their own
+   * file reference and result.
+   */
+  const handleIdentityFile = (slot, file) => {
+    const errorKey = slot; // form.identity keys match the slot keys
+    setForm((p) => ({ ...p, identity: { ...p.identity, [slot]: file } }));
+    setErrors((prev) => ({ ...prev, [errorKey]: "" }));
+
+    // Clear the previous result immediately and mark this slot as the newest.
+    const seq = (screeningSeq.current[slot] || 0) + 1;
+    screeningSeq.current[slot] = seq;
+    setScreening((p) => ({ ...p, [slot]: initialSlotState() }));
+
+    if (!file) return;
+    setScreening((p) => ({ ...p, [slot]: { status: SLOT_STATUS.CHECKING, reason: "", message: "" } }));
+
+    (async () => {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("documentType", SLOT_DOCUMENT_TYPE[slot]);
+        if (form.identity.governmentIdType) {
+          fd.append("governmentIdType", form.identity.governmentIdType);
+        }
+        const resp = await postFormData("/resident-documents/screen", fd);
+        if (screeningSeq.current[slot] !== seq) return; // a newer file replaced this one
+        setScreening((p) => ({ ...p, [slot]: slotStateFromScreening(resp?.screening) }));
+      } catch (err) {
+        if (screeningSeq.current[slot] !== seq) return;
+        setScreening((p) => ({
+          ...p,
+          [slot]: {
+            status: SLOT_STATUS.ERROR,
+            reason: "SCREENING_ERROR",
+            message: err?.message || "We could not check this document. Please re-upload it.",
+          },
+        }));
+      }
+    })();
   };
-  const setIdBack = (file) => {
-    setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdBack: file } }));
-    setErrors((prev) => ({ ...prev, governmentIdBack: "" }));
-  };
-  const setIdentityPhoto = (file) => {
-    setForm((p) => ({ ...p, identity: { ...p.identity, identityPhoto: file } }));
-    setErrors((prev) => ({ ...prev, identityPhoto: "" }));
-  };
+
+  const setIdFront = (file) => handleIdentityFile("governmentIdFront", file);
+  const setIdBack = (file) => handleIdentityFile("governmentIdBack", file);
+  const setIdentityPhoto = (file) => handleIdentityFile("identityPhoto", file);
 
   // Changing the email invalidates any in-flight or completed verification.
   const setEmailValue = (val) => {
@@ -439,6 +578,7 @@ export default function NewResidentRegistration() {
   }, [form.email, emailPhase]);
 
   const validateStep = (s) => {
+    /** @type {RegistrationErrors} */
     let errs = {};
     if (s === 1) {
       errs = validateFields(form, {
@@ -469,9 +609,23 @@ export default function NewResidentRegistration() {
       if (idt.governmentIdType === "other" && !idt.governmentIdTypeOther.trim()) {
         errs.governmentIdTypeOther = "Please specify the type of government-issued ID.";
       }
-      if (!idt.governmentIdFront) errs.governmentIdFront = "Upload the front of your government ID.";
-      if (!idt.governmentIdBack) errs.governmentIdBack = "Upload the back of your government ID.";
-      if (!idt.identityPhoto) errs.identityPhoto = "Upload your identity photo holding the ID.";
+      // Each required document must exist AND have its own eligible screening
+      // result. A rejected/not-checked/checking/error document blocks the step —
+      // "file uploaded" is never treated as "document verified".
+      const slotFiles = {
+        governmentIdFront: idt.governmentIdFront,
+        governmentIdBack: idt.governmentIdBack,
+        identityPhoto: idt.identityPhoto,
+      };
+      for (const slot of REQUIRED_DOCUMENT_SLOTS) {
+        if (!slotFiles[slot]) {
+          errs[slot] = slot === "identityPhoto"
+            ? "Upload your identity photo holding the ID."
+            : `Upload the ${slot === "governmentIdFront" ? "front" : "back"} of your government ID.`;
+        } else if (!isSlotEligible(screening[slot])) {
+          errs[slot] = blockingSlotError(screening[slot]);
+        }
+      }
       if (!form.agreeReview) errs.agreeReview = "Please confirm your information for review to continue";
     }
     setErrors(errs);
@@ -484,6 +638,17 @@ export default function NewResidentRegistration() {
 
   const submit = async () => {
     if (submitting) return; // guard against duplicate submissions
+
+    // Never submit while a required document is missing, rejected, unchecked or
+    // still being checked. The backend enforces this again when each file is
+    // uploaded, but this prevents even attempting an invalid submission.
+    const missingSlot = REQUIRED_DOCUMENT_SLOTS.find((slot) => !form.identity[slot]);
+    if (missingSlot || firstBlockingSlot(screening)) {
+      setErrors((prev) => ({ ...prev, submit: "Replace the rejected document before submitting." }));
+      setStep(3);
+      return;
+    }
+
     setSubmitting(true);
     setErrors({});
 
@@ -566,9 +731,13 @@ export default function NewResidentRegistration() {
       // The Supabase account was created in Step 2 with a temporary password
       // (required to trigger the Confirm Signup OTP email). Now that we hold a
       // valid session for the confirmed account, set the resident's real
-      // chosen password.
+      // chosen password. On a retry the account may already carry this exact
+      // password, so Supabase's password-CHANGE rule ("should be different from
+      // the old password") is treated as success here: it only means the
+      // password is already set, which is the desired end state for
+      // registration. Genuine errors (weak/blocked) are still surfaced.
       const { error: setPwError } = await supabase.auth.updateUser({ password: form.password });
-      if (setPwError) throw setPwError;
+      if (setPwError && !isPasswordReuseError(setPwError.message)) throw setPwError;
 
       const resident = await registrationApi.registerResident(payload);
       if (!resident?.id) {
@@ -601,6 +770,14 @@ export default function NewResidentRegistration() {
         if (!docResp?.document) {
           throw new Error(`We could not upload ${u.label}. Please go back and try again.`);
         }
+        // Rule-based automated screening (readability only — never an
+        // authenticity decision). The backend returns a resident-safe message;
+        // a rejected upload keeps the resident on this step so they can replace
+        // the file. Technical reason codes are never shown to residents.
+        const screening = docResp.document.screening;
+        if (screening?.status === 'automated_rejected') {
+          throw new Error(screening.message || 'The uploaded file does not meet the document requirements. Please upload a clear copy of your identification document.');
+        }
       }
 
       // The account is already authenticated from the signup verification.
@@ -608,18 +785,19 @@ export default function NewResidentRegistration() {
       // there is the post-registration confirmation state.
       navigate('/app/resident-limited/dashboard');
     } catch (err) {
-      // Preserve the exact technical error for developers without exposing it
-      // to residents. The backend now returns a real message in the standard
-      // { error: { message, details } } envelope (see apiClient), so this is
-      // the actual validation/processing failure, not a generic status string.
-      if (import.meta.env?.DEV) {
-        // eslint-disable-next-line no-console
-        console.error('Registration submit failed:', err?.status, err?.message, err?.payload);
-      }
-
       const status = err?.status;
       const backendMessage = typeof err?.message === 'string' ? err.message : '';
       const isGenericStatusOnly = /^Request failed with status/i.test(backendMessage);
+
+      // A 422 from the document upload path is the deterministic screening
+      // result: the file was rejected and the registration cannot proceed.
+      // Show the resident-safe message; never a technical reason code.
+      if (status === 422 && typeof err?.payload?.details?.screening?.message === 'string') {
+        setErrors((prev) => ({ ...prev, submit: err.payload.details.screening.message }));
+        setStep(3);
+        setSubmitting(false);
+        return;
+      }
 
       let message;
       if (status === 409) {
@@ -640,6 +818,14 @@ export default function NewResidentRegistration() {
   };
 
   const meta = STEPS_META[step - 1];
+
+  // Submission is only enabled when every required document has been uploaded
+  // AND passed its own automated check. This is a UX guard; the backend
+  // independently rejects rejected/stale documents.
+  const documentsSubmittable =
+    canSubmitDocuments(screening) && REQUIRED_DOCUMENT_SLOTS.every((slot) => Boolean(form.identity[slot]));
+  const canSubmit = documentsSubmittable && !submitting;
+  const blockingSlot = firstBlockingSlot(screening);
 
   return (
     <RegistrationShell
@@ -776,16 +962,16 @@ export default function NewResidentRegistration() {
                         <button
                           type="button"
                           onClick={sendCode}
-                          disabled={emailPhase === "sending" || resendIn > 0 && emailPhase === "sent"}
+                          disabled={emailPhase === "sending" || resendIn > 0 && /** @type {string} */ (emailPhase) === "sent"}
                           className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {emailPhase === "sending" ? (
                             <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending</>
                           ) : (
-                            <><Mail className="h-3.5 w-3.5" /> {emailPhase === "sent" ? "Send Code Again" : "Send Verification Code"}</>
+                            <><Mail className="h-3.5 w-3.5" /> {/** @type {string} */ (emailPhase) === "sent" ? "Send Code Again" : "Send Verification Code"}</>
                           )}
                         </button>
-                        {emailPhase === "sent" && resendIn > 0 && (
+                        {/** @type {string} */ (emailPhase) === "sent" && resendIn > 0 && (
                           <span className="text-[12px] font-medium text-slate-500 tabular-nums">Resend code in {resendIn}s</span>
                         )}
                       </div>
@@ -941,25 +1127,25 @@ export default function NewResidentRegistration() {
                 <div className="border-t border-slate-100 pt-5">
                   <SectionKicker>Contact Information</SectionKicker>
                   <div className="mt-5 space-y-5">
-                    <Field label="Mobile Number" required error={errors.mobile}>
-                      <input
-                        type="tel"
-                        inputMode="numeric"
-                        autoComplete="tel"
-                        pattern="[0-9]*"
-                        maxLength={11}
-                        placeholder="09381829120"
-                        value={form.mobile}
-                        onChange={set("mobile")}
-                        onKeyDown={(e) => {
-                          // Block anything that is not a digit or an editing key.
-                          const allowed = ["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"];
-                          if (allowed.includes(e.key) || e.ctrlKey || e.metaKey) return;
-                          if (!/^[0-9]$/.test(e.key)) e.preventDefault();
-                        }}
-                        className={inputCls(errors.mobile)}
-                      />
-                    </Field>
+                    <Field label="Mobile Number" required error={errors.mobile} hint="Enter your 11-digit Philippine mobile number (must start with 09).">
+                        <input
+                          type="tel"
+                          inputMode="numeric"
+                          autoComplete="tel"
+                          pattern="[0-9]*"
+                          maxLength={11}
+                          placeholder="09XXXXXXXXX"
+                          value={form.mobile}
+                          onChange={set("mobile")}
+                          onKeyDown={(e) => {
+                            // Block anything that is not a digit or an editing key.
+                            const allowed = ["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"];
+                            if (allowed.includes(e.key) || e.ctrlKey || e.metaKey) return;
+                            if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                          }}
+                          className={`${inputCls(errors.mobile)} tabular-nums`}
+                        />
+                      </Field>
                     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                       <Field label="Province">
                         <input type="text" value={form.province} onChange={set("province")} className={inputCls()} />
@@ -1151,6 +1337,7 @@ export default function NewResidentRegistration() {
                       file={form.identity.governmentIdFront}
                       onFile={setIdFront}
                       onRemove={() => setIdFront(null)}
+                      screening={screening.governmentIdFront}
                     />
                     {errors.governmentIdFront && (
                       <p className="-mt-3 text-[11.5px] font-medium text-brand-danger">{errors.governmentIdFront}</p>
@@ -1161,6 +1348,7 @@ export default function NewResidentRegistration() {
                       file={form.identity.governmentIdBack}
                       onFile={setIdBack}
                       onRemove={() => setIdBack(null)}
+                      screening={screening.governmentIdBack}
                     />
                     {errors.governmentIdBack && (
                       <p className="-mt-3 text-[11.5px] font-medium text-brand-danger">{errors.governmentIdBack}</p>
@@ -1184,6 +1372,7 @@ export default function NewResidentRegistration() {
                     file={form.identity.identityPhoto}
                     onFile={setIdentityPhoto}
                     onRemove={() => setIdentityPhoto(null)}
+                    screening={screening.identityPhoto}
                   />
                   {errors.identityPhoto && (
                     <p className="mt-1.5 text-[11.5px] font-medium text-brand-danger">{errors.identityPhoto}</p>
@@ -1232,14 +1421,30 @@ export default function NewResidentRegistration() {
                   ["Government ID Type", form.identity.governmentIdType === "other"
                     ? `Other: ${form.identity.governmentIdTypeOther || "—"}`
                     : (GOVT_ID_LABEL[form.identity.governmentIdType] || "—")],
-                  ["ID Front", form.identity.governmentIdFront?.name || "—"],
-                  ["ID Back", form.identity.governmentIdBack?.name || "—"],
-                  ["Identity Photo", form.identity.identityPhoto?.name || "—"],
-                  ["Document Status", "Uploaded — Pending Review"],
+                  ["Government ID Number", form.identity.identityNo ? "••••••••••" : "—"],
                 ]} />
+                {/* Document status is tied to each file's OWN automated screening
+                    result, never a hardcoded "Uploaded — Pending Review". */}
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-100/80 px-4 py-3">
+                    <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-ink">Document Status</p>
+                    <button
+                      type="button"
+                      onClick={() => goTo(3)}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-blue transition-colors hover:text-brand-dark"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    <ReviewDocRow label="Government ID — Front" slot={screening.governmentIdFront} fileName={form.identity.governmentIdFront?.name} />
+                    <ReviewDocRow label="Government ID — Back" slot={screening.governmentIdBack} fileName={form.identity.governmentIdBack?.name} />
+                    <ReviewDocRow label="Identity Photo" slot={screening.identityPhoto} fileName={form.identity.identityPhoto?.name} />
+                  </div>
+                </div>
                 <ReviewBlock title="Verification" onEdit={() => goTo(3)} items={[
                   ["Method", "Health Supervisor review"],
-                  ["Status", "Pending Verification after submission"],
+                  ["Status", documentsSubmittable ? "Ready to submit" : "Replace the rejected document before submitting."],
                 ]} />
               </div>
             )}
@@ -1280,18 +1485,29 @@ export default function NewResidentRegistration() {
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </button>
             ) : (
-              <button onClick={submit} disabled={submitting} className={btnPrimary}>
-                {submitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Submitting
-                  </>
-                ) : (
-                  <>
-                    Submit Registration <Check className="h-4 w-4" strokeWidth={2.5} />
-                  </>
+              <>
+                {!documentsSubmittable && (
+                  <p className="mr-auto text-left text-[12px] leading-snug text-brand-danger">
+                    {blockingSlot ? blockingSlotError(screening[blockingSlot]) : "Upload all required documents before submitting."}
+                  </p>
                 )}
-              </button>
+                <button
+                  onClick={submit}
+                  disabled={!canSubmit}
+                  className={`${btnPrimary} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Checking document...
+                    </>
+                  ) : (
+                    <>
+                      Submit Registration {documentsSubmittable && <Check className="h-4 w-4" strokeWidth={2.5} />}
+                    </>
+                  )}
+                </button>
+              </>
             )}
           </div>
         </div>

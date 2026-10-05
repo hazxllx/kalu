@@ -1,4 +1,3 @@
-import React, { useSyncExternalStore } from "react";
 import {
   computeHouseholdRisk,
   getRiskConfig,
@@ -165,8 +164,6 @@ const resolveHousehold = (id, { outcome = RISK_WORKFLOW_STATUSES[0] } = {}) => {
   persistWorkflow(id, { workflowStatus: outcome, history });
   return getClusters().find((x) => x.id === id);
 };
-
-export const useHouseholdRiskClusters = () => useSyncExternalStore(subscribe, getSnapshot);
 
 export const householdRiskStore = {
   getClusters,

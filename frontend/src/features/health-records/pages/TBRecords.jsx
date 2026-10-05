@@ -128,7 +128,7 @@ export default function TBRecords() {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [toast, setToast] = useState(null);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(/** @type {Record<string, any>} */ ({
     residentId: "",
     program: TB_PROGRAMS[0],
     bhw: "",
@@ -138,8 +138,8 @@ export default function TBRecords() {
     nextVisit: "",
     nextVisitTime: "",
     notes: "",
-  });
-  const [formErrors, setFormErrors] = useState({});
+  }));
+  const [formErrors, setFormErrors] = useState(/** @type {Record<string, any>} */ ({}));
 
   const showToast = (message) => {
     setToast(message);

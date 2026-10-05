@@ -115,7 +115,7 @@ const draftNotesOf = (d) =>
 
 function ReferralFormModal({ initial, draft, resident, residents, saving, onClose, onSave, onSelectResident }) {
   const isEdit = Boolean(initial);
-  const [form, setForm] = useState(() => {
+  const [form, setForm] = useState(/** @type {() => Record<string, any>} */ (() => {
     if (initial) {
       return {
         referralDate: initial.referralDate || todayIso(),
@@ -140,8 +140,8 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
       };
     }
     return EMPTY_FORM();
-  });
-  const [errors, setErrors] = useState({});
+  }));
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));

@@ -45,7 +45,7 @@ const formatDateTime = (value) => {
   return d.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
-export default function PendingVerifications() {
+export default function PendingVerifications({ embedded = false }) {
   const [tab, setTab] = useState("pending");
   const [rows, setRows] = useState([]);
   const [history, setHistory] = useState([]);
@@ -143,11 +143,13 @@ export default function PendingVerifications() {
 
   return (
     <>
-      <PageHeader
-        crumbs={["Dashboard", "Resident Verifications"]}
-        title="Resident Verifications"
-        subtitle="Review resident registrations and record an approval or rejection."
-      />
+      {!embedded && (
+        <PageHeader
+          crumbs={["Dashboard", "Resident Verifications"]}
+          title="Resident Verifications"
+          subtitle="Review resident registrations and record an approval or rejection."
+        />
+      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">

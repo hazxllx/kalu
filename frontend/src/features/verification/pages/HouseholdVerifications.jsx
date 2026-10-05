@@ -66,7 +66,7 @@ const toDrawer = (h) => ({
  * household row through `householdsApi.update`; the reviewer identity and
  * timestamp are set on the server from the authenticated session, never here.
  */
-export default function HouseholdVerifications() {
+export default function HouseholdVerifications({ embedded = false }) {
   const { user } = useAuth();
   const assignedBarangay = getAssignedBarangay(user);
   const reviewerName = (user?.role && ROLES[user.role] && ROLES[user.role].name) || user?.name || "";
@@ -149,11 +149,13 @@ export default function HouseholdVerifications() {
 
   return (
     <>
-      <PageHeader
-        crumbs={["Dashboard", "Household Verifications"]}
-        title="Household Verification"
-        subtitle={`${pending.length} households awaiting verification of profiling information ${scopeLabel}.`}
-      />
+      {!embedded && (
+        <PageHeader
+          crumbs={["Dashboard", "Household Verifications"]}
+          title="Household Verification"
+          subtitle={`${pending.length} households awaiting verification of profiling information ${scopeLabel}.`}
+        />
+      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 z-50 flex animate-in slide-in-from-bottom-2 items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">

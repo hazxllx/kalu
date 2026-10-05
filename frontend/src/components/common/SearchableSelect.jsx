@@ -18,15 +18,16 @@ const normalizeOptions = (options) =>
  * with a clear button; the panel closes on selection, on outside click and on
  * Escape. Keyboard navigation (↑/↓/Enter) is supported.
  *
- * @param {string} label        Field label (kept consistent with sibling inputs)
- * @param {boolean} required    Adds the red required asterisk
- * @param {string} value        Currently selected value
- * @param {(v: string) => void} onChange
- * @param {Array<string|{value:string,label:string}>} options Selectable options
- * @param {string} placeholder  Shown before anything is chosen
- * @param {string} emptyText    Shown when the filter has no matches
- * @param {string} error        Inline validation message
- * @param {number} maxResults   Scrollable result cap (panel scrolls if exceeded)
+ * @param {Object} props
+ * @param {string} [props.label] Field label (kept consistent with sibling inputs)
+ * @param {boolean} [props.required] Adds the red required asterisk
+ * @param {string} [props.value] Currently selected value
+ * @param {(value: string) => void} props.onChange
+ * @param {Array<string|{value:string,label:string}>} [props.options] Selectable options
+ * @param {string} [props.placeholder] Shown before anything is chosen
+ * @param {string} [props.emptyText] Shown when the filter has no matches
+ * @param {string} [props.error] Inline validation message
+ * @param {number} [props.maxResults] Scrollable result cap (panel scrolls if exceeded)
  */
 export default function SearchableSelect({
   label,

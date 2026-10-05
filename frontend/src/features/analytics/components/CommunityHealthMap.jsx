@@ -217,6 +217,11 @@ export default function CommunityHealthMap({
     );
   }
 
+  const MapContainerCompat = /** @type {any} */ (MapContainer);
+  const TileLayerCompat = /** @type {any} */ (TileLayer);
+  const CircleMarkerCompat = /** @type {any} */ (CircleMarker);
+  const PopupCompat = /** @type {any} */ (Popup);
+
   return (
     <div>
       {plotted.length === 0 && plottedHouseholds.length === 0 ? (
@@ -237,13 +242,13 @@ export default function CommunityHealthMap({
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-brand-border">
-          <MapContainer
+          <MapContainerCompat
             center={centerPoint}
             zoom={13}
             scrollWheelZoom={false}
             style={{ height: "420px", width: "100%" }}
           >
-            <TileLayer
+            <TileLayerCompat
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
@@ -254,7 +259,7 @@ export default function CommunityHealthMap({
               const color = intensityColor(b.intensity ?? 0, caseCount);
               const isSelected = selectedName && b.name === selectedName;
               return (
-                <CircleMarker
+                <CircleMarkerCompat
                   key={b.id}
                   center={[b.latitude, b.longitude]}
                   radius={isSelected ? 16 : 12}
@@ -266,7 +271,7 @@ export default function CommunityHealthMap({
                   }}
                   eventHandlers={onSelect ? { click: () => onSelect(b) } : undefined}
                 >
-                  <Popup>
+                  <PopupCompat>
                     <div className="space-y-0.5">
                       <p className="text-sm font-semibold">{b.name}</p>
                       <p className="text-xs">Total cases: {caseCount}</p>
@@ -282,8 +287,8 @@ export default function CommunityHealthMap({
                         </button>
                       )}
                     </div>
-                  </Popup>
-                </CircleMarker>
+                  </PopupCompat>
+                </CircleMarkerCompat>
               );
             })}
             {/* Household markers (clustered per family). ONE marker per household;
@@ -291,7 +296,7 @@ export default function CommunityHealthMap({
             {plottedHouseholds.map((h) => {
               const color = householdColor(h.riskLevel, h.hasActiveCase);
               return (
-                <CircleMarker
+                <CircleMarkerCompat
                   key={`hh-${h.id}`}
                   center={[h.latitude, h.longitude]}
                   radius={h.hasActiveCase ? 9 : 6}
@@ -302,7 +307,7 @@ export default function CommunityHealthMap({
                     weight: h.hasActiveCase ? 3 : 1.5,
                   }}
                 >
-                  <Popup>
+                  <PopupCompat>
                     <div className="space-y-0.5">
                       <p className="text-sm font-semibold">Household {h.householdNo}</p>
                       {h.barangay && <p className="text-xs">Barangay: {h.barangay}</p>}
@@ -315,11 +320,11 @@ export default function CommunityHealthMap({
                         </span>
                       </p>
                     </div>
-                  </Popup>
-                </CircleMarker>
+                  </PopupCompat>
+                </CircleMarkerCompat>
               );
             })}
-          </MapContainer>
+          </MapContainerCompat>
         </div>
       )}
 

@@ -202,6 +202,22 @@ function Blocks({ blocks = [], data }) {
   return blocks.map((b, i) => <Block key={i} block={b} data={data} />);
 }
 
+/**
+ * @typedef {Object} M1Header
+ * @property {string} [periodLabel]
+ * @property {string} [monthLabel]
+ * @property {number|string} [year]
+ * @property {string} [municipality]
+ * @property {string} [province]
+ * @property {number} [projectedPopulation]
+ * @property {string} [barangay]
+ * @property {string} [bhs]
+ * @property {string} [rhu]
+ */
+
+/**
+ * @param {{data?: any, header?: M1Header, template?: any[]}} props
+ */
 export default function M1OfficialForm({ data = {}, header = {}, template = M1_FORM_TEMPLATE }) {
   const h = header;
   return (

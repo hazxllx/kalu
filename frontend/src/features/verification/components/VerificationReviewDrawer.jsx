@@ -19,6 +19,43 @@ const DOC_LABELS = {
 
 const isImageDoc = (doc) => String(doc?.mimeType || "").startsWith("image/");
 
+// Staff-facing labels for the deterministic automated screening result. The
+// automated check is ADVISORY: "Rejected" here never blocks a staff member from
+// viewing the document or making the final decision.
+const SCREENING_STATUS_META = {
+  pending_manual_review: { label: "Passed", tone: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  automated_flagged: { label: "Flagged", tone: "bg-amber-50 text-amber-700 border-amber-200" },
+  automated_rejected: { label: "Rejected", tone: "bg-rose-50 text-rose-700 border-rose-200" },
+};
+
+const SCREENING_REASON_LABEL = {
+  DOCUMENT_INDICATORS_DETECTED: "Document-specific text detected.",
+  NO_DOCUMENT_INDICATORS: "No document-specific text detected.",
+  DOCUMENT_TYPE_MISMATCH: "Document does not match the selected government ID type.",
+  IMAGE_REQUIRES_MANUAL_REVIEW: "Image received for manual review.",
+  DOCUMENT_NOT_AUTOMATICALLY_SCREENED: "File type is not automatically screened.",
+  OCR_UNAVAILABLE: "Automated text check unavailable; needs manual review.",
+  NO_MEANINGFUL_TEXT: "No readable document text detected.",
+  INSUFFICIENT_RESOLUTION: "Image resolution is insufficient.",
+  BLANK_IMAGE: "Image appears blank.",
+  TOO_DARK: "Image is too dark to read.",
+  TOO_BRIGHT: "Image has too much glare or brightness.",
+  LOW_IMAGE_QUALITY: "Image quality is insufficient.",
+  INVALID_FILE_TYPE: "File type is not supported.",
+  FILE_TOO_LARGE: "File size is too large.",
+  CORRUPTED_FILE: "File appears to be corrupted.",
+};
+
+const screeningLabel = (screening) => {
+  if (!screening?.status) return null;
+  return SCREENING_STATUS_META[screening.status] || null;
+};
+
+const screeningReason = (screening) => {
+  if (!screening?.reason) return "";
+  return SCREENING_REASON_LABEL[screening.reason] || "Automated check completed.";
+};
+
 const formatDate = (value) => {
   if (!value) return "—";
   const d = new Date(String(value).length === 10 ? `${value}T00:00:00` : value);
@@ -236,6 +273,41 @@ export default function VerificationReviewDrawer({
               </div>
             )}
           </section>
+
+          {documents.some((doc) => doc.screening?.status) && (
+            <section>
+              <SectionTitle>Automated Document Check</SectionTitle>
+              <div className="space-y-2">
+                {documents
+                  .filter((doc) => doc.screening?.status)
+                  .map((doc) => {
+                    const meta = screeningLabel(doc.screening);
+                    return (
+                      <div
+                        key={`screening-${doc.id}`}
+                        className="rounded-btn border border-brand-border bg-white p-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-brand-ink">
+                            {DOC_LABELS[doc.documentType] || doc.documentType}
+                          </p>
+                          {meta && (
+                            <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${meta.tone}`}>
+                              {meta.label}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs text-brand-gray">{screeningReason(doc.screening)}</p>
+                      </div>
+                    );
+                  })}
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-brand-gray">
+                This is a rule-based readability pre-check only. It does not authenticate the document;
+                the final decision remains with authorized staff.
+              </p>
+            </section>
+          )}
 
           {(verification.rejectionReason || verification.verifiedAt) && (
             <section className="rounded-btn border border-brand-border bg-white p-4">

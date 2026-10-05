@@ -61,6 +61,9 @@ const inputCls = (error) =>
   }`;
 const labelCls = "text-sm font-medium text-brand-ink";
 
+/**
+ * @param {{label: string, required?: boolean, error?: string, children: any}} props
+ */
 function Field({ label, required, error, children }) {
   return (
     <div>
@@ -88,8 +91,8 @@ const EMPTY_FORM = () => ({
 });
 
 function ScheduleFormModal({ initial, residents, saving, onClose, onSave }) {
-  const [form, setForm] = useState(() => (initial ? { ...initial } : EMPTY_FORM()));
-  const [errors, setErrors] = useState({});
+  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initial ? { ...initial } : EMPTY_FORM()));
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
 
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));

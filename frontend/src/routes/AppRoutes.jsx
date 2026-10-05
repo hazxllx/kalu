@@ -112,10 +112,10 @@ const ResetPassword = publicPage(
 );
 
 // Verification
-const PendingVerifications = appPage(
+const VerificationsApprovals = appPage(
   () =>
     import(
-      '@/features/verification/pages/PendingVerifications'
+      '@/features/verification/pages/VerificationsApprovals'
     )
 );
 
@@ -123,13 +123,6 @@ const ResidentVerificationStatus = appPage(
   () =>
     import(
       '@/features/verification/pages/ResidentVerificationStatus'
-    )
-);
-
-const HouseholdVerifications = appPage(
-  () =>
-    import(
-      '@/features/verification/pages/HouseholdVerifications'
     )
 );
 
@@ -929,7 +922,7 @@ const AppRoutes = () => (
         />
         <Route
           path="verifications"
-          element={<PendingVerifications />}
+          element={<VerificationsApprovals />}
         />
         <Route
           path="transfer-requests"
@@ -937,7 +930,12 @@ const AppRoutes = () => (
         />
         <Route
           path="household-verifications"
-          element={<HouseholdVerifications />}
+          element={
+            <Navigate
+              to="/app/health_supervisor/verifications?tab=household"
+              replace
+            />
+          }
         />
         <Route
           path="consultations"
@@ -978,7 +976,12 @@ const AppRoutes = () => (
         {/* Account approval authority: the Health Supervisor approves BHW and Resident accounts. */}
         <Route
           path="account-approvals"
-          element={<StaffAccountApprovals />}
+          element={
+            <Navigate
+              to="/app/health_supervisor/verifications?tab=accounts"
+              replace
+            />
+          }
         />
 
         <Route

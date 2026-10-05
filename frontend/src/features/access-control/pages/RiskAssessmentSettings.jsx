@@ -265,7 +265,7 @@ export default function RiskAssessmentSettings() {
               type="number"
               min={1}
               value={thresholds.moderateMin}
-              onChange={(e) => setThresholds((p) => ({ ...p, moderateMin: e.target.value }))}
+              onChange={(e) => setThresholds((p) => ({ ...p, moderateMin: Number(e.target.value) }))}
               className={inputClass}
             />
           </div>
@@ -275,7 +275,7 @@ export default function RiskAssessmentSettings() {
               type="number"
               min={1}
               value={thresholds.highMin}
-              onChange={(e) => setThresholds((p) => ({ ...p, highMin: e.target.value }))}
+              onChange={(e) => setThresholds((p) => ({ ...p, highMin: Number(e.target.value) }))}
               className={inputClass}
             />
           </div>
@@ -426,7 +426,7 @@ export default function RiskAssessmentSettings() {
                 </div>
                 <div>
                   <label className={labelClass}>Priority</label>
-                  <input type="number" value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))} className={inputClass} />
+                  <input type="number" value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: Number(e.target.value) || 100 }))} className={inputClass} />
                 </div>
                 <div className="flex items-center gap-2 mt-6">
                   <input id="enabled" type="checkbox" checked={form.enabled} onChange={(e) => setForm((p) => ({ ...p, enabled: e.target.checked }))} />

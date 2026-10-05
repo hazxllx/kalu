@@ -10,7 +10,11 @@ import { api } from './apiClient';
  * account via list({ mine: true }).
  */
 export const healthServicesApi = {
-  meta: () => api.get('/health-services/meta'),
+   meta: () => api.get('/health-services/meta'),
+   // params: { mine: true, category }
+   // params: { from, to } for calendar scope
+   // params: { service_id } | { resident_id } | { from, to } for dashboard listing
+   listAttendance: (params) => api.get('/health-services/attendance', { params }),
   // Municipality-scoped barangays + facilities + categories for the create form.
   reference: () => api.get('/health-services/reference'),
   // params: { mine: true, category }

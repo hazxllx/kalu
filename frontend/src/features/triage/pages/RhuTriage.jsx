@@ -117,7 +117,7 @@ export default function RhuTriage() {
   // Assigned personnel (name & designation) who performed the triage. Optional;
   // falls back to the signed-in account name on the server.
   const [assignedPersonnel, setAssignedPersonnel] = useState("");
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [listSearch, setListSearch] = useState("");
   const [toast, setToast] = useState(null);
 
@@ -566,7 +566,7 @@ export default function RhuTriage() {
                           <SearchableSelect
                             value={walkIn.barangay}
                             onChange={(v) => setWalkIn((prev) => ({ ...prev, barangay: v }))}
-                            options={BARANGAYS}
+                            options={[...BARANGAYS]}
                             placeholder="Search barangay..."
                             emptyText="No barangay found."
                             error={errors.barangay}
@@ -1014,9 +1014,14 @@ export default function RhuTriage() {
                           {p.barangay || "RHU"}
                         </span>
                       </div>
-                      <p className="truncate text-xs leading-snug text-brand-ink md:text-sm md:pr-3">
-                        {p.reason || p.triage?.chiefComplaint}
-                      </p>
+                      <div className="min-w-0 md:pr-3">
+                        <p className="truncate text-xs leading-snug text-brand-ink md:text-sm">
+                          {p.reason || p.triage?.chiefComplaint}
+                        </p>
+                        <p className="truncate text-xs text-brand-gray">
+                          Responsible personnel: {p.raw?.responsiblePersonnelName || p.raw?.responsiblePersonnelId || "—"}
+                        </p>
+                      </div>
                       <div className="md:flex md:justify-end">
                         <span
                           className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_TONES[p.status] || "bg-slate-100 text-slate-600"}`}

@@ -38,6 +38,7 @@ const toDisplay = (hhmm) => {
  * it without closing the surrounding modal. Never overflows the viewport —
  * the popover is width-locked to its field.
  *
+ * @param {Object} props
  * @param {string} props.value 24-hour "HH:MM" string (e.g. "09:00")
  * @param {(hhmm: string) => void} props.onChange
  * @param {boolean} [props.error] show the invalid (red) border

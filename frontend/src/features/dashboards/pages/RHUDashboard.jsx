@@ -13,8 +13,6 @@ import {
   ArrowRight,
   Bell,
   CalendarDays,
-  CheckCircle2,
-  ClipboardList,
   HeartPulse,
   RefreshCw,
   Stethoscope,

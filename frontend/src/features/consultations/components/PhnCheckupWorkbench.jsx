@@ -77,6 +77,9 @@ const OutcomeItem = ({ label, value }) => (
  * already exists the same sections render in read-only mode so the completed
  * consultation can be reopened from Health Records or the Check-ups list.
  */
+/**
+ * @param {{patient: any, onClose: () => void, user?: any, onComplete?: any, onOutcome?: any}} props
+ */
 export default function PhnCheckupWorkbench({ patient, onClose, onComplete = undefined, onOutcome = undefined }) {
   const [assessment, setAssessment] = useState("");
   const [healthConcern, setHealthConcern] = useState("");
@@ -86,7 +89,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   // assessment. Distinct from the triage personnel; defaults to the signed-in
   // account name and is editable (e.g. shared station accounts).
   const [assignedPersonnel, setAssignedPersonnel] = useState("");
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [justCompleted, setJustCompleted] = useState(false);
   const [certOpen, setCertOpen] = useState(false);
   const { user } = useAuth();

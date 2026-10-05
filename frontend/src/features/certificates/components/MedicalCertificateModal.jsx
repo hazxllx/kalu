@@ -31,6 +31,9 @@ export function CertificateStatusBadge({ value }) {
   );
 }
 
+/**
+ * @param {{label: string, required?: boolean, error?: string, children: any}} props
+ */
 function Field({ label, required, error, children }) {
   return (
     <div>
@@ -57,6 +60,9 @@ function Field({ label, required, error, children }) {
  * resident's scope, validates the transition and writes the certificate log
  * plus a `health_audit_logs` entry.
  */
+/**
+ * @param {{mode?: string, patient?: any, certificate?: any, currentUser?: string, currentUserRole?: string, purposes?: any, onClose: () => void, onSaved?: (status: string) => void, onRequestStatusChange?: any}} props
+ */
 export default function MedicalCertificateModal({
   mode = "create",
   patient = null, // { patientId, patient, age, sex, barangay, address }
@@ -79,7 +85,7 @@ const CERT_PURPOSES = purposesProp?.length ? purposesProp : meta.purposes;
 const signatoryName =
   String(user?.name || currentUser || certificate?.medicalOfficer || "").trim() ||
   "Signatory name not set";
-const [form, setForm] = useState(() => ({
+const [form, setForm] = useState(() => /** @type {Record<string, any>} */ ({
   purpose: certificate?.purpose || "",
   findings: certificate?.findings || "",
   dateOfExamination: certificate?.dateOfExamination || new Date().toISOString().slice(0, 10),
@@ -87,7 +93,7 @@ const [form, setForm] = useState(() => ({
   licenseNumber: certificate?.licenseNumber || "",
   notes: certificate?.notes || "",
 }));
-const [errors, setErrors] = useState({});
+const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
 const [actionNotes, setActionNotes] = useState("");
 const [busy, setBusy] = useState("");
 const { printCertificate, portal } = useCertificatePrint();

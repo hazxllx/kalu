@@ -16,6 +16,7 @@ import { api } from './apiClient';
  */
 export const householdsApi = {
   list: (params) => api.get('/households', { params }),
+  searchResidents: (q) => api.get('/households/residents/search', { params: { q } }),
   get: (id) => api.get(`/households/${id}`),
   create: (payload) => api.post('/households', payload),
   update: (id, payload) => api.put(`/households/${id}`, payload),

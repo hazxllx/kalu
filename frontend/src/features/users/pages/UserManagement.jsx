@@ -102,13 +102,13 @@ function ConfirmDialog({ title, message, confirmLabel, tone = "danger", busy, on
 // lifecycle and are intentionally not performed from this screen.
 
 function UserEditModal({ initial, busy, error, onClose, onSave }) {
-  const [form, setForm] = useState(() => ({
+  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ ({
     name: initial.name || "",
     contact: initial.contact || "",
     role: initial.roleId || "resident",
     status: initial.statusId || "active",
   }));
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
 
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));

@@ -5,6 +5,8 @@ import { hhBadgeTone } from "../lib/householdOptions";
  * Color-coded pill badge for household tracking values (HH Status, Approval
  * Status, Risk Level, Pending Sync). Same shape as the common StatusBadge but
  * with the household profiling color scheme.
+ *
+ * @param {{value: any, label?: string, className?: string}} props
  */
 export default function HHBadge({ value, label, className = "" }) {
   return (

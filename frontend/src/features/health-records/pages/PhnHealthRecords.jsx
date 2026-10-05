@@ -173,7 +173,7 @@ export default function PhnHealthRecords() {
   const [selected, setSelected] = useState(null);
   const [checkupPatient, setCheckupPatient] = useState(null);
   const [form, setForm] = useState(() => ({ ...emptyForm(), barangay: phnDefaultBarangay(user, coverage) }));
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [toast, setToast] = useState(null);
 
   const writableBarangays = phnWritableBarangays(user, coverage);

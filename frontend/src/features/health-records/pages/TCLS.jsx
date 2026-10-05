@@ -171,7 +171,7 @@ export default function TCLS() {
 
   // Add form state.
   const [residentQuery, setResidentQuery] = useState("");
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(/** @type {Record<string, any>} */ ({
     residentId: "",
     program: "",
     bhw: "",
@@ -181,13 +181,13 @@ export default function TCLS() {
     nextVisit: "",
     nextVisitTime: "",
     notes: "",
-  });
-  const [errors, setErrors] = useState({});
+  }));
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [submitError, setSubmitError] = useState("");
 
   // Schedule form state.
   const [scheduleForm, setScheduleForm] = useState({ nextVisit: "", nextVisitTime: "", lastVisit: "", notes: "" });
-  const [scheduleErrors, setScheduleErrors] = useState({});
+  const [scheduleErrors, setScheduleErrors] = useState(/** @type {Record<string, any>} */ ({}));
 
   const showToast = (message) => {
     setToast(message);

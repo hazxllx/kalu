@@ -18,16 +18,14 @@ test('profile action uses one stable route for every role', () => {
   }
 });
 
-test('RHU navigation does not expose medical certificate preparation', () => {
-  assert.equal(NAV.rhu_personnel.some((item) => item.path?.includes('/certificates')), false);
-});
-
 test('RHU navigation uses the required role-specific sections', () => {
   assert.deepEqual(
     NAV.rhu_personnel.map(({ label, group }) => [group, label]),
     [
       ['Main', 'Dashboard'],
       ['Operations', 'Triage'],
+      ['Operations', 'Consultation'],
+      ['Operations', 'Medical Certificates'],
       ['Operations', 'Health Programs'],
       ['Operations', 'Notifications'],
       ['System', 'Settings'],

@@ -175,12 +175,12 @@ export default function ResidentsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [selected, setSelected] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
-  const [form, setForm] = useState(() => initialFromUser(user));
-  const [errors, setErrors] = useState({});
+  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initialFromUser(user)));
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
-  const [editForm, setEditForm] = useState({ contact: "", barangay: "", civilStatus: "", currentAddress: "", philhealthNo: "", religion: "", employmentStatus: "", fatherName: "", motherName: "", birthPlace: "" });
-  const [editErrors, setEditErrors] = useState({});
+  const [editForm, setEditForm] = useState(/** @type {Record<string, any>} */ ({ contact: "", barangay: "", civilStatus: "", currentAddress: "", philhealthNo: "", religion: "", employmentStatus: "", fatherName: "", motherName: "", birthPlace: "" }));
+  const [editErrors, setEditErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState(null);
   const [toast, setToast] = useState(null);

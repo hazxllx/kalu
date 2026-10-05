@@ -98,7 +98,7 @@ export const phone = (value, { label = 'Contact number', isRequired = true } = {
 export const strictMobile = (value, { label = 'Mobile number', isRequired = true } = {}) => {
   if (isBlank(value)) return isRequired ? `${label} is required.` : '';
   if (!isStrictMobile(value)) {
-    return 'Mobile number must be exactly 11 digits with no spaces or symbols (e.g. 09381829120).';
+    return 'Mobile number must be exactly 11 digits and start with 09 (e.g. 09123456789).';
   }
   return '';
 };

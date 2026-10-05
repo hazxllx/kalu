@@ -90,7 +90,7 @@ export default function VerificationBanner() {
   const [idFront, setIdFront] = useState(null);
   const [idBack, setIdBack] = useState(null);
   const [idSelfie, setIdSelfie] = useState(null);
-  const [formErrors, setFormErrors] = useState({});
+  const [formErrors, setFormErrors] = useState(/** @type {Record<string, any>} */ ({}));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,6 +168,17 @@ export default function VerificationBanner() {
     const resp = await postFormData("/resident-documents/upload", fd);
     if (!resp?.document) {
       throw new Error("We could not upload your document. Please try again.");
+    }
+    // Rule-based automated screening result (readability only). A rejected
+    // upload is surfaced with the backend's resident-safe message; the modal
+    // stays open so the resident can choose a clearer file. Technical reason
+    // codes are never shown.
+    const screening = resp.document.screening;
+    if (screening?.status === "automated_rejected") {
+      throw new Error(
+        screening.message ||
+          "The uploaded image is difficult to read. Please upload a clearer image.",
+      );
     }
   };
 
@@ -449,7 +460,7 @@ export default function VerificationBanner() {
                 className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
               >
                 {resubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                {resubmitting ? "Submitting…" : "Submit Resubmission"}
+                {resubmitting ? "Checking document..." : "Submit Resubmission"}
               </button>
             </div>
           </div>

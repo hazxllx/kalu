@@ -15,7 +15,7 @@ export function Card({ className = "", children, ...props }) {
  *   Section title  — text-base / font-semibold / brand ink
  *   Supporting text — text-xs / brand gray
  */
-export function CardHeader({ title, subtitle, action, className = "" }) {
+export function CardHeader({ title, subtitle, action = null, className = "" }) {
   return (
     <div className={`flex items-start justify-between gap-3 ${className}`}>
       <div className="min-w-0">

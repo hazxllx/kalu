@@ -70,7 +70,7 @@ const shortId = (id) => (id ? String(id).slice(0, 8).toUpperCase() : "—");
  *   Health Supervisor approves BHW and Resident accounts
  *   System Admin / MHO have no approval queue and 403 on every route here.
  */
-export default function StaffAccountApprovals() {
+export default function StaffAccountApprovals({ embedded = false }) {
   const { user } = useAuth();
   const roleKey = user?.role;
 
@@ -143,15 +143,17 @@ export default function StaffAccountApprovals() {
 
   return (
     <>
-      <PageHeader
-        crumbs={["Account Approvals"]}
-        title="Health Personnel Account Approvals"
-        subtitle={
-          authority.length
-            ? `You approve ${authority.join(" and ")} accounts. Approving an account activates it immediately.`
-            : "Your role is not an account approval authority."
-        }
-      />
+      {!embedded && (
+        <PageHeader
+          crumbs={["Account Approvals"]}
+          title="Health Personnel Account Approvals"
+          subtitle={
+            authority.length
+              ? `You approve ${authority.join(" and ")} accounts. Approving an account activates it immediately.`
+              : "Your role is not an account approval authority."
+          }
+        />
+      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 z-[90] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">

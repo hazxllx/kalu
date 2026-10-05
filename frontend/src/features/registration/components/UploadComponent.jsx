@@ -1,11 +1,23 @@
 import React, { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { UploadCloud, FileText, X, CheckCircle2, ImageIcon } from "lucide-react";
+import { UploadCloud, FileText, X, CheckCircle2, ImageIcon, AlertTriangle, XCircle, Loader2, RotateCcw } from "lucide-react";
 import { labelCls } from "@/features/registration/components/RegistrationDesign";
+import { SLOT_STATUS, slotStatusLabel } from "@/features/registration/documentScreening";
 
 const ACCEPTED = ".png,.jpg,.jpeg,.pdf";
 const DEFAULT_EXTS = ["png", "jpg", "jpeg", "pdf"];
 const MAX_SIZE = 10 * 1024 * 1024;
+
+// Status presentation for the automated document check. Neutral until the
+// backend result arrives; a rejected/error result is never shown as accepted.
+const STATUS_META = {
+  [SLOT_STATUS.CHECKING]: { tone: "text-brand-blue", bg: "bg-brand-blue/5 border-brand-blue/20", Icon: Loader2, spin: true },
+  [SLOT_STATUS.PASSED]: { tone: "text-emerald-700", bg: "bg-emerald-50/70 border-emerald-200", Icon: CheckCircle2 },
+  [SLOT_STATUS.FLAGGED]: { tone: "text-amber-700", bg: "bg-amber-50/70 border-amber-200", Icon: AlertTriangle },
+  [SLOT_STATUS.REJECTED]: { tone: "text-brand-danger", bg: "bg-brand-danger/5 border-brand-danger/25", Icon: XCircle },
+  [SLOT_STATUS.ERROR]: { tone: "text-brand-danger", bg: "bg-brand-danger/5 border-brand-danger/25", Icon: XCircle },
+  [SLOT_STATUS.NOT_CHECKED]: { tone: "text-slate-500", bg: "bg-slate-50 border-slate-200", Icon: FileText },
+};
 
 export default function UploadComponent({
   label,
@@ -16,6 +28,7 @@ export default function UploadComponent({
   accept = ACCEPTED,
   allowedExts = DEFAULT_EXTS,
   hint = "",
+  screening = null,
 }) {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
@@ -35,7 +48,8 @@ export default function UploadComponent({
       setError("File exceeds 10 MB limit.");
       return;
     }
-    // Simulate upload progress
+    // Simulate upload progress, then hand the file to the parent which runs the
+    // real automated screen. A newly selected file always starts as "checking".
     setProgress(0);
     const interval = setInterval(() => {
       setProgress((p) => {
@@ -53,6 +67,23 @@ export default function UploadComponent({
   };
 
   const isImage = file?.type?.startsWith("image/");
+  const status = screening?.status || SLOT_STATUS.NOT_CHECKED;
+  const meta = STATUS_META[status] || STATUS_META[SLOT_STATUS.NOT_CHECKED];
+  const StatusIcon = meta.Icon;
+
+  // Replace = clear the current file + its screening result, then reopen the
+  // picker. The old result is removed first so a stale result can never attach
+  // to the replacement file.
+  const handleReplace = (e) => {
+    e.stopPropagation();
+    setProgress(0);
+    setError("");
+    onRemove();
+    if (inputRef.current) {
+      inputRef.current.value = "";
+      inputRef.current.click();
+    }
+  };
 
   return (
     <div>
@@ -120,27 +151,49 @@ export default function UploadComponent({
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-3 p-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                  {isImage ? (
-                    <ImageIcon className="h-5 w-5 text-slate-400" />
-                  ) : (
-                    <FileText className="h-5 w-5 text-brand-blue" />
-                  )}
+              <>
+                <div className="flex items-center gap-3 p-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                    {isImage ? (
+                      <ImageIcon className="h-5 w-5 text-slate-400" />
+                    ) : (
+                      <FileText className="h-5 w-5 text-brand-blue" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium text-brand-ink">{file.name}</p>
+                    <p className="text-[12px] text-slate-400">{(file.size / 1024).toFixed(0)} KB</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleReplace}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11.5px] font-semibold text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Replace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onRemove(); setProgress(0); }}
+                    aria-label="Remove file"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-brand-danger/10 hover:text-brand-danger"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-medium text-brand-ink">{file.name}</p>
-                  <p className="text-[12px] text-slate-400">{(file.size / 1024).toFixed(0)} KB</p>
+                {/* Automated document check result — the resident must never
+                    have to guess whether the file was accepted. */}
+                <div className={`flex items-start gap-2 border-t px-3 py-2.5 text-[11.5px] leading-relaxed ${meta.bg}`}>
+                  <StatusIcon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${meta.tone} ${meta.spin ? "animate-spin" : ""}`} strokeWidth={2} />
+                  <div className="min-w-0">
+                    <span className={`font-semibold ${meta.tone}`}>
+                      Automated check: {slotStatusLabel(screening)}
+                    </span>
+                    {status === SLOT_STATUS.REJECTED && screening?.message && (
+                      <p className="mt-0.5 text-brand-ink">{screening.message}</p>
+                    )}
+                  </div>
                 </div>
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-brand-green" />
-                <button
-                  onClick={(e) => { e.stopPropagation(); onRemove(); setProgress(0); }}
-                  aria-label="Remove file"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-brand-danger/10 hover:text-brand-danger"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+              </>
             )}
           </motion.div>
         )}

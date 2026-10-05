@@ -234,6 +234,13 @@
   /* ---------- Date picker (react-day-picker v8) ---------- */
   /* Scoped KALUSAGAP theme: blue selection, distinct today/hover/disabled
      states, uppercase weekday headers. Only affects the custom DatePicker. */
+  .kalusagap-datepicker {
+    --dp-surface: #ffffff;
+    --dp-surface-text: #0F2A44;
+    --dp-muted-text: #64748B;
+    --dp-border: #E2E8F0;
+    --dp-accent: #12518F;
+  }
   .kalusagap-datepicker .rdp {
     --rdp-cell-size: 38px;
     --rdp-accent-color: #12518F;
@@ -243,26 +250,44 @@
     --rdp-outline-selected: 2px solid rgba(11, 60, 107, 0.5);
     margin: 0;
     font-size: 0.8125rem;
+    color: var(--dp-surface-text);
   }
   .kalusagap-datepicker .rdp-month { width: 100%; }
   .kalusagap-datepicker .rdp-caption_label,
   .kalusagap-datepicker .rdp-dropdown {
     font-weight: 600;
-    color: #0F2A44;
+    color: var(--dp-surface-text);
   }
   .kalusagap-datepicker .rdp-dropdown {
-    border: 1px solid #E2E8F0;
+    border: 1px solid var(--dp-border);
     border-radius: 0.5rem;
     padding: 0.125rem 0.25rem;
-    background: #fff;
+    background: var(--dp-surface);
+  }
+  .kalusagap-datepicker .rdp-dropdown:focus-visible {
+    outline: 2px solid var(--rdp-outline);
+    outline-offset: 1px;
+  }
+  /* Native month/year select popup inside the dropdown: use a dark surface
+     with light text so the options are readable instead of washed out. */
+  .kalusagap-datepicker select.rdp-dropdown_month,
+  .kalusagap-datepicker select.rdp-dropdown_year {
+    color: var(--dp-surface-text);
+    background: var(--dp-surface);
+    color-scheme: light;
+  }
+  .kalusagap-datepicker select.rdp-dropdown_month option,
+  .kalusagap-datepicker select.rdp-dropdown_year option {
+    color: #0F2A44;
+    background: #ffffff;
   }
   .kalusagap-datepicker .rdp-nav_button {
     border-radius: 0.5rem;
-    color: #12518F;
+    color: var(--dp-accent);
   }
   .kalusagap-datepicker .rdp-nav_button:hover { background-color: #E8F0FA; }
   .kalusagap-datepicker .rdp-head_cell {
-    color: #64748B;
+    color: var(--dp-muted-text);
     font-size: 0.6875rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -270,22 +295,22 @@
   }
   .kalusagap-datepicker .rdp-day {
     border-radius: 0.5rem;
-    color: #0F2A44;
+    color: var(--dp-surface-text);
     font-weight: 500;
   }
   .kalusagap-datepicker .rdp-day:hover:not(.rdp-day_selected):not(.rdp-day_disabled) {
     background-color: #E8F0FA;
-    color: #12518F;
+    color: var(--dp-accent);
   }
   .kalusagap-datepicker .rdp-day_selected,
   .kalusagap-datepicker .rdp-day_selected:hover {
-    background-color: #12518F;
+    background-color: var(--dp-accent);
     color: #fff;
     font-weight: 600;
   }
   .kalusagap-datepicker .rdp-day_today {
     font-weight: 700;
-    color: #12518F;
+    color: var(--dp-accent);
     box-shadow: inset 0 0 0 1px rgba(18, 81, 143, 0.35);
   }
   .kalusagap-datepicker .rdp-day_today.rdp-day_selected { color: #fff; box-shadow: none; }
@@ -300,16 +325,36 @@
   /* Date picker — dark mode. The popup surface already remaps via `.bg-white`;
      these override the calendar internals (hardcoded light text/dropdown) so
      days, weekday headers and the month/year dropdowns stay legible on dark. */
+  .dark .kalusagap-datepicker {
+    --dp-surface: hsl(var(--popover));
+    --dp-surface-text: hsl(var(--foreground));
+    --dp-muted-text: hsl(var(--muted-foreground));
+    --dp-border: hsl(var(--border));
+    --dp-accent: hsl(210 86% 58%);
+  }
   .dark .kalusagap-datepicker .rdp-caption_label,
-  .dark .kalusagap-datepicker .rdp-dropdown { color: hsl(var(--foreground)); }
+  .dark .kalusagap-datepicker .rdp-dropdown { color: var(--dp-surface-text); }
   .dark .kalusagap-datepicker .rdp-dropdown {
-    background: hsl(var(--input));
-    border-color: hsl(var(--border));
+    background: var(--dp-surface);
+    border-color: var(--dp-border);
+  }
+  /* In dark, the native month/year options panel uses a dark background with
+     light text so the dropdown text never turns white-on-light. */
+  .dark .kalusagap-datepicker select.rdp-dropdown_month,
+  .dark .kalusagap-datepicker select.rdp-dropdown_year {
+    background: hsl(var(--popover));
+    color: hsl(var(--foreground));
+    color-scheme: dark;
+  }
+  .dark .kalusagap-datepicker select.rdp-dropdown_month option,
+  .dark .kalusagap-datepicker select.rdp-dropdown_year option {
+    color: hsl(var(--foreground));
+    background: hsl(var(--popover));
   }
   .dark .kalusagap-datepicker .rdp-nav_button { color: hsl(210 86% 66%); }
   .dark .kalusagap-datepicker .rdp-nav_button:hover { background-color: hsl(var(--hover)); }
-  .dark .kalusagap-datepicker .rdp-head_cell { color: hsl(var(--muted-foreground)); }
-  .dark .kalusagap-datepicker .rdp-day { color: hsl(var(--foreground)); }
+  .dark .kalusagap-datepicker .rdp-head_cell { color: var(--dp-muted-text); }
+  .dark .kalusagap-datepicker .rdp-day { color: var(--dp-surface-text); }
   .dark .kalusagap-datepicker .rdp-day:hover:not(.rdp-day_selected):not(.rdp-day_disabled) {
     background-color: hsl(var(--hover));
     color: hsl(210 86% 70%);

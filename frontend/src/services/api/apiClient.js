@@ -19,6 +19,29 @@ import { supabase } from '@/lib/supabase';
  */
 const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
+/**
+ * @typedef {Object} RequestOptions
+ * @property {string} [method]
+ * @property {any} [body]
+ * @property {any} [headers]
+ * @property {Record<string, any>} [params]
+ * @property {RequestCredentials} [credentials]
+ * @property {AbortSignal} [signal]
+ */
+
+class ApiError extends Error {
+  /**
+   * @param {string} message
+   * @param {number} status
+   * @param {any} payload
+   */
+  constructor(message, status, payload) {
+    super(message);
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 async function getAccessToken() {
   if (!supabase) return null;
   const { data } = await supabase.auth.getSession();
@@ -34,6 +57,10 @@ function buildUrl(path, params) {
   return search ? `${BASE_URL}${path}?${search}` : `${BASE_URL}${path}`;
 }
 
+/**
+ * @param {string} path
+ * @param {RequestOptions} options
+ */
 async function request(path, { method = 'GET', body, headers = {}, params, ...rest } = {}) {
   const token = await getAccessToken();
 
@@ -60,10 +87,7 @@ async function request(path, { method = 'GET', body, headers = {}, params, ...re
     const message =
       (isJson && (payload?.error?.message || payload?.message)) ||
       `Request failed with status ${response.status}`;
-    const error = new Error(message);
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
+    throw new ApiError(message, response.status, payload);
   }
 
   return isJson && payload && 'data' in payload ? payload.data : payload;
@@ -89,10 +113,7 @@ export const postFormData = async (path, formData, options = {}) => {
     const message =
       (isJson && (payload?.error?.message || payload?.message)) ||
       `Request failed with status ${response.status}`;
-    const error = new Error(message);
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
+    throw new ApiError(message, response.status, payload);
   }
 
   return isJson && payload && 'data' in payload ? payload.data : payload;

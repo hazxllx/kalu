@@ -71,6 +71,9 @@ export default function ResidentVerificationStatus() {
   }, [load]);
 
   const history = state?.history || [];
+  const verification = state?.verification;
+  const completeness = verification?.completeness === true || verification?.completeness === "complete";
+  const currentStatus = verification?.status;
 
   return (
     <>
@@ -82,6 +85,41 @@ export default function ResidentVerificationStatus() {
 
       <div className="space-y-5">
         <VerificationBanner />
+
+        {verification && (
+          <Card className="space-y-3 p-5">
+            <p className="flex flex-wrap gap-x-2 text-sm">
+              <span className="font-semibold text-brand-ink">Completeness:</span>
+              <span className={completeness ? "text-brand-green" : "text-brand-danger"}>
+                {completeness ? "Complete" : "Incomplete"}
+              </span>
+            </p>
+            <div className="text-sm">
+              <p className="flex flex-wrap gap-x-2">
+                <span className="font-semibold text-brand-ink">Verification:</span>
+                <span className="text-brand-gray">
+                  {currentStatus === "approved"
+                    ? "Approved"
+                    : currentStatus === "rejected"
+                      ? "Rejected"
+                      : "Pending review"}
+                </span>
+              </p>
+              {currentStatus === "rejected" && verification.rejectionReason && (
+                <p className="mt-1 text-brand-danger">
+                  Rejection reason: {verification.rejectionReason}
+                </p>
+              )}
+              {currentStatus === "pending" && (
+                <p className="mt-1 text-brand-gray">
+                  {completeness
+                    ? "Waiting for reviewer."
+                    : "Missing or unreadable documents. Resubmit to continue."}
+                </p>
+              )}
+            </div>
+          </Card>
+        )}
 
         {state?.verification?.status === "pending" && (
           <Card className="p-5">

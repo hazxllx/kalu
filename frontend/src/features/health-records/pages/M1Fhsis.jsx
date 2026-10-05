@@ -435,6 +435,9 @@ function DailyView({ daily, search, setSearch, date }) {
 // ---------------------------------------------------------------------------
 // Monthly — expandable sections
 // ---------------------------------------------------------------------------
+/**
+ * @param {{groups: any[], expanded: Set<string>, toggle: (key: string) => void, openDrill: (indicator: any) => void, byCode?: any}} props
+ */
 function MonthlyView({ groups, expanded, toggle, openDrill }) {
   if (!groups.length) return <Card className="p-10 text-center text-sm text-slate-500">No indicators.</Card>;
   return (

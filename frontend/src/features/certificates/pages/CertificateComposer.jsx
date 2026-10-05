@@ -68,6 +68,9 @@ const inputCls = (error) =>
   }`;
 const labelCls = "text-sm font-medium text-brand-ink";
 
+/**
+ * @param {{label: string, required?: boolean, error?: string, hint?: string, children: any}} props
+ */
 function Field({ label, required, error, hint, children }) {
   return (
     <div>
@@ -155,7 +158,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
   const [patientQuery, setPatientQuery] = useState("");
   const [resident, setResident] = useState(null);
   const [form, setForm] = useState(() => ({ ...defaultForm(), certificateNumber: "" }));
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [previewOpen, setPreviewOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [savedId, setSavedId] = useState(null);

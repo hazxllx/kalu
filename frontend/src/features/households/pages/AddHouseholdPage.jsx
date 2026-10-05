@@ -109,6 +109,9 @@ const classificationLabel = (value) =>
 const philhealthLabel = (value) =>
   value === "member" ? "Member" : value === "non-member" ? "Non-member" : "—";
 
+/**
+ * @param {{label: string, required?: boolean, error?: string, hint?: string, children: any, className?: string}} props
+ */
 function Field({ label, required, error, hint, children, className = "" }) {
   return (
     <div className={className}>
@@ -157,6 +160,14 @@ function RadioRow({ name, value, options, onChange }) {
  * it themes correctly in light and dark mode.
  */
 function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit }) {
+  const [residentSearch, setResidentSearch] = useState({
+    query: "",
+    rows: [],
+    loading: false,
+    searched: false,
+    error: "",
+  });
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
@@ -164,6 +175,38 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    const query = residentSearch.query.trim();
+    if (isEdit || !query) {
+      setResidentSearch((current) => ({ ...current, rows: [], loading: false, searched: false, error: "" }));
+      return undefined;
+    }
+    let active = true;
+    const timeout = setTimeout(() => {
+      setResidentSearch((current) => ({ ...current, loading: true, error: "" }));
+      householdsApi.searchResidents(query)
+        .then((response) => {
+          if (!active) return;
+          const rows = Array.isArray(response) ? response : response?.rows || [];
+          setResidentSearch((current) => ({ ...current, rows, loading: false, searched: true }));
+        })
+        .catch((error) => {
+          if (!active) return;
+          setResidentSearch((current) => ({
+            ...current,
+            rows: [],
+            loading: false,
+            searched: true,
+            error: error?.message || "Could not search existing residents.",
+          }));
+        });
+    }, 300);
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [isEdit, residentSearch.query]);
 
   const input = inputCls();
   const inputErr = inputCls("x");
@@ -198,17 +241,93 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
           </div>
 
           <div className="space-y-5 p-5 sm:p-6">
+            {!isEdit && (
+              <section className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
+                <label htmlFor="household-resident-search" className="mb-1.5 block text-sm font-medium text-brand-ink">
+                  Search existing resident
+                </label>
+                {draft.residentId ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-brand-ink">{draft.name}</p>
+                      <p className="text-xs text-brand-gray">
+                        {draft.birthday ? formatBirthday(draft.birthday) : "Birthdate not recorded"} · Linked resident
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onChange("residentId", undefined);
+                        onChange("name", "");
+                        onChange("birthday", "");
+                        onChange("age", "");
+                      }}
+                      className="text-xs font-medium text-brand-blue hover:underline"
+                    >
+                      Clear link
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      id="household-resident-search"
+                      type="search"
+                      value={residentSearch.query}
+                      onChange={(event) => setResidentSearch((current) => ({ ...current, query: event.target.value }))}
+                      placeholder="Search by resident name"
+                      className={input}
+                      autoComplete="off"
+                    />
+                    {residentSearch.loading && <p className="mt-2 text-xs text-brand-gray">Searching residents…</p>}
+                    {residentSearch.error && <p className="mt-2 text-xs text-brand-danger">{residentSearch.error}</p>}
+                    {residentSearch.rows.length > 0 && (
+                      <ul className="mt-2 max-h-48 divide-y divide-brand-border overflow-y-auto rounded-btn border border-brand-border bg-white">
+                        {residentSearch.rows.map((resident) => (
+                          <li key={resident.residentId}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onChange("residentId", resident.residentId);
+                                onChange("name", `${resident.firstName} ${resident.lastName}`.trim());
+                                onChange("birthday", resident.birthDate || "");
+                                onChange("age", ageFromBirthday(resident.birthDate || ""));
+                              }}
+                              className="w-full px-3 py-2.5 text-left transition-colors hover:bg-brand-bg"
+                            >
+                              <span className="block text-sm font-medium text-brand-ink">
+                                {resident.firstName} {resident.lastName}
+                              </span>
+                              <span className="mt-0.5 block text-xs text-brand-gray">
+                                {resident.birthDate ? formatBirthday(resident.birthDate) : "Birthdate not recorded"}
+                                {" · "}
+                                {resident.verificationStatus || "Pending verification"}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {residentSearch.searched && !residentSearch.loading && !residentSearch.error && residentSearch.rows.length === 0 && (
+                      <p className="mt-2 text-xs text-brand-gray">No matches — add as new member.</p>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
             {/* Row 1 — Name / Relationship / Sex */}
             <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-3">
-              <Field label="Full Name" required error={errors.name}>
-                <input
-                  type="text"
-                  value={draft.name}
-                  onChange={(e) => onChange("name", e.target.value)}
-                  placeholder="e.g. Juan Dela Cruz"
-                  className={errors.name ? inputErr : input}
-                />
-              </Field>
+              {!draft.residentId && (
+                <Field label="Full Name" required error={errors.name}>
+                  <input
+                    type="text"
+                    value={draft.name}
+                    onChange={(e) => onChange("name", e.target.value)}
+                    placeholder="e.g. Juan Dela Cruz"
+                    className={errors.name ? inputErr : input}
+                  />
+                </Field>
+              )}
               <Field label="Relationship to Household Head" required error={errors.relationship}>
                 <select
                   value={draft.relationship}
@@ -237,15 +356,17 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
 
             {/* Row 2 — Birthdate / Age (auto) / Classification */}
             <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-3">
-              <Field label="Birthdate">
-                <input
-                  type="date"
-                  value={draft.birthday}
-                  max={today()}
-                  onChange={(e) => onChange("birthday", e.target.value)}
-                  className={input}
-                />
-              </Field>
+              {!draft.residentId && (
+                <Field label="Birthdate">
+                  <input
+                    type="date"
+                    value={draft.birthday}
+                    max={today()}
+                    onChange={(e) => onChange("birthday", e.target.value)}
+                    className={input}
+                  />
+                </Field>
+              )}
               <Field label="Age" hint="Auto-calculated from birthdate">
                 <input
                   type="text"
@@ -478,14 +599,14 @@ export default function AddHouseholdPage() {
     members: true,
     risk: true,
   });
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [memberErrors, setMemberErrors] = useState([]);
   const [memberListError, setMemberListError] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [memberModal, setMemberModal] = useState({ open: false, index: null });
   const [memberDraft, setMemberDraft] = useState(emptyMember());
   const [memberDraftErrors, setMemberDraftErrors] = useState({});
-  const [form, setForm] = useState(() => ({
+  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ ({
     head: "",
     purok: "",
     streetAddress: "",
@@ -598,8 +719,14 @@ export default function AddHouseholdPage() {
         : [...prev.treatmentMethods, method],
     }));
 
-  const risk = useMemo(() => computeHouseholdRisk(form), [form]);
-  const flags = useMemo(() => householdFlags(form), [form]);
+  const risk = useMemo(
+    () => computeHouseholdRisk(/** @type {{waterSource: any, toilet: any, sanitationAccess: any, members?: any[], income: any}} */ (form)),
+    [form],
+  );
+  const flags = useMemo(
+    () => householdFlags(/** @type {{waterSource: any, toilet: any, members?: any[]}} */ (form)),
+    [form],
+  );
   // The classification is only meaningful once the required inputs that drive
   // the score exist. Until then we must NOT imply the household is "Low Risk"
   // (that read false on an empty form). The server remains the source of truth.
@@ -712,6 +839,7 @@ export default function AddHouseholdPage() {
           collectorName: form.collector,
           members: form.members.map((m) => ({
             name: m.name.trim(),
+            ...(m.residentId ? { residentId: m.residentId } : {}),
             birthday: m.birthday || "",
             age: m.age === "" ? null : Number(m.age),
             sex: m.sex || "",

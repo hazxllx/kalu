@@ -62,8 +62,11 @@ export const defaultCoverage = (user) => (isPHN(user) ? RHU_OPTION : null);
 /**
  * Normalize a requested coverage. PHNs can only ever resolve to RHU — any
  * barangay value is rejected so a PHN can never land on a barangay scope.
+ *
+ * Accepts the older/raw value passed from storage or forms so older call sites
+ * stay compatible while still enforcing the PHN RHU-only policy.
  */
-export const resolveCoverage = (user) => {
+export const resolveCoverage = (user, _coverageValue) => {
   if (!isPHN(user)) return null;
   return RHU_OPTION;
 };
@@ -102,8 +105,11 @@ export const isVisibleToUser = () => true;
  *
  * PHN lists are RHU workflow lists and are returned unchanged; other roles
  * also see the full list (preserving existing behavior).
+ *
+ * @param {any} rows
+ * @param {...any} _scope Unused compatibility arguments from existing callers.
  */
-export const filterRowsByScope = (rows) => (Array.isArray(rows) ? rows : []);
+export const filterRowsByScope = (rows, ..._scope) => (Array.isArray(rows) ? rows : []);
 
 /** Display coverage string for a PHN (always "RHU"). */
 export const phnCoverageLabel = () => "RHU";
@@ -127,7 +133,11 @@ export const RHU_OPTION = "RHU";
  * PHNs are RHU-based, so only the "RHU" option is ever offered. Any other role
  * keeps the full three-barangay list (unchanged behavior).
  */
-export const phnWritableBarangays = (user) => {
+/**
+ * @param {any} user
+ * @param {any} [_coverage]
+ */
+export const phnWritableBarangays = (user, _coverage) => {
   const scope = getPHNScope(user);
   if (!scope) return [...BARANGAYS];
   return [RHU_OPTION];
@@ -137,7 +147,11 @@ export const phnWritableBarangays = (user) => {
  * Default barangay for a new record.
  * PHNs always write RHU-level records ("RHU" sentinel → stored as null).
  */
-export const phnDefaultBarangay = (user) => {
+/**
+ * @param {any} user
+ * @param {any} [_coverage]
+ */
+export const phnDefaultBarangay = (user, _coverage) => {
   const scope = getPHNScope(user);
   if (!scope) return "";
   return RHU_OPTION;

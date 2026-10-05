@@ -73,7 +73,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [reportToSubmit, setReportToSubmit] = useState(null);
-  const [formErrors, setFormErrors] = useState({});
+  const [formErrors, setFormErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [toast, setToast] = useState(null);
   const [reportForm, setReportForm] = useState(() => ({
     reportType: "",

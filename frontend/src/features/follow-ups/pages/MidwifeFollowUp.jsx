@@ -101,6 +101,7 @@ const mapFollowUpRow = (row) => ({
   age: row.resident?.birth_date ? new Date().getFullYear() - new Date(row.resident.birth_date).getFullYear() : "",
   purpose: row.purpose,
   type: row.purpose,
+  consultation: row.consultation || null,
   scheduledDateRaw: row.scheduled_date,
   scheduledTimeRaw: row.scheduled_time,
   scheduledDate: formatDate(row.scheduled_date),
@@ -168,10 +169,10 @@ export default function MidwifeFollowUp() {
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [selectedFollowUp, setSelectedFollowUp] = useState(null);
   const [selectedResident, setSelectedResident] = useState(null);
-  const [scheduleForm, setScheduleForm] = useState(() => emptyScheduleForm(""));
+  const [scheduleForm, setScheduleForm] = useState(() => /** @type {Record<string, any>} */ (emptyScheduleForm("")));
   const [visitForm, setVisitForm] = useState({ findings: "", treatment: "", advice: "", nextVisitDate: "" });
   const [remarksDraft, setRemarksDraft] = useState("");
-  const [touched, setTouched] = useState({});
+  const [touched, setTouched] = useState(/** @type {Record<string, boolean>} */ ({}));
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
@@ -581,7 +582,16 @@ export default function MidwifeFollowUp() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{f.purpose}</td>
+                  <td className="px-4 py-3 text-sm text-brand-ink">
+                    <p>{f.purpose}</p>
+                    {f.consultation && (
+                      <p className="mt-1 text-xs text-brand-gray">
+                        Consultation {f.consultation.id}
+                        {f.consultation.visit_date ? ` · ${formatDate(f.consultation.visit_date)}` : ""}
+                        {f.consultation.chief_complaint ? ` · ${f.consultation.chief_complaint}` : ""}
+                      </p>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{f.assignedMidwife}</td>
                   <td className="px-4 py-3">
                     <div className="text-sm text-brand-ink">{f.scheduledDate}</div>

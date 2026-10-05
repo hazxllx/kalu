@@ -32,7 +32,21 @@ const MEDIUM_REASONS = {
 
 const LOW_REASON = "No significant risk indicators identified.";
 
-/** Lower-cased searchable copy of every relevant structured field. */
+/**
+ * @typedef {Object} RiskTextFields
+ * @property {string} [reason]
+ * @property {string} [notes]
+ * @property {string} [chiefComplaint]
+ * @property {string} [healthConcern]
+ * @property {string} [assessment]
+ * @property {string} [clinicalNotes]
+ * @property {string} [recommendations]
+ */
+
+/**
+ * Lower-cased searchable copy of every relevant structured field.
+ * @param {{patient?: RiskTextFields, triage?: RiskTextFields, checkup?: RiskTextFields}} data
+ */
 const collectText = ({ patient = {}, triage = {}, checkup = {} }) => {
   const parts = [
     patient?.reason,

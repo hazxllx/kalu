@@ -16,7 +16,7 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState({});
+  const [fieldErrors, setFieldErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [submitting, setSubmitting] = useState(false);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
