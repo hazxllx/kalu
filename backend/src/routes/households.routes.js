@@ -19,6 +19,7 @@
 import { Router } from 'express';
 import authenticate from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
+import idempotency from '../middleware/idempotency.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import householdsController from '../controllers/households.controller.js';
@@ -40,11 +41,12 @@ const HOUSEHOLD_ROLES = FEATURE_ROLES.households; // BHW / Health Supervisor / P
 const params = validate(householdParamsValidator, 'params');
 
 router.get('/', authorize(HOUSEHOLD_ROLES), asyncHandler(householdsController.listHouseholds));
-router.post('/', authorize(HOUSEHOLD_ROLES), validate(createHouseholdValidator), asyncHandler(householdsController.createHousehold));
+// Idempotency-Key makes an offline re-upload safe (no duplicate household).
+router.post('/', authorize(HOUSEHOLD_ROLES), idempotency, validate(createHouseholdValidator), asyncHandler(householdsController.createHousehold));
 
 router.get('/residents/search', authorize(HOUSEHOLD_ROLES), asyncHandler(householdsController.searchResidents));
 router.get('/:id', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.getHousehold));
-router.put('/:id', authorize(HOUSEHOLD_ROLES), params, validate(updateHouseholdValidator), asyncHandler(householdsController.updateHousehold));
+router.put('/:id', authorize(HOUSEHOLD_ROLES), idempotency, params, validate(updateHouseholdValidator), asyncHandler(householdsController.updateHousehold));
 
 router.post('/:id/members', authorize(HOUSEHOLD_ROLES), params, validate(householdMemberValidator), asyncHandler(householdsController.addHouseholdMember));
 router.delete('/:id/members/:memberId', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.removeHouseholdMember));

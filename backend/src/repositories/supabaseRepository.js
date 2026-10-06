@@ -74,6 +74,8 @@ const HOUSEHOLD_TO_DB = {
   collectorId: 'collector_id',
   collectorName: 'collector_name',
   createdBy: 'created_by',
+  revision: 'revision',
+  clientOperationKey: 'client_operation_key',
 };
 
 const DB_TO_HOUSEHOLD = Object.fromEntries(
@@ -89,6 +91,10 @@ const householdFromRow = (row) => {
   household.address = [row.street_address, row.purok].filter(Boolean).join(', ');
   household.createdAt = row.created_at;
   household.updatedAt = row.updated_at;
+  // Optimistic-concurrency version (defaults to 1 for rows created before the
+  // offline migration added the column).
+  household.revision = row.revision ?? 1;
+  household.clientOperationKey = row.client_operation_key ?? null;
   return household;
 };
 
@@ -564,6 +570,35 @@ const isMissingScreeningColumn = (error) => {
     || (/column/i.test(message) && /documents/i.test(message));
 };
 
+/**
+ * True when a write failed only because the offline-sync columns
+ * (`revision` / `client_operation_key`) are not present yet (migration not
+ * applied). Lets the online household workflow keep working unchanged against a
+ * database that has not received `20261006130000_offline_sync_operations.sql`.
+ */
+const isMissingOfflineColumn = (error) => {
+  const code = error?.code || error?.details?.code || '';
+  const message = error?.message || error?.details?.message || '';
+  return (
+    code === 'PGRST204' ||
+    code === '42703' ||
+    (/client_operation_key|revision/i.test(message) && /column/i.test(message))
+  );
+};
+
+/**
+ * True when the `create_household_with_members` RPC is not present yet (offline
+ * migration not applied). The service then uses the legacy sequential insert.
+ */
+const isMissingRpc = (error) => {
+  const code = error?.code || '';
+  const message = error?.message || '';
+  return (
+    code === 'PGRST202' ||
+    /could not find the function|function .* does not exist|schema cache/i.test(message)
+  );
+};
+
 // ----- resident free-text search -------------------------------------------
 
 /** Columns a resident directory search matches against, in priority order. */
@@ -904,23 +939,109 @@ export const supabaseRepository = {
 
   async insertHousehold(household) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase
+    const row = householdToRow(household);
+    let { data, error } = await supabase
       .from(TABLES.households)
-      .insert(householdToRow(household))
+      .insert(row)
       .select('*')
       .single();
-    throwOnError(error, 'Could not save household');
+    if (error && isMissingOfflineColumn(error)) {
+      // Migration not applied yet: retry without the additive operation-key
+      // column so online creation keeps working. Idempotency activates once the
+      // migration is deployed.
+      const { client_operation_key: _omit, ...compat } = row;
+      ({ data, error } = await supabase
+        .from(TABLES.households)
+        .insert(compat)
+        .select('*')
+        .single());
+    }
+    if (error) {
+      // Database-enforced idempotency: a replayed create carries the same
+      // client_operation_key, which is unique. Surface it as 23505 so the
+      // service returns the already-created household instead of failing.
+      if (error.code === '23505' && household?.clientOperationKey) {
+        const duplicate = new Error('A household for this operation already exists.');
+        duplicate.code = '23505';
+        duplicate.statusCode = 409;
+        duplicate.details = error;
+        throw duplicate;
+      }
+      throwOnError(error, 'Could not save household');
+    }
     return householdFromRow(data);
   },
 
-  async updateHousehold(id, patch) {
+  /**
+   * Atomically create a household and all of its members in ONE database
+   * transaction via `public.create_household_with_members`. Returns
+   * `{ household, deduplicated }`, or `null` when the function is not deployed
+   * yet so the caller can fall back to the legacy sequential insert.
+   */
+  async createHouseholdWithMembers(household, members = []) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('create_household_with_members', {
+      p_household: householdToRow(household),
+      p_members: (members || []).map(memberToRow),
+      p_client_operation_key: household?.clientOperationKey || null,
+    });
+    if (error) {
+      if (isMissingRpc(error)) return null;
+      if (error.code === '23505' && household?.clientOperationKey) {
+        const existing = await this.findHouseholdByOperationKey(household.clientOperationKey);
+        if (existing) return { household: existing, deduplicated: true };
+      }
+      if (error.code === '23505') {
+        const duplicate = new Error(
+          'A household for that head and address is already registered.',
+        );
+        duplicate.statusCode = 409;
+        duplicate.details = error;
+        throw duplicate;
+      }
+      throwOnError(error, 'Could not create household');
+    }
+    const payload = Array.isArray(data) ? data[0] : data;
+    const row = payload?.household ?? payload;
+    return { household: householdFromRow(row), deduplicated: Boolean(payload?.deduplicated) };
+  },
+
+  /** The household created by a given offline operation key, or null. */
+  async findHouseholdByOperationKey(clientOperationKey) {
+    if (!clientOperationKey) return null;
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from(TABLES.households)
-      .update(householdToRow(patch))
-      .eq('id', id)
       .select('*')
-      .single();
+      .eq('client_operation_key', clientOperationKey)
+      .maybeSingle();
+    // Column not migrated yet: behave as "no prior operation" so the online
+    // workflow is unaffected until the migration is applied.
+    if (error && isMissingOfflineColumn(error)) return null;
+    throwOnError(error, 'Could not look up household by operation key');
+    return data ? householdFromRow(data) : null;
+  },
+
+  async updateHousehold(id, patch, { expectedRevision = null } = {}) {
+    const supabase = getServiceClient();
+    const usesConcurrency = expectedRevision !== null && expectedRevision !== undefined;
+    const row = householdToRow(patch);
+    const runUpdate = (columns) => {
+      let query = supabase.from(TABLES.households).update(columns).eq('id', id);
+      if (usesConcurrency) {
+        // Conditional write: only applies when the stored revision still
+        // matches, so a concurrent edit cannot be silently overwritten.
+        query = query.eq('revision', Number(expectedRevision));
+      }
+      return query.select('*').maybeSingle();
+    };
+    let { data, error } = await runUpdate(row);
+    if (error && isMissingOfflineColumn(error)) {
+      // Migration not applied yet: retry without the additive columns so online
+      // updates keep working (no revision bump until the migration is deployed).
+      const { revision: _r, client_operation_key: _k, ...compat } = row;
+      ({ data, error } = await runUpdate(compat));
+    }
     throwOnError(error, 'Could not update household');
     return data ? householdFromRow(data) : null;
   },

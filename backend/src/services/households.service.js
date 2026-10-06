@@ -201,8 +201,16 @@ export const getHousehold = async ({ id, user }) => {
   return getScopedHousehold(id, user);
 };
 
-export const createHousehold = async ({ user, payload = {} }) => {
+export const createHousehold = async ({ user, payload = {}, idempotencyKey = null, repo = repository }) => {
   if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
+
+  // Idempotent create: if this offline operation already produced a household
+  // (e.g. the response was lost), return it instead of creating a duplicate. The
+  // unique constraint on client_operation_key is the database-level backstop.
+  if (idempotencyKey && typeof repo.findHouseholdByOperationKey === 'function') {
+    const existing = await repo.findHouseholdByOperationKey(idempotencyKey);
+    if (existing) return repo.getHousehold(existing.id);
+  }
 
   const barangayName = text(payload.barangay);
   const errors = [];
@@ -241,7 +249,7 @@ export const createHousehold = async ({ user, payload = {} }) => {
   if (scope && barangayName.toLowerCase() !== scope.toLowerCase()) {
     throw ApiError.forbidden('Your account is assigned to Barangay ' + scope + ' only');
   }
-  const barangayRow = await repository.findBarangayByName(barangayName, user?.municipalityId || null);
+  const barangayRow = await repo.findBarangayByName(barangayName, user?.municipalityId || null);
   if (!barangayRow) {
     throw ApiError.unprocessable(`Unknown barangay: ${barangayName}. It must belong to your municipality.`);
   }
@@ -250,7 +258,7 @@ export const createHousehold = async ({ user, payload = {} }) => {
     throw ApiError.conflict('A resident can only be added once to this household.');
   }
   for (const residentId of memberResidentIds) {
-    const resident = await repository.getResident(residentId);
+    const resident = await repo.getResident(residentId);
     if (!resident || (resident.barangayId && resident.barangayId !== barangayRow.id)
       || (!resident.barangayId && (resident.barangay || '').toLowerCase() !== barangayRow.name.toLowerCase())) {
       throw ApiError.unprocessable('A linked resident must belong to the same barangay as the household.');
@@ -258,7 +266,7 @@ export const createHousehold = async ({ user, payload = {} }) => {
   }
 
   // Duplicate guard: same head + purok + street address within the barangay.
-  const duplicate = await repository.findHouseholdDuplicate({
+  const duplicate = await repo.findHouseholdDuplicate({
     barangayId: barangayRow.id,
     headName,
     purok,
@@ -268,7 +276,7 @@ export const createHousehold = async ({ user, payload = {} }) => {
     throw ApiError.conflict(`A household for ${headName} at that address is already registered (${duplicate.id}).`);
   }
 
-  const ids = await repository.nextHouseholdId();
+  const ids = await repo.nextHouseholdId();
   const memberRows = members || [];
   const risk = recomputeRisk(
     { waterSource, toiletType, sanitationAccess: text(payload.sanitationAccess), monthlyIncome: payload.monthlyIncome, members: [] },
@@ -276,7 +284,7 @@ export const createHousehold = async ({ user, payload = {} }) => {
     memberRows,
   );
 
-  const household = await repository.insertHousehold({
+  const householdInput = {
     id: ids.id,
     municipalityId: barangayRow.municipalityId,
     barangayId: barangayRow.id,
@@ -316,26 +324,79 @@ export const createHousehold = async ({ user, payload = {} }) => {
     collectorId: user?.id || null,
     collectorName: text(payload.collectorName ?? payload.collector) || user?.name || user?.email || '',
     createdBy: user?.id || null,
-  });
+    // Only present for an offline operation; becomes the unique
+    // client_operation_key that makes a replayed create return the same row.
+    ...(idempotencyKey ? { clientOperationKey: idempotencyKey } : {}),
+  };
 
-  for (const member of memberRows) {
-    await repository.addHouseholdMember(household.id, {
-      ...member,
-      // Link the member to a resident record when one already exists for the
-      // exact identity — roster entries never create residents implicitly.
-      residentId: member.residentId || null,
-    });
+  // Normalize members once (link a member to an existing resident only by its
+  // exact identity; roster entries never create residents implicitly).
+  const memberInserts = memberRows.map((member) => ({
+    ...member,
+    residentId: member.residentId || null,
+  }));
+
+  // Preferred path: a single database function creates the household and ALL of
+  // its members in one transaction, so a member failure can never leave a
+  // partial household. Returns null when the function is not deployed yet.
+  if (typeof repo.createHouseholdWithMembers === 'function') {
+    const atomic = await repo.createHouseholdWithMembers(householdInput, memberInserts);
+    if (atomic && atomic.household) {
+      const full = await repo.getHousehold(atomic.household.id);
+      await recordHouseholdAudit({ user, action: 'HOUSEHOLD_CREATED', household: full });
+      return full;
+    }
   }
 
-  const full = await repository.getHousehold(household.id);
+  // Fallback (function not deployed): insert the household, then its members.
+  // A database-level idempotency backstop returns the existing row (and skips
+  // re-adding members) if a concurrent or interrupted retry already created it.
+  let household;
+  let deduplicated = false;
+  try {
+    household = await repo.insertHousehold(householdInput);
+  } catch (error) {
+    if (idempotencyKey && error?.code === '23505' && typeof repo.findHouseholdByOperationKey === 'function') {
+      const existing = await repo.findHouseholdByOperationKey(idempotencyKey);
+      if (existing) {
+        household = existing;
+        deduplicated = true;
+      } else {
+        throw error;
+      }
+    } else {
+      throw error;
+    }
+  }
+
+  if (!deduplicated) {
+    for (const member of memberInserts) {
+      await repo.addHouseholdMember(household.id, member);
+    }
+  }
+
+  const full = await repo.getHousehold(household.id);
   // Best-effort audit of the creation event (no notification on create).
   await recordHouseholdAudit({ user, action: 'HOUSEHOLD_CREATED', household: full });
   return full;
 };
 
-export const updateHousehold = async ({ id, user, patch = {} }) => {
+export const updateHousehold = async ({ id, user, patch = {}, expectedRevision = null, repo = repository }) => {
   if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
-  const household = await getScopedHousehold(id, user);
+  const household = await getScopedHousehold(id, user, repo);
+
+  // Optimistic concurrency: when the client supplies the revision it last saw
+  // (If-Match), reject a stale write instead of silently overwriting a
+  // concurrent edit made on another device.
+  const usesConcurrency = expectedRevision !== null && expectedRevision !== undefined && expectedRevision !== '';
+  if (usesConcurrency) {
+    const currentRevision = Number(household.revision ?? 1);
+    if (Number(expectedRevision) !== currentRevision) {
+      throw ApiError.conflict(
+        'This household was updated on another device. Reload it and reapply your changes.',
+      );
+    }
+  }
 
   // Verification outcomes belong to the Health Supervisor only.
   const touchesVerification = VERIFICATION_FIELDS.some((f) => patch[f] !== undefined);
@@ -427,10 +488,26 @@ export const updateHousehold = async ({ id, user, patch = {} }) => {
   delete nextPatch.barangayId;
   delete nextPatch.members;
 
+  // Bump the record version on every accepted update (optimistic concurrency).
+  nextPatch.revision = Number(household.revision ?? 1) + 1;
+
   const risk = recomputeRisk(household, nextPatch, members === undefined ? undefined : members);
-  const updated = await repository.updateHousehold(id, { ...nextPatch, ...risk });
-  if (!updated) throw ApiError.notFound('Household not found');
-  const full = await repository.getHousehold(id);
+  const updated = await repo.updateHousehold(
+    id,
+    { ...nextPatch, ...risk },
+    { expectedRevision: usesConcurrency ? Number(expectedRevision) : null },
+  );
+  if (!updated) {
+    // With a revision check the write is conditional; zero rows means a
+    // concurrent edit slipped in between our read and the write.
+    if (usesConcurrency) {
+      throw ApiError.conflict(
+        'This household was updated on another device. Reload it and reapply your changes.',
+      );
+    }
+    throw ApiError.notFound('Household not found');
+  }
+  const full = await repo.getHousehold(id);
 
   // Best-effort audit + notification for lifecycle transitions (submit /
   // resubmit / verify / return). Reuses the existing health_audit_logs and

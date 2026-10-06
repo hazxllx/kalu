@@ -19,6 +19,8 @@ import HHBadge from "../components/HHBadge";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
 import { householdsApi } from "@/services/api";
+import { createHouseholdOffline } from "@/services/offline/householdOfflineService";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
 import { systemUsers } from "@/services/local/dashboardData";
 import { maxLength, numeric, phone as validatePhone } from "@/utils/validation";
 import {
@@ -571,6 +573,8 @@ export default function AddHouseholdPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const syncStatus = useSyncStatus();
+  const isOffline = syncStatus.online === false;
 
   // Absolute path to the Household Profiling list for the current role area
   // (e.g. /app/bhw/households or /app/health_supervisor/households). Relative
@@ -804,8 +808,15 @@ export default function AddHouseholdPage() {
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await householdsApi.create({
-        household: {
+      // Save through the offline-aware service. When online this is exactly the
+      // previous behavior (authorized API call, server-allocated id, server
+      // recomputed risk, duplicate/validation errors surfaced). When offline, or
+      // if the connection drops mid-request, the household is stored on this
+      // device as a pending draft and queued for synchronization — never
+      // reported as already saved to the server.
+      const result = await createHouseholdOffline({
+        ownerId: user?.id,
+        payload: {
           barangay: user?.assignedBarangay || user?.barangay || "",
           headName: form.head.trim(),
           purok: form.purok,
@@ -854,10 +865,13 @@ export default function AddHouseholdPage() {
         },
       });
       const saved = result?.household;
+      const toastMessage = result?.queued
+        ? `Household saved on this device (${saved?.id || "draft"}) — pending synchronization`
+        : `Household ${saved?.id || ""} added successfully`;
       if (householdsPath) {
         navigate(householdsPath, {
           replace: true,
-          state: { hhToast: `Household ${saved?.id || ""} added successfully` },
+          state: { hhToast: toastMessage },
         });
       }
     } catch (err) {
@@ -906,8 +920,22 @@ export default function AddHouseholdPage() {
               Back to Household Profiling
             </Link>
           )}
-          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 md:ml-0">
-            <CheckCircle2 className="h-3.5 w-3.5" /> Saved directly to the database
+          <span
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium md:ml-0 ${
+              isOffline
+                ? "border-amber-200 bg-amber-50 text-amber-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {isOffline ? (
+              <>
+                <AlertTriangle className="h-3.5 w-3.5" /> Offline — saved on this device, syncs later
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Saved directly to the database
+              </>
+            )}
           </span>
         </div>
         <div className="mt-2 flex items-start gap-3">

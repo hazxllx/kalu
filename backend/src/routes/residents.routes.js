@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
+import idempotency from '../middleware/idempotency.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import * as residentsController from '../controllers/residents.controller.js';
@@ -30,7 +31,8 @@ router.use(authenticate, resolveBarangayScope);
 // cross-barangay query/body values before the controller runs, and the service
 // layer independently re-checks the assignment.
 router.get('/', authorize(FEATURE_ROLES.residents), asyncHandler(residentsController.listResidents));
-router.post('/', authorize(FEATURE_ROLES.residents), asyncHandler(residentsController.createResident));
+// Idempotency-Key makes an offline re-upload safe (no duplicate resident).
+router.post('/', authorize(FEATURE_ROLES.residents), idempotency, asyncHandler(residentsController.createResident));
 
 // Resident self-service. Must be declared before '/:id' so these are not
 // captured as an id. Resident is derived from the session; barangay scope is a

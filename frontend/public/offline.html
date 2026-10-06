@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#072F5F" />
+    <title>KALUSAGAP — Offline</title>
+    <style>
+      :root {
+        --brand-blue: #0b4a8f;
+        --brand-dark: #072f5f;
+        --brand-light: #edf3fa;
+        --brand-bg: #f4f6fa;
+        --brand-ink: #12263f;
+        --brand-gray: #54637a;
+        --brand-border: #d6dee8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--brand-bg);
+        color: var(--brand-ink);
+        font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+      }
+      .card {
+        width: 100%;
+        max-width: 460px;
+        background: #fff;
+        border: 1px solid var(--brand-border);
+        border-radius: 16px;
+        padding: 32px 28px;
+        text-align: center;
+        box-shadow: 0 12px 32px rgba(7, 47, 95, 0.08);
+      }
+      .mark {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 18px;
+        border-radius: 16px;
+        background: var(--brand-dark);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 21px;
+        color: var(--brand-dark);
+      }
+      p {
+        margin: 0 0 20px;
+        font-size: 14px;
+        line-height: 1.55;
+        color: var(--brand-gray);
+      }
+      button {
+        appearance: none;
+        border: 1px solid var(--brand-blue);
+        background: var(--brand-blue);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        padding: 11px 22px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: var(--brand-dark);
+        border-color: var(--brand-dark);
+      }
+      .hint {
+        margin-top: 16px;
+        font-size: 12px;
+        color: var(--brand-gray);
+      }
+      .hint a {
+        color: var(--brand-blue);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card" role="main">
+      <div class="mark" aria-hidden="true">K</div>
+      <h1>You are offline</h1>
+      <p>
+        KALUSAGAP could not reach the network to load this page. Any changes you
+        made offline are stored safely on this device and will be synchronized
+        once your connection returns.
+      </p>
+      <button type="button" onclick="window.location.reload()">
+        Try again
+      </button>
+      <p class="hint">
+        Already signed in and have a cached page?
+        <a href="/app">Return to the application</a>.
+      </p>
+    </main>
+  </body>
+</html>

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Icon from "@/components/common/Icon";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
+import OfflineStatusIndicator from "@/features/offline/components/OfflineStatusIndicator";
 import { LOGO_URL, ROLES } from "@/lib/brand";
 import {
   NAV,
@@ -458,6 +459,7 @@ export default function DashboardLayout({ roleKey }) {
           )}
 
           <div className="ml-auto flex items-center gap-2 md:gap-4">
+            <OfflineStatusIndicator />
             <Link
               to={notificationsPath}
               className="relative w-10 h-10 rounded-xl hover:bg-slate-50 dark:hover:bg-hover flex items-center justify-center"

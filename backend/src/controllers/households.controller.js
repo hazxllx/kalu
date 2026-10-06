@@ -31,15 +31,22 @@ export const getHousehold = async (req, res) => {
 export const createHousehold = async (req, res) => {
   const household = await householdsService.createHousehold({
     payload: req.body?.household || req.body || {},
+    // Set by the idempotency middleware; makes a replayed offline create return
+    // the already-created household instead of a duplicate.
+    idempotencyKey: req.idempotencyKey || req.headers['idempotency-key'] || null,
     user: req.user,
   });
   sendCreated(res, { household });
 };
 
 export const updateHousehold = async (req, res) => {
+  // Optimistic concurrency: the offline client sends the last-seen revision in
+  // `If-Match` (falling back to `baseRevision` in the body).
+  const expectedRevision = req.headers['if-match'] ?? req.body?.baseRevision ?? null;
   const household = await householdsService.updateHousehold({
     id: req.params.id,
     patch: req.body?.household || req.body || {},
+    expectedRevision,
     user: req.user,
   });
   sendData(res, { household });

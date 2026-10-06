@@ -7,6 +7,7 @@ import { AuthProvider } from '@/context/AuthContext';
 import { PermissionsProvider } from '@/context/PermissionsContext';
 import { PhnCoverageProvider } from '@/context/PhnCoverageContext';
 import { ThemeProvider } from '@/context/ThemeContext';
+import OfflineSyncProvider from '@/features/offline/OfflineSyncProvider';
 import ScrollToTop from '@/routes/ScrollToTop';
 import AppRoutes from '@/routes/AppRoutes';
 
@@ -18,17 +19,19 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <PhnCoverageProvider>
-          <PermissionsProvider>
-            <QueryClientProvider client={queryClientInstance}>
-              <Router>
-                <ScrollToTop />
-                <AppRoutes />
-              </Router>
-              <Toaster />
-            </QueryClientProvider>
-          </PermissionsProvider>
-        </PhnCoverageProvider>
+        <OfflineSyncProvider>
+          <PhnCoverageProvider>
+            <PermissionsProvider>
+              <QueryClientProvider client={queryClientInstance}>
+                <Router>
+                  <ScrollToTop />
+                  <AppRoutes />
+                </Router>
+                <Toaster />
+              </QueryClientProvider>
+            </PermissionsProvider>
+          </PhnCoverageProvider>
+        </OfflineSyncProvider>
       </AuthProvider>
     </ThemeProvider>
   );
