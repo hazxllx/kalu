@@ -13,7 +13,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-      cb(ApiError.badRequest('Only PDF, JPG, and PNG files are allowed.'));
+      cb(ApiError.unsupportedMediaType('Only PDF, JPG, and PNG files are allowed.'));
       return;
     }
     cb(null, true);
@@ -42,7 +42,7 @@ export const uploadDocumentFile = (req, res, next) => {
     if (err) {
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-          return next(ApiError.badRequest('File size must not exceed 10 MB.'));
+          return next(ApiError.payloadTooLarge('File size is not supported. Please upload a clear copy of your identification document (10 MB maximum).'));
         }
         if (err.code === 'LIMIT_UNEXPECTED_FILE') {
           return next(ApiError.badRequest('No file was provided.'));
@@ -56,9 +56,82 @@ export const uploadDocumentFile = (req, res, next) => {
       return next(ApiError.badRequest('Please upload a valid document.'));
     }
     if (!hasExpectedSignature(req.file)) {
-      return next(ApiError.badRequest('The uploaded file content does not match an approved document type.'));
+      return next(ApiError.unsupportedMediaType('The uploaded file content does not match an approved document type.'));
     }
     req.file = toNodeFile(req.file);
+    next();
+  });
+};
+
+export const uploadGovernmentIdPairFiles = (req, res, next) => {
+  upload.fields([
+    { name: 'governmentIdFront', maxCount: 1 },
+    { name: 'governmentIdBack', maxCount: 1 },
+  ])(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return next(ApiError.payloadTooLarge('Each government ID image must be 10 MB or smaller.'));
+        }
+        if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+          return next(ApiError.badRequest('Only the government ID front and back may be submitted for cross-checking.'));
+        }
+        return next(ApiError.badRequest('Unable to process the uploaded ID images.'));
+      }
+      if (err instanceof ApiError) return next(err);
+      return next(ApiError.badRequest('Unable to process the uploaded ID images.'));
+    }
+
+    const files = req.files || {};
+    const front = files.governmentIdFront?.[0];
+    const back = files.governmentIdBack?.[0];
+    if (!front || !back) {
+      return next(ApiError.badRequest('Please provide both the front and back of your government ID.'));
+    }
+    if (![front, back].every(hasExpectedSignature)) {
+      return next(ApiError.unsupportedMediaType('An uploaded file does not match an approved document type.'));
+    }
+    req.governmentIdPair = {
+      governmentIdFront: toNodeFile(front),
+      governmentIdBack: toNodeFile(back),
+    };
+    next();
+  });
+};
+
+export const uploadResidentDocumentFiles = (req, res, next) => {
+  upload.fields([
+    { name: 'file', maxCount: 1 },
+    { name: 'governmentIdFront', maxCount: 1 },
+    { name: 'governmentIdBack', maxCount: 1 },
+  ])(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return next(ApiError.payloadTooLarge('File size is not supported. Please upload a clear document image (10 MB maximum).'));
+        }
+        return next(ApiError.badRequest('Unable to process the uploaded document.'));
+      }
+      if (err instanceof ApiError) return next(err);
+      return next(ApiError.badRequest('Unable to process the uploaded document.'));
+    }
+
+    const files = req.files || {};
+    const primary = files.file?.[0];
+    const front = files.governmentIdFront?.[0];
+    const back = files.governmentIdBack?.[0];
+    if (!primary) return next(ApiError.badRequest('Please upload a valid document.'));
+    if (![primary, front, back].filter(Boolean).every(hasExpectedSignature)) {
+      return next(ApiError.unsupportedMediaType('An uploaded file does not match an approved document type.'));
+    }
+    if (Boolean(front) !== Boolean(back)) {
+      return next(ApiError.badRequest('Both government ID sides are required for cross-verification.'));
+    }
+
+    req.file = toNodeFile(primary);
+    req.governmentIdPair = front && back
+      ? { governmentIdFront: toNodeFile(front), governmentIdBack: toNodeFile(back) }
+      : null;
     next();
   });
 };

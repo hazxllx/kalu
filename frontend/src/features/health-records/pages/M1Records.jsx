@@ -468,7 +468,7 @@ export default function M1Records() {
   const [sectionCounts, setSectionCounts] = useState(null);
   const [countsLoading, setCountsLoading] = useState(false);
   const navigate = useNavigate();
-  const { startPrint, portal } = useM1OfficialPrint();
+  const { startPrint, portal, brandingError } = useM1OfficialPrint();
   const { startPrint: startMaternalPrint, portal: maternalPrintPortal } = useMaternalRecordPrint();
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
@@ -631,7 +631,7 @@ export default function M1Records() {
         m1Api.report(params),
         m1Api.getMeta({ year, month: metaMonth }).catch(() => null),
       ]);
-      startPrint({
+      await startPrint({
         data: reportData?.byCode || {},
         header: {
           periodLabel: fhsisPeriodLabel(descriptor),
@@ -746,6 +746,8 @@ export default function M1Records() {
           </div>
         }
       />
+
+      {brandingError && <Card role="alert" className="mb-4 p-3 text-sm text-brand-danger">{brandingError}</Card>}
 
       {toast && (
         <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">

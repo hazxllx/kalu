@@ -40,7 +40,7 @@ export default function Hero() {
       </div>
 
       {/* Main masthead */}
-      <div className="relative gov-navy-panel gov-guilloche text-white">
+      <div className="relative gov-landing-panel gov-landing-guilloche text-white">
         <div className="mx-auto grid max-w-content gap-12 px-5 py-16 md:px-8 md:py-20 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:gap-16">
           <motion.div
             initial={{ opacity: 0, y: 16 }}

@@ -22,6 +22,7 @@ const throwOnError = (error, fallback) => {
 
 /** Resolve the follow-up statuses that still allow a resident response. */
 const RESPONDABLE_STATUSES = new Set(['Pending', 'Scheduled']);
+const CONSULTATION_EMBED = 'consultation:visits!follow_ups_consultation_id_fkey(id, visit_date, chief_complaint, status)';
 
 /** Confirmation label derived from the stored decision (frontend vocabulary). */
 const confirmationOf = (row) => {
@@ -54,6 +55,14 @@ const toSafe = (row) => ({
   respondedAt: row.resident_decision_at || '',
   rejectionReason: row.resident_decision === 'rejected' ? (row.resident_decision_reason || '') : '',
   createdAt: row.created_at || '',
+  consultation: row.consultation
+    ? {
+      id: row.consultation.id,
+      date: row.consultation.visit_date || '',
+      chiefComplaint: row.consultation.chief_complaint || '',
+      status: row.consultation.status || '',
+    }
+    : null,
 });
 
 /** Load the caller's own resident record from the authenticated session. */
@@ -70,7 +79,7 @@ const ownResident = async (supabase, user) => {
 
 /** Load one follow-up and assert it belongs to the caller (404 otherwise). */
 const ownFollowUp = async (supabase, resident, id) => {
-  const { data, error } = await supabase.from('follow_ups').select('*').eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('follow_ups').select(`*, ${CONSULTATION_EMBED}`).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load the follow-up');
   // Report any not-found OR not-owned record identically so ids cannot be probed.
   if (!data || data.resident_id !== resident.id) throw ApiError.notFound('Follow-up not found.');
@@ -81,7 +90,7 @@ export const listOwn = async ({ user, supabase = getServiceClient() }) => {
   const resident = await ownResident(supabase, user);
   const { data, error } = await supabase
     .from('follow_ups')
-    .select('*')
+    .select(`*, ${CONSULTATION_EMBED}`)
     .eq('resident_id', resident.id)
     .order('scheduled_date', { ascending: true })
     .limit(200);

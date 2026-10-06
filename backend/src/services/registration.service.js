@@ -2,7 +2,13 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { getServiceClient } from '../config/supabase.js';
 import { validateDocumentUpload } from '../validators/documents.validators.js';
-import { isStrictMobile, toZone } from '../validators/common.js';
+import {
+  ageFromDateOnly,
+  isFutureDateOnly,
+  isStrictMobile,
+  parseDateOnly,
+  toZone,
+} from '../validators/common.js';
 
 const SELF_ROLES = Object.freeze(['resident', 'resident-limited']);
 
@@ -24,6 +30,17 @@ const toResidentResult = (resident) => ({
   barangay: resident.barangay,
   verificationStatus: resident.verificationStatus || 'pending',
 });
+
+const minorFieldsFor = (fields, existing) => {
+  if (!fields.minorVerificationMethod || existing?.minorVerificationMethod) return {};
+  return {
+    minorVerificationMethod: fields.minorVerificationMethod,
+    minorAlternativeStatus: fields.minorVerificationMethod === 'staff_alternative' ? 'pending_review' : null,
+    ...(existing?.guardianStatus ? {} : {
+      guardianStatus: fields.guardianLinkChoice === 'request' ? 'pending_guardian_acceptance' : 'skipped',
+    }),
+  };
+};
 
 /**
  * When a self-service account links to an existing resident profile that is
@@ -57,9 +74,24 @@ const validate = (payload) => {
   if (!lastName) errors.push('Last name is required.');
   if (!birthDate) errors.push('Date of birth is required.');
   else {
-    const dob = new Date(birthDate);
-    if (Number.isNaN(dob.getTime())) errors.push('Date of birth is invalid.');
-    else if (dob.getTime() > Date.now()) errors.push('Date of birth cannot be in the future.');
+    const age = ageFromDateOnly(birthDate);
+    if (!parseDateOnly(birthDate)) errors.push('Date of birth is invalid.');
+    else if (isFutureDateOnly(birthDate)) errors.push('Date of birth cannot be in the future.');
+    else if (age === null || age < 0 || age > 120) errors.push('Date of birth is not a valid age.');
+  }
+  const age = ageFromDateOnly(birthDate);
+  const isMinor = age !== null && age < 18;
+  const minorVerificationMethod = text(payload.minorVerificationMethod);
+  const guardianLinkChoice = text(payload.guardianLinkChoice);
+  if (isMinor && !['student_id', 'staff_alternative'].includes(minorVerificationMethod)) {
+    errors.push('Select a student ID or request staff-approved alternative verification.');
+  } else if (!isMinor && minorVerificationMethod) {
+    errors.push('Minor verification options are only available to applicants under 18.');
+  }
+  if (isMinor && !['skip', 'request'].includes(guardianLinkChoice)) {
+    errors.push('Choose whether to skip or request parent/guardian linking.');
+  } else if (!isMinor && guardianLinkChoice) {
+    errors.push('Parent/guardian linking is only available to applicants under 18.');
   }
   if (!sex) errors.push('Sex is required.');
   else if (!['Male', 'Female'].includes(sex)) errors.push('Sex must be "Male" or "Female".');
@@ -75,7 +107,18 @@ const validate = (payload) => {
 
   if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
 
-  return { firstName, lastName, birthDate, sex, barangay, identityNo, cellphoneNo, zone };
+  return {
+    firstName,
+    lastName,
+    birthDate,
+    sex,
+    barangay,
+    identityNo,
+    cellphoneNo,
+    zone,
+    ...(isMinor ? { minorVerificationMethod } : {}),
+    ...(isMinor ? { guardianLinkChoice } : {}),
+  };
 };
 
 export const registerResident = async ({ user, payload = {} }) => {
@@ -124,12 +167,15 @@ export const registerResident = async ({ user, payload = {} }) => {
         'The information provided does not match that resident record. Please verify your date of birth.',
       );
     }
-    const linked = repository.updateResident
+    let linked = repository.updateResident
       ? await repository.updateResident(target.id, {
         authUserId: user.id,
         updatedAt: new Date().toISOString(),
       })
       : { ...target, authUserId: user.id };
+    if (repository.updateResident && Object.keys(minorFieldsFor(fields, target)).length) {
+      linked = await repository.updateResident(target.id, minorFieldsFor(fields, target));
+    }
     const result = linked || { ...target, authUserId: user.id };
     await activateIfVerified(result, user.id);
     try {
@@ -163,6 +209,11 @@ export const registerResident = async ({ user, payload = {} }) => {
       firstName: fields.firstName,
       middleName: text(payload.middleName),
       birthDate: fields.birthDate,
+      ...(fields.minorVerificationMethod ? {
+        minorVerificationMethod: fields.minorVerificationMethod,
+        minorAlternativeStatus: fields.minorVerificationMethod === 'staff_alternative' ? 'pending_review' : null,
+        guardianStatus: fields.guardianLinkChoice === 'request' ? 'pending_guardian_acceptance' : 'skipped',
+      } : {}),
     });
   }
   if (!duplicate && text(payload.middleName)) {
@@ -227,7 +278,10 @@ export const registerResident = async ({ user, payload = {} }) => {
         : { ...duplicate, authUserId: user.id };
     }
 
-    const linkedResident = claimed || { ...duplicate, authUserId: user.id };
+    let linkedResident = claimed || { ...duplicate, authUserId: user.id };
+    if (repository.updateResident && Object.keys(minorFieldsFor(fields, duplicate)).length) {
+      linkedResident = await repository.updateResident(duplicate.id, minorFieldsFor(fields, duplicate));
+    }
     await activateIfVerified(linkedResident, user.id);
     try {
       await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });

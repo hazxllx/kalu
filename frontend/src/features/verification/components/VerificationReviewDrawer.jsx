@@ -1,11 +1,17 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   X, CheckCircle2, XCircle, FileWarning, User, MapPin, Calendar, Phone, Hash, History, Loader2, FileText,
+  Shield,
 } from "lucide-react";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { REJECTION_REASONS } from "@/services/local/verifications";
-import { fetchResidentDocuments } from "@/services/api/verificationsApi";
+import {
+  fetchResidentDocuments,
+  reviewMinorAlternative,
+  reviewResidentDocument,
+} from "@/services/api/verificationsApi";
+import { guardianLinksApi } from "@/services/api/guardianLinksApi";
 
 const DOC_LABELS = {
   government_id_front: "ID Front",
@@ -15,6 +21,7 @@ const DOC_LABELS = {
   barangay_certificate: "Barangay Certificate",
   barangay_clearance: "Barangay Clearance",
   government_id: "Government ID",
+  student_id: "Student ID Verification",
 };
 
 const isImageDoc = (doc) => String(doc?.mimeType || "").startsWith("image/");
@@ -23,15 +30,21 @@ const isImageDoc = (doc) => String(doc?.mimeType || "").startsWith("image/");
 // automated check is ADVISORY: "Rejected" here never blocks a staff member from
 // viewing the document or making the final decision.
 const SCREENING_STATUS_META = {
-  pending_manual_review: { label: "Passed", tone: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  automated_flagged: { label: "Flagged", tone: "bg-amber-50 text-amber-700 border-amber-200" },
-  automated_rejected: { label: "Rejected", tone: "bg-rose-50 text-rose-700 border-rose-200" },
+  pending_manual_review: { label: "Accepted for staff review", tone: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  automated_flagged: { label: "Manual review required", tone: "bg-amber-50 text-amber-700 border-amber-200" },
+  automated_rejected: { label: "Rejected by pre-screen", tone: "bg-rose-50 text-rose-700 border-rose-200" },
 };
 
 const SCREENING_REASON_LABEL = {
   DOCUMENT_INDICATORS_DETECTED: "Document-specific text detected.",
   NO_DOCUMENT_INDICATORS: "No document-specific text detected.",
+  NO_PERSON_DETECTED: "The photo does not clearly show a person holding the ID.",
   DOCUMENT_TYPE_MISMATCH: "Document does not match the selected government ID type.",
+  ID_SIDE_FIELDS_CONFLICT: "Some labelled details differ across the submitted ID sides; staff review is required.",
+  ID_SIDE_FIELDS_CONSISTENT: "Available labelled fields did not conflict; this is not proof of authenticity and staff review is still required.",
+  ID_SIDE_COMPARISON_INCONCLUSIVE: "There was not enough overlapping OCR information to compare both sides.",
+  DOCUMENT_SIDE_INCONCLUSIVE: "The ID side could not be conclusively screened; staff review is required.",
+  ID_TYPE_UNCONFIRMED: "The selected ID type could not be automatically confirmed; staff review is required.",
   IMAGE_REQUIRES_MANUAL_REVIEW: "Image received for manual review.",
   DOCUMENT_NOT_AUTOMATICALLY_SCREENED: "File type is not automatically screened.",
   OCR_UNAVAILABLE: "Automated text check unavailable; needs manual review.",
@@ -53,7 +66,25 @@ const screeningLabel = (screening) => {
 
 const screeningReason = (screening) => {
   if (!screening?.reason) return "";
-  return SCREENING_REASON_LABEL[screening.reason] || "Automated check completed.";
+  const [pairReason, sideReason] = String(screening.reason).split(";SIDE:");
+  const [reasonCode, fieldList] = pairReason.split("|");
+  const pairLabel = SCREENING_REASON_LABEL[reasonCode] || "Automated check completed.";
+  const fieldLabels = {
+    name: "name",
+    surname: "surname",
+    givenName: "given name",
+    middleName: "middle name",
+    dateOfBirth: "date of birth",
+    idNumber: "ID number",
+  };
+  const conflictingFields = fieldList
+    ? fieldList.split(",").map((field) => fieldLabels[field]).filter(Boolean)
+    : [];
+  const detail = conflictingFields.length
+    ? ` Conflicting labelled fields: ${conflictingFields.join(", ")}.`
+    : "";
+  const sideLabel = sideReason ? SCREENING_REASON_LABEL[sideReason] : "";
+  return `${pairLabel}${detail}${sideLabel && sideReason !== reasonCode ? ` Side check: ${sideLabel}` : ""}`;
 };
 
 const formatDate = (value) => {
@@ -111,9 +142,18 @@ export default function VerificationReviewDrawer({
   const [documents, setDocuments] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState("");
+  const [guardianLinks, setGuardianLinks] = useState([]);
+  const [guardianLinksError, setGuardianLinksError] = useState("");
+  const [reviewReason, setReviewReason] = useState("");
+  const [reviewError, setReviewError] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [alternativeStatus, setAlternativeStatus] = useState(verification.minorAlternativeStatus);
 
-  // Load the resident's submitted documents (fresh signed URLs, private storage,
-  // scope-enforced server-side). Re-fetches when a different resident opens.
+  const loadDocuments = useCallback(async () => {
+    const docs = await fetchResidentDocuments(verification.id);
+    setDocuments(docs);
+  }, [verification.id]);
+
   useEffect(() => {
     let active = true;
     const residentId = verification?.id;
@@ -127,6 +167,81 @@ export default function VerificationReviewDrawer({
     return () => { active = false; };
   }, [verification?.id]);
 
+  useEffect(() => {
+    let active = true;
+    if (!verification?.isMinor) return undefined;
+    guardianLinksApi.listForMinor(verification.id)
+      .then((links) => { if (active) setGuardianLinks(links); })
+      .catch(() => { if (active) setGuardianLinksError("Could not load guardian relationship requests."); });
+    return () => { active = false; };
+  }, [verification?.id, verification?.isMinor]);
+
+  const reviewStudentDocument = async (doc, decision) => {
+    if (decision === "rejected" && reviewReason.trim().length < 5) {
+      setReviewError("Enter a rejection reason of at least 5 characters.");
+      return;
+    }
+    setReviewError("");
+    setReviewBusy(true);
+    try {
+      await reviewResidentDocument(
+        verification.id,
+        doc.id,
+        decision,
+        decision === "rejected" ? reviewReason.trim() : "",
+      );
+      await loadDocuments();
+      setReviewReason("");
+    } catch (error) {
+      setReviewError(error?.message || "The student ID review could not be saved.");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const reviewAlternative = async (decision) => {
+    if (decision === "rejected" && reviewReason.trim().length < 5) {
+      setReviewError("Enter a rejection reason of at least 5 characters.");
+      return;
+    }
+    setReviewError("");
+    setReviewBusy(true);
+    try {
+      const result = await reviewMinorAlternative(
+        verification.id,
+        decision,
+        decision === "rejected" ? reviewReason.trim() : "",
+      );
+      setAlternativeStatus(result?.verification?.minorAlternativeStatus || decision);
+      setReviewReason("");
+    } catch (error) {
+      setReviewError(error?.message || "The alternative verification review could not be saved.");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const reviewGuardianLink = async (linkId, decision) => {
+    if (decision === "rejected" && reviewReason.trim().length < 5) {
+      setReviewError("Enter a relationship rejection reason of at least 5 characters.");
+      return;
+    }
+    setReviewError("");
+    setReviewBusy(true);
+    try {
+      const updated = await guardianLinksApi.review(
+        linkId,
+        decision,
+        decision === "rejected" ? reviewReason.trim() : "",
+      );
+      setGuardianLinks((items) => items.map((item) => item.id === linkId ? updated.guardianLink || updated : item));
+      setReviewReason("");
+    } catch (error) {
+      setReviewError(error?.message || "The guardian relationship review could not be saved.");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== "Escape") return;
@@ -230,12 +345,63 @@ export default function VerificationReviewDrawer({
               <InfoCell icon={Phone} label="Contact Number" value={verification.contactNumber} />
               <InfoCell icon={MapPin} label="Barangay" value={verification.barangay} />
               <InfoCell icon={Calendar} label="Registration Date" value={formatDate(verification.registeredDate)} />
+              {verification.isMinor && (
+                <InfoCell
+                  icon={Shield}
+                  label="Minor verification path"
+                  value={verification.minorVerificationMethod === "staff_alternative"
+                    ? `Alternative verification — ${alternativeStatus || "pending review"}`
+                    : "Student ID"}
+                />
+              )}
             </div>
             <div className="mt-3 grid grid-cols-1 gap-3">
               <InfoCell icon={MapPin} label="Address" value={verification.address} />
               <InfoCell icon={Hash} label="Reference Number" value={verification.ref} />
             </div>
           </section>
+
+          {verification.isMinor && verification.minorVerificationMethod === "staff_alternative" && (
+            <section className="rounded-btn border border-amber-200 bg-amber-50 p-4">
+              <SectionTitle>Alternative Verification Review</SectionTitle>
+              <p className="text-sm text-amber-950">
+                Status: {alternativeStatus || "pending review"}
+                {verification.minorAlternativeReason ? ` — ${verification.minorAlternativeReason}` : ""}
+              </p>
+              {alternativeStatus !== "approved" && (
+                <div className="mt-3 space-y-2">
+                  {alternativeStatus === "rejected" && (
+                    <p className="text-xs text-rose-700">A replacement student ID can be uploaded instead.</p>
+                  )}
+                  <textarea
+                    value={reviewReason}
+                    onChange={(event) => setReviewReason(event.target.value)}
+                    maxLength={2000}
+                    placeholder="Required when rejecting"
+                    className="w-full rounded border border-brand-border bg-white p-2 text-sm"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={reviewBusy}
+                      onClick={() => reviewAlternative("approved")}
+                      className="rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Approve alternative
+                    </button>
+                    <button
+                      type="button"
+                      disabled={reviewBusy}
+                      onClick={() => reviewAlternative("rejected")}
+                      className="rounded bg-rose-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Reject alternative
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           <section>
             <SectionTitle>Submitted Documents</SectionTitle>
@@ -250,29 +416,120 @@ export default function VerificationReviewDrawer({
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {documents.map((doc) => (
-                  <a
-                    key={doc.id}
-                    href={doc.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group overflow-hidden rounded-btn border border-brand-border bg-white transition-colors hover:border-brand-blue"
-                    title={`Open ${DOC_LABELS[doc.documentType] || doc.documentType}`}
-                  >
-                    <div className="flex h-28 items-center justify-center overflow-hidden bg-brand-bg">
-                      {isImageDoc(doc) ? (
-                        <img src={doc.url} alt={DOC_LABELS[doc.documentType] || doc.documentType} className="h-full w-full object-cover" />
-                      ) : (
-                        <FileText className="h-8 w-8 text-brand-blue" strokeWidth={1.6} />
-                      )}
-                    </div>
-                    <p className="truncate px-2.5 py-2 text-xs font-medium text-brand-ink">
-                      {DOC_LABELS[doc.documentType] || doc.documentType}
-                    </p>
-                  </a>
+                  <div key={doc.id} className="overflow-hidden rounded-btn border border-brand-border bg-white">
+                    <a
+                      href={doc.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group block transition-colors hover:border-brand-blue"
+                      title={`Open ${DOC_LABELS[doc.documentType] || doc.documentType}`}
+                    >
+                      <div className="flex h-28 items-center justify-center overflow-hidden bg-brand-bg">
+                        {isImageDoc(doc) ? (
+                          <img src={doc.url} alt={DOC_LABELS[doc.documentType] || doc.documentType} className="h-full w-full object-cover" />
+                        ) : (
+                          <FileText className="h-8 w-8 text-brand-blue" strokeWidth={1.6} />
+                        )}
+                      </div>
+                      <p className="truncate px-2.5 py-2 text-xs font-medium text-brand-ink">
+                        {DOC_LABELS[doc.documentType] || doc.documentType}
+                      </p>
+                      <p className="px-2.5 pb-2 text-[11px] text-brand-gray">
+                        {doc.verificationStatus === "approved" ? "Approved" : doc.verificationStatus === "rejected" ? "Rejected" : "Pending Review"}
+                      </p>
+                    </a>
+                    {doc.documentType === "student_id" && doc.verificationStatus === "pending" && (
+                      <div className="space-y-2 border-t border-brand-border p-2">
+                        <input
+                          value={reviewReason}
+                          onChange={(event) => setReviewReason(event.target.value)}
+                          maxLength={2000}
+                          placeholder="Reason required to reject"
+                          className="w-full rounded border border-brand-border p-2 text-xs"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={reviewBusy}
+                            onClick={() => reviewStudentDocument(doc, "approved")}
+                            className="rounded bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            disabled={reviewBusy}
+                            onClick={() => reviewStudentDocument(doc, "rejected")}
+                            className="rounded bg-rose-700 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {doc.documentType === "student_id" && doc.rejectionReason && (
+                      <p className="border-t border-rose-100 bg-rose-50 p-2 text-xs text-rose-800">
+                        Rejection reason: {doc.rejectionReason}
+                      </p>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
+            {reviewError && <p className="mt-2 text-xs text-rose-700">{reviewError}</p>}
           </section>
+
+          {verification.isMinor && (
+            <section>
+              <SectionTitle>Parent / Guardian Requests</SectionTitle>
+              {guardianLinksError ? (
+                <p className="rounded-btn bg-brand-bg p-3 text-sm text-brand-danger">{guardianLinksError}</p>
+              ) : guardianLinks.length === 0 ? (
+                <p className="rounded-btn bg-brand-bg p-3 text-sm text-brand-gray">No parent or guardian link request.</p>
+              ) : (
+                <div className="space-y-2">
+                  {guardianLinks.map((link) => (
+                    <div key={link.id} className="rounded-btn border border-brand-border bg-white p-3">
+                      <p className="text-sm font-medium text-brand-ink">
+                        {link.guardian?.firstName} {link.guardian?.lastName} — {link.relationshipLabel}
+                      </p>
+                      <p className="mt-1 text-xs text-brand-gray">
+                        Status: {link.verificationStatus.replace(/_/g, " ")}
+                      </p>
+                      {link.verificationNote && <p className="mt-1 text-xs text-rose-700">{link.verificationNote}</p>}
+                      {link.verificationStatus === "pending_verification" && (
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            disabled={reviewBusy}
+                            onClick={() => reviewGuardianLink(link.id, "verified")}
+                            className="rounded bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                          >
+                            Verify relationship
+                          </button>
+                          <button
+                            type="button"
+                            disabled={reviewBusy}
+                            onClick={() => reviewGuardianLink(link.id, "rejected")}
+                            className="rounded bg-rose-700 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                          >
+                            Reject relationship
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <textarea
+                    value={reviewReason}
+                    onChange={(event) => setReviewReason(event.target.value)}
+                    maxLength={2000}
+                    placeholder="Relationship rejection reason (required for rejection)"
+                    className="w-full rounded border border-brand-border bg-white p-2 text-sm"
+                  />
+                </div>
+              )}
+            </section>
+          )}
 
           {documents.some((doc) => doc.screening?.status) && (
             <section>

@@ -51,4 +51,44 @@ export const unassign = async (req, res) => {
   sendData(res, { record });
 };
 
-export default { meta, reference, list, personnel, get, create, assign, unassign };
+export const createAttendance = async (req, res) => {
+  const record = await service.createHealthServiceAttendance({ user: req.user, payload: req.body || {} });
+  sendCreated(res, { record });
+};
+
+export const listAttendance = async (req, res) => {
+  let rows;
+  if (req.query.service_id) {
+    rows = await service.listAttendanceByService({ user: req.user, query: req.query });
+  } else if (req.query.resident_id) {
+    rows = await service.listAttendanceByResident({ user: req.user, query: req.query });
+  } else {
+    // No service/resident filter: a staff caller in scope lists attendance
+    // scheduled within their coverage for the dashboard calendar.
+    rows = await service.listScopeAttendance({ user: req.user, query: req.query });
+  }
+  sendData(res, { rows, records: rows });
+};
+
+export const updateAttendance = async (req, res) => {
+  const record = await service.updateHealthServiceAttendance({
+    user: req.user,
+    params: req.params,
+    payload: req.body || {},
+  });
+  sendData(res, { record });
+};
+
+export default {
+  meta,
+  reference,
+  list,
+  personnel,
+  get,
+  create,
+  assign,
+  unassign,
+  createAttendance,
+  listAttendance,
+  updateAttendance,
+};

@@ -28,6 +28,8 @@ import { notifyResident } from './notifications.service.js';
 
 const TABLE = 'health_services';
 const ASSIGN_TABLE = 'health_service_assignments';
+const ATTENDANCE_TABLE = 'health_service_attendance';
+const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'cancelled', 'walk_in']);
 
 export const SERVICE_CATEGORIES = Object.freeze([
   'Maternal',
@@ -45,6 +47,11 @@ const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
 };
+
+// Local "YYYY-MM-DD" check (the same rule the validator applies) so a bad date
+// range is rejected before it reaches the query.
+const dateIsDateOnly = (value) =>
+  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`));
 
 const FACILITY_EMBED = 'facility:facilities(name, type)';
 const BARANGAY_EMBED = 'barangay:barangays(name)';
@@ -212,6 +219,198 @@ const manageableService = async (user, serviceId, supabase) => {
   } else if (user.role !== ROLES.ADMIN) {
     throw ApiError.forbidden('Your role is not authorized to manage health services.');
   }
+  return data;
+};
+
+const attendanceDate = (value) =>
+  typeof value === 'string'
+  && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`))
+  && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+
+const applyAttendanceDateRange = (query, { from, to }) => {
+  let ranged = query;
+  if (from) ranged = ranged.gte('scheduled_date', from);
+  if (to) ranged = ranged.lte('scheduled_date', to);
+  return ranged;
+};
+
+export const createHealthServiceAttendance = async ({ user, payload = {}, supabase = getServiceClient() }) => {
+  assertManager(user);
+  const serviceId = text(payload.service_id);
+  const residentId = text(payload.resident_id);
+  const scheduledDate = text(payload.scheduled_date);
+  const status = text(payload.status);
+  const notes = text(payload.notes);
+  if (!serviceId) throw ApiError.unprocessable('A service is required.');
+  if (!residentId) throw ApiError.unprocessable('A resident is required.');
+  if (!attendanceDate(scheduledDate)) throw ApiError.unprocessable('Enter a valid scheduled date.');
+  if (!ATTENDANCE_STATUSES.includes(status)) throw ApiError.unprocessable('Select a valid attendance status.');
+  if (notes.length > 2000) throw ApiError.unprocessable('Notes must be 2000 characters or fewer.');
+
+  await manageableService(user, serviceId, supabase);
+  const { data: resident, error: residentError } = await supabase
+    .from('residents')
+    .select('id')
+    .eq('id', residentId)
+    .maybeSingle();
+  throwOnError(residentError, 'Could not verify resident');
+  if (!resident) throw ApiError.unprocessable('The selected resident does not exist.');
+
+  const row = {
+    service_id: serviceId,
+    resident_id: residentId,
+    scheduled_date: scheduledDate,
+    attendance_status: status,
+    notes,
+    recorded_by: user.id,
+    recorded_by_name: text(user.name),
+  };
+  const { data, error } = await supabase.from(ATTENDANCE_TABLE).insert(row).select('*').single();
+  throwOnError(error, 'Could not create health service attendance');
+  return data;
+};
+
+export const listAttendanceByService = async ({ user, query = {}, supabase = getServiceClient() }) => {
+  if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+  const serviceId = text(query.service_id);
+  if (!serviceId) throw ApiError.badRequest('A service reference is required.');
+  await getById({ user, id: serviceId, supabase });
+
+  let request = supabase
+    .from(ATTENDANCE_TABLE)
+    .select('*')
+    .eq('service_id', serviceId);
+  request = applyAttendanceDateRange(request, query);
+  const { data, error } = await request.order('scheduled_date', { ascending: false });
+  throwOnError(error, 'Could not load health service attendance');
+  return data || [];
+};
+
+export const listAttendanceByResident = async ({ user, query = {}, supabase = getServiceClient() }) => {
+  if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+  const residentId = text(query.resident_id);
+  if (!residentId) throw ApiError.badRequest('A resident reference is required.');
+  const { data: resident, error: residentError } = await supabase
+    .from('residents')
+    .select('id')
+    .eq('id', residentId)
+    .maybeSingle();
+  throwOnError(residentError, 'Could not verify resident');
+  if (!resident) throw ApiError.notFound('Resident not found.');
+
+  let request = supabase
+    .from(ATTENDANCE_TABLE)
+    .select('*, service:health_services(id, municipality_id, barangay_id)')
+    .eq('resident_id', residentId);
+  request = applyAttendanceDateRange(request, query);
+  const { data, error } = await request.order('scheduled_date', { ascending: false });
+  throwOnError(error, 'Could not load health service attendance');
+
+  const visibleRows = [];
+  for (const row of data || []) {
+    if (await serviceVisibleTo(user, row.service, supabase)) {
+      const { service, ...attendance } = row;
+      visibleRows.push(attendance);
+    }
+  }
+  return visibleRows;
+};
+
+export const RESIDENTS_EMBED = 'resident:residents(id, first_name, middle_name, last_name, sex, birth_date, barangay)';
+const ATTENDANCE_SELECT = `*, service:health_services(id, name, category, municipality_id, barangay_id), ${RESIDENTS_EMBED}`;
+
+/**
+ * Attendance records (scheduled health-service appointments) for the caller's
+ * scope within a date range, for the dashboard calendar.
+ *
+ * Scope is enforced in JS from the authenticated session (the service-role
+ * client bypasses RLS): a barangay-assigned Health Supervisor only sees
+ * attendance for services in their barangay or assigned to them; a
+ * municipality-wide caller sees every service in their municipality. Each row
+ * is passed through `serviceVisibleTo` so a known id (or one reached via a
+ * wider join) can never leak an out-of-scope service. Date filtering uses
+ * `scheduled_date` against the requested `from`/`to` window.
+ */
+export const listScopeAttendance = async ({ user, query = {}, supabase = getServiceClient() }) => {
+  if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+
+  const from = text(query.from);
+  const to = text(query.to);
+  if ((from && !dateIsDateOnly(from)) || (to && !dateIsDateOnly(to))) {
+    throw ApiError.badRequest('Invalid date range for the health service calendar.');
+  }
+
+  let request = supabase.from(ATTENDANCE_TABLE).select(ATTENDANCE_SELECT);
+  if (from) request = request.gte('scheduled_date', from);
+  if (to) request = request.lte('scheduled_date', to);
+  const { data, error } = await request.order('scheduled_date', { ascending: true });
+  throwOnError(error, 'Could not load health service schedules');
+
+  const visibleRows = [];
+  for (const row of data || []) {
+    if (!row.service) continue; // orphan row — not visible to anyone
+    if (!(await serviceVisibleTo(user, row.service, supabase))) continue;
+    // A resident embed only returns residents the caller may see (RLS). Barangay
+    // supervisors are additionally bound to their barangay by serviceVisibleTo,
+    // so no other-barangay resident identity is ever attached.
+    const { service, resident, ...attendance } = row;
+    visibleRows.push({
+      ...attendance,
+      service: service ? { id: service.id, name: service.name, category: service.category } : null,
+      resident: resident
+        ? [resident.first_name, resident.middle_name, resident.last_name].filter(Boolean).join(' ')
+        : 'Resident',
+      residentBarangay: resident?.barangay || '',
+      attendanceStatus: attendance.attendance_status || 'scheduled',
+    });
+  }
+  return visibleRows;
+};
+
+export const updateHealthServiceAttendance = async ({ user, params = {}, payload = {}, supabase = getServiceClient() }) => {
+  assertManager(user);
+  const id = text(params.id);
+  if (!id) throw ApiError.unprocessable('An attendance reference is required.');
+  const { data: current, error: currentError } = await supabase
+    .from(ATTENDANCE_TABLE)
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  throwOnError(currentError, 'Could not load health service attendance');
+  if (!current) throw ApiError.notFound('Health service attendance not found.');
+  await manageableService(user, current.service_id, supabase);
+
+  const patch = {};
+  if (payload.status !== undefined) {
+    const status = text(payload.status);
+    if (!ATTENDANCE_STATUSES.includes(status)) throw ApiError.unprocessable('Select a valid attendance status.');
+    patch.attendance_status = status;
+    if (status === 'attended' && payload.attended_at == null) patch.attended_at = new Date().toISOString();
+  }
+  if (payload.notes !== undefined) {
+    if (typeof payload.notes !== 'string' || payload.notes.length > 2000) {
+      throw ApiError.unprocessable('Notes must be a string of 2000 characters or fewer.');
+    }
+    patch.notes = payload.notes.trim();
+  }
+  if (payload.attended_at !== undefined) {
+    if (payload.attended_at !== null && (typeof payload.attended_at !== 'string' || Number.isNaN(Date.parse(payload.attended_at)))) {
+      throw ApiError.unprocessable('Enter a valid attendance timestamp.');
+    }
+    patch.attended_at = patch.attendance_status === 'attended' && payload.attended_at === null
+      ? new Date().toISOString()
+      : payload.attended_at;
+  }
+  if (Object.keys(patch).length === 0) throw ApiError.badRequest('Provide at least one attendance field to update.');
+
+  const { data, error } = await supabase
+    .from(ATTENDANCE_TABLE)
+    .update(patch)
+    .eq('id', id)
+    .select('*')
+    .single();
+  throwOnError(error, 'Could not update health service attendance');
   return data;
 };
 
@@ -394,4 +593,9 @@ export default {
   assignablePersonnel,
   reference,
   meta,
+  createHealthServiceAttendance,
+  listAttendanceByService,
+  listAttendanceByResident,
+  listScopeAttendance,
+  updateHealthServiceAttendance,
 };

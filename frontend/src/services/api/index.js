@@ -30,3 +30,5 @@ export { rolesApi } from './rolesApi';
 export { householdRiskApi } from './householdRiskApi';
 export { riskConfigApi } from './riskConfigApi';
 export { municipalSubmissionsApi } from './municipalSubmissionsApi';
+export { documentBrandingApi } from './documentBrandingApi';
+export { guardianLinksApi } from './guardianLinksApi';

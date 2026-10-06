@@ -45,7 +45,7 @@ export default function CTASection() {
             </div>
           </div>
 
-          <div className="gov-navy-panel gov-guilloche flex flex-col justify-between p-8 text-white md:p-11">
+          <div className="gov-landing-panel gov-landing-guilloche flex flex-col justify-between p-8 text-white md:p-11">
             <div>
               <div className="flex items-center gap-3">
                 <GovSeal height={30} onDark className="shrink-0" />

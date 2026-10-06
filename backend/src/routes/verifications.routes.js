@@ -5,11 +5,13 @@ import authorize from '../middleware/authorize.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import validate from '../middleware/validate.js';
+import ApiError from '../utils/apiError.js';
 import {
   approveValidator,
   decisionValidator,
   rejectValidator,
   requestResubmissionValidator,
+  minorAlternativeReviewValidator,
   verificationIdParamValidator,
   verificationRefParamValidator,
 } from '../validators/verification.validators.js';
@@ -32,10 +34,16 @@ const router = Router();
 const staff = [authenticate, authorize(FEATURE_ROLES.verification), resolveBarangayScope];
 const self = [authenticate, authorize(FEATURE_ROLES.residentSelf)];
 const idParam = validate(verificationIdParamValidator, 'params');
+export const rejectDirectStatusWrite = (req, res, next) => {
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'verification_status')) {
+    return next(ApiError.forbidden('Verification status must be changed through a reviewer decision.'));
+  }
+  return next();
+};
 
 // Resident self-service
 router.get('/me', ...self, asyncHandler(verificationsController.getMine));
-router.patch('/:id/resubmit', ...self, idParam, asyncHandler(verificationsController.resubmit));
+router.patch('/:id/resubmit', ...self, rejectDirectStatusWrite, idParam, asyncHandler(verificationsController.resubmit));
 
 // Staff queue + history (specific paths before '/:id')
 router.get('/queue', ...staff, asyncHandler(verificationsController.listQueue));
@@ -46,18 +54,27 @@ router.get('/history', ...staff, asyncHandler(verificationsController.listHistor
 router.post(
   '/:ref/decision',
   ...staff,
+  rejectDirectStatusWrite,
   validate(verificationRefParamValidator, 'params'),
   validate(decisionValidator),
   asyncHandler(verificationsController.decide),
 );
-router.patch('/:id/approve', ...staff, idParam, validate(approveValidator), asyncHandler(verificationsController.approve));
-router.patch('/:id/reject', ...staff, idParam, validate(rejectValidator), asyncHandler(verificationsController.reject));
+router.patch('/:id/approve', ...staff, rejectDirectStatusWrite, idParam, validate(approveValidator), asyncHandler(verificationsController.approve));
+router.patch('/:id/reject', ...staff, rejectDirectStatusWrite, idParam, validate(rejectValidator), asyncHandler(verificationsController.reject));
 router.patch(
   '/:id/request-resubmission',
   ...staff,
+  rejectDirectStatusWrite,
   idParam,
   validate(requestResubmissionValidator),
   asyncHandler(verificationsController.requestResubmission),
+);
+router.patch(
+  '/:id/minor-alternative',
+  ...staff,
+  idParam,
+  validate(minorAlternativeReviewValidator),
+  asyncHandler(verificationsController.reviewMinorAlternative),
 );
 
 // Staff single-record reads

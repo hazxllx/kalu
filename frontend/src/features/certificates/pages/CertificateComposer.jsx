@@ -7,6 +7,7 @@ import { ROLES } from "@/lib/brand";
 import { residentsApi, medicalCertificatesApi } from "@/services/api";
 import { useCertificateMeta } from "@/features/certificates/hooks/useCertificateRegister";
 import MedicalCertificateDocument from "../components/MedicalCertificateDocument";
+import { useDocumentBranding } from "@/lib/documentBranding";
 import { useCertificatePrint } from "../components/useCertificatePrint.jsx";
 import {
   Search, ChevronRight, ShieldAlert, Eye, Printer, RotateCcw, CheckCircle2, Users, Loader2, AlertCircle,
@@ -153,7 +154,8 @@ export default function CertificateComposer() {
 
 function ComposerContent({ base, roleLabel, residents, residentsError, purposes }) {
   const { user } = useAuth();
-  const { printCertificate, portal } = useCertificatePrint();
+  const { printCertificate, portal, brandingError } = useCertificatePrint();
+  const { branding } = useDocumentBranding("medical_certificate");
 
   const [patientQuery, setPatientQuery] = useState("");
   const [resident, setResident] = useState(null);
@@ -585,7 +587,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
               </div>
             </div>
             <div className="flex-1 overflow-auto bg-slate-100 p-4 dark:bg-background">
-              <MedicalCertificateDocument certificate={buildCertificate()} signatoryName={officerName} />
+              <MedicalCertificateDocument certificate={buildCertificate()} signatoryName={officerName} branding={branding} />
             </div>
           </div>
         </div>
@@ -593,6 +595,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
 
       {/* Print copy (portalled outside the app for a clean A4 page) */}
       {portal}
+      {brandingError && <p role="alert" className="fixed bottom-4 right-4 z-[90] rounded-btn bg-brand-danger px-4 py-3 text-sm text-white shadow-lg">{brandingError}</p>}
     </>
   );
 }

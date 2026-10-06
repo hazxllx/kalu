@@ -19,7 +19,7 @@ const errorHandler = (err, req, res, next) => {
   const isServerError = statusCode >= 500;
 
   if (isServerError) {
-    console.error(`Unhandled error on ${req.method} ${req.path}:`, err.message);
+    console.error(`[requestId=${req.requestId || 'unknown'}] Unhandled error on ${req.method} ${req.path}:`, err.message);
     if (!env.isProduction && err.stack) console.error(err.stack);
   } else if (!env.isProduction) {
     // Client errors (4xx) are silent in production, but during development we

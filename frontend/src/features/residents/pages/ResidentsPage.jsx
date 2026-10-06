@@ -13,6 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { residentsApi } from "@/services/api";
 import { BARANGAYS } from "@/lib/barangays";
+import { dateOfBirth } from "@/utils/validation";
 
 const CIVIL_STATUS_OPTIONS = ["Single", "Married", "Widowed", "Separated"];
 const SEX_OPTIONS = ["Female", "Male"];
@@ -40,6 +41,66 @@ const EMPTY_FORM = {
   email: "",
 };
 
+/**
+ * @typedef {Object} ResidentForm
+ * @property {string} firstName
+ * @property {string} middleName
+ * @property {string} lastName
+ * @property {string} suffix
+ * @property {string} dob
+ * @property {string} age
+ * @property {string} gender
+ * @property {string} contact
+ * @property {string} purok
+ * @property {string} street
+ * @property {string} houseNo
+ * @property {string} barangay
+ * @property {string} civilStatus
+ * @property {boolean} createAccount
+ * @property {string} email
+ */
+
+/**
+ * @typedef {Object} ResidentRecord
+ * @property {string} id
+ * @property {string} [firstName]
+ * @property {string} [middleName]
+ * @property {string} [lastName]
+ * @property {string} [suffix]
+ * @property {string} [name]
+ * @property {string} [birthDate]
+ * @property {string} [sex]
+ * @property {string} [gender]
+ * @property {string} [civilStatus]
+ * @property {string} [cellphoneNo]
+ * @property {string} [barangay]
+ * @property {string} [currentAddress]
+ * @property {string} [permanentAddress]
+ * @property {string} [philhealthNo]
+ * @property {string} [verificationStatus]
+ * @property {string} [status]
+ * @property {string} [healthRecordNo]
+ * @property {string} [createdAt]
+ * @property {string} [authUserId]
+ * @property {string} [accountStatus]
+ * @property {string} [guardianStatus]
+ * @property {string} [religion]
+ * @property {string} [employmentStatus]
+ * @property {string} [fatherName]
+ * @property {string} [motherName]
+ * @property {string} [birthPlace]
+ * @property {number|null} [riskScore]
+ * @property {string|null} [riskLevel]
+ * @property {string} [riskAssessedAt]
+ * @property {Array<{code?: string, name: string, measured?: string|number|null, weight: number}>} [riskFactors]
+ * @property {string} [age]
+ */
+
+/** @typedef {ResidentRecord & {name: string, age: string, gender: string, status: string, riskLevel: string|null}} ResidentRow */
+/** @typedef {Record<string, string>} ValidationErrors */
+/** @typedef {{message?: string, status?: number, payload?: {error?: {details?: string[]}}}} RequestError */
+
+/** @param {boolean|string|undefined} invalid */
 const inputClass = (invalid) =>
   `mt-1.5 w-full bg-white border px-3.5 py-2.5 text-sm outline-none transition-colors rounded-input ${
     invalid ? "border-brand-danger focus:border-brand-danger" : "border-brand-border focus:border-brand-blue"
@@ -48,15 +109,22 @@ const inputClass = (invalid) =>
 const labelClass = "text-sm font-medium text-brand-ink";
 const errorClass = "mt-1 text-xs text-brand-danger";
 
+/** @param {string|null|undefined} dob */
 const calcAge = (dob) => {
-  if (!dob) return "";
-  const d = new Date(dob);
-  if (Number.isNaN(d.getTime())) return "";
-  const age = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
-  return age >= 0 && age < 120 ? String(age) : "";
+  if (typeof dob !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) return "";
+  const [year, month, day] = dob.split("-").map(Number);
+  const birth = new Date(Date.UTC(year, month - 1, day));
+  if (birth.getUTCFullYear() !== year || birth.getUTCMonth() !== month - 1 || birth.getUTCDate() !== day) return "";
+  const now = new Date();
+  let age = now.getUTCFullYear() - year;
+  if (now.getUTCMonth() < month - 1 || (now.getUTCMonth() === month - 1 && now.getUTCDate() < day)) age -= 1;
+  return age >= 0 && age <= 120 ? String(age) : "";
 };
 
+/** @param {Partial<ResidentRecord>|null|undefined} r */
 const fullNameOf = (r) => [r?.firstName, r?.middleName, r?.lastName, r?.suffix].filter(Boolean).join(" ");
+
+/** @param {string} name */
 const initialsOf = (name) =>
   String(name || "")
     .split(" ")
@@ -66,7 +134,10 @@ const initialsOf = (name) =>
     .join("")
     .toUpperCase();
 
-/** Compose the address line from the form's address parts. */
+/**
+ * Compose the address line from the form's address parts.
+ * @param {ResidentForm} f
+ */
 const composeAddress = (f) =>
   [f.houseNo, f.street, f.purok ? `Purok ${f.purok}` : "", f.barangay, "Pili, Camarines Sur"]
     .filter(Boolean)
@@ -77,6 +148,7 @@ const composeAddress = (f) =>
  * resident profile is fully valid with "No Account"; an account can later be
  * created/linked without changing the verification status.
  */
+/** @type {Record<string, string>} */
 const ACCOUNT_STATUS_LABELS = {
   active: "Active",
   pending: "Pending Activation",
@@ -84,6 +156,7 @@ const ACCOUNT_STATUS_LABELS = {
   none: "No Account",
 };
 
+/** @param {string} status */
 const accountStatusClass = (status) => {
   switch (status) {
     case "active":
@@ -97,6 +170,7 @@ const accountStatusClass = (status) => {
   }
 };
 
+/** @param {{status?: string}} props */
 const AccountStatusPill = ({ status }) => {
   const key = status || "none";
   return (
@@ -106,6 +180,9 @@ const AccountStatusPill = ({ status }) => {
   );
 };
 
+/**
+ * @param {{label: string, value: string, onChange: (value: string) => void, options?: string[], placeholder?: string, error?: string, emptyLabel?: string, children?: import("react").ReactNode}} props
+ */
 function Select({ label, value, onChange, options = [], placeholder = "", error = "", emptyLabel = "", children = null }) {
   return (
     <div>
@@ -129,6 +206,9 @@ function Select({ label, value, onChange, options = [], placeholder = "", error 
   );
 }
 
+/**
+ * @param {{label: string, value: string, onChange: (value: string) => void, placeholder?: string, error?: string, type?: string, optional?: boolean, readOnly?: boolean}} props
+ */
 function Field({ label, value, onChange, placeholder = "", error = "", type = "text", optional = false, readOnly = false }) {
   return (
     <div>
@@ -147,6 +227,7 @@ function Field({ label, value, onChange, placeholder = "", error = "", type = "t
   );
 }
 
+/** @param {{assignedBarangay?: string|null, barangay?: string|null}|null|undefined} user */
 const initialFromUser = (user) => {
   const assigned = user?.assignedBarangay || user?.barangay || "";
   return { ...EMPTY_FORM, barangay: assigned };
@@ -162,29 +243,31 @@ const initialFromUser = (user) => {
  * no mock data is used.
  */
 export default function ResidentsPage() {
+  /** @type {{user: {id?: string, role?: string, assignedBarangay?: string|null, barangay?: string|null}|null}} */
   const { user } = useAuth();
 
-  const [residents, setResidents] = useState([]);
+  const [residents, setResidents] = useState(/** @type {ResidentRecord[]} */ ([]));
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
+  const [loadError, setLoadError] = useState(/** @type {string|null} */ (null));
 
   const [q, setQ] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [editTarget, setEditTarget] = useState(null);
-  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initialFromUser(user)));
-  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
+  const [selected, setSelected] = useState(/** @type {ResidentRow|null} */ (null));
+  const [editTarget, setEditTarget] = useState(/** @type {ResidentRow|null} */ (null));
+  const [form, setForm] = useState(/** @type {ResidentForm} */ (initialFromUser(user)));
+  const [errors, setErrors] = useState(/** @type {ValidationErrors} */ ({}));
   const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState(null);
-  const [editForm, setEditForm] = useState(/** @type {Record<string, any>} */ ({ contact: "", barangay: "", civilStatus: "", currentAddress: "", philhealthNo: "", religion: "", employmentStatus: "", fatherName: "", motherName: "", birthPlace: "" }));
-  const [editErrors, setEditErrors] = useState(/** @type {Record<string, any>} */ ({}));
+  const [formError, setFormError] = useState(/** @type {string|null} */ (null));
+  const [editForm, setEditForm] = useState(/** @type {Record<string, string>} */ ({ contact: "", barangay: "", civilStatus: "", currentAddress: "", philhealthNo: "", religion: "", employmentStatus: "", fatherName: "", motherName: "", birthPlace: "" }));
+  const [editErrors, setEditErrors] = useState(/** @type {ValidationErrors} */ ({}));
   const [editSubmitting, setEditSubmitting] = useState(false);
-  const [editError, setEditError] = useState(null);
-  const [toast, setToast] = useState(null);
+  const [editError, setEditError] = useState(/** @type {string|null} */ (null));
+  const [toast, setToast] = useState(/** @type {string|null} */ (null));
 
+  /** @param {string} message */
   const showToast = (message) => {
     setToast(message);
     setTimeout(() => setToast(null), 3200);
@@ -218,7 +301,8 @@ export default function ResidentsPage() {
         setResidents(result?.rows || []);
       } catch (err) {
         setResidents([]);
-        setLoadError(err?.message || "Could not load the resident directory.");
+        const error = /** @type {RequestError} */ (err);
+        setLoadError(error?.message || "Could not load the resident directory.");
       } finally {
         setLoading(false);
       }
@@ -231,13 +315,15 @@ export default function ResidentsPage() {
   }, [load]);
 
   // Debounced server-side search.
-  const debounceRef = useRef(null);
+  const debounceRef = useRef(/** @type {ReturnType<typeof setTimeout>|null} */ (null));
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       load(q.trim());
     }, 350);
-    return () => clearTimeout(debounceRef.current);
+    return () => {
+      if (debounceRef.current !== null) clearTimeout(debounceRef.current);
+    };
   }, [q, load]);
 
   const rows = useMemo(() => {
@@ -262,6 +348,7 @@ export default function ResidentsPage() {
     setShowAddModal(true);
   };
 
+  /** @param {ResidentRow} resident */
   const openView = (resident) => {
     setSelected(resident);
     setShowViewModal(true);
@@ -272,6 +359,7 @@ export default function ResidentsPage() {
    * Only the fields the API permits for correction are editable — identity
    * keys (name, birth date, sex) are locked and change through an admin.
    */
+  /** @param {ResidentRow} resident */
   const openEdit = (resident) => {
     setEditTarget(resident);
     setEditForm({
@@ -297,12 +385,13 @@ export default function ResidentsPage() {
     setFormError(null);
   };
 
+  /** @returns {ValidationErrors} */
   const validate = () => {
-    const errs = {};
+    const errs = /** @type {ValidationErrors} */ ({});
     if (!form.firstName.trim()) errs.firstName = "First name is required";
     if (!form.lastName.trim()) errs.lastName = "Last name is required";
-    if (!form.dob) errs.dob = "Date of birth is required";
-    else if (new Date(form.dob) > new Date()) errs.dob = "Date of birth cannot be in the future";
+    const dobError = dateOfBirth(form.dob, { label: "Date of birth" });
+    if (dobError) errs.dob = dobError;
     if (!form.gender) errs.gender = "Sex is required";
     if (!form.barangay) errs.barangay = "Barangay is required";
     if (form.contact && !/^[0-9+\-\s()]{7,20}$/.test(form.contact.trim())) {
@@ -326,7 +415,7 @@ export default function ResidentsPage() {
     setSubmitting(true);
     setFormError(null);
     try {
-      const payload = {
+      const payload = /** @type {Record<string, string|boolean>} */ ({
         firstName: form.firstName.trim(),
         middleName: form.middleName.trim(),
         lastName: form.lastName.trim(),
@@ -338,7 +427,7 @@ export default function ResidentsPage() {
         cellphoneNo: form.contact.trim(),
         currentAddress: composeAddress(form),
         permanentAddress: composeAddress(form),
-      };
+      });
       // Optional login account: only sent when the health worker opts in. The
       // backend creates the Supabase Auth user in Pending Activation and links
       // it to this profile; the resident sets their own password later.
@@ -373,11 +462,12 @@ export default function ResidentsPage() {
         setShowViewModal(true);
       }
     } catch (err) {
+      const error = /** @type {RequestError} */ (err);
       // 422 details are the server's field-level validation list.
-      if (err?.status === 422 && Array.isArray(err?.payload?.error?.details)) {
-        setFormError(err.payload.error.details.join(" "));
+      if (error?.status === 422 && Array.isArray(error?.payload?.error?.details)) {
+        setFormError(error.payload.error.details.join(" "));
       } else {
-        setFormError(err?.message || "Could not register the resident. Please try again.");
+        setFormError(error?.message || "Could not register the resident. Please try again.");
       }
     } finally {
       setSubmitting(false);
@@ -417,25 +507,30 @@ export default function ResidentsPage() {
       showToast("Resident updated successfully.");
       await load(q.trim());
     } catch (err) {
-      if (err?.status === 422 && Array.isArray(err?.payload?.error?.details)) {
-        setEditError(err.payload.error.details.join(" "));
+      const error = /** @type {RequestError} */ (err);
+      if (error?.status === 422 && Array.isArray(error?.payload?.error?.details)) {
+        setEditError(error.payload.error.details.join(" "));
       } else {
-        setEditError(err?.message || "Could not save the changes. Please try again.");
+        setEditError(error?.message || "Could not save the changes. Please try again.");
       }
     } finally {
       setEditSubmitting(false);
     }
   };
 
+  /** @param {string} value */
   const onDobChange = (value) => {
     setForm((p) => ({ ...p, dob: value, age: calcAge(value) || "" }));
     if (errors.dob) setErrors((p) => ({ ...p, dob: "" }));
   };
 
-  const set = (key) => (value) => {
-    setForm((p) => ({ ...p, [key]: value }));
-    if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
-  };
+  /** @param {keyof ResidentForm} key */
+  const set = (key) =>
+    /** @param {string|boolean} value */
+    (value) => {
+      setForm((p) => ({ ...p, [key]: value }));
+      if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
+    };
 
   const columns = [
     { key: "name", label: "Resident" },
@@ -449,6 +544,7 @@ export default function ResidentsPage() {
     { key: "actions", label: "" },
   ];
 
+  /** @param {string} label @param {string|number|null|undefined} value */
   const detailCell = (label, value) => (
     <div>
       <p className="text-[11px] text-brand-gray uppercase tracking-wide">{label}</p>
@@ -533,7 +629,7 @@ export default function ResidentsPage() {
           <DataTable
             columns={columns}
             rows={rows}
-            renderCell={(key, row) => {
+            renderCell={(/** @type {string} */ key, /** @type {ResidentRow} */ row) => {
               if (key === "name")
                 return (
                   <div className="flex items-center gap-3">
@@ -568,7 +664,7 @@ export default function ResidentsPage() {
                     )}
                   </div>
                 );
-              return row[key] || "—";
+              return row[/** @type {keyof ResidentRow} */ (key)] || "—";
             }}
           />
           <p className="mt-4 text-sm text-brand-gray">
@@ -716,11 +812,13 @@ export default function ResidentsPage() {
                 <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Demographics</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {detailCell("Age", selected.age)}
+                  {Number(selected.age) < 18 && detailCell("Age Category", "Minor — under 18")}
                   {detailCell("Sex", selected.sex || selected.gender)}
                   {detailCell("Civil Status", selected.civilStatus)}
                   {detailCell("Birthdate", selected.birthDate)}
                   {detailCell("Barangay", selected.barangay)}
                   {detailCell("Contact Number", selected.cellphoneNo)}
+                  {Number(selected.age) < 18 && detailCell("Parent / Guardian Link", selected.guardianStatus || "Skipped")}
                   {detailCell("Address", selected.currentAddress)}
                   {detailCell("PhilHealth No.", selected.philhealthNo)}
                 </div>

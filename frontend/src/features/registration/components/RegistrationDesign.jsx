@@ -458,21 +458,24 @@ export const btnGhost =
 /** Navy portal background + KALUSAGAP masthead + centered content column. */
 export function RegistrationShell({ children, footer = undefined }) {
   return (
-    <div className="relative flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden bg-[#0A2E55] px-4 py-6 sm:px-6 sm:py-10">
+    <div className="relative flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden gov-navy-panel px-4 py-6 sm:px-6 sm:py-10">
       <div
         className="pointer-events-none absolute inset-0"
         aria-hidden="true"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 18% 12%, rgba(255,255,255,0.06) 0 1px, transparent 1px 11px), radial-gradient(circle at 82% 88%, rgba(255,255,255,0.045) 0 1px, transparent 1px 13px), linear-gradient(158deg, #0A3A70 0%, #072B54 55%, #051F3E 100%)",
+            "radial-gradient(circle at 18% 12%, rgba(255,255,255,0.09) 0 1px, transparent 1px 11px), radial-gradient(circle at 82% 88%, rgba(255,255,255,0.07) 0 1px, transparent 1px 13px)",
         }}
+      />
+      <div
+        className="pointer-events-none absolute inset-0 gov-guilloche opacity-45"
+        aria-hidden="true"
       />
       <div
         className="pointer-events-none absolute inset-0"
         aria-hidden="true"
         style={{
-          background:
-            "radial-gradient(60% 50% at 50% 0%, rgba(228,195,93,0.08), transparent 70%)",
+          backgroundImage: "var(--auth-pattern-sparkle)",
         }}
       />
       <motion.div

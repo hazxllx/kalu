@@ -17,7 +17,11 @@ import {
 import Icon from "@/components/common/Icon";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import { LOGO_URL, ROLES } from "@/lib/brand";
-import { NAV, filterNavByPermission } from "@/lib/navConfig";
+import {
+  NAV,
+  filterNavByPermission,
+  navItemIsActive,
+} from "@/lib/navConfig";
 import { notificationsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -59,10 +63,7 @@ export default function DashboardLayout({ roleKey }) {
 
       items.forEach((it) => {
         const owns = it.children?.some(
-          (c) =>
-            c.path &&
-            (location.pathname === c.path ||
-              location.pathname.startsWith(`${c.path}/`))
+          (child) => navItemIsActive(child, location.pathname)
         );
 
         if (owns && !next[it.label]) {
@@ -153,19 +154,6 @@ export default function DashboardLayout({ roleKey }) {
   }/profile`;
 
   const NavList = () => {
-    // An item is active when its path matches exactly OR when the current
-    // location is a child page of that module (e.g. `/app/bhw/households/new`
-    // keeps "Household Profiling" highlighted instead of leaving no active
-    // item — and never highlights Dashboard).
-    const isItemActive = (item) => {
-      if (!item.path || item.path === "#") return false;
-
-      return (
-        location.pathname === item.path ||
-        location.pathname.startsWith(`${item.path}/`)
-      );
-    };
-
     // Group consecutive items that share a `group` label under one small
     // uppercase header; ungrouped items render flat, exactly as before.
     const blocks = items.reduce((acc, it) => {
@@ -183,12 +171,15 @@ export default function DashboardLayout({ roleKey }) {
       return acc;
     }, []);
 
+    const isItemActive = (item) =>
+      navItemIsActive(item, location.pathname);
+
     const renderItem = (it) => {
       if (it.locked) {
         return (
           <div
             key={it.label}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none"
+            className="flex min-h-[42px] items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none"
             title="Available after account verification"
           >
             <Icon
@@ -218,7 +209,7 @@ export default function DashboardLayout({ roleKey }) {
                   [it.label]: !openGroup,
                 }))
               }
-              className="flex w-full items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+              className="flex min-h-[42px] w-full items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
             >
               <Icon
                 name={it.icon}
@@ -251,7 +242,7 @@ export default function DashboardLayout({ roleKey }) {
                         key={child.path}
                         to={child.path}
                         onClick={() => setOpen(false)}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
+                        className={`flex min-h-[42px] items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors ${
                           active
                             ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
                             : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
@@ -280,7 +271,7 @@ export default function DashboardLayout({ roleKey }) {
           key={it.path}
           to={it.path}
           onClick={() => setOpen(false)}
-          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
+          className={`flex min-h-[42px] items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors ${
             active
               ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
               : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
@@ -297,24 +288,24 @@ export default function DashboardLayout({ roleKey }) {
     };
 
     return (
-      <nav className="px-3">
+      <div className="space-y-1">
         {blocks.map((block, i) => (
           <div
             key={block.group || `block-${i}`}
-            className={i === 0 ? "" : "mt-5"}
+            className={block.group && i > 0 ? "mt-3" : ""}
           >
             {block.group && (
-              <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-500 select-none">
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-500 select-none">
                 {block.group}
               </p>
             )}
 
-            <div className="space-y-0.5">
+            <div className="space-y-1">
               {block.items.map(renderItem)}
             </div>
           </div>
         ))}
-      </nav>
+      </div>
     );
   };
 
@@ -359,7 +350,7 @@ export default function DashboardLayout({ roleKey }) {
 
   return (
     <div className="min-h-screen bg-[color:#f5f7fa] dark:bg-background">
-      <aside className="hidden lg:flex fixed inset-y-0 left-0 w-72 flex-col bg-white dark:bg-sidebar border-r border-slate-200 dark:border-border">
+      <aside className="hidden lg:flex fixed left-0 top-0 h-screen max-h-[100dvh] w-72 flex-col bg-white dark:bg-sidebar border-r border-slate-200 dark:border-border">
         {/* Brand header — fixed */}
         <div className="h-20 shrink-0 flex items-center px-5 border-b border-slate-200 dark:border-border">
           <SidebarBrand />
@@ -368,19 +359,19 @@ export default function DashboardLayout({ roleKey }) {
         {/* Scrollable navigation */}
         <nav
           aria-label="Main navigation"
-          className="nav-scroll flex-1 overflow-y-auto px-3 py-4"
+          className="nav-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3"
         >
           <NavList />
 
           {/* Bottom padding so the final nav item is always reachable */}
-          <div className="h-4" aria-hidden="true" />
+          <div className="h-2" aria-hidden="true" />
         </nav>
 
         {/* Fixed account footer */}
-        <div className="shrink-0 p-3 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
+        <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
           <button
             onClick={() => logout()}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+            className="w-full min-h-[42px] flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
           >
             <LogOut
               className="w-5 h-5 shrink-0"
@@ -423,16 +414,16 @@ export default function DashboardLayout({ roleKey }) {
 
               <nav
                 aria-label="Main navigation"
-                className="nav-scroll flex-1 overflow-y-auto px-3 py-4"
+                className="nav-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3"
               >
                 <NavList />
-                <div className="h-4" aria-hidden="true" />
+                <div className="h-2" aria-hidden="true" />
               </nav>
 
-              <div className="shrink-0 p-3 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
+              <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
                 <button
                   onClick={() => logout()}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+                  className="w-full min-h-[42px] flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
                 >
                   <LogOut
                     className="w-5 h-5 shrink-0"

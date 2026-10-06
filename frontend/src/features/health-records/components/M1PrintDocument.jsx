@@ -267,7 +267,7 @@ function InfoRow({ cells }) {
   );
 }
 
-export default function M1PrintDocument({ groups = [], meta, periodLabel, barangay }) {
+export default function M1PrintDocument({ groups = [], meta, periodLabel, barangay, branding = null }) {
   const facility = meta?.meta?.bhs_name || meta?.barangay?.healthStation || "";
   const brgy = meta?.barangay?.name || barangay || "";
 
@@ -276,6 +276,10 @@ export default function M1PrintDocument({ groups = [], meta, periodLabel, barang
       <style>{CSS}</style>
 
       <div className="m1-head">
+        <div className="mb-1 flex items-center justify-center gap-2">
+          {branding?.logos?.municipal?.dataUrl && <img src={branding.logos.municipal.dataUrl} alt="Municipality of Pili official logo" className="h-8 max-w-12 object-contain" />}
+          {branding?.logos?.rhu?.dataUrl && <img src={branding.logos.rhu.dataUrl} alt="Rural Health Unit official logo" className="h-8 max-w-12 object-contain" />}
+        </div>
         <p className="m1-title">FHSIS — MONTHLY FORM M1</p>
         <p className="m1-subtitle">Program Accomplishment / Service Coverage Report</p>
       </div>

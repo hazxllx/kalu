@@ -4,6 +4,7 @@ import { assignedBarangay } from '../config/scope.js';
 import { getServiceClient } from '../config/supabase.js';
 import * as operational from './operational.service.js';
 import { persistResidentRisk } from './residentRisk.service.js';
+import { computeBMI } from '../utils/bmi.js';
 
 const STAFF_ROLES = new Set(['health_supervisor', 'phn']);
 const text = (value) => String(value ?? '').trim();
@@ -21,6 +22,18 @@ const inRange = (value, lo, hi) => {
   return Number.isFinite(n) && n >= lo && n <= hi;
 };
 const present = (value) => value !== undefined && value !== null && String(value).trim() !== '';
+
+export const classifyBloodPressure = (bloodPressure) => {
+  const match = text(bloodPressure).match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/);
+  if (!match) return null;
+  const systolic = Number(match[1]);
+  const diastolic = Number(match[2]);
+  if (systolic > 180 || diastolic > 110) return 'Hypertensive Crisis';
+  if (systolic >= 160 || diastolic >= 100) return 'Stage 2 hypertension';
+  if (systolic >= 140 || diastolic >= 90) return 'Stage 1 hypertension';
+  if (systolic >= 120 || diastolic >= 80) return 'Prehypertension';
+  return 'Normal';
+};
 
 const validateVitalsByField = (payload = {}) => {
   const errors = {};
@@ -42,8 +55,8 @@ const validateVitalsByField = (payload = {}) => {
     } else {
       const sys = Number(m[1]);
       const dia = Number(m[2]);
-      if (!inRange(sys, 50, 300)) errors.bloodPressure = 'Systolic blood pressure must be between 50 and 300.';
-      else if (!inRange(dia, 30, 200)) errors.bloodPressure = 'Diastolic blood pressure must be between 30 and 200.';
+      if (!inRange(sys, 40, 300)) errors.bloodPressure = 'Systolic blood pressure must be between 40 and 300.';
+      else if (!inRange(dia, 40, 300)) errors.bloodPressure = 'Diastolic blood pressure must be between 40 and 300.';
       else if (sys <= dia) errors.bloodPressure = 'Systolic blood pressure must be greater than diastolic.';
     }
   }
@@ -98,7 +111,7 @@ const assertResidentScope = (user, resident) => {
   }
 };
 
-const toVisit = (payload = {}, user, residentId) => ({
+export const toVisit = (payload = {}, user, residentId) => ({
   residentId,
   recordedById: user.id,
   recordedByRole: user.role,
@@ -120,6 +133,10 @@ const toVisit = (payload = {}, user, residentId) => ({
     heightCm: payload.height,
     weightKg: payload.weight,
     o2sat: payload.oxygenSaturation,
+    ...(() => {
+      const { bmi, category } = computeBMI(payload.height, payload.weight);
+      return { bmi, bmiCategory: category };
+    })(),
   },
   phn: {
     assessment: text(payload.diagnosis),
@@ -183,7 +200,10 @@ const fromVisit = async (visit, supabase = getServiceClient()) => {
     remarks: visit.clinicalHistory || visit.phn?.notes || '',
     followUpRequired: visit.recommendation?.includes('Next visit:') ? 'Yes' : 'No',
     nextVisitDate: visit.recommendation?.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || '',
-    vitals: visit.vitals || {},
+    vitals: {
+      ...(visit.vitals || {}),
+      bloodPressureCategory: classifyBloodPressure(visit.vitals?.bp),
+    },
     status: visit.status,
     createdAt: visit.createdAt,
     facilityName: facilityName,
@@ -260,13 +280,16 @@ export const syncConsultationFollowUp = async ({
     // as history, so a new one is created instead of resurrecting them.
     const { data: rows, error } = await supabase
       .from('follow_ups')
-      .select('id, status, resident_decision')
+      .select('id, status, resident_decision, consultation_id')
       .eq('resident_id', visit.residentId)
       .eq('created_by', user.id)
       .eq('purpose', purpose)
       .order('created_at', { ascending: false });
     if (error) throw new Error(error.message || 'Could not look up the linked follow-up');
-    const existing = (rows || []).find((r) => !TERMINAL_FOLLOWUP.has(text(r.status))) || null;
+    const liveRows = (rows || []).filter((r) => !TERMINAL_FOLLOWUP.has(text(r.status)));
+    const existing = liveRows.find((r) => r.consultation_id === visit.id)
+      || liveRows.find((r) => !r.consultation_id)
+      || null;
 
     const { action } = planFollowUpSync(existing, payload);
     if (action === 'noop') return;
@@ -283,6 +306,7 @@ export const syncConsultationFollowUp = async ({
           purpose,
           notes: text(payload.adviceGiven),
           status: 'Pending',
+          consultation_id: visit.id,
           requires_resident_response: true,
           resident_decision: 'pending',
           resident_decision_at: null,
@@ -300,6 +324,7 @@ export const syncConsultationFollowUp = async ({
         kind: 'followups',
         id: existing.id,
         payload: { scheduled_date: text(payload.nextVisitDate), purpose, notes: text(payload.adviceGiven) },
+        consultationId: visit.id,
       });
       return;
     }
@@ -315,6 +340,7 @@ export const syncConsultationFollowUp = async ({
       kind: 'followups',
       payload: {
         residentId: visit.residentId,
+        consultation_id: visit.id,
         scheduled_date: text(payload.nextVisitDate),
         purpose,
         notes: text(payload.adviceGiven),

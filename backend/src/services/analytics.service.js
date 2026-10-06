@@ -366,12 +366,22 @@ export const getCommunityMap = async ({
       if (v && riskFromVitals(v.vitals, riskConfig) === 'High') highRiskResidents += 1;
     });
 
-    const hasCoordinates = b.latitude != null && b.longitude != null;
+    const latitude = Number(b.latitude);
+    const longitude = Number(b.longitude);
+    const hasCoordinates =
+      b.latitude != null &&
+      b.longitude != null &&
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180;
     return {
       id: b.id,
       name: b.name,
-      latitude: hasCoordinates ? Number(b.latitude) : null,
-      longitude: hasCoordinates ? Number(b.longitude) : null,
+      latitude: hasCoordinates ? latitude : null,
+      longitude: hasCoordinates ? longitude : null,
       hasCoordinates,
       residents: residents.length,
       highRiskResidents,
@@ -401,9 +411,18 @@ export const getCommunityMap = async ({
     completedCases: rows.reduce((s, r) => s + r.completedCases, 0),
   };
 
+  const centerLatitude = Number(municipality?.latitude);
+  const centerLongitude = Number(municipality?.longitude);
   const center =
-    municipality && municipality.latitude != null && municipality.longitude != null
-      ? { latitude: Number(municipality.latitude), longitude: Number(municipality.longitude) }
+    municipality?.latitude != null &&
+    municipality?.longitude != null &&
+    Number.isFinite(centerLatitude) &&
+    Number.isFinite(centerLongitude) &&
+    centerLatitude >= -90 &&
+    centerLatitude <= 90 &&
+    centerLongitude >= -180 &&
+    centerLongitude <= 180
+      ? { latitude: centerLatitude, longitude: centerLongitude }
       : null;
 
   return {
@@ -527,7 +546,17 @@ export const getHouseholdMap = async ({ barangay = null, municipalityId = null }
       (id) => activeVisitResidentIds.has(id) || activeTbResidentIds.has(id),
     );
     const activeCases = activeResidentIds.length;
-    const hasCoordinates = hh.latitude != null && hh.longitude != null;
+    const latitude = Number(hh.latitude);
+    const longitude = Number(hh.longitude);
+    const hasCoordinates =
+      hh.latitude != null &&
+      hh.longitude != null &&
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180;
 
     // Household-level marker payload ONLY (no resident identity, no diagnosis).
     const marker = {
@@ -540,8 +569,8 @@ export const getHouseholdMap = async ({ barangay = null, municipalityId = null }
       activeCases,
       hasActiveCase: activeCases > 0,
       hasCoordinates,
-      latitude: hasCoordinates ? hh.latitude : null,
-      longitude: hasCoordinates ? hh.longitude : null,
+      latitude: hasCoordinates ? latitude : null,
+      longitude: hasCoordinates ? longitude : null,
     };
 
     if (hasCoordinates) markers.push(marker);

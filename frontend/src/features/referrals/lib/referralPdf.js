@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import { LOGO_URL } from "@/lib/brand";
+import { loadDocumentBranding } from "@/lib/documentBranding";
 
 /**
  * Barangay -> RHU referral form PDF (Letter/"short" 8.5 x 11 in, portrait).
@@ -32,26 +32,6 @@ const OFFICE_LINE = "Municipal Health Office · Rural Health Unit";
 const SYSTEM_LINE = "KALUSAGAP · Community Health Risk Monitoring and Early Intervention System";
 
 const str = (v) => (v === undefined || v === null ? "" : String(v).trim());
-
-/** Loads the bundled KALUSAGAP logo and re-encodes it for jsPDF. */
-function loadLogo() {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
-        canvas.getContext("2d").drawImage(img, 0, 0);
-        resolve({ dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height });
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => resolve(null);
-    img.src = LOGO_URL;
-  });
-}
 
 function formatDateTime(value) {
   if (!str(value)) return "";
@@ -159,7 +139,8 @@ export async function downloadReferralPdf(referral, { residents = [] } = {}) {
   };
 
   // ------------------------------------------------------------------ header
-  const logo = await loadLogo();
+  const branding = await loadDocumentBranding("barangay_rhu_referral");
+  const logo = branding.logos.municipal;
   if (logo) {
     const box = 0.58;
     const scale = Math.min(box / logo.width, box / logo.height);

@@ -22,7 +22,7 @@ export const uploadDocument = async ({ file, residentId, documentId }) => {
   const path = storagePath(residentId, documentId, file.name, 'resident-documents');
 
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    cacheControl: 'private, max-age=3600',
+    cacheControl: '3600',
     upsert: false,
     contentType: file.type,
   });
@@ -39,11 +39,25 @@ export const uploadDocument = async ({ file, residentId, documentId }) => {
   };
 };
 
+/**
+ * Download a private document for server-side ID-side cross-verification.
+ */
+export const downloadDocumentFile = async ({ storagePath, fileName, mimeType }) => {
+  const supabase = getServiceClient();
+  const { data, error } = await supabase.storage.from(BUCKET).download(storagePath);
+  if (error || !data) {
+    throw new Error(`Could not read stored document${error?.message ? `: ${error.message}` : ''}`);
+  }
+  return new File([await data.arrayBuffer()], fileName || 'document', {
+    type: mimeType || data.type || 'application/octet-stream',
+  });
+};
+
 export const uploadTransferDocument = async ({ file, transferRequestId, documentId }) => {
   const supabase = getServiceClient();
   const path = storagePath(transferRequestId, documentId, file.name, 'transfer-documents');
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    cacheControl: 'private, max-age=3600', upsert: false, contentType: file.type,
+    cacheControl: '3600', upsert: false, contentType: file.type,
   });
   if (error) throw new Error(`Upload failed: ${error.message}`);
   const { data: urlData } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
@@ -59,7 +73,7 @@ export const uploadStaffDocument = async ({ file, requestId, documentId }) => {
   const supabase = getServiceClient();
   const path = storagePath(requestId, documentId, file.name, 'staff-documents');
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    cacheControl: 'private, max-age=3600', upsert: false, contentType: file.type,
+    cacheControl: '3600', upsert: false, contentType: file.type,
   });
   if (error) throw new Error(`Upload failed: ${error.message}`);
   return { storagePath: path };
@@ -89,4 +103,12 @@ export const deleteDocument = async (storagePath) => {
   return true;
 };
 
-export default { uploadDocument, uploadTransferDocument, uploadStaffDocument, getDocumentSignedUrl, deleteDocument, storagePath };
+export default {
+  uploadDocument,
+  downloadDocumentFile,
+  uploadTransferDocument,
+  uploadStaffDocument,
+  getDocumentSignedUrl,
+  deleteDocument,
+  storagePath,
+};

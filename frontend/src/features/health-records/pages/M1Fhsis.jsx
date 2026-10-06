@@ -69,7 +69,7 @@ const groupBySection = (indicators = []) => {
 
 export default function M1Fhsis() {
   const { user } = useAuth();
-  const { startPrint, portal } = useM1Print();
+  const { startPrint, portal, brandingError } = useM1Print();
   const supervisor = isHealthSupervisor(user);
   const scope = supervisor ? getSupervisorScope(user) : null;
   const assignedBarangay = scope && scope.level === "barangay" ? scope.assignedBarangay : (user?.barangay || null);
@@ -262,6 +262,8 @@ export default function M1Fhsis() {
           </div>
         }
       />
+
+      {brandingError && <Card role="alert" className="mb-4 p-3 text-sm text-brand-danger">{brandingError}</Card>}
 
       {/* Controls */}
       <div className="no-print mb-6 flex flex-wrap items-center gap-3">

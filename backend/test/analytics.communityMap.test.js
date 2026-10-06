@@ -79,6 +79,20 @@ test('barangays with verified coordinates are marked hasCoordinates; others are 
   assert.equal(byName['San Isidro'].latitude, null);
 });
 
+test('out-of-range barangay coordinates are not exposed as map points', async () => {
+  const original = BARANGAYS[0];
+  BARANGAYS[0] = { ...original, latitude: 91, longitude: 123.2 };
+  try {
+    const res = await service.getCommunityMap({ barangay: null, municipalityId: 'M1' });
+    const sanIsidro = res.barangays.find((row) => row.name === 'San Isidro');
+    assert.equal(sanIsidro.hasCoordinates, false);
+    assert.equal(sanIsidro.latitude, null);
+    assert.equal(sanIsidro.longitude, null);
+  } finally {
+    BARANGAYS[0] = original;
+  }
+});
+
 test('high-risk residents are counted from the latest visit vitals', async () => {
   const res = await service.getCommunityMap({ barangay: null, municipalityId: 'M1' });
   const byName = Object.fromEntries(res.barangays.map((b) => [b.name, b]));

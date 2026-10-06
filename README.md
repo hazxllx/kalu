@@ -167,23 +167,27 @@ The API defaults to `http://localhost:5000`; Vite defaults to
 
 ## Development Commands
 
+Run these from the repository root:
+
 ```bash
-npm run dev:frontend      # Vite dev server
-npm run dev:backend       # Express API with nodemon
-npm run build             # frontend production build
-npm run preview           # preview the production build
-npm run lint              # frontend ESLint
-npm run start:backend     # start the API without nodemon
+npm run dev:frontend
+npm run dev:backend
+npm run build
+npm run preview
+npm run lint
+npm run start:backend
 ```
 
 ## Testing
 
+Run the backend and frontend test suites, lint, type-check, or build with:
+
 ```bash
-npm test --prefix backend             # backend tests (node:test)
-npm test --prefix frontend            # frontend tests (node:test)
-npm run lint --prefix frontend        # frontend ESLint
-npm run typecheck --prefix frontend   # TypeScript type checking of the JS sources
-npm run build --prefix frontend       # production build check
+npm test --prefix backend
+npm test --prefix frontend
+npm run lint --prefix frontend
+npm run typecheck --prefix frontend
+npm run build --prefix frontend
 ```
 
 Backend and frontend tests both use Node's built-in test runner. ESLint and the
@@ -192,15 +196,18 @@ separate lint step. The `typecheck` script runs `tsc` in `checkJs` mode over the
 JavaScript sources as an advisory diagnostic — the sources are plain JavaScript,
 so it reports type-inference notices rather than gating the build.
 
-An optional end-to-end suite lives in `frontend/tests/` and runs with Playwright:
+The optional Playwright end-to-end suite lives in
+`frontend/tests/kalusagap-major-features/`. Run it with:
 
 ```bash
-npm run test:e2e --prefix frontend   # requires running dev servers + local test credentials
+npm run test:e2e --prefix frontend
 ```
 
-The E2E suite drives a real browser against the running frontend and backend and
-reads all sign-in credentials from environment variables (never from source).
-It is not part of the unit-test baseline above.
+The suite drives a real browser against the frontend and backend. The Playwright
+configuration starts or reuses the frontend dev server; start the backend
+separately and provide any test-account credentials through environment
+variables, never source files. The E2E suite is not part of the unit-test
+baseline above.
 
 ## Security
 
@@ -241,6 +248,13 @@ PostgreSQL database for both.
   not expose resident-level personally identifiable information.
 - The user-facing "Household Risk Clusters" view has been removed; household
   profiling and the retained household risk overview/detail pages remain.
+- Resident document uploads pass through **rule-based automated document
+  screening** (allowed file type, readable-image and text checks) before queued
+  manual review. This is a readability pre-check only — it is **not AI document
+  authentication** and **not automatic government ID verification**. Final
+  document and identity verification always remains with authorized KALUSAGAP
+  personnel, and an automated flag never prevents a staff member from reviewing
+  a document.
 
 
 

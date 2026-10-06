@@ -6,7 +6,6 @@ import {
   FileHeart, ClipboardList, CalendarClock, Lock, ArrowRight,
 } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
-import VerificationBanner from "@/features/verification/components/VerificationBanner";
 import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import { useAuth } from "@/context/AuthContext";
 
@@ -31,12 +30,8 @@ export default function LimitedResidentDashboard() {
       <PageHeader
         crumbs={["Dashboard"]}
         title={`Welcome, ${first}`}
-        subtitle="Your account is pending verification by the Health Supervisor. Some features are temporarily locked."
+        subtitle="Some features are temporarily locked until your account is verified."
       />
-
-      <div className="mb-6">
-        <VerificationBanner />
-      </div>
 
       <TransferStatusBanner />
 

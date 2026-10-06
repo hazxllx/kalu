@@ -7,6 +7,11 @@ const STAFF = new Set(['health_supervisor', 'phn', 'mho']);
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => { if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error }); };
 
+/** Local "YYYY-MM-DD" format check (same rule the health-services validator uses). */
+const dateIsDateOnly = (value) =>
+  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`));
+
 /**
  * Follow-up lifecycle guard (enforced on the server).
  *
@@ -140,7 +145,12 @@ const audit = async (supabase, user, action, entityType, entityId, resident) => 
 // (which read `row.resident.first_name`) fell back to the literal string
 // "Resident" and overwrote the correct name after any edit.
 const RESIDENT_EMBED = 'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, cellphone_no)';
-const selectFor = (kind) => (kind === 'followups' || kind === 'maternal') ? `*, ${RESIDENT_EMBED}` : '*';
+const CONSULTATION_EMBED = 'consultation:visits!follow_ups_consultation_id_fkey(id, visit_date, chief_complaint, status)';
+const selectFor = (kind) => kind === 'followups'
+  ? `*, ${RESIDENT_EMBED}, ${CONSULTATION_EMBED}`
+  : kind === 'maternal'
+    ? `*, ${RESIDENT_EMBED}`
+    : '*';
 
 /** Statuses a follow-up can no longer leave. */
 const CLOSED_FOLLOW_UP_STATUSES = new Set(['Completed', 'Cancelled', 'Rejected', 'Missed']);
@@ -164,7 +174,7 @@ export const withScheduleState = (row, today = manilaDateString()) => {
   };
 };
 
-export const list = async ({ user, kind, residentId = null, status = null, supabase = getServiceClient() }) => {
+export const list = async ({ user, kind, residentId = null, status = null, from = null, to = null, supabase = getServiceClient() }) => {
   if (!TABLES[kind] && kind !== 'notifications') throw ApiError.badRequest('Unknown operational record type.');
   if (kind === 'notifications') {
     // Resident/staff notifications are ALWAYS scoped to the authenticated
@@ -174,6 +184,18 @@ export const list = async ({ user, kind, residentId = null, status = null, supab
     const { data, error } = await supabase.from('notifications').select('*').eq('recipient_id', user.id).order('created_at', { ascending: false }).limit(100);
     throwOnError(error, 'Could not load notifications');
     return data || [];
+  }
+  // Validate optional date-range filters (follow-ups & health-service schedules
+  // expose scheduled_date; other kinds simply ignore the window).
+  const hasRange = Boolean(from) || Boolean(to);
+  if (hasRange && !(kind === 'followups')) {
+    // Silently ignore date filters for non-scheduled kinds.
+  }
+  if (from && kind === 'followups' && !dateIsDateOnly(from)) {
+    throw ApiError.badRequest('Invalid "from" date for follow-ups.');
+  }
+  if (to && kind === 'followups' && !dateIsDateOnly(to)) {
+    throw ApiError.badRequest('Invalid "to" date for follow-ups.');
   }
   if (!STAFF.has(user?.role)) {
     if (!['resident', 'resident-limited'].includes(user?.role) || kind !== 'followups') {
@@ -200,22 +222,29 @@ export const list = async ({ user, kind, residentId = null, status = null, supab
     if (!user.municipalityId) return [];
     query = query.eq('municipality_id', user.municipalityId);
   }
-  if (residentId) { await residentFor(supabase, user, residentId); query = query.eq('resident_id', residentId); }
+   if (residentId) { await residentFor(supabase, user, residentId); query = query.eq('resident_id', residentId); }
   if (status) query = query.eq('status', status);
+  // Follow-ups: narrow by scheduled_date window so the dashboard calendar only
+  // loads rows for the visible month range — still barangay/municipality-scoped
+  // by the filter above, so no cross-scope leak is possible.
+  if (kind === 'followups') {
+    if (from) query = query.gte('scheduled_date', from);
+    if (to) query = query.lte('scheduled_date', to);
+  }
   const { data, error } = await query;
   throwOnError(error, `Could not load ${kind}`);
   if (kind === 'followups') return (data || []).map((row) => withScheduleState(row));
   return data || [];
 };
 
-export const create = async ({ user, kind, payload = {} }) => {
+export const create = async ({ user, kind, payload = {}, supabase = getServiceClient() }) => {
   assertStaff(user);
-  const supabase = getServiceClient();
   const resident = await residentFor(supabase, user, payload.residentId);
   const table = TABLES[kind];
   if (!table) throw ApiError.badRequest('Unknown operational record type.');
   const row = { ...payload, resident_id: resident.id, created_by: user.id };
   delete row.residentId;
+  delete row.consultationId;
   delete row.id;
   // A follow-up may require the resident to confirm (approve) or reject it
   // before it becomes an approved/scheduled calendar event. When requested it
@@ -224,6 +253,20 @@ export const create = async ({ user, kind, payload = {} }) => {
   // decision fields are never trusted — they are set here from the workflow.
   let followUpAwaitsResident = false;
   if (kind === 'followups') {
+    const consultationId = text(payload.consultation_id);
+    delete row.consultation_id;
+    if (consultationId) {
+      const { data: consultation, error: consultationError } = await supabase
+        .from('visits')
+        .select('id, resident_id')
+        .eq('id', consultationId)
+        .maybeSingle();
+      throwOnError(consultationError, 'Could not verify consultation');
+      if (!consultation || consultation.resident_id !== resident.id) {
+        throw ApiError.unprocessable('The selected consultation does not belong to this resident.');
+      }
+      row.consultation_id = consultation.id;
+    }
     followUpAwaitsResident = Boolean(row.requiresResidentResponse ?? row.requires_resident_response);
     delete row.requiresResidentResponse;
     delete row.resident_decision;
@@ -257,8 +300,7 @@ export const create = async ({ user, kind, payload = {} }) => {
   return kind === 'followups' ? withScheduleState(data) : data;
 };
 
-export const update = async ({ user, kind, id, payload = {} }) => {
-  const supabase = getServiceClient();
+export const update = async ({ user, kind, id, payload = {}, consultationId = null, supabase = getServiceClient() }) => {
   const table = TABLES[kind];
   if (!table) {
     if (kind === 'notifications') return markNotificationRead({ user, id });
@@ -277,6 +319,20 @@ export const update = async ({ user, kind, id, payload = {} }) => {
   delete row.municipality_id;
   delete row.created_by;
   delete row.created_at;
+  delete row.consultation_id;
+  delete row.consultationId;
+  if (kind === 'followups' && consultationId) {
+    const { data: consultation, error: consultationError } = await supabase
+      .from('visits')
+      .select('id, resident_id')
+      .eq('id', consultationId)
+      .maybeSingle();
+    throwOnError(consultationError, 'Could not verify consultation');
+    if (!consultation || consultation.resident_id !== existing.resident_id) {
+      throw ApiError.unprocessable('The selected consultation does not belong to this resident.');
+    }
+    row.consultation_id = consultation.id;
+  }
   // The resident confirmation outcome is owned by the resident-follow-up
   // endpoints, never by a staff update — strip any client-supplied decision.
   delete row.resident_decision;

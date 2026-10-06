@@ -6,6 +6,8 @@ import { getAssignedBarangay } from "@/lib/barangayScope";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
+import VerificationBanner from "@/features/verification/components/VerificationBanner";
+import OfficialLogosSection from "@/features/settings/components/OfficialLogosSection";
 import { fetchMyVerification } from "@/services/api/verificationsApi";
 import { residentsApi, authApi } from "@/services/api";
 import { supabase } from "@/lib/supabase";
@@ -276,6 +278,14 @@ export default function SettingsPage({ roleKey = "resident" }) {
       <PageHeader crumbs={[isProfileRoute ? "Profile" : "Settings"]} title={isProfileRoute ? "Profile" : "Settings"} subtitle={isProfileRoute ? "View and update your account information." : "Manage your account security and information."} />
 
       <div className="space-y-5">
+        {roleKey === "admin" && !isProfileRoute && <OfficialLogosSection />}
+
+        {isResident && isProfileRoute && (
+          <section aria-label="Verification Status">
+            <VerificationBanner showVerificationMethod />
+          </section>
+        )}
+
         {/* Profile Information */}
         <Card className="p-4 sm:p-6">
           <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-4 sm:mb-5">Profile Information</h3>
@@ -552,21 +562,23 @@ export default function SettingsPage({ roleKey = "resident" }) {
                     icon: FileText,
                     value: isResident ? (account?.ref || dash) : (user?.referenceNumber || dash),
                   },
-                  isResident
-                    ? {
-                        label: "Verification Status",
-                        icon: ShieldCheck,
-                        badge: true,
-                        status: account?.status,
-                      }
-                    : {
-                        label: "Account Status",
-                        icon: ShieldCheck,
-                        value: user?.status
-                          ? user.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-                          : dash,
-                      },
                 ];
+                if (isResident && !isProfileRoute) {
+                  fields.push({
+                    label: "Verification Status",
+                    icon: ShieldCheck,
+                    badge: true,
+                    status: account?.status,
+                  });
+                } else if (!isResident) {
+                  fields.push({
+                    label: "Account Status",
+                    icon: ShieldCheck,
+                    value: user?.status
+                      ? user.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                      : dash,
+                  });
+                }
                 if (!isResident) {
                   fields.push({ label: "Role", value: role?.name || user?.role || dash, icon: ShieldCheck });
                 }

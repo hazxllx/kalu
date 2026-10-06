@@ -9,8 +9,9 @@
  * KALUSAGAP navigation behaviour unchanged.
  *
  * An item may also declare a `group` label. Consecutive items sharing a group
- * are rendered under one small uppercase section header, which keeps longer
- * role menus organized. Items without a group render flat, exactly as before.
+ * are rendered under one small uppercase section header. Items with `children`
+ * render as expandable navigation groups; child permissions are filtered in
+ * the same way as top-level items.
  */
 export const NAV = {
   "resident-limited": [
@@ -136,100 +137,103 @@ export const NAV = {
     },
   ],
 
-  // Public Health Nurse: triage hand-off check-ups, health records, referrals,
-  // follow-ups, health services. Grouped into functional categories (the
-  // DashboardLayout renders consecutive shared-group items under one small,
-  // non-clickable section label). Settings is kept under System so no existing
-  // PHN entry point is removed.
+  // Public Health Nurse navigation keeps the dashboard and resident directory
+  // visible, with the remaining clinical destinations organized into
+  // collapsible groups. Every existing route and permission remains unchanged.
   phn: [
     {
       label: "Dashboard",
       icon: "LayoutDashboard",
       path: "/app/phn/dashboard",
-      group: "Overview",
     },
     {
       label: "Resident Directory",
       icon: "Users",
       path: "/app/phn/residents",
-      group: "Patient & Community Care",
     },
     {
-      label: "Health Records",
-      icon: "FileHeart",
-      path: "/app/phn/record",
-      group: "Patient & Community Care",
+      label: "Clinical Care",
+      icon: "HeartPulse",
+      children: [
+        {
+          label: "Health Records",
+          icon: "FileHeart",
+          path: "/app/phn/record",
+        },
+        {
+          label: "PHN Check-ups",
+          icon: "ClipboardList",
+          path: "/app/phn/consultations",
+          permission: "consultation.requests.view",
+        },
+        {
+          label: "Health Services",
+          icon: "Stethoscope",
+          path: "/app/phn/services",
+        },
+      ],
     },
     {
-      label: "PHN Check-ups",
-      icon: "ClipboardList",
-      path: "/app/phn/consultations",
-      permission: "consultation.requests.view",
-      group: "Patient & Community Care",
+      label: "Care Coordination",
+      icon: "HeartHandshake",
+      children: [
+        {
+          label: "Referrals",
+          icon: "Send",
+          path: "/app/phn/referrals",
+          permission: "referrals.view",
+        },
+        {
+          label: "Follow-ups",
+          icon: "CalendarClock",
+          path: "/app/phn/followups",
+          permission: "followups.view",
+        },
+      ],
     },
     {
-      label: "Health Services",
-      icon: "Stethoscope",
-      path: "/app/phn/services",
-      group: "Patient & Community Care",
-    },
-    {
-      label: "Referrals",
-      icon: "Send",
-      path: "/app/phn/referrals",
-      permission: "referrals.view",
-      group: "Care Coordination",
-    },
-    {
-      label: "Follow-ups",
-      icon: "CalendarClock",
-      path: "/app/phn/followups",
-      permission: "followups.view",
-      group: "Care Coordination",
-    },
-    {
-      label: "Household Risk Overview",
+      label: "Community Risk",
       icon: "AlertTriangle",
-      path: "/app/phn/households/risk-overview",
-      group: "Risk & Monitoring",
+      children: [
+        {
+          label: "Household Risk Overview",
+          icon: "Home",
+          path: "/app/phn/households/risk-overview",
+          activePaths: ["/app/phn/households"],
+        },
+      ],
     },
     {
-      label: "Community Monitoring",
-      icon: "Map",
-      path: "/app/phn/barangays",
-      permission: "reports.analytics.view",
-      group: "Risk & Monitoring",
-    },
-    {
-      label: "Medical Certificates",
+      label: "Documents & Reports",
       icon: "FileText",
-      path: "/app/phn/certificates",
-      group: "Documents & Reports",
+      children: [
+        {
+          label: "Medical Certificates",
+          icon: "FileText",
+          path: "/app/phn/certificates",
+        },
+        {
+          label: "Reports",
+          icon: "BarChart3",
+          path: "/app/phn/reports",
+          permission: "reports.view",
+        },
+      ],
     },
     {
       label: "Account Approvals",
       icon: "ShieldCheck",
       path: "/app/phn/account-approvals",
-      group: "Documents & Reports",
-    },
-    {
-      label: "Reports",
-      icon: "BarChart3",
-      path: "/app/phn/reports",
-      permission: "reports.view",
-      group: "Documents & Reports",
     },
     {
       label: "Notifications",
       icon: "Bell",
       path: "/app/phn/notifications",
-      group: "System",
     },
     {
       label: "Settings",
       icon: "Settings",
       path: "/app/phn/settings",
-      group: "System",
     },
   ],
 
@@ -413,13 +417,6 @@ export const NAV = {
       group: "Monitoring",
     },
     {
-      label: "Community Monitoring",
-      icon: "Map",
-      path: "/app/mho/barangays",
-      permission: "reports.analytics.view",
-      group: "Monitoring",
-    },
-    {
       label: "Referrals",
       icon: "Send",
       path: "/app/mho/referrals",
@@ -464,57 +461,76 @@ export const NAV = {
       label: "Dashboard",
       icon: "LayoutDashboard",
       path: "/app/admin/dashboard",
+      group: "Overview",
     },
     {
       label: "User Management",
       icon: "Users",
       path: "/app/admin/users",
       permission: "accounts.view",
-    },
-    {
-      label: "Early Intervention Rules",
-      icon: "AlertTriangle",
-      path: "/app/admin/risk-rules",
-    },
-    {
-      label: "Risk Assessment",
-      icon: "ShieldAlert",
-      path: "/app/admin/risk-assessment",
+      group: "Management",
     },
     {
       label: "Roles",
       icon: "Shield",
       path: "/app/admin/roles",
+      group: "Management",
     },
     {
       label: "Role & Permissions",
       icon: "KeyRound",
       path: "/app/admin/permissions",
       permission: "accounts.roles.manage",
+      group: "Management",
+    },
+    {
+      label: "Early Intervention Rules",
+      icon: "AlertTriangle",
+      path: "/app/admin/risk-rules",
+      group: "Health Configuration",
+    },
+    {
+      label: "Risk Assessment",
+      icon: "ShieldAlert",
+      path: "/app/admin/risk-assessment",
+      group: "Health Configuration",
     },
     {
       label: "Audit Trail",
       icon: "ScrollText",
       path: "/app/admin/audit",
       permission: "system.audit.view",
+      group: "System",
     },
     {
       label: "System Settings",
       icon: "Settings",
       path: "/app/admin/settings",
       permission: "system.settings.manage",
+      group: "System",
     },
     {
       label: "Logs",
       icon: "Terminal",
       path: "/app/admin/logs",
       permission: "system.activity.view",
+      group: "System",
     },
   ],
 };
 
 export const profilePathForRole = (roleKey) =>
   `/app/${roleKey}/profile`;
+
+export const navItemIsActive = (item, pathname) => {
+  const paths = [item.path, ...(item.activePaths || [])].filter(
+    (path) => path && path !== "#",
+  );
+
+  return paths.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`),
+  );
+};
 
 /**
  * Drops items whose declared `permission` the current role does not hold.

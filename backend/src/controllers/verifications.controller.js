@@ -85,6 +85,16 @@ export const requestResubmission = async (req, res) => {
   sendData(res, { verification });
 };
 
+export const reviewMinorAlternative = async (req, res) => {
+  const verification = await verificationsService.reviewMinorAlternative({
+    user: req.user,
+    id: req.params.id,
+    decision: req.body?.decision,
+    reason: req.body?.reason,
+  });
+  sendData(res, { verification });
+};
+
 export const resubmit = async (req, res) => {
   const verification = await verificationsService.resubmit({ user: req.user, id: req.params.id });
   sendData(res, { verification });
@@ -117,6 +127,7 @@ export default {
   approve,
   reject,
   requestResubmission,
+  reviewMinorAlternative,
   resubmit,
   getMine,
   decide,

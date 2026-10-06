@@ -26,6 +26,7 @@ export const ALLOWED_DOCUMENT_TYPES = Object.freeze([
   'government_id_front',
   'government_id_back',
   'identity_photo',
+  'student_id',
   'transfer_previous_health_record',
   'transfer_proof_of_address',
 ]);
@@ -94,7 +95,9 @@ export const validateDocumentUpload = (input = {}) => {
   }
 
   if (file.size > MAX_FILE_SIZE) {
-    errors.file = 'File size must not exceed 10 MB.';
+    errors.file = documentType === 'identity_photo'
+      ? 'Identity photo must not exceed 10 MB.'
+      : 'File size is not supported. Please upload a clear copy of your identification document.';
   }
 
   if (file.size < 1) {

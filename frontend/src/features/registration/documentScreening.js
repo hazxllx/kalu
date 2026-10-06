@@ -22,6 +22,7 @@ export const SLOT_DOCUMENT_TYPE = Object.freeze({
   governmentIdFront: 'government_id_front',
   governmentIdBack: 'government_id_back',
   identityPhoto: 'identity_photo',
+  studentId: 'student_id',
 });
 
 /** Slots that must be uploaded and pass screening before submission. */
@@ -35,14 +36,22 @@ export const SLOT_LABEL = Object.freeze({
   governmentIdFront: 'Government ID — Front',
   governmentIdBack: 'Government ID — Back',
   identityPhoto: 'Identity Photo',
+  studentId: 'Student ID Verification',
 });
 
-export const initialSlotState = () => ({ status: SLOT_STATUS.NOT_CHECKED, reason: '', message: '' });
+export const initialSlotState = () => ({
+  status: SLOT_STATUS.NOT_CHECKED,
+  requestId: null,
+  reason: '',
+  message: '',
+  result: null,
+});
 
 export const initialScreeningState = () => ({
   governmentIdFront: initialSlotState(),
   governmentIdBack: initialSlotState(),
   identityPhoto: initialSlotState(),
+  studentId: initialSlotState(),
 });
 
 /** Backend screening status -> UI slot status. */
@@ -59,12 +68,22 @@ export const mapScreeningStatus = (status) => {
   }
 };
 
-export const slotStateFromScreening = (screening) => {
+export const slotStateFromScreening = (screening, requestId = null) => {
   if (!screening || !screening.status) return initialSlotState();
+  const result = { ...screening };
+  const status = screening.reason === 'DOCUMENT_TYPE_MISMATCH'
+    ? SLOT_STATUS.REJECTED
+    : mapScreeningStatus(screening.status);
+  if (status === SLOT_STATUS.REJECTED && screening.reason === 'DOCUMENT_TYPE_MISMATCH') {
+    result.status = 'automated_rejected';
+  }
   return {
-    status: mapScreeningStatus(screening.status),
+    status,
+    requestId,
     reason: screening.reason || '',
     message: screening.message || '',
+    crossVerificationMessage: screening.crossVerificationMessage || '',
+    result,
   };
 };
 
@@ -85,19 +104,37 @@ export const canSubmitDocuments = (screening) =>
 export const firstBlockingSlot = (screening) =>
   REQUIRED_DOCUMENT_SLOTS.find((slot) => isSlotBlocking(screening?.[slot])) || null;
 
+export const isCurrentScreeningRequest = (requestSequence, currentSequence) =>
+  requestSequence === currentSequence;
+
+/** Update only the slot that owns this still-current screening request. */
+export const updateSlotForCurrentRequest = (
+  screeningState,
+  slot,
+  requestId,
+  currentRequestId,
+  nextSlotState,
+) => {
+  if (!isCurrentScreeningRequest(requestId, currentRequestId)) return screeningState;
+  return {
+    ...screeningState,
+    [slot]: { ...nextSlotState, requestId },
+  };
+};
+
 /** Human-readable status for the review page / upload card. */
 export const slotStatusLabel = (slot) => {
   switch (slot?.status) {
     case SLOT_STATUS.CHECKING:
       return 'Checking document...';
     case SLOT_STATUS.PASSED:
-      return 'Ready for Review';
+      return 'Accepted for Staff Review';
     case SLOT_STATUS.FLAGGED:
-      return 'Flagged for Review';
+      return 'Manual Review Required';
     case SLOT_STATUS.REJECTED:
       return 'Rejected — Action Required';
     case SLOT_STATUS.ERROR:
-      return 'Check failed — Re-upload required';
+      return 'Screening unavailable — Retry';
     default:
       return 'Not checked';
   }
@@ -124,7 +161,7 @@ export const blockingSlotError = (slot) => {
     case SLOT_STATUS.REJECTED:
       return slot.message || 'The uploaded document was rejected. Please replace it with a clear copy.';
     case SLOT_STATUS.ERROR:
-      return 'We could not check this document. Please re-upload it.';
+      return 'We could not check this document. Please retry screening.';
     case SLOT_STATUS.CHECKING:
       return 'This document is still being checked. Please wait a moment.';
     default:
@@ -141,10 +178,12 @@ export default {
   initialScreeningState,
   mapScreeningStatus,
   slotStateFromScreening,
+  updateSlotForCurrentRequest,
   isSlotEligible,
   isSlotBlocking,
   canSubmitDocuments,
   firstBlockingSlot,
+  isCurrentScreeningRequest,
   slotStatusLabel,
   slotStatusTone,
   blockingSlotError,

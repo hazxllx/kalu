@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { M1_FORM_TEMPLATE } from "@/features/health-records/lib/m1OfficialFormTemplate";
+import { loadDocumentBranding } from "@/lib/documentBranding";
 
 /**
  * KALUSAGAP — FHSIS Monthly Form M1 — OFFICIAL-STYLE PRINT RENDERER.
@@ -41,7 +42,7 @@ const CSS = `
 /* ---------- form header (matches the official FHSIS M1 sheet) ---------- */
 .m1of-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 0 0 6px; }
 .m1of-head .seal { width: 128px; display: flex; gap: 6px; align-items: center; }
-.m1of-head .seal span { display: inline-block; width: 30px; height: 30px; border-radius: 50%; border: 1px solid #9aa7b8; font-size: 5.5px; color: #6b7788; text-align: center; line-height: 30px; }
+.m1of-head .seal img { display: block; max-width: 44px; width: auto; height: 32px; object-fit: contain; }
 .m1of-head .fields { flex: 1 1 auto; }
 .m1of-head .fields .row { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 8.5px; }
 .m1of-head .fields .row .lab { color: #334A63; }
@@ -216,16 +217,19 @@ function Blocks({ blocks = [], data }) {
  */
 
 /**
- * @param {{data?: any, header?: M1Header, template?: any[]}} props
+ * @param {{data?: any, header?: M1Header, template?: any[], branding?: any}} props
  */
-export default function M1OfficialForm({ data = {}, header = {}, template = M1_FORM_TEMPLATE }) {
+export default function M1OfficialForm({ data = {}, header = {}, template = M1_FORM_TEMPLATE, branding }) {
   const h = header;
   return (
     <div className="m1of">
       <style>{CSS}</style>
 
       <div className="m1of-head">
-        <div className="seal"><span>RP</span><span>DOH</span></div>
+        <div className="seal">
+          {branding?.logos?.municipal?.dataUrl && <img src={branding.logos.municipal.dataUrl} alt="Municipality of Pili official logo" />}
+          {branding?.logos?.rhu?.dataUrl && <img src={branding.logos.rhu.dataUrl} alt="Rural Health Unit official logo" />}
+        </div>
         <div className="fields">
           <div className="row">
             <span className="lab">FHSIS REPORT for the</span>
@@ -274,6 +278,7 @@ const PRINT_CSS = `
 
 export function useM1OfficialPrint() {
   const [payload, setPayload] = useState(null);
+  const [brandingError, setBrandingError] = useState("");
 
   useEffect(() => {
     if (!payload) return undefined;
@@ -302,6 +307,14 @@ export function useM1OfficialPrint() {
       )
     : null;
 
-  const startPrint = useCallback((data) => setPayload(data), []);
-  return { startPrint, portal };
+  const startPrint = useCallback(async (data) => {
+    setBrandingError("");
+    try {
+      const branding = await loadDocumentBranding("fhsis_m1");
+      setPayload({ ...data, branding });
+    } catch (error) {
+      setBrandingError(error?.message || "Could not load official M1 branding.");
+    }
+  }, []);
+  return { startPrint, portal, brandingError };
 }

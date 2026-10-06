@@ -19,6 +19,15 @@ import { ChevronRight } from "lucide-react";
  *
  * `meta` is an opt-in slot for controls that genuinely belong to the page.
  */
+/**
+ * @param {{
+ *   crumbs?: Array<string|{label: string, to?: string}>,
+ *   title: import("react").ReactNode,
+ *   subtitle?: string,
+ *   action?: import("react").ReactNode,
+ *   meta?: import("react").ReactNode
+ * }} props
+ */
 export default function PageHeader({ crumbs = [], title, subtitle = "", action = null, meta = null }) {
   return (
     <div className="mb-8 rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-card dark:border-border dark:bg-card md:px-6">
@@ -59,4 +68,3 @@ export default function PageHeader({ crumbs = [], title, subtitle = "", action =
     </div>
   );
 }
-

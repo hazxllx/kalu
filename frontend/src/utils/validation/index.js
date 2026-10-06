@@ -70,6 +70,28 @@ export const ageFromDate = (value, now = new Date()) => {
   return age;
 };
 
+const parseDateOnly = (value) => {
+  const raw = text(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const [year, month, day] = raw.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) return null;
+  return date;
+};
+
+const ageFromDateOnly = (value, now = new Date()) => {
+  const date = parseDateOnly(value);
+  if (!date) return null;
+  let age = now.getUTCFullYear() - date.getUTCFullYear();
+  const monthDelta = now.getUTCMonth() - date.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < date.getUTCDate())) age -= 1;
+  return age;
+};
+
 export const inEnum = (value, options) => options.includes(asString(value));
 export const isFiniteNumber = (value) =>
   value !== '' && value !== null && value !== undefined && Number.isFinite(Number(value));
@@ -114,9 +136,12 @@ export const zone = (value, { label = 'Zone', isRequired = true } = {}) => {
 /** Date of birth: required, not in the future, plausible age (empty allowed unless required). */
 export const dateOfBirth = (value, { isRequired = true, maxAge = 120, label = 'Date of birth' } = {}) => {
   if (isBlank(value)) return isRequired ? `${label} is required.` : '';
-  if (!parseDate(value)) return `${label} is invalid.`;
-  if (isFutureDate(value)) return 'Date of birth cannot be in the future.';
-  const age = ageFromDate(value);
+  const date = parseDateOnly(value);
+  if (!date) return `${label} is invalid.`;
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  if (date.getTime() > today) return 'Date of birth cannot be in the future.';
+  const age = ageFromDateOnly(value, now);
   if (age === null || age < 0 || age > maxAge) return `${label} is not a valid age.`;
   return '';
 };

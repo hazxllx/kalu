@@ -50,6 +50,20 @@ export const fetchResidentDocuments = async (residentId) => {
   return payload?.documents || [];
 };
 
+export const fetchMyDocuments = async (residentId) => {
+  const payload = await api.get(`/resident-documents/me/list?residentId=${encodeURIComponent(residentId)}`);
+  return payload?.documents || [];
+};
+
+export const reviewResidentDocument = async (residentId, documentId, verificationStatus, rejectionReason = '') =>
+  api.patch(
+    `/verifications/${encodeURIComponent(residentId)}/documents/${encodeURIComponent(documentId)}/review`,
+    { verificationStatus, rejectionReason },
+  );
+
+export const reviewMinorAlternative = async (residentId, decision, reason = '') =>
+  api.patch(`/verifications/${encodeURIComponent(residentId)}/minor-alternative`, { decision, reason });
+
 /**
  * @typedef {Object} VerificationDecisionOptions
  * @property {string} [remarks]
@@ -102,6 +116,9 @@ export default {
   fetchVerificationHistory,
   fetchResidentVerification,
   fetchResidentDocuments,
+  fetchMyDocuments,
+  reviewResidentDocument,
+  reviewMinorAlternative,
   approveResident,
   rejectResident,
   requestResubmission,

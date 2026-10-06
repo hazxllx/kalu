@@ -19,7 +19,11 @@
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
+import { SCREENING_MIME_TYPES, SCREENING_STATUS, MAX_SCREENING_FILE_SIZE } from '../config/documentScreening.js';
+import storageService from './storage.service.js';
 import { notifyResident } from './notifications.service.js';
+import { ageFromDateOnly } from '../validators/common.js';
+import { isMinorAge } from '../config/guardianPolicy.js';
 
 export const VERIFICATION_STATUS = Object.freeze({
   PENDING: 'pending',
@@ -32,6 +36,68 @@ export const ALL_VERIFICATION_STATUSES = Object.freeze(Object.values(VERIFICATIO
 
 const STAFF_ROLES = Object.freeze(['health_supervisor', 'phn']);
 const SELF_ROLES = Object.freeze(['resident', 'resident-limited']);
+
+const hasRequiredProfileFields = (resident) =>
+  Boolean(
+    String(resident?.firstName || '').trim() &&
+    String(resident?.lastName || '').trim() &&
+    resident?.birthDate &&
+    String(resident?.sex || '').trim() &&
+    String(resident?.currentAddress || '').trim() &&
+    String(resident?.barangay || '').trim(),
+  );
+
+const hasValidRequiredDocument = async (resident, document) => {
+  const path = String(document?.storagePath || '');
+  const requiredPrefix = `resident-documents/${resident.id}/`;
+  if (!path.startsWith(requiredPrefix) || path.includes('..')) return false;
+  if (!SCREENING_MIME_TYPES.includes(document.mimeType)) return false;
+  if (!Number.isInteger(document.sizeBytes) || document.sizeBytes < 1 || document.sizeBytes > MAX_SCREENING_FILE_SIZE) {
+    return false;
+  }
+  if (![SCREENING_STATUS.PENDING_MANUAL_REVIEW, SCREENING_STATUS.AUTOMATED_FLAGGED].includes(document.screeningStatus)) {
+    return false;
+  }
+
+  try {
+    return Boolean(await storageService.getDocumentSignedUrl(path));
+  } catch (error) {
+    if (/not found|does not exist/i.test(error?.message || '')) return false;
+    throw error;
+  }
+};
+
+const isVerificationComplete = async (resident) => {
+  if (!hasRequiredProfileFields(resident)) return false;
+  const documents = await repository.listDocumentsByResident(resident.id);
+  if (isMinorAge(resident.birthDate)) {
+    if (resident.minorVerificationMethod === 'staff_alternative') {
+      return resident.minorAlternativeStatus === 'approved';
+    }
+    if (resident.minorVerificationMethod !== 'student_id') return false;
+    const studentId = documents.find((document) => document.documentType === 'student_id');
+    if (!studentId || studentId.verificationStatus !== 'approved') return false;
+    return hasValidRequiredDocument(resident, studentId);
+  }
+  if (ageFromDateOnly(resident.birthDate) === null) return false;
+  const requiredTypes = ['government_id_front', 'government_id_back', 'identity_photo'];
+  const requiredDocuments = requiredTypes.map((type) =>
+    documents.find((document) =>
+      document.documentType === type
+      && ['pending', 'approved'].includes(document.verificationStatus),
+    ),
+  );
+  if (requiredDocuments.some((document) => !document)) return false;
+  const [front, back] = requiredDocuments;
+  if (
+    !front.governmentIdType
+    || String(front.governmentIdType).trim().toLowerCase()
+      !== String(back.governmentIdType || '').trim().toLowerCase()
+  ) return false;
+  return (await Promise.all(
+    requiredDocuments.map((document) => hasValidRequiredDocument(resident, document)),
+  )).every(Boolean);
+};
 
 export const REJECTION_REASONS = Object.freeze([
   'Invalid information',
@@ -60,19 +126,14 @@ const fullName = (r) =>
     .trim();
 
 const ageFrom = (birthDate) => {
-  if (!birthDate) return '';
-  const dob = new Date(birthDate);
-  if (Number.isNaN(dob.getTime())) return '';
-  const now = new Date();
-  let age = now.getFullYear() - dob.getFullYear();
-  const m = now.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
-  return age >= 0 ? age : '';
+  const age = ageFromDateOnly(birthDate);
+  return age !== null && age >= 0 ? age : '';
 };
 
 /** Domain resident -> verification record returned to the UI. */
-const toVerification = (resident) => {
+const toVerification = async (resident) => {
   if (!resident) return null;
+  const complete = await isVerificationComplete(resident);
   return {
     ref: resident.id,
     id: resident.id,
@@ -91,7 +152,13 @@ const toVerification = (resident) => {
     philhealthNo: resident.philhealthNo || '',
     registeredDate: resident.createdAt || null,
     submittedAt: resident.submittedForVerificationAt || resident.createdAt || null,
+    completeness: complete ? 'complete' : 'incomplete',
+    isMinor: isMinorAge(resident.birthDate),
+    minorVerificationMethod: resident.minorVerificationMethod || null,
+    minorAlternativeStatus: resident.minorAlternativeStatus || null,
+    minorAlternativeReason: resident.minorAlternativeReason || '',
     status: resident.verificationStatus || VERIFICATION_STATUS.PENDING,
+    verificationSubmittedBy: resident.verificationSubmittedBy || null,
     verifiedBy: resident.verifiedBy || null,
     verifiedAt: resident.verifiedAt || null,
     rejectionReason: resident.rejectionReason || '',
@@ -181,14 +248,14 @@ export const listQueue = async ({ user, status = 'pending', q = '', limit = 100,
     offset: Math.max(Number(offset) || 0, 0),
   });
 
-  return { rows: rows.map(toVerification), total, status: requested || 'all' };
+  return { rows: await Promise.all(rows.map(toVerification)), total, status: requested || 'all' };
 };
 
 /** Single resident verification record + its audit history (staff, scoped). */
 export const getVerification = async ({ user, id }) => {
   const resident = await requireStaffResident(user, id);
   const history = await repository.listResidentVerificationLogs(resident.id, { limit: 100 });
-  return { verification: toVerification(resident), history };
+  return { verification: await toVerification(resident), history };
 };
 
 /** Recent decisions across the caller's scope, for the history table. */
@@ -206,7 +273,11 @@ export const listHistory = async ({ user, limit = 100, offset = 0 } = {}) => {
 
 /** Approve a pending / resubmission-required resident. */
 export const approve = async ({ user, id, remarks = '' } = {}) => {
+  if (!user?.id) throw ApiError.unprocessable('A reviewer is required to approve a resident verification.');
   const resident = await requireStaffResident(user, id);
+  if (!(await isVerificationComplete(resident))) {
+    throw ApiError.unprocessable('The resident verification is incomplete and cannot be approved.');
+  }
   const current = resident.verificationStatus || VERIFICATION_STATUS.PENDING;
 
   if (current === VERIFICATION_STATUS.APPROVED) {
@@ -247,6 +318,7 @@ export const approve = async ({ user, id, remarks = '' } = {}) => {
 
 /** Reject a pending / resubmission-required resident. A reason is required. */
 export const reject = async ({ user, id, reason, remarks = '' } = {}) => {
+  if (!user?.id) throw ApiError.unprocessable('A reviewer is required to reject a resident verification.');
   const resident = await requireStaffResident(user, id);
   const current = resident.verificationStatus || VERIFICATION_STATUS.PENDING;
 
@@ -258,7 +330,7 @@ export const reject = async ({ user, id, reason, remarks = '' } = {}) => {
   }
 
   const trimmedReason = String(reason || '').trim();
-  if (!trimmedReason) throw ApiError.badRequest('A rejection reason is required.');
+  if (!trimmedReason) throw ApiError.unprocessable('A rejection reason is required.');
   const trimmedRemarks = String(remarks || '').trim();
   if (trimmedReason === 'Other' && !trimmedRemarks) {
     throw ApiError.badRequest('Please provide remarks when choosing "Other".');
@@ -341,6 +413,27 @@ export const requestResubmission = async ({ user, id, reason, remarks = '' } = {
   return toVerification(updated);
 };
 
+export const reviewMinorAlternative = async ({ user, id, decision, reason = '' } = {}) => {
+  const resident = await requireStaffResident(user, id);
+  if (!isMinorAge(resident.birthDate) || resident.minorVerificationMethod !== 'staff_alternative') {
+    throw ApiError.conflict('This resident did not request alternative minor verification.');
+  }
+  if (!['approved', 'rejected'].includes(decision)) {
+    throw ApiError.unprocessable('Choose whether to approve or reject the alternative verification path.');
+  }
+  const note = String(reason || '').trim();
+  if (decision === 'rejected' && note.length < 5) {
+    throw ApiError.unprocessable('A rejection reason of at least 5 characters is required.');
+  }
+  const updated = await repository.updateResident(resident.id, {
+    minorAlternativeStatus: decision,
+    minorAlternativeReason: decision === 'rejected' ? note : '',
+    minorAlternativeReviewedBy: user.id,
+    minorAlternativeReviewedAt: new Date().toISOString(),
+  });
+  return toVerification(updated);
+};
+
 /** Resident resubmits their own rejected / resubmission-required registration. */
 export const resubmit = async ({ user, id } = {}) => {
   if (!isSelf(user)) {
@@ -361,6 +454,7 @@ export const resubmit = async ({ user, id } = {}) => {
     verificationStatus: VERIFICATION_STATUS.PENDING,
     rejectionReason: '',
     submittedForVerificationAt: new Date().toISOString(),
+    verificationSubmittedBy: resident.verificationSubmittedBy || user.id,
     verifiedBy: null,
     verifiedAt: null,
   });
@@ -399,7 +493,7 @@ export const getMine = async ({ user } = {}) => {
   }
   return {
     hasResidentRecord: true,
-    verification: { ...toVerification(resident), municipality },
+    verification: { ...(await toVerification(resident)), municipality },
     history,
   };
 };
@@ -425,6 +519,7 @@ export default {
   approve,
   reject,
   requestResubmission,
+  reviewMinorAlternative,
   resubmit,
   getMine,
   listPending,

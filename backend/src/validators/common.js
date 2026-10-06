@@ -48,6 +48,7 @@ export const hasMaxLength = (value, max) => asString(value).length <= max;
 export const hasMinLength = (value, min) => text(value).length >= min;
 
 export const normalizePhone = (value) => asString(value).replace(/[\s()\-.]/g, '');
+export const normalizeEmail = (value) => text(value).toLowerCase();
 export const isPhonePH = (value) => PH_MOBILE.test(normalizePhone(value));
 /**
  * Strict mobile check for registration: the raw value must be EXACTLY 11
@@ -55,7 +56,7 @@ export const isPhonePH = (value) => PH_MOBILE.test(normalizePhone(value));
  * value is NOT normalised first: separators or letters cause rejection.
  */
 export const isStrictMobile = (value) => PH_MOBILE_STRICT.test(asString(value));
-export const isEmail = (value) => EMAIL.test(text(value));
+export const isEmail = (value) => EMAIL.test(normalizeEmail(value));
 export const isUuid = (value) => UUID.test(text(value));
 
 /** Coerce a Zone input to an integer 1..8, or null when out of range/blank. */
@@ -74,6 +75,37 @@ export const parseDate = (value) => {
   if (!raw) return null;
   const d = raw.length === 10 ? new Date(`${raw}T00:00:00`) : new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/** Parse a date-only value as a UTC calendar date, rejecting rollover dates. */
+export const parseDateOnly = (value) => {
+  const raw = text(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const [year, month, day] = raw.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) return null;
+  return date;
+};
+
+/** Age in whole calendar years using UTC dates on both client and server. */
+export const ageFromDateOnly = (value, now = new Date()) => {
+  const date = parseDateOnly(value);
+  if (!date) return null;
+  let age = now.getUTCFullYear() - date.getUTCFullYear();
+  const monthDelta = now.getUTCMonth() - date.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < date.getUTCDate())) age -= 1;
+  return age;
+};
+
+export const isFutureDateOnly = (value, now = new Date()) => {
+  const date = parseDateOnly(value);
+  if (!date) return false;
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return date.getTime() > today;
 };
 
 export const isFutureDate = (value, now = new Date()) => {
@@ -132,6 +164,7 @@ export default {
   hasMaxLength,
   hasMinLength,
   normalizePhone,
+  normalizeEmail,
   isPhonePH,
   isStrictMobile,
   toZone,
@@ -139,6 +172,9 @@ export default {
   isEmail,
   isUuid,
   parseDate,
+  parseDateOnly,
+  ageFromDateOnly,
+  isFutureDateOnly,
   isFutureDate,
   ageFromDate,
   inEnum,

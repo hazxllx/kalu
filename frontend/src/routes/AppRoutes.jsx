@@ -410,20 +410,6 @@ const HealthTrends = appPage(
     )
 );
 
-const Barangays = appPage(
-  () =>
-    import(
-      '@/features/analytics/pages/Barangays'
-    )
-);
-
-const CommunityMonitoring = appPage(
-  () =>
-    import(
-      '@/features/analytics/pages/CommunityMonitoring'
-    )
-);
-
 const UserManagement = appPage(
   () =>
     import(
@@ -727,8 +713,8 @@ const AppRoutes = () => (
           The MHO is a municipality-wide supervisor and is NOT authorized for
           the barangay/BHW household-profiling data. The retained Household
           Risk Overview / Detail are backed by those household endpoints,
-          so for the MHO the old paths redirect to municipal Community
-          Monitoring instead of rendering a guaranteed-403 page.
+          so for the MHO the old paths redirect to           the MHO dashboard (which now includes the municipality heatmap)
+          instead of rendering a guaranteed-403 page.
           Household Risk Clusters remains removed.
         */}
         <Route
@@ -764,7 +750,7 @@ const AppRoutes = () => (
         />
         <Route
           path="barangays"
-          element={<CommunityMonitoring />}
+          element={<Navigate to="/app/mho/dashboard" replace />}
         />
         <Route
           path="certificates/new"
@@ -856,7 +842,7 @@ const AppRoutes = () => (
         />
         <Route
           path="barangays"
-          element={<CommunityMonitoring />}
+          element={<Navigate to="/app/phn/dashboard" replace />}
         />
         <Route
           path="certificates/new"
@@ -1019,7 +1005,7 @@ const AppRoutes = () => (
         />
         <Route
           path="barangays"
-          element={<CommunityMonitoring />}
+          element={<Navigate to="/app/health_supervisor/dashboard" replace />}
         />
         <Route
           path="reports"

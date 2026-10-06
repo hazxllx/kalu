@@ -64,7 +64,7 @@ function RuledText({ value, lines = 3 }) {
   );
 }
 
-export default function MedicalCertificateDocument({ certificate, signatoryName }) {
+export default function MedicalCertificateDocument({ certificate, signatoryName, branding }) {
   const c = certificate || {};
   /**
    * Authorized signatory — the signed-in account's name (passed in from the
@@ -91,6 +91,13 @@ export default function MedicalCertificateDocument({ certificate, signatoryName 
 
       {/* Inner bordered page */}
       <div className="relative z-[1] flex min-h-[277mm] flex-col border border-black px-[11mm] py-[10mm]">
+        {branding?.logos?.municipal?.dataUrl && (
+          <img
+            src={branding.logos.municipal.dataUrl}
+            alt="Municipality of Pili official logo"
+            className="absolute left-[11mm] top-[10mm] h-[16mm] max-w-[24mm] object-contain"
+          />
+        )}
         {/* Government header */}
         <header className="text-center">
           <p>Republic of the Philippines</p>

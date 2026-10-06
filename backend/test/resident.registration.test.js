@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 
-import { registerResidentValidator } from '../src/validators/registration.validators.js';
+import { emailValidator, registerResidentValidator } from '../src/validators/registration.validators.js';
 import { validateDocumentUpload } from '../src/validators/documents.validators.js';
 import validate from '../src/middleware/validate.js';
 import * as registrationService from '../src/services/registration.service.js';
@@ -34,7 +34,13 @@ test('registerResidentValidator accepts valid payload', () => {
     zone: '1',
     email: 'ana@example.com',
   });
+
   assert.ok(!result.error, JSON.stringify(result));
+});
+
+test('server registration email validation trims and lowercases consistently', () => {
+  assert.equal(emailValidator('  Resident.Example@Example.COM  '), '');
+  assert.equal(emailValidator('not-an-email'), 'Please enter a valid email address.');
 });
 
 test('resident account creation uses a temporary password and resident role metadata', () => {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { UploadCloud, FileText, X, CheckCircle2, ImageIcon, AlertTriangle, XCircle, Loader2, RotateCcw } from "lucide-react";
 import { labelCls } from "@/features/registration/components/RegistrationDesign";
@@ -29,12 +29,24 @@ export default function UploadComponent({
   allowedExts = DEFAULT_EXTS,
   hint = "",
   screening = null,
+  onRetry,
 }) {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState(file ? 100 : 0);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const inputRef = useRef(null);
   const formatsHint = hint || `${allowedExts.map((e) => e.toUpperCase()).join(", ")} — up to 10 MB`;
+
+  useEffect(() => {
+    if (!file?.type?.startsWith("image/")) {
+      setPreviewUrl(null);
+      return undefined;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const handleFile = useCallback((f) => {
     setError("");
@@ -154,7 +166,9 @@ export default function UploadComponent({
               <>
                 <div className="flex items-center gap-3 p-3">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                    {isImage ? (
+                    {previewUrl ? (
+                      <img src={previewUrl} alt={`Preview of ${file.name}`} className="h-full w-full object-cover" />
+                    ) : isImage ? (
                       <ImageIcon className="h-5 w-5 text-slate-400" />
                     ) : (
                       <FileText className="h-5 w-5 text-brand-blue" />
@@ -188,8 +202,35 @@ export default function UploadComponent({
                     <span className={`font-semibold ${meta.tone}`}>
                       Automated check: {slotStatusLabel(screening)}
                     </span>
-                    {status === SLOT_STATUS.REJECTED && screening?.message && (
+                    {screening?.message && (
                       <p className="mt-0.5 text-brand-ink">{screening.message}</p>
+                    )}
+                    {screening?.crossVerificationMessage && screening.crossVerificationMessage !== screening.message && (
+                      <p className="mt-0.5 text-brand-ink">{screening.crossVerificationMessage}</p>
+                    )}
+                    {screening?.result?.crossVerification?.conflictingFields?.length > 0 && (
+                      <p className="mt-0.5 font-medium text-brand-danger">
+                        Conflicting labelled fields: {screening.result.crossVerification.conflictingFields
+                          .map((field) => ({
+                            name: "name",
+                            surname: "surname",
+                            givenName: "given name",
+                            middleName: "middle name",
+                            dateOfBirth: "date of birth",
+                            idNumber: "ID number",
+                          })[field])
+                          .filter(Boolean)
+                          .join(", ")}. Staff review is required.
+                      </p>
+                    )}
+                    {status === SLOT_STATUS.ERROR && onRetry && (
+                      <button
+                        type="button"
+                        onClick={(event) => { event.stopPropagation(); onRetry(); }}
+                        className="mt-1 inline-flex items-center gap-1 font-semibold text-brand-blue underline underline-offset-2"
+                      >
+                        <RotateCcw className="h-3 w-3" /> Retry screening
+                      </button>
                     )}
                   </div>
                 </div>

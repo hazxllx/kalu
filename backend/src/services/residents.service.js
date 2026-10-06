@@ -17,7 +17,12 @@ import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
 import { getServiceClient } from '../config/supabase.js';
 import env from '../config/env.js';
-import { isPhonePH } from '../validators/common.js';
+import {
+  ageFromDateOnly,
+  isFutureDateOnly,
+  isPhonePH,
+  parseDateOnly,
+} from '../validators/common.js';
 import { computeBMI } from '../utils/bmi.js';
 import { riskFromVitals } from './analytics.service.js';
 import {
@@ -324,13 +329,7 @@ export const getOwnHealthRecords = async ({ user } = {}) => {
       barangay: resident.barangay || '',
       birthDate: resident.birthDate || '',
 
-      age: resident.birthDate
-        ? Math.max(
-            0,
-            new Date().getFullYear() -
-              new Date(resident.birthDate).getFullYear(),
-          )
-        : '',
+      age: ageFromDateOnly(resident.birthDate) ?? '',
 
       sex: resident.sex || '',
       verificationStatus:
@@ -689,14 +688,15 @@ export const createResident = async ({
   if (!birthDate) {
     errors.push('Date of birth is required.');
   } else {
-    const dob = new Date(birthDate);
-
-    if (Number.isNaN(dob.getTime())) {
+    const age = ageFromDateOnly(birthDate);
+    if (!parseDateOnly(birthDate)) {
       errors.push('Date of birth is invalid.');
-    } else if (dob.getTime() > Date.now()) {
+    } else if (isFutureDateOnly(birthDate)) {
       errors.push(
         'Date of birth cannot be in the future.',
       );
+    } else if (age === null || age < 0 || age > 120) {
+      errors.push('Date of birth is not a valid age.');
     }
   }
 
@@ -770,6 +770,17 @@ export const createResident = async ({
 
   const ids =
     await repository.nextResidentIds();
+  const age = ageFromDateOnly(birthDate);
+  const minorVerification = age !== null && age < 18
+    ? {
+        minorVerificationMethod: 'staff_alternative',
+        minorAlternativeStatus: 'approved',
+        minorAlternativeReason: 'In-person verification by authorized staff.',
+        minorAlternativeReviewedBy: user?.id || null,
+        minorAlternativeReviewedAt: new Date().toISOString(),
+        guardianStatus: 'skipped',
+      }
+    : {};
 
   const shouldCreateLoginAccount =
     Boolean(
@@ -821,6 +832,7 @@ export const createResident = async ({
         verifiedBy: user?.id || null,
         verifiedAt:
           new Date().toISOString(),
+        ...minorVerification,
 
         firstName,
         middleName,
@@ -888,6 +900,7 @@ export const createResident = async ({
     verifiedBy: user?.id || null,
     verifiedAt:
       new Date().toISOString(),
+    ...minorVerification,
 
     firstName,
     middleName,

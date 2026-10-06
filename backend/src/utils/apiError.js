@@ -17,6 +17,14 @@ export default class ApiError extends Error {
     return new ApiError(400, message, details);
   }
 
+  static unsupportedMediaType(message = 'Unsupported media type') {
+    return new ApiError(415, message);
+  }
+
+  static payloadTooLarge(message = 'Uploaded file is too large') {
+    return new ApiError(413, message);
+  }
+
   static unauthorized(message = 'Authentication required') {
     return new ApiError(401, message);
   }

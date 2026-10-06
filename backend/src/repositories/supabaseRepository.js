@@ -169,6 +169,13 @@ const DOCUMENT_TO_DB = {
   uploadedById: 'uploaded_by',
   createdAt: 'created_at',
   updatedAt: 'updated_at',
+  // Deterministic automated screening result (advisory; see
+  // services/documentVerification.service.js). Null until the upload runs.
+  screeningStatus: 'screening_status',
+  screeningReason: 'screening_reason',
+  screeningQuality: 'screening_quality',
+  screeningOcrDetected: 'screening_ocr_detected',
+  screeningCheckedAt: 'screening_checked_at',
 };
 
 const DB_TO_DOCUMENT = Object.fromEntries(Object.entries(DOCUMENT_TO_DB).map(([k, v]) => [v, k]));
@@ -262,6 +269,7 @@ const RESIDENT_TO_DB = {
   barangayId: 'barangay_id',
   municipalityId: 'municipality_id',
   verificationStatus: 'verification_status',
+  verificationSubmittedBy: 'verification_submitted_by',
   verifiedBy: 'verified_by',
   verifiedAt: 'verified_at',
   rejectionReason: 'rejection_reason',
@@ -276,6 +284,15 @@ const RESIDENT_TO_DB = {
   riskLevel: 'risk_level',
   riskFactors: 'risk_factors',
   riskAssessedAt: 'risk_assessed_at',
+  // Denormalized mirror of the minor's active guardian-link status
+  // (service-maintained; the resident_guardian_links table is the source of
+  // truth). Phase 2.2.
+  guardianStatus: 'guardian_status',
+  minorVerificationMethod: 'minor_verification_method',
+  minorAlternativeStatus: 'minor_alternative_status',
+  minorAlternativeReason: 'minor_alternative_reason',
+  minorAlternativeReviewedBy: 'minor_alternative_reviewed_by',
+  minorAlternativeReviewedAt: 'minor_alternative_reviewed_at',
 };
 
 const DB_TO_RESIDENT = Object.fromEntries(Object.entries(RESIDENT_TO_DB).map(([k, v]) => [v, k]));
@@ -286,6 +303,8 @@ const VISIT_TO_DB = {
   recordedById: 'recorded_by_id',
   recordedByRole: 'recorded_by_role',
   recordedByName: 'recorded_by_name',
+  responsiblePersonnelId: 'responsible_personnel_id',
+  responsiblePersonnelName: 'responsible_personnel_name',
   facilityId: 'facility_id',
   status: 'status',
   visitDate: 'visit_date',
@@ -348,6 +367,45 @@ const mapBack = (row, mapping) => {
 
 const residentToRow = (resident) => mapKeys(resident, RESIDENT_TO_DB);
 const residentFromRow = (row) => (row ? mapBack(row, DB_TO_RESIDENT) : null);
+
+const GUARDIAN_LINK_TO_DB = {
+  id: 'id',
+  minorResidentId: 'minor_resident_id',
+  guardianResidentId: 'guardian_resident_id',
+  guardianAuthUserId: 'guardian_auth_user_id',
+  guardianAcceptedById: 'guardian_accepted_by_id',
+  guardianAcceptedAt: 'guardian_accepted_at',
+  guardianLastName: 'guardian_last_name',
+  guardianFirstName: 'guardian_first_name',
+  guardianMiddleName: 'guardian_middle_name',
+  relationshipType: 'relationship_type',
+  guardianCellphoneNo: 'guardian_cellphone_no',
+  guardianIdentityNo: 'guardian_identity_no',
+  consentRecorded: 'consent_recorded',
+  consentNote: 'consent_note',
+  verificationStatus: 'verification_status',
+  verificationNote: 'verification_note',
+  verifiedById: 'verified_by_id',
+  verifiedByRole: 'verified_by_role',
+  verifiedByName: 'verified_by_name',
+  verifiedAt: 'verified_at',
+  createdById: 'created_by_id',
+  createdByRole: 'created_by_role',
+  createdByName: 'created_by_name',
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+};
+
+const DB_TO_GUARDIAN_LINK = Object.fromEntries(Object.entries(GUARDIAN_LINK_TO_DB).map(([k, v]) => [v, k]));
+
+const guardianLinkToRow = (link) => {
+  const row = mapKeys(link, GUARDIAN_LINK_TO_DB);
+  // Explicit NULL for "no linked resident" (mapKeys skips undefined keys).
+  if (row.guardian_resident_id === undefined) row.guardian_resident_id = null;
+  return row;
+};
+
+const guardianLinkFromRow = (row) => (row ? mapBack(row, DB_TO_GUARDIAN_LINK) : null);
 
 const RISK_CRITERION_TO_DB = {
   code: 'code',
@@ -460,16 +518,22 @@ const verificationLogFromRow = (row) => ({
 // (getResident / listResidents / searchResidents), which transparently include
 // the columns when the migration is applied and omit them when it is not.
 //
-// Embedded resident joins on visits/referrals (SELECT_RESIDENT) never render a
-// resident's risk, so they must NOT enumerate these columns by name: doing so
-// makes every visit/referral read — and the Community Map, which embeds the
-// resident through listVisits — hard-fail with "column residents_1.risk_score
-// does not exist" on any database where that risk migration has not been
-// applied yet. Keep them out of the embedded select; the risk engine and
-// resident detail reads are unaffected.
-const RESIDENT_RISK_COLUMNS = new Set(['risk_score', 'risk_level', 'risk_factors', 'risk_assessed_at']);
+// Embedded resident joins on visits/referrals do not need risk or minor-review
+// fields. Keep migration-dependent columns out of this projection so analytics
+// remains readable while the live database is behind those optional migrations.
+const RESIDENT_OPTIONAL_COLUMNS = new Set([
+  'risk_score',
+  'risk_level',
+  'risk_factors',
+  'risk_assessed_at',
+  'minor_verification_method',
+  'minor_alternative_status',
+  'minor_alternative_reason',
+  'minor_alternative_reviewed_by',
+  'minor_alternative_reviewed_at',
+]);
 const SELECT_RESIDENT = Object.keys(DB_TO_RESIDENT)
-  .filter((column) => !RESIDENT_RISK_COLUMNS.has(column))
+  .filter((column) => !RESIDENT_OPTIONAL_COLUMNS.has(column))
   .join(',');
 
 // BUG-012: transfer_requests carries OTP secret material (otp_hash,
@@ -486,6 +550,18 @@ const throwOnError = (error, fallback) => {
     err.details = error;
     throw err;
   }
+};
+
+/**
+ * True when a write failed only because the additive automated-screening
+ * columns are not present yet (migration not applied). Used to transparently
+ * fall back to the base document row instead of breaking uploads.
+ */
+const isMissingScreeningColumn = (error) => {
+  const code = error?.code || '';
+  const message = error?.message || '';
+  return code === 'PGRST204' || /screening_[a-z_]+/.test(message)
+    || (/column/i.test(message) && /documents/i.test(message));
 };
 
 // ----- resident free-text search -------------------------------------------
@@ -1454,28 +1530,42 @@ export const supabaseRepository = {
   // ----- documents ----------------------------------------------------------
   async insertDocument(document) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase
-      .from(TABLES.documents)
-      .insert({
-        resident_id: document.residentId || null,
-        transfer_request_id: document.transferRequestId || null,
-        document_type: document.documentType,
-        // `purpose` is a NOT NULL column on the original documents table (no
-        // default). The registration/transfer flows track the kind of file in
-        // `document_type`, so mirror it into `purpose` to satisfy the column
-        // without a schema change.
-        purpose: document.purpose || document.documentType,
-        government_id_type: document.governmentIdType || null,
-        file_name: document.fileName,
-        storage_path: document.storagePath,
-        mime_type: document.mimeType,
-        size_bytes: document.sizeBytes,
-        status: document.status || 'uploaded',
-        verification_status: document.verificationStatus || 'pending',
-        uploaded_by: document.uploadedById || null,
-      })
-      .select('*')
-      .single();
+    // `purpose` is a NOT NULL column on the original documents table (no
+    // default). The registration/transfer flows track the kind of file in
+    // `document_type`, so mirror it into `purpose` to satisfy the column
+    // without a schema change.
+    const baseRow = {
+      resident_id: document.residentId || null,
+      transfer_request_id: document.transferRequestId || null,
+      document_type: document.documentType,
+      purpose: document.purpose || document.documentType,
+      government_id_type: document.governmentIdType || null,
+      file_name: document.fileName,
+      storage_path: document.storagePath,
+      mime_type: document.mimeType,
+      size_bytes: document.sizeBytes,
+      status: document.status || 'uploaded',
+      verification_status: document.verificationStatus || 'pending',
+      uploaded_by: document.uploadedById || null,
+    };
+
+    // Automated screening columns are additive (migration
+    // 20261005000000_document_automated_screening). Only include them when the
+    // service supplies a result, and fall back to the base row if the column
+    // set is not present yet, so the existing upload path never breaks on a
+    // database where the migration has not been applied.
+    const screeningRow = {};
+    if (document.screeningStatus !== undefined) screeningRow.screening_status = document.screeningStatus;
+    if (document.screeningReason !== undefined) screeningRow.screening_reason = document.screeningReason;
+    if (document.screeningQuality !== undefined) screeningRow.screening_quality = document.screeningQuality;
+    if (document.screeningOcrDetected !== undefined) screeningRow.screening_ocr_detected = document.screeningOcrDetected;
+    if (document.screeningCheckedAt !== undefined) screeningRow.screening_checked_at = document.screeningCheckedAt;
+
+    const insert = (row) => supabase.from(TABLES.documents).insert(row).select('*').single();
+    let { data, error } = await insert({ ...baseRow, ...screeningRow });
+    if (error && Object.keys(screeningRow).length && isMissingScreeningColumn(error)) {
+      ({ data, error } = await insert(baseRow));
+    }
     throwOnError(error, 'Could not create document record');
     return documentFromRow(data);
   },
@@ -1505,15 +1595,22 @@ export const supabaseRepository = {
 
   async updateDocument(id, patch) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase
+    const row = mapKeys(patch, DOCUMENT_TO_DB);
+    const update = (values) => supabase
       .from(TABLES.documents)
-      .update({
-        ...patch,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ ...values, updated_at: new Date().toISOString() })
       .eq('id', id)
       .select('*')
       .maybeSingle();
+    let { data, error } = await update(row);
+    if (error && isMissingScreeningColumn(error)) {
+      const legacyRow = Object.fromEntries(
+        Object.entries(row).filter(([column]) => !column.startsWith('screening_')),
+      );
+      if (Object.keys(legacyRow).length !== Object.keys(row).length) {
+        ({ data, error } = await update(legacyRow));
+      }
+    }
     throwOnError(error, 'Could not update document');
     if (!data) return null;
     return documentFromRow(data);
@@ -1612,6 +1709,119 @@ export const supabaseRepository = {
     return data;
   },
 
+  // ----- minor / guardian links ---------------------------------------------
+  async insertGuardianLink(link) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('resident_guardian_links')
+      .insert(guardianLinkToRow(link))
+      .select('*')
+      .single();
+    throwOnError(error, 'Could not create the guardian link');
+    return guardianLinkFromRow(data);
+  },
+
+  async getGuardianLink(id) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('resident_guardian_links')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    throwOnError(error, 'Could not load the guardian link');
+    return guardianLinkFromRow(data);
+  },
+
+  /**
+   * The minor's single ACTIVE (non-rejected) link, if any. The DB guarantees at
+   * most one via the partial unique index, but the service also guards this so
+   * a race between two writers still resolves to a 409 rather than a second
+   * active link.
+   */
+  async getActiveGuardianLinkForMinor(minorResidentId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('resident_guardian_links')
+      .select('*')
+      .eq('minor_resident_id', minorResidentId)
+      .not('verification_status', 'in', '("rejected","cancelled")')
+      .limit(1)
+      .maybeSingle();
+    throwOnError(error, 'Could not load the guardian link');
+    return guardianLinkFromRow(data);
+  },
+
+  /** All links for a minor, newest first (review/correction history). */
+  async listGuardianLinksForMinor(minorResidentId, { limit = 20 } = {}) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('resident_guardian_links')
+      .select('*')
+      .eq('minor_resident_id', minorResidentId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    throwOnError(error, 'Could not list guardian links');
+    return (data || []).map(guardianLinkFromRow);
+  },
+
+  /** Links where a given resident is recorded as the guardian. */
+  async listGuardianLinksForGuardian(guardianResidentId, { limit = 20 } = {}) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('resident_guardian_links')
+      .select('*')
+      .eq('guardian_resident_id', guardianResidentId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    throwOnError(error, 'Could not list guardian links');
+    return (data || []).map(guardianLinkFromRow);
+  },
+
+  async findResidentProfileByEmail(email) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from(TABLES.profiles)
+      .select('id, email, role, full_name')
+      .eq('email', String(email || '').trim().toLowerCase())
+      .in('role', ['resident', 'resident-limited'])
+      .limit(1)
+      .maybeSingle();
+    throwOnError(error, 'Could not resolve the guardian account');
+    return data
+      ? { id: data.id, email: data.email, role: data.role, fullName: data.full_name || '' }
+      : null;
+  },
+
+  async listGuardianLinksForAccount(authUserId, { limit = 20 } = {}) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('resident_guardian_links')
+      .select('*')
+      .eq('guardian_auth_user_id', authUserId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    throwOnError(error, 'Could not list guardian link requests');
+    return (data || []).map(guardianLinkFromRow);
+  },
+
+  async updateGuardianLink(id, patch) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('resident_guardian_links')
+      .update({ ...guardianLinkToRow(patch), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .maybeSingle();
+    throwOnError(error, 'Could not update the guardian link');
+    return guardianLinkFromRow(data);
+  },
+
+  async deleteGuardianLink(id) {
+    const supabase = getServiceClient();
+    const { error } = await supabase.from('resident_guardian_links').delete().eq('id', id);
+    throwOnError(error, 'Could not delete the guardian link');
+    return true;
+  },
 };
 
 export default supabaseRepository;

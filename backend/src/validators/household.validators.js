@@ -80,7 +80,7 @@ const validateMember = (member, index, errors) => {
   const contact = text(member?.contact);
   if (contact && !isPhonePH(contact)) errors[`${prefix}.contact`] = `Member ${index + 1}: contact number must be a valid PH mobile number.`;
 
-  return {
+  const normalized = {
     name,
     birthday: optionalText(member?.birthday, 10, `${prefix}.birthday`, `Member ${index + 1} birthday`, errors),
     age: member?.age === '' || member?.age === null || member?.age === undefined ? null : Number(member.age),
@@ -94,6 +94,25 @@ const validateMember = (member, index, errors) => {
     quarterStatus: text(member?.quarterStatus),
     ...(member?.residentId ? { residentId: text(member.residentId) } : {}),
   };
+  const newResident = member?.newResident || member?.new_resident;
+  if (newResident !== undefined) {
+    const firstName = text(newResident?.firstName || newResident?.first_name);
+    const lastName = text(newResident?.lastName || newResident?.last_name);
+    const birthDate = text(newResident?.birthDate || newResident?.birth_date);
+    if (!firstName) errors[`${prefix}.newResident.firstName`] = `Member ${index + 1}: resident first name is required.`;
+    if (!lastName) errors[`${prefix}.newResident.lastName`] = `Member ${index + 1}: resident last name is required.`;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || Number.isNaN(Date.parse(`${birthDate}T00:00:00.000Z`))) {
+      errors[`${prefix}.newResident.birthDate`] = `Member ${index + 1}: resident birthdate must be a valid date.`;
+    }
+    normalized.newResident = {
+      firstName,
+      lastName,
+      birthDate,
+      sex: text(newResident?.sex),
+      birthPlace: text(newResident?.birthPlace || newResident?.birth_place),
+    };
+  }
+  return normalized;
 };
 
 /** Shared field extraction for create (full) and update (partial) payloads. */

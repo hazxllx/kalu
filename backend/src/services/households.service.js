@@ -86,8 +86,8 @@ const outOfScope = (household, user) => {
 const VERIFICATION_FIELDS = ['verificationStatus', 'verifiedBy', 'verifiedAt', 'correctionReason'];
 
 /** Load a household and enforce scope; throws 404 when out of scope/absent. */
-const getScopedHousehold = async (id, user) => {
-  const household = await repository.getHousehold(id);
+const getScopedHousehold = async (id, user, repo = repository) => {
+  const household = await repo.getHousehold(id);
   if (!household || outOfScope(household, user)) {
     throw ApiError.notFound('Household not found');
   }
@@ -127,7 +127,7 @@ export const normalizeMembers = (members) => {
     const residentId = m.residentId === undefined || m.residentId === null || m.residentId === ''
       ? null
       : String(m.residentId).trim();
-    return {
+    const normalized = {
       name,
       birthday: text(m.birthday),
       age,
@@ -142,8 +142,42 @@ export const normalizeMembers = (members) => {
       isHead: text(m.relationship) === 'Head' || Boolean(m.isHead),
       ...(residentId ? { residentId } : {}),
     };
+    const newResident = m.newResident || m.new_resident;
+    if (newResident) {
+      normalized.newResident = {
+        firstName: text(newResident.firstName || newResident.first_name),
+        lastName: text(newResident.lastName || newResident.last_name),
+        birthDate: text(newResident.birthDate || newResident.birth_date),
+        sex: text(newResident.sex),
+        birthPlace: text(newResident.birthPlace || newResident.birth_place),
+      };
+    }
+    return normalized;
   });
   return { members: normalized, errors };
+};
+
+export const searchHouseholdResidents = async ({ user, q = '', repo = repository } = {}) => {
+  if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
+  const query = text(q);
+  if (!query) return [];
+  const barangay = assignedBarangay(user);
+  if (user.role === 'bhw' && !barangay) return [];
+  const result = await repo.listResidents({
+    q: query,
+    limit: 20,
+    barangay: barangay || null,
+    municipalityId: user?.municipalityId || null,
+  });
+  const rows = Array.isArray(result) ? result : result?.rows || [];
+  return rows.map((resident) => ({
+    residentId: resident.id,
+    firstName: resident.firstName || '',
+    lastName: resident.lastName || '',
+    birthDate: resident.birthDate || '',
+    verificationStatus: resident.verificationStatus || 'pending',
+    verified: resident.verificationStatus === 'approved',
+  }));
 };
 
 export const listHouseholds = async ({ user, q = '', barangay = '', limit = 50, offset = 0 } = {}) => {
@@ -197,6 +231,9 @@ export const createHousehold = async ({ user, payload = {} }) => {
   }
   const { members, errors: memberErrors } = normalizeMembers(payload.members);
   errors.push(...memberErrors);
+  if ((members || []).some((member) => member.newResident)) {
+    errors.push('Create new resident profiles through the household member endpoint after saving the household.');
+  }
   if (errors.length) throw ApiError.unprocessable('Please complete the required household fields.', errors);
 
   // Barangay must exist and be inside the caller's scope — never trusted.
@@ -207,6 +244,17 @@ export const createHousehold = async ({ user, payload = {} }) => {
   const barangayRow = await repository.findBarangayByName(barangayName, user?.municipalityId || null);
   if (!barangayRow) {
     throw ApiError.unprocessable(`Unknown barangay: ${barangayName}. It must belong to your municipality.`);
+  }
+  const memberResidentIds = (members || []).map((member) => member.residentId).filter(Boolean);
+  if (new Set(memberResidentIds).size !== memberResidentIds.length) {
+    throw ApiError.conflict('A resident can only be added once to this household.');
+  }
+  for (const residentId of memberResidentIds) {
+    const resident = await repository.getResident(residentId);
+    if (!resident || (resident.barangayId && resident.barangayId !== barangayRow.id)
+      || (!resident.barangayId && (resident.barangay || '').toLowerCase() !== barangayRow.name.toLowerCase())) {
+      throw ApiError.unprocessable('A linked resident must belong to the same barangay as the household.');
+    }
   }
 
   // Duplicate guard: same head + purok + street address within the barangay.
@@ -398,9 +446,9 @@ export const updateHousehold = async ({ id, user, patch = {} }) => {
   return full;
 };
 
-export const addHouseholdMember = async ({ id, user, member = {} }) => {
+export const addHouseholdMember = async ({ id, user, member = {}, repo = repository }) => {
   if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
-  const household = await getScopedHousehold(id, user);
+  const household = await getScopedHousehold(id, user, repo);
 
   const { members: normalized, errors } = normalizeMembers([member]);
   if (errors.length) throw ApiError.unprocessable('Please complete the member details.', errors);
@@ -409,23 +457,60 @@ export const addHouseholdMember = async ({ id, user, member = {} }) => {
   // Optional link to an existing resident — must exist AND belong to the same
   // barangay as the household (so a roster never mixes municipalities).
   let resident = null;
-  if (member.residentId) {
-    resident = await repository.getResident(member.residentId);
+  let residentId = newMember.residentId || null;
+  if (newMember.newResident) {
+    const profile = newMember.newResident;
+    const duplicate = await repo.findResidentByIdentity({
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      birthDate: profile.birthDate,
+    });
+    if (duplicate) {
+      throw ApiError.conflict('A resident with the same first name, last name, and birthdate already exists. Search for and link that resident instead.');
+    }
+    const barangay = await repo.findBarangayByName(household.barangay, household.municipalityId);
+    if (!barangay) throw ApiError.unprocessable('The household barangay could not be verified.');
+    const ids = await repo.nextResidentIds();
+    resident = await repo.insertResident({
+      ...ids,
+      firstName: profile.firstName,
+      middleName: '',
+      lastName: profile.lastName,
+      birthDate: profile.birthDate,
+      birthPlace: profile.birthPlace,
+      sex: profile.sex === 'Male' || profile.sex === 'Female' || profile.sex === 'Other' ? profile.sex : '',
+      barangay: barangay.name,
+      barangayId: barangay.id,
+      municipalityId: barangay.municipalityId,
+      verificationStatus: 'pending',
+      submittedForVerificationAt: new Date().toISOString(),
+      createdById: user.id,
+      createdByRole: user.role,
+    });
+    residentId = resident.id;
+    newMember.name = `${profile.firstName} ${profile.lastName}`;
+    if (!newMember.birthday) newMember.birthday = profile.birthDate;
+  } else if (residentId) {
+    resident = await repo.getResident(residentId);
     if (!resident) throw ApiError.notFound('Resident not found');
     if ((resident.barangay || '').toLowerCase() !== (household.barangay || '').toLowerCase()) {
       throw ApiError.unprocessable('That resident belongs to a different barangay than the household.');
     }
     // Duplicate membership check before hitting the unique constraint.
-    if ((household.members || []).some((m) => m.residentId === member.residentId)) {
+    if ((household.members || []).some((m) => m.residentId === residentId)) {
       throw ApiError.conflict('That resident is already a member of this household.');
     }
   }
 
-  const created = await repository.addHouseholdMember(household.id, {
+  if (residentId && (household.members || []).some((m) => m.residentId === residentId)) {
+    throw ApiError.conflict('That resident is already a member of this household.');
+  }
+  const created = await repo.addHouseholdMember(household.id, {
     ...newMember,
-    residentId: member.residentId || null,
+    residentId,
+    newResident: undefined,
   });
-  return { member: created, household: await repository.getHousehold(household.id) };
+  return { member: created, household: await repo.getHousehold(household.id) };
 };
 
 export const removeHouseholdMember = async ({ id, memberId, user }) => {
@@ -527,6 +612,7 @@ export const saveMemberHealth = async ({ id, memberId, user, payload = {} }) => 
 
 export default {
   listHouseholds,
+  searchHouseholdResidents,
   getHousehold,
   createHousehold,
   updateHousehold,

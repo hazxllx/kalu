@@ -14,6 +14,9 @@ node_modules
 *.log
 npm-debug.log*
 
+# OCR language data downloaded/cached at runtime by tesseract.js
+*.traineddata
+
 # OS / editor files
 .DS_Store
 Thumbs.db

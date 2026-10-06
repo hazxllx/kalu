@@ -39,6 +39,7 @@ export const approveValidator = (input = {}) => {
   const errors = {};
   const remarks = remarksField(input?.remarks, errors);
   if (Object.keys(errors).length) return invalid(errors);
+  // Verification status is set only by the authenticated reviewer decision route.
   return valid({ remarks });
 };
 
@@ -73,6 +74,21 @@ export const requestResubmissionValidator = (input = {}) => {
   return valid({ reason, remarks });
 };
 
+export const minorAlternativeReviewValidator = (input = {}) => {
+  const errors = {};
+  const decision = text(input?.decision);
+  const reason = text(input?.reason);
+  if (!['approved', 'rejected'].includes(decision)) {
+    errors.decision = 'Decision must be approved or rejected.';
+  }
+  if (reason.length > TEXT_LIMITS.notes) errors.reason = `Reason is too long (max ${TEXT_LIMITS.notes} characters).`;
+  if (decision === 'rejected' && reason.length < 5) {
+    errors.reason = 'A rejection reason of at least 5 characters is required.';
+  }
+  if (Object.keys(errors).length) return invalid(errors);
+  return valid({ decision, reason });
+};
+
 /** Legacy `POST /:ref/decision` body: { decision: 'approved'|'rejected', ... }. */
 export const decisionValidator = (input = {}) => {
   const decision = text(input?.decision).toLowerCase();
@@ -93,5 +109,6 @@ export default {
   approveValidator,
   rejectValidator,
   requestResubmissionValidator,
+  minorAlternativeReviewValidator,
   decisionValidator,
 };

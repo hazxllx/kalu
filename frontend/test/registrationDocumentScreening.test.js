@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   SLOT_STATUS,
+  SLOT_DOCUMENT_TYPE,
   REQUIRED_DOCUMENT_SLOTS,
   initialSlotState,
   initialScreeningState,
@@ -10,11 +11,17 @@ import {
   isSlotEligible,
   canSubmitDocuments,
   firstBlockingSlot,
+  isCurrentScreeningRequest,
+  updateSlotForCurrentRequest,
   slotStatusLabel,
   slotStatusTone,
   blockingSlotError,
 } from '../src/features/registration/documentScreening.js';
 import { isPasswordReuseError } from '../src/features/registration/passwordErrors.js';
+import {
+  normalizeRegistrationEmail,
+  signupResponseIssue,
+} from '../src/features/registration/signupResponse.js';
 import { isStrictMobile, digitsOnly } from '../src/utils/validation/index.js';
 
 /**
@@ -31,6 +38,12 @@ import { isStrictMobile, digitsOnly } from '../src/utils/validation/index.js';
 
 test('initial screening state has every required slot not_checked', () => {
   const state = initialScreeningState();
+  assert.deepEqual(SLOT_DOCUMENT_TYPE, {
+    governmentIdFront: 'government_id_front',
+    governmentIdBack: 'government_id_back',
+    identityPhoto: 'identity_photo',
+    proofOfResidency: 'proof_of_residency',
+  });
   for (const slot of REQUIRED_DOCUMENT_SLOTS) {
     assert.equal(state[slot].status, SLOT_STATUS.NOT_CHECKED);
   }
@@ -73,6 +86,7 @@ test('both front and back passed/eligible allows submission', () => {
   state.governmentIdFront = { status: SLOT_STATUS.PASSED };
   state.governmentIdBack = { status: SLOT_STATUS.FLAGGED };
   state.identityPhoto = { status: SLOT_STATUS.PASSED };
+  state.proofOfResidency = { status: SLOT_STATUS.PASSED };
   assert.equal(canSubmitDocuments(state), true);
   assert.equal(firstBlockingSlot(state), null);
 });
@@ -83,6 +97,7 @@ test('not_checked, checking and error all block submission (uploaded != verified
     state.governmentIdFront = { status };
     state.governmentIdBack = { status: SLOT_STATUS.PASSED };
     state.identityPhoto = { status: SLOT_STATUS.PASSED };
+    state.proofOfResidency = { status: SLOT_STATUS.PASSED };
     assert.equal(canSubmitDocuments(state), false, `${status} must block`);
   }
 });
@@ -98,6 +113,7 @@ test('replacement clears the old result and a new result is used independently',
   state.governmentIdFront = { status: SLOT_STATUS.PASSED };
   state.governmentIdBack = { status: SLOT_STATUS.PASSED };
   state.identityPhoto = { status: SLOT_STATUS.PASSED };
+  state.proofOfResidency = { status: SLOT_STATUS.PASSED };
   assert.equal(canSubmitDocuments(state), true);
 });
 
@@ -126,6 +142,157 @@ test('backend screening status maps to UI slot status', () => {
   assert.equal(slotStateFromScreening({ status: 'pending_manual_review' }).status, SLOT_STATUS.PASSED);
   assert.equal(slotStateFromScreening({ status: 'automated_flagged' }).status, SLOT_STATUS.FLAGGED);
   assert.equal(slotStateFromScreening({ status: 'automated_rejected' }).status, SLOT_STATUS.REJECTED);
+});
+
+test('review-ready and rejected UI states stay consistent with their current message', () => {
+  const reviewReady = slotStateFromScreening({
+    status: 'pending_manual_review',
+    reason: 'DOCUMENT_SIDE_INCONCLUSIVE',
+    message: 'We could not automatically identify this ID side. It may require staff review.',
+  });
+  assert.equal(slotStatusLabel(reviewReady), 'Ready for Review');
+  assert.doesNotMatch(reviewReady.message, /does not match/i);
+
+  const inconsistentLegacyResult = slotStateFromScreening({
+    status: 'pending_manual_review',
+    reason: 'DOCUMENT_TYPE_MISMATCH',
+    message: 'The uploaded document does not match the selected government ID type. Please upload the selected ID.',
+  });
+  assert.equal(inconsistentLegacyResult.status, SLOT_STATUS.REJECTED);
+  assert.equal(slotStatusLabel(inconsistentLegacyResult), 'Rejected — Action Required');
+  assert.match(blockingSlotError(inconsistentLegacyResult), /does not match/i);
+  assert.equal(inconsistentLegacyResult.result.status, 'automated_rejected');
+});
+
+test('an old screening response cannot overwrite the latest replacement request', () => {
+  assert.equal(isCurrentScreeningRequest(4, 4), true);
+  assert.equal(isCurrentScreeningRequest(3, 4), false);
+});
+
+test('replacing an identity photo invalidates its previous result and request', () => {
+  const previous = initialScreeningState();
+  previous.identityPhoto = slotStateFromScreening({
+    status: 'pending_manual_review',
+    reason: 'old-photo',
+    message: 'Old photo result',
+  }, 1);
+  const replacement = updateSlotForCurrentRequest(
+    previous,
+    'identityPhoto',
+    2,
+    2,
+    { ...initialSlotState(), status: SLOT_STATUS.CHECKING },
+  );
+  assert.equal(replacement.identityPhoto.status, SLOT_STATUS.CHECKING);
+  assert.equal(replacement.identityPhoto.result, null);
+  assert.equal(replacement.identityPhoto.requestId, 2);
+  assert.equal(updateSlotForCurrentRequest(
+    replacement,
+    'identityPhoto',
+    1,
+    2,
+    slotStateFromScreening({ status: 'automated_rejected', message: 'stale' }, 1),
+  ), replacement);
+});
+
+test('a delayed residency result or error updates only the residency upload slot', () => {
+  const state = initialScreeningState();
+  state.identityPhoto = slotStateFromScreening({
+    status: 'pending_manual_review',
+    reason: 'IMAGE_REQUIRES_MANUAL_REVIEW',
+    message: 'We could not automatically verify this photo. It may require staff review.',
+  }, 1);
+
+  const residencyResult = updateSlotForCurrentRequest(
+    state,
+    'proofOfResidency',
+    1,
+    1,
+    slotStateFromScreening({
+      status: 'automated_rejected',
+      reason: 'NO_DOCUMENT_INDICATORS',
+      message: 'Residency-specific rejection',
+    }, 1),
+  );
+  assert.equal(residencyResult.identityPhoto.message, state.identityPhoto.message);
+  assert.equal(residencyResult.proofOfResidency.status, SLOT_STATUS.REJECTED);
+
+  const residencyError = updateSlotForCurrentRequest(
+    residencyResult,
+    'proofOfResidency',
+    2,
+    2,
+    { ...initialSlotState(), status: SLOT_STATUS.ERROR, message: 'Residency request failed' },
+  );
+  assert.equal(residencyError.identityPhoto.status, SLOT_STATUS.PASSED);
+  assert.equal(residencyError.identityPhoto.message, state.identityPhoto.message);
+  assert.equal(residencyError.proofOfResidency.message, 'Residency request failed');
+});
+
+test('a delayed front-side response cannot overwrite the back-side result', () => {
+  const state = initialScreeningState();
+  state.governmentIdBack = slotStateFromScreening({
+    status: 'pending_manual_review',
+    reason: 'DOCUMENT_SIDE_INCONCLUSIVE',
+    message: 'Back-side review',
+  }, 1);
+  const next = updateSlotForCurrentRequest(
+    state,
+    'governmentIdFront',
+    3,
+    3,
+    slotStateFromScreening({
+      status: 'automated_rejected',
+      reason: 'NO_DOCUMENT_INDICATORS',
+      message: 'Front-side rejection',
+    }, 3),
+  );
+  assert.equal(next.governmentIdFront.status, SLOT_STATUS.REJECTED);
+  assert.equal(next.governmentIdBack.status, SLOT_STATUS.PASSED);
+  assert.equal(next.governmentIdBack.message, 'Back-side review');
+});
+
+test('registration email normalization trims whitespace and lowercases', () => {
+  assert.equal(normalizeRegistrationEmail('  Resident.Example@Example.COM  '), 'resident.example@example.com');
+});
+
+test('signup response explicitly identifies duplicate email errors and obfuscated users', () => {
+  assert.equal(signupResponseIssue({
+    error: { code: 'user_already_exists', message: 'User already registered' },
+    email: 'resident@example.com',
+  }), 'duplicate_email');
+  assert.equal(signupResponseIssue({
+    data: {
+      user: {
+        id: 'auth-user-id',
+        email: 'resident@example.com',
+        identities: [],
+      },
+    },
+    email: '  RESIDENT@EXAMPLE.COM  ',
+  }), 'duplicate_email');
+});
+
+test('signup response permits a valid new signup and fails closed on malformed data', () => {
+  assert.equal(signupResponseIssue({
+    data: {
+      user: {
+        id: 'auth-user-id',
+        email: 'resident@example.com',
+        identities: [{ identity_id: 'identity-id' }],
+      },
+    },
+    email: ' RESIDENT@EXAMPLE.COM ',
+  }), null);
+  assert.equal(signupResponseIssue({ data: {}, email: 'resident@example.com' }), 'invalid_response');
+  assert.equal(signupResponseIssue({
+    data: { user: { id: 'auth-user-id', email: 'resident@example.com' } },
+    email: 'resident@example.com',
+  }), 'invalid_response');
+  assert.equal(signupResponseIssue({
+    error: { message: 'Auth service unavailable' },
+    email: 'resident@example.com',
+  }), 'signup_failed');
 });
 
 // ---------------------------------------------------------------------------

@@ -72,7 +72,7 @@ export default function About() {
             transition={{ duration: 0.45, delay: 0.1 }}
             className="lg:sticky lg:top-28"
           >
-            <div className="gov-navy-panel gov-guilloche relative overflow-hidden text-white">
+            <div className="gov-landing-panel gov-landing-guilloche relative overflow-hidden text-white">
               <div className="px-8 py-9">
                 <Quote className="h-7 w-7 text-brand-goldlight/70" strokeWidth={1.6} />
                 <p className="mt-5 font-display text-[19px] leading-[1.6] text-white">

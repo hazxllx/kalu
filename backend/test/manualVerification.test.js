@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import repository from '../src/repositories/index.js';
 import * as service from '../src/services/verifications.service.js';
+import { rejectDirectStatusWrite } from '../src/routes/verifications.routes.js';
+import storageService from '../src/services/storage.service.js';
 
 /**
  * Manual resident verification service tests.
@@ -16,7 +18,9 @@ import * as service from '../src/services/verifications.service.js';
 const RESIDENTS = new Map();
 const LOGS = [];
 const PROFILE_STATUS = [];
+const DOCUMENTS = [];
 const original = {};
+const originalGetDocumentSignedUrl = storageService.getDocumentSignedUrl;
 
 const STUBBED = [
   'getResident',
@@ -26,6 +30,7 @@ const STUBBED = [
   'insertResidentVerificationLog',
   'listResidentVerificationLogs',
   'listRecentResidentVerificationLogs',
+  'listDocumentsByResident',
   'setProfileStatus',
 ];
 
@@ -88,20 +93,35 @@ before(() => {
   repository.listResidentVerificationLogs = async (residentId) =>
     LOGS.filter((l) => l.residentId === residentId).map((l) => ({ ...l }));
   repository.listRecentResidentVerificationLogs = async () => ({ rows: LOGS.map((l) => ({ ...l })), total: LOGS.length });
+  repository.listDocumentsByResident = async (residentId) =>
+    DOCUMENTS.filter((document) => document.residentId === residentId).map((document) => ({ ...document }));
   repository.setProfileStatus = async (profileId, status) => {
     PROFILE_STATUS.push({ profileId, status });
     return { id: profileId, status };
   };
+  storageService.getDocumentSignedUrl = async () => 'https://signed.example/document';
 });
 
 beforeEach(() => {
   RESIDENTS.clear();
   LOGS.length = 0;
   PROFILE_STATUS.length = 0;
+  storageService.getDocumentSignedUrl = async () => 'https://signed.example/document';
+  DOCUMENTS.length = 0;
+  DOCUMENTS.push({
+    id: 'DOC-1',
+    residentId: 'RES-000001',
+    documentType: 'proof_of_residency',
+    storagePath: 'resident-documents/RES-000001/DOC-1.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    screeningStatus: 'pending_manual_review',
+  });
 });
 
 after(() => {
   for (const key of STUBBED) repository[key] = original[key];
+  storageService.getDocumentSignedUrl = originalGetDocumentSignedUrl;
 });
 
 test('a new resident defaults to pending and appears in the pending queue', async () => {
@@ -128,6 +148,82 @@ test('a Health Supervisor can approve a pending resident and the account becomes
   assert.deepEqual(PROFILE_STATUS.at(-1), { profileId: 'user-1', status: 'active' });
 });
 
+test('approval requires an authenticated reviewer id', async () => {
+  RESIDENTS.set('RES-000001', makeResident());
+  await assert.rejects(
+    () => service.approve({ user: { ...HS, id: null }, id: 'RES-000001' }),
+    (error) => error.statusCode === 422,
+  );
+});
+
+test('approval stores reviewer and decision timestamp', async () => {
+  RESIDENTS.set('RES-000001', makeResident());
+  const result = await service.approve({ user: HS, id: 'RES-000001' });
+  assert.equal(result.verifiedBy, HS.id);
+  assert.ok(result.verifiedAt);
+});
+
+test('a complete resident remains pending until a reviewer decides', async () => {
+  RESIDENTS.set('RES-000001', makeResident({
+    firstName: 'Juan',
+    lastName: 'Dela Cruz',
+    birthDate: '1990-01-01',
+    sex: 'Male',
+    currentAddress: 'San Isidro',
+    barangay: 'San Isidro',
+    verificationStatus: 'pending',
+  }));
+  const { rows } = await service.listQueue({ user: HS, status: 'pending' });
+  assert.equal(rows[0].completeness, 'complete');
+  assert.equal(rows[0].status, 'pending');
+});
+
+test('completeness is false when the required proof-of-residency document is missing', async () => {
+  DOCUMENTS.length = 0;
+  RESIDENTS.set('RES-000001', makeResident());
+  const result = await service.getVerification({ user: HS, id: 'RES-000001' });
+  assert.equal(result.verification.completeness, 'incomplete');
+});
+
+test('completeness is false when the document storage path does not resolve', async () => {
+  RESIDENTS.set('RES-000001', makeResident());
+  storageService.getDocumentSignedUrl = async () => null;
+  const result = await service.getVerification({ user: HS, id: 'RES-000001' });
+  assert.equal(result.verification.completeness, 'incomplete');
+});
+
+test('completeness is true when the required document is present and valid', async () => {
+  RESIDENTS.set('RES-000001', makeResident());
+  const result = await service.getVerification({ user: HS, id: 'RES-000001' });
+  assert.equal(result.verification.completeness, 'complete');
+});
+
+test('completeness is false when screening rejected the document as unreadable', async () => {
+  RESIDENTS.set('RES-000001', makeResident());
+  DOCUMENTS[0].screeningStatus = 'automated_rejected';
+  const result = await service.getVerification({ user: HS, id: 'RES-000001' });
+  assert.equal(result.verification.completeness, 'incomplete');
+});
+
+test('completeness is false when document MIME or size is invalid', async () => {
+  RESIDENTS.set('RES-000001', makeResident());
+  DOCUMENTS[0].mimeType = 'application/octet-stream';
+  DOCUMENTS[0].sizeBytes = 1024 * 1024 * 11;
+  const result = await service.getVerification({ user: HS, id: 'RES-000001' });
+  assert.equal(result.verification.completeness, 'incomplete');
+});
+
+test('approval remains blocked when the resident verification is incomplete', async () => {
+  RESIDENTS.set('RES-000001', makeResident());
+  DOCUMENTS.length = 0;
+  await assert.rejects(
+    () => service.approve({ user: HS, id: 'RES-000001' }),
+    (error) => error.statusCode === 422,
+  );
+  assert.equal(RESIDENTS.get('RES-000001').verificationStatus, 'pending');
+  assert.equal(LOGS.length, 0);
+});
+
 test('approving an already approved resident is a conflict', async () => {
   RESIDENTS.set('RES-000001', makeResident({ verificationStatus: 'approved' }));
   await assert.rejects(() => service.approve({ user: HS, id: 'RES-000001' }), (e) => e.statusCode === 409);
@@ -135,8 +231,16 @@ test('approving an already approved resident is a conflict', async () => {
 
 test('rejecting requires a reason', async () => {
   RESIDENTS.set('RES-000001', makeResident());
-  await assert.rejects(() => service.reject({ user: HS, id: 'RES-000001', reason: '  ' }), (e) => e.statusCode === 400);
+  await assert.rejects(() => service.reject({ user: HS, id: 'RES-000001', reason: '  ' }), (e) => e.statusCode === 422);
   assert.equal(LOGS.length, 0);
+});
+
+test('rejecting requires an authenticated reviewer id', async () => {
+  RESIDENTS.set('RES-000001', makeResident());
+  await assert.rejects(
+    () => service.reject({ user: { ...HS, id: null }, id: 'RES-000001', reason: 'Invalid information' }),
+    (error) => error.statusCode === 422,
+  );
 });
 
 test('rejecting records the reason and keeps the account limited', async () => {
@@ -170,6 +274,36 @@ test('a resident can resubmit their own rejected registration and it returns to 
   assert.equal(LOGS[0].previousStatus, 'rejected');
   assert.equal(LOGS[0].newStatus, 'pending');
   assert.equal(LOGS[0].reviewedBy, null);
+});
+
+test('resubmission records the authenticated submitter when none is recorded', async () => {
+  RESIDENTS.set('RES-000001', makeResident({
+    authUserId: RESIDENT.id,
+    verificationStatus: 'rejected',
+    verificationSubmittedBy: null,
+  }));
+  const result = await service.resubmit({ user: RESIDENT, id: 'RES-000001' });
+  assert.equal(result.verificationSubmittedBy, RESIDENT.id);
+});
+
+test('resubmission preserves the original verification submitter', async () => {
+  RESIDENTS.set('RES-000001', makeResident({
+    authUserId: RESIDENT.id,
+    verificationStatus: 'rejected',
+    verificationSubmittedBy: 'original-submitter',
+  }));
+  const result = await service.resubmit({ user: RESIDENT, id: 'RES-000001' });
+  assert.equal(result.verificationSubmittedBy, 'original-submitter');
+});
+
+test('mutation route rejects a client-supplied verification_status with 403', () => {
+  let nextError;
+  rejectDirectStatusWrite(
+    { body: { verification_status: 'approved' } },
+    {},
+    (error) => { nextError = error; },
+  );
+  assert.equal(nextError.statusCode, 403);
 });
 
 test('a resident cannot resubmit another resident’s registration', async () => {

@@ -23,7 +23,8 @@ const env = {
   clientUrls: (process.env.CLIENT_URL || process.env.CORS_ORIGIN || 'http://localhost:5173')
     .split(',')
     .map((origin) => origin.trim())
-    .filter(Boolean),
+    .filter(Boolean)
+    .map((origin) => new URL(origin).origin),
 
   // --- Supabase (server side) ------------------------------------------------
   // The service-role key bypasses Row Level Security, so it lives ONLY here on

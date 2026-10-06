@@ -75,7 +75,7 @@ const formatDate = (iso) => {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 };
 
-export default function VerificationBanner() {
+export default function VerificationBanner({ showVerificationMethod = false }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -276,6 +276,17 @@ export default function VerificationBanner() {
                 <p className="mt-2 text-xs text-brand-gray">
                   Submitted on <span className="font-medium text-brand-ink">{formatDate(verification.submittedAt)}</span>
                   {verification.barangay ? ` · Barangay ${verification.barangay}` : ""}
+                </p>
+              )}
+              {showVerificationMethod && verification?.minorVerificationMethod && (
+                <p className="mt-1 text-xs text-brand-gray">
+                  Verification method: <span className="font-medium text-brand-ink">
+                    {verification.minorVerificationMethod === "student_id"
+                      ? "Student ID"
+                      : verification.minorVerificationMethod === "staff_alternative"
+                        ? "Staff-approved alternative"
+                        : verification.minorVerificationMethod.replace(/_/g, " ")}
+                  </span>
                 </p>
               )}
 

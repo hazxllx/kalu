@@ -20,8 +20,11 @@
     "cors": "2.8.5",
     "dotenv": "16.4.7",
     "express": "4.22.2",
+    "jpeg-js": "^0.4.4",
     "multer": "^2.4.0",
-    "nodemailer": "^10.0.10"
+    "nodemailer": "^10.0.10",
+    "pngjs": "^7.0.0",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "nodemon": "3.1.10"

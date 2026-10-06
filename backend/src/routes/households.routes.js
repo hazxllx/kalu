@@ -42,6 +42,7 @@ const params = validate(householdParamsValidator, 'params');
 router.get('/', authorize(HOUSEHOLD_ROLES), asyncHandler(householdsController.listHouseholds));
 router.post('/', authorize(HOUSEHOLD_ROLES), validate(createHouseholdValidator), asyncHandler(householdsController.createHousehold));
 
+router.get('/residents/search', authorize(HOUSEHOLD_ROLES), asyncHandler(householdsController.searchResidents));
 router.get('/:id', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.getHousehold));
 router.put('/:id', authorize(HOUSEHOLD_ROLES), params, validate(updateHouseholdValidator), asyncHandler(householdsController.updateHousehold));
 

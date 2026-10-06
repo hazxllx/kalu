@@ -1,10 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { CalendarClock, ShieldCheck, Stethoscope, ShieldAlert, Activity } from "lucide-react";
+import { CalendarClock, ShieldCheck, Stethoscope, Activity } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import VerificationBadge from "@/features/verification/components/VerificationBadge";
-import VerificationModal from "@/features/verification/components/VerificationModal";
 import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import { residentsApi, residentFollowUpsApi, referralsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
@@ -37,7 +35,6 @@ const riskTone = (risk) => {
 
 export default function ResidentDashboard() {
   const { user } = useAuth();
-  const [verifyModal, setVerifyModal] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [health, setHealth] = useState(null); // { resident, riskLevel, lastConsultationDate, consultations }
@@ -66,10 +63,6 @@ export default function ResidentDashboard() {
 
   const displayName = user?.name || health?.resident?.name || "Resident";
   const first = displayName.split(" ")[0];
-
-  // Verification status comes from the resident's real record, not a hardcoded flag.
-  const verificationStatus = health?.resident?.verificationStatus || user?.status || "";
-  const verified = ["verified", "approved", "active"].includes(String(verificationStatus).toLowerCase());
 
   // Next approved/confirmed upcoming follow-up (earliest future/today date).
   const upcomingFollowUp = useMemo(() => {
@@ -136,34 +129,11 @@ export default function ResidentDashboard() {
     <>
       <PageHeader
         crumbs={["Dashboard"]}
-        title={<span className="flex items-center gap-3">Welcome back, {first} <VerificationBadge status={verified ? "verified" : "pending"} /></span>}
+        title={`Welcome back, ${first}`}
         subtitle="Here's an overview of your health at a glance."
       />
 
       <TransferStatusBanner />
-
-      {!verified && (
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-          <div className="bg-brand-yellow/10 border border-brand-yellow/20 rounded-2xl p-5 flex items-start gap-4">
-            <div className="w-10 h-10 rounded-xl bg-brand-yellow/20 flex items-center justify-center shrink-0">
-              <ShieldAlert className="w-5 h-5 text-[#B07E00]" strokeWidth={1.8} />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-heading font-semibold text-brand-ink">Account Verification Required</h3>
-              <p className="mt-1 text-sm text-brand-gray">
-                Some features remain unavailable until your Barangay Health Worker completes your verification.
-              </p>
-            </div>
-            <button
-              onClick={() => setVerifyModal(true)}
-              className="shrink-0 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
-            >
-              View Verification Status
-            </button>
-          </div>
-        </motion.div>
-      )}
-
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {cards.map((c, i) => (
@@ -245,8 +215,6 @@ export default function ResidentDashboard() {
           </div>
         </Card>
       </div>
-
-      <VerificationModal open={verifyModal} onClose={() => setVerifyModal(false)} />
     </>
   );
 }

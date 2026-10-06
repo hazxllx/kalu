@@ -4,6 +4,7 @@ import { useCertificateMeta } from "@/features/certificates/hooks/useCertificate
 import { medicalCertificatesApi } from "@/services/api";
 import MedicalCertificateDocument from "./MedicalCertificateDocument";
 import { useCertificatePrint } from "./useCertificatePrint.jsx";
+import { useDocumentBranding } from "@/lib/documentBranding";
 import { useAuth } from "@/context/AuthContext";
 import { X, FileText, Printer, CheckCircle2, ClipboardCheck, Ban, Send, RefreshCw, Loader2 } from "lucide-react";
 
@@ -96,7 +97,8 @@ const [form, setForm] = useState(() => /** @type {Record<string, any>} */ ({
 const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
 const [actionNotes, setActionNotes] = useState("");
 const [busy, setBusy] = useState("");
-const { printCertificate, portal } = useCertificatePrint();
+const { printCertificate, portal, brandingError } = useCertificatePrint();
+const { branding } = useDocumentBranding("medical_certificate");
 
   const isCreate = mode === "create";
   const isEdit = mode === "edit";
@@ -194,6 +196,7 @@ const { printCertificate, portal } = useCertificatePrint();
                 <X className="h-5 w-5" />
               </button>
             </div>
+            {brandingError && <p role="alert" className="mt-3 text-sm text-brand-danger">{brandingError}</p>}
           </div>
 
           {isFormMode ? (
@@ -265,7 +268,7 @@ const { printCertificate, portal } = useCertificatePrint();
             <div className="mt-4 space-y-5">
               {/* Formal A4 certificate document (official layout) */}
               <div className="max-h-[52vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-3 dark:border-border dark:bg-background">
-                <MedicalCertificateDocument certificate={view} signatoryName={signatoryName} />
+                <MedicalCertificateDocument certificate={view} signatoryName={signatoryName} branding={branding} />
               </div>
 
               {/* Reviewer decisions (PHN / MHO) */}

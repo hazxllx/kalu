@@ -38,7 +38,7 @@ const steps = [
 
 export default function HowItWorks() {
   return (
-    <section id="how-it-works" className="gov-navy-panel gov-guilloche relative py-20 text-white md:py-24">
+    <section id="how-it-works" className="gov-landing-panel gov-landing-guilloche relative py-20 text-white md:py-24">
       <div className="mx-auto max-w-content px-5 md:px-8">
         <SectionHeading
           kicker="Getting Started"

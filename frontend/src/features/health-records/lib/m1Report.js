@@ -1,5 +1,6 @@
 import { buildM1FhsisModel } from "./m1FhsisFormModel.js";
 import { renderM1FhsisPdf } from "./m1FhsisPdfRenderer.js";
+import { loadDocumentBranding } from "@/lib/documentBranding";
 
 /**
  * KALUSAGAP — FHSIS M1 Complete 9-Page Report
@@ -40,9 +41,10 @@ const MONTH_LABELS = [
  * @param {number} args.year
  * @param {number} args.month        1-12
  */
-export const renderM1FhsisDoc = ({ monthlyData = {}, meta = null, barangay = "", year, month }) => {
+export const renderM1FhsisDoc = async ({ monthlyData = {}, meta = null, barangay = "", year, month }) => {
   const model = buildM1FhsisModel(monthlyData, meta || {}, { year, month, barangay });
-  return renderM1FhsisPdf(model);
+  const branding = await loadDocumentBranding("fhsis_m1");
+  return renderM1FhsisPdf(model, branding);
 };
 
 /**
@@ -50,8 +52,8 @@ export const renderM1FhsisDoc = ({ monthlyData = {}, meta = null, barangay = "",
  *
  * @param {object} args — same as renderM1FhsisDoc
  */
-export const downloadM1FhsisReport = ({ monthlyData = {}, meta = null, barangay = "", year, month } = {}) => {
-  const doc = renderM1FhsisDoc({ monthlyData, meta, barangay, year, month });
+export const downloadM1FhsisReport = async ({ monthlyData = {}, meta = null, barangay = "", year, month } = {}) => {
+  const doc = await renderM1FhsisDoc({ monthlyData, meta, barangay, year, month });
   const safeBarangay = str(barangay).replace(/[^\w-]+/g, "_") || "all-barangays";
   const suffix = `${year}-${String(month ?? 1).padStart(2, "0")}`;
   doc.save(`M1-FHSIS-Report-${safeBarangay}-${suffix}.pdf`);

@@ -20,7 +20,7 @@ export const downloadM1Fhsis = async ({ year, month, barangay }) => {
     m1Api.getMeta({ year, month }).catch(() => null),
   ]);
   
-  downloadM1FhsisReport({ monthlyData, meta, barangay, year, month });
+  await downloadM1FhsisReport({ monthlyData, meta, barangay, year, month });
 };
 
 export default { downloadM1Fhsis };

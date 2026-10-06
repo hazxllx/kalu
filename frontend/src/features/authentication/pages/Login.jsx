@@ -73,11 +73,11 @@ export default function Login() {
 
   return (
     <div className="relative flex min-h-dvh w-full flex-col items-center justify-center gov-navy-panel px-4 py-5 sm:py-7">
-      <div className="pointer-events-none absolute inset-0 gov-guilloche opacity-60" aria-hidden="true" />
+      <div className="pointer-events-none absolute inset-0 gov-guilloche opacity-50" aria-hidden="true" />
       <div
         className="pointer-events-none absolute inset-0"
         aria-hidden="true"
-        style={{ backgroundImage: "radial-gradient(60% 45% at 50% 0%, rgba(255,255,255,0.10), transparent 70%)" }}
+        style={{ backgroundImage: "var(--auth-pattern-sparkle)" }}
       />
 
       <motion.div

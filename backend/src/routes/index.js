@@ -26,6 +26,8 @@ import healthServicesRoutes from './healthServices.routes.js';
 import rolesRoutes from './roles.routes.js';
 import municipalSubmissionsRoutes from './municipalSubmissions.routes.js';
 import riskConfigRoutes from './riskConfig.routes.js';
+import guardianLinksRoutes from './guardianLinks.routes.js';
+import documentBrandingRoutes from './documentBranding.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -103,6 +105,9 @@ router.use('/roles', rolesRoutes);
 // resident records on every change.
 router.use('/risk-config', riskConfigRoutes);
 
+// Official logo administration and centralized document-template branding.
+router.use('/document-branding', documentBrandingRoutes);
+
 // MHO municipal submission review (BUG-010) — persistent review decisions in
 // public.municipal_submission_reviews (MHO-only writes, municipality-scoped).
 router.use('/municipal-submissions', municipalSubmissionsRoutes);
@@ -137,6 +142,12 @@ router.use('/analytics', analyticsRoutes);
 // Resident document upload and review
 router.use(documentsRoutes);
 router.use(transferRoutes);
+
+// Minor / parent-or-guardian linking (Phase 2.2): create pending links for
+// minors, staff review (verify/reject) and correction. Staff are scoped to
+// their barangay/municipality; the minor's own account may only link its own
+// record. A link never grants the guardian access to the minor's records.
+router.use('/guardian-links', guardianLinksRoutes);
 
 // Notifications are served by the real operational router at
 // `/operational/notifications` (notifications table), which enforces

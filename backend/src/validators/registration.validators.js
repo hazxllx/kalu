@@ -3,13 +3,13 @@ import {
   NAME_SUFFIXES,
   SEX_OPTIONS,
   TEXT_LIMITS,
-  ageFromDate,
+  ageFromDateOnly,
   isEmail,
-  isFutureDate,
+  isFutureDateOnly,
   isStrictMobile,
+  normalizeEmail,
   toZone,
   invalid,
-  parseDate,
   text,
   valid,
 } from './common.js';
@@ -47,11 +47,24 @@ export const registerResidentValidator = (input = {}) => {
 
   const birthDate = text(body.birthDate);
   if (!birthDate) errors.birthDate = 'Date of birth is required.';
-  else if (!parseDate(birthDate)) errors.birthDate = 'Date of birth is invalid.';
-  else if (isFutureDate(birthDate)) errors.birthDate = 'Date of birth cannot be in the future.';
+  else if (ageFromDateOnly(birthDate) === null) errors.birthDate = 'Date of birth is invalid.';
+  else if (isFutureDateOnly(birthDate)) errors.birthDate = 'Date of birth cannot be in the future.';
   else {
-    const age = ageFromDate(birthDate);
+    const age = ageFromDateOnly(birthDate);
     if (age === null || age < 0 || age > 120) errors.birthDate = 'Date of birth is not a valid age.';
+  }
+  const isMinor = ageFromDateOnly(birthDate) !== null && ageFromDateOnly(birthDate) < 18;
+  const minorVerificationMethod = text(body.minorVerificationMethod);
+  const guardianLinkChoice = text(body.guardianLinkChoice);
+  if (isMinor && !['student_id', 'staff_alternative'].includes(minorVerificationMethod)) {
+    errors.minorVerificationMethod = 'Select a student ID or request staff-approved alternative verification.';
+  } else if (!isMinor && minorVerificationMethod) {
+    errors.minorVerificationMethod = 'Minor verification options are only available to applicants under 18.';
+  }
+  if (isMinor && !['skip', 'request'].includes(guardianLinkChoice)) {
+    errors.guardianLinkChoice = 'Choose whether to skip or request parent/guardian linking.';
+  } else if (!isMinor && guardianLinkChoice) {
+    errors.guardianLinkChoice = 'Parent/guardian linking is only available to applicants under 18.';
   }
 
   const sex = text(body.sex);
@@ -114,6 +127,8 @@ export const registerResidentValidator = (input = {}) => {
     barangay,
     ...(zone === null ? {} : { zone }),
     ...(residentId ? { residentId } : {}),
+    ...(isMinor ? { minorVerificationMethod } : {}),
+    ...(isMinor ? { guardianLinkChoice } : {}),
     ...(sms === undefined ? {} : { smsUpdates: Boolean(sms) }),
   };
 
@@ -126,7 +141,7 @@ export const registerResidentValidator = (input = {}) => {
  * (kept here so registration and auth rules cannot drift).
  */
 export const emailValidator = (value, field = 'email', label = 'Email') => {
-  const out = text(value);
+  const out = normalizeEmail(value);
   if (!out) return `${label} is required.`;
   if (!isEmail(out)) return 'Please enter a valid email address.';
   return '';

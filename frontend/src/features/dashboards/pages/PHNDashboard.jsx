@@ -1,49 +1,52 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+
 import PageHeader from "@/components/common/PageHeader";
-import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
-import StatusBadge from "@/components/common/StatusBadge";
-import {
-  REFERRAL_STATUSES,
-  phnAlerts,
-} from "@/services/local/phnData";
-import {
-  useWorkflowStore,
-  patchReferral,
-  workflowHelpers,
-} from "@/services/local/workflowStore";
-import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
-import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
-import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
-import { usePhnCoverage } from "@/context/PhnCoverageContext";
-import { riskOfPatient } from "@/lib/riskRules";
+import ErrorState from "@/components/common/ErrorState";
+import EmptyState from "@/components/common/EmptyState";
+import { Skeleton, SkeletonTable } from "@/components/common/Skeleton";
 import { useAuth } from "@/context/AuthContext";
+import { usePhnCoverage } from "@/context/PhnCoverageContext";
+import { filterRowsByScope } from "@/lib/phnScope";
+import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
+import { riskOfPatient } from "@/lib/riskRules";
 import {
-  Users, Activity, CalendarClock, ClipboardList, X, CheckCircle2, ChevronRight, Clock, Bell, UserPlus,
+  countFollowUpsDue,
+  countPendingReferrals,
+  formatManilaLongDate,
+  isPendingReferral,
+  mapFollowUpRow,
+  mapHighRiskResident,
+  mapReferralRow,
+  queueCounts,
+  sortQueueByRisk,
+} from "@/lib/phnDashboard";
+import { usePhnDashboardData } from "@/features/dashboards/hooks/usePhnDashboardData";
+import {
+  Activity,
+  AlertTriangle,
+  CalendarClock,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardList,
+  Clock,
+  RefreshCw,
+  Send,
+  TrendingUp,
+  UserPlus,
+  Users,
 } from "lucide-react";
 
-const REFERRAL_STATUS_TONES = {
-  "For Review": "bg-amber-50 text-amber-700",
-  Accepted: "bg-emerald-50 text-emerald-700",
-  Pending: "bg-amber-50 text-amber-700",
-  "Follow-up Required": "bg-brand-accent/10 text-brand-accent",
-  Completed: "bg-emerald-50 text-emerald-700",
-};
+/* --------------------------------- Styling -------------------------------- */
 
-const FOLLOWUP_STATUS_TONES = {
-  Scheduled: "bg-brand-blue/10 text-brand-blue",
-  "Due Today": "bg-brand-accent/10 text-brand-accent",
-  Overdue: "bg-rose-50 text-rose-700",
-  Completed: "bg-emerald-50 text-emerald-700",
-  Cancelled: "bg-slate-100 text-slate-600",
-};
-
-const QUEUE_STATUS_TONES = {
-  "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
-  "In Check-up": "bg-brand-blue/10 text-brand-blue",
-  "Consultation Completed": "bg-emerald-50 text-emerald-700",
+const KPI_TONES = {
+  accent: "bg-brand-accent/10 text-brand-accent",
+  blue: "bg-brand-blue/10 text-brand-blue",
+  yellow: "bg-brand-yellow/15 text-[#B07E00]",
+  danger: "bg-brand-danger/10 text-brand-danger",
+  green: "bg-brand-green/10 text-brand-green",
 };
 
 const RISK_TONES = {
@@ -52,16 +55,37 @@ const RISK_TONES = {
   Low: "bg-brand-green/10 text-brand-green",
 };
 
-const ALERT_LEVELS = {
-  critical: { dot: "bg-red-500", tone: "bg-brand-danger/10 text-brand-danger", label: "Critical" },
-  warning: { dot: "bg-amber-400", tone: "bg-brand-yellow/15 text-[#B07E00]", label: "Warning" },
+const FOLLOWUP_STATUS_TONES = {
+  Overdue: "bg-brand-danger/10 text-brand-danger",
+  Today: "bg-brand-accent/10 text-brand-accent",
+  Scheduled: "bg-brand-blue/10 text-brand-blue",
+  Upcoming: "bg-brand-gray/10 text-brand-gray",
+  Ongoing: "bg-brand-blue/10 text-brand-blue",
+  Missed: "bg-brand-danger/10 text-brand-danger",
+  Completed: "bg-brand-green/10 text-brand-green",
+  Cancelled: "bg-brand-gray/10 text-brand-gray",
+  Rejected: "bg-brand-gray/10 text-brand-gray",
+};
+
+const REFERRAL_STATUS_TONES = {
+  Pending: "bg-brand-yellow/15 text-[#B07E00]",
+  Accepted: "bg-brand-blue/10 text-brand-blue",
+  "In Progress": "bg-brand-accent/10 text-brand-accent",
+  Completed: "bg-brand-green/10 text-brand-green",
+  Cancelled: "bg-brand-gray/10 text-brand-gray",
+};
+
+const REFERRAL_PRIORITY_TONES = {
+  High: "bg-brand-danger/10 text-brand-danger",
+  Medium: "bg-brand-yellow/15 text-[#B07E00]",
+  Low: "bg-brand-green/10 text-brand-green",
 };
 
 const QUICK_ACTIONS = [
   { icon: UserPlus, label: "PHN Check-ups", path: "/app/phn/consultations" },
   { icon: ClipboardList, label: "Review Referrals", path: "/app/phn/referrals" },
   { icon: CalendarClock, label: "View Follow-ups", path: "/app/phn/followups" },
-  { icon: Activity, label: "View Reports", path: "/app/phn/reports" },
+  { icon: TrendingUp, label: "View Reports", path: "/app/phn/reports" },
 ];
 
 const welcomeFor = (user) => {
@@ -69,60 +93,127 @@ const welcomeFor = (user) => {
   return first ? `Welcome, Nurse ${first}` : "Welcome, Nurse";
 };
 
+/* ------------------------------- Primitives ------------------------------- */
+
+function Pill({ value, tones }) {
+  const tone = tones[value] || "bg-slate-100 text-slate-600";
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${tone}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+      {value}
+    </span>
+  );
+}
+
+function SectionHeader({ title, subtitle, action = null, icon: Icon = null }) {
+  return (
+    <div className="mb-4 flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h3 className="text-sm font-semibold text-brand-ink sm:text-base">{title}</h3>
+        {subtitle && <p className="mt-0.5 text-xs text-brand-gray">{subtitle}</p>}
+      </div>
+      {action ||
+        (Icon ? <Icon className="h-4 w-4 shrink-0 text-brand-gray" strokeWidth={1.8} /> : null)}
+    </div>
+  );
+}
+
+/**
+ * A compact, actionable priority indicator.
+ *
+ * Renders the real count only when its request succeeded. While loading it
+ * shows a placeholder; on failure it shows an error affordance that retries the
+ * exact failed request instead of a misleading zero.
+ */
+function KpiCard({ icon: Icon, label, value, hint, tone, loading, error, onClick, onRetry, index = 0 }) {
+  const failed = Boolean(error);
+  return (
+    <motion.button
+      type="button"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.04, duration: 0.3 }}
+      onClick={failed ? onRetry : onClick}
+      aria-label={failed ? `Retry loading ${label}` : `${label}: ${loading ? "loading" : value}`}
+      className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-card transition-colors hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${KPI_TONES[tone]}`}>
+          <Icon className="h-[18px] w-[18px]" strokeWidth={1.9} />
+        </span>
+        {failed ? (
+          <RefreshCw className="h-4 w-4 text-brand-danger" strokeWidth={1.9} />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-slate-300" strokeWidth={1.9} />
+        )}
+      </div>
+
+      {loading ? (
+        <Skeleton className="mt-3 h-7 w-12" />
+      ) : failed ? (
+        <span className="mt-3 text-2xl font-stat font-extrabold text-slate-300">—</span>
+      ) : (
+        <span className="mt-3 text-2xl font-stat font-extrabold tracking-tight text-slate-900">{value}</span>
+      )}
+
+      <span className="mt-1 text-sm font-medium text-slate-700">{label}</span>
+      {loading ? (
+        <Skeleton className="mt-1 h-3 w-16" />
+      ) : failed ? (
+        <span className="mt-0.5 text-[11px] text-brand-danger">Couldn’t load — tap to retry</span>
+      ) : hint ? (
+        <span className="mt-0.5 text-[11px] text-brand-gray">{hint}</span>
+      ) : null}
+    </motion.button>
+  );
+}
+
+/** A work section that always communicates loading, error (with retry) and empty. */
+function WorkSection({ title, subtitle, icon, onViewAll, loading, error, onRetry, isEmpty, emptyText, children }) {
+  return (
+    <Card className="p-4 sm:p-5">
+      <SectionHeader
+        title={title}
+        subtitle={subtitle}
+        icon={icon}
+        action={
+          onViewAll ? (
+            <button
+              type="button"
+              onClick={onViewAll}
+              className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
+            >
+              View all <ChevronRight className="h-4 w-4" />
+            </button>
+          ) : null
+        }
+      />
+
+      {loading ? (
+        <div className="space-y-2.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-full rounded-btn" />
+          ))}
+        </div>
+      ) : error ? (
+        <ErrorState title="Couldn’t load this section" message={error} onRetry={onRetry} className="py-6" />
+      ) : isEmpty ? (
+        <p className="py-6 text-center text-sm text-brand-gray">{emptyText}</p>
+      ) : (
+        <div className="space-y-2.5">{children}</div>
+      )}
+    </Card>
+  );
+}
+
+/* -------------------------------- Dashboard ------------------------------- */
+
 export default function PHNDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  // PHNs are RHU-based personnel. The dashboard always reflects the RHU
-  // workflow — patients may come from any barangay (BHWs / health centers
-  // refer them to the RHU), so no row is hidden by residence barangay.
   const { coverage } = usePhnCoverage();
-  const welcome = welcomeFor(user);
-  const subtitle = "Today's health summary across check-ups, referrals, follow-ups, and community services.";
+  const { queue, followUps, referrals, residents } = usePhnDashboardData();
 
-  const store = useWorkflowStore();
-  // BUG-008: the check-up pipeline is the persistent DB-backed PHN queue.
-  // Referrals/follow-ups remain on their existing collections.
-  const { patients: workflowPatients, startCheckup } = usePhnWorkflow({ source: "queue" });
-
-  // Every collection below is the RHU workflow (already RHU-scoped by the
-  // datasets feeding the pages); counts are rendered straight from them.
-  const allPatients = useMemo(
-    () => filterRowsByScope(workflowPatients, user, coverage),
-    [workflowPatients, user, coverage]
-  );
-  const visibleQueue = useMemo(
-    () => allPatients.filter((p) => p.status === CHECKUP_STATUS.WAITING),
-    [allPatients]
-  );
-  const visibleInCheckup = useMemo(
-    () => allPatients.filter((p) => p.status === CHECKUP_STATUS.IN_CHECKUP),
-    [allPatients]
-  );
-  const visibleCompleted = useMemo(
-    () => allPatients.filter((p) => p.status === CHECKUP_STATUS.COMPLETED),
-    [allPatients]
-  );
-  const visibleReferrals = useMemo(
-    () => filterRowsByScope(store.referrals, user, coverage),
-    [store.referrals, user, coverage]
-  );
-  const visibleFollowUps = useMemo(
-    () => filterRowsByScope(store.followUps, user, coverage),
-    [store.followUps, user, coverage]
-  );
-  const visibleAlerts = useMemo(
-    () => filterRowsByScope(phnAlerts, user, coverage),
-    [user, coverage]
-  );
-  const visibleServices = useMemo(
-    () => filterRowsByScope(store.services, user, coverage),
-    [store.services, user, coverage]
-  );
-
-  const [reviewReferral, setReviewReferral] = useState(null);
-  const [referralStatus, setReferralStatus] = useState("");
-  const [alertDetail, setAlertDetail] = useState(null);
-  const [servicesModal, setServicesModal] = useState(false);
   const [toast, setToast] = useState(null);
 
   const showToast = (message) => {
@@ -130,94 +221,58 @@ export default function PHNDashboard() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const anyModalOpen = Boolean(reviewReferral || alertDetail || servicesModal);
+  const today = useMemo(() => formatManilaLongDate(), []);
 
-  useEffect(() => {
-    if (!anyModalOpen) return undefined;
-    document.body.style.overflow = "hidden";
-    const onKey = (e) => {
-      if (e.key !== "Escape") return;
-      setReviewReferral(null);
-      setAlertDetail(null);
-      setServicesModal(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = "";
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [anyModalOpen]);
+  // Patients in the persistent RHU → PHN pipeline (municipality-scoped by the
+  // backend; the PHN is RHU-based and not limited by residence barangay).
+  const scopedPatients = useMemo(
+    () => filterRowsByScope(queue.patients, user, coverage),
+    [queue.patients, user, coverage]
+  );
+  const counts = useMemo(() => queueCounts(scopedPatients), [scopedPatients]);
+  const waitingQueue = useMemo(
+    () => sortQueueByRisk(scopedPatients.filter((p) => p.status === CHECKUP_STATUS.WAITING)),
+    [scopedPatients]
+  );
 
-  // PHNs are RHU-based — the right rail always shows the RHU check-up
-  // progress summary.
-  const stats = useMemo(() => {
-    const today = workflowHelpers.todayLong();
-    return [
-      {
-        icon: "Users",
-        label: "Patients for Check-up",
-        value: String(visibleQueue.length),
-        tone: "accent",
-        onClick: () => navigate("/app/phn/consultations"),
-      },
-      {
-        icon: "Activity",
-        label: "In Check-up",
-        value: String(visibleInCheckup.length),
-        tone: "blue",
-        onClick: () => navigate("/app/phn/consultations"),
-      },
-      {
-        icon: "CalendarCheck",
-        label: "Completed Today",
-        value: String(visibleCompleted.filter((p) => p.checkup?.completedAt === today).length),
-        tone: "green",
-        onClick: () => navigate("/app/phn/consultations"),
-      },
-      {
-        icon: "Send",
-        label: "Pending Referrals",
-        value: String(visibleReferrals.filter((r) => r.status !== "Completed").length),
-        tone: "yellow",
-        onClick: () => navigate("/app/phn/referrals"),
-      },
-      {
-        icon: "CalendarClock",
-        label: "Follow-ups Due",
-        value: String(visibleFollowUps.filter((f) => f.status === "Scheduled" || f.status === "Due Today" || f.status === "Overdue").length),
-        tone: "blue",
-        onClick: () => navigate("/app/phn/followups"),
-      },
-      {
-        icon: "Stethoscope",
-        label: "Health Services Today",
-        value: String(visibleServices.length),
-        tone: "green",
-        onClick: () => navigate("/app/phn/services"),
-      },
-    ];
-  }, [visibleQueue, visibleInCheckup, visibleCompleted, visibleReferrals, visibleFollowUps, visibleServices, navigate]);
+  const followUpRows = useMemo(() => followUps.rows.map(mapFollowUpRow), [followUps.rows]);
+  const followUpsDue = useMemo(() => countFollowUpsDue(followUps.rows), [followUps.rows]);
+  const followUpsOverdue = useMemo(
+    () => followUpRows.filter((f) => f.isOverdue).length,
+    [followUpRows]
+  );
+  const dueFollowUpList = useMemo(
+    () =>
+      followUpRows
+        .filter((f) => f.isOverdue || f.isDueToday)
+        .sort((a, b) => Number(b.isOverdue) - Number(a.isOverdue))
+        .slice(0, 4),
+    [followUpRows]
+  );
 
-  const dueFollowUps = visibleFollowUps
-    .filter((f) => f.status === "Due Today" || f.status === "Overdue" || (f.status === "Scheduled" && f.dueDate === "Tomorrow"))
-    .slice(0, 4);
+  const referralRows = useMemo(() => referrals.rows.map(mapReferralRow), [referrals.rows]);
+  const pendingReferrals = useMemo(() => countPendingReferrals(referrals.rows), [referrals.rows]);
+  const pendingReferralList = useMemo(
+    () =>
+      referralRows
+        .filter((r) => isPendingReferral({ status: r.status }))
+        .sort((a, b) => {
+          const rank = { High: 0, Medium: 1, Low: 2 };
+          const diff = (rank[a.priority] ?? 1) - (rank[b.priority] ?? 1);
+          return diff !== 0 ? diff : String(b.referralDate).localeCompare(String(a.referralDate));
+        })
+        .slice(0, 4),
+    [referralRows]
+  );
 
-  const handleReview = (referral) => {
-    setReviewReferral(referral);
-    setReferralStatus(referral.status);
-  };
-
-  const handleReferralStatusSave = () => {
-    if (!reviewReferral || !referralStatus) return;
-    patchReferral(reviewReferral.id, { status: referralStatus });
-    setReviewReferral(null);
-    setReferralStatus("");
-    showToast("Referral updated successfully.");
-  };
+  const highRiskRows = useMemo(
+    () => residents.rows.filter((r) => (r.riskLevel ?? r.risk_level) === "High").map(mapHighRiskResident),
+    [residents.rows]
+  );
 
   const handleStartCheckup = async (patient) => {
     try {
-      await startCheckup(patient.id);
+      await queue.startCheckup(patient.id);
       showToast("Check-up started.");
       navigate("/app/phn/consultations", { state: { openCheckup: patient.id } });
     } catch (err) {
@@ -229,11 +284,311 @@ export default function PHNDashboard() {
     <>
       <PageHeader
         crumbs={["Dashboard"]}
-        title={welcome}
-        subtitle={subtitle}
+        title={welcomeFor(user)}
+        subtitle="Here are the patients and tasks that need your attention today."
+        action={
+          <div className="text-left md:text-right">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-gray">Today</p>
+            <p className="text-sm font-medium text-brand-ink">{today}</p>
+          </div>
+        }
       />
 
-      {/* Toast */}
+      {/* Four compact priority indicators */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <KpiCard
+          index={0}
+          icon={Users}
+          tone="accent"
+          label="Waiting for PHN"
+          value={counts.waiting}
+          hint="Completed triage — ready for consultation"
+          loading={queue.loading}
+          error={queue.error}
+          onClick={() => navigate("/app/phn/consultations")}
+          onRetry={queue.reload}
+        />
+        <KpiCard
+          index={1}
+          icon={CalendarClock}
+          tone="blue"
+          label="Follow-ups Due"
+          value={followUpsDue}
+          hint={followUpsOverdue > 0 ? `${followUpsOverdue} overdue` : "Due today or overdue"}
+          loading={followUps.loading}
+          error={followUps.error}
+          onClick={() => navigate("/app/phn/followups")}
+          onRetry={followUps.reload}
+        />
+        <KpiCard
+          index={2}
+          icon={Send}
+          tone="yellow"
+          label="Pending Referrals"
+          value={pendingReferrals}
+          hint="Pending, accepted or in progress"
+          loading={referrals.loading}
+          error={referrals.error}
+          onClick={() => navigate("/app/phn/referrals")}
+          onRetry={referrals.reload}
+        />
+        <KpiCard
+          index={3}
+          icon={AlertTriangle}
+          tone="danger"
+          label="High-Risk Cases"
+          value={highRiskRows.length}
+          hint="Requiring PHN review"
+          loading={residents.loading}
+          error={residents.error}
+          onClick={() => navigate("/app/phn/residents")}
+          onRetry={residents.reload}
+        />
+      </div>
+
+      {/* Priority work queue */}
+      <Card id="queue" className="mt-4 scroll-mt-24 p-4 sm:p-6 sm:mt-5">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-brand-ink sm:text-base">Patients for Check-up (RHU)</h3>
+              {!queue.loading && !queue.error && (
+                <span className="rounded-full bg-brand-accent/10 px-2.5 py-0.5 text-xs font-semibold text-brand-accent">
+                  {counts.waiting} waiting
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-brand-gray">
+              Patients who completed triage and are waiting for PHN consultation, highest risk first.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate("/app/phn/consultations")}
+            className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
+          >
+            View full queue <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+
+        {queue.loading ? (
+          <SkeletonTable rows={4} cols={6} />
+        ) : queue.error ? (
+          <ErrorState
+            title="Couldn’t load the check-up queue"
+            message={queue.error}
+            onRetry={queue.reload}
+            className="py-8"
+          />
+        ) : waitingQueue.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title="No patients are waiting for check-up"
+            description="Patients appear here as soon as triage hands them off to the PHN."
+          />
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-brand-border bg-brand-bg text-left">
+                  {["Patient", "Barangay", "Reason for Visit", "Risk", "Status", ""].map((h) => (
+                    <th
+                      key={h || "action"}
+                      className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-brand-gray"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {waitingQueue.map((q) => {
+                  const risk = riskOfPatient(q);
+                  return (
+                    <tr key={q.id} className="border-b border-brand-border last:border-0 hover:bg-brand-bg/50">
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-brand-ink">{q.patient}</p>
+                        <p className="text-xs text-brand-gray">
+                          {[q.age && `${q.age} yrs`, q.sex].filter(Boolean).join(" · ")}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3 text-brand-ink">{q.barangay || "RHU"}</td>
+                      <td className="px-4 py-3 text-brand-ink">{q.reason || q.triage?.chiefComplaint || "—"}</td>
+                      <td className="px-4 py-3">
+                        <Pill value={risk.level} tones={RISK_TONES} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Pill value={q.status} tones={{}} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleStartCheckup(q)}
+                          className="whitespace-nowrap text-sm font-medium text-brand-blue hover:underline"
+                        >
+                          Start Check-up
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Follow-ups + referrals requiring action */}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:mt-5 lg:grid-cols-2 sm:gap-5">
+        <WorkSection
+          title="Follow-ups Requiring Attention"
+          subtitle="Overdue and due-today follow-ups across the RHU."
+          icon={CalendarClock}
+          loading={followUps.loading}
+          error={followUps.error}
+          onRetry={followUps.reload}
+          isEmpty={dueFollowUpList.length === 0}
+          emptyText="No follow-ups are due or overdue."
+          onViewAll={() => navigate("/app/phn/followups")}
+        >
+          {dueFollowUpList.map((f) => (
+            <div key={f.id} className="flex items-center justify-between gap-3 rounded-btn border border-brand-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-brand-ink">
+                  {f.residentName}
+                  {f.barangay && <span className="font-normal text-brand-gray"> · {f.barangay}</span>}
+                </p>
+                <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-brand-gray">
+                  <Clock className="h-3 w-3 shrink-0" />
+                  {f.scheduledDate || "No date"}
+                  {f.scheduledTime ? ` · ${f.scheduledTime}` : ""} · {f.purpose}
+                </p>
+              </div>
+              <Pill value={f.status} tones={FOLLOWUP_STATUS_TONES} />
+            </div>
+          ))}
+        </WorkSection>
+
+        <WorkSection
+          title="Referrals Requiring Action"
+          subtitle="Referrals still pending, accepted or in progress."
+          icon={Send}
+          loading={referrals.loading}
+          error={referrals.error}
+          onRetry={referrals.reload}
+          isEmpty={pendingReferralList.length === 0}
+          emptyText="No referrals require action."
+          onViewAll={() => navigate("/app/phn/referrals")}
+        >
+          {pendingReferralList.map((r) => (
+            <div key={r.id} className="flex items-center justify-between gap-3 rounded-btn border border-brand-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-brand-ink">
+                  {r.residentName}
+                  {r.barangay && <span className="font-normal text-brand-gray"> · {r.barangay}</span>}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-brand-gray">
+                  {r.destinationFacility || "—"} · {r.reason || "No reason recorded"}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <Pill value={r.status} tones={REFERRAL_STATUS_TONES} />
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${REFERRAL_PRIORITY_TONES[r.priority] || REFERRAL_PRIORITY_TONES.Medium}`}>
+                  {r.priority}
+                </span>
+              </div>
+            </div>
+          ))}
+        </WorkSection>
+      </div>
+
+      {/* High-risk cases + check-up progress */}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:mt-5 lg:grid-cols-3 sm:gap-5">
+        <div className="lg:col-span-2">
+          <WorkSection
+            title="High-Risk Cases Requiring Review"
+            subtitle="Residents classified High by the system's risk assessment."
+            icon={AlertTriangle}
+            loading={residents.loading}
+            error={residents.error}
+            onRetry={residents.reload}
+            isEmpty={highRiskRows.length === 0}
+            emptyText="No high-risk residents in your scope."
+            onViewAll={() => navigate("/app/phn/residents")}
+          >
+            {highRiskRows.slice(0, 4).map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-3 rounded-btn border border-brand-border px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-brand-ink">{r.name}</p>
+                  <p className="mt-0.5 text-xs text-brand-gray">{r.barangay || "RHU"}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {r.riskScore != null && (
+                    <span className="text-xs text-brand-gray">Score {r.riskScore}</span>
+                  )}
+                  <Pill value={r.riskLevel} tones={RISK_TONES} />
+                </div>
+              </div>
+            ))}
+          </WorkSection>
+        </div>
+
+        <Card className="p-4 sm:p-5">
+          <SectionHeader title="Check-up Progress" subtitle="RHU activity today" icon={Activity} />
+          <div className="space-y-2.5">
+            {[
+              { label: "Waiting for PHN", value: counts.waiting, tone: "text-brand-accent bg-brand-accent/10" },
+              { label: "In Check-up", value: counts.inCheckup, tone: "text-brand-blue bg-brand-blue/10" },
+              { label: "Completed Today", value: counts.completedToday, tone: "text-brand-green bg-brand-green/10" },
+            ].map((row) => (
+              <div
+                key={row.label}
+                className="flex items-center justify-between rounded-btn border border-brand-border bg-brand-bg/60 px-4 py-2.5"
+              >
+                <span className="text-sm text-brand-ink">{row.label}</span>
+                {queue.loading ? (
+                  <Skeleton className="h-6 w-8" />
+                ) : queue.error ? (
+                  <span className="text-sm font-semibold text-slate-300">—</span>
+                ) : (
+                  <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${row.tone}`}>{row.value}</span>
+                )}
+              </div>
+            ))}
+            {queue.error && (
+              <button
+                type="button"
+                onClick={queue.reload}
+                className="flex items-center gap-1.5 text-xs font-medium text-brand-danger hover:underline"
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Retry
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => navigate("/app/phn/consultations")}
+              className="mt-1 text-sm font-medium text-brand-blue hover:underline"
+            >
+              Open PHN Check-ups
+            </button>
+          </div>
+        </Card>
+      </div>
+
+      {/* Quick actions */}
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 lg:grid-cols-4">
+        {QUICK_ACTIONS.map((a) => (
+          <button
+            key={a.label}
+            type="button"
+            onClick={() => navigate(a.path)}
+            className="flex items-center justify-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-3 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:bg-brand-light"
+          >
+            <a.icon className="h-4 w-4 text-brand-blue" /> {a.label}
+          </button>
+        ))}
+      </div>
+
       <AnimatePresence>
         {toast && (
           <motion.div
@@ -245,419 +600,6 @@ export default function PHNDashboard() {
             <CheckCircle2 className="h-4 w-4 text-brand-green" />
             <span className="text-sm text-white">{toast}</span>
           </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 mb-6">
-        {stats.map((s, i) => (
-          <StatCard
-            key={s.label}
-            icon={s.icon}
-            label={s.label}
-            value={s.value}
-            tone={s.tone}
-            index={i}
-            onClick={s.onClick}
-          />
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-        {/* Patients for Check-up — single queue source, scope-filtered */}
-        <Card id="queue" className="p-4 sm:p-6 lg:col-span-2 scroll-mt-24">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div>
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base">
-            Patients for Check-up (RHU)
-          </h3>
-              <p className="text-xs text-brand-gray mt-0.5">
-                Patients who completed triage and are waiting for PHN consultation.
-              </p>
-            </div>
-            <Users className="w-4 h-4 text-brand-gray shrink-0" />
-          </div>
-          <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-brand-bg border-b border-brand-border text-left">
-                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Patient</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Barangay</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Reason for Visit</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Risk</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Status</th>
-                  <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleQueue.map((q) => {
-                  const risk = riskOfPatient(q);
-                  return (
-                    <tr key={q.id} className="border-b border-brand-border last:border-0 hover:bg-brand-bg/50 transition-colors">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-brand-ink">{q.patient}</p>
-                        <p className="text-xs text-brand-gray">{q.age} yrs · {q.sex}</p>
-                      </td>
-                      <td className="px-4 py-3 text-brand-ink">
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${q.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>
-                          {scopeLabel(q, user)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-brand-ink">{q.reason || q.triage?.chiefComplaint}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${RISK_TONES[risk.level] || RISK_TONES.Low}`}>
-                          {risk.level}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${QUEUE_STATUS_TONES[q.status] || "bg-slate-100 text-slate-600"}`}>
-                          <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
-                          {q.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => handleStartCheckup(q)}
-                          className="text-sm font-medium text-brand-blue hover:underline whitespace-nowrap"
-                        >
-                          Start Check-up
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {visibleQueue.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-brand-gray">
-                      No patients are waiting for check-up.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        {/* Right rail — RHU check-up progress */}
-        <Card className="p-4 sm:p-6 h-fit">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div>
-              <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Check-up Progress</h3>
-              <p className="text-xs text-brand-gray mt-0.5">RHU-level check-up activity today</p>
-            </div>
-            <Activity className="w-4 h-4 text-brand-gray shrink-0" />
-          </div>
-          <div className="space-y-3">
-            {[
-              { label: "Waiting for PHN", value: visibleQueue.length, tone: "text-brand-accent bg-brand-accent/10" },
-              { label: "In Check-up", value: visibleInCheckup.length, tone: "text-brand-blue bg-brand-blue/10" },
-              { label: "Consultation Completed", value: visibleCompleted.length, tone: "text-brand-green bg-brand-green/10" },
-            ].map((row) => (
-              <div key={row.label} className="flex items-center justify-between rounded-btn bg-brand-bg/60 border border-brand-border px-4 py-3">
-                <span className="text-sm text-brand-ink">{row.label}</span>
-                <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${row.tone}`}>{row.value}</span>
-              </div>
-            ))}
-            <button
-              onClick={() => navigate("/app/phn/consultations")}
-              className="mt-1 text-sm font-medium text-brand-blue hover:underline"
-            >
-              Open PHN Check-ups
-            </button>
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 mt-4 sm:mt-5">
-        {/* Referrals */}
-        <Card className="p-4 sm:p-6">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Referrals Requiring Attention</h3>
-            <button onClick={() => navigate("/app/phn/referrals")} className="flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline shrink-0">
-              View All <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="space-y-3">
-            {visibleReferrals.filter((r) => r.status !== "Completed").slice(0, 4).map((r) => (
-              <div key={r.id} className="border border-brand-border rounded-btn px-4 py-3">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-medium text-brand-ink text-sm">{r.resident}</p>
-                    <p className="text-xs text-brand-gray">
-                      {r.barangay || "RHU"} · {r.reason}
-                    </p>
-                  </div>
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium shrink-0 ${REFERRAL_STATUS_TONES[r.status] || "bg-slate-100 text-slate-600"}`}>
-                    <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" /> {r.status}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 mt-3">
-                  <button onClick={() => handleReview(r)} className="text-xs font-medium text-brand-blue hover:underline">Review</button>
-                  <span className="text-brand-border">|</span>
-                  <button onClick={() => handleReview(r)} className="text-xs font-medium text-brand-blue hover:underline">View</button>
-                  <span className="text-brand-border">|</span>
-                  <button onClick={() => handleReview(r)} className="text-xs font-medium text-brand-blue hover:underline">Update Status</button>
-                </div>
-              </div>
-            ))}
-            {visibleReferrals.filter((r) => r.status !== "Completed").length === 0 && (
-              <p className="text-sm text-brand-gray py-6 text-center">No referrals require attention.</p>
-            )}
-          </div>
-        </Card>
-
-        {/* Follow-ups Due */}
-        <Card className="p-4 sm:p-6">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Follow-ups Due</h3>
-            <button onClick={() => navigate("/app/phn/followups")} className="flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline shrink-0">
-              View All <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="space-y-3">
-            {dueFollowUps.length === 0 && <p className="text-sm text-brand-gray py-6 text-center">No follow-ups due.</p>}
-            {dueFollowUps.map((f) => (
-              <div key={f.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium text-brand-ink text-sm">
-                    {f.resident} <span className="text-brand-gray font-normal">— {f.barangay || "RHU"} — {f.purpose}</span>
-                  </p>
-                  <p className="text-xs text-brand-gray flex items-center gap-1 mt-0.5"><Clock className="w-3 h-3" /> {f.dueDate} · {f.time}</p>
-                </div>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium shrink-0 ${FOLLOWUP_STATUS_TONES[f.status] || "bg-slate-100 text-slate-600"}`}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" /> {f.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 mt-4 sm:mt-5">
-        {/* Community Health Alerts */}
-        <Card className="p-4 sm:p-6">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Community Health Alerts</h3>
-            <Bell className="w-4 h-4 text-brand-gray shrink-0" strokeWidth={1.8} />
-          </div>
-          <div className="space-y-3">
-            {visibleAlerts.map((a) => {
-              const level = ALERT_LEVELS[a.level] || ALERT_LEVELS.warning;
-              return (
-                <div key={a.id} className="border border-brand-border rounded-btn px-4 py-3">
-                  <div className="flex items-start gap-2.5">
-                    <span className={`mt-1 w-2.5 h-2.5 rounded-full shrink-0 ${level.dot}`} />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-brand-ink text-sm">{a.type}</p>
-                      <p className="text-xs text-brand-gray mt-0.5">{a.barangay || "RHU"} — {a.description}</p>
-                      <button onClick={() => setAlertDetail(a)} className="text-xs font-medium text-brand-blue hover:underline mt-2">Review</button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {visibleAlerts.length === 0 && (
-                  <p className="text-sm text-brand-gray py-6 text-center">No alerts at the RHU right now.</p>
-            )}
-          </div>
-        </Card>
-
-        {/* Today's Health Services */}
-        <Card className="p-4 sm:p-6">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Today's Health Services</h3>
-            <button onClick={() => setServicesModal(true)} className="text-sm font-medium text-brand-blue hover:underline shrink-0">View Services</button>
-          </div>
-          <div className="space-y-2.5">
-            {visibleServices.slice(0, 5).map((s) => (
-              <div key={s.id} className="flex items-center justify-between border border-brand-border rounded-btn px-4 py-2.5 gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium text-brand-ink text-sm truncate">{s.name}</p>
-                  <p className="text-xs text-brand-gray">{s.barangay || "RHU"} · {s.count}</p>
-                </div>
-                <StatusBadge value={s.status === "Ongoing" ? "Ongoing" : s.status === "Completed" ? "Completed" : "Scheduled"} />
-              </div>
-            ))}
-            {visibleServices.length === 0 && (
-                  <p className="text-sm text-brand-gray py-6 text-center">No health services today at the RHU.</p>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* Quick actions */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4 sm:mt-5">
-        {QUICK_ACTIONS.map((a) => (
-          <button
-            key={a.label}
-            onClick={() => navigate(a.path)}
-            className="flex items-center justify-center gap-2 border border-brand-border rounded-btn px-4 py-3 text-sm font-medium text-brand-ink hover:border-brand-blue hover:bg-brand-light transition-colors"
-          >
-            <a.icon className="w-4 h-4 text-brand-blue" /> {a.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Review Referral Modal */}
-      <AnimatePresence>
-        {reviewReferral && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setReviewReferral(null)}>
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              className="w-full max-w-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Card role="dialog" aria-modal="true" aria-label="Review referral" className="flex max-h-[90vh] flex-col overflow-hidden">
-                <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
-                  <h3 className="text-base font-semibold text-brand-ink">Review Referral</h3>
-                  <button onClick={() => setReviewReferral(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink" aria-label="Close modal">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto px-6 py-4">
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Patient Information</h4>
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <p className="text-brand-gray">Name: <span className="text-brand-ink">{reviewReferral.resident}</span></p>
-                        <p className="text-brand-gray">Barangay: <span className="text-brand-ink">{reviewReferral.barangay || "RHU"}</span></p>
-                        <p className="text-brand-gray">Age: <span className="text-brand-ink">{reviewReferral.age}</span></p>
-                        <p className="text-brand-gray">Referral No.: <span className="text-brand-ink">{reviewReferral.referralNo}</span></p>
-                      </div>
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Referral Information</h4>
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <p className="text-brand-gray">Reason: <span className="text-brand-ink">{reviewReferral.reason}</span></p>
-                        <p className="text-brand-gray">Facility: <span className="text-brand-ink">{reviewReferral.facility}</span></p>
-                        <p className="text-brand-gray">Date: <span className="text-brand-ink">{reviewReferral.date}</span></p>
-                        <p className="text-brand-gray">Referred by: <span className="text-brand-ink">{reviewReferral.referringPersonnel}</span></p>
-                        <p className="text-brand-gray">Priority: <span className="text-brand-ink">{reviewReferral.priority}</span></p>
-                        <p className="text-brand-gray">
-                          Status: <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${REFERRAL_STATUS_TONES[reviewReferral.status]}`}>{reviewReferral.status}</span>
-                        </p>
-                      </div>
-                    </div>
-                    {reviewReferral.notes && (
-                      <div>
-                        <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-2">Notes</h4>
-                        <p className="text-sm text-brand-ink">{reviewReferral.notes}</p>
-                      </div>
-                    )}
-                    <div>
-                      <label className="text-sm font-medium text-brand-ink block mb-1.5">Update Status <span className="text-red-500">*</span></label>
-                      <select
-                        value={referralStatus}
-                        onChange={(e) => setReferralStatus(e.target.value)}
-                        className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-                      >
-                        {REFERRAL_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
-                  <button onClick={() => setReviewReferral(null)} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Cancel</button>
-                  <button onClick={handleReferralStatusSave} className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors">Update Status</button>
-                </div>
-              </Card>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Alert Review Modal */}
-      <AnimatePresence>
-        {alertDetail && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setAlertDetail(null)}>
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              className="w-full max-w-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Card role="dialog" aria-modal="true" aria-label="Review community health alert" className="overflow-hidden">
-                <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
-                  <h3 className="text-base font-semibold text-brand-ink">Community Health Alert</h3>
-                  <button onClick={() => setAlertDetail(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink" aria-label="Close modal">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="px-6 py-4">
-                  <div className="flex items-center gap-2.5 mb-4">
-                    <span className={`w-2.5 h-2.5 rounded-full ${(ALERT_LEVELS[alertDetail.level] || ALERT_LEVELS.warning).dot}`} />
-                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${(ALERT_LEVELS[alertDetail.level] || ALERT_LEVELS.warning).tone}`}>
-                      {(ALERT_LEVELS[alertDetail.level] || ALERT_LEVELS.warning).label}
-                    </span>
-                    <span className="text-xs text-brand-gray">{alertDetail.status}</span>
-                  </div>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between"><span className="text-brand-gray">Alert type</span><span className="font-medium text-brand-ink">{alertDetail.type}</span></div>
-                    <div className="flex justify-between"><span className="text-brand-gray">Affected area</span><span className="font-medium text-brand-ink">{alertDetail.barangay || "RHU (all barangays)"}</span></div>
-                    <div className="flex justify-between"><span className="text-brand-gray">Number of cases</span><span className="font-medium text-brand-ink">{alertDetail.cases}</span></div>
-                    <div className="flex justify-between"><span className="text-brand-gray">Date detected</span><span className="font-medium text-brand-ink">{alertDetail.detected}</span></div>
-                    <div>
-                      <p className="text-brand-gray mb-1">Description</p>
-                      <p className="text-brand-ink">{alertDetail.description}</p>
-                    </div>
-                    <div>
-                      <p className="text-brand-gray mb-1">Recommended action</p>
-                      <p className="text-brand-ink">{alertDetail.recommendedAction}</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
-                  <button onClick={() => setAlertDetail(null)} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Close</button>
-                </div>
-              </Card>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Today's Services Modal */}
-      <AnimatePresence>
-        {servicesModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setServicesModal(false)}>
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              className="w-full max-w-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Card role="dialog" aria-modal="true" aria-label="Today's health services" className="flex max-h-[90vh] flex-col overflow-hidden">
-                <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
-                  <div>
-                    <h3 className="text-base font-semibold text-brand-ink">Today's Health Services</h3>
-                    <p className="text-xs text-brand-gray mt-0.5">RHU-level services</p>
-                  </div>
-                  <button onClick={() => setServicesModal(false)} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink" aria-label="Close modal">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto px-6 py-4">
-                  <div className="space-y-3">
-                    {visibleServices.map((s) => (
-                      <div key={s.id} className="border border-brand-border rounded-btn px-4 py-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="font-medium text-brand-ink text-sm">{s.name}</p>
-                          <StatusBadge value={s.status === "Ongoing" ? "Ongoing" : s.status === "Completed" ? "Completed" : "Scheduled"} />
-                        </div>
-                        <p className="text-xs text-brand-gray mt-1">{s.barangay || "RHU"} · {s.count} · {s.time} · {s.personnel}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
-                  <button onClick={() => setServicesModal(false)} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Close</button>
-                </div>
-              </Card>
-            </motion.div>
-          </div>
         )}
       </AnimatePresence>
     </>

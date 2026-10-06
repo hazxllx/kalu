@@ -4,6 +4,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import { FEATURE_ROLES } from '../config/roles.js';
+import asyncHandler from '../utils/asyncHandler.js';
 import {
   getEarlyWarning,
   getCommunityMap,
@@ -22,10 +23,10 @@ import {
  */
 const router = Router();
 
-router.get('/early-warning', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getEarlyWarning);
-router.get('/community-map', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getCommunityMap);
-router.get('/household-map', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getHouseholdMap);
-router.get('/community-map/trends', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, getCommunityMapTrends);
-router.get('/conditions', authenticate, authorize(FEATURE_ROLES.analytics), getConditions);
+router.get('/early-warning', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, asyncHandler(getEarlyWarning));
+router.get('/community-map', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, asyncHandler(getCommunityMap));
+router.get('/household-map', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, asyncHandler(getHouseholdMap));
+router.get('/community-map/trends', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, asyncHandler(getCommunityMapTrends));
+router.get('/conditions', authenticate, authorize(FEATURE_ROLES.analytics), asyncHandler(getConditions));
 
 export default router;

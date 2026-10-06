@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import M1PrintDocument from "./M1PrintDocument";
+import { loadDocumentBranding } from "@/lib/documentBranding";
 
 /**
  * Prints the FHSIS M1 report through the browser print dialog (which is also
@@ -28,6 +29,7 @@ const PRINT_CSS = `
 
 export function useM1Print() {
   const [payload, setPayload] = useState(null);
+  const [brandingError, setBrandingError] = useState("");
 
   useEffect(() => {
     if (!payload) return undefined;
@@ -62,9 +64,17 @@ export function useM1Print() {
       )
     : null;
 
-  const startPrint = useCallback((data) => setPayload(data), []);
+  const startPrint = useCallback(async (data) => {
+    setBrandingError("");
+    try {
+      const branding = await loadDocumentBranding("fhsis_m1");
+      setPayload({ ...data, branding });
+    } catch (error) {
+      setBrandingError(error?.message || "Could not load official M1 branding.");
+    }
+  }, []);
 
-  return { startPrint, portal };
+  return { startPrint, portal, brandingError };
 }
 
 export default useM1Print;

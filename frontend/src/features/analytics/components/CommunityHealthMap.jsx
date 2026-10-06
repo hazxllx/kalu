@@ -30,6 +30,22 @@ import { fetchCommunityMap, fetchHouseholdMap } from "@/services/api/earlyWarnin
 // centre nor a plotted barangay is available to frame the view.
 const PILI_CENTER = [13.55417, 123.27528];
 
+const hasValidCoordinates = (point) => {
+  const latitude = Number(point?.latitude);
+  const longitude = Number(point?.longitude);
+  return (
+    point?.hasCoordinates === true &&
+    point.latitude != null &&
+    point.longitude != null &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+};
+
 function FitToMarkers({ points }) {
   const map = useMap();
   useEffect(() => {
@@ -117,7 +133,7 @@ export default function CommunityHealthMap({
     setError("");
     return fetchCommunityMap()
       .then((res) => setData(res))
-      .catch(() => setError("Unable to load community health data."))
+      .catch((err) => setError(err?.message || "Unable to load community health data."))
       .finally(() => setLoading(false));
   }, []);
 
@@ -151,10 +167,10 @@ export default function CommunityHealthMap({
   const errText = controlled ? errorProp || "" : error;
   const center = centerProp || (controlled ? null : data?.center) || null;
 
-  const plotted = useMemo(() => barangays.filter((b) => b.hasCoordinates), [barangays]);
-  const missing = useMemo(() => barangays.filter((b) => !b.hasCoordinates), [barangays]);
+  const plotted = useMemo(() => barangays.filter(hasValidCoordinates), [barangays]);
+  const missing = useMemo(() => barangays.filter((b) => !hasValidCoordinates(b)), [barangays]);
   const plottedHouseholds = useMemo(
-    () => households.filter((h) => h.hasCoordinates && h.latitude != null && h.longitude != null),
+    () => households.filter(hasValidCoordinates),
     [households],
   );
   const points = useMemo(() => {
@@ -162,7 +178,9 @@ export default function CommunityHealthMap({
     const householdPoints = plottedHouseholds.map((h) => [h.latitude, h.longitude]);
     return [...barangayPoints, ...householdPoints];
   }, [plotted, plottedHouseholds]);
-  const centerPoint = center ? [center.latitude, center.longitude] : points[0] || PILI_CENTER;
+  const centerPoint = hasValidCoordinates({ ...center, hasCoordinates: true })
+    ? [Number(center.latitude), Number(center.longitude)]
+    : points[0] || PILI_CENTER;
 
   const retry = controlled ? onRetry : load;
 
@@ -184,7 +202,7 @@ export default function CommunityHealthMap({
       <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
         <AlertCircle className="h-5 w-5 text-brand-danger" strokeWidth={1.8} />
         <p className="text-sm font-semibold text-brand-ink">Unable to load community health data.</p>
-        <p className="text-xs text-brand-gray">Please try again.</p>
+        <p className="text-xs text-brand-gray">{typeof errText === "string" ? errText : "Please try again."}</p>
         {retry && (
           <button
             onClick={retry}

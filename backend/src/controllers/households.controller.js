@@ -15,6 +15,14 @@ export const listHouseholds = async (req, res) => {
   sendData(res, result);
 };
 
+export const searchResidents = async (req, res) => {
+  const rows = await householdsService.searchHouseholdResidents({
+    user: req.user,
+    q: req.query.q,
+  });
+  sendData(res, { rows });
+};
+
 export const getHousehold = async (req, res) => {
   const household = await householdsService.getHousehold({ id: req.params.id, user: req.user });
   sendData(res, { household });
@@ -76,6 +84,7 @@ export const saveMemberHealth = async (req, res) => {
 
 export default {
   listHouseholds,
+  searchResidents,
   getHousehold,
   createHousehold,
   updateHousehold,

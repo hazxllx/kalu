@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import MedicalCertificateDocument from "@/features/certificates/components/MedicalCertificateDocument";
+import { loadDocumentBranding } from "@/lib/documentBranding";
 
 /**
  * Prints the formal A4 Medical Certificate via the browser print dialog.
@@ -17,6 +18,7 @@ import MedicalCertificateDocument from "@/features/certificates/components/Medic
  */
 export function useCertificatePrint() {
   const [printData, setPrintData] = useState(null);
+  const [brandingError, setBrandingError] = useState("");
 
   useEffect(() => {
     if (!printData) return undefined;
@@ -56,16 +58,24 @@ export function useCertificatePrint() {
           <MedicalCertificateDocument
             certificate={printData.certificate}
             signatoryName={printData.signatoryName}
+            branding={printData.branding}
           />
         </div>,
         document.body
       )
     : null;
 
-  const printCertificate = (certificate, signatoryName) =>
-    setPrintData({ certificate, signatoryName });
+  const printCertificate = async (certificate, signatoryName) => {
+    setBrandingError("");
+    try {
+      const branding = await loadDocumentBranding("medical_certificate");
+      setPrintData({ certificate, signatoryName, branding });
+    } catch (error) {
+      setBrandingError(error?.message || "Could not load official document branding.");
+    }
+  };
 
-  return { printCertificate, portal };
+  return { printCertificate, portal, brandingError };
 }
 
 export default useCertificatePrint;

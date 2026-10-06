@@ -95,9 +95,19 @@ function drawSubHeader(doc, y, text) {
   return y + 10;
 }
 
-function drawHeader(doc, model) {
+function drawHeader(doc, model, branding) {
   rf(doc, BLUE);
   doc.rect(0, 0, PAGE_W, 28, "F");
+  const municipalLogo = branding?.logos?.municipal;
+  const rhuLogo = branding?.logos?.rhu;
+  const addLogo = (logo, x) => {
+    if (!logo?.dataUrl || !logo.width || !logo.height) return;
+    const box = 22;
+    const scale = Math.min(box / logo.width, box / logo.height);
+    doc.addImage(logo.dataUrl, "PNG", x, 3, logo.width * scale, logo.height * scale);
+  };
+  addLogo(municipalLogo, 3);
+  addLogo(rhuLogo, PAGE_W - 25);
   rt(doc, WHITE);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
@@ -192,10 +202,10 @@ function indicatorRow(doc, y, cols, label, values, opts) {
   return y + 10;
 }
 
-export function renderM1FhsisPdf(model) {
+export function renderM1FhsisPdf(model, branding = null) {
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: [PAGE_W, PAGE_H] });
   const TOTAL_PAGES = 9;
-  let y = drawHeader(doc, model);
+  let y = drawHeader(doc, model, branding);
 
   // ============= PAGE 1: Family Planning =============
   y = drawSectionHeader(doc, y, "SECTION A: FAMILY PLANNING");
