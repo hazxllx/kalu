@@ -8,7 +8,8 @@ import { useAuth } from "@/context/AuthContext";
 import { ROLE } from "@/lib/roles";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { referralsApi, residentsApi } from "@/services/api";
-import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Trash2, Send } from "lucide-react";
+import { downloadReferralPdf } from "@/features/referrals/lib/referralPdf";
+import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Trash2, Send, Download } from "lucide-react";
 
 /**
  * Referral coordination page backed by the real API (`/api/referrals` ->
@@ -300,6 +301,7 @@ export default function HealthReferrals() {
   const [newStatus, setNewStatus] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [exportingId, setExportingId] = useState(null);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -446,6 +448,20 @@ export default function HealthReferrals() {
     }
   };
 
+  const handleDownloadPdf = async (record) => {
+    if (exportingId) return;
+    setExportingId(record.id);
+    try {
+      const detail = await referralsApi.get(record.id);
+      const row = detail?.record || detail || record;
+      await downloadReferralPdf(row, { residents });
+    } catch (err) {
+      showToast(err?.message || "Could not generate the referral PDF.");
+    } finally {
+      setExportingId(null);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setSaving(true);
@@ -559,6 +575,14 @@ export default function HealthReferrals() {
                       </button>
                       {!isResident && (
                         <>
+                          <button
+                            onClick={() => handleDownloadPdf(r)}
+                            disabled={exportingId === r.id}
+                            className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors disabled:opacity-50"
+                            title="Download Referral Form (PDF)"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
                           {canWrite && (
                             <button onClick={() => openEdit(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Edit Referral">
                               <Edit2 className="w-4 h-4" />

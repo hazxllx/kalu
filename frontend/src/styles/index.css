@@ -621,6 +621,109 @@
 }
 .cert-print-portal { display: none; }
 
+/* ---------- formal government certificate header ---------- */
+.cert-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8mm;
+}
+.cert-header-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30mm;
+  min-height: 24mm;
+  flex-shrink: 0;
+}
+.cert-header-logo-right { justify-content: flex-end; }
+.cert-logo-img {
+  display: block;
+  max-height: 16mm;
+  max-width: 28mm;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.cert-header-govt {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-size: 11.5pt;
+  line-height: 1.55;
+}
+.cert-header-govt p { margin: 0; }
+.cert-header-municipality {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.cert-office { margin-top: 2.2mm; }
+.cert-office-name {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12.5pt;
+}
+.cert-office-address {
+  font-size: 10pt;
+  margin-top: 0.4mm;
+}
+.cert-title {
+  margin: 9mm 0 0;
+  text-align: center;
+  font-size: 17pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.cert-fieldline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 0;
+  font-size: 11.5pt;
+}
+.cert-label { font-weight: 600; white-space: nowrap; }
+.cert-padleft { margin-left: 6mm; }
+.cert-blocklabel { margin: 0 0 2mm; }
+.cert-issuance {
+  margin-top: 8mm;
+  font-size: 10pt;
+  line-height: 1.6;
+}
+.cert-signature {
+  margin-top: 22mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  align-self: flex-end;
+}
+.cert-doc .cert-signature {
+  margin-left: auto;
+  margin-right: 0;
+  width: 74mm;
+}
+.cert-signature-name {
+  font-weight: 700;
+  font-size: 11.5pt;
+}
+.cert-signature-position {
+  font-size: 10.5pt;
+  margin-top: 1mm;
+}
+.cert-signature-license {
+  font-size: 10pt;
+  margin-top: 1.2mm;
+}
+.cert-meta {
+  margin-top: 6mm;
+  font-size: 8pt;
+  color: #222;
+  text-align: center;
+}
+.cert-doc { display: flex; flex-direction: column; }
+
 /* ===========================================================================
    FHSIS M1 — official reporting form
    ---------------------------------------------------------------------------

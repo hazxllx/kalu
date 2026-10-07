@@ -169,6 +169,36 @@ const writeLog = async (supabase, user, certificateId, action, previousStatus, n
   throwOnError(error, 'Could not write certificate history');
 };
 
+/**
+ * Resolve the AUTHORIZED signatory from the database — never from the client.
+ *
+ * The MHO is the required approval/signatory role for medical documents, so the
+ * approving MHO's own profile (full_name / position / license_no) is the
+ * authoritative signatory identity. Falls back to the session user's identity
+ * only when the profile row cannot be read, and never to a request body value.
+ */
+const resolveSignatory = async (supabase, user) => {
+  if (user?.id) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('full_name, position, license_no')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (!error && data) {
+      return {
+        fullName: data.full_name || '',
+        position: data.position || 'Municipal Health Officer',
+        licenseNumber: data.license_no || '',
+      };
+    }
+  }
+  return {
+    fullName: user?.name || '',
+    position: 'Municipal Health Officer',
+    licenseNumber: '',
+  };
+};
+
 const writeAudit = async (supabase, user, action, certificateId, row, metadata = {}) => {
   const { error } = await supabase.from('health_audit_logs').insert({
     actor_id: user.id,
@@ -324,8 +354,10 @@ const sanitizeWrite = (payload = {}) => {
     if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw ApiError.unprocessable('Invalid date of examination.');
     row.date_of_examination = value || todayIso();
   }
-  if (payload.medicalOfficer !== undefined) row.medical_officer = text(payload.medicalOfficer);
-  if (payload.licenseNumber !== undefined) row.license_number = text(payload.licenseNumber);
+  // SECURITY: the authorized signatory is NEVER client-supplied. Any
+  // medicalOfficer / licenseNumber sent by the client is ignored — the values
+  // are resolved server-side from the profile of the preparer and re-stamped
+  // from the approving MHO's profile at approval/issue time.
   if (payload.civilStatus !== undefined) row.civil_status = text(payload.civilStatus);
   if (payload.recommendation !== undefined) row.recommendation = text(payload.recommendation);
   if (payload.remarks !== undefined) row.remarks = text(payload.remarks);
@@ -341,6 +373,11 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
 
   const row = sanitizeWrite(payload);
   if (!row.findings) throw ApiError.unprocessable('Clinical findings are required.');
+  // The authorized signatory is resolved server-side from the preparer's
+  // profile (the MHO signatory is re-stamped at approval/issue time).
+  const signatory = await resolveSignatory(supabase, user);
+  row.medical_officer = signatory.fullName || user?.name || '';
+  row.license_number = signatory.licenseNumber || '';
   if (!row.medical_officer) throw ApiError.unprocessable('The medical officer name is required.');
   row.status = CERT_STATUS.DRAFT;
   row.resident_id = resident.id;
@@ -440,6 +477,19 @@ export const changeStatus = async ({ user, id, status, notes = '', supabase = ge
     row.reviewed_by = user.id;
     row.reviewed_at = new Date().toISOString();
     row.review_remarks = text(notes);
+  }
+
+  // The authorized signatory is resolved server-side (the approving MHO's own
+  // profile) and stamped onto the certificate. A client can never type an
+  // arbitrary doctor/license into the document — the stored values are the
+  // authoritative ones, and they are preserved unchanged once the certificate
+  // is approved/issued.
+  if (target === CERT_STATUS.APPROVED || target === CERT_STATUS.ISSUED) {
+    const signatory = await resolveSignatory(supabase, user);
+    const signatoryName = (signatory.fullName || '').trim();
+    const license = (signatory.licenseNumber || '').trim();
+    if (signatoryName) row.medical_officer = signatoryName;
+    if (signatoryName || license) row.license_number = license;
   }
 
   const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(SELECT).single();

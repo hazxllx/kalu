@@ -72,15 +72,21 @@ test('official logo validation rejects spoofed, truncated, and oversized-dimensi
 test('approved document templates centrally define logo requirements', () => {
   assert.deepEqual(DOCUMENT_BRANDING_TEMPLATES.medical_certificate, {
     issuingLevel: 'municipal',
-    logoTypes: ['municipal'],
+    logoTypes: ['municipal', 'rhu'],
+    officeName: 'OFFICE OF THE MUNICIPAL HEALTH OFFICER',
+    title: 'MEDICAL CERTIFICATE',
   });
   assert.deepEqual(DOCUMENT_BRANDING_TEMPLATES.fhsis_m1, {
     issuingLevel: 'barangay',
     logoTypes: ['municipal', 'rhu'],
+    officeName: '',
+    title: 'FHSIS M1',
   });
   assert.deepEqual(DOCUMENT_BRANDING_TEMPLATES.barangay_rhu_referral, {
     issuingLevel: 'barangay-to-rhu',
-    logoTypes: ['municipal'],
+    logoTypes: ['municipal', 'rhu'],
+    officeName: 'OFFICE OF THE MUNICIPAL HEALTH OFFICER',
+    title: 'REFERRAL FORM',
   });
 });
 
@@ -107,4 +113,85 @@ test('clients cannot invent a document template or issuing level', async () => {
     }),
     { statusCode: 404 },
   );
+});
+
+test('document branding resolves dynamic organization and authorized signatory data', async () => {
+  const pngBytes = pngBuffer();
+  const storageDownload = {
+    data: {
+      arrayBuffer: async () => new Uint8Array(pngBytes).buffer,
+    },
+    error: null,
+  };
+
+  const logoRows = [
+    {
+      logo_type: 'municipal',
+      storage_path: 'official-logos/municipality-id/municipal/a.png',
+      mime_type: 'image/png',
+      original_filename: 'lgu.png',
+      file_size: pngBytes.length,
+      uploaded_by: 'admin-id',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    },
+  ];
+
+  const supabase = {
+    from(table) {
+      const builder = {
+        _table: table,
+        _op: 'select',
+        select() { return this; },
+        eq() { return this; },
+        limit() { return this; },
+        maybeSingle() {
+          if (table === 'municipalities') {
+            return Promise.resolve({
+              data: { id: 'municipality-id', name: 'Pili', province: 'Camarines Sur', region: 'Region V (Bicol)' },
+              error: null,
+            });
+          }
+          if (table === 'profiles') {
+            return Promise.resolve({
+              data: { full_name: 'Rafael C. Salles, M.D.', position: 'Municipal Health Officer', license_no: '069196' },
+              error: null,
+            });
+          }
+          return Promise.resolve({ data: null, error: null });
+        },
+        then(resolve) {
+          if (table === 'official_logos') return resolve({ data: logoRows, error: null });
+          return resolve({ data: [], error: null });
+        },
+      };
+      return builder;
+    },
+    storage: {
+      from() {
+        return {
+          download: async () => storageDownload,
+          createSignedUrl: async () => ({ data: { signedUrl: 'https://example.test/signed' }, error: null }),
+        };
+      },
+    },
+  };
+
+  const result = await getDocumentBranding({
+    user: { id: 'mho-id', role: 'mho', municipalityId: 'municipality-id' },
+    documentType: 'medical_certificate',
+    supabase,
+  });
+
+  assert.equal(result.documentType, 'medical_certificate');
+  assert.equal(result.organization.municipality, 'Pili');
+  assert.equal(result.organization.province, 'Camarines Sur');
+  assert.equal(result.organization.region, 'Region V (Bicol)');
+  assert.equal(result.organization.officeName, 'OFFICE OF THE MUNICIPAL HEALTH OFFICER');
+  assert.equal(result.signatory.fullName, 'Rafael C. Salles, M.D.');
+  assert.equal(result.signatory.licenseNumber, '069196');
+  assert.deepEqual(result.missingLogoTypes, ['rhu']);
+  assert.ok(result.logos.municipal.dataUrl.startsWith('data:image/png;base64,'));
+  // RHU facility absent in this stub → empty rhu name, no crash.
+  assert.equal(result.organization.rhuName, '');
 });

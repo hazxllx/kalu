@@ -78,27 +78,43 @@ export default function MedicalCertificateModal({
 const { user } = useAuth();
 const meta = useCertificateMeta();
 const CERT_PURPOSES = purposesProp?.length ? purposesProp : meta.purposes;
+const { printCertificate, portal, brandingError } = useCertificatePrint();
+const { branding } = useDocumentBranding("medical_certificate");
+
 /**
- * Authorized signatory — the signed-in account's name (from the active
- * session), falling back to the caller-provided user and finally to the
- * certificate's designated medical officer. Never a placeholder label.
+ * Authorized signatory — resolved from the centralized branding configuration
+ * (the active MHO profile). This is authoritative for the OFFICIAL document:
+ * the user can never type an arbitrary doctor/license into the certificate.
+ * The logged-in account's name is only a fallback when no MHO signatory is
+ * configured. The API re-stamps the signatory at approval/issue time.
  */
-const signatoryName =
-  String(user?.name || currentUser || certificate?.medicalOfficer || "").trim() ||
-  "Signatory name not set";
+const authorizedSignatory = {
+  name: String(
+    branding?.signatory?.fullName ||
+    certificate?.medicalOfficer ||
+    user?.name ||
+    currentUser ||
+    ""
+  ).trim(),
+  licenseNumber: String(
+    certificate?.licenseNumber ||
+    branding?.signatory?.licenseNumber ||
+    ""
+  ).trim(),
+};
+const signatoryName = authorizedSignatory.name || "Signatory name not set";
+
 const [form, setForm] = useState(() => /** @type {Record<string, any>} */ ({
   purpose: certificate?.purpose || "",
   findings: certificate?.findings || "",
   dateOfExamination: certificate?.dateOfExamination || new Date().toISOString().slice(0, 10),
-  medicalOfficer: certificate?.medicalOfficer || String(user?.name || currentUser || "").trim(),
-  licenseNumber: certificate?.licenseNumber || "",
+  medicalOfficer: authorizedSignatory.name,
+  licenseNumber: authorizedSignatory.licenseNumber,
   notes: certificate?.notes || "",
 }));
 const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
 const [actionNotes, setActionNotes] = useState("");
 const [busy, setBusy] = useState("");
-const { printCertificate, portal, brandingError } = useCertificatePrint();
-const { branding } = useDocumentBranding("medical_certificate");
 
   const isCreate = mode === "create";
   const isEdit = mode === "edit";
@@ -221,11 +237,23 @@ const { branding } = useDocumentBranding("medical_certificate");
                 <Field label="Date of Examination" required error={errors.dateOfExamination}>
                   <input type="date" value={form.dateOfExamination} onChange={(e) => set("dateOfExamination")(e.target.value)} className={inputCls(errors.dateOfExamination)} />
                 </Field>
-                <Field label="Medical Officer" required error={errors.medicalOfficer}>
-                  <input type="text" value={form.medicalOfficer} onChange={(e) => set("medicalOfficer")(e.target.value)} className={inputCls(errors.medicalOfficer)} />
+                <Field label="Medical Officer (Authorized Signatory)" required error={errors.medicalOfficer}>
+                  <input
+                    type="text"
+                    value={form.medicalOfficer}
+                    readOnly
+                    title="The authorized signatory is resolved from the official configuration and stamped by the API when the certificate is approved/issued."
+                    className={`${inputCls(errors.medicalOfficer)} bg-slate-50 dark:bg-slate-500/10`}
+                  />
                 </Field>
                 <Field label="License Number">
-                  <input type="text" value={form.licenseNumber} onChange={(e) => set("licenseNumber")(e.target.value)} className={inputCls()} />
+                  <input
+                    type="text"
+                    value={form.licenseNumber}
+                    readOnly
+                    title="The authorized signatory's license number is resolved from the official configuration and stamped by the API when the certificate is approved/issued."
+                    className={`${inputCls()} bg-slate-50 dark:bg-slate-500/10`}
+                  />
                 </Field>
               </div>
               {isCreate && (

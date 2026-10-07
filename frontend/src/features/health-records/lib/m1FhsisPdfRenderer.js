@@ -224,24 +224,20 @@ export function renderM1FhsisPdf(model, branding = null) {
   y = headerRow(doc, y, fpCols, ["Method", "10-14", "15-19", "20-49", "Total"]);
 
   const fpMethods = [
-    { code: "FP_BTL", name: "BTL (Bilateral Tubal Ligation)" },
-    { code: "FP_NSV", name: "NSV (No-Scalpel Vasectomy)" },
-    { code: "FP_CONDOM", name: "Condom (Male)" },
-    { code: "FP_PILLS_POP", name: "Pills (Progestogen Only)" },
-    { code: "FP_PILLS_COC", name: "Pills (Combined Oral Contraceptive)" },
-    { code: "FP_INJECTABLE", name: "Injectable (DMPA/Sayana Press)" },
-    { code: "FP_IMPLANT_INTERVAL", name: "Implant (Interval)" },
-    { code: "FP_IMPLANT_PP", name: "Implant (Postpartum)" },
-    { code: "FP_IUD_INTERVAL", name: "IUD (Interval)" },
-    { code: "FP_IUD_PP", name: "IUD (Postpartum)" },
-    { code: "FP_NFP_LAM", name: "NFP - LAM (Lactational Amenorrhea Method)" },
-    { code: "FP_NFP_BBT", name: "NFP - BBT (Basal Body Temperature)" },
-    { code: "FP_NFP_CMM", name: "NFP - CMM (Cervical Mucus Method)" },
-    { code: "FP_NFP_STM", name: "NFP - STM (Symptothermal Method)" },
-    { code: "FP_NFP_SDM", name: "NFP - SDM (Standard Days Method)" },
-    { code: "FP_PILL_EMERGENCY", name: "Emergency Pills" },
-    { code: "FP_OTHER_MODERN", name: "Other Modern Methods" },
-    { code: "FP_TRADITIONAL", name: "Traditional Methods" }
+    { code: "A2_btl", name: "BTL (Bilateral Tubal Ligation)" },
+    { code: "A2_nsv", name: "NSV (No-Scalpel Vasectomy)" },
+    { code: "A2_condom", name: "Condom (Male)" },
+    { code: "A2_pop", name: "Pills (Progestogen Only)" },
+    { code: "A2_coc", name: "Pills (Combined Oral Contraceptive)" },
+    { code: "A2_dmpa", name: "Injectable (DMPA/Sayana Press)" },
+    { code: "A2_implant", name: "Implant" },
+    { code: "A2_iud_pp", name: "IUD (Postpartum)" },
+    { code: "A2_iud_i", name: "IUD (Interval)" },
+    { code: "A2_lam", name: "NFP - LAM (Lactational Amenorrhea Method)" },
+    { code: "A2_bbt", name: "NFP - BBT (Basal Body Temperature)" },
+    { code: "A2_cmm", name: "NFP - CMM (Cervical Mucus Method)" },
+    { code: "A2_stm", name: "NFP - STM (Symptothermal Method)" },
+    { code: "A2_sdm", name: "NFP - SDM (Standard Days Method)" },
   ];
 
   let rowFill = false;

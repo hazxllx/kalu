@@ -21,8 +21,10 @@ const RHU = { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'mun-1' };
 
 let certRow;
 let logs;
+let profileStub = null;
 
 const makeSupabase = () => ({
+  _setProfile(profile) { profileStub = profile; },
   from(table) {
     const builder = {
       _table: table,
@@ -39,6 +41,11 @@ const makeSupabase = () => ({
       },
       maybeSingle() {
         if (table === 'medical_certificates') return Promise.resolve({ data: certRow, error: null });
+        if (table === 'profiles') {
+          return profileStub
+            ? Promise.resolve({ data: profileStub, error: null })
+            : Promise.resolve({ data: null, error: null });
+        }
         return Promise.resolve({ data: null, error: null });
       },
       single() {
@@ -60,6 +67,7 @@ const makeSupabase = () => ({
 
 beforeEach(() => {
   logs = [];
+  profileStub = null;
   certRow = {
     id: 'cert-1',
     reference_no: 'MC-2026-0001',
@@ -90,6 +98,29 @@ test('an MHO can approve a For Review certificate; approver id + timestamp recor
   assert.equal(certRow.status, 'Approved');
   assert.equal(certRow.reviewed_by, 'mho-1');
   assert.ok(certRow.reviewed_at, 'approval timestamp is recorded');
+});
+
+test('approval stamps the authorized signatory identity (name + license) server-side', async () => {
+  const supabase = makeSupabase();
+  supabase._setProfile({ full_name: 'Dr. Maria L. Santos', position: 'Municipal Health Officer', license_no: 'PRC-2026-0001' });
+
+  const result = await certs.approve({ user: MHO, id: 'cert-1', supabase });
+  assert.equal(result.status, 'Approved');
+  assert.equal(certRow.medical_officer, 'Dr. Maria L. Santos');
+  assert.equal(certRow.license_number, 'PRC-2026-0001');
+});
+
+test('issuance preserves the approved signatory and license on the finalized document', async () => {
+  const supabase = makeSupabase();
+  certRow.status = 'Approved';
+  certRow.medical_officer = 'Dr. Maria L. Santos';
+  certRow.license_number = 'PRC-2026-0001';
+
+  const issued = await certs.issue({ user: MHO, id: 'cert-1', supabase });
+  assert.equal(issued.status, 'Issued');
+  assert.equal(certRow.medical_officer, 'Dr. Maria L. Santos');
+  assert.equal(certRow.license_number, 'PRC-2026-0001');
+  assert.ok(certRow.date_issued, 'issuance date stamped');
 });
 
 test('a certificate cannot be Issued before it is Approved — 409', async () => {

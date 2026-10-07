@@ -141,6 +141,8 @@ export const profileToSessionUser = (profile) => ({
   // editable contact number, plus read-only registration date and a stable
   // account reference. These are the account holder's OWN values only.
   contact: profile.contact || '',
+  licenseNo: profile.license_no || '',
+  position: profile.position || '',
   createdAt: profile.created_at ?? null,
   referenceNumber: profile.id,
 });

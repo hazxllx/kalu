@@ -9,7 +9,15 @@ import {
   manualIndicators,
   sourceMapping,
   FP_MEASURES,
+  fpMethodToIndicatorCodes,
 } from '../config/m1Catalog.js';
+import {
+  countQualifyingPeopleByAge,
+  countPeopleByMethod,
+  countUniquePeople,
+  ageYearsAt as personAgeAt,
+  fpAgeBand,
+} from './m1PersonCounts.js';
 
 /**
  * KALUSAGAP — FHSIS M1 reporting & aggregation service.
@@ -549,6 +557,31 @@ const aggregateOverRange = async ({ scope, start, end, year, months, supabase })
   const { data: households, error: hhErr } = await hhQ;
   throwOnError(hhErr, 'Could not load households');
 
+  // Person-level FP roster: household_members carries fp_method; join to the
+  // household (barangay scope) and the linked resident (birth_date / sex) so
+  // the M1 FP current-user counts are DERIVED from real people. Scope is
+  // applied on households; members inherit their household's barangay.
+  let fmQ = supabase
+    .from('household_members')
+    .select('id, household_id, resident_id, fp_method, name, birthday, sex, household:households(barangay_id, municipality_id), resident:residents(birth_date, sex)')
+    .limit(50000);
+  const { data: householdMembersRaw, error: fmErr } = await fmQ;
+  throwOnError(fmErr, 'Could not load household member family-planning records');
+  const fpPeople = (householdMembersRaw || [])
+    .filter((m) => {
+      // Scope the member through its household's barangay.
+      if (scope.barangayId) return m.household?.barangay_id === scope.barangayId;
+      if (scope.municipalityId) return m.household?.municipality_id === scope.municipalityId;
+      return true; // admin
+    })
+    .map((m) => ({
+      resident_id: m.resident_id || null,
+      birth_date: m.resident?.birth_date || m.birthday || null,
+      sex: m.resident?.sex || m.sex || '',
+      methodCodes: fpMethodToIndicatorCodes(m.fp_method),
+    }))
+    .filter((p) => p.methodCodes.length > 0);
+
   let mortQ = supabase
     .from('household_member_health_profiles')
     .select('*, member:household_members(id, name, sex, birthday)')
@@ -570,6 +603,17 @@ const aggregateOverRange = async ({ scope, start, end, year, months, supabase })
   matQ = applyScope(matQ, scope);
   const { data: maternal, error: matErr } = await matQ;
   throwOnError(matErr, 'Could not load maternal records');
+
+  // Target-client (TCL) program enrollments (Section E / F derivation). Loaded
+  // for the whole scope; the reporting-month attribution keys off created_at
+  // (the enrollment date) and each indicator's program match in computeIndicator.
+  let tclQ = supabase
+    .from('tcl_entries')
+    .select('*, resident:residents(birth_date, sex)')
+    .limit(50000);
+  tclQ = applyScope(tclQ, scope);
+  const { data: tclEntries, error: tclErr } = await tclQ;
+  throwOnError(tclErr, 'Could not load target-client enrollments');
 
   // Manual aggregate figures for every month covered by the period. Summing the
   // monthly buckets over the range yields the quarterly / annual rollup.
@@ -612,7 +656,9 @@ const aggregateOverRange = async ({ scope, start, end, year, months, supabase })
       households: households || [],
       mort: mort || [],
       maternal: maternal || [],
+      tclEntries: tclEntries || [],
       manual: manualByIndicator.get(ind.code) || [],
+      fpPeople,
       rangeStart: start,
       rangeEnd: end,
       remark: remarkMap.get(ind.code) || '',
@@ -757,9 +803,24 @@ const computeIndicator = (ind, sets) => {
     // m1_records
     if (ind.dataType === 'fp_method' || ind.dataType === 'fp_total') {
       // Current-users logic per age group.
+      //
+      // PERSON-BASED COUNTS (spec PART 9): the beginning/end-of-month current
+      // user counts for each FP method are DERIVED from the real person-level
+      // roster (household_members.fp_method) — every qualifying unique woman
+      // contributes +1 to her method's age band, never more than once. This
+      // replaces manually typed FP totals.
+      //
+      // The manual m1_records `detail.measure` stream is RETAINED only for the
+      // measures the roster snapshot cannot express (new acceptors, drop-outs,
+      // and the fine-grained method variants). When both a person-derived count
+      // and a manual figure exist for the SAME method+measure, the person-derived
+      // value is authoritative to avoid double counting (manual entries for
+      // auto-counted methods are rejected by saveManualEntry).
       const measures = {};
       for (const fm of FP_MEASURES) measures[fm.key] = { Total: 0 };
       for (const g of ind.ageGroups) for (const fm of FP_MEASURES) measures[fm.key][g] = 0;
+
+      // Manual FP measure events (new acceptors / drop-outs / fine variants).
       for (const r of sets.recs) {
         const key = text(r.detail?.measure) || 'current_end';
         const g = resolveAgeGroup(ind, r, r.resident) || 'Total';
@@ -770,6 +831,38 @@ const computeIndicator = (ind, sets) => {
         }
         if (r.resident_id) uniqueResidents.add(r.resident_id);
       }
+
+      // Person-derived current users from the roster.
+      const personByMethod = countPeopleByMethod(sets.fpPeople || [], {
+        refDate: sets.rangeEnd,
+        sexFilter: 'Female',
+      });
+      if (ind.dataType === 'fp_method') {
+        // This indicator's method: person-derived current users go into BOTH
+        // current_begin and current_end (the roster is a current snapshot, so
+        // beginning-of-month == current stored method). Manual new-acceptor and
+        // dropout measures still add on top where the roster cannot see them.
+        const counts = personByMethod[ind.code] || { '10-14': 0, '15-19': 0, '20-49': 0, total: 0 };
+        for (const g of ind.ageGroups) {
+          measures.current_begin[g] += counts[g];
+          measures.current_end[g] += counts[g];
+        }
+        measures.current_begin.Total += counts.total;
+        measures.current_end.Total += counts.total;
+      } else if (ind.dataType === 'fp_total') {
+        // Total Current Users = every auto-counted method summed + manual
+        // current_end figures (a person counts once, across all methods).
+        for (const g of ind.ageGroups) {
+          let gPerson = 0;
+          for (const counts of Object.values(personByMethod)) gPerson += counts[g];
+          measures.current_begin[g] += gPerson;
+          measures.current_end[g] += gPerson;
+        }
+        const personTotal = Object.values(personByMethod).reduce((s, c) => s + c.total, 0);
+        measures.current_begin.Total += personTotal;
+        measures.current_end.Total += personTotal;
+      }
+
       // End-of-month current users = explicit current_end, else begin+new+other-dropout.
       for (const g of ind.ageGroups) {
         const explicitEnd = measures.current_end[g] || 0;
@@ -857,6 +950,30 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
   hhQ = applyScope(hhQ, scope);
   const { data: households } = await hhQ;
 
+  // Person-level FP roster for annual current-user counts.
+  let fmQ = supabase
+    .from('household_members')
+    .select('id, household_id, resident_id, fp_method, name, birthday, sex, household:households(barangay_id, municipality_id), resident:residents(birth_date, sex)')
+    .limit(50000);
+  const { data: householdMembersRaw } = await fmQ;
+  const fpPeople = (householdMembersRaw || [])
+    .filter((m) => {
+      if (scope.barangayId) return m.household?.barangay_id === scope.barangayId;
+      if (scope.municipalityId) return m.household?.municipality_id === scope.municipalityId;
+      return true;
+    })
+    .map((m) => ({
+      resident_id: m.resident_id || null,
+      birth_date: m.resident?.birth_date || m.birthday || null,
+      sex: m.resident?.sex || m.sex || '',
+      methodCodes: fpMethodToIndicatorCodes(m.fp_method),
+    }))
+    .filter((p) => p.methodCodes.length > 0);
+  const fpPeopleByMethod = countPeopleByMethod(fpPeople, {
+    refDate: `${year}-12-31`,
+    sexFilter: 'Female',
+  });
+
   let matQ = supabase.from(MATERNAL).select('*, resident:residents(birth_date, sex)').limit(50000);
   matQ = applyScope(matQ, scope);
   const { data: maternal } = await matQ;
@@ -929,20 +1046,46 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
         }
       }
     } else {
-      for (const r of recs || []) {
-        if (r.indicator_code !== ind.code) continue;
-        const m = monthOf(r.record_date);
-        if (!m) continue;
-        if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
-          if (r.resident_id) { uniquePerMonth[m - 1].add(r.resident_id); uniqueYear.add(r.resident_id); }
-        } else {
-          const val = Number(r.value) || 1;
-          months[m - 1] += val;
-          addSex(r, r.resident, val);
+      if (ind.dataType === 'fp_method' || ind.dataType === 'fp_total') {
+        // Annual current-user counts: the roster is a current snapshot, so the
+        // annual figure is the end-of-year person count (same method the
+        // monthly report uses for its current month). Manual new-acceptor /
+        // dropout measure events still add to the corresponding months.
+        const personCounts = ind.dataType === 'fp_total'
+          ? Object.values(fpPeopleByMethod).reduce((s, c) => ({
+              '10-14': s['10-14'] + c['10-14'],
+              '15-19': s['15-19'] + c['15-19'],
+              '20-49': s['20-49'] + c['20-49'],
+              total: s.total + c.total,
+            }), { '10-14': 0, '15-19': 0, '20-49': 0, total: 0 })
+          : fpPeopleByMethod[ind.code] || { '10-14': 0, '15-19': 0, '20-49': 0, total: 0 };
+        for (const r of recs || []) {
+          if (r.indicator_code !== ind.code) continue;
+          const m = monthOf(r.record_date);
+          if (!m) continue;
+          months[m - 1] += Number(r.value) || 1;
         }
-      }
-      if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
-        for (let i = 0; i < 12; i += 1) months[i] = uniquePerMonth[i].size;
+        // The end-of-year current-user snapshot is added to the December column
+        // (the roster is a live snapshot, so it best represents December).
+        months[11] += personCounts.total;
+        if (bySex) bySex.Female += personCounts.total;
+        // Annual total for CURRENT_USERS is handled below (snapshot, not sum).
+      } else {
+        for (const r of recs || []) {
+          if (r.indicator_code !== ind.code) continue;
+          const m = monthOf(r.record_date);
+          if (!m) continue;
+          if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+            if (r.resident_id) { uniquePerMonth[m - 1].add(r.resident_id); uniqueYear.add(r.resident_id); }
+          } else {
+            const val = Number(r.value) || 1;
+            months[m - 1] += val;
+            addSex(r, r.resident, val);
+          }
+        }
+        if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+          for (let i = 0; i < 12; i += 1) months[i] = uniquePerMonth[i].size;
+        }
       }
     }
 
@@ -950,6 +1093,14 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
     let annual;
     if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') annual = uniqueYear.size || months.reduce((a, b) => a + b, 0);
     else if (ind.source === 'households') annual = months[11];
+    else if (ind.dataType === 'fp_method' || ind.dataType === 'fp_total') {
+      // Current-users snapshot: annual = end-of-year person count (not the sum
+      // of 12 monthly figures, which would multiply a stable roster).
+      const personCounts = ind.dataType === 'fp_total'
+        ? Object.values(fpPeopleByMethod).reduce((s, c) => s + c.total, 0)
+        : (fpPeopleByMethod[ind.code]?.total || 0);
+      annual = personCounts + months.slice(0, 11).reduce((a, b) => a + b, 0);
+    }
     else annual = months.reduce((a, b) => a + b, 0);
 
     // Unique-resident indicators are deduplicated per person for the total, so

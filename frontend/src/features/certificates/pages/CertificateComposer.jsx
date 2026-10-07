@@ -204,11 +204,15 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
   };
 
   /**
-   * Authorized signatory — always the logged-in demo account's name (updates
-   * when switching accounts). No name is invented; the account data carries
-   * its own title (e.g. "Dr. Maria L. Santos") where applicable.
+   * Authorized signatory — the active MHO from the centralized branding
+   * configuration. On the official printed certificate the authorized
+   * signatory is never the logged-in account's arbitrary name; the value
+   * stamped on the issued certificate is authoritative. The logged-in name is
+   * only a fallback when no MHO signatory is configured.
    */
-  const officerName = String(user?.name || "").trim();
+  const officerName = String(
+    branding?.signatory?.fullName || user?.name || ""
+  ).trim();
 
   /** Certificate payload assembled from the selected resident + form values. */
   const buildCertificate = () => ({

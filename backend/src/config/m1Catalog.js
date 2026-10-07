@@ -63,6 +63,7 @@ export const SOURCES = Object.freeze([
   'households', // reuse public.households WASH fields
   'household_member_health_profiles', // reuse mortality fields
   'maternal_records', // DERIVED from public.maternal_records case data
+  'tcl_entries', // DERIVED from public.tcl_entries target-client enrollments
 ]);
 
 // Age-group schemes. Each resolves to an ordered list of buckets.
@@ -87,6 +88,53 @@ export const FP_MEASURES = Object.freeze([
   { key: 'new_present', label: 'New Acceptors — Present Month' },
   { key: 'current_end', label: 'Current Users — End of Month' },
 ]);
+
+/**
+ * Family-planning METHOD mapping from the person-level roster
+ * (household_members.fp_method) to the M1 method indicator codes.
+ *
+ * Each entry declares the M1 indicator code(s) a roster method contributes to,
+ * plus whether that method is an AUTOMATIC (person-based) count. Methods that
+ * the coarse roster cannot distinguish (e.g. POP vs COC, IUD-I vs IUD-PP, the
+ * five NFP sub-methods) are marked `automatic: false` so they remain manual
+ * entries rather than being invented from an ambiguous source value.
+ */
+export const FP_METHOD_MAPPING = Object.freeze([
+  { rosterValue: 'BTL', codes: ['A2_btl'], automatic: true },
+  { rosterValue: 'Vasectomy', codes: ['A2_nsv'], automatic: true },
+  { rosterValue: 'Condom', codes: ['A2_condom'], automatic: true },
+  // "Pill" cannot distinguish POP from COC, so it is NOT auto-counted into a
+  // specific pill indicator. The health worker reports POP/COC manually rather
+  // than us assigning every Pill user to one brand (which would be wrong).
+  { rosterValue: 'Pill', codes: [], automatic: false, note: 'Pill users report POP/COC via manual M1 entry (roster does not distinguish).' },
+  { rosterValue: 'Injectable (DMPA)', codes: ['A2_dmpa'], automatic: true },
+  { rosterValue: 'Implant', codes: ['A2_implant'], automatic: true },
+  // "IUD" cannot distinguish Interval vs Post-Partum; only interval is common in
+  // a community roster, so IUD auto-counts into A2_iud_i. IUD-PP stays manual.
+  { rosterValue: 'IUD', codes: ['A2_iud_i'], automatic: true },
+  // NFP/Cycle Tracking is not a single M1 sub-method; the five NFP sub-methods
+  // are entered manually from the service records.
+  { rosterValue: 'NFP/Cycle Tracking', codes: [], automatic: false, note: 'NFP sub-methods (LAM/BBT/CMM/STM/SDM) reported via manual M1 entry.' },
+  { rosterValue: 'Other', codes: [], automatic: false },
+  { rosterValue: 'None', codes: [], automatic: false },
+]);
+
+/**
+ * Map a stored roster FP method value to the M1 indicator code(s) it
+ * automatically contributes to. Returns [] when the method has no automatic
+ * M1 indicator (ambiguous / manual-only).
+ * @param {string} rosterValue
+ * @returns {string[]}
+ */
+const text = (v) => String(v ?? '').trim();
+export const fpMethodToIndicatorCodes = (rosterValue) => {
+  const key = text(rosterValue);
+  const entry = FP_METHOD_MAPPING.find((m) => m.rosterValue === key);
+  return (entry && entry.automatic ? entry.codes : []) || [];
+};
+
+/** True when a roster FP method can be auto-counted into at least one M1 method indicator. */
+export const isAutoCountedFpMethod = (rosterValue) => fpMethodToIndicatorCodes(rosterValue).length > 0;
 
 // ---------------------------------------------------------------------------
 // Builder
@@ -115,6 +163,8 @@ const ind = (section, subsection, code, name, opts = {}) => {
     match = null, // adapter hint for non-m1_records sources
     derive = null, // derivation descriptor for source === 'maternal_records'
     population = null,
+    ageMin = null, // minimum age in years at the record date (e.g. 60 for seniors)
+    ageMax = null, // maximum age in years at the record date (inclusive)
   } = opts;
   rows.push({
     code,
@@ -132,6 +182,8 @@ const ind = (section, subsection, code, name, opts = {}) => {
     match,
     derive,
     population,
+    ageMin,
+    ageMax,
     displayOrder: (ORDER += 10),
     active: true,
   });
@@ -144,8 +196,34 @@ ind('A', 'A1. Modern FP Unmet Need', 'A1_1',
   'Women of reproductive age with unmet need for modern family planning',
   { ageScheme: 'fp', aggregation: 'COUNT_UNIQUE_RESIDENTS' });
 
-// A2 — Use of family planning method. Each method is one indicator; the six
-// current-users/acceptor/dropout measures live in m1_records.detail.measure.
+// A2 — Use of family planning method. Each method is one indicator; the counts
+// are DERIVED from the real person-level FP method stored on
+// household_members.fp_method (UNIQUE WOMEN / USERS, one count per resident,
+// age banded from birth_date at the reporting month, barangay-scoped). No
+// manual "1" typing: a resident whose current method matches the indicator
+// contributes exactly 1 to their age group and to Total.
+//
+// Method mapping (household_members.fp_method -> M1 method indicator):
+//   BTL                          -> A2_btl  (Female Sterilization / BTL)
+//   Vasectomy                    -> A2_nsv  (Male Sterilization / NSV)
+//   Condom                       -> A2_condom
+//   Pill                         -> A2_coc  (Pills — COC; the stored value
+//                                             cannot distinguish POP from COC,
+//                                             so Pill maps to the combined pill
+//                                             indicator)
+//   Injectable (DMPA)            -> A2_dmpa
+//   Implant                      -> A2_implant
+//   IUD                          -> A2_iud_i (Interval IUD; no sub-type stored)
+//   NFP/Cycle Tracking           -> A2_lam  (LAM is the NFP method recorded;
+//                                             BBT/CMM/STM/SDM are not
+//                                             distinguished in the roster)
+//
+// The fine-grained measures that the snapshot cannot reconstruct (new acceptors
+// in a specific month, drop-outs, IUD-PP, NFP-BBT/CMM/STM/SDM) remain entered
+// through the manual M1 Data Entry workflow (m1_manual_entries). Marking these
+// FP method indicators as derived from household_members prevents staff from
+// typing both a roster method AND a manual figure for the same method — no
+// double counting.
 const FP_METHODS = [
   ['A2_btl', 'Female Sterilization / BTL'],
   ['A2_nsv', 'Male Sterilization / NSV'],
@@ -364,7 +442,10 @@ ind('E', E2, 'E2_8', 'Cases treated', { aggregation: 'COUNT_CASES' });
 ind('E', E2, 'E2_9', 'Confirmed chronic cases referred to a hospital facility', { aggregation: 'COUNT_CASES' });
 
 const E5 = 'E5. Tuberculosis';
-ind('E', E5, 'E5_1', 'Notified TB cases, all forms', { aggregation: 'COUNT_CASES', sex: true });
+// E5_1 (notified TB cases) is DERIVED from the existing TCL register
+// (public.tcl_entries): a resident enrolled in a TB program in the reporting
+// month is a notified TB case. No manual re-entry of the same enrollment.
+ind('E', E5, 'E5_1', 'Notified TB cases, all forms', { source: 'tcl_entries', aggregation: 'COUNT_UNIQUE_RESIDENTS', sex: true, match: { field: 'program', regex: '\\bTB\\b|Tuberculosis|TB Patients|TB Monitoring|TB Prevention' } });
 ind('E', E5, 'E5_2', 'Registered bacteriologically-confirmed DR-TB / RR-MDR-TB cases', { aggregation: 'COUNT_CASES', sex: true });
 ind('E', E5, 'E5_3', 'TB (all forms) cured and completely treated', { aggregation: 'COUNT_CASES', sex: true });
 ind('E', E5, 'E5_4', 'DR-TB / RR-MDR-TB cases cured and completed treatment', { aggregation: 'COUNT_CASES', sex: true });
@@ -394,11 +475,19 @@ ind('F', F, 'F_6', 'Adult women found positive/suspect for cervical cancer', { a
 ind('F', F, 'F_7', 'Adult women screened for breast mass', { aggregation: 'COUNT_UNIQUE_RESIDENTS' });
 ind('F', F, 'F_8', 'Adult women with suspicious breast mass', { aggregation: 'COUNT_CASES' });
 ind('F', F, 'F_9', 'Newly identified hypertensive adults', { aggregation: 'COUNT_CASES', sex: true });
-ind('F', F, 'F_10', 'Newly identified adults with Type 2 Diabetes Mellitus', { aggregation: 'COUNT_CASES', sex: true });
+// F_10 is DERIVED from the existing TCL register (public.tcl_entries): a
+// resident enrolled in the "Diabetes" target-client program in the reporting
+// month is a newly identified Type 2 diabetic under management. No manual
+// re-entry of the same enrollment.
+ind('F', F, 'F_10', 'Newly identified adults with Type 2 Diabetes Mellitus', { source: 'tcl_entries', aggregation: 'COUNT_UNIQUE_RESIDENTS', sex: true, match: { field: 'program', regex: '^Diabetes$' } });
 ind('F', F, 'F_11', 'Senior citizens screened for visual acuity', { aggregation: 'COUNT_UNIQUE_RESIDENTS', sex: true });
 ind('F', F, 'F_12', 'Senior citizens diagnosed with eye disease(s)', { aggregation: 'COUNT_CASES', sex: true });
-ind('F', F, 'F_13', 'Senior citizens who received one dose of PPV', { aggregation: 'COUNT_EVENTS', sex: true });
-ind('F', F, 'F_14', 'Senior citizens who received one dose of influenza vaccine', { aggregation: 'COUNT_EVENTS', sex: true });
+// F_13 (PPV) and F_14 (influenza) are DERIVED from the existing
+// immunizations table — the senior-citizen adult-immunization event is already
+// recorded there as vaccine 'Influenza' / 'Pneumococcal' (or aliases) with
+// status Completed. This removes the double entry for adult vaccines.
+ind('F', F, 'F_13', 'Senior citizens who received one dose of PPV', { source: 'immunizations', aggregation: 'COUNT_EVENTS', sex: true, match: { vaccine: 'Pneumococcal', aliases: ['Pneumococcal', 'PPV', 'PCV13', 'Pneumo', 'Pneumococcal Polysaccharide'], status: 'Completed' } });
+ind('F', F, 'F_14', 'Senior citizens who received one dose of influenza vaccine', { source: 'immunizations', aggregation: 'COUNT_EVENTS', sex: true, match: { vaccine: 'Influenza', aliases: ['Influenza', 'Flu', 'Flu shot', 'Flu vaccine'], status: 'Completed' } });
 
 // ===========================================================================
 // SECTION G — ENVIRONMENTAL HEALTH (reuse public.households WASH fields)
@@ -452,6 +541,28 @@ for (const r of rows) {
   if (r.source === 'm1_records' && r.section !== 'A') r.source = 'm1_manual';
 }
 
+// ---------------------------------------------------------------------------
+// Counting-unit classification (spec PART 12 / 21-22)
+//
+// Every indicator declares the UNIT its value is counted in so the aggregation
+// layer never uses COUNT(*) for everything:
+//   PERSON    -> count each unique qualifying person once (dedup by resident_id)
+//   EVENT     -> count each qualifying record/event (deliveries, visits, doses)
+//   HOUSEHOLD -> count each unique qualifying household once
+//   AGGREGATE -> a value supplied from another layer (e.g. manual figures,
+//                rates/percentages) — never row-counted
+// ---------------------------------------------------------------------------
+const countingUnitFor = (r) => {
+  if (r.source === 'households') return 'HOUSEHOLD';
+  if (r.source === 'm1_manual') return 'AGGREGATE';
+  if (r.aggregation === 'COUNT_UNIQUE_RESIDENTS') return 'PERSON';
+  if (r.aggregation === 'CURRENT_USERS') return 'PERSON'; // FP current users = unique women
+  if (r.dataType === 'fp_total') return 'PERSON';
+  if (r.aggregation === 'SUM' || r.aggregation === 'RATE' || r.aggregation === 'PERCENTAGE') return 'AGGREGATE';
+  return 'EVENT';
+};
+for (const r of rows) r.countingUnit = countingUnitFor(r);
+
 export const M1_INDICATORS = Object.freeze(rows.map((r) => Object.freeze(r)));
 
 const BY_CODE = new Map(M1_INDICATORS.map((r) => [r.code, r]));
@@ -492,6 +603,7 @@ export const SOURCE_LABELS = Object.freeze({
   households: 'Derived from households (WASH)',
   household_member_health_profiles: 'Derived from recorded member mortality',
   maternal_records: 'Derived from maternal_records',
+  tcl_entries: 'Derived from target-client (TCL) program enrollments',
 });
 
 /** True when an indicator is populated by the manual M1 Data Entry workflow. */
@@ -508,6 +620,7 @@ const SOURCE_TABLE = Object.freeze({
   households: 'households',
   household_member_health_profiles: 'household_member_health_profiles',
   maternal_records: 'maternal_records',
+  tcl_entries: 'tcl_entries',
 });
 
 // 'operational' = derived from a real service/event/household record;
@@ -518,6 +631,7 @@ const SOURCE_TYPE = Object.freeze({
   households: 'operational',
   household_member_health_profiles: 'operational',
   maternal_records: 'operational',
+  tcl_entries: 'operational',
   m1_manual: 'manual_reporting',
 });
 
@@ -537,6 +651,7 @@ const sourceFieldsFor = (r) => {
     flattenCondFields(r.derive?.filter, f);
     return [...new Set(f)];
   }
+  if (r.source === 'tcl_entries') return ['program', 'created_at', 'resident_id'];
   if (r.source === 'immunizations') return ['vaccine', 'administered_date', 'status'];
   if (r.source === 'households') return [...new Set(flattenCondFields(r.match))];
   if (r.source === 'household_member_health_profiles') return ['date_of_death', 'member.sex'];

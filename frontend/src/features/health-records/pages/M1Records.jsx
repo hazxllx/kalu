@@ -6,11 +6,9 @@ import {
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
-import StatCard from "@/components/common/StatCard";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import {
-  Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight, Trash2,
-  Users, HeartPulse, Syringe, Smile, Activity, Droplets, ShieldAlert, FileBarChart2, Printer, ChevronRight as ArrowChevron,
+  Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight, Trash2, Printer, CalendarClock,
 } from "lucide-react";
 import { maternalApi, residentsApi, referralsApi, m1Api } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
@@ -26,23 +24,8 @@ import { useM1OfficialPrint } from "@/features/health-records/components/M1Offic
 import { useMaternalRecordPrint } from "@/features/health-records/components/MaternalRecordPrint";
 import M1DataEntryModal from "@/features/health-records/components/M1DataEntryModal";
 import M1SectionPanel from "@/features/health-records/components/M1SectionPanel";
-
-// FHSIS M1 program sections shown as the Health Services launcher. Maternal Care
-// opens the in-page operational records; Child Care and Environmental Health
-// open their existing operational modules; the remaining sections open the
-// section workspace (live indicator values + manual reporting input where an
-// indicator has no operational source). Order/labels follow the official M1 form.
-const HEALTH_SERVICES = [
-  { key: "A", title: "Family Planning", desc: "Women of reproductive age and family planning method utilization.", icon: Users, kind: "section" },
-  { key: "B", title: "Maternal Care", desc: "Prenatal, delivery and postpartum services.", icon: HeartPulse, kind: "maternal" },
-  { key: "C", title: "Child Care", desc: "Immunization, nutrition and child services.", icon: Syringe, kind: "nav", to: "../immunization" },
-  { key: "D", title: "Oral Health", desc: "Oral health care visits across age groups.", icon: Smile, kind: "section" },
-  { key: "F", title: "Non-Communicable Diseases", desc: "Risk assessment, hypertension, diabetes, cancer screening.", icon: Activity, kind: "section" },
-  { key: "G", title: "Environmental Health", desc: "Household water supply and sanitation.", icon: Droplets, kind: "nav", to: "../households" },
-  { key: "E", title: "Infectious Disease", desc: "TB, rabies, schistosomiasis, leprosy, malaria.", icon: ShieldAlert, kind: "section" },
-  { key: "H", title: "Vital Statistics", desc: "Mortality and natality.", icon: FileBarChart2, kind: "section" },
-];
-const SECTION_TITLE = Object.fromEntries(HEALTH_SERVICES.map((s) => [s.key, s.title]));
+import HealthServicesSummary from "@/features/health-records/components/HealthServicesSummary";
+import { HEALTH_SERVICE_TITLES } from "@/features/health-records/lib/healthServicesConfig";
 
 const RISK_LEVELS = ["Low", "Moderate", "High"];
 const STATUSES = ["Active", "Delivered", "Transferred", "Inactive"];
@@ -467,6 +450,7 @@ export default function M1Records() {
   // never diverges from the report. null = not loaded yet.
   const [sectionCounts, setSectionCounts] = useState(null);
   const [countsLoading, setCountsLoading] = useState(false);
+  const [countsError, setCountsError] = useState(null);
   const navigate = useNavigate();
   const { startPrint, portal, brandingError } = useM1OfficialPrint();
   const { startPrint: startMaternalPrint, portal: maternalPrintPortal } = useMaternalRecordPrint();
@@ -543,11 +527,13 @@ export default function M1Records() {
   // (GET /m1/report → byCode) that also drives the official M1 form, so the
   // summary reuses the existing Health Services / operational records instead of
   // storing its own, and updates automatically as records are added in their
-  // modules. Only fetched while the summary grid is visible.
+  // modules. Only fetched while the summary grid is visible. On error the
+  // summary shows a retry action rather than silently reading 0.
   useEffect(() => {
     if (activeSection !== null) return undefined;
     let active = true;
     setCountsLoading(true);
+    setCountsError(null);
     m1Api
       .report(toReportParams(descriptor))
       .then((res) => {
@@ -561,7 +547,11 @@ export default function M1Records() {
         }
         setSectionCounts(totals);
       })
-      .catch(() => { if (active) setSectionCounts(null); })
+      .catch((err) => {
+        if (!active) return;
+        setSectionCounts(null);
+        setCountsError(err?.message || "Unable to load record counts.");
+      })
       .finally(() => { if (active) setCountsLoading(false); });
     return () => { active = false; };
   }, [descriptor, activeSection]);
@@ -596,8 +586,9 @@ export default function M1Records() {
 
   const openManualEntry = (sectionKey) => { setM1EntrySection(sectionKey || "D"); setM1EntryOpen(true); };
   const openService = (svc) => {
-    if (svc.kind === "nav" && svc.to) { navigate(svc.to); return; }
-    setActiveSection(svc.key);
+    const target = svc.open || {};
+    if (target.to) { navigate(target.to); return; }
+    if (target.section) setActiveSection(target.section);
   };
 
   const ageOf = (birthDate) => {
@@ -829,69 +820,64 @@ export default function M1Records() {
             <span className="text-sm text-brand-gray">Showing: <span className="font-medium text-brand-ink">{periodLabel}</span></span>
           </div>
 
-          {/* M1 workspace metrics */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 sm:gap-5">
-            <StatCard icon="CalendarClock" tone="blue" index={0} label="Reporting Period" value={periodLabel} />
-            <StatCard icon="FileHeart" tone="danger" index={1} label="Maternal Records (period)" value={m1Metrics.periodRecords} />
-            <StatCard icon="Users" tone="green" index={2} label="Residents Served (period)" value={m1Metrics.residentsServed} />
-            <StatCard icon="ClipboardList" tone="yellow" index={3} label="Total Maternal Records" value={m1Metrics.totalRecords} />
+          {/* M1 workspace metrics — compact summary strip (high density) */}
+          <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm">
+            <span className="inline-flex items-center gap-2 font-semibold text-brand-ink">
+              <CalendarClock className="h-4 w-4 text-brand-blue" /> {periodLabel}
+            </span>
+            <span className="text-brand-gray">Maternal records (period): <strong className="text-brand-ink">{m1Metrics.periodRecords}</strong></span>
+            <span className="text-brand-gray">Residents served: <strong className="text-brand-ink">{m1Metrics.residentsServed}</strong></span>
+            <span className="text-brand-gray">Total maternal records: <strong className="text-brand-ink">{m1Metrics.totalRecords}</strong></span>
+            <span className="ml-auto hidden text-xs text-brand-gray sm:inline">
+              Derived indicators are computed automatically from operational records.
+            </span>
           </div>
 
-          {/* Health Services — Service Summary of the operational records M1 consolidates. */}
+          {/* Health Services — standardized service summary + M1 reporting entry. */}
           {activeSection === null && (
-            <Card className="mt-6 p-6">
-              <h3 className="font-semibold text-brand-ink">Health Services</h3>
-              <p className="mt-0.5 text-xs text-brand-gray">
-                Operational health service records are consolidated automatically into the M1 report for {periodLabel}.
-                Services, personnel and participants are created and managed in the Health Services module — M1 only reads and totals those records.
-              </p>
-
-              <div className="mt-5 flex items-center justify-between">
-                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Service Summary</h4>
-                {countsLoading && <span className="text-[11px] text-brand-gray">Updating…</span>}
-              </div>
-
-              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {HEALTH_SERVICES.map((svc) => {
-                  const Icon = svc.icon;
-                  // Maternal (B) mirrors the operational maternal records in period
-                  // (same number as the "Maternal Records (period)" summary card);
-                  // every other section reads its consolidated total from the M1
-                  // aggregation API. null = counts still loading.
-                  const count = svc.key === "B"
-                    ? m1Metrics.periodRecords
-                    : (sectionCounts ? sectionCounts[svc.key] || 0 : null);
-                  return (
-                    <button
-                      key={svc.key}
-                      onClick={() => openService(svc)}
-                      className="group flex flex-col rounded-btn border border-brand-border bg-white p-4 text-left transition-colors hover:border-brand-blue"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-10 w-10 items-center justify-center rounded-btn bg-brand-blue/10 text-brand-blue">
-                          <Icon className="h-5 w-5" />
-                        </span>
-                        <span className="text-sm font-semibold text-brand-ink">{svc.title}</span>
-                      </div>
-                      <p className="mt-3 flex-1">
-                        <span className="font-stat text-2xl font-bold text-brand-ink">{count === null ? "—" : count}</span>
-                        <span className="ml-1.5 text-xs text-brand-gray">{count === 1 ? "record" : "records"}</span>
-                      </p>
-                      <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-brand-blue">
-                        View Records <ArrowChevron className="h-4 w-4" />
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </Card>
+            <HealthServicesSummary
+              periodLabel={periodLabel}
+              period={period}
+              year={year}
+              month={month}
+              years={yearsList}
+              onPeriodChange={({ year: y, month: m }) => {
+                if (y !== undefined) setYear(y);
+                if (m !== undefined) setMonth(m);
+              }}
+              countsBySection={sectionCounts || {}}
+              countsLoading={countsLoading}
+              countsError={countsError}
+              onRetryCounts={() => {
+                setSectionCounts(null);
+                setCountsError(null);
+                setCountsLoading(true);
+                m1Api
+                  .report(toReportParams(descriptor))
+                  .then((res) => {
+                    const byCode = res?.byCode || {};
+                    const totals = {};
+                    for (const row of Object.values(byCode)) {
+                      const key = row?.section;
+                      if (!key) continue;
+                      totals[key] = (totals[key] || 0) + (Number(row.total) || 0);
+                    }
+                    setSectionCounts(totals);
+                    setCountsError(null);
+                  })
+                  .catch((err) => setCountsError(err?.message || "Unable to load record counts."))
+                  .finally(() => setCountsLoading(false));
+              }}
+              maternalPeriodCount={m1Metrics.periodRecords}
+              onOpenService={openService}
+            />
           )}
 
           {/* Non-maternal section workspace (live indicator values + reporting input) */}
           {activeSection && activeSection !== "B" && (
             <M1SectionPanel
               sectionKey={activeSection}
-              sectionTitle={SECTION_TITLE[activeSection] || "FHSIS Section"}
+              sectionTitle={HEALTH_SERVICE_TITLES[activeSection] || "FHSIS Section"}
               descriptor={descriptor}
               periodLabel={periodLabel}
               navigate={navigate}

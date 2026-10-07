@@ -110,21 +110,103 @@ export const getAdminLogoSettings = async ({ user } = {}) => {
   };
 };
 
-export const getDocumentBranding = async ({ user, documentType } = {}) => {
+/**
+ * Resolve the organization + authorized signatory data a document generator
+ * needs, from the existing database tables (municipalities, facilities,
+ * profiles). Nothing here is hardcoded.
+ */
+const loadOrganizationAndSignatory = async (supabase, municipalityId, documentType, user = null) => {
+  const template = DOCUMENT_BRANDING_TEMPLATES[documentType];
+
+  const municipality = await (async () => {
+    const { data, error } = await supabase
+      .from('municipalities')
+      .select('id, name, province, region')
+      .eq('id', municipalityId)
+      .maybeSingle();
+    throwOnSupabaseError(error, 'Could not load municipality branding scope');
+    return data || null;
+  })();
+
+  // RHU facility: the first facility of type 'rhu' in the municipality. Address
+  // is optional (the seed stores the RHU with no address yet).
+  const [facilityRows] = await Promise.all([
+    supabase
+      .from('facilities')
+      .select('name, type, address')
+      .eq('municipality_id', municipalityId)
+      .eq('type', 'rhu')
+      .limit(5),
+  ]);
+  throwOnSupabaseError(facilityRows.error, 'Could not load RHU facility settings');
+  const rhu = (facilityRows.data || []).find((f) => f.name) || null;
+
+  // Authorized signatory: prefer an active MHO (the required approval role for
+  // medical documents). Falls back to the profile of the requesting user when no
+  // MHO profile is stored. Only identity fields are surfaced; the signatory is
+  // resolved server-side and stamped at issue time by the certificate service.
+  let signatory = null;
+  try {
+    const mho = await supabase
+      .from('profiles')
+      .select('full_name, position, license_no')
+      .eq('role', 'mho')
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle();
+    throwOnSupabaseError(mho.error, 'Could not load authorized signatory');
+    if (mho.data) {
+      signatory = {
+        fullName: mho.data.full_name || '',
+        position: mho.data.position || 'Municipal Health Officer',
+        licenseNumber: mho.data.license_no || '',
+      };
+    }
+  } catch (_error) {
+    // Fall back to the requesting profile; do not fail document generation
+    // solely because no MHO profile is configured.
+  }
+  if (!signatory && user?.name) {
+    signatory = {
+      fullName: user.name,
+      position: user.position || 'Municipal Health Officer',
+      licenseNumber: user.licenseNumber || '',
+    };
+  }
+
+  return {
+    municipality: municipality ? {
+      name: municipality.name || '',
+      province: municipality.province || '',
+      region: municipality.region || '',
+      id: municipality.id,
+    } : {},
+    rhu: rhu ? {
+      name: rhu.name || '',
+      type: rhu.type || 'rhu',
+      address: rhu.address || '',
+    } : null,
+    officeName: template.officeName || '',
+    documentTitle: template.title || '',
+    signatory,
+  };
+};
+
+export const getDocumentBranding = async ({ user, documentType, supabase } = {}) => {
   if (!ALLOWED_ROLES.has(user?.role)) {
     throw ApiError.forbidden('Your account cannot use official document branding.');
   }
   const template = DOCUMENT_BRANDING_TEMPLATES[documentType];
   if (!template) throw ApiError.notFound('Document branding template not found.');
 
-  const supabase = getServiceClient();
-  const municipalityId = await requireMunicipality(user, supabase);
-  const rows = await getLogoRows(supabase, municipalityId);
+  const client = supabase || getServiceClient();
+  const municipalityId = await requireMunicipality(user, client);
+  const rows = await getLogoRows(client, municipalityId);
   const rowByType = new Map(rows.map((row) => [row.logo_type, row]));
   const resolved = await Promise.all(template.logoTypes.map(async (logoType) => {
     const row = rowByType.get(logoType);
     if (!row) return null;
-    const { data, error } = await supabase.storage.from(BUCKET).download(row.storage_path);
+    const { data, error } = await client.storage.from(BUCKET).download(row.storage_path);
     throwOnSupabaseError(error, `Could not retrieve the configured ${logoType} logo`);
     if (!data) {
       throw Object.assign(new Error(`Could not retrieve the configured ${logoType} logo.`), { statusCode: 500 });
@@ -138,11 +220,24 @@ export const getDocumentBranding = async ({ user, documentType } = {}) => {
     }];
   }));
   const logos = Object.fromEntries(resolved.filter(Boolean));
+  const { municipality, rhu, officeName, documentTitle, signatory } =
+    await loadOrganizationAndSignatory(client, municipalityId, documentType, user);
   return {
     documentType,
     issuingLevel: template.issuingLevel,
     logos,
     missingLogoTypes: template.logoTypes.filter((logoType) => !logos[logoType]),
+    organization: {
+      municipality: municipality.name || '',
+      province: municipality.province || '',
+      region: municipality.region || '',
+      officeName,
+      rhuName: rhu?.name || '',
+      rhuAddress: rhu?.address || '',
+      address: rhu?.address || '',
+      rhu,
+    },
+    signatory,
   };
 };
 

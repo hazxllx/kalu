@@ -68,7 +68,10 @@ let testMunicipalityId;
 let testBarangayId;
 let testUserId;
 
-// Test fixtures (minimal valid household)
+// Test fixtures (minimal valid household). The database CHECK constraints on
+// `household_members` are: sex IN ('', 'Male', 'Female') and name NOT NULL, so
+// member rows must carry a valid sex and a name. The household id is a TEXT pk;
+// `headName` is free text (there is no separate `name` column on households).
 const makeTestHousehold = (suffix = '') => ({
   barangay: 'Test Poblacion',
   headName: `Integration Test ${suffix}`,
@@ -83,6 +86,9 @@ const makeTestHousehold = (suffix = '') => ({
     { name: `Member B ${suffix}`, relationship: 'Spouse', age: 32, sex: 'Female' },
   ],
 });
+
+/** Unique household TEXT id per run so parallel/CI runs cannot collide. */
+const uniqueHouseholdId = (prefix = 'IT') => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const testUser = {
   id: null, // set in before()
@@ -300,7 +306,7 @@ test('RLS denies anon/authenticated access to sync_operations', { skip: SKIP_REA
 
 test('create_household_with_members function exists and is callable', { skip: SKIP_REASON }, async () => {
   const householdRow = {
-    id: `HH-${Date.now()}`,
+    id: uniqueHouseholdId('RPC'),
     municipality_id: testMunicipalityId,
     barangay_id: testBarangayId,
     head_name: 'RPC Test',

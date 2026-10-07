@@ -56,6 +56,8 @@ const profileToFrontendUser = (profileUser) => ({
   // Self-service account details (Settings page): own editable contact number,
   // read-only registration date and stable account reference.
   contact: profileUser.contact ?? '',
+  licenseNo: profileUser.licenseNo ?? '',
+  position: profileUser.position ?? '',
   createdAt: profileUser.createdAt ?? null,
   referenceNumber: profileUser.referenceNumber ?? profileUser.id ?? null,
 });

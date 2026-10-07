@@ -44,6 +44,9 @@ class FakeQuery {
     const out = { ...row };
     if (this.selectStr.includes('resident:residents(')) out.resident = this.store.residents.get(row.resident_id) || null;
     if (this.selectStr.includes('member:household_members(')) out.member = this.store.members.get(row.household_member_id) || null;
+    if (this.selectStr.includes('household:households(')) {
+      out.household = this.store.tables.households.get(row.household_id) || null;
+    }
     if (this.selectStr.includes('municipalities(')) out.municipalities = this.store.municipalities.get(row.municipality_id) || null;
     return out;
   }
@@ -125,6 +128,7 @@ const makeStore = () => {
       m1_manual_entries: new Map(),
       maternal_records: new Map(),
       households: new Map(),
+      household_members: new Map(),
       immunizations: new Map(),
       household_member_health_profiles: new Map(),
       m1_indicator_remarks: new Map(),
@@ -578,4 +582,107 @@ test('listManualEntries returns stored figures and the manual indicator catalog'
   const entry = res.entries.find((e) => e.indicator_code === 'B1_1' && e.age_group === '20-49');
   assert.equal(entry.value, 7);
   assert.equal(res.remarks.B1_1, 'reviewed');
+});
+
+// ===========================================================================
+// Person-based FP auto-counting (spec PART 1-28)
+// ===========================================================================
+
+// Seed household_members with an FP method + linked resident (age derived
+// from the resident's birth_date at the report month).
+const seedFpMember = (over = {}) => {
+  const id = `FP-${++store.seq}`;
+  const row = {
+    id,
+    household_id: over.household_id || 'HH-1',
+    resident_id: 'RES-1',
+    fp_method: 'Condom',
+    name: 'Member',
+    birthday: '',
+    sex: '',
+    ...over,
+  };
+  // Link the household (for scope) + resident (for birth_date/sex) embeds.
+  if (!store.tables.households.has(row.household_id)) {
+    store.tables.households.set(row.household_id, { id: row.household_id, barangay_id: 'brgy-1', municipality_id: 'M1', head_name: 'HH', purok: '', street_address: '' });
+  }
+  const hh = store.tables.households.get(row.household_id);
+  const res = store.residents.get(row.resident_id) || {};
+  store.tables.household_members.set(id, {
+    ...row,
+    household: hh,
+    resident: { birth_date: res.birth_date || null, sex: res.sex || '' },
+  });
+  return store.tables.household_members.get(id);
+};
+
+// The FP person counts use a JOIN shape; the fake client's _embed only fills
+// household/resident when the select string asks for them. We seed the raw
+// member rows and rely on the service's household_members select which asks
+// for the embeds — the FakeQuery._embed handles resident:residents(...) but
+// NOT household:households(...). Patch _embed to also resolve households.
+// (The FakeQuery._embed was defined before household support existed.)
+
+test('FP method indicators are derived from unique qualifying people (PERSON +1)', async () => {
+  // RES-1 female age ~25 (birth 2001) -> 20-49; RES-3 female age ~17 -> 15-19.
+  seedFpMember({ id: 'FP-A', resident_id: 'RES-1', fp_method: 'Condom' });
+  seedFpMember({ id: 'FP-B', resident_id: 'RES-3', fp_method: 'Condom' });
+  seedFpMember({ id: 'FP-C', resident_id: 'RES-1', fp_method: 'Condom' }); // duplicate same person
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 10, supabase: sb });
+  assert.equal(report.byCode.A2_condom.total, 2); // two unique women, not 3 records
+  assert.equal(report.byCode.A2_condom.byAge['20-49'], 1); // RES-1
+  assert.equal(report.byCode.A2_condom.byAge['15-19'], 1); // RES-3
+});
+
+test('FP person counts respect the reporting barangay (outside resident excluded)', async () => {
+  seedFpMember({ id: 'FP-D', resident_id: 'RES-1', fp_method: 'Condom' }); // brgy-1
+  // Give RES-2 (brgy-2) its own household + member so scope isolates it.
+  store.tables.households.set('HH-2', { id: 'HH-2', barangay_id: 'brgy-2', municipality_id: 'M1', head_name: 'HH2', purok: '', street_address: '' });
+  seedFpMember({ id: 'FP-E', resident_id: 'RES-2', household_id: 'HH-2', fp_method: 'Condom' }); // brgy-2
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 10, supabase: sb });
+  assert.equal(report.byCode.A2_condom.total, 1); // only brgy-1
+});
+
+test('FP person counts group by method and never double count a person', async () => {
+  // Same resident, two different method records -> only her actual method counts.
+  seedFpMember({ id: 'FP-F', resident_id: 'RES-1', fp_method: 'Condom' });
+  seedFpMember({ id: 'FP-G', resident_id: 'RES-1', fp_method: 'Injectable (DMPA)' });
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 10, supabase: sb });
+  // RES-1 maps to BOTH A2_condom and A2_dmpa from the two roster rows; each
+  // method counts her once. (A real person has ONE stored method; the test
+  // verifies a person with multiple records is still +1 per method.)
+  assert.equal(report.byCode.A2_condom.total, 1);
+  assert.equal(report.byCode.A2_dmpa.total, 1);
+});
+
+test('FP method age bands: 14 -> 10-14, 15/19 -> 15-19, 20/49 -> 20-49', async () => {
+  // RES-1 birth 2001 -> 25 in 2026 (20-49). Add synthetic ages via direct rows.
+  store.residents.set('RES-4', { id: 'RES-4', first_name: 'B', last_name: 'Y', barangay: 'San Isidro', barangay_id: 'brgy-1', municipality_id: 'M1', birth_date: '2012-01-01', sex: 'Female' }); // ~14
+  store.residents.set('RES-5', { id: 'RES-5', first_name: 'C', last_name: 'Z', barangay: 'San Isidro', barangay_id: 'brgy-1', municipality_id: 'M1', birth_date: '2011-06-01', sex: 'Female' }); // ~15
+  store.residents.set('RES-6', { id: 'RES-6', first_name: 'D', last_name: 'W', barangay: 'San Isidro', barangay_id: 'brgy-1', municipality_id: 'M1', birth_date: '2007-06-01', sex: 'Female' }); // ~19
+  store.residents.set('RES-7', { id: 'RES-7', first_name: 'E', last_name: 'V', barangay: 'San Isidro', barangay_id: 'brgy-1', municipality_id: 'M1', birth_date: '2006-01-01', sex: 'Female' }); // ~20
+  store.residents.set('RES-8', { id: 'RES-8', first_name: 'F', last_name: 'U', barangay: 'San Isidro', barangay_id: 'brgy-1', municipality_id: 'M1', birth_date: '1977-06-01', sex: 'Female' }); // ~49
+  seedFpMember({ id: 'FP-14', resident_id: 'RES-4', fp_method: 'Condom' });
+  seedFpMember({ id: 'FP-15', resident_id: 'RES-5', fp_method: 'Condom' });
+  seedFpMember({ id: 'FP-19', resident_id: 'RES-6', fp_method: 'Condom' });
+  seedFpMember({ id: 'FP-20', resident_id: 'RES-7', fp_method: 'Condom' });
+  seedFpMember({ id: 'FP-49', resident_id: 'RES-8', fp_method: 'Condom' });
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 10, supabase: sb });
+  const c = report.byCode.A2_condom;
+  assert.equal(c.byAge['10-14'], 1);
+  assert.equal(c.byAge['15-19'], 2);
+  assert.equal(c.byAge['20-49'], 2);
+  assert.equal(c.total, 5);
+});
+
+test('FP current users total (A2_total) sums all auto-counted methods', async () => {
+  seedFpMember({ id: 'FP-T1', resident_id: 'RES-1', fp_method: 'Condom' });
+  seedFpMember({ id: 'FP-T2', resident_id: 'RES-3', fp_method: 'Injectable (DMPA)' });
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 10, supabase: sb });
+  assert.equal(report.byCode.A2_total.total, 2); // one condom + one DMPA user
+});
+
+test('no qualifying people -> FP method total is 0', async () => {
+  const report = await service.monthlyReport({ user: HS, year: 2026, month: 10, supabase: sb });
+  assert.equal(report.byCode.A2_condom.total, 0);
 });
