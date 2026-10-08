@@ -67,6 +67,11 @@ const hasValidRequiredDocument = async (resident, document) => {
   }
 };
 
+const isPendingApprovalDocument = (document) => {
+  const status = String(document?.verificationStatus || 'pending').trim().toLowerCase();
+  return !status || ['pending', 'approved'].includes(status);
+};
+
 const isVerificationComplete = async (resident) => {
   if (!hasRequiredProfileFields(resident)) return false;
   const documents = await repository.listDocumentsByResident(resident.id);
@@ -75,16 +80,25 @@ const isVerificationComplete = async (resident) => {
       return resident.minorAlternativeStatus === 'approved';
     }
     if (resident.minorVerificationMethod !== 'student_id') return false;
-    const studentId = documents.find((document) => document.documentType === 'student_id');
-    if (!studentId || studentId.verificationStatus !== 'approved') return false;
+    const studentId = documents.find((document) => document.documentType === 'student_id' && isPendingApprovalDocument(document));
+    if (!studentId || (studentId.verificationStatus && studentId.verificationStatus !== 'approved')) return false;
     return hasValidRequiredDocument(resident, studentId);
   }
   if (ageFromDateOnly(resident.birthDate) === null) return false;
+
+  const proofOfResidency = documents.find((document) =>
+    document.documentType === 'proof_of_residency'
+    && isPendingApprovalDocument(document),
+  );
+  if (proofOfResidency) {
+    return hasValidRequiredDocument(resident, proofOfResidency);
+  }
+
   const requiredTypes = ['government_id_front', 'government_id_back', 'identity_photo'];
   const requiredDocuments = requiredTypes.map((type) =>
     documents.find((document) =>
       document.documentType === type
-      && ['pending', 'approved'].includes(document.verificationStatus),
+      && isPendingApprovalDocument(document),
     ),
   );
   if (requiredDocuments.some((document) => !document)) return false;

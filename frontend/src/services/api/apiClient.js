@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { normalizeApiBaseUrl } from './apiBaseUrl';
 
 /**
  * Centralized HTTP client for the KALUSAGAP backend (see `backend/`).
@@ -17,7 +18,7 @@ import { supabase } from '@/lib/supabase';
  * empty state when the endpoint supplies no rows — no fabricated data is
  * rendered anywhere in the app.
  */
-const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
+const BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
 
 /**
  * @typedef {Object} RequestOptions

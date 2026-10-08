@@ -37,11 +37,9 @@ export const GUARDIAN_RELATIONSHIP_TYPES = Object.freeze([
 
 /** Verification lifecycle of a guardian link. */
 export const GUARDIAN_LINK_STATUSES = Object.freeze([
-  'pending_guardian_acceptance',
   'pending_verification',
   'verified', // an authorized staff member confirmed the relationship
   'rejected', // an authorized staff member recorded it as incorrect
-  'cancelled',
 ]);
 
 /** Staff roles that may create guardian links (aligned with household workflows). */

@@ -231,10 +231,16 @@ a Vercel deployment that installs and builds the frontend, serves
 routing. Set the `VITE_` environment variables in the hosting project settings.
 
 The Express API in `backend/` is a separate Node.js service and is deployed and
-scaled independently of the frontend. Point the frontend `VITE_API_URL` at the
-deployed API origin, and set the backend's `CLIENT_URL` to the deployed frontend
-origin so CORS permits it. The Supabase project provides authentication and the
-PostgreSQL database for both.
+scaled independently of the frontend. Set the frontend `VITE_API_URL` to the
+deployed API origin **including `/api`** (for example,
+`https://kalusagap.onrender.com/api`); the Express app mounts all routes under
+`/api`, including `/api/auth/me` and `/api/roles/permissions`. The frontend also
+normalizes a bare API origin by appending `/api`, but including the mount in the
+deployment setting makes the contract explicit. Set the backend's `CLIENT_URL`
+to the deployed frontend origin so CORS permits it. For the current production
+deployment, use `VITE_API_URL=https://kalusagap.onrender.com/api` in Vercel and
+`CLIENT_URL=https://kalu-zeta.vercel.app` in Render. The Supabase project
+provides authentication and the PostgreSQL database for both.
 
 ## Scope and Limitations
 
