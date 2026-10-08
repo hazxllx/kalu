@@ -745,10 +745,12 @@ export const supabaseRepository = {
    * first / middle / last name, record number, PhilHealth number and mobile
    * are all searchable from one field.
    */
-  async searchResidents({ q = '', limit = 20 } = {}) {
+  async searchResidents({ q = '', limit = 20, barangay = null, municipalityId = null } = {}) {
     const supabase = getServiceClient();
     let query = supabase.from(TABLES.residents).select('*').order('created_at', { ascending: false }).limit(limit);
     if (q) query = query.or(residentSearchFilter(q, { includeBarangay: true }));
+    if (barangay) query = query.eq('barangay', barangay);
+    if (municipalityId) query = query.eq('municipality_id', municipalityId);
     const { data, error } = await query;
     throwOnError(error, 'Could not search residents');
     return (data || []).map(residentFromRow);

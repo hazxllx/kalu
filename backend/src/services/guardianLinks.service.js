@@ -114,7 +114,7 @@ const publicResidentLink = (link) => ({
  * Bounded, scope-aware; returns display-safe fields only (no address, no
  * medical data, no verification detail beyond what the directory exposes).
  */
-export const searchGuardianCandidates = async ({ user, q = '' }) => {
+export const searchGuardianCandidates = async ({ user, q = '', repo = repository }) => {
   if (!GUARDIAN_LINK_CREATE_ROLES.includes(user.role) && user.role !== 'admin') {
     throw ApiError.forbidden('Your role cannot search guardian candidates.');
   }
@@ -127,9 +127,14 @@ export const searchGuardianCandidates = async ({ user, q = '' }) => {
   // wide roles (phn / mho / admin) search their own municipality — never a
   // bare global search.
   const results = scope
-    ? await repository.searchResidents({ q: term, limit: 10, barangay: scope })
+    ? await repo.searchResidents({
+      q: term,
+      limit: 10,
+      barangay: scope,
+      municipalityId: user.municipalityId || null,
+    })
     : user.municipalityId
-      ? (await repository.listResidents({ q: term, limit: 10, municipalityId: user.municipalityId })).rows
+      ? (await repo.listResidents({ q: term, limit: 10, municipalityId: user.municipalityId })).rows
       : [];
   return results.map((resident) => ({
     id: resident.id,
