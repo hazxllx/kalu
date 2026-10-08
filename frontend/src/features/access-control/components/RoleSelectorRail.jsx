@@ -1,93 +1,87 @@
 import React from "react";
 import { Lock } from "lucide-react";
 
-import Icon from "@/components/common/Icon";
 import { ALL_PERMISSION_IDS, ROLE_POLICY, countGranted } from "@/lib/permissions";
 
-/**
- * Role picker for the Role & Permissions control centre.
- *
- * Vertical rail on desktop, horizontally scrollable row on small screens.
- * Each card reports how much of the catalogue the role currently holds so an
- * administrator can see least-privilege at a glance.
- */
 export default function RoleSelectorRail({ roles, selectedRoleId, dirtyRoleId, permissionsForRole, onSelect }) {
   const total = ALL_PERMISSION_IDS.length;
+  const selectedRole = roles.find((role) => role.id === selectedRoleId);
 
   return (
-    <div
-      className="flex gap-3 overflow-x-auto pb-2 no-scrollbar lg:flex-col lg:overflow-visible lg:pb-0"
-      role="tablist"
-      aria-label="System roles"
-    >
-      {roles.map((role) => {
-        const granted = countGranted(permissionsForRole(role.id));
-        const pct = total === 0 ? 0 : Math.round((granted / total) * 100);
-        const selected = role.id === selectedRoleId;
-        const restricted = Boolean(ROLE_POLICY[role.id]);
+    <>
+      <label className="sr-only" htmlFor="role-selector">
+        Select a role
+      </label>
+      <select
+        id="role-selector"
+        value={selectedRoleId}
+        onChange={(event) => onSelect(event.target.value)}
+        className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-brand-dark focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/20 lg:hidden"
+      >
+        {roles.map((role) => {
+          const granted = countGranted(permissionsForRole(role.id));
+          return (
+            <option key={role.id} value={role.id}>
+              {role.label} — {granted}/{total}
+            </option>
+          );
+        })}
+      </select>
 
-        return (
-          <button
-            key={role.id}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            onClick={() => onSelect(role.id)}
-            className={`relative w-[248px] shrink-0 overflow-hidden rounded-2xl border p-4 text-left transition-colors lg:w-full ${
-              selected
-                ? "border-brand-blue bg-brand-light/70 shadow-card"
-                : "border-slate-200 bg-white hover:border-brand-rule hover:bg-slate-50"
-            }`}
-          >
-            {selected && <span className="absolute inset-y-0 left-0 w-[3px] bg-brand-gold" aria-hidden="true" />}
+      <div className="hidden lg:block">
+        <div className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <span>Role</span>
+          <span>Granted</span>
+        </div>
+        <div className="divide-y divide-slate-200 border-y border-slate-200 bg-white">
+          {roles.map((role) => {
+            const granted = countGranted(permissionsForRole(role.id));
+            const selected = role.id === selectedRoleId;
+            const restricted = Boolean(ROLE_POLICY[role.id]);
 
-            <div className="flex items-start gap-3">
-              <div
-                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                  selected ? "bg-brand-blue text-white" : "bg-slate-100 text-brand-gray"
+            return (
+              <button
+                key={role.id}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onSelect(role.id)}
+                className={`relative flex min-h-[52px] w-full items-center justify-between gap-3 px-3 py-1.5 text-left transition-colors ${
+                  selected
+                    ? "bg-[#EEF2F6] text-brand-dark"
+                    : "text-slate-700 hover:bg-slate-50"
                 }`}
               >
-                <Icon name={role.icon} className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className={`truncate text-sm font-semibold ${selected ? "text-brand-dark" : "text-slate-900"}`}>
-                    {role.label}
-                  </p>
-                  {restricted && (
-                    <Lock
-                      className="h-3 w-3 shrink-0 text-brand-gold"
-                      strokeWidth={2.2}
-                      aria-label="This role has fixed guard-rails"
-                    />
+                {selected && <span className="absolute inset-y-0 left-0 w-0.5 bg-brand-gold" aria-hidden="true" />}
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-[13px] font-semibold">{role.label}</span>
+                    {restricted && (
+                      <Lock
+                        className="h-3 w-3 shrink-0 text-brand-gold"
+                        strokeWidth={2.2}
+                        aria-label="This role has fixed guard-rails"
+                      />
+                    )}
+                    {dirtyRoleId === role.id && (
+                      <span className="shrink-0 rounded bg-brand-goldpale px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-amber">
+                        Unsaved
+                      </span>
+                    )}
+                  </span>
+                  {selected && selectedRole?.description && (
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                      {selectedRole.description}
+                    </span>
                   )}
-                </div>
-                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{role.description}</p>
-              </div>
-            </div>
-
-            <div className="mt-3.5 flex items-center gap-3">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={`h-full rounded-full ${selected ? "bg-brand-blue" : "bg-brand-rule"}`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <span className="num shrink-0 text-[11px] font-semibold text-slate-500">
-                {granted}/{total}
-              </span>
-            </div>
-
-            {dirtyRoleId === role.id && (
-              <span className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-brand-goldpale px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-amber">
-                <span className="h-1.5 w-1.5 rounded-full bg-brand-gold" />
-                Unsaved
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
+                </span>
+                <span className="num shrink-0 text-xs font-semibold text-slate-500">
+                  {granted}/{total}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
   );
 }

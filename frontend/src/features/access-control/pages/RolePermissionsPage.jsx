@@ -1,14 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  KeyRound,
-  Layers,
   RotateCcw,
   Save,
   Search,
   ShieldAlert,
-  ShieldCheck,
-  Undo2,
-  Users,
   X,
 } from "lucide-react";
 
@@ -19,10 +14,10 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { ROLE } from "@/lib/roles";
 import {
+  ACTION_LABEL,
   ALL_PERMISSION_IDS,
   MANAGED_ROLES,
   PERMISSION_MODULES,
-  SENSITIVE_PERMISSION_IDS,
   countGranted,
   defaultPermissionsForRole,
   diffPermissionMaps,
@@ -34,7 +29,6 @@ import {
 } from "@/lib/permissions";
 
 import ConfirmPermissionDialog from "@/features/access-control/components/ConfirmPermissionDialog";
-import ModulePermissionCard from "@/features/access-control/components/ModulePermissionCard";
 import PermissionAuditFeed from "@/features/access-control/components/PermissionAuditFeed";
 import PermissionMatrixTable from "@/features/access-control/components/PermissionMatrixTable";
 import RoleSelectorRail from "@/features/access-control/components/RoleSelectorRail";
@@ -44,25 +38,6 @@ const plural = (count, singular, suffix = "s") => `${count} ${singular}${count =
 const summarise = (labels, max = 3) => {
   if (labels.length <= max) return labels.join(", ");
   return `${labels.slice(0, max).join(", ")} and ${labels.length - max} more`;
-};
-
-const SummaryTile = ({ icon: TileIcon, label, value, tone = "blue" }) => {
-  const tones = {
-    blue: "bg-brand-light text-brand-blue",
-    gold: "bg-brand-goldpale text-brand-amber",
-    slate: "bg-slate-100 text-slate-600",
-  };
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-card">
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${tones[tone]}`}>
-        <TileIcon className="h-[18px] w-[18px]" strokeWidth={1.8} />
-      </span>
-      <div className="min-w-0">
-        <p className="num font-stat text-xl font-extrabold leading-none tracking-tight text-slate-900">{value}</p>
-        <p className="mt-1 truncate text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      </div>
-    </div>
-  );
 };
 
 /**
@@ -80,9 +55,10 @@ const SummaryTile = ({ icon: TileIcon, label, value, tone = "blue" }) => {
  * access or granting administrative powers to a Resident.
  */
 export default function RolePermissionsPage() {
-  const { role: actorRole } = useAuth();
+  const { role: actorRole, user } = useAuth();
   const {
     permissionsForRole,
+    matrixLoadState,
     saveRolePermissions,
     resetRoleToDefaults,
     auditEntries,
@@ -93,9 +69,10 @@ export default function RolePermissionsPage() {
   const [selectedRoleId, setSelectedRoleId] = useState(MANAGED_ROLES[0].id);
   const [draft, setDraft] = useState(() => permissionsForRole(MANAGED_ROLES[0].id));
   const [confirmRequest, setConfirmRequest] = useState(null);
-  const [highlightModuleId, setHighlightModuleId] = useState(null);
+  const [expandedModuleId, setExpandedModuleId] = useState(null);
   const [query, setQuery] = useState("");
   const [sensitiveOnly, setSensitiveOnly] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const selectedRole = getManagedRole(selectedRoleId) || MANAGED_ROLES[0];
   const saved = useMemo(() => permissionsForRole(selectedRoleId), [permissionsForRole, selectedRoleId]);
@@ -104,12 +81,6 @@ export default function RolePermissionsPage() {
   useEffect(() => {
     setDraft(saved);
   }, [saved]);
-
-  useEffect(() => {
-    if (!highlightModuleId) return undefined;
-    const timer = setTimeout(() => setHighlightModuleId(null), 1800);
-    return () => clearTimeout(timer);
-  }, [highlightModuleId]);
 
   const changedIds = useMemo(() => diffPermissionMaps(saved, draft), [saved, draft]);
   const isDirty = changedIds.length > 0;
@@ -179,6 +150,46 @@ export default function RolePermissionsPage() {
     });
   };
 
+  const handleActionToggle = (module, action, actionPermissions, nextValue) => {
+    const targets = actionPermissions.filter(
+      (permission) =>
+        !isPermissionLocked(selectedRoleId, permission.id) && Boolean(draft[permission.id]) !== nextValue,
+    );
+    if (targets.length === 0) return;
+
+    const lockedCount = actionPermissions.length - actionPermissions.filter(
+      (permission) => !isPermissionLocked(selectedRoleId, permission.id),
+    ).length;
+    const sensitive = targets.filter((permission) => permission.sensitive);
+    const ids = targets.map((permission) => permission.id);
+
+    if (sensitive.length === 0 && lockedCount === 0) {
+      applyValues(ids, nextValue);
+      return;
+    }
+
+    setConfirmRequest({
+      tone: nextValue ? "grant" : "revoke",
+      title: `${nextValue ? "Enable" : "Disable"} ${ACTION_LABEL[action]} permissions in ${module.label}?`,
+      description: nextValue
+        ? `This will grant ${plural(targets.length, "permission")} for ${ACTION_LABEL[action].toLowerCase()} actions in ${module.label} to ${selectedRole.plural}.`
+        : `This will remove ${plural(targets.length, "permission")} for ${ACTION_LABEL[action].toLowerCase()} actions in ${module.label} from ${selectedRole.plural}.`,
+      meta:
+        sensitive.length > 0
+          ? [
+              { label: "Sensitive actions", value: summarise(sensitive.map((permission) => permission.label)) },
+              { label: "Total affected", value: plural(targets.length, "permission") },
+            ]
+          : [{ label: "Total affected", value: plural(targets.length, "permission") }],
+      note:
+        lockedCount > 0
+          ? `${plural(lockedCount, "permission")} in this action group ${lockedCount === 1 ? "is" : "are"} fixed by policy and will not change.`
+          : undefined,
+      confirmLabel: "Confirm",
+      onConfirm: () => applyValues(ids, nextValue),
+    });
+  };
+
   const handleBulk = (module, nextValue) => {
     const fullModule = getModule(module.id) || module;
     const targets = fullModule.permissions.filter(
@@ -224,6 +235,8 @@ export default function RolePermissionsPage() {
   /* --------------------------------------------------------------------- */
 
   const handleSave = async () => {
+    if (saving || !isDirty) return;
+    setSaving(true);
     try {
       const { changedIds: applied } = await saveRolePermissions(selectedRoleId, draft);
       toast({
@@ -236,10 +249,10 @@ export default function RolePermissionsPage() {
         title: "Could not save permissions.",
         description: err?.message || "The server rejected the change. Only administrators can edit permissions.",
       });
+    } finally {
+      setSaving(false);
     }
   };
-
-  const handleDiscard = () => setDraft(saved);
 
   const handleReset = () => {
     const defaults = defaultPermissionsForRole(selectedRoleId);
@@ -287,6 +300,7 @@ export default function RolePermissionsPage() {
   const handleSelectRole = (roleId) => {
     if (roleId === selectedRoleId) return;
     if (!isDirty) {
+      setDraft(permissionsForRole(roleId));
       setSelectedRoleId(roleId);
       return;
     }
@@ -296,21 +310,22 @@ export default function RolePermissionsPage() {
       description: `${plural(changedIds.length, "permission change")} on ${selectedRole.label} ${changedIds.length === 1 ? "has" : "have"} not been saved yet.`,
       confirmLabel: "Discard and switch",
       onConfirm: () => {
-        setDraft(saved);
+        setDraft(permissionsForRole(roleId));
         setSelectedRoleId(roleId);
       },
     });
   };
 
   const handleOpenModule = (moduleId) => {
-    setQuery("");
-    setSensitiveOnly(false);
-    setHighlightModuleId(moduleId);
-    window.requestAnimationFrame(() => {
-      document
-        .getElementById(`permission-module-${moduleId}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    const closing = expandedModuleId === moduleId;
+    setExpandedModuleId(closing ? null : moduleId);
+    if (!closing) {
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById(`permission-module-${moduleId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    }
   };
 
   /* --------------------------------------------------------------------- */
@@ -341,18 +356,45 @@ export default function RolePermissionsPage() {
     );
   }
 
+  const permissionsLoading =
+    matrixLoadState.userId !== user?.id || matrixLoadState.status === "loading";
+  if (permissionsLoading || matrixLoadState.status === "error") {
+    return (
+      <>
+        <PageHeader
+          crumbs={["Access Control", "Role & Permissions"]}
+          title="Role & Permissions"
+          subtitle="Manage access privileges for each system role."
+        />
+        <Card className="p-6">
+          <p className={`text-sm ${matrixLoadState.status === "error" ? "text-brand-danger" : "text-slate-600"}`}>
+            {!permissionsLoading && matrixLoadState.status === "error"
+              ? `Unable to load role permissions. ${matrixLoadState.error}`
+              : "Loading role permissions..."}
+          </p>
+        </Card>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader
         crumbs={["Access Control", "Role & Permissions"]}
         title="Role & Permissions"
-        subtitle="Grant or remove privileges per role. Nothing is fixed — every action below is switched on or off deliberately."
+        subtitle="Manage access privileges for each system role."
         action={
           <div className="flex flex-wrap items-center gap-2">
+            {isDirty && (
+              <span className="mr-1 text-xs font-medium text-brand-amber" role="status">
+                Unsaved changes
+              </span>
+            )}
             <button
               type="button"
               onClick={handleReset}
-              className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue"
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RotateCcw className="h-4 w-4" strokeWidth={1.9} />
               Reset to defaults
@@ -360,11 +402,11 @@ export default function RolePermissionsPage() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={!isDirty}
+              disabled={!isDirty || saving}
               className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               <Save className="h-4 w-4" strokeWidth={1.9} />
-              Save changes
+              {saving ? "Saving..." : "Save changes"}
               {isDirty && (
                 <span className="num rounded-full bg-white/20 px-1.5 text-xs font-bold">{changedIds.length}</span>
               )}
@@ -373,27 +415,15 @@ export default function RolePermissionsPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <SummaryTile icon={Users} label="Roles managed" value={MANAGED_ROLES.length} />
-        <SummaryTile icon={Layers} label="Permission modules" value={PERMISSION_MODULES.length} />
-        <SummaryTile icon={KeyRound} label="Permissions defined" value={ALL_PERMISSION_IDS.length} tone="slate" />
-        <SummaryTile
-          icon={ShieldAlert}
-          label="Sensitive actions"
-          value={SENSITIVE_PERMISSION_IDS.length}
-          tone="gold"
-        />
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-12">
-        <aside className="lg:col-span-4 xl:col-span-3">
+      <div className="grid gap-5 lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)]">
+        <aside>
+          <div className="mb-2 flex items-baseline justify-between">
+            <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Roles</h2>
+            <span className="num text-[11px] font-medium text-slate-500">
+              {grantedCount}/{ALL_PERMISSION_IDS.length}
+            </span>
+          </div>
           <div className="lg:sticky lg:top-24">
-            <div className="mb-3 flex items-baseline justify-between">
-              <h2 className="gov-kicker text-brand-gray">Select a role</h2>
-              <span className="num text-[11px] font-semibold text-slate-500">
-                {grantedCount}/{ALL_PERMISSION_IDS.length} granted
-              </span>
-            </div>
             <RoleSelectorRail
               roles={MANAGED_ROLES}
               selectedRoleId={selectedRoleId}
@@ -404,30 +434,24 @@ export default function RolePermissionsPage() {
           </div>
         </aside>
 
-        <div className="space-y-6 lg:col-span-8 xl:col-span-9">
-          <PermissionMatrixTable
-            role={selectedRole}
-            permissions={draft}
-            onOpenModule={handleOpenModule}
-          />
-
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-card md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-1 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2">
-              <Search className="h-4 w-4 shrink-0 text-brand-gray" />
+        <div className="min-w-0 space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/15">
+              <Search className="h-4 w-4 shrink-0 text-slate-500" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Find a permission or module…"
+                placeholder="Search permissions or modules..."
                 aria-label="Filter permissions"
                 className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
               />
               {query && (
                 <button type="button" onClick={() => setQuery("")} aria-label="Clear filter">
-                  <X className="h-4 w-4 text-brand-gray hover:text-slate-700" />
+                  <X className="h-4 w-4 text-slate-500 hover:text-slate-700" />
                 </button>
               )}
             </div>
-            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm text-slate-600">
+            <label className="flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-600">
               <input
                 type="checkbox"
                 checked={sensitiveOnly}
@@ -439,24 +463,20 @@ export default function RolePermissionsPage() {
           </div>
 
           {visibleModules.length === 0 ? (
-            <Card className="p-8 text-center">
-              <p className="text-sm text-slate-600">No permission matches “{query}”.</p>
+            <Card className="p-6 text-center">
+              <p className="text-sm text-slate-600">No permissions match the current search or filter.</p>
             </Card>
           ) : (
-            <div className="space-y-5">
-              {visibleModules.map((mod, index) => (
-                <ModulePermissionCard
-                  key={mod.id}
-                  module={mod}
-                  role={selectedRole}
-                  permissions={draft}
-                  highlighted={highlightModuleId === mod.id}
-                  index={index}
-                  onToggle={handleToggle}
-                  onBulk={handleBulk}
-                />
-              ))}
-            </div>
+            <PermissionMatrixTable
+              role={selectedRole}
+              permissions={draft}
+              modules={visibleModules}
+              expandedModuleId={expandedModuleId}
+              onOpenModule={handleOpenModule}
+              onActionToggle={handleActionToggle}
+              onToggle={handleToggle}
+              onBulk={handleBulk}
+            />
           )}
 
           <PermissionAuditFeed
@@ -465,41 +485,6 @@ export default function RolePermissionsPage() {
           />
         </div>
       </div>
-
-      {isDirty && (
-        <div className="sticky bottom-4 z-20 mt-6">
-          <div className="flex flex-col gap-3 rounded-2xl border border-brand-blue/30 bg-white/95 px-4 py-3.5 shadow-float backdrop-blur md:flex-row md:items-center md:justify-between md:px-5">
-            <p className="flex items-center gap-2.5 text-sm text-slate-700">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-goldpale text-brand-amber">
-                <ShieldCheck className="h-4 w-4" strokeWidth={1.9} />
-              </span>
-              <span>
-                <span className="num font-semibold text-slate-900">{changedIds.length}</span> unsaved{" "}
-                {changedIds.length === 1 ? "change" : "changes"} for{" "}
-                <span className="font-semibold text-slate-900">{selectedRole.label}</span>
-              </span>
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleDiscard}
-                className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-danger hover:text-brand-danger"
-              >
-                <Undo2 className="h-4 w-4" strokeWidth={1.9} />
-                Discard
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-dark"
-              >
-                <Save className="h-4 w-4" strokeWidth={1.9} />
-                Save changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <ConfirmPermissionDialog
         request={confirmRequest}

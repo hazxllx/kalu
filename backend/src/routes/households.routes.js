@@ -40,25 +40,82 @@ router.use(authenticate, resolveBarangayScope);
 const HOUSEHOLD_ROLES = FEATURE_ROLES.households; // BHW / Health Supervisor / PHN
 const params = validate(householdParamsValidator, 'params');
 
-router.get('/', authorize(HOUSEHOLD_ROLES), asyncHandler(householdsController.listHouseholds));
+router.get(
+  '/',
+  authorize(HOUSEHOLD_ROLES, { permission: 'households.view' }),
+  asyncHandler(householdsController.listHouseholds),
+);
 // Idempotency-Key makes an offline re-upload safe (no duplicate household).
-router.post('/', authorize(HOUSEHOLD_ROLES), idempotency, validate(createHouseholdValidator), asyncHandler(householdsController.createHousehold));
+router.post(
+  '/',
+  authorize(HOUSEHOLD_ROLES, { permission: 'households.create' }),
+  idempotency,
+  validate(createHouseholdValidator),
+  asyncHandler(householdsController.createHousehold),
+);
 
-router.get('/residents/search', authorize(HOUSEHOLD_ROLES), asyncHandler(householdsController.searchResidents));
-router.get('/:id', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.getHousehold));
-router.put('/:id', authorize(HOUSEHOLD_ROLES), idempotency, params, validate(updateHouseholdValidator), asyncHandler(householdsController.updateHousehold));
+router.get(
+  '/residents/search',
+  authorize(HOUSEHOLD_ROLES, { anyPermission: ['households.view', 'households.create'] }),
+  asyncHandler(householdsController.searchResidents),
+);
+router.get(
+  '/:id',
+  authorize(HOUSEHOLD_ROLES, { permission: 'households.view' }),
+  params,
+  asyncHandler(householdsController.getHousehold),
+);
+router.put(
+  '/:id',
+  authorize(HOUSEHOLD_ROLES, { anyPermission: ['households.create', 'households.verify'] }),
+  idempotency,
+  params,
+  validate(updateHouseholdValidator),
+  asyncHandler(householdsController.updateHousehold),
+);
 
-router.post('/:id/members', authorize(HOUSEHOLD_ROLES), params, validate(householdMemberValidator), asyncHandler(householdsController.addHouseholdMember));
-router.delete('/:id/members/:memberId', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.removeHouseholdMember));
+router.post(
+  '/:id/members',
+  authorize(HOUSEHOLD_ROLES, { permission: 'households.create' }),
+  params,
+  validate(householdMemberValidator),
+  asyncHandler(householdsController.addHouseholdMember),
+);
+router.delete(
+  '/:id/members/:memberId',
+  authorize(HOUSEHOLD_ROLES, { anyPermission: ['households.create', 'households.verify'] }),
+  params,
+  asyncHandler(householdsController.removeHouseholdMember),
+);
 
 // Member-level health profile (anthropometrics + server-computed BMI, mortality,
 // remarks). Same scope + role gates as the parent household.
-router.get('/:id/members/:memberId/health', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.getMemberHealth));
-router.put('/:id/members/:memberId/health', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdsController.saveMemberHealth));
+router.get(
+  '/:id/members/:memberId/health',
+  authorize(HOUSEHOLD_ROLES, { permission: 'residents.profile.view' }),
+  params,
+  asyncHandler(householdsController.getMemberHealth),
+);
+router.put(
+  '/:id/members/:memberId/health',
+  authorize(HOUSEHOLD_ROLES, { permission: 'residents.edit' }),
+  params,
+  asyncHandler(householdsController.saveMemberHealth),
+);
 
 // BUG-009: household risk-cluster workflow (follow-up / assignment / escalation
 // / resolution) — persistent, scope-enforced (service + RLS).
-router.get('/:id/risk-workflow', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdRiskWorkflowController.getWorkflow));
-router.put('/:id/risk-workflow', authorize(HOUSEHOLD_ROLES), params, asyncHandler(householdRiskWorkflowController.saveWorkflow));
+router.get(
+  '/:id/risk-workflow',
+  authorize(HOUSEHOLD_ROLES, { permission: 'followups.view' }),
+  params,
+  asyncHandler(householdRiskWorkflowController.getWorkflow),
+);
+router.put(
+  '/:id/risk-workflow',
+  authorize(HOUSEHOLD_ROLES, { permission: 'followups.edit' }),
+  params,
+  asyncHandler(householdRiskWorkflowController.saveWorkflow),
+);
 
 export default router;

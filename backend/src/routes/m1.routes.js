@@ -19,30 +19,32 @@ router.use(authenticate, resolveBarangayScope);
 
 const READ = FEATURE_ROLES.m1Read; // HS, PHN, MHO, RHU personnel
 const WRITE = FEATURE_ROLES.m1Write; // HS + PHN + BHW record events
+const readers = { permission: 'reports.view' };
+const writers = { permission: 'reports.generate' };
 
 // Catalog (reference data for every staff member).
-router.get('/catalog', authorize(READ), asyncHandler(controller.catalog));
-router.post('/catalog/sync', authorize(['admin']), asyncHandler(controller.syncCatalog));
+router.get('/catalog', authorize(READ, readers), asyncHandler(controller.catalog));
+router.post('/catalog/sync', authorize(['admin'], { permission: 'system.settings.manage' }), asyncHandler(controller.syncCatalog));
 
 // Views
-router.get('/daily', authorize(READ), asyncHandler(controller.daily));
-router.get('/monthly', authorize(READ), asyncHandler(controller.monthly));
-router.get('/annual', authorize(READ), asyncHandler(controller.annual));
-router.get('/report', authorize(READ), asyncHandler(controller.report));
-router.get('/drilldown/:code', authorize(READ), asyncHandler(controller.drilldown));
+router.get('/daily', authorize(READ, readers), asyncHandler(controller.daily));
+router.get('/monthly', authorize(READ, readers), asyncHandler(controller.monthly));
+router.get('/annual', authorize(READ, readers), asyncHandler(controller.annual));
+router.get('/report', authorize(READ, readers), asyncHandler(controller.report));
+router.get('/drilldown/:code', authorize(READ, readers), asyncHandler(controller.drilldown));
 
 // Report header + section remarks
-router.get('/meta', authorize(READ), asyncHandler(controller.getMeta));
-router.put('/meta', authorize(WRITE), asyncHandler(controller.saveMeta));
-router.put('/remarks/:code', authorize(WRITE), asyncHandler(controller.saveRemarks));
+router.get('/meta', authorize(READ, readers), asyncHandler(controller.getMeta));
+router.put('/meta', authorize(WRITE, writers), asyncHandler(controller.saveMeta));
+router.put('/remarks/:code', authorize(WRITE, writers), asyncHandler(controller.saveRemarks));
 
 // Manual M1 data entry (aggregate figures with no operational source).
-router.get('/manual', authorize(READ), asyncHandler(controller.listManual));
-router.put('/manual', authorize(WRITE), asyncHandler(controller.saveManual));
+router.get('/manual', authorize(READ, readers), asyncHandler(controller.listManual));
+router.put('/manual', authorize(WRITE, writers), asyncHandler(controller.saveManual));
 
 // Underlying record CRUD
-router.post('/records', authorize(WRITE), asyncHandler(controller.createRecord));
-router.put('/records/:id', authorize(WRITE), asyncHandler(controller.updateRecord));
-router.delete('/records/:id', authorize(WRITE), asyncHandler(controller.removeRecord));
+router.post('/records', authorize(WRITE, writers), asyncHandler(controller.createRecord));
+router.put('/records/:id', authorize(WRITE, writers), asyncHandler(controller.updateRecord));
+router.delete('/records/:id', authorize(WRITE, writers), asyncHandler(controller.removeRecord));
 
 export default router;

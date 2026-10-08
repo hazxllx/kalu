@@ -10,7 +10,8 @@
  * Human-readable identifiers (RES-/SUB-/REF-) are minted from the
  * `record_counters` table so records look identical across drivers.
  */
-import { getServiceClient } from '../config/supabase.js';
+import { createAuthClient, getServiceClient } from '../config/supabase.js';
+import env from '../config/env.js';
 
 const TABLES = Object.freeze({
   residents: 'residents',
@@ -651,7 +652,8 @@ const residentSearchFilter = (term, { includeBarangay = false } = {}) => {
 // explicit allow-list so the API can never leak columns added later.
 const PROFILE_ADMIN_COLUMNS =
   'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,position,license_no,contact,created_at,updated_at';
-const PROFILE_ADMIN_SELECT = `${PROFILE_ADMIN_COLUMNS},barangay:barangays(name),municipality:municipalities(name)`;
+const PROFILE_ADMIN_SELECT =
+  `${PROFILE_ADMIN_COLUMNS},barangay:barangays(name),municipality:municipalities(name),facility:facilities(name)`;
 const PROFILE_ADMIN_BASE_SELECT = PROFILE_ADMIN_COLUMNS;
 
 /** Only the embedded barangay/municipality relationship lookup is unavailable. */
@@ -673,6 +675,7 @@ const profileToAdminUser = (row) => ({
   barangayId: row.barangay_id ?? null,
   barangay: row.barangay?.name ?? null,
   facilityId: row.facility_id ?? null,
+  facility: row.facility?.name ?? null,
   position: row.position || '',
   licenseNo: row.license_no || '',
   contact: row.contact || '',
@@ -1264,7 +1267,15 @@ export const supabaseRepository = {
   // account status and coverage assignment. Reads/writes here run on the
   // service-role client and are only reachable after authenticate +
   // authorize(admin); the profile guard trigger allows service-role writes.
-  async listProfiles({ q = '', role = null, status = null, limit = 50, offset = 0 } = {}) {
+  async listProfiles({
+    q = '',
+    role = null,
+    status = null,
+    municipalityId = null,
+    barangayId = null,
+    limit = 50,
+    offset = 0,
+  } = {}) {
     const supabase = getServiceClient();
     const read = (select) => {
       let query = supabase
@@ -1274,6 +1285,8 @@ export const supabaseRepository = {
         .range(offset, offset + limit - 1);
       if (role) query = query.eq('role', role);
       if (status) query = query.eq('status', status);
+      if (municipalityId) query = query.eq('municipality_id', municipalityId);
+      if (barangayId) query = query.eq('barangay_id', barangayId);
       if (q) {
         const term = String(q).trim();
         query = query.or(`full_name.ilike.%${term}%,email.ilike.%${term}%`);
@@ -1319,11 +1332,113 @@ export const supabaseRepository = {
       .from(TABLES.profiles)
       .select('id', { count: 'exact', head: true })
       .eq('role', 'admin')
-      .neq('status', 'disabled');
+      .eq('status', 'active');
     if (excludeId) query = query.neq('id', excludeId);
     const { count, error } = await query;
     throwOnError(error, 'Could not count administrator accounts');
     return count ?? 0;
+  },
+
+  async getAccountAssignmentOptions() {
+    const supabase = getServiceClient();
+    const [municipalitiesResult, barangaysResult, facilitiesResult] = await Promise.all([
+      supabase
+        .from('municipalities')
+        .select('id,name,province')
+        .eq('is_active', true)
+        .order('name'),
+      supabase
+        .from('barangays')
+        .select('id,name,municipality_id')
+        .eq('status', 'Active')
+        .order('name'),
+      supabase
+        .from('facilities')
+        .select('id,name,municipality_id')
+        .eq('type', 'rhu')
+        .order('name'),
+    ]);
+    throwOnError(municipalitiesResult.error, 'Could not load municipalities');
+    throwOnError(barangaysResult.error, 'Could not load barangays');
+    throwOnError(facilitiesResult.error, 'Could not load RHU facilities');
+
+    return {
+      municipalities: (municipalitiesResult.data || []).map(({ id, name, province }) => ({
+        id,
+        name,
+        province,
+      })),
+      barangays: (barangaysResult.data || []).map(({ id, name, municipality_id }) => ({
+        id,
+        name,
+        municipalityId: municipality_id,
+      })),
+      facilities: (facilitiesResult.data || []).map(({ id, name, municipality_id }) => ({
+        id,
+        name,
+        municipalityId: municipality_id,
+      })),
+    };
+  },
+
+  async inviteAccount({ email, fullName }) {
+    const supabase = getServiceClient();
+    const redirectTo = env.clientUrls[0] ? `${env.clientUrls[0]}/reset-password` : undefined;
+    const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
+      data: { full_name: fullName },
+      ...(redirectTo ? { redirectTo } : {}),
+    });
+    if (error) throw Object.assign(new Error(error.message || 'Could not invite the user'), { details: error });
+    return data?.user?.id ?? null;
+  },
+
+  async provisionAccountProfile({ id, actorId, profile }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('admin_provision_profile', {
+      p_target_id: id,
+      p_actor_id: actorId,
+      p_profile: profile,
+    });
+    throwOnError(error, 'Could not provision the invited account');
+    return data ? profileToAdminUser(data) : null;
+  },
+
+  async removeUnprovisionedAuthUser(id) {
+    const supabase = getServiceClient();
+    const { error } = await supabase.auth.admin.deleteUser(id);
+    throwOnError(error, 'Could not clean up the unprovisioned invitation');
+  },
+
+  async updateAdminAccountProfile({ id, actorId, profile }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('admin_update_profile', {
+      p_target_id: id,
+      p_actor_id: actorId,
+      p_profile: profile,
+    });
+    throwOnError(error, 'Could not update the user account');
+    return data ? profileToAdminUser(data) : null;
+  },
+
+  async sendAccountRecoveryEmail({ user, actorId }) {
+    const supabase = createAuthClient();
+    const redirectTo = env.clientUrls[0] ? `${env.clientUrls[0]}/reset-password` : undefined;
+    const admin = getServiceClient();
+    const { error: auditError } = await admin.from('health_audit_logs').insert({
+      actor_id: actorId,
+      action: 'ACCOUNT_ACCESS_RESET_REQUESTED',
+      entity_type: 'profiles',
+      entity_id: user.id,
+      municipality_id: user.municipalityId,
+      barangay_id: user.barangayId,
+      metadata: { email: user.email },
+    });
+    throwOnError(auditError, 'Could not record the account access reset request');
+
+    const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+      ...(redirectTo ? { redirectTo } : {}),
+    });
+    if (error) throw Object.assign(new Error(error.message || 'Could not send the recovery email'), { details: error });
   },
 
   // ----- resident verification audit log -----------------------------------

@@ -21,28 +21,46 @@ import asyncHandler from '../utils/asyncHandler.js';
  */
 const processing = Router();
 processing.use(authenticate);
-processing.use(authorize(FEATURE_ROLES.consultationProcessing));
 
-const phnOnly = authorize(FEATURE_ROLES.phnProcessing);
+const queueReaders = authorize(FEATURE_ROLES.consultationProcessing, {
+  permission: 'consultation.requests.view',
+});
+const findingsWriters = authorize(FEATURE_ROLES.consultationProcessing, {
+  permission: 'consultation.findings.record',
+});
+const consultationConductors = authorize(FEATURE_ROLES.consultationProcessing, {
+  permission: 'consultation.conduct',
+});
+const referralCreators = authorize(FEATURE_ROLES.phnProcessing, {
+  permission: 'referrals.create',
+});
+const referralEditors = authorize(FEATURE_ROLES.phnProcessing, {
+  permission: 'referrals.status.update',
+});
 
-processing.get('/submissions', asyncHandler(phnQueueController.listQueue));
-processing.put('/submissions/:id', asyncHandler(phnQueueController.updateSubmission));
-processing.post('/submissions/:id/receive', asyncHandler(phnQueueController.receiveSubmission));
-processing.post('/submissions/:id/review', asyncHandler(phnQueueController.markInReview));
-processing.post('/submissions/:id/complete', asyncHandler(phnQueueController.completeSubmission));
+processing.get('/submissions', queueReaders, asyncHandler(phnQueueController.listQueue));
+processing.put('/submissions/:id', findingsWriters, asyncHandler(phnQueueController.updateSubmission));
+processing.post('/submissions/:id/receive', consultationConductors, asyncHandler(phnQueueController.receiveSubmission));
+processing.post('/submissions/:id/review', consultationConductors, asyncHandler(phnQueueController.markInReview));
+processing.post('/submissions/:id/complete', consultationConductors, asyncHandler(phnQueueController.completeSubmission));
 // Referrals remain PHN-only.
-processing.post('/submissions/:id/referral', phnOnly, asyncHandler(phnQueueController.createReferral));
-processing.put('/referrals/:id', phnOnly, asyncHandler(phnQueueController.updateReferral));
-processing.post('/referrals/:id/sync', phnOnly, asyncHandler(phnQueueController.syncReferral));
+processing.post('/submissions/:id/referral', referralCreators, asyncHandler(phnQueueController.createReferral));
+processing.put('/referrals/:id', referralEditors, asyncHandler(phnQueueController.updateReferral));
+processing.post('/referrals/:id/sync', referralEditors, asyncHandler(phnQueueController.syncReferral));
 
 const reads = Router();
 reads.use(authenticate);
-reads.use(authorize(FEATURE_ROLES.referralRecords));
+const submissionReaders = authorize(FEATURE_ROLES.referralRecords, {
+  anyPermission: ['consultation.requests.view', 'consultation.history.view'],
+});
+const referralReaders = authorize(FEATURE_ROLES.referralRecords, {
+  anyPermission: ['referrals.view', 'referrals.history.view'],
+});
 
-reads.get('/submissions/:id', asyncHandler(phnQueueController.getSubmission));
-reads.get('/submissions/:id/referral', asyncHandler(phnQueueController.getReferralByVisit));
-reads.get('/referrals', asyncHandler(phnQueueController.listReferrals));
-reads.get('/referrals/:id', asyncHandler(phnQueueController.getReferral));
+reads.get('/submissions/:id', submissionReaders, asyncHandler(phnQueueController.getSubmission));
+reads.get('/submissions/:id/referral', referralReaders, asyncHandler(phnQueueController.getReferralByVisit));
+reads.get('/referrals', referralReaders, asyncHandler(phnQueueController.listReferrals));
+reads.get('/referrals/:id', referralReaders, asyncHandler(phnQueueController.getReferral));
 
 export const phnReadsRouter = reads;
 

@@ -102,15 +102,49 @@ test('1. a valid triage visit can be created (draft, no findings/treatment)', as
   assert.equal(sub.facilityId, RHU.facilityId);
 });
 
-test('triage facility comes from the authenticated assignment, not the request payload', async () => {
-  const sub = await createTriage(RHU, { facilityId: 'another-facility' });
+test('triage facility and accountability come from the authenticated user, not request fields', async () => {
+  const sub = await createTriage(RHU, {
+    facilityId: 'another-facility',
+    facility_id: 'another-facility',
+    recordedById: 'spoofed-user',
+    responsiblePersonnelId: 'spoofed-user',
+    assignedPersonnel: 'A different displayed person',
+  });
   assert.equal(sub.facilityId, RHU.facilityId);
+  assert.equal(sub.recordedById, RHU.id);
+  assert.equal(sub.responsiblePersonnelId, RHU.id);
+  assert.equal(sub.recordedByName, 'A different displayed person');
+  assert.equal(sub.responsiblePersonnelName, RHU.name);
+  await intake.submitSubmission({ id: sub.id, user: RHU });
+  await assert.rejects(
+    () => intake.submitSubmission({ id: sub.id, user: { ...RHU, id: 'spoofed-user' } }),
+    (error) => error.statusCode === 403,
+  );
 });
 
 test('RHU triage is denied when the authenticated account has no facility assignment', async () => {
   await assert.rejects(
     () => createTriage({ ...RHU, facilityId: null }),
     (error) => error.statusCode === 422,
+  );
+});
+
+test('RHU intake records stop being accessible after the authenticated facility assignment changes', async () => {
+  const sub = await createTriage();
+  const reassignedRhu = { ...RHU, facilityId: 'facility-rhu-2' };
+
+  assert.deepEqual(await intake.listMySubmissions({ user: reassignedRhu }), []);
+  await assert.rejects(
+    () => intake.getSubmissionForIntake({ id: sub.id, user: reassignedRhu }),
+    (error) => error.statusCode === 404,
+  );
+  await assert.rejects(
+    () => intake.updateSubmissionDraft({ id: sub.id, visit: { facilityId: RHU.facilityId }, user: reassignedRhu }),
+    (error) => error.statusCode === 404,
+  );
+  await assert.rejects(
+    () => intake.submitSubmission({ id: sub.id, user: reassignedRhu }),
+    (error) => error.statusCode === 403,
   );
 });
 
@@ -220,9 +254,52 @@ test('10. authz: residents cannot create; barangay roles cannot process; RHU con
   // Health Supervisor is NOT in the consultation processing group.
   await assert.rejects(() => phn.receiveSubmission({ id: sub.id, user: HS }), (e) => e.statusCode === 403);
   await assert.rejects(() => phn.completeSubmission({ id: sub.id, user: HS }), (e) => e.statusCode === 403);
-  // RHU Consultation Station may now process the shared queue (receive/review).
+  // RHU Consultation Station may process its facility's shared encounter.
   const received = await phn.receiveSubmission({ id: sub.id, user: RHU });
   assert.equal(received.status, 'received');
+  await phn.markInReview({ id: sub.id, user: RHU });
+  await phn.updateSubmissionForPhn({
+    id: sub.id,
+    patch: {
+      findings: 'Stable',
+      treatmentGiven: 'Supportive care',
+      facilityId: 'another-facility',
+      recordedById: 'spoofed-user',
+      responsiblePersonnelId: 'spoofed-user',
+    },
+    user: RHU,
+  });
+  const completed = await phn.completeSubmission({ id: sub.id, user: RHU });
+  assert.equal(completed.status, 'completed');
+  const persisted = await repository.getVisit(sub.id);
+  assert.equal(persisted.facilityId, RHU.facilityId);
+  assert.equal(persisted.recordedById, RHU.id);
+  assert.equal(persisted.responsiblePersonnelId, RHU.id);
+});
+
+test('RHU queue reads and mutations are limited to the authenticated facility', async () => {
+  const sub = await createTriage();
+  await intake.submitSubmission({ id: sub.id, user: RHU });
+  const otherFacilityRhu = { ...RHU, id: 'rhu-2', facilityId: 'facility-rhu-2' };
+
+  const queue = await phn.listQueue({ user: otherFacilityRhu });
+  assert.equal(queue.rows.some((row) => row.id === sub.id), false);
+  await assert.rejects(() => phn.viewSubmission({ id: sub.id, user: otherFacilityRhu }), (error) => error.statusCode === 404);
+  await assert.rejects(() => phn.updateSubmissionForPhn({
+    id: sub.id,
+    patch: { findings: 'Out of facility', facilityId: otherFacilityRhu.facilityId },
+    user: otherFacilityRhu,
+  }), (error) => error.statusCode === 404);
+  await assert.rejects(() => phn.receiveSubmission({ id: sub.id, user: otherFacilityRhu }), (error) => error.statusCode === 404);
+  await assert.rejects(() => phn.markInReview({ id: sub.id, user: otherFacilityRhu }), (error) => error.statusCode === 404);
+  await assert.rejects(() => phn.completeSubmission({ id: sub.id, user: otherFacilityRhu }), (error) => error.statusCode === 404);
+});
+
+test('an RHU user without an authenticated facility assignment cannot access the queue', async () => {
+  await assert.rejects(
+    () => phn.listQueue({ user: { ...RHU, facilityId: null } }),
+    (error) => error.statusCode === 422,
+  );
 });
 
 test('11. only the record owner may submit', async () => {
@@ -255,7 +332,13 @@ test('12b/scope. a barangay-scoped caller cannot attach a visit to an out-of-sco
   await assert.rejects(
     () => intake.createSubmission({
       residentId: 'RES-2',
-      visit: { visitDate: '2026-09-24T09:00:00Z', chiefComplaint: 'Fever', vitals: goodVitals() },
+      visit: {
+        visitDate: '2026-09-24T09:00:00Z',
+        chiefComplaint: 'Fever',
+        vitals: goodVitals(),
+        barangay_id: 'brgy-cadlan',
+        assignedBarangay: 'Cadlan',
+      },
       user: HS, // San Isidro
     }),
     (e) => e.statusCode === 404,
@@ -265,8 +348,20 @@ test('12b/scope. a barangay-scoped caller cannot attach a visit to an out-of-sco
 test('12c/scope. a barangay-scoped caller cannot create a new resident in another barangay (403)', async () => {
   await assert.rejects(
     () => intake.createSubmission({
-      resident: { firstName: 'Bagong', lastName: 'Residente', barangay: 'Cadlan' }, // another barangay
-      visit: { visitDate: '2026-09-24T09:00:00Z', chiefComplaint: 'Cough', vitals: goodVitals() },
+      resident: {
+        firstName: 'Bagong',
+        lastName: 'Residente',
+        barangay: 'Cadlan',
+        barangay_id: 'brgy-cadlan',
+        assignedBarangay: 'Cadlan',
+      },
+      visit: {
+        visitDate: '2026-09-24T09:00:00Z',
+        chiefComplaint: 'Cough',
+        vitals: goodVitals(),
+        barangay_id: 'brgy-cadlan',
+        assignedBarangay: 'Cadlan',
+      },
       user: HS, // San Isidro
     }),
     (e) => e.statusCode === 403,
@@ -275,12 +370,48 @@ test('12c/scope. a barangay-scoped caller cannot create a new resident in anothe
 
 test('12d/scope. a new resident with no barangay is forced to the scoped callers barangay', async () => {
   const sub = await intake.createSubmission({
-    resident: { firstName: 'Walang', lastName: 'Barangay' }, // no barangay supplied
-    visit: { visitDate: '2026-09-24T09:00:00Z', chiefComplaint: 'Cough', vitals: goodVitals() },
+    resident: {
+      firstName: 'Walang',
+      lastName: 'Barangay',
+      barangay_id: 'brgy-cadlan',
+      assignedBarangay: 'Cadlan',
+    },
+    visit: {
+      visitDate: '2026-09-24T09:00:00Z',
+      chiefComplaint: 'Cough',
+      vitals: goodVitals(),
+      barangay_id: 'brgy-cadlan',
+      assignedBarangay: 'Cadlan',
+    },
     user: HS, // San Isidro
   });
   const created = residents.get(sub.residentId);
   assert.equal(created.barangay, 'San Isidro');
+  const result = await intake.submitSubmission({ id: sub.id, user: HS });
+  assert.equal(result.submission.status, 'submitted');
+});
+
+test('barangay reassignment on the authenticated profile revokes access to the former barangay intake', async () => {
+  const sub = await intake.createSubmission({
+    residentId: 'RES-1',
+    visit: { visitDate: '2026-09-24T09:00:00Z', chiefComplaint: 'Cough', vitals: goodVitals() },
+    user: HS,
+  });
+  const reassignedHs = { ...HS, barangay: 'Cadlan', barangayId: 'brgy-cadlan' };
+
+  assert.deepEqual(await intake.listMySubmissions({ user: reassignedHs }), []);
+  await assert.rejects(
+    () => intake.getSubmissionForIntake({ id: sub.id, user: reassignedHs }),
+    (error) => error.statusCode === 404,
+  );
+  await assert.rejects(
+    () => intake.updateSubmissionDraft({ id: sub.id, visit: { assignedBarangay: 'San Isidro' }, user: reassignedHs }),
+    (error) => error.statusCode === 404,
+  );
+  await assert.rejects(
+    () => intake.submitSubmission({ id: sub.id, user: reassignedHs }),
+    (error) => error.statusCode === 403,
+  );
 });
 
 /* ---------------------- BUG-002 cross-scope PHI reads ------------------- */

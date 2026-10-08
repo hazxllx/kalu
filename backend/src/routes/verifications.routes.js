@@ -31,7 +31,11 @@ import asyncHandler from '../utils/asyncHandler.js';
  */
 const router = Router();
 
-const staff = [authenticate, authorize(FEATURE_ROLES.verification), resolveBarangayScope];
+const staff = [
+  authenticate,
+  authorize(FEATURE_ROLES.verification, { permission: 'residents.registration.approve' }),
+  resolveBarangayScope,
+];
 const self = [authenticate, authorize(FEATURE_ROLES.residentSelf)];
 const idParam = validate(verificationIdParamValidator, 'params');
 export const rejectDirectStatusWrite = (req, res, next) => {

@@ -5,6 +5,7 @@ import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { ROLE } from "@/lib/roles";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { referralsApi, residentsApi } from "@/services/api";
@@ -274,7 +275,14 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
 
 export default function HealthReferrals() {
   const { user } = useAuth();
+  const { can } = usePermissions();
   const isResident = user?.role === ROLE.RESIDENT || user?.role === ROLE.RESIDENT_LIMITED;
+  const canCreate = can("referrals.create");
+  const canAssign = can("referrals.assign");
+  const canUpdateStatus = can("referrals.status.update");
+  const canApprove = can("referrals.approve");
+  const canReject = can("referrals.reject");
+  const canChangeStatus = canUpdateStatus || canApprove || canReject;
   const scope = getSupervisorScope(user);
   const assignedBarangay = scope && scope.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
   /**
@@ -286,6 +294,13 @@ export default function HealthReferrals() {
   const isReadOnlyRole = user?.role === ROLE.MHO || user?.role === ROLE.RHU_PERSONNEL;
   const canWrite = !isResident && !isReadOnlyRole;
   const isSupervisorOnly = user?.role === ROLE.MHO;
+  const canSetReferralStatus = useCallback((status) => (
+    status === "Accepted"
+      ? canApprove
+      : status === "Cancelled"
+        ? canReject
+        : canUpdateStatus
+  ), [canApprove, canReject, canUpdateStatus]);
 
   const [records, setRecords] = useState([]);
   const [residents, setResidents] = useState([]);
@@ -317,12 +332,16 @@ export default function HealthReferrals() {
   useEffect(() => {
     const incoming = location.state?.referralDraft;
     if (!incoming) return;
+    if (!canCreate) {
+      navigate(location.pathname, { replace: true, state: null });
+      return;
+    }
     setDraft(incoming);
     setEditing(null);
     setSelectedResident(null);
     setFormOpen(true);
     navigate(location.pathname, { replace: true, state: null });
-  }, [location.state, location.pathname, navigate]);
+  }, [canCreate, location.state, location.pathname, navigate]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -366,8 +385,21 @@ export default function HealthReferrals() {
     });
   }, [records, search, statusFilter, priorityFilter]);
 
-  const openCreate = () => { setEditing(null); setDraft(null); setSelectedResident(null); setFormOpen(true); };
-  const openEdit = (record) => { setEditing(record); setDraft(null); setSelectedResident(null); setDetail(null); setFormOpen(true); };
+  const openCreate = () => {
+    if (!canCreate) return;
+    setEditing(null);
+    setDraft(null);
+    setSelectedResident(null);
+    setFormOpen(true);
+  };
+  const openEdit = (record) => {
+    if (!canAssign) return;
+    setEditing(record);
+    setDraft(null);
+    setSelectedResident(null);
+    setDetail(null);
+    setFormOpen(true);
+  };
 
   /**
    * The resident a create will be filed against: the one picked in the modal, or
@@ -396,6 +428,7 @@ export default function HealthReferrals() {
   });
 
   const handleSave = async (form) => {
+    if (editing ? !canAssign : !canCreate) return;
     setSaving(true);
     try {
       if (editing) {
@@ -430,10 +463,15 @@ export default function HealthReferrals() {
     }
   };
 
-  const openStatus = (record) => { setStatusTarget(record); setNewStatus(record.status); setResolutionNotes(record.resolutionNotes || ""); };
+  const openStatus = (record) => {
+    if (!canWrite || !canChangeStatus) return;
+    setStatusTarget(record);
+    setNewStatus(record.status);
+    setResolutionNotes(record.resolutionNotes || "");
+  };
 
   const handleStatusSave = async () => {
-    if (!statusTarget || !newStatus) return;
+    if (!canWrite || !canSetReferralStatus(newStatus) || !statusTarget || !newStatus) return;
     setSaving(true);
     try {
       const result = await referralsApi.updateStatus(statusTarget.id, { status: newStatus, resolution_notes: resolutionNotes });
@@ -463,7 +501,7 @@ export default function HealthReferrals() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!canWrite || !canReject || !deleteTarget) return;
     setSaving(true);
     try {
       await referralsApi.remove(deleteTarget.id);
@@ -496,7 +534,7 @@ export default function HealthReferrals() {
                 : "Manage resident referrals to RHU and higher-level healthcare facilities."
         }
         action={
-          canWrite ? (
+          canWrite && canCreate ? (
             <button onClick={openCreate} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark">
               <Plus className="w-4 h-4" /> New Referral
             </button>
@@ -583,17 +621,17 @@ export default function HealthReferrals() {
                           >
                             <Download className="w-4 h-4" />
                           </button>
-                          {canWrite && (
+                          {canWrite && canAssign && (
                             <button onClick={() => openEdit(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Edit Referral">
                               <Edit2 className="w-4 h-4" />
                             </button>
                           )}
-                          {r.status !== "Completed" && r.status !== "Cancelled" && (
+                          {canWrite && canChangeStatus && r.status !== "Completed" && r.status !== "Cancelled" && (
                             <button onClick={() => openStatus(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Update Status">
                               <RefreshCw className="w-4 h-4" />
                             </button>
                           )}
-                          {canWrite && (
+                          {canWrite && canReject && (
                             <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-brand-danger hover:bg-brand-danger/10 rounded transition-colors" title="Delete Referral">
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -718,7 +756,9 @@ export default function HealthReferrals() {
                 <div>
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">New Status</label>
                   <select value={newStatus} onChange={(e) => setNewStatus(e.target.value)} className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue">
-                    {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {STATUSES
+                      .filter((status) => status === statusTarget.status || canSetReferralStatus(status))
+                      .map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div>
@@ -728,7 +768,7 @@ export default function HealthReferrals() {
               </div>
               <div className="mt-6 flex justify-end gap-3">
                 <button onClick={() => setStatusTarget(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-                <button disabled={saving} onClick={handleStatusSave} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">Update</button>
+                <button disabled={saving || !canSetReferralStatus(newStatus)} onClick={handleStatusSave} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">Update</button>
               </div>
             </div>
           </Card>

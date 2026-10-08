@@ -39,7 +39,13 @@ public; everything else requires authentication.
 - `/api/intake` and `/api/phn` — the RHU intake to PHN processing workflow.
 - `/api/analytics` — barangay-level aggregates and early-warning signals for the
   community health map (aggregate-only, no resident-level detail).
-- `/api/users` — admin user management on the `profiles` table.
+- `/api/users` — admin account management on the `profiles` table: staff
+  invitations through Supabase Auth, role/scope edits, activation/deactivation,
+  and password-recovery email requests. Resident accounts remain in the linked
+  registration workflow; accounts are deactivated rather than hard-deleted.
+  The `20261008090000_admin_account_lifecycle.sql` migration installs
+  service-role-only transactional profile RPCs with actor-attributed audit
+  entries and last-active-administrator/self-lockout safeguards.
 - Document upload/review and residency-transfer requests.
 
 ## Audit trail

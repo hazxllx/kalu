@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/common/Card";
 import { Inbox, RefreshCw, CheckCircle2, X, FileText } from "lucide-react";
+import { usePermissions } from "@/context/PermissionsContext";
 import { reportsApi } from "@/services/api";
 
 /**
@@ -36,6 +37,8 @@ const formatDateTime = (iso) => {
 };
 
 export default function IncomingReports() {
+  const { can } = usePermissions();
+  const canReview = can("reports.generate");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -69,6 +72,7 @@ export default function IncomingReports() {
   );
 
   const act = async (report, status) => {
+    if (!canReview) return;
     if (status === "Rejected" && !rejectReason.trim()) {
       showToast("A reason is required to reject a report.");
       return;
@@ -185,7 +189,7 @@ export default function IncomingReports() {
                 ))}
               </div>
 
-              {detail.status !== "Reviewed" && detail.status !== "Rejected" && (
+              {canReview && detail.status !== "Reviewed" && detail.status !== "Rejected" && (
                 <div className="mt-4">
                   <label className="text-sm font-medium text-brand-ink">Remarks / Reason (required to reject)</label>
                   <textarea

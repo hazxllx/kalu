@@ -22,14 +22,22 @@ const router = Router();
 
 const READ_ROLES = [...FEATURE_ROLES.referrals, 'resident', 'resident-limited'];
 const WRITE_ROLES = ['health_supervisor', 'phn'];
+const statusPermission = (req) => {
+  if (req.body?.status === 'Accepted') return ['referrals.approve'];
+  if (req.body?.status === 'Cancelled') return ['referrals.reject'];
+  return ['referrals.status.update'];
+};
+const referralReaders = authorize(READ_ROLES, {
+  anyPermission: ['referrals.view', 'referrals.history.view'],
+});
 
 router.use(authenticate, resolveBarangayScope);
 
-router.get('/', authorize(READ_ROLES), asyncHandler(controller.list));
-router.get('/:id', authorize(READ_ROLES), asyncHandler(controller.get));
-router.post('/', authorize(WRITE_ROLES), asyncHandler(controller.create));
-router.put('/:id/status', authorize(WRITE_ROLES), asyncHandler(controller.updateStatus));
-router.put('/:id', authorize(WRITE_ROLES), asyncHandler(controller.update));
-router.delete('/:id', authorize(WRITE_ROLES), asyncHandler(controller.remove));
+router.get('/', referralReaders, asyncHandler(controller.list));
+router.get('/:id', referralReaders, asyncHandler(controller.get));
+router.post('/', authorize(WRITE_ROLES, { permission: 'referrals.create' }), asyncHandler(controller.create));
+router.put('/:id/status', authorize(WRITE_ROLES, { permission: statusPermission }), asyncHandler(controller.updateStatus));
+router.put('/:id', authorize(WRITE_ROLES, { permission: 'referrals.assign' }), asyncHandler(controller.update));
+router.delete('/:id', authorize(WRITE_ROLES, { permission: 'referrals.reject' }), asyncHandler(controller.remove));
 
 export default router;

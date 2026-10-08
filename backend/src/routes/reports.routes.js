@@ -22,13 +22,14 @@ import asyncHandler from '../utils/asyncHandler.js';
  */
 const router = Router();
 
-const staff = [authenticate, authorize(FEATURE_ROLES.reports)];
+const readers = [authenticate, authorize(FEATURE_ROLES.reports, { permission: 'reports.view' })];
+const writers = [authenticate, authorize(FEATURE_ROLES.reports, { permission: 'reports.generate' })];
 const idParam = validate(reportIdParamValidator, 'params');
 
-router.get('/meta', ...staff, asyncHandler(controller.meta));
-router.get('/', ...staff, asyncHandler(controller.list));
-router.get('/:id', ...staff, idParam, asyncHandler(controller.get));
-router.post('/', ...staff, validate(createReportValidator), asyncHandler(controller.create));
-router.patch('/:id/review', ...staff, idParam, validate(reviewReportValidator), asyncHandler(controller.review));
+router.get('/meta', ...readers, asyncHandler(controller.meta));
+router.get('/', ...readers, asyncHandler(controller.list));
+router.get('/:id', ...readers, idParam, asyncHandler(controller.get));
+router.post('/', ...writers, validate(createReportValidator), asyncHandler(controller.create));
+router.patch('/:id/review', ...writers, idParam, validate(reviewReportValidator), asyncHandler(controller.review));
 
 export default router;

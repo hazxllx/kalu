@@ -20,6 +20,10 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/permissions', asyncHandler(rolesController.getPermissions));
-router.patch('/:role/permissions', authorize(FEATURE_ROLES.users), asyncHandler(rolesController.updateRolePermissions));
+router.patch(
+  '/:role/permissions',
+  authorize(FEATURE_ROLES.users, { permission: 'accounts.roles.manage' }),
+  asyncHandler(rolesController.updateRolePermissions),
+);
 
 export default router;

@@ -18,6 +18,7 @@ import {
 } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { monthlyConsultations, comparisonMonthlyConsultations, barangayOverview } from "@/services/local/dashboardData";
 import { reportsApi } from "@/services/api";
@@ -42,6 +43,8 @@ const REPORT_TYPE_LABELS = ["Health Records", "Referrals", "Follow-ups", "Health
 
 export default function ReportsPage({ roleKey = "midwife" }) {
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const canGenerate = can("reports.generate");
   const { coverage } = usePhnCoverage();
   const isPhn = roleKey === "phn";
   const coverageLabel = coverage ? (coverage === "RHU" ? "RHU" : coverage) : null;
@@ -111,6 +114,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   });
 
   const handleGenerateReport = () => {
+    if (!canGenerate) return;
     const errors = {};
     if (!reportForm.reportType) errors.reportType = "Report type is required.";
     if (!reportForm.period) errors.period = "Reporting period is required.";
@@ -133,11 +137,13 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   };
 
   const handleSubmitToRHU = (report) => {
+    if (!canGenerate) return;
     setReportToSubmit(report);
     setShowSubmitConfirm(true);
   };
 
   const confirmSubmit = async () => {
+    if (!canGenerate) return;
     const report = reportToSubmit;
     if (!report) return;
     const now = new Date();
@@ -310,7 +316,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
-            <button
+            {canGenerate && <button
               onClick={() => {
                 setFormErrors({});
                 setShowGenerateModal(true);
@@ -318,7 +324,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               className="w-full sm:w-auto flex items-center justify-center gap-2 bg-brand-blue text-white px-4 py-2 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
             >
               <Download className="w-4 h-4" /> Generate Report
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -350,7 +356,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-col gap-1">
-                      {report.status === "Generated" && (
+                      {canGenerate && report.status === "Generated" && (
                         <button
                           onClick={() => handleSubmitToRHU(report)}
                           className="flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
@@ -366,7 +372,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                           <div className="mt-1">{report.submittedDate} • {report.submittedTime}</div>
                         </div>
                       )}
-                      {report.status === "Draft" && (
+                      {canGenerate && report.status === "Draft" && (
                         <button
                           onClick={() => handleSubmitToRHU({ ...report, status: "Generated" })}
                           className="flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"

@@ -29,13 +29,41 @@ const intakeSubmit = FEATURE_ROLES.intakeSubmit;
 
 router.use(authenticate, resolveBarangayScope);
 
-router.get('/residents/search', authorize(intake), asyncHandler(intakeController.searchResidents));
-router.get('/residents/:id', authorize(intake), asyncHandler(intakeController.getResident));
+router.get(
+  '/residents/search',
+  authorize(intake, { permission: 'residents.profile.view' }),
+  asyncHandler(intakeController.searchResidents),
+);
+router.get(
+  '/residents/:id',
+  authorize(intake, { permission: 'residents.profile.view' }),
+  asyncHandler(intakeController.getResident),
+);
 
-router.get('/visits', authorize(intake), asyncHandler(intakeController.listMySubmissions));
-router.post('/visits', authorize(intake), asyncHandler(intakeController.createSubmission));
-router.get('/visits/:id', authorize(intake), asyncHandler(intakeController.getSubmission));
-router.put('/visits/:id', authorize(intake), asyncHandler(intakeController.updateSubmission));
-router.post('/visits/:id/submit', authorize(intakeSubmit), asyncHandler(intakeController.submitSubmission));
+router.get(
+  '/visits',
+  authorize(intake, { permission: 'residents.profile.view' }),
+  asyncHandler(intakeController.listMySubmissions),
+);
+router.post(
+  '/visits',
+  authorize(intake, { permission: 'residents.create' }),
+  asyncHandler(intakeController.createSubmission),
+);
+router.get(
+  '/visits/:id',
+  authorize(intake, { permission: 'residents.profile.view' }),
+  asyncHandler(intakeController.getSubmission),
+);
+router.put(
+  '/visits/:id',
+  authorize(intake, { permission: 'residents.edit' }),
+  asyncHandler(intakeController.updateSubmission),
+);
+router.post(
+  '/visits/:id/submit',
+  authorize(intakeSubmit, { permission: 'residents.create' }),
+  asyncHandler(intakeController.submitSubmission),
+);
 
 export default router;

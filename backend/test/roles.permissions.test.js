@@ -98,6 +98,70 @@ test('BUG-011: the matrix reads back the persisted overrides', async () => {
   assert.equal(matrix.phn['reports.send'], true);
 });
 
+test('configured role permissions control runtime access without leaking to other roles', async () => {
+  const supabase = makeStub();
+  await roles.updateRolePermissions({
+    user: ADMIN,
+    role: 'health_supervisor',
+    permissions: {
+      'consultation.conduct': true,
+      'consultation.records.update': false,
+    },
+    supabase,
+  });
+
+  assert.equal(
+    await roles.hasAnyConfiguredPermission({
+      role: 'health_supervisor',
+      permissionIds: ['consultation.conduct'],
+      supabase,
+    }),
+    true,
+  );
+  assert.equal(
+    await roles.hasAnyConfiguredPermission({
+      role: 'health_supervisor',
+      permissionIds: ['consultation.records.update'],
+      supabase,
+    }),
+    false,
+  );
+  assert.equal(
+    await roles.hasAnyConfiguredPermission({
+      role: 'phn',
+      permissionIds: ['consultation.conduct'],
+      supabase,
+    }),
+    null,
+  );
+});
+
+test('all-permission checks require every configured permission and preserve the bootstrap fallback', async () => {
+  const supabase = makeStub();
+  await roles.updateRolePermissions({
+    user: ADMIN,
+    role: 'admin',
+    permissions: { 'accounts.edit': true, 'accounts.roles.manage': false },
+    supabase,
+  });
+  assert.equal(
+    await roles.hasAllConfiguredPermissions({
+      role: 'admin',
+      permissionIds: ['accounts.edit', 'accounts.roles.manage'],
+      supabase,
+    }),
+    false,
+  );
+  assert.equal(
+    await roles.hasAllConfiguredPermissions({
+      role: 'phn',
+      permissionIds: ['accounts.create', 'accounts.roles.manage'],
+      supabase,
+    }),
+    null,
+  );
+});
+
 test('BUG-011: re-saving the same values records no new audit entries', async () => {
   const supabase = makeStub();
   await roles.updateRolePermissions({ user: ADMIN, role: 'phn', permissions: { 'reports.send': true }, supabase });

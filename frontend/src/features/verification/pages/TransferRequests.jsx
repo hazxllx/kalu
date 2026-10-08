@@ -1,26 +1,32 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ArrowRight, Check, ExternalLink, X } from "lucide-react";
+import { usePermissions } from "@/context/PermissionsContext";
 import { api } from "@/services/api";
 
 export default function TransferRequests() {
+  const { can } = usePermissions();
+  const canReviewTransfers = can("residents.transfer.approve");
   const [requests, setRequests] = useState([]);
   const [details, setDetails] = useState({});
   const [reasons, setReasons] = useState({});
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    if (!canReviewTransfers) return;
     try { const result = await api.get("/transfer-requests/queue"); setRequests(result.rows || []); }
     catch (err) { setError(err?.message || "Transfer requests could not be loaded."); }
-  };
-  useEffect(() => { load(); }, []);
+  }, [canReviewTransfers]);
+  useEffect(() => { load(); }, [load]);
 
   const review = async (request) => {
+    if (!canReviewTransfers) return;
     try { const result = await api.get(`/transfer-requests/${request.id}/review`); setDetails((current) => ({ ...current, [request.id]: result })); }
     catch (err) { setError(err?.message || "The transfer documents could not be loaded."); }
   };
 
   const decide = async (request, action) => {
+    if (!canReviewTransfers) return;
     setError("");
     try {
       if (action === "reject" && !reasons[request.id]?.trim()) {
@@ -37,6 +43,16 @@ export default function TransferRequests() {
     } catch (err) { setError(err?.message || "The transfer decision could not be completed."); }
     finally { setBusyId(""); }
   };
+
+  if (!canReviewTransfers) {
+    return (
+      <main className="p-6">
+        <p role="status" className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
+          Your role does not have permission to review resident transfer requests.
+        </p>
+      </main>
+    );
+  }
 
   return (
     <main className="space-y-6 p-6">

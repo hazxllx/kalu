@@ -17,7 +17,7 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { computeBMI, isPlausibleVital } from '../utils/bmi.js';
 import { SUBMISSION_STATUS } from '../config/facility.js';
-import { assignedBarangay } from '../config/scope.js';
+import { assignedBarangay, withinFacilityScope } from '../config/scope.js';
 
 const INTAKE_ROLES = ['bhw', 'rhu_personnel', 'health_supervisor'];
 
@@ -31,6 +31,10 @@ const withinBarangayScope = (user, resident) => {
   if (!scope) return true;
   return String(resident?.barangay ?? '').trim().toLowerCase() === scope.toLowerCase();
 };
+
+const withinIntakeScope = (user, submission) =>
+  withinBarangayScope(user, submission?.resident) &&
+  withinFacilityScope(user, submission?.facilityId);
 
 export const searchResidents = async ({ q = '', user }) => {
   const residents = await repository.searchResidents({ q, limit: 25 });
@@ -233,15 +237,15 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
 export const listMySubmissions = async ({ user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
   const { rows } = await repository.listVisits({ submittedById: user.id, limit: 100 });
-  return rows;
+  return rows.filter((submission) => withinIntakeScope(user, submission));
 };
 
 export const getSubmissionForIntake = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
-  if (submission.recordedById !== user.id) {
-    // A submission recorded by someone else is not part of this user's intake.
+  if (submission.recordedById !== user.id || !withinIntakeScope(user, submission)) {
+    // Avoid exposing whether another user's or out-of-scope submission exists.
     throw ApiError.notFound('Submission not found');
   }
   return submission;
@@ -252,6 +256,7 @@ export const updateSubmissionDraft = async ({ id, visit = {}, user }) => {
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id) throw ApiError.forbidden('You may only update submissions you created.');
+  if (!withinIntakeScope(user, submission)) throw ApiError.notFound('Submission not found');
   if (!editableStatusesForIntake().includes(submission.status)) {
     throw ApiError.forbidden('This submission has been submitted and can no longer be edited.');
   }
@@ -265,7 +270,7 @@ export const submitSubmission = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
-  if (submission.recordedById !== user.id) {
+  if (submission.recordedById !== user.id || !withinIntakeScope(user, submission)) {
     throw ApiError.forbidden('You may only submit submissions you created.');
   }
   if (submission.status !== SUBMISSION_STATUS.DRAFT) {

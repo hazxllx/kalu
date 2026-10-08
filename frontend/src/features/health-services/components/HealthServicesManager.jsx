@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { healthServicesApi } from "@/services/api";
 import {
   Plus, X, CheckCircle2, RefreshCw, Search, Users, MapPin, Building2, Activity, UserPlus, UserMinus,
@@ -53,6 +54,10 @@ const inputCls = (error) =>
 
 export default function HealthServicesManager({ subtitle }) {
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const canCreate = can("services.create");
+  const canEdit = can("services.edit");
+  const canManage = canCreate || canEdit;
   const isSupervisor = user?.role === "health_supervisor";
 
   const [services, setServices] = useState([]);
@@ -90,12 +95,13 @@ export default function HealthServicesManager({ subtitle }) {
 
   useEffect(() => {
     loadServices();
+    if (!canManage) return;
     // Reference + personnel are for the create/assign forms; a failure here
     // must not blank the catalog, so they are best-effort.
     healthServicesApi.meta().then((m) => m?.categories && setCategories(m.categories)).catch(() => {});
     healthServicesApi.reference().then((r) => { setBarangays(r?.barangays || []); setFacilities(r?.facilities || []); }).catch(() => {});
     healthServicesApi.personnel().then((r) => setPersonnel(r?.rows || [])).catch(() => {});
-  }, [loadServices]);
+  }, [canManage, loadServices]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -110,6 +116,7 @@ export default function HealthServicesManager({ subtitle }) {
   }, [filtered, categories]);
 
   const openCreate = () => {
+    if (!canCreate) return;
     setForm({
       name: "",
       category: "Maternal",
@@ -129,6 +136,7 @@ export default function HealthServicesManager({ subtitle }) {
     }));
 
   const saveService = async () => {
+    if (!canCreate) return;
     if (!form.name.trim()) { setFormError("A service name is required."); return; }
     setSaving(true);
     setFormError("");
@@ -154,6 +162,7 @@ export default function HealthServicesManager({ subtitle }) {
   const isAssigned = (service, personnelId) => (service.assignedPersonnel || []).some((p) => p.id === personnelId);
 
   const toggleAssign = async (service, person) => {
+    if (!canEdit) return;
     setBusyAssign(person.id);
     try {
       const updated = isAssigned(service, person.id)
@@ -183,14 +192,14 @@ export default function HealthServicesManager({ subtitle }) {
         crumbs={["Health Services"]}
         title="Health Services"
         subtitle={subtitle || "Catalog of health services and their assigned personnel."}
-        action={
+        action={canCreate ? (
           <button
             onClick={openCreate}
             className="flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
           >
             <Plus className="h-4 w-4" /> Add Health Service
           </button>
-        }
+        ) : null}
       />
 
       {toast && (
@@ -264,12 +273,12 @@ export default function HealthServicesManager({ subtitle }) {
                       {s.description && <p className="line-clamp-2 pt-1">{s.description}</p>}
                     </div>
                     <div className="mt-4 border-t border-brand-border pt-3 dark:border-border">
-                      <button
+                      {canEdit && <button
                         onClick={() => setManageTarget(s)}
                         className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
                       >
                         <UserPlus className="h-3.5 w-3.5" /> Manage assignments
-                      </button>
+                      </button>}
                     </div>
                   </Card>
                 ))}
@@ -392,7 +401,7 @@ export default function HealthServicesManager({ subtitle }) {
                         <span className="block truncate text-sm font-medium text-brand-ink">{p.name}</span>
                         <span className="text-xs text-brand-gray">{ROLE_LABELS[p.role] || p.role}</span>
                       </span>
-                      <button
+                      {canEdit && <button
                         onClick={() => toggleAssign(manageTarget, p)}
                         disabled={busyAssign === p.id}
                         className={`inline-flex shrink-0 items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
@@ -400,7 +409,7 @@ export default function HealthServicesManager({ subtitle }) {
                         }`}
                       >
                         {assigned ? <><UserMinus className="h-3.5 w-3.5" /> Remove</> : <><UserPlus className="h-3.5 w-3.5" /> Assign</>}
-                      </button>
+                      </button>}
                     </div>
                   );
                 })}

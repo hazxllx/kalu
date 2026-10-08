@@ -134,9 +134,12 @@ test('PHN navigation keeps quick links separate and organizes the remaining dest
       .filter((item) => item.permission)
       .map(({ label, permission }) => [label, permission]),
     [
+      ['Health Records', 'residents.profile.view'],
       ['PHN Check-ups', 'consultation.requests.view'],
+      ['Health Services', 'services.view'],
       ['Referrals', 'referrals.view'],
       ['Follow-ups', 'followups.view'],
+      ['Household Risk Overview', 'households.view'],
       ['Reports', 'reports.view'],
     ],
   );

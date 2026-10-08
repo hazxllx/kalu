@@ -8,8 +8,22 @@ import asyncHandler from '../utils/asyncHandler.js';
 
 const router = Router();
 router.use(authenticate, resolveBarangayScope);
-router.get('/', authorize([...FEATURE_ROLES.consultations, ROLES.RESIDENT]), asyncHandler(controller.list));
-router.post('/', authorize(FEATURE_ROLES.consultations), asyncHandler(controller.create));
-router.put('/:id', authorize(FEATURE_ROLES.consultations), asyncHandler(controller.update));
+router.get(
+  '/',
+  authorize([...FEATURE_ROLES.consultations, ROLES.RESIDENT], {
+    anyPermission: ['consultation.requests.view', 'consultation.history.view'],
+  }),
+  asyncHandler(controller.list),
+);
+router.post(
+  '/',
+  authorize(FEATURE_ROLES.consultations, { permission: 'consultation.conduct' }),
+  asyncHandler(controller.create),
+);
+router.put(
+  '/:id',
+  authorize(FEATURE_ROLES.consultations, { permission: 'consultation.records.update' }),
+  asyncHandler(controller.update),
+);
 
 export default router;

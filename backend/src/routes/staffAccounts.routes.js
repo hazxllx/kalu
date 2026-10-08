@@ -43,7 +43,10 @@ const registerLimiter = rateLimit({
   message: 'Too many registration attempts. Please try again later.',
 });
 
-const reviewer = [authenticate, authorize(APPROVER_ROLES)];
+const reviewer = [
+  authenticate,
+  authorize(APPROVER_ROLES, { permission: 'accounts.personnel.approve' }),
+];
 const idParam = validate(staffAccountIdParamValidator, 'params');
 
 router.post('/register', registerLimiter, uploadStaffDocuments, validate(registerPersonnelValidator), asyncHandler(staffAccountsController.register));

@@ -8,7 +8,12 @@ import * as controller from '../controllers/transfer.controller.js';
 
 const router = Router();
 const self = [authenticate, authorize(FEATURE_ROLES.residentSelf)];
-const staff = [authenticate, authorize(['admin', 'mho', 'phn', 'health_supervisor'])];
+const staff = [
+  authenticate,
+  authorize(['admin', 'mho', 'phn', 'health_supervisor'], {
+    permission: 'residents.transfer.approve',
+  }),
+];
 
 // Resident self-service (identity always derived from the authenticated session).
 router.get('/transfer-requests/context', ...self, asyncHandler(controller.getContext));

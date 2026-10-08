@@ -24,11 +24,37 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/', authorize(FEATURE_ROLES.riskConfigRead), asyncHandler(riskConfigController.getConfig));
-router.put('/thresholds', authorize(FEATURE_ROLES.riskConfig), asyncHandler(riskConfigController.updateThresholds));
-router.post('/criteria', authorize(FEATURE_ROLES.riskConfig), asyncHandler(riskConfigController.upsertCriterion));
-router.put('/criteria/:code', authorize(FEATURE_ROLES.riskConfig), asyncHandler(riskConfigController.upsertCriterion));
-router.delete('/criteria/:code', authorize(FEATURE_ROLES.riskConfig), asyncHandler(riskConfigController.deleteCriterion));
-router.post('/recalculate', authorize(FEATURE_ROLES.riskConfig), asyncHandler(riskConfigController.recalculate));
+router.get(
+  '/',
+  authorize(FEATURE_ROLES.riskConfigRead, {
+    anyPermission: ['reports.analytics.view', 'system.settings.manage'],
+  }),
+  asyncHandler(riskConfigController.getConfig),
+);
+router.put(
+  '/thresholds',
+  authorize(FEATURE_ROLES.riskConfig, { permission: 'system.settings.manage' }),
+  asyncHandler(riskConfigController.updateThresholds),
+);
+router.post(
+  '/criteria',
+  authorize(FEATURE_ROLES.riskConfig, { permission: 'system.settings.manage' }),
+  asyncHandler(riskConfigController.upsertCriterion),
+);
+router.put(
+  '/criteria/:code',
+  authorize(FEATURE_ROLES.riskConfig, { permission: 'system.settings.manage' }),
+  asyncHandler(riskConfigController.upsertCriterion),
+);
+router.delete(
+  '/criteria/:code',
+  authorize(FEATURE_ROLES.riskConfig, { permission: 'system.settings.manage' }),
+  asyncHandler(riskConfigController.deleteCriterion),
+);
+router.post(
+  '/recalculate',
+  authorize(FEATURE_ROLES.riskConfig, { permission: 'system.settings.manage' }),
+  asyncHandler(riskConfigController.recalculate),
+);
 
 export default router;

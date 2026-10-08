@@ -10,6 +10,7 @@ import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { residentsApi } from "@/services/api";
 import { BARANGAYS } from "@/lib/barangays";
@@ -245,6 +246,10 @@ const initialFromUser = (user) => {
 export default function ResidentsPage() {
   /** @type {{user: {id?: string, role?: string, assignedBarangay?: string|null, barangay?: string|null}|null}} */
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const canCreate = can("residents.create");
+  const canCreateLoginAccount = can("accounts.create");
+  const canEditPermission = can("residents.edit");
 
   const [residents, setResidents] = useState(/** @type {ResidentRecord[]} */ ([]));
   const [loading, setLoading] = useState(true);
@@ -285,7 +290,8 @@ export default function ResidentsPage() {
    * resident demographics (the API's edit roles are the PHN and the Health
    * Supervisor), so the edit action is hidden rather than shown and 403'd.
    */
-  const canEdit = user?.role === "phn" || user?.role === "health_supervisor";
+  const canEdit =
+    (user?.role === "phn" || user?.role === "health_supervisor") && canEditPermission;
 
   /** Load the directory from the API (search term is applied server-side). */
   const load = useCallback(
@@ -342,6 +348,7 @@ export default function ResidentsPage() {
   }, [residents]);
 
   const openAdd = () => {
+    if (!canCreate) return;
     setForm(initialFromUser(user));
     setErrors({});
     setFormError(null);
@@ -361,6 +368,7 @@ export default function ResidentsPage() {
    */
   /** @param {ResidentRow} resident */
   const openEdit = (resident) => {
+    if (!canEdit) return;
     setEditTarget(resident);
     setEditForm({
       contact: resident.cellphoneNo || "",
@@ -407,6 +415,7 @@ export default function ResidentsPage() {
   };
 
   const handleSubmit = async () => {
+    if (!canCreate) return;
     const errs = validate();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
@@ -484,7 +493,7 @@ export default function ResidentsPage() {
 
   /** Save the permitted corrections through the API. */
   const handleEditSave = async () => {
-    if (!validateEdit() || !editTarget) return;
+    if (!canEdit || !validateEdit() || !editTarget) return;
     setEditSubmitting(true);
     setEditError(null);
     try {
@@ -562,14 +571,14 @@ export default function ResidentsPage() {
             ? `Verified residents in Barangay ${assignedBarangay}. Pending registrations are reviewed under Resident Verification.`
             : "Verified residents in your area. Pending registrations are reviewed under Resident Verification."
         }
-        action={
+        action={canCreate ? (
           <button
             onClick={openAdd}
             className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
           >
             <Plus className="w-4 h-4" /> Add Resident
           </button>
-        }
+        ) : null}
       />
 
       <Card className="p-4 mb-5 flex flex-col lg:flex-row gap-3">
@@ -729,47 +738,49 @@ export default function ResidentsPage() {
                   requires an account; the health worker chooses whether to
                   create one. When Yes, the account is created in Pending
                   Activation and the resident sets their own password later. */}
-              <div className="mt-5 rounded-2xl border border-slate-200 bg-brand-bg/40 p-4">
-                <p className="text-sm font-medium text-brand-ink">Create Resident Login Account?</p>
-                <p className="mt-0.5 text-xs text-brand-gray">
-                  Optional. The resident profile is created either way. Choose “Yes” only if this resident should be able to log in.
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => set("createAccount")(false)}
-                    className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
-                      !form.createAccount ? "bg-brand-blue text-white" : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
-                    }`}
-                  >
-                    No
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => set("createAccount")(true)}
-                    className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
-                      form.createAccount ? "bg-brand-blue text-white" : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
-                    }`}
-                  >
-                    Yes
-                  </button>
-                </div>
-                {form.createAccount && (
-                  <div className="mt-4">
-                    <Field
-                      label="Email for login account"
-                      type="email"
-                      value={form.email}
-                      onChange={set("email")}
-                      placeholder="e.g. resident@example.com"
-                      error={errors.email}
-                    />
-                    <p className="mt-1 text-xs text-brand-gray">
-                      The account starts in Pending Activation. An invitation link is emailed to this address — the resident clicks it to set their own password and activate the account.
-                    </p>
+              {canCreateLoginAccount && (
+                <div className="mt-5 rounded-2xl border border-slate-200 bg-brand-bg/40 p-4">
+                  <p className="text-sm font-medium text-brand-ink">Create Resident Login Account?</p>
+                  <p className="mt-0.5 text-xs text-brand-gray">
+                    Optional. The resident profile is created either way. Choose “Yes” only if this resident should be able to log in.
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => set("createAccount")(false)}
+                      className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
+                        !form.createAccount ? "bg-brand-blue text-white" : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                      }`}
+                    >
+                      No
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => set("createAccount")(true)}
+                      className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
+                        form.createAccount ? "bg-brand-blue text-white" : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                      }`}
+                    >
+                      Yes
+                    </button>
                   </div>
-                )}
-              </div>
+                  {form.createAccount && (
+                    <div className="mt-4">
+                      <Field
+                        label="Email for login account"
+                        type="email"
+                        value={form.email}
+                        onChange={set("email")}
+                        placeholder="e.g. resident@example.com"
+                        error={errors.email}
+                      />
+                      <p className="mt-1 text-xs text-brand-gray">
+                        The account starts in Pending Activation. An invitation link is emailed to this address — the resident clicks it to set their own password and activate the account.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 mt-6">
                 <button onClick={closeAdd} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">

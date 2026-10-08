@@ -6,6 +6,7 @@ import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
 import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 import { followUpsApi, healthServicesApi, residentsApi } from "@/services/api";
 
@@ -133,6 +134,11 @@ export default function MidwifeFollowUp() {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { can, canAny } = usePermissions();
+  const canScheduleFollowUp = can("followups.create");
+  const canEditFollowUp = can("followups.edit");
+  const canCompleteFollowUp = can("followups.complete");
+  const canRecordVisit = canAny(["followups.edit", "followups.complete"]);
   // Health Supervisor scope: only their single assigned barangay. Rows,
   // statistics, resident options and personnel options are all limited to it.
   const supervisor = isHealthSupervisor(user);
@@ -284,29 +290,50 @@ export default function MidwifeFollowUp() {
   };
 
   const handleRecordVisit = (followUp) => {
+    if (!canRecordVisit) {
+      showToast("You do not have permission to record follow-up visits.");
+      return;
+    }
     setSelectedFollowUp(followUp);
     setVisitForm({ findings: "", treatment: "", advice: "", nextVisitDate: "" });
     setShowRecordVisitModal(true);
   };
 
   const handleUpdateStatus = (followUp) => {
+    if (!canEditFollowUp) {
+      showToast("You do not have permission to update follow-up status.");
+      return;
+    }
     setSelectedFollowUp(followUp);
     setShowUpdateStatusModal(true);
   };
 
   const handleAddRemarks = (followUp) => {
+    if (!canEditFollowUp) {
+      showToast("You do not have permission to edit follow-up notes.");
+      return;
+    }
     setSelectedFollowUp(followUp);
     setRemarksDraft(followUp.remarks || "");
     setShowRemarksModal(true);
   };
 
   const handleCompleteFollowUp = (followUp) => {
+    if (!canCompleteFollowUp) {
+      showToast("You do not have permission to complete follow-ups.");
+      return;
+    }
     setSelectedFollowUp(followUp);
     setShowCompleteConfirm(true);
   };
 
   const confirmComplete = async () => {
+    if (!canCompleteFollowUp) {
+      showToast("You do not have permission to complete follow-ups.");
+      return;
+    }
     const target = selectedFollowUp;
+    if (!target) return;
     try {
       await persistFollowUp(target.id, { status: "Completed" }, "Follow-up marked as completed.");
       setShowCompleteConfirm(false);
@@ -317,7 +344,13 @@ export default function MidwifeFollowUp() {
   };
 
   const handleStatusUpdate = async (newStatus) => {
+    const canUpdateStatus = newStatus === "Missed" ? canCompleteFollowUp : canEditFollowUp;
+    if (!canUpdateStatus) {
+      showToast("You do not have permission to update this follow-up status.");
+      return;
+    }
     const target = selectedFollowUp;
+    if (!target) return;
     try {
       await persistFollowUp(target.id, { status: newStatus }, `Status updated to ${newStatus}.`);
       setShowUpdateStatusModal(false);
@@ -328,7 +361,12 @@ export default function MidwifeFollowUp() {
   };
 
   const handleSaveRemarks = async (remarks) => {
+    if (!canEditFollowUp) {
+      showToast("You do not have permission to edit follow-up notes.");
+      return;
+    }
     const target = selectedFollowUp;
+    if (!target) return;
     try {
       await persistFollowUp(target.id, { notes: remarks }, "Remarks saved successfully.");
       setShowRemarksModal(false);
@@ -339,7 +377,15 @@ export default function MidwifeFollowUp() {
   };
 
   const handleSaveVisit = async (visitData) => {
+    const canSaveVisit = visitData?.nextVisitDate ? canEditFollowUp : canCompleteFollowUp;
+    if (!canSaveVisit) {
+      showToast(visitData?.nextVisitDate
+        ? "You do not have permission to reschedule follow-ups."
+        : "You do not have permission to complete follow-ups.");
+      return;
+    }
     const target = selectedFollowUp;
+    if (!target) return;
     const patch = { status: "Completed" };
     if (visitData?.notes !== undefined) patch.notes = visitData.notes;
     if (visitData?.nextVisitDate) {
@@ -357,6 +403,10 @@ export default function MidwifeFollowUp() {
   };
 
   const openScheduleModal = () => {
+    if (!canScheduleFollowUp) {
+      showToast("You do not have permission to schedule follow-ups.");
+      return;
+    }
     setSelectedResident(null);
     setTouched({});
     setScheduleForm({ ...emptyScheduleForm(defaultPersonnel), location: defaultFollowUpLocation });
@@ -431,6 +481,10 @@ export default function MidwifeFollowUp() {
     Boolean(scheduleForm.reason.trim());
 
   const handleSchedule = async () => {
+    if (!canScheduleFollowUp) {
+      showToast("You do not have permission to schedule follow-ups.");
+      return;
+    }
     // Backstop — the primary button is disabled until the form is complete.
     if (!canSchedule) {
       setTouched({ resident: true, date: true, time: true, reason: true });
@@ -476,14 +530,14 @@ export default function MidwifeFollowUp() {
             ? `Manage scheduled follow-up visits and monitor resident outcomes in Brgy. ${assignedBarangay}.`
             : "Manage scheduled follow-up visits and monitor resident outcomes."
         }
-        action={
+        action={canScheduleFollowUp ? (
           <button
             onClick={openScheduleModal}
             className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
           >
             <Plus className="w-4 h-4" /> Schedule Follow-up
           </button>
-        }
+        ) : null}
       />
 
       {/* Toast Notification */}
@@ -619,32 +673,40 @@ export default function MidwifeFollowUp() {
                       >
                         View
                       </button>
-                      {f.status !== "Completed" && (
+                      {f.status !== "Completed" && (canRecordVisit || canEditFollowUp || canCompleteFollowUp) && (
                         <>
-                          <button
-                            onClick={() => handleRecordVisit(f)}
-                            className="text-sm font-medium text-brand-blue hover:underline"
-                          >
-                            Record Visit
-                          </button>
-                          <button
-                            onClick={() => handleUpdateStatus(f)}
-                            className="text-sm font-medium text-brand-blue hover:underline"
-                          >
-                            Update Status
-                          </button>
-                          <button
-                            onClick={() => handleAddRemarks(f)}
-                            className="text-sm font-medium text-brand-blue hover:underline"
-                          >
-                            Add Remarks
-                          </button>
-                          <button
-                            onClick={() => handleCompleteFollowUp(f)}
-                            className="text-sm font-medium text-brand-green hover:underline"
-                          >
-                            Complete
-                          </button>
+                          {canRecordVisit && (
+                            <button
+                              onClick={() => handleRecordVisit(f)}
+                              className="text-sm font-medium text-brand-blue hover:underline"
+                            >
+                              Record Visit
+                            </button>
+                          )}
+                          {(canEditFollowUp || canCompleteFollowUp) && (
+                            <>
+                              <button
+                                onClick={() => handleUpdateStatus(f)}
+                                className="text-sm font-medium text-brand-blue hover:underline"
+                              >
+                                Update Status
+                              </button>
+                              <button
+                                onClick={() => handleAddRemarks(f)}
+                                className="text-sm font-medium text-brand-blue hover:underline"
+                              >
+                                Add Remarks
+                              </button>
+                            </>
+                          )}
+                          {canCompleteFollowUp && (
+                            <button
+                              onClick={() => handleCompleteFollowUp(f)}
+                              className="text-sm font-medium text-brand-green hover:underline"
+                            >
+                              Complete
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -1052,6 +1114,7 @@ export default function MidwifeFollowUp() {
                     type="date"
                     value={visitForm.nextVisitDate}
                     onChange={(e) => setVisitForm((v) => ({ ...v, nextVisitDate: e.target.value }))}
+                    disabled={!canEditFollowUp}
                     className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                   />
                 </div>
@@ -1064,7 +1127,7 @@ export default function MidwifeFollowUp() {
                   Cancel
                 </button>
                 <button
-                  disabled={saving}
+                  disabled={saving || (visitForm.nextVisitDate ? !canEditFollowUp : !canCompleteFollowUp)}
                   onClick={() => {
                     const notes = [
                       visitForm.findings && `Findings: ${visitForm.findings}`,
@@ -1101,7 +1164,9 @@ export default function MidwifeFollowUp() {
               </div>
               <p className="text-sm text-brand-gray mb-4">Select new status for {selectedFollowUp.resident}'s follow-up:</p>
               <div className="space-y-2">
-                {["Scheduled", "Ongoing", "Missed", "Cancelled"].map((status) => (
+                {["Scheduled", "Ongoing", "Missed", "Cancelled"]
+                  .filter((status) => status === "Missed" ? canCompleteFollowUp : canEditFollowUp)
+                  .map((status) => (
                   <button
                     key={status}
                     onClick={() => handleStatusUpdate(status)}

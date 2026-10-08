@@ -12,7 +12,6 @@
  *   MANAGED_ROLES          the roles an administrator is allowed to configure.
  *   DEFAULT_GRANTS         least-privilege defaults per role (never "all on").
  *   ROLE_POLICY            hard guard-rails the administrator cannot cross:
- *                            • essential Admin access can never be removed
  *                            • Resident accounts stay self-service only
  *
  * Nothing here changes the existing KALUSAGAP workflow. Route-level RBAC still
@@ -620,11 +619,7 @@ export const rolePlural = (roleId) => getManagedRole(roleId)?.plural || roleLabe
 /* Guard-rails                                                               */
 /* ------------------------------------------------------------------------- */
 
-/**
- * Administrator access that can never be switched off. Without these the
- * administrator would lock themselves — and everybody else — out of access
- * management.
- */
+/** Core administrative permissions, retained as a catalogue constant for consumers. */
 export const ADMIN_ESSENTIAL_PERMISSIONS = Object.freeze([
   'accounts.view',
   'accounts.roles.manage',
@@ -649,11 +644,6 @@ const RESIDENT_SELF_SERVICE = Object.freeze([
  *   grantable  when present, ONLY these ids may ever be granted to the role
  */
 export const ROLE_POLICY = Object.freeze({
-  [ROLE.ADMIN]: {
-    lockedOn: ADMIN_ESSENTIAL_PERMISSIONS,
-    lockedOnReason:
-      'Essential administrator access. Removing it would leave no one able to manage accounts, roles or system settings.',
-  },
   [ROLE.RESIDENT]: {
     grantable: RESIDENT_SELF_SERVICE,
     deniedReason:
@@ -704,20 +694,22 @@ export const normalizePermissionValue = (roleId, permissionId, value) => {
 const DEFAULT_GRANTS = Object.freeze({
   [ROLE.ADMIN]: '*',
 
-  // Higher-level monitoring, reports, analytics and referral oversight.
+  // Municipal directory, service management, reports, analytics and referral oversight.
   [ROLE.MHO]: [
     'residents.directory.view',
     'residents.profile.view',
+    'residents.create',
+    'accounts.create',
+    'residents.transfer.approve',
     'consultation.history.view',
-    'triage.view',
     'referrals.view',
-    'referrals.approve',
-    'referrals.reject',
-    'referrals.assign',
     'referrals.history.view',
     'followups.view',
     'followups.history.view',
     'services.view',
+    'services.create',
+    'services.edit',
+    'services.delete',
     'reports.view',
     'reports.generate',
     'reports.export',
@@ -730,6 +722,7 @@ const DEFAULT_GRANTS = Object.freeze({
     'residents.profile.view',
     'residents.create',
     'residents.edit',
+    'accounts.create',
     'residents.registration.approve',
     'residents.transfer.approve',
     'households.view',
@@ -761,14 +754,24 @@ const DEFAULT_GRANTS = Object.freeze({
     'services.edit',
     'services.delete',
     'reports.view',
+    'reports.generate',
+    'reports.export',
     'reports.analytics.view',
+    'accounts.personnel.approve',
   ],
 
-  // RHU-based public health nursing: records, assessments, referrals, follow-ups
-  // (mirrors the API's FEATURE_ROLES map for `phn`). PHNs are NOT assigned to a
-  // barangay and do NOT own the resident directory or resident verification —
-  // those belong to the Health Supervisor.
+  // Public health nursing: records, assessments, referrals, follow-ups and
+  // the existing resident, household and account-review workflows.
   [ROLE.PHN]: [
+    'residents.directory.view',
+    'residents.profile.view',
+    'residents.create',
+    'residents.edit',
+    'accounts.create',
+    'residents.registration.approve',
+    'residents.transfer.approve',
+    'households.view',
+    'households.create',
     'consultation.requests.view',
     'consultation.conduct',
     'consultation.findings.record',
@@ -777,6 +780,9 @@ const DEFAULT_GRANTS = Object.freeze({
     'triage.view',
     'referrals.view',
     'referrals.create',
+    'referrals.approve',
+    'referrals.reject',
+    'referrals.assign',
     'referrals.status.update',
     'referrals.history.view',
     'followups.view',
@@ -786,11 +792,17 @@ const DEFAULT_GRANTS = Object.freeze({
     'followups.history.view',
     'followups.notify',
     'services.view',
+    'services.create',
+    'services.edit',
+    'services.delete',
     'reports.view',
+    'reports.generate',
+    'reports.export',
     // Municipality-wide Community Health Monitoring (view only). PHN sees the
     // whole Municipality of Pili on the map, matching the MHO experience, but
     // this grants NO administrative capability.
     'reports.analytics.view',
+    'accounts.personnel.approve',
   ],
 
   // Triage intake and case routing at the RHU. RHU Personnel do NOT have access
@@ -803,20 +815,32 @@ const DEFAULT_GRANTS = Object.freeze({
   // advertise a capability the server refuses.
   [ROLE.RHU_PERSONNEL]: [
     'consultation.requests.view',
+    'consultation.conduct',
+    'consultation.findings.record',
     'consultation.history.view',
+    'residents.create',
+    'residents.edit',
+    'residents.profile.view',
     'triage.view',
     'triage.perform',
     'triage.assessment.update',
     'triage.forward',
-    'followups.view',
-    'followups.history.view',
     'services.view',
+    'reports.view',
   ],
 
   // DATA GATHERING ONLY. No consultation, no referral approval, no resident
   // directory management, no reports and no follow-up management unless an
   // administrator explicitly switches those on.
-  [ROLE.BHW]: ['residents.create', 'residents.edit', 'services.view'],
+  [ROLE.BHW]: [
+    'residents.create',
+    'residents.edit',
+    'residents.profile.view',
+    'households.view',
+    'households.create',
+    'services.view',
+    'reports.generate',
+  ],
 
   // Own information only.
   [ROLE.RESIDENT]: [...RESIDENT_SELF_SERVICE],

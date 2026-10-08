@@ -1,17 +1,15 @@
 /**
  * Sidebar navigation per role.
  *
- * An item may declare an optional `permission` id from `@/lib/permissions`. When
- * it does, the item is only rendered if the signed-in user's role currently
- * holds that permission — so switching a privilege off on the admin's
- * Role & Permissions page immediately removes the corresponding entry point.
- * Items without a `permission` key are always shown, which keeps the existing
- * KALUSAGAP navigation behaviour unchanged.
+ * An item may declare `permission` or `anyPermissions` ids from
+ * `@/lib/permissions`. Items with permission requirements are only rendered
+ * when the signed-in user's role currently holds the required permission(s).
  *
  * An item may also declare a `group` label. Consecutive items sharing a group
  * are rendered under one small uppercase section header. Items with `children`
  * render as expandable navigation groups; child permissions are filtered in
- * the same way as top-level items.
+ * the same way as top-level items. Hidden items preserve route permission
+ * mappings without appearing in the sidebar.
  */
 export const NAV = {
   "resident-limited": [
@@ -124,6 +122,7 @@ export const NAV = {
       label: "Household Profiling",
       icon: "Home",
       path: "/app/bhw/households",
+      permission: "households.view",
     },
     {
       label: "Notifications",
@@ -150,6 +149,7 @@ export const NAV = {
       label: "Resident Directory",
       icon: "Users",
       path: "/app/phn/residents",
+      permission: "residents.directory.view",
     },
     {
       label: "Clinical Care",
@@ -159,6 +159,7 @@ export const NAV = {
           label: "Health Records",
           icon: "FileHeart",
           path: "/app/phn/record",
+          permission: "residents.profile.view",
         },
         {
           label: "PHN Check-ups",
@@ -170,6 +171,7 @@ export const NAV = {
           label: "Health Services",
           icon: "Stethoscope",
           path: "/app/phn/services",
+          permission: "services.view",
         },
       ],
     },
@@ -200,6 +202,7 @@ export const NAV = {
           icon: "Home",
           path: "/app/phn/households/risk-overview",
           activePaths: ["/app/phn/households"],
+          permission: "households.view",
         },
       ],
     },
@@ -224,6 +227,7 @@ export const NAV = {
       label: "Account Approvals",
       icon: "ShieldCheck",
       path: "/app/phn/account-approvals",
+      permission: "accounts.personnel.approve",
     },
     {
       label: "Notifications",
@@ -258,77 +262,80 @@ export const NAV = {
       group: "Main",
     },
     {
-      label: "Verifications & Approvals",
-      icon: "ShieldCheck",
-      path: "/app/health_supervisor/verifications",
-      group: "Verification & Approvals",
-    },
-    {
-      label: "Consultation",
+      label: "Health Services",
       icon: "Stethoscope",
-      path: "/app/health_supervisor/consultations",
-      permission: "consultation.conduct",
-      group: "Health Services",
-    },
-    {
-      label: "Records",
-      icon: "ClipboardList",
-      group: "Health Services",
+      group: "Health Operations",
       children: [
         {
-          label: "TCL",
+          label: "Consultation",
+          icon: "Stethoscope",
+          path: "/app/health_supervisor/consultations",
+          permission: "consultation.requests.view",
+        },
+        {
+          label: "Records",
           icon: "ClipboardList",
-          path: "/app/health_supervisor/tcls",
+          children: [
+            {
+              label: "TCL",
+              icon: "ClipboardList",
+              path: "/app/health_supervisor/tcls",
+            },
+            {
+              label: "M1",
+              icon: "FileHeart",
+              path: "/app/health_supervisor/m1",
+            },
+            {
+              label: "Immunization",
+              icon: "Syringe",
+              path: "/app/health_supervisor/immunization",
+            },
+            {
+              label: "TB Records",
+              icon: "Activity",
+              path: "/app/health_supervisor/tb",
+            },
+            {
+              label: "Follow-ups",
+              icon: "CalendarClock",
+              path: "/app/health_supervisor/followups",
+              permission: "followups.view",
+            },
+          ],
         },
         {
-          label: "M1",
-          icon: "FileHeart",
-          path: "/app/health_supervisor/m1",
+          label: "Referrals",
+          icon: "Send",
+          path: "/app/health_supervisor/referrals",
+          permission: "referrals.view",
         },
         {
-          label: "Immunization",
-          icon: "Syringe",
-          path: "/app/health_supervisor/immunization",
-        },
-        {
-          label: "TB Records",
+          label: "Health Services / Programs",
           icon: "Activity",
-          path: "/app/health_supervisor/tb",
-        },
-        {
-          label: "Follow-ups",
-          icon: "CalendarClock",
-          path: "/app/health_supervisor/followups",
-          permission: "followups.view",
+          path: "/app/health_supervisor/services",
+          permission: "services.view",
         },
       ],
     },
     {
-      label: "Health Services",
-      icon: "Activity",
-      path: "/app/health_supervisor/services",
-      group: "Health Services",
-    },
-    {
-      label: "Referrals",
-      icon: "Send",
-      path: "/app/health_supervisor/referrals",
-      permission: "referrals.view",
-      group: "Health Services",
-    },
-    {
-      label: "Early Warning",
+      label: "Monitoring & Reports",
       icon: "TrendingUp",
-      path: "/app/health_supervisor/trends",
-      permission: "reports.analytics.view",
       group: "Monitoring",
-    },
-    {
-      label: "Reports",
-      icon: "BarChart3",
-      path: "/app/health_supervisor/reports",
-      permission: "reports.view",
-      group: "Monitoring",
+      children: [
+        {
+          label: "Early Warning",
+          icon: "TrendingUp",
+          path: "/app/health_supervisor/trends",
+          permission: "reports.analytics.view",
+        },
+        {
+          label: "Reports",
+          icon: "BarChart3",
+          path: "/app/health_supervisor/reports",
+          permission: "reports.view",
+        },
+      ],
     },
     {
       label: "Notifications",
@@ -337,10 +344,21 @@ export const NAV = {
       group: "Account",
     },
     {
+      label: "Verifications & Approvals",
+      icon: "ShieldCheck",
+      path: "/app/health_supervisor/verifications",
+      anyPermissions: [
+        "residents.registration.approve",
+        "households.verify",
+        "accounts.personnel.approve",
+      ],
+      hidden: true,
+    },
+    {
       label: "Settings",
       icon: "Settings",
       path: "/app/health_supervisor/settings",
-      group: "Account",
+      hidden: true,
     },
   ],
 
@@ -407,6 +425,7 @@ export const NAV = {
       label: "Resident Directory",
       icon: "Users",
       path: "/app/mho/residents",
+      permission: "residents.directory.view",
       group: "Main",
     },
     {
@@ -474,6 +493,7 @@ export const NAV = {
       label: "Roles",
       icon: "Shield",
       path: "/app/admin/roles",
+      permission: "accounts.roles.manage",
       group: "Management",
     },
     {
@@ -487,12 +507,14 @@ export const NAV = {
       label: "Early Intervention Rules",
       icon: "AlertTriangle",
       path: "/app/admin/risk-rules",
+      permission: "system.settings.manage",
       group: "Health Configuration",
     },
     {
       label: "Risk Assessment",
       icon: "ShieldAlert",
       path: "/app/admin/risk-assessment",
+      permission: "system.settings.manage",
       group: "Health Configuration",
     },
     {
@@ -543,6 +565,9 @@ export const filterNavByPermission = (items = [], can) => {
     if (item.permission && !can(item.permission)) {
       return visible;
     }
+    if (item.anyPermissions?.length && !item.anyPermissions.some((permission) => can(permission))) {
+      return visible;
+    }
 
     if (item.children) {
       const children = filterNavByPermission(item.children, can);
@@ -562,4 +587,24 @@ export const filterNavByPermission = (items = [], can) => {
     visible.push(item);
     return visible;
   }, []);
+};
+
+/**
+ * Resolve the permission requirement for a visible navigation path. The same
+ * mapping guards direct URL visits inside DashboardLayout.
+ */
+export const navPermissionsForPath = (items = [], pathname) => {
+  for (const item of items) {
+    if (item.children) {
+      const childPermissions = navPermissionsForPath(item.children, pathname);
+      if (childPermissions) return childPermissions;
+    }
+
+    if (navItemIsActive(item, pathname)) {
+      if (item.permission) return [item.permission];
+      if (item.anyPermissions?.length) return item.anyPermissions;
+      return null;
+    }
+  }
+  return null;
 };

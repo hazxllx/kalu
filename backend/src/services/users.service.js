@@ -7,17 +7,10 @@
  * the caller is always a verified administrator; the role is never trusted from
  * the client.
  *
- * Scope of this endpoint (matches the documented system design — accounts are
- * created in Supabase Auth, and an administrator then sets role/status/scope):
- *   - list / read user accounts,
- *   - update display fields (full name, contact, position, license no),
- *   - change application role,
- *   - activate / deactivate (status).
- *
- * NOT handled here (by design): creating or deleting Supabase Auth accounts and
- * changing credentials — those belong to the Supabase Auth lifecycle. `email`
- * is intentionally read-only because it is owned by `auth.users`; editing it on
- * `profiles` alone would desync the two.
+ * Auth owns account identities and credentials; profiles owns application
+ * roles, status and scope. Account creation uses Auth invitations, while
+ * profile writes and actor-attributed audit records are committed atomically
+ * by the database account-lifecycle functions.
  */
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
@@ -40,13 +33,22 @@ const ASSIGNABLE_ROLES = Object.freeze([
 // Roles that are pinned to a single barangay; every other role must not carry
 // a barangay assignment.
 const BARANGAY_SCOPED_ROLES = Object.freeze([ROLES.HEALTH_SUPERVISOR, ROLES.BHW]);
+const MUNICIPALITY_SCOPED_ROLES = Object.freeze([ROLES.MHO, ROLES.PHN]);
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-export const listUsers = async ({ q = '', role = null, status = null, limit = 50, offset = 0 } = {}) => {
+export const listUsers = async ({
+  q = '',
+  role = null,
+  status = null,
+  municipalityId = null,
+  barangayId = null,
+  limit = 50,
+  offset = 0,
+} = {}) => {
   const roleFilter = role ? String(role).trim() : null;
   if (roleFilter && !isValidRole(roleFilter)) {
     throw ApiError.badRequest(`Unknown role filter: ${roleFilter}`);
@@ -61,15 +63,166 @@ export const listUsers = async ({ q = '', role = null, status = null, limit = 50
     q: String(q || '').trim(),
     role: roleFilter,
     status: statusFilter,
+    municipalityId: municipalityId ? String(municipalityId).trim() : null,
+    barangayId: barangayId ? String(barangayId).trim() : null,
     limit: parsedLimit,
     offset: parsedOffset,
   });
 };
 
+export const getAccountOptions = async () => ({
+  roles: [
+    { id: ROLES.ADMIN, name: 'Administrator' },
+    { id: ROLES.MHO, name: 'Municipal Health Office' },
+    { id: ROLES.PHN, name: 'Public Health Nurse' },
+    { id: ROLES.HEALTH_SUPERVISOR, name: 'Health Supervisor' },
+    { id: ROLES.RHU_PERSONNEL, name: 'RHU Personnel' },
+    { id: ROLES.BHW, name: 'Barangay Health Worker' },
+    { id: ROLES.RESIDENT, name: 'Resident' },
+  ],
+  ...(await repository.getAccountAssignmentOptions()),
+});
+
 export const getUser = async ({ id } = {}) => {
   const user = await repository.getProfileById(id);
   if (!user) throw ApiError.notFound('User account not found');
   return user;
+};
+
+const normalizeOptionalText = (value) => String(value ?? '').trim();
+
+const makeProfileAssignment = async ({ role, municipalityId, barangayId, facilityId, allowResident }) => {
+  if (role === ROLES.ADMIN) {
+    return { municipality_id: null, barangay_id: null, facility_id: null };
+  }
+
+  if (role === ROLES.RESIDENT) {
+    if (!allowResident) {
+      throw ApiError.unprocessable('Resident accounts must use the resident registration workflow.');
+    }
+    return {
+      municipality_id: municipalityId || null,
+      barangay_id: barangayId || null,
+      facility_id: facilityId || null,
+    };
+  }
+
+  const options = await repository.getAccountAssignmentOptions();
+  if (BARANGAY_SCOPED_ROLES.includes(role)) {
+    const barangay = options.barangays.find((item) => item.id === barangayId);
+    if (!barangay) {
+      throw ApiError.unprocessable('Select a valid active barangay for this role.');
+    }
+    if (municipalityId && municipalityId !== barangay.municipalityId) {
+      throw ApiError.unprocessable('The selected barangay does not belong to the selected municipality.');
+    }
+    if (facilityId) {
+      throw ApiError.unprocessable('A barangay-scoped role cannot have a facility assignment.');
+    }
+    return {
+      municipality_id: barangay.municipalityId,
+      barangay_id: barangay.id,
+      facility_id: null,
+    };
+  }
+
+  if (role === ROLES.RHU_PERSONNEL) {
+    const facility = options.facilities.find((item) => item.id === facilityId);
+    if (!facility) {
+      throw ApiError.unprocessable('Select a valid RHU facility for this role.');
+    }
+    if (municipalityId && municipalityId !== facility.municipalityId) {
+      throw ApiError.unprocessable('The selected facility does not belong to the selected municipality.');
+    }
+    if (barangayId) {
+      throw ApiError.unprocessable('RHU Personnel use a facility assignment, not a barangay assignment.');
+    }
+    return {
+      municipality_id: facility.municipalityId,
+      barangay_id: null,
+      facility_id: facility.id,
+    };
+  }
+
+  if (MUNICIPALITY_SCOPED_ROLES.includes(role)) {
+    if (!options.municipalities.some((item) => item.id === municipalityId)) {
+      throw ApiError.unprocessable('Select a valid active municipality for this role.');
+    }
+    if (barangayId || facilityId) {
+      throw ApiError.unprocessable('This role uses municipality-wide scope only.');
+    }
+    return { municipality_id: municipalityId, barangay_id: null, facility_id: null };
+  }
+
+  throw ApiError.unprocessable('The selected role cannot be assigned to an account.');
+};
+
+const accountStatus = (value, fallback, allowPending = false) => {
+  if (value === undefined || value === null || String(value).trim() === '') return fallback;
+  const status = String(value).trim();
+  const allowed = allowPending ? VALID_STATUSES : ['active', 'disabled'];
+  if (!allowed.includes(status)) {
+    throw ApiError.unprocessable(`Status must be one of: ${allowed.join(', ')}.`);
+  }
+  return status;
+};
+
+export const createUser = async ({ actorId, input = {} } = {}) => {
+  const email = String(input.email ?? '').trim().toLowerCase();
+  const fullName = String(input.fullName ?? input.name ?? '').trim();
+  const role = String(input.role ?? '').trim();
+  const errors = [];
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Enter a valid email address.');
+  if (!fullName || fullName.length > 120) errors.push('Name must be between 1 and 120 characters.');
+  if (!ASSIGNABLE_ROLES.includes(role) || role === ROLES.RESIDENT) {
+    errors.push('Choose an assignable staff role. Resident accounts must use resident registration.');
+  }
+  if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
+
+  const status = accountStatus(input.status, 'active');
+  const assignment = await makeProfileAssignment({
+    role,
+    municipalityId: input.municipalityId ? String(input.municipalityId).trim() : null,
+    barangayId: input.barangayId ? String(input.barangayId).trim() : null,
+    facilityId: input.facilityId ? String(input.facilityId).trim() : null,
+    allowResident: false,
+  });
+  const profile = {
+    email,
+    full_name: fullName,
+    role,
+    status,
+    contact: normalizeOptionalText(input.contact),
+    position: normalizeOptionalText(input.position),
+    license_no: normalizeOptionalText(input.licenseNo),
+    ...assignment,
+  };
+
+  let id;
+  try {
+    id = await repository.inviteAccount({ email, fullName });
+  } catch (error) {
+    if (/already (?:been )?registered|already exists|user already/i.test(error.message || '')) {
+      throw ApiError.conflict('An account with this email already exists.');
+    }
+    throw error;
+  }
+  if (!id) throw new ApiError(502, 'The invitation was not created by Supabase Auth.');
+
+  try {
+    const user = await repository.provisionAccountProfile({ id, actorId, profile });
+    if (!user) throw new ApiError(502, 'The invitation was sent, but its account profile could not be loaded.');
+    return user;
+  } catch (error) {
+    try {
+      await repository.removeUnprovisionedAuthUser(id);
+    } catch {
+      throw new ApiError(500,
+        'The invitation could not be provisioned or safely rolled back. Contact a system administrator before retrying.',
+      );
+    }
+    throw error;
+  }
 };
 
 /**
@@ -83,7 +236,7 @@ export const getUser = async ({ id } = {}) => {
  *   - the LAST active administrator cannot be demoted or disabled,
  *   - email is never modified here (owned by Supabase Auth).
  */
-export const updateUser = async ({ id, patch = {} } = {}) => {
+export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
   const existing = await repository.getProfileById(id);
   if (!existing) throw ApiError.notFound('User account not found');
 
@@ -91,11 +244,13 @@ export const updateUser = async ({ id, patch = {} } = {}) => {
   const errors = [];
 
   if (patch.name !== undefined || patch.fullName !== undefined) {
-    fields.full_name = String(patch.fullName ?? patch.name ?? '').trim();
+    const name = String(patch.fullName ?? patch.name ?? '').trim();
+    if (!name || name.length > 120) errors.push('Name must be between 1 and 120 characters.');
+    else fields.full_name = name;
   }
-  if (patch.contact !== undefined) fields.contact = String(patch.contact ?? '').trim();
-  if (patch.position !== undefined) fields.position = String(patch.position ?? '').trim();
-  if (patch.licenseNo !== undefined) fields.license_no = String(patch.licenseNo ?? '').trim();
+  if (patch.contact !== undefined) fields.contact = normalizeOptionalText(patch.contact);
+  if (patch.position !== undefined) fields.position = normalizeOptionalText(patch.position);
+  if (patch.licenseNo !== undefined) fields.license_no = normalizeOptionalText(patch.licenseNo);
 
   let nextRole = existing.role;
   if (patch.role !== undefined && patch.role !== null && String(patch.role).trim() !== existing.role) {
@@ -110,34 +265,25 @@ export const updateUser = async ({ id, patch = {} } = {}) => {
 
   let nextStatus = existing.status;
   if (patch.status !== undefined && patch.status !== null && String(patch.status).trim() !== existing.status) {
-    const status = String(patch.status).trim();
-    if (!VALID_STATUSES.includes(status)) {
-      errors.push(`Status must be one of: ${VALID_STATUSES.join(', ')}.`);
-    } else {
-      nextStatus = status;
-      fields.status = status;
+    try {
+      nextStatus = accountStatus(patch.status, existing.status, true);
+      fields.status = nextStatus;
+    } catch (error) {
+      errors.push(error.message);
     }
-  }
-
-  // Barangay assignment: only accepted for scoped roles; cleared otherwise.
-  const scoped = BARANGAY_SCOPED_ROLES.includes(nextRole);
-  if (patch.barangayId !== undefined) {
-    const barangayId = patch.barangayId ? String(patch.barangayId).trim() : null;
-    if (barangayId && !scoped) {
-      errors.push('Only Health Supervisor / Barangay Health Worker accounts may be assigned to a barangay.');
-    } else if (scoped) {
-      fields.barangay_id = barangayId;
-    }
-  }
-  // When a role changes to a non-scoped role, drop any stale barangay pin.
-  if (fields.role && !scoped && existing.barangayId) {
-    fields.barangay_id = null;
   }
 
   if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
 
+  if ((nextRole === ROLES.RESIDENT) !== (existing.role === ROLES.RESIDENT)) {
+    throw ApiError.unprocessable('Resident accounts and staff roles must use their existing registration and linking workflows.');
+  }
+  if (actorId && actorId === id && (nextRole !== ROLES.ADMIN || nextStatus !== 'active')) {
+    throw ApiError.conflict('You cannot change or deactivate your own administrator account.');
+  }
+
   // Last-admin safeguard: never leave the system with zero active admins.
-  const demotingAdmin = existing.role === ROLES.ADMIN && (nextRole !== ROLES.ADMIN || nextStatus === 'disabled');
+  const demotingAdmin = existing.role === ROLES.ADMIN && (nextRole !== ROLES.ADMIN || nextStatus !== 'active');
   if (demotingAdmin) {
     const otherActiveAdmins = await repository.countActiveAdmins({ excludeId: id });
     if (otherActiveAdmins < 1) {
@@ -147,11 +293,63 @@ export const updateUser = async ({ id, patch = {} } = {}) => {
     }
   }
 
-  if (Object.keys(fields).length === 0) return existing;
+  if (Object.keys(fields).length === 0
+      && patch.role === undefined
+      && patch.status === undefined
+      && patch.municipalityId === undefined
+      && patch.barangayId === undefined
+      && patch.facilityId === undefined) return existing;
 
-  const updated = await repository.updateProfileFields(id, fields);
+  let requestedMunicipality = patch.municipalityId === undefined
+    ? existing.municipalityId
+    : (patch.municipalityId ? String(patch.municipalityId).trim() : null);
+  let requestedBarangay = patch.barangayId === undefined
+    ? existing.barangayId
+    : (patch.barangayId ? String(patch.barangayId).trim() : null);
+  let requestedFacility = patch.facilityId === undefined
+    ? existing.facilityId
+    : (patch.facilityId ? String(patch.facilityId).trim() : null);
+  if (nextRole !== existing.role) {
+    if (!BARANGAY_SCOPED_ROLES.includes(nextRole)) requestedBarangay = null;
+    if (nextRole !== ROLES.RHU_PERSONNEL) requestedFacility = null;
+    if (nextRole === ROLES.ADMIN) requestedMunicipality = null;
+  }
+  const assignmentChanged = nextRole !== existing.role
+    || patch.municipalityId !== undefined
+    || patch.barangayId !== undefined
+    || patch.facilityId !== undefined;
+  const assignment = assignmentChanged
+    ? await makeProfileAssignment({
+      role: nextRole,
+      municipalityId: requestedMunicipality,
+      barangayId: requestedBarangay,
+      facilityId: requestedFacility,
+      allowResident: existing.role === ROLES.RESIDENT,
+    })
+    : {
+      municipality_id: existing.municipalityId,
+      barangay_id: existing.barangayId,
+      facility_id: existing.facilityId,
+    };
+  const profile = {
+    full_name: fields.full_name ?? existing.name,
+    contact: fields.contact ?? existing.contact,
+    position: fields.position ?? existing.position,
+    license_no: fields.license_no ?? existing.licenseNo,
+    role: nextRole,
+    status: nextStatus,
+    ...assignment,
+  };
+  const updated = await repository.updateAdminAccountProfile({ id, actorId, profile });
   if (!updated) throw ApiError.notFound('User account not found');
   return updated;
 };
 
-export default { listUsers, getUser, updateUser };
+export const resetUserAccess = async ({ id, actorId } = {}) => {
+  const user = await repository.getProfileById(id);
+  if (!user) throw ApiError.notFound('User account not found');
+  await repository.sendAccountRecoveryEmail({ user, actorId });
+  return { sent: true };
+};
+
+export default { listUsers, getAccountOptions, getUser, createUser, updateUser, resetUserAccess };

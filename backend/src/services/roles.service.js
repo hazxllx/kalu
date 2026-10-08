@@ -6,10 +6,10 @@
  * for any authenticated staff member (it drives UI affordances) and lets ONLY
  * an administrator change it. Every change is written to the health audit log.
  *
- * Server-side authorization for actual API access remains FEATURE_ROLES +
- * authorize() middleware + RLS; this matrix configures UI/permission display
- * and is enforced admin-only at the API and database layers so a non-admin can
- * never grant themselves anything by manipulating browser storage.
+ * FEATURE_ROLES and RLS remain the coarse server-side security boundary.
+ * Routes that opt in to fine-grained permission checks use this persisted
+ * matrix as an additional restriction; roles without a saved matrix retain
+ * their existing feature-role behavior until configured by an administrator.
  */
 import ApiError from '../utils/apiError.js';
 import { getServiceClient } from '../config/supabase.js';
@@ -54,6 +54,44 @@ export const getPermissionMatrix = async ({ user, supabase = getServiceClient() 
     matrix[row.role][row.permission_id] = Boolean(row.granted);
   }
   return matrix;
+};
+
+/**
+ * Check configured permissions for a role. A null result means no persisted
+ * matrix exists yet and lets existing feature-role authorization remain the
+ * bootstrap behavior until an administrator saves that role's matrix.
+ */
+export const hasAnyConfiguredPermission = async ({
+  role,
+  permissionIds,
+  supabase = getServiceClient(),
+}) => {
+  if (!role || !Array.isArray(permissionIds) || permissionIds.length === 0) return false;
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('permission_id, granted')
+    .eq('role', role);
+  throwOnError(error, 'Could not verify role permissions');
+
+  if (!data?.length) return null;
+  return data.some((row) => permissionIds.includes(row.permission_id) && Boolean(row.granted));
+};
+
+export const hasAllConfiguredPermissions = async ({
+  role,
+  permissionIds,
+  supabase = getServiceClient(),
+}) => {
+  if (!role || !Array.isArray(permissionIds) || permissionIds.length === 0) return false;
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('permission_id, granted')
+    .eq('role', role);
+  throwOnError(error, 'Could not verify role permissions');
+
+  if (!data?.length) return null;
+  const granted = new Set(data.filter((row) => Boolean(row.granted)).map((row) => row.permission_id));
+  return permissionIds.every((permissionId) => granted.has(permissionId));
 };
 
 /**

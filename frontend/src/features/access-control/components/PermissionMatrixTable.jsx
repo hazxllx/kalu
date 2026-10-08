@@ -1,172 +1,196 @@
 import React from "react";
-import { Check, ChevronRight, Minus } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Minus } from "lucide-react";
 
-import Icon from "@/components/common/Icon";
+import ModulePermissionCard from "@/features/access-control/components/ModulePermissionCard";
 import {
   ACTION_LABEL,
   ACTION_ORDER,
-  PERMISSION_MODULES,
-  countGrantedInModule,
-  moduleActionState,
+  ALL_PERMISSION_IDS,
+  countGranted,
+  getModule,
+  isPermissionLocked,
 } from "@/lib/permissions";
 
-/**
- * Module x action overview for the selected role.
- *
- * Columns come from `ACTION_ORDER` and rows from `PERMISSION_MODULES`, so the
- * table grows on its own when the catalogue is extended. A cell is a shortcut:
- * clicking it opens the matching module below.
- */
-const Cell = ({ state, on, total }) => {
-  if (state === "na") {
-    return <span className="text-sm text-slate-300">&middot;</span>;
-  }
-  if (state === "on") {
-    return (
-      <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-blue text-white">
-        <Check className="h-3.5 w-3.5" strokeWidth={3} />
-      </span>
-    );
-  }
-  if (state === "partial") {
-    return (
-      <span className="num inline-flex h-6 min-w-[34px] items-center justify-center rounded-md bg-brand-goldpale px-1.5 text-[11px] font-bold text-brand-amber">
-        {on}/{total}
-      </span>
-    );
-  }
+const Cell = ({ state, on, total, module, action, role, onActionToggle }) => {
+  if (state === "na") return <span className="text-slate-300">&middot;</span>;
+
+  const enabled = state === "on";
+  const mixed = state === "partial";
+  const actionPermissions = module.permissions.filter((permission) => permission.action === action);
+  const lockedCount = actionPermissions.filter((permission) => isPermissionLocked(role.id, permission.id)).length;
+  const disabled = lockedCount === actionPermissions.length;
+  const nextValue = !enabled;
+
   return (
-    <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-400">
-      <Minus className="h-3.5 w-3.5" strokeWidth={2.4} />
-    </span>
+    <input
+      type="checkbox"
+      checked={enabled}
+      ref={(element) => {
+        if (element) element.indeterminate = mixed;
+      }}
+      aria-checked={mixed ? "mixed" : enabled}
+      aria-label={`${module.label}, ${ACTION_LABEL[action]}: ${on} of ${total} granted. Click to ${
+        nextValue ? "enable" : "disable"
+      } all ${ACTION_LABEL[action]} permissions${lockedCount ? `; ${lockedCount} locked` : ""}`}
+      title={`${ACTION_LABEL[action]}: ${on} of ${total} granted. Click to ${nextValue ? "enable" : "disable"} all ${
+        ACTION_LABEL[action]
+      } permissions${lockedCount ? `; ${lockedCount} locked` : ""}.`}
+      disabled={disabled}
+      onChange={(event) => onActionToggle(module, action, actionPermissions, event.currentTarget.checked)}
+      className="h-5 w-5 cursor-pointer rounded-[3px] border border-slate-400 accent-brand-dark transition-colors hover:outline hover:outline-2 hover:outline-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    />
   );
 };
 
-export default function PermissionMatrixTable({ role, permissions, onOpenModule }) {
+export default function PermissionMatrixTable({
+  role,
+  permissions,
+  modules,
+  expandedModuleId,
+  onOpenModule,
+  onActionToggle,
+  onToggle,
+  onBulk,
+}) {
+  const granted = countGranted(permissions);
+  const total = ALL_PERMISSION_IDS.length;
+
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card">
-      <header className="flex flex-col gap-1 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between md:px-6">
-        <div>
-          <p className="gov-kicker text-brand-gray">Access overview</p>
-          <h2 className="mt-1 font-heading text-base font-semibold text-slate-900">
-            Role: <span className="text-brand-blue">{role.label}</span>
-          </h2>
+    <section className="overflow-hidden border border-slate-200 bg-white">
+      <header className="border-b border-slate-200 px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Access overview</p>
+            <h2 className="mt-0.5 text-base font-semibold text-brand-dark">
+              {role.label}
+              <span className="ml-2 text-xs font-medium text-slate-500">
+                {granted}/{total} permissions granted
+              </span>
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">{role.description}</p>
+          </div>
+          <p className="num rounded bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">
+            {granted} / {total} granted
+          </p>
         </div>
-        <p className="text-xs text-slate-500">Select a cell to jump to that module.</p>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+          <span className="inline-flex items-center gap-1.5">
+            <Check className="h-3.5 w-3.5 text-brand-blue" strokeWidth={2.5} />
+            All granted
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="num font-semibold text-brand-amber">1/2</span>
+            Partly granted
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Minus className="h-3.5 w-3.5 text-slate-300" />
+            Not granted
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-slate-300">&middot;</span>
+            Not applicable
+          </span>
+          <span className="ml-auto text-slate-500">Click a permission to enable or disable it.</span>
+        </div>
       </header>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-sm">
+        <table className="w-full min-w-[680px] text-sm">
           <caption className="sr-only">
             Permissions granted to {role.label}, grouped by module and action.
           </caption>
           <thead>
-            <tr className="bg-slate-50 text-left">
-              <th scope="col" className="px-5 py-3.5 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600 md:px-6">
-                Module
-              </th>
+            <tr className="h-9 bg-slate-50 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <th scope="col" className="min-w-[220px] px-4 text-left sm:px-5">Module</th>
               {ACTION_ORDER.map((action) => (
-                <th
-                  key={action}
-                  scope="col"
-                  className="px-3 py-3.5 text-center text-xs font-semibold uppercase tracking-[0.16em] text-slate-600"
-                >
-                  {ACTION_LABEL[action]}
-                </th>
+                <th key={action} scope="col" className="px-2 text-center">{ACTION_LABEL[action]}</th>
               ))}
-              <th scope="col" className="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
-                Granted
-              </th>
+              <th scope="col" className="px-4 text-right sm:px-5">Granted</th>
             </tr>
           </thead>
           <tbody>
-            {PERMISSION_MODULES.map((mod) => {
-              const { on, total } = countGrantedInModule(mod.id, permissions);
+            {modules.map((module) => {
+              const fullModule = getModule(module.id) || module;
+              const moduleGranted = fullModule.permissions.filter((permission) => permissions[permission.id]).length;
+              const moduleTotal = fullModule.permissions.length;
+              const expanded = expandedModuleId === module.id;
+
               return (
-                <tr key={mod.id} className="border-t border-slate-200 transition-colors hover:bg-slate-50/70">
-                  <th scope="row" className="px-5 py-3.5 text-left font-normal md:px-6">
-                    <button
-                      type="button"
-                      onClick={() => onOpenModule(mod.id)}
-                      className="group flex items-center gap-3 text-left"
-                    >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-light text-brand-blue">
-                        <Icon name={mod.icon} className="h-4 w-4" strokeWidth={1.8} />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium text-slate-900 group-hover:text-brand-blue">
-                          {mod.label}
-                        </span>
-                      </span>
-                    </button>
-                  </th>
-
-                  {ACTION_ORDER.map((action) => {
-                    const cell = moduleActionState(mod.id, action, permissions);
-                    const label = `${mod.label} — ${ACTION_LABEL[action]}`;
-                    return (
-                      <td key={action} className="px-3 py-3.5 text-center">
-                        {cell.state === "na" ? (
-                          <Cell {...cell} />
+                <React.Fragment key={module.id}>
+                  <tr
+                    id={`permission-module-${module.id}`}
+                    className={`h-[48px] border-t border-slate-200 transition-colors ${
+                      expanded ? "bg-[#EEF2F6]" : "hover:bg-slate-50/70"
+                    }`}
+                  >
+                    <th scope="row" className="px-4 text-left font-medium sm:px-5">
+                      <button
+                        type="button"
+                        onClick={() => onOpenModule(module.id)}
+                        aria-expanded={expanded}
+                        aria-controls={`permission-details-${module.id}`}
+                        className="flex w-full items-center gap-2 text-left text-slate-900 hover:text-brand-blue focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                      >
+                        {expanded ? (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-brand-blue" />
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => onOpenModule(mod.id)}
-                            title={`${label}: ${cell.on} of ${cell.total} granted`}
-                            aria-label={`${label}: ${cell.on} of ${cell.total} granted`}
-                            className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
-                          >
-                            <Cell {...cell} />
-                          </button>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
                         )}
-                      </td>
-                    );
-                  })}
-
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => onOpenModule(mod.id)}
-                      className="inline-flex items-center gap-1.5 text-slate-600 hover:text-brand-blue"
-                    >
-                      <span className="num text-sm font-semibold">
-                        {on}
-                        <span className="text-slate-400">/{total}</span>
+                        <span className="truncate">{module.label}</span>
+                      </button>
+                    </th>
+                    {ACTION_ORDER.map((action) => {
+                      const actionPermissions = module.permissions.filter((permission) => permission.action === action);
+                      const actionGranted = actionPermissions.filter((permission) => permissions[permission.id]).length;
+                      const cell = {
+                        state:
+                          actionPermissions.length === 0
+                            ? "na"
+                            : actionGranted === actionPermissions.length
+                              ? "on"
+                              : actionGranted === 0
+                                ? "off"
+                                : "partial",
+                        on: actionGranted,
+                        total: actionPermissions.length,
+                      };
+                      return (
+                        <td key={action} className="px-2 text-center">
+                          <Cell
+                            {...cell}
+                            module={module}
+                            action={action}
+                            role={role}
+                            onActionToggle={onActionToggle}
+                          />
+                        </td>
+                      );
+                    })}
+                    <td className="px-4 text-right sm:px-5">
+                      <span className="num text-xs font-semibold text-slate-600">
+                        {moduleGranted}<span className="text-slate-400">/{moduleTotal}</span>
                       </span>
-                      <ChevronRight className="h-4 w-4" strokeWidth={2} />
-                    </button>
-                  </td>
-                </tr>
+                    </td>
+                  </tr>
+                  {expanded && (
+                    <tr>
+                      <td id={`permission-details-${module.id}`} colSpan={ACTION_ORDER.length + 2} className="p-0">
+                        <ModulePermissionCard
+                          module={module}
+                          role={role}
+                          permissions={permissions}
+                          onToggle={onToggle}
+                          onBulk={onBulk}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
           </tbody>
         </table>
       </div>
-
-      <footer className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-200 bg-slate-50/70 px-5 py-3 text-xs text-slate-500 md:px-6">
-        <span className="inline-flex items-center gap-2">
-          <span className="inline-flex h-4 w-4 items-center justify-center rounded bg-brand-blue text-white">
-            <Check className="h-2.5 w-2.5" strokeWidth={3.5} />
-          </span>
-          All granted
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="num inline-flex h-4 items-center rounded bg-brand-goldpale px-1 text-[9px] font-bold text-brand-amber">
-            1/2
-          </span>
-          Partly granted
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="inline-flex h-4 w-4 items-center justify-center rounded bg-slate-100 text-slate-400">
-            <Minus className="h-2.5 w-2.5" strokeWidth={3} />
-          </span>
-          Not granted
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="text-slate-300">&middot;</span>
-          Not applicable
-        </span>
-      </footer>
     </section>
   );
 }

@@ -21,8 +21,10 @@ import { LOGO_URL, ROLES } from "@/lib/brand";
 import {
   NAV,
   filterNavByPermission,
+  navPermissionsForPath,
   navItemIsActive,
 } from "@/lib/navConfig";
+import { homeForRole } from "@/lib/roles";
 import { notificationsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -31,12 +33,22 @@ export default function DashboardLayout({ roleKey }) {
   const role = ROLES[roleKey];
   const location = useLocation();
   const { user, logout, refreshProfile } = useAuth();
-  const { can } = usePermissions();
+  const { can, matrixLoadState, refreshMatrix } = usePermissions();
 
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
   const menuRef = useRef(null);
+
+  useEffect(() => {
+    const refreshPermissions = () => {
+      if (document.visibilityState === "visible") {
+        void refreshMatrix();
+      }
+    };
+    window.addEventListener("focus", refreshPermissions);
+    return () => window.removeEventListener("focus", refreshPermissions);
+  }, [refreshMatrix]);
 
   const isResident =
     roleKey === "resident" || roleKey === "resident-limited";
@@ -52,6 +64,14 @@ export default function DashboardLayout({ roleKey }) {
     () => filterNavByPermission(NAV[roleKey] || [], can),
     [roleKey, can]
   );
+  const routePermissions = useMemo(
+    () => navPermissionsForPath(NAV[roleKey] || [], location.pathname),
+    [roleKey, location.pathname]
+  );
+  const permissionsReady =
+    matrixLoadState.userId === user?.id && matrixLoadState.status === "ready";
+  const routeAllowed =
+    !routePermissions || (permissionsReady && routePermissions.some((permission) => can(permission)));
 
   // Keep an expandable submenu (e.g. Records) open while the user is on one
   // of its child pages — including on a direct URL visit — so the active child
@@ -62,16 +82,28 @@ export default function DashboardLayout({ roleKey }) {
       let changed = false;
       const next = { ...prev };
 
-      items.forEach((it) => {
-        const owns = it.children?.some(
-          (child) => navItemIsActive(child, location.pathname)
-        );
+      const expandActiveGroups = (entries) => {
+        entries.forEach((item) => {
+          if (!item.children) return;
 
-        if (owns && !next[it.label]) {
-          next[it.label] = true;
-          changed = true;
-        }
-      });
+          const ownsRoute = item.children.some((child) => {
+            const childOwnsRoute = (entry) =>
+              navItemIsActive(entry, location.pathname) ||
+              entry.children?.some(childOwnsRoute);
+
+            return childOwnsRoute(child);
+          });
+
+          if (ownsRoute && !next[item.label]) {
+            next[item.label] = true;
+            changed = true;
+          }
+
+          expandActiveGroups(item.children);
+        });
+      };
+
+      expandActiveGroups(items);
 
       return changed ? next : prev;
     });
@@ -155,32 +187,20 @@ export default function DashboardLayout({ roleKey }) {
   }/profile`;
 
   const NavList = () => {
-    // Group consecutive items that share a `group` label under one small
-    // uppercase header; ungrouped items render flat, exactly as before.
-    const blocks = items.reduce((acc, it) => {
-      const last = acc[acc.length - 1];
-
-      if (it.group && last && last.group === it.group) {
-        last.items.push(it);
-      } else {
-        acc.push({
-          group: it.group || null,
-          items: [it],
-        });
-      }
-
-      return acc;
-    }, []);
+    const compact = roleKey === "health_supervisor";
+    const rowSize = compact
+      ? "min-h-[40px] py-1.5"
+      : "min-h-[42px] py-2";
 
     const isItemActive = (item) =>
       navItemIsActive(item, location.pathname);
 
-    const renderItem = (it) => {
+    const renderItem = (it, depth = 0) => {
       if (it.locked) {
         return (
           <div
             key={it.label}
-            className="flex min-h-[42px] items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none"
+            className={`flex ${rowSize} items-center gap-2.5 px-3 rounded-xl text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none`}
             title="Available after account verification"
           >
             <Icon
@@ -199,18 +219,21 @@ export default function DashboardLayout({ roleKey }) {
 
       if (it.children) {
         const openGroup = expandedGroups[it.label];
+        const groupId = `nav-group-${it.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
         return (
           <div key={it.label}>
             <button
               type="button"
+              aria-expanded={Boolean(openGroup)}
+              aria-controls={groupId}
               onClick={() =>
                 setExpandedGroups((prev) => ({
                   ...prev,
                   [it.label]: !openGroup,
                 }))
               }
-              className="flex min-h-[42px] w-full items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+              className={`flex ${rowSize} w-full items-center gap-2.5 px-3 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors`}
             >
               <Icon
                 name={it.icon}
@@ -233,31 +256,12 @@ export default function DashboardLayout({ roleKey }) {
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden pl-3 pt-1 space-y-1"
+                  id={groupId}
+                  className={`overflow-hidden pl-3 pt-1 ${compact ? "space-y-0.5" : "space-y-1"}`}
                 >
-                  {it.children.map((child) => {
-                    const active = isItemActive(child);
-
-                    return (
-                      <Link
-                        key={child.path}
-                        to={child.path}
-                        onClick={() => setOpen(false)}
-                        className={`flex min-h-[42px] items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors ${
-                          active
-                            ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
-                            : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
-                        }`}
-                      >
-                        <Icon
-                          name={child.icon}
-                          className="w-5 h-5 shrink-0"
-                          strokeWidth={1.8}
-                        />
-                        <span className="truncate">{child.label}</span>
-                      </Link>
-                    );
-                  })}
+                  {it.children.filter((child) => !child.hidden).map((child) =>
+                    renderItem(child, depth + 1)
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -272,7 +276,7 @@ export default function DashboardLayout({ roleKey }) {
           key={it.path}
           to={it.path}
           onClick={() => setOpen(false)}
-          className={`flex min-h-[42px] items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors ${
+          className={`flex ${rowSize} items-center gap-2.5 px-3 rounded-xl text-sm transition-colors ${
             active
               ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
               : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
@@ -288,21 +292,36 @@ export default function DashboardLayout({ roleKey }) {
       );
     };
 
+    const visibleItems = items.filter((item) => !item.hidden);
+    const blocks = visibleItems.reduce((acc, it) => {
+      const last = acc[acc.length - 1];
+
+      if (it.group && last && last.group === it.group) {
+        last.items.push(it);
+      } else {
+        acc.push({
+          group: it.group || null,
+          items: [it],
+        });
+      }
+      return acc;
+    }, []);
+
     return (
-      <div className="space-y-1">
+      <div className={compact ? "space-y-0.5" : "space-y-1"}>
         {blocks.map((block, i) => (
           <div
             key={block.group || `block-${i}`}
-            className={block.group && i > 0 ? "mt-3" : ""}
+            className={block.group && i > 0 ? (compact ? "mt-2" : "mt-3") : ""}
           >
             {block.group && (
-              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-500 select-none">
+              <p className={`px-3 ${compact ? "pb-0.5" : "pb-1"} text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-500 select-none`}>
                 {block.group}
               </p>
             )}
 
-            <div className="space-y-1">
-              {block.items.map(renderItem)}
+            <div className={compact ? "space-y-0.5" : "space-y-1"}>
+              {block.items.filter((item) => !item.hidden).map((item) => renderItem(item))}
             </div>
           </div>
         ))}
@@ -321,6 +340,37 @@ export default function DashboardLayout({ roleKey }) {
   // by ProtectedRoute.
   if (roleKey === "resident-limited" && user?.role === "resident") {
     return <Navigate to="/app/resident/dashboard" replace />;
+  }
+
+  if (routePermissions && !permissionsReady) {
+    const loadFailed = matrixLoadState.userId === user?.id && matrixLoadState.status === "error";
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-brand-surface px-4">
+        <div className="max-w-md border border-brand-border bg-white p-5 text-center">
+          <p className="text-sm font-medium text-brand-ink">
+            {loadFailed ? "Role permissions could not be verified." : "Loading role permissions…"}
+          </p>
+          <p className="mt-1 text-xs text-brand-gray">
+            {loadFailed
+              ? matrixLoadState.error || "Permission-gated features remain unavailable until permissions can be verified."
+              : "This page will open when access has been checked."}
+          </p>
+          {loadFailed && (
+            <button
+              type="button"
+              onClick={() => void refreshMatrix()}
+              className="mt-4 min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  if (!routeAllowed) {
+    return <Navigate to={homeForRole(user?.role || roleKey)} replace />;
   }
 
   /**
@@ -623,6 +673,26 @@ export default function DashboardLayout({ roleKey }) {
         </header>
 
         <main className="max-w-content mx-auto px-4 md:px-8 py-8">
+          {matrixLoadState.userId === user?.id && matrixLoadState.status === "error" && (
+            <div
+              className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-brand-danger/30 bg-white px-4 py-3 text-sm text-brand-ink"
+              role="alert"
+            >
+              <div>
+                <p className="font-medium">Role permissions could not be loaded.</p>
+                <p className="text-xs text-brand-gray">
+                  {matrixLoadState.error || "Permission-gated features remain unavailable until permissions can be verified."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshMatrix()}
+                className="min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+              >
+                Retry
+              </button>
+            </div>
+          )}
           <motion.div
             key={location.pathname}
             initial={{ opacity: 0, y: 8 }}

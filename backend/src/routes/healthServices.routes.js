@@ -27,21 +27,26 @@ import asyncHandler from '../utils/asyncHandler.js';
 const router = Router();
 
 const readers = [authenticate, authorize(FEATURE_ROLES.healthServicesRead)];
-const managers = [authenticate, authorize(FEATURE_ROLES.healthServices)];
+const managerReaders = [
+  authenticate,
+  authorize(FEATURE_ROLES.healthServices, { anyPermission: ['services.create', 'services.edit'] }),
+];
+const creators = [authenticate, authorize(FEATURE_ROLES.healthServices, { permission: 'services.create' })];
+const editors = [authenticate, authorize(FEATURE_ROLES.healthServices, { permission: 'services.edit' })];
 const idParam = validate(serviceIdParamValidator, 'params');
 const attendanceIdParam = validate(attendanceIdParamValidator, 'params');
 
 router.get('/meta', ...readers, asyncHandler(controller.meta));
-router.get('/reference', ...managers, asyncHandler(controller.reference));
-router.get('/personnel', ...managers, asyncHandler(controller.personnel));
+router.get('/reference', ...managerReaders, asyncHandler(controller.reference));
+router.get('/personnel', ...managerReaders, asyncHandler(controller.personnel));
 router.get('/attendance', ...readers, validate(attendanceListQueryValidator, 'query'), asyncHandler(controller.listAttendance));
 router.get('/', ...readers, asyncHandler(controller.list));
-router.patch('/attendance/:id', ...managers, attendanceIdParam, validate(updateAttendanceValidator), asyncHandler(controller.updateAttendance));
+router.patch('/attendance/:id', ...editors, attendanceIdParam, validate(updateAttendanceValidator), asyncHandler(controller.updateAttendance));
 router.get('/:id', ...readers, idParam, asyncHandler(controller.get));
 
-router.post('/', ...managers, validate(createServiceValidator), asyncHandler(controller.create));
-router.post('/attendance', ...managers, validate(createAttendanceValidator), asyncHandler(controller.createAttendance));
-router.post('/:id/assign', ...managers, idParam, validate(assignValidator), asyncHandler(controller.assign));
-router.delete('/:id/assign/:personnelId', ...managers, idParam, asyncHandler(controller.unassign));
+router.post('/', ...creators, validate(createServiceValidator), asyncHandler(controller.create));
+router.post('/attendance', ...editors, validate(createAttendanceValidator), asyncHandler(controller.createAttendance));
+router.post('/:id/assign', ...editors, idParam, validate(assignValidator), asyncHandler(controller.assign));
+router.delete('/:id/assign/:personnelId', ...editors, idParam, asyncHandler(controller.unassign));
 
 export default router;

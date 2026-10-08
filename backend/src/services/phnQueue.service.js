@@ -10,7 +10,7 @@
  *     finalized referral never changes when the resident profile is edited.
  *
  * Enforcement notes (server side):
- *   - only the PHN role may mutate queue items,
+ *   - only PHN/RHU consultation staff may mutate queue items inside their scope,
  *   - clinical content is editable only while status is in the PHN set,
  *   - a visit can generate at most one referral,
  *   - referral snapshots are frozen at generation time and re-synced
@@ -20,6 +20,7 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { computeBMI } from '../utils/bmi.js';
 import { FACILITY, SUBMISSION_STATUS, PHN_EDITABLE_STATUSES } from '../config/facility.js';
+import { withinFacilityScope } from '../config/scope.js';
 import { validateVitals } from './intake.service.js';
 
 const isPHN = (user) => user?.role === 'phn';
@@ -30,6 +31,13 @@ const isPHN = (user) => user?.role === 'phn';
 // PHN assessment feature — it only additionally admits the RHU consultation
 // role. Referral generation remains PHN-only (see createReferral/updateReferral).
 const canProcessConsultation = (user) => user?.role === 'phn' || user?.role === 'rhu_personnel';
+
+const assertCanProcessConsultation = (user) => {
+  if (!canProcessConsultation(user)) throw ApiError.forbidden();
+  if (user.role === 'rhu_personnel' && !user.facilityId) {
+    throw ApiError.unprocessable('Your account must be assigned to an RHU facility before accessing the consultation queue.');
+  }
+};
 
 const MUNICIPALITY_ROLES = new Set(['mho', 'phn', 'rhu_personnel']);
 const BARANGAY_ROLES = new Set(['health_supervisor', 'bhw']);
@@ -43,9 +51,10 @@ const BARANGAY_ROLES = new Set(['health_supervisor', 'bhw']);
  * municipality-scoped role cannot read another municipality's PHI, even when
  * the record id is known.
  */
-const recordInScope = (user, resident) => {
+const recordInScope = (user, resident, facilityId = null) => {
   if (!user) return false;
   if (user.role === 'admin') return true;
+  if (!withinFacilityScope(user, facilityId)) return false;
   const municipalityId = resident?.municipalityId ?? null;
   const barangayId = resident?.barangayId ?? null;
   if (BARANGAY_ROLES.has(user.role)) {
@@ -55,6 +64,12 @@ const recordInScope = (user, resident) => {
     return Boolean(user.municipalityId) && municipalityId === user.municipalityId;
   }
   return false;
+};
+
+const assertSubmissionScope = (user, submission) => {
+  if (!recordInScope(user, submission?.resident, submission?.facilityId)) {
+    throw ApiError.notFound('Submission not found');
+  }
 };
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -71,14 +86,14 @@ const withoutMeta = (obj) => {
 };
 
 export const listQueue = async ({ statuses = null, q = '', user } = {}) => {
-  if (!canProcessConsultation(user)) throw ApiError.forbidden();
+  assertCanProcessConsultation(user);
   const allowed = statuses && statuses.length ? statuses : null;
   const effectiveStatuses = allowed && allowed.length
     ? allowed
     : [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.COMPLETED];
   const result = await repository.listVisits({ statuses: effectiveStatuses, q, limit: 100 });
   // BUG-002: the PHN queue is limited to the PHN's own municipality.
-  const rows = (result?.rows ?? result ?? []).filter((v) => recordInScope(user, v.resident));
+  const rows = (result?.rows ?? result ?? []).filter((v) => recordInScope(user, v.resident, v.facilityId));
   return Array.isArray(result) ? rows : { ...result, rows, total: rows.length };
 };
 
@@ -92,9 +107,9 @@ export const viewSubmission = async ({ id, user }) => {
   // record's municipality/barangay scope. Out-of-scope reads return 404 so a
   // known id cannot be used to probe or read another barangay's PHI.
   const canView =
-    isRecorder ||
+    (isRecorder && recordInScope(user, submission.resident, submission.facilityId)) ||
     ((isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role)) &&
-      recordInScope(user, submission.resident));
+      recordInScope(user, submission.resident, submission.facilityId));
   if (!canView) throw ApiError.notFound('Submission not found');
 
   if (!isPHN(user) && submission.status === SUBMISSION_STATUS.DRAFT) {
@@ -145,9 +160,10 @@ const normalizePhnVisit = (visit = {}) => {
 };
 
 export const updateSubmissionForPhn = async ({ id, patch = {}, user }) => {
-  if (!canProcessConsultation(user)) throw ApiError.forbidden();
+  assertCanProcessConsultation(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
+  assertSubmissionScope(user, submission);
   if (!PHN_EDITABLE_STATUSES.includes(submission.status)) {
     throw ApiError.forbidden('This submission is not open for PHN processing.');
   }
@@ -168,18 +184,20 @@ const guardTransition = (submission, from, to) => {
 };
 
 export const receiveSubmission = async ({ id, user }) => {
-  if (!canProcessConsultation(user)) throw ApiError.forbidden();
+  assertCanProcessConsultation(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
+  assertSubmissionScope(user, submission);
   guardTransition(submission, [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED], SUBMISSION_STATUS.RECEIVED);
   const now = new Date().toISOString();
   return repository.updateVisit(id, { status: SUBMISSION_STATUS.RECEIVED, receivedAt: now });
 };
 
 export const markInReview = async ({ id, user }) => {
-  if (!canProcessConsultation(user)) throw ApiError.forbidden();
+  assertCanProcessConsultation(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
+  assertSubmissionScope(user, submission);
   guardTransition(
     submission,
     [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED],
@@ -194,9 +212,10 @@ export const markInReview = async ({ id, user }) => {
 };
 
 export const completeSubmission = async ({ id, user }) => {
-  if (!canProcessConsultation(user)) throw ApiError.forbidden();
+  assertCanProcessConsultation(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
+  assertSubmissionScope(user, submission);
   guardTransition(
     submission,
     [SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.SUBMITTED],

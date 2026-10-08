@@ -4,6 +4,7 @@ import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
+import { usePermissions } from "@/context/PermissionsContext";
 import { householdsApi } from "@/services/api";
 
 /**
@@ -62,6 +63,8 @@ const roField = (label, value) => (
 );
 
 export default function MemberHealthModal({ householdId, member, verificationStatus, currentRole, onClose }) {
+  const { can } = usePermissions();
+  const canEdit = can("residents.edit");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -74,7 +77,7 @@ export default function MemberHealthModal({ householdId, member, verificationSta
   // The backend locks a verified household to the BHW; mirror that in the UI so
   // the collector sees a clear locked state instead of a raw 403. The backend
   // remains authoritative — this is UX only.
-  const lockedForBhw = verificationStatus === "Verified" && currentRole === "bhw";
+  const lockedForBhw = (verificationStatus === "Verified" && currentRole === "bhw") || !canEdit;
 
   const applyProfile = useCallback((p) => {
     setProfile(p || null);
@@ -191,7 +194,11 @@ export default function MemberHealthModal({ householdId, member, verificationSta
               {lockedForBhw && (
                 <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   <Lock className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>Verified household — editing is locked. The Health Supervisor must return it for correction before changes can be made.</span>
+                  <span>
+                    {!canEdit
+                      ? "Your role can view this health profile but cannot edit it."
+                      : "Verified household — editing is locked. The Health Supervisor must return it for correction before changes can be made."}
+                  </span>
                 </div>
               )}
 

@@ -25,7 +25,7 @@ before(() => {
     savedVisit = { ...visit };
     return { ...savedVisit, resident: RESIDENT };
   };
-  repository.getVisit = async (id) => (id === savedVisit?.id ? { ...savedVisit } : null);
+  repository.getVisit = async (id) => (id === savedVisit?.id ? { ...savedVisit, resident: RESIDENT } : null);
 });
 
 after(() => {

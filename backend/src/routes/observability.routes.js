@@ -24,7 +24,7 @@ const router = Router();
 router.get(
   '/audit-trail',
   authenticate,
-  authorize(FEATURE_ROLES.system),
+  authorize(FEATURE_ROLES.system, { permission: 'system.audit.view' }),
   asyncHandler(async (req, res) => {
     const result = await auditTrailService.list({
       user: req.user,
@@ -44,7 +44,7 @@ router.get(
 router.get(
   '/system-logs',
   authenticate,
-  authorize(FEATURE_ROLES.system),
+  authorize(FEATURE_ROLES.system, { permission: 'system.activity.view' }),
   asyncHandler(async (req, res) => {
     const result = await systemLogsService.list({
       q: req.query.q,

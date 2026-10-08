@@ -18,15 +18,40 @@ const withKind = (kind) => (req, _res, next) => {
   next();
 };
 
+const followUpPermission = (method) => (req) => {
+  if (req.params.kind !== 'followups') return [];
+  if (method === 'GET') return ['followups.view'];
+  if (method === 'POST') return ['followups.create'];
+  if (['Completed', 'Missed'].includes(String(req.body?.status || ''))) {
+    return ['followups.complete'];
+  }
+  return ['followups.edit'];
+};
+
 for (const kind of kinds) {
   const roles = kind === 'notifications' ? ['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw', 'resident', 'resident-limited'] : staff;
-  router.get(`/${kind}`, withKind(kind), authorize(roles), asyncHandler(controller.list));
+  router.get(
+    `/${kind}`,
+    withKind(kind),
+    authorize(roles, { permission: followUpPermission('GET') }),
+    asyncHandler(controller.list),
+  );
   if (kind === 'notifications') {
     // Recipients may mark their own notifications read.
     router.put(`/${kind}/:id`, withKind(kind), authorize(roles), asyncHandler(controller.update));
   } else {
-    router.post(`/${kind}`, withKind(kind), authorize(staff), asyncHandler(controller.create));
-    router.put(`/${kind}/:id`, withKind(kind), authorize(staff), asyncHandler(controller.update));
+    router.post(
+      `/${kind}`,
+      withKind(kind),
+      authorize(staff, { permission: followUpPermission('POST') }),
+      asyncHandler(controller.create),
+    );
+    router.put(
+      `/${kind}/:id`,
+      withKind(kind),
+      authorize(staff, { permission: followUpPermission('PUT') }),
+      asyncHandler(controller.update),
+    );
     // Maternal records support deletion (spec PART 13). Other operational kinds
     // keep their append-only history, so no DELETE route is exposed for them.
     if (kind === 'maternal') {

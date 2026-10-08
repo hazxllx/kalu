@@ -23,10 +23,10 @@ import {
  */
 const router = Router();
 
-router.get('/early-warning', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, asyncHandler(getEarlyWarning));
-router.get('/community-map', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, asyncHandler(getCommunityMap));
-router.get('/household-map', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, asyncHandler(getHouseholdMap));
-router.get('/community-map/trends', authenticate, authorize(FEATURE_ROLES.analytics), resolveBarangayScope, asyncHandler(getCommunityMapTrends));
-router.get('/conditions', authenticate, authorize(FEATURE_ROLES.analytics), asyncHandler(getConditions));
+router.get('/early-warning', authenticate, authorize(FEATURE_ROLES.analytics, { permission: 'reports.analytics.view' }), resolveBarangayScope, asyncHandler(getEarlyWarning));
+router.get('/community-map', authenticate, authorize(FEATURE_ROLES.analytics, { permission: 'reports.analytics.view' }), resolveBarangayScope, asyncHandler(getCommunityMap));
+router.get('/household-map', authenticate, authorize(FEATURE_ROLES.analytics, { permission: 'reports.analytics.view' }), resolveBarangayScope, asyncHandler(getHouseholdMap));
+router.get('/community-map/trends', authenticate, authorize(FEATURE_ROLES.analytics, { permission: 'reports.analytics.view' }), resolveBarangayScope, asyncHandler(getCommunityMapTrends));
+router.get('/conditions', authenticate, authorize(FEATURE_ROLES.analytics, { permission: 'reports.analytics.view' }), asyncHandler(getConditions));
 
 export default router;

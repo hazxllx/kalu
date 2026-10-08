@@ -18,6 +18,7 @@ import {
 import HHBadge from "../components/HHBadge";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { householdsApi } from "@/services/api";
 import { createHouseholdOffline } from "@/services/offline/householdOfflineService";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
@@ -573,6 +574,8 @@ export default function AddHouseholdPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const canCreateHousehold = can("households.create");
   const syncStatus = useSyncStatus();
   const isOffline = syncStatus.online === false;
 
@@ -782,6 +785,10 @@ export default function AddHouseholdPage() {
   };
 
   const handleSave = async () => {
+    if (!canCreateHousehold) {
+      setSaveError("You do not have permission to create household profiles.");
+      return;
+    }
     const { errors: nextErrors, memberErrors: nextMemberErrors } = validate();
     const membersInvalid = nextMemberErrors.some((m) => Object.values(m).some(Boolean));
     const noMembers = form.members.length === 0;
@@ -888,6 +895,26 @@ export default function AddHouseholdPage() {
   };
 
   const grid2 = "grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-2";
+
+  if (!canCreateHousehold) {
+    return (
+      <div className="mx-auto max-w-3xl p-6">
+        <Card className="p-6">
+          <h1 className="text-lg font-semibold text-brand-ink">Permission required</h1>
+          <p className="mt-2 text-sm text-brand-gray">
+            Your role does not have permission to create household profiles.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate(householdsPath || "/")}
+            className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+          >
+            Return to households
+          </button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <>

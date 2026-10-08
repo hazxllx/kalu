@@ -8,20 +8,16 @@ const HouseholdVerifications = lazy(() => import("@/features/verification/pages/
 const StaffAccountApprovals = lazy(() => import("@/features/accounts/pages/StaffAccountApprovals"));
 
 const TABS = [
-  { id: "resident", label: "Resident Verification" },
-  { id: "household", label: "Household Verification" },
-  { id: "accounts", label: "Account Approvals" },
+  { id: "resident", label: "Resident Verification", permission: "residents.registration.approve" },
+  { id: "household", label: "Household Verification", permission: "households.verify" },
+  { id: "accounts", label: "Account Approvals", permission: "accounts.personnel.approve" },
 ];
 
 export default function VerificationsApprovals() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = usePermissions();
   const requestedTab = searchParams.get("tab");
-  const availableTabs = TABS.filter((tab) => {
-    if (tab.id === "resident") return can("residents.registration.approve");
-    if (tab.id === "household") return can("households.verify");
-    return true;
-  });
+  const availableTabs = TABS.filter((tab) => !tab.permission || can(tab.permission));
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab)
     ? requestedTab
     : availableTabs[0].id;
@@ -49,6 +45,12 @@ export default function VerificationsApprovals() {
       />
 
       <section aria-label="Verification and approval workflows">
+        {availableTabs.length === 0 ? (
+          <p className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            No verification or account-approval permissions are assigned to this role.
+          </p>
+        ) : (
+        <>
         <div className="mb-4 flex overflow-x-auto border-b border-brand-border" role="tablist" aria-label="Verification workflows">
           {availableTabs.map((tab) => (
             <button
@@ -101,6 +103,8 @@ export default function VerificationsApprovals() {
             {activeTab === "accounts" && <StaffAccountApprovals embedded />}
           </Suspense>
         </div>
+        </>
+        )}
       </section>
     </main>
   );

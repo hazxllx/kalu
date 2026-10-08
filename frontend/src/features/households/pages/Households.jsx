@@ -31,6 +31,7 @@ import {
 import HHBadge from "../components/HHBadge";
 import MemberHealthModal from "../components/MemberHealthModal";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { householdsApi, intakeApi } from "@/services/api";
 import {
   HH_STATUSES,
@@ -192,6 +193,11 @@ export default function Households() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { can, canAny } = usePermissions();
+  const canCreateHousehold = can("households.create");
+  const canManageMembers = can("households.create");
+  const canRemoveMembers = canAny(["households.create", "households.verify"]);
+  const canViewMemberHealth = can("residents.profile.view");
 
   const [households, setHouseholds] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -361,6 +367,10 @@ export default function Households() {
   };
 
   const saveMember = async () => {
+    if (!canManageMembers) {
+      showToast("You do not have permission to add household members.");
+      return;
+    }
     if (!detail) return;
     if (!memberForm.name.trim() || !memberForm.relationship || !memberForm.sex) {
       setMemberError("Name, relationship to head, and sex are required.");
@@ -394,6 +404,10 @@ export default function Households() {
   };
 
   const removeMember = async (member) => {
+    if (!canRemoveMembers) {
+      showToast("You do not have permission to remove household members.");
+      return;
+    }
     if (!detail) return;
     try {
       await householdsApi.removeMember(detail.id, member.id);
@@ -426,14 +440,14 @@ export default function Households() {
         crumbs={["Household Profiling"]}
         title="Household Profiling"
         subtitle="Household conditions and risk classification across the barangay."
-        action={
+        action={canCreateHousehold ? (
           <button
             onClick={openAddPage}
             className="flex items-center gap-2 bg-brand-blue px-5 py-2.5 text-sm font-medium text-white rounded-btn transition-colors hover:bg-brand-dark"
           >
             <Plus className="h-4 w-4" /> Add Household
           </button>
-        }
+        ) : null}
       />
 
       {/* Toast Notification */}
@@ -516,14 +530,14 @@ export default function Households() {
             icon={Home}
             title="No households yet"
             description="Household records will appear here once they are registered."
-            action={
+            action={canCreateHousehold ? (
               <button
                 onClick={openAddPage}
                 className="flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
               >
                 <Plus className="h-4 w-4" /> Add Household
               </button>
-            }
+            ) : null}
           />
         </Card>
       )}
@@ -789,15 +803,17 @@ export default function Households() {
                       <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">
                         Household Members ({detail.members?.length ?? 0})
                       </p>
-                      <button
-                        onClick={() => {
-                          setShowAddMember((v) => !v);
-                          setMemberError(null);
-                        }}
-                        className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
-                      >
-                        <UserPlus className="h-4 w-4" /> Add member
-                      </button>
+                      {canManageMembers && (
+                        <button
+                          onClick={() => {
+                            setShowAddMember((v) => !v);
+                            setMemberError(null);
+                          }}
+                          className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                        >
+                          <UserPlus className="h-4 w-4" /> Add member
+                        </button>
+                      )}
                     </div>
 
                     {showAddMember && (
@@ -927,20 +943,24 @@ export default function Households() {
                             </div>
                             <div className="flex items-center gap-3">
                               <AccountBadge status={m.accountStatus} />
-                              <button
-                                onClick={() => setHealthMember(m)}
-                                className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue transition-colors hover:underline"
-                                aria-label={`Health profile for ${m.name}`}
-                              >
-                                <HeartPulse className="h-3.5 w-3.5" /> Health
-                              </button>
-                              <button
-                                onClick={() => removeMember(m)}
-                                className="inline-flex items-center gap-1 text-xs font-medium text-brand-gray transition-colors hover:text-brand-danger"
-                                aria-label={`Remove ${m.name}`}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" /> Remove
-                              </button>
+                              {canViewMemberHealth && (
+                                <button
+                                  onClick={() => setHealthMember(m)}
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue transition-colors hover:underline"
+                                  aria-label={`Health profile for ${m.name}`}
+                                >
+                                  <HeartPulse className="h-3.5 w-3.5" /> Health
+                                </button>
+                              )}
+                              {canRemoveMembers && (
+                                <button
+                                  onClick={() => removeMember(m)}
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-brand-gray transition-colors hover:text-brand-danger"
+                                  aria-label={`Remove ${m.name}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" /> Remove
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}

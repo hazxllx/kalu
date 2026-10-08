@@ -6,6 +6,7 @@ import {
   Search, FileText, Save, X, Plus, CheckCircle2, Users, ChevronLeft, Stethoscope, Calendar,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { consultationsApi, residentsApi } from "@/services/api";
 
@@ -150,6 +151,9 @@ const initialsOf = (name) =>
 
 export default function TreatmentConsultation() {
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const canConductConsultation = can("consultation.conduct");
+  const canEditConsultation = can("consultation.records.update");
   const [allResidents, setAllResidents] = useState([]);
   const [consultations, setConsultations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -224,6 +228,7 @@ export default function TreatmentConsultation() {
   };
 
   const startNewConsultation = () => {
+    if (!canConductConsultation) return;
     setEditingId(null);
     setSelectedResident(null);
     setFormData(emptyForm());
@@ -233,6 +238,7 @@ export default function TreatmentConsultation() {
   };
 
   const openForEdit = (record) => {
+    if (!canEditConsultation) return;
     setEditingId(record.id);
     setSelectedResident(record.resident || null);
     // Vitals are returned nested under record.vitals (bp/temperature/hr/rr/
@@ -292,6 +298,7 @@ export default function TreatmentConsultation() {
 
   const handleSave = () => {
     if (busy) return; // guard against double submission while a save is in flight
+    if (editingId ? !canEditConsultation : !canConductConsultation) return;
     const nextErrors = validate();
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
@@ -771,10 +778,10 @@ export default function TreatmentConsultation() {
                   ) : (
                     <span className="inline-flex rounded-full bg-slate-100 text-slate-600 px-2.5 py-1 text-xs font-medium">No</span>
                   );
-                if (key === "actions")
+                if (key === "actions" && canEditConsultation)
                   return (
                     <button onClick={() => openForEdit(row)} className="flex items-center gap-1 text-brand-blue text-sm font-medium hover:underline">
-                      <FileText className="w-4 h-4" /> View
+                      <FileText className="w-4 h-4" /> Edit
                     </button>
                   );
                 return row[key];
@@ -799,12 +806,14 @@ export default function TreatmentConsultation() {
         subtitle="Record consultation findings, treatment, and recommendations for residents."
         action={
           mode === "list" ? (
-            <button
-              onClick={startNewConsultation}
-              className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Add Treatment Consultation
-            </button>
+            canConductConsultation ? (
+              <button
+                onClick={startNewConsultation}
+                className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add Treatment Consultation
+              </button>
+            ) : null
           ) : (
             <button
               onClick={cancelForm}

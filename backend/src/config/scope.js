@@ -27,4 +27,16 @@ export const assignedBarangay = (user) => {
   return barangay || null;
 };
 
-export default { BARANGAY_SCOPED_ROLES, assignedBarangay };
+/**
+ * RHU record access is limited to the facility assigned to the authenticated
+ * profile. The facility on a stored record is compared here; request data is
+ * never an authorization source.
+ */
+export const withinFacilityScope = (user, facilityId) => {
+  if (user?.role !== 'rhu_personnel') return true;
+  const assignedFacility = String(user.facilityId ?? '').trim();
+  const recordFacility = String(facilityId ?? '').trim();
+  return Boolean(assignedFacility && recordFacility && assignedFacility === recordFacility);
+};
+
+export default { BARANGAY_SCOPED_ROLES, assignedBarangay, withinFacilityScope };

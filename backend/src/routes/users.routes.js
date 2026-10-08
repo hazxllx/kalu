@@ -16,15 +16,54 @@ import * as controller from '../controllers/users.controller.js';
  * unauthenticated caller receives 401.
  *
  *   GET  /api/users        list accounts (search: ?q, ?role, ?status; ?limit,?offset)
+ *   GET  /api/users/options assignment and role options for the admin editor
+ *   POST /api/users        invite and provision a real Supabase Auth account
  *   GET  /api/users/:id    read one account
- *   PUT  /api/users/:id    update profile fields / role / status (activate-deactivate)
+ *   PUT  /api/users/:id    update profile, role and scope / status
+ *   POST /api/users/:id/access-reset send a Supabase password recovery email
  */
 const router = Router();
 
 router.use(authenticate, authorize(FEATURE_ROLES.users));
 
-router.get('/', asyncHandler(controller.listUsers));
-router.get('/:id', asyncHandler(controller.getUser));
-router.put('/:id', asyncHandler(controller.updateUser));
+router.get('/options', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), asyncHandler(controller.getAccountOptions));
+router.get('/', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), asyncHandler(controller.listUsers));
+router.post(
+  '/',
+  authorize(FEATURE_ROLES.users, {
+    allPermissions: (req) => {
+      const input = req.body?.user || req.body || {};
+      const permissions = ['accounts.create', 'accounts.roles.manage'];
+      if (input.status === 'disabled') permissions.push('accounts.deactivate');
+      return permissions;
+    },
+  }),
+  asyncHandler(controller.createUser),
+);
+router.get('/:id', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), asyncHandler(controller.getUser));
+router.put(
+  '/:id',
+  authorize(FEATURE_ROLES.users, {
+    allPermissions: (req) => {
+      const patch = req.body?.user || req.body || {};
+      const permissions = [];
+      const hasProfileEdit = ['name', 'fullName', 'contact', 'position', 'licenseNo', 'municipalityId', 'barangayId', 'facilityId']
+        .some((field) => Object.prototype.hasOwnProperty.call(patch, field));
+      if (hasProfileEdit) permissions.push('accounts.edit');
+      if (Object.prototype.hasOwnProperty.call(patch, 'role')) {
+        permissions.push('accounts.edit', 'accounts.roles.manage');
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'status')) permissions.push('accounts.deactivate');
+      if (permissions.length === 0) permissions.push('accounts.edit');
+      return permissions;
+    },
+  }),
+  asyncHandler(controller.updateUser),
+);
+router.post(
+  '/:id/access-reset',
+  authorize(FEATURE_ROLES.users, { permission: 'accounts.access.reset' }),
+  asyncHandler(controller.resetUserAccess),
+);
 
 export default router;

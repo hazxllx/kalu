@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAuth } from '@/context/AuthContext';
 import { ROLE } from '@/lib/roles';
@@ -71,32 +71,52 @@ export const PermissionsProvider = ({ children }) => {
   // Start from the registry defaults, then load the persisted overrides from the
   // API. localStorage is no longer the source of truth.
   const [matrix, setMatrix] = useState(() => hydrateMatrix(null));
+  const [matrixLoadState, setMatrixLoadState] = useState(() => ({
+    userId: user?.id || null,
+    status: user?.id ? 'loading' : 'ready',
+    error: null,
+  }));
+  const matrixRequestRef = useRef(0);
   const [auditEntries, setAuditEntries] = useState([]);
 
+  const refreshMatrix = useCallback(async () => {
+    if (!user?.id) {
+      setMatrix(hydrateMatrix(null));
+      setMatrixLoadState({ userId: null, status: 'ready', error: null });
+      return false;
+    }
+    const requestId = ++matrixRequestRef.current;
+    setMatrixLoadState((current) => (
+      current.userId === user.id && current.status === 'ready'
+        ? current
+        : { userId: user.id, status: 'loading', error: null }
+    ));
+    try {
+      const serverMatrix = await rolesApi.getMatrix();
+      if (requestId !== matrixRequestRef.current) return false;
+      setMatrix(hydrateMatrix(serverMatrix));
+      setMatrixLoadState({ userId: user.id, status: 'ready', error: null });
+      return true;
+    } catch (error) {
+      if (requestId !== matrixRequestRef.current) return false;
+      setMatrixLoadState({
+        userId: user.id,
+        status: 'error',
+        error: error?.message || 'Could not load role permissions from the server.',
+      });
+      return false;
+    }
+  }, [user?.id]);
+
   useEffect(() => {
-    let active = true;
     // The permission matrix endpoint is authenticated. Only load it once a user
     // is signed in; before authentication, use the safe registry defaults so no
     // unauthenticated request is issued (which would 401).
-    if (!user?.id) {
-      setMatrix(hydrateMatrix(null));
-      return () => {
-        active = false;
-      };
-    }
-    rolesApi
-      .getMatrix()
-      .then((serverMatrix) => {
-        if (active) setMatrix(hydrateMatrix(serverMatrix));
-      })
-      .catch(() => {
-        // On failure keep the safe registry defaults; never trust local storage.
-        if (active) setMatrix(hydrateMatrix(null));
-      });
+    void refreshMatrix();
     return () => {
-      active = false;
+      matrixRequestRef.current += 1;
     };
-  }, [user?.id]);
+  }, [refreshMatrix]);
 
   const permissionsForRole = useCallback(
     (roleId) => matrix[roleId] || defaultPermissionsForRole(roleId),
@@ -116,11 +136,12 @@ export const PermissionsProvider = ({ children }) => {
   const can = useCallback(
     (permissionId) => {
       if (!permissionId) return true;
+      if (matrixLoadState.status !== 'ready' || matrixLoadState.userId !== user?.id) return false;
       const effectiveRole = role === ROLE.RESIDENT_LIMITED ? ROLE.RESIDENT : role;
       if (!effectiveRole) return false;
       return roleCan(effectiveRole, permissionId);
     },
-    [role, roleCan],
+    [matrixLoadState, role, roleCan, user?.id],
   );
 
   const canAny = useCallback(
@@ -158,6 +179,9 @@ export const PermissionsProvider = ({ children }) => {
       // Persist to the authoritative store FIRST; only reflect locally on success.
       await rolesApi.updateRolePermissions(roleId, next);
 
+      // A matrix fetch started before this save must not overwrite the saved
+      // permissions if its response arrives afterwards.
+      matrixRequestRef.current += 1;
       setMatrix((current) => ({ ...current, [roleId]: next }));
 
       const entries = buildAuditEntries({
@@ -189,6 +213,8 @@ export const PermissionsProvider = ({ children }) => {
   const value = useMemo(
     () => ({
       matrix,
+      matrixLoadState,
+      refreshMatrix,
       permissionsForRole,
       roleCan,
       can,
@@ -200,6 +226,8 @@ export const PermissionsProvider = ({ children }) => {
     }),
     [
       matrix,
+      matrixLoadState,
+      refreshMatrix,
       permissionsForRole,
       roleCan,
       can,
