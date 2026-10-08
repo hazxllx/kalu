@@ -30,6 +30,10 @@ import {
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
 import MemberHealthModal from "../components/MemberHealthModal";
+import {
+  getHouseholdOffline,
+  listHouseholdsOffline,
+} from "@/services/offline/householdOfflineService";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { householdsApi, intakeApi } from "@/services/api";
@@ -233,15 +237,18 @@ export default function Households() {
     setLoading(true);
     setLoadError(null);
     try {
-      const result = await householdsApi.list({ q: searchTerm, limit: 100 });
-      setHouseholds(result?.rows || []);
+      const rows = await listHouseholdsOffline({
+        ownerId: user?.id,
+        params: { q: searchTerm, limit: 100 },
+      });
+      setHouseholds(rows);
     } catch (err) {
       setHouseholds([]);
       setLoadError(err?.message || "Could not load households.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     load("");
@@ -328,9 +335,15 @@ export default function Households() {
     setMemberError(null);
     setLinkedResidentId(null);
     setMemberForm({ name: "", relationship: "", sex: "", age: "", classification: "", isPwd: false });
+    if (String(id).startsWith("LOCAL-")) {
+      const local = households.find((row) => row.id === id);
+      setDetail(local || null);
+      setDetailLoading(false);
+      return;
+    }
     try {
-      const result = await householdsApi.get(id);
-      setDetail(result?.household || null);
+      const household = await getHouseholdOffline({ ownerId: user?.id, householdId: id });
+      setDetail(household || null);
     } catch (err) {
       setDetailError(err?.message || "Could not load household details.");
     } finally {
@@ -423,6 +436,11 @@ export default function Households() {
   const closeModal = () => {
     setDetailId(null);
     setDetail(null);
+  };
+
+  const editHousehold = () => {
+    if (!detail || detail.localId) return;
+    navigate(`${location.pathname.replace(/\/+$/, '')}/${detail.id}/edit`);
   };
 
   /* -------------------------------- render -------------------------------- */
@@ -763,6 +781,15 @@ export default function Households() {
                     <div className="flex flex-col items-end gap-2">
                       <HHBadge value={detail.riskLevel || "Low"} label={`${detail.riskLevel || "Low"} Risk`} />
                       <HHBadge value={detail.hhStatus} />
+                      {canAny(["households.create", "households.verify"]) && !detail.localId && (
+                        <button
+                          type="button"
+                          onClick={editHousehold}
+                          className="text-xs font-medium text-brand-blue hover:underline"
+                        >
+                          Edit factual details
+                        </button>
+                      )}
                       <button onClick={closeModal} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
                         <X className="h-5 w-5" />
                       </button>

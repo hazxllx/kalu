@@ -69,8 +69,8 @@ verification, not a separate staff role.
 ## Repository Structure
 
 ```text
-frontend/   React application, feature pages, API clients, and frontend tests
-backend/    Express API, services, repositories, and backend tests
+frontend/   React application, feature pages, and API clients
+backend/    Express API, services, and repositories
 supabase/   Supabase configuration, seed data, and ordered SQL migrations
 docs/       Database, backend, and integration documentation
 ```
@@ -178,36 +178,20 @@ npm run lint
 npm run start:backend
 ```
 
-## Testing
+## Validation
 
-Run the backend and frontend test suites, lint, type-check, or build with:
+Run lint, type-check, or build with:
 
 ```bash
-npm test --prefix backend
-npm test --prefix frontend
 npm run lint --prefix frontend
 npm run typecheck --prefix frontend
 npm run build --prefix frontend
 ```
 
-Backend and frontend tests both use Node's built-in test runner. ESLint and the
-Vite production build provide the frontend static checks; the backend has no
-separate lint step. The `typecheck` script runs `tsc` in `checkJs` mode over the
-JavaScript sources as an advisory diagnostic — the sources are plain JavaScript,
-so it reports type-inference notices rather than gating the build.
-
-The optional Playwright end-to-end suite lives in
-`frontend/tests/kalusagap-major-features/`. Run it with:
-
-```bash
-npm run test:e2e --prefix frontend
-```
-
-The suite drives a real browser against the frontend and backend. The Playwright
-configuration starts or reuses the frontend dev server; start the backend
-separately and provide any test-account credentials through environment
-variables, never source files. The E2E suite is not part of the unit-test
-baseline above.
+The Vite production build provides the frontend production check; the backend
+has no separate lint step. The `typecheck` script runs `tsc` in `checkJs` mode
+over the JavaScript sources as an advisory diagnostic — the sources are plain
+JavaScript, so it reports type-inference notices rather than gating the build.
 
 ## Security
 

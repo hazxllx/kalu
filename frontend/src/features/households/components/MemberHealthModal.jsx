@@ -6,6 +6,8 @@ import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
 import { usePermissions } from "@/context/PermissionsContext";
 import { householdsApi } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
+import { saveMemberMeasurementsOffline } from "@/services/offline/householdOfflineService";
 
 /**
  * BHW Member Health Profile.
@@ -64,6 +66,7 @@ const roField = (label, value) => (
 
 export default function MemberHealthModal({ householdId, member, verificationStatus, currentRole, onClose }) {
   const { can } = usePermissions();
+  const { user } = useAuth();
   const canEdit = can("residents.edit");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -72,6 +75,7 @@ export default function MemberHealthModal({ householdId, member, verificationSta
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [savedOffline, setSavedOffline] = useState(false);
   const savedTimer = useRef(null);
 
   // The backend locks a verified household to the BHW; mirror that in the UI so
@@ -116,6 +120,7 @@ export default function MemberHealthModal({ householdId, member, verificationSta
   const setField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
+    setSavedOffline(false);
   };
 
   const livePreview = useMemo(() => previewBmi(form.heightCm, form.weightKg), [form.heightCm, form.weightKg]);
@@ -134,18 +139,37 @@ export default function MemberHealthModal({ householdId, member, verificationSta
     setSaveError(null);
     setSaved(false);
     try {
-      const profileResult = await householdsApi.saveMemberHealth(householdId, member.id, {
+      const result = await saveMemberMeasurementsOffline({
+        ownerId: user?.id,
+        householdId,
+        memberId: member.id,
+        payload: {
         heightCm: form.heightCm === "" ? null : Number(form.heightCm),
         weightKg: form.weightKg === "" ? null : Number(form.weightKg),
         dateOfDeath: form.dateOfDeath || null,
         causeOfDeath: form.causeOfDeath,
         transOut: form.transOut,
         remarks: form.remarks,
+        },
       });
+      const profileResult = result?.profile;
+      if (result?.queued) {
+        setProfile(profileResult);
+        setForm((current) => ({
+          ...current,
+          heightCm: numberOrBlank(profileResult?.heightCm),
+          weightKg: numberOrBlank(profileResult?.weightKg),
+          remarks: profileResult?.remarks || "",
+        }));
+        setSavedOffline(true);
+        setSaved(true);
+        return;
+      }
       // Re-display from the server response so the persisted, server-computed
       // BMI is what the user sees (never the client preview).
       applyProfile(profileResult?.profile || profileResult || null);
       setSaved(true);
+      setSavedOffline(false);
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaved(false), 3200);
     } catch (err) {
@@ -348,11 +372,16 @@ export default function MemberHealthModal({ householdId, member, verificationSta
                   {saveError}
                 </p>
               )}
+              {savedOffline && (
+                <p role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-800">
+                  Saved offline — will sync automatically
+                </p>
+              )}
 
               <div className="flex items-center justify-end gap-3">
                 {saved && (
                   <span className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-green">
-                    <CheckCircle2 className="h-4 w-4" /> Saved
+                    <CheckCircle2 className="h-4 w-4" /> {savedOffline ? "Saved offline" : "Saved"}
                   </span>
                 )}
                 <button

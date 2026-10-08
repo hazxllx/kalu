@@ -1,6 +1,7 @@
 import { db, safeWrite } from './db.js';
 import { decryptJson, encryptJson } from './crypto.js';
 import { idempotencyKeyFor, newId } from './ids.js';
+import { MUTATION_TIER, assertQueueableMutation, isKnownMutationTier } from './mutationPolicy.js';
 
 /**
  * Synchronization outbox — the durable write-ahead log of pending writes.
@@ -43,7 +44,8 @@ export const isValidOperation = (op) =>
       op.entity &&
       (op.opType === 'create' || op.opType === 'update') &&
       typeof op.idempotencyKey === 'string' &&
-      op.idempotencyKey,
+      op.idempotencyKey &&
+      isKnownMutationTier(op.mutationType),
   );
 
 /**
@@ -60,20 +62,24 @@ export const buildOperation = (input, encryptedPayload) => {
     baseRevision = null,
     maxAttempts = DEFAULT_MAX_ATTEMPTS,
     targetServerId = null,
+    mutationType = MUTATION_TIER.ONLINE_ONLY,
+    opId = newId(),
+    idempotencyKey = idempotencyKeyFor(opId),
   } = input;
 
-  const opId = newId();
+  assertQueueableMutation(mutationType);
   const now = Date.now();
   return {
     opId,
     entity,
     opType,
+    mutationType,
     ownerId,
     localRecordId,
     targetServerId,
     payload: encryptedPayload,
     dependsOn: Array.isArray(dependsOn) ? dependsOn : [],
-    idempotencyKey: idempotencyKeyFor(opId),
+    idempotencyKey,
     status: OUTBOX_STATUS.PENDING,
     attempts: 0,
     maxAttempts,

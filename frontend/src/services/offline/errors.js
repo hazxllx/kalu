@@ -11,6 +11,7 @@ export const SYNC_ERROR = Object.freeze({
   NETWORK: 'network',
   AUTH: 'auth',
   FORBIDDEN: 'forbidden',
+  PERMISSION_CHANGED: 'permission_changed',
   VALIDATION: 'validation',
   CONFLICT: 'conflict',
   SERVER: 'server',
@@ -24,6 +25,7 @@ export const TERMINAL_ERRORS = new Set([
   SYNC_ERROR.VALIDATION,
   SYNC_ERROR.CONFLICT,
   SYNC_ERROR.FORBIDDEN,
+  SYNC_ERROR.PERMISSION_CHANGED,
   SYNC_ERROR.MALFORMED,
 ]);
 
@@ -51,10 +53,10 @@ export const classifySyncError = (error) => {
   }
   if (status === 403) {
     return {
-      code: SYNC_ERROR.FORBIDDEN,
+      code: SYNC_ERROR.PERMISSION_CHANGED,
       status,
       retryable: false,
-      message: message || 'You are not authorized to synchronize this record.',
+      message: 'Sync failed — permission changed',
     };
   }
   if (status === 409) {

@@ -2,9 +2,9 @@
 
 This document describes the offline-first layer added to KALUSAGAP. It is
 additive: Supabase Auth, the Express API, Row Level Security, existing roles,
-routes, and all online workflows are unchanged. Offline support is layered on
-top of the existing `@/services/api/*` clients — components still never call
-`fetch` directly.
+routes, and all online workflows remain authoritative. Offline support is
+layered on top of the existing `@/services/api/*` clients — components still
+never call `fetch` directly.
 
 ## Architecture
 
@@ -21,10 +21,73 @@ Dexie / IndexedDB       (src/services/offline/db.js)
         ▲
         │  read/written by
 Sync engine             (syncEngine.js → syncRunner.js → handlers.js)
-        │  sends each op through the existing API with Idempotency-Key (+ If-Match)
+        │  sends SAFE_SYNC through a registered handler and existing API
         ▼
-Express API → Supabase (RLS + service layer re-validate user, role, scope, record)
+Express API → Supabase (current authentication, role, scope, validation)
 ```
+
+## Mutation tiers and current coverage
+
+The role-by-role mutation inventory is maintained in
+[`ROLE-AUDIT.md`](./ROLE-AUDIT.md). It is incremental and does not mean every
+role or workflow is offline-ready.
+
+`SAFE_SYNC`, `OFFLINE_DRAFT`, and `ONLINE_ONLY` classify behavior; they are not
+roles or permissions. No tier grants API access. A mutation only synchronizes
+through a registered handler and the existing authenticated endpoint, which
+re-reads the current profile and applies its route/service authorization. The
+frontend defaults mutations to online-only. It does not mirror or replace the
+backend permission matrix.
+
+| Existing workflow / role | Current access and server scope | Offline classification |
+| --- | --- | --- |
+| Household creation and factual household edits — BHW, Health Supervisor, PHN | Existing `/households` role/permission checks; BHW and Health Supervisor are bound to their assigned barangay, PHN to their municipality. | Create and allow-listed factual updates: `SAFE_SYNC`. Verification, approval, status decisions, deletes, and scope/identity fields are never queued. |
+| Household member measurements — BHW, Health Supervisor, PHN, subject to the existing `residents.edit` permission and household scope | Same household route gate; service rechecks the parent household and verified-household restrictions. BMI is recomputed by the server. | Height, weight, and factual remarks: `SAFE_SYNC`. Death/trans-out fields remain online-only. |
+| Household member add/remove — BHW, Health Supervisor, PHN | Add uses the existing create permission and parent scope; remove uses create/verify permission. | Not currently registered as an offline handler. Remove is destructive and online-only. |
+| M1, resident verification, risk-workflow and other community workflows — BHW/Health Supervisor/PHN as individually authorized | Existing route role/permission checks plus barangay or municipality filtering and corresponding RLS policies. | Online-only until a workflow-specific retry-safe handler is audited and registered. Review/approval/escalation actions must not be automatically committed. |
+| Intake, triage, and consultation — BHW/RHU Personnel/Health Supervisor and PHN/RHU Personnel according to the individual route | Existing intake-owner rules, facility binding where applicable, and current route/service checks. | No offline handler is currently registered. Clinical data may only be an `OFFLINE_DRAFT` when the feature has a server draft endpoint that preserves draft state; no draft is finalized by the sync runner. |
+| Referral, follow-up, reports, certificates, account/role/permission administration — each route's existing role gate | Existing API validation and record/municipality/barangay/facility scope; the route and RLS policies remain authoritative. | Online-only for submission, approval/rejection, notifications, account/permission changes, deletes, and other consequential actions. Preparation is not auto-submitted. |
+| Resident self-service | Owner-only endpoints; registration/transfer/follow-up state transitions use their existing staff/server review flows. | No offline mutation handler is currently registered. Locally prepared drafts must not be submitted or treated as approved offline. |
+| Midwife | Not present in the canonical backend role list, route role map, or current profile role enum. | No offline access is granted. |
+
+## Existing role authorization audit
+
+This summarizes the existing online API contract relevant to offline work.
+Route-level role/permission checks and service-level record checks are the API
+authority; RLS is an additional database boundary. The service-role API client
+bypasses RLS, so backend scope checks must not be replaced by client filtering.
+
+| Role | Modules and records visible | Create / update | Delete | Facility / municipality / barangay scope | Existing enforcement |
+| --- | --- | --- | --- | --- | --- |
+| **BHW** | Household profiles and members in the assigned barangay; identity-only resident search/intake; allowed M1 entry; assigned health-service catalog; own notifications. Not the resident clinical directory. | Household/roster collection, member health facts (subject to permissions and verification lock), intake draft, permitted M1 records. | Household itself has no hard-delete route; member removal and permitted M1 deletion are destructive and stay online-only. | No facility-wide access; household and community writes must stay in the assigned barangay. | `FEATURE_ROLES`, `/households`, `/intake`, `/m1`, service scope guards; households/member/M1 RLS. |
+| **Midwife** | No canonical profile role or backend feature mapping, even though a frontend screen uses a Midwife label. | None through the current backend role system. | None. | No scope is assigned by the canonical authorization layer. | `backend/src/config/roles.js`; unsupported roles are rejected by `authenticate`/`authorize`; no RLS role branch. |
+| **PHN** | Municipality resident directory and authorized clinical/household records; verification, consultation queue, referrals/follow-ups, M1, reports, health services and analytics. | Only the shared allow-listed factual household handlers are currently `SAFE_SYNC`; clinical, referral, report, and administrative mutations remain online-only. | Only endpoint-specific destructive actions; no household hard delete. | Municipality-wide within the authenticated profile; may filter to a barangay but cannot cross municipality. | `FEATURE_ROLES`, route `authorize()` gates, service scope checks; household, visit, operational and M1 RLS. |
+| **Health Supervisor** | Assigned-barangay households, resident/verification/clinical queues, triage, consultations, referral/follow-up workflows, reports, analytics and staff-account review queues. | Only the shared allow-listed factual household handlers are currently `SAFE_SYNC`; verification and workflow decisions remain online-only. | Household hard delete is unavailable; member removals and other delete endpoints remain online-only. | Exactly the currently assigned barangay for barangay records; municipality-wide access is not implied by the role. | `FEATURE_ROLES`, `resolveBarangayScope`, service record checks and verification guards; household, verification and operational RLS. |
+| **RHU Personnel** | Facility/intake, triage and consultation records assigned to the facility; permitted M1 reads and assigned health-service catalog. Not the community analytics role. | No RHU automatic sync handler is registered; intake may be an offline draft only after a draft handler exists, and consultation completion/submission is online-only. | No offline delete. Existing endpoint-specific delete operations remain online-only. | Facility-bound on facility workflows using the authenticated profile; municipality checks apply where the route/table is municipality-scoped. No client-selected facility may widen access. | `FEATURE_ROLES`, `withinFacilityScope`, intake/consultation services and visit RLS. |
+| **MHO** | Municipality residents/referrals, reports and review queues, certificates, health-service management, analytics, M1 reports and notifications. Household API role gates do not grant direct MHO household CRUD. | MHO mutations are audited but remain online-only; no MHO automatic sync handler is registered. | No offline deletes; route-specific destructive changes remain online-only. | Municipality from the authenticated profile; no client-selected municipality or barangay may widen access. | `FEATURE_ROLES`, route/service municipality checks; reports, municipal-submission, referral and M1 RLS. |
+| **Resident** | Own resident profile, registration/verification status, own transfer/follow-up/document workflows and own notifications; not staff/community records. | No resident automatic sync handler is registered; profile editing is only a future narrow candidate, while submissions, consent, and staff-review transitions stay online-only. | No offline deletes. | Owner-only record access; no facility, municipality, or other resident scope is granted. | `FEATURE_ROLES.residentSelf`, `authenticate`, owner checks in services and resident/transfer RLS. |
+
+Concrete route gates are maintained in
+[`backend/src/config/roles.js`](../../backend/src/config/roles.js) and
+[`backend/src/routes/`](../../backend/src/routes/). Database policies are in
+the ordered files under [`supabase/migrations/`](../../supabase/migrations/);
+notable household and member policies are in
+[`20260915100200_create_households.sql`](../../supabase/migrations/20260915100200_create_households.sql),
+and offline idempotency support is in
+[`20261006130000_offline_sync_operations.sql`](../../supabase/migrations/20261006130000_offline_sync_operations.sql).
+The table is an audit summary, not a second permission source. Endpoint-specific
+checks and migrations remain authoritative where a workflow has narrower rules.
+
+`offline_draft` rows are encrypted in IndexedDB and do not enter the automatic
+write outbox. A workflow must provide a handler that explicitly sends to its
+existing server-side draft endpoint and confirms the returned record is still a
+draft before it may be synchronized. In the absence of that audited integration,
+the draft stays local for online review. `ONLINE_ONLY` actions are rejected
+before transport when offline and cannot be inserted through the queue helpers.
+
+Deletes are not queueable. No request is translated into a create/update. Soft
+archive or status transitions must be audited separately rather than assumed to
+be safe.
 
 ### Local stores
 
@@ -50,8 +113,14 @@ store requires a new `.version(n)` block with an upgrade function.
 - `pending → syncing → synced | failed | conflict`. An op is `synced` only after
   a confirmed, durable server response (`markSynced` is never called on error).
 - Bounded exponential backoff with jitter for retryable errors (network, 5xx);
-  terminal errors (422 validation, 403 authorization, 401 auth, malformed) are
-  exhausted immediately and wait for the user.
+  terminal errors (422 validation, 403 permission/scope changes, 401 auth,
+  malformed) are exhausted immediately and wait for the user.
+- A 403 from a sync is retained locally and labeled exactly
+  `Sync failed — permission changed`; the next attempt, if the user retries,
+  must pass current server authorization again.
+- `ONLINE_ONLY` operations are never sent by the runner. `OFFLINE_DRAFT`
+  operations are deferred unless a handler is explicitly marked draft-only, and
+  synchronization is accepted only when the server confirms draft state.
 - 409 conflicts are surfaced for review and never silently overwrite data.
 - Dependencies (`dependsOn`) are processed in order (e.g. a household before its
   dependent records).
@@ -68,6 +137,13 @@ store requires a new `.version(n)` block with an upgrade function.
   fingerprint of `(method, path, canonical body)`; reusing a key with a different
   request is rejected with 409 instead of replaying an unrelated response. The
   table is RLS-enabled with no policies: service-role (backend) only.
+- Household idempotency replay is performed only after the current route
+  permission and household scope checks. For create replays, the current
+  authenticated user must still be able to access the returned household.
+- Client-provided `facilityId`, `municipalityId`, `barangayId`, recorder/
+  responsible-personnel ids, role, and authorization scope are not accepted as
+  update authority. The household service derives organization and attribution
+  fields from the authenticated profile/current database record.
 - **Database-enforced create idempotency**: the `Idempotency-Key` is carried into
   `households.client_operation_key`, which has a unique (partial) index. Even if
   the ledger update is lost to a crash, a retried create hits the unique
@@ -104,19 +180,18 @@ No new backend runtime dependencies.
 
 ## Privacy & security
 
-- Supabase RLS and backend authorization are untouched and remain authoritative.
-  Every synchronized write goes through the existing authenticated endpoints; the
-  server re-validates user, role, barangay/municipality scope and permissions.
+- Supabase RLS and backend authorization remain authoritative. Every registered
+  synchronized write goes through the existing authenticated endpoints; the
+  server re-validates the current user, role, scope, and permissions.
 - The service-role key never reaches the browser. No passwords or auth tokens are
   written to IndexedDB or local storage — only the minimal queued record payloads.
 - Local payloads are encrypted at rest with a per-device AES-GCM key. In browsers
   the key is persisted as a **non-extractable `CryptoKey`** (its bytes cannot be
-  read back); environments that cannot structured-clone a `CryptoKey` (the
-  `fake-indexeddb` test runner) fall back to raw key bytes. See the threat note in
-  `src/services/offline/crypto.js`: this is defense-in-depth only — the key is
-  co-located with the ciphertext, so it does not defend against same-origin script
-  or a full IndexedDB dump, and it is not a substitute for device disk encryption
-  or the server-side RLS/authorization controls.
+  read back). See the threat note in `src/services/offline/crypto.js`: this is
+  defense-in-depth only — the key is co-located with the ciphertext, so it does
+  not defend against same-origin script or a full IndexedDB dump, and it is not
+  a substitute for device disk encryption or the server-side RLS/authorization
+  controls.
 - On logout and on account switch, `OfflineSyncProvider` purges the entire
   offline database and invalidates the key, so a shared device never leaves one
   user's queued health data for the next user. A cached session can never drive a
@@ -128,18 +203,8 @@ No new backend runtime dependencies.
   any project. The only linked Supabase project (`lblawqeoixojyytkmfqy`) is the
   live/real database, so the migration must be applied to a dedicated
   development/staging project (or a local Supabase started with Docker) first.
-- **Unit-verified** (Node test runner): sync ordering/backoff/error
-  classification, Dexie encryption round-trip, queue/outbox/recovery, interrupted
-  operation recovery, idempotency-key fingerprint binding, service-level create
-  deduplication, the atomic household+members create path (mocked repository),
-  and conditional revision conflicts. See
-  `frontend/test/offline.*.test.js` and `backend/test/offline.offlineSync.test.js`.
 - **Live-verified**: production PWA build (service worker, manifest, offline
   fallback, cache rules) and non-authenticated offline navigation in Chromium.
-- **NOT live-verified** (requires a non-production Supabase project and/or test
-  accounts): real Supabase integration (RLS, the unique constraint, ledger
-  replay), authenticated offline save → reconnect → sync, duplicate-retry record
-  count, and revision conflicts against the database.
 
 ## Commands
 
@@ -148,8 +213,6 @@ npm run install:all                 # install frontend + backend deps
 npm run dev:backend                 # API on http://localhost:5000
 npm run dev:frontend                # Vite on http://localhost:5173
 npm run build --prefix frontend     # production build incl. PWA/service worker
-npm test --prefix frontend          # frontend unit tests
-npm test --prefix backend           # backend unit tests
 npm run lint --prefix frontend
 supabase db push                    # apply supabase/migrations/*
 ```
@@ -185,9 +248,10 @@ Use a throwaway/test Supabase project. Do not touch production health data.
 
 ## Known limitations
 
-- Only the **Household creation** workflow is wired end-to-end offline (per the
-  incremental delivery requirement). Resident/assessment/maternal/follow-up/
-  referral drafts require the same audited handler + service wiring.
+- Household creation and factual member measurements are wired end-to-end
+  offline. The allow-listed household update service is not yet connected to an
+  edit UI; member-add, resident/assessment/maternal/follow-up/referral drafts
+  require their own audited handler + service wiring.
 - Offline **reads** are cached only via `records` and are not yet surfaced in the
   household list UI; queued drafts are shown through the sync indicator.
 - Device inactivity locking / re-authentication on resume is not implemented; the

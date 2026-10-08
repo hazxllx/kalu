@@ -15,6 +15,7 @@ import { decryptJson, encryptJson } from './crypto.js';
 
 export const DRAFT_STATUS = Object.freeze({
   PENDING: 'pending',
+  OFFLINE_DRAFT: 'offline_draft',
   SYNCING: 'syncing',
   SYNCED: 'synced',
   FAILED: 'failed',
@@ -58,6 +59,15 @@ export const listDrafts = async (ownerId, entity = null) => {
   return decrypted.sort((a, b) => b.updatedAt - a.updatedAt);
 };
 
+export const getOfflineDraftCount = async (ownerId) => {
+  if (!ownerId) return 0;
+  return db.drafts
+    .where('ownerId')
+    .equals(ownerId)
+    .filter((row) => row.status === DRAFT_STATUS.OFFLINE_DRAFT)
+    .count();
+};
+
 export const markDraftStatus = async (localId, status, patch = {}) => {
   await safeWrite(() => db.drafts.update(localId, { status, ...patch, updatedAt: Date.now() }));
 };
@@ -94,6 +104,7 @@ export default {
   putDraft,
   getDraft,
   listDrafts,
+  getOfflineDraftCount,
   markDraftStatus,
   reconcileDraft,
   deleteDraft,

@@ -84,6 +84,36 @@ const outOfScope = (household, user) => {
 };
 
 const VERIFICATION_FIELDS = ['verificationStatus', 'verifiedBy', 'verifiedAt', 'correctionReason'];
+const SERVER_OWNED_UPDATE_FIELDS = [
+  'facilityId',
+  'facility_id',
+  'municipality',
+  'municipalityId',
+  'municipality_id',
+  'barangay',
+  'barangayId',
+  'barangay_id',
+  'recordedById',
+  'recorded_by_id',
+  'responsiblePersonnelId',
+  'responsible_personnel_id',
+  'createdBy',
+  'createdById',
+  'createdByRole',
+  'created_by',
+  'created_by_id',
+  'created_by_role',
+  'collectorId',
+  'collector_id',
+  'collectorName',
+  'role',
+  'authorizationScope',
+  'authorization_scope',
+  'verifiedBy',
+  'verifiedAt',
+  'verified_by',
+  'verified_at',
+];
 
 /** Load a household and enforce scope; throws 404 when out of scope/absent. */
 const getScopedHousehold = async (id, user, repo = repository) => {
@@ -204,15 +234,24 @@ export const getHousehold = async ({ id, user }) => {
 export const createHousehold = async ({ user, payload = {}, idempotencyKey = null, repo = repository }) => {
   if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
 
-  // Idempotent create: if this offline operation already produced a household
-  // (e.g. the response was lost), return it instead of creating a duplicate. The
-  // unique constraint on client_operation_key is the database-level backstop.
-  if (idempotencyKey && typeof repo.findHouseholdByOperationKey === 'function') {
-    const existing = await repo.findHouseholdByOperationKey(idempotencyKey);
-    if (existing) return repo.getHousehold(existing.id);
+  const barangayName = text(payload.barangay);
+  const scope = assignedBarangay(user);
+  if (scope && barangayName.toLowerCase() !== scope.toLowerCase()) {
+    throw ApiError.forbidden('Your account is assigned to Barangay ' + scope + ' only');
   }
 
-  const barangayName = text(payload.barangay);
+  // Check the caller's CURRENT scope before replaying an earlier success.
+  // Idempotency must never become a way to retrieve a household after the
+  // authenticated profile's barangay or municipality assignment changes.
+  if (idempotencyKey && typeof repo.findHouseholdByOperationKey === 'function') {
+    const existing = await repo.findHouseholdByOperationKey(idempotencyKey);
+    if (existing) {
+      const full = await repo.getHousehold(existing.id);
+      if (!full || outOfScope(full, user)) throw ApiError.notFound('Household not found');
+      return full;
+    }
+  }
+
   const errors = [];
   const headName = text(payload.headName ?? payload.head);
   const purok = text(payload.purok);
@@ -245,7 +284,6 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
   if (errors.length) throw ApiError.unprocessable('Please complete the required household fields.', errors);
 
   // Barangay must exist and be inside the caller's scope — never trusted.
-  const scope = assignedBarangay(user);
   if (scope && barangayName.toLowerCase() !== scope.toLowerCase()) {
     throw ApiError.forbidden('Your account is assigned to Barangay ' + scope + ' only');
   }
@@ -322,7 +360,7 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
     longitude: longitude === null || Number.isNaN(longitude) ? null : longitude,
     ...risk,
     collectorId: user?.id || null,
-    collectorName: text(payload.collectorName ?? payload.collector) || user?.name || user?.email || '',
+    collectorName: user?.name || user?.email || '',
     createdBy: user?.id || null,
     // Only present for an offline operation; becomes the unique
     // client_operation_key that makes a replayed create return the same row.
@@ -383,6 +421,11 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
 
 export const updateHousehold = async ({ id, user, patch = {}, expectedRevision = null, repo = repository }) => {
   if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
+  patch = { ...patch };
+  delete patch.verifiedBy;
+  delete patch.verifiedAt;
+  delete patch.verified_by;
+  delete patch.verified_at;
   const household = await getScopedHousehold(id, user, repo);
 
   // Optimistic concurrency: when the client supplies the revision it last saw
@@ -416,9 +459,11 @@ export const updateHousehold = async ({ id, user, patch = {}, expectedRevision =
   // The reviewer identity and timestamp always come from the authenticated
   // session — never from the client. A returned-for-correction outcome requires
   // a correction reason.
+  let verificationAudit = null;
   if (patch.verificationStatus !== undefined) {
     patch.verifiedBy = user.id;
     patch.verifiedAt = new Date().toISOString();
+    verificationAudit = { verifiedBy: patch.verifiedBy, verifiedAt: patch.verifiedAt };
     if (patch.verificationStatus === 'Returned for Correction' && !text(patch.correctionReason)) {
       throw ApiError.unprocessable('A correction reason is required when returning a household.');
     }
@@ -479,6 +524,8 @@ export const updateHousehold = async ({ id, user, patch = {}, expectedRevision =
   }
 
   const nextPatch = { ...patch };
+  for (const field of SERVER_OWNED_UPDATE_FIELDS) delete nextPatch[field];
+  if (verificationAudit) Object.assign(nextPatch, verificationAudit);
   delete nextPatch.riskScore;
   delete nextPatch.riskLevel;
   delete nextPatch.riskFactors;

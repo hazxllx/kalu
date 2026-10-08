@@ -18,13 +18,13 @@ export const householdsApi = {
   list: (params) => api.get('/households', { params }),
   searchResidents: (q) => api.get('/households/residents/search', { params: { q } }),
   get: (id) => api.get(`/households/${id}`),
-  create: (payload) => api.post('/households', payload),
-  update: (id, payload) => api.put(`/households/${id}`, payload),
+  create: (payload, options) => api.post('/households', payload, options),
+  update: (id, payload, options) => api.put(`/households/${id}`, payload, options),
   addMember: (id, member) => api.post(`/households/${id}/members`, { member }),
   removeMember: (id, memberId) => api.delete(`/households/${id}/members/${memberId}`),
   getMemberHealth: (id, memberId) => api.get(`/households/${id}/members/${memberId}/health`),
-  saveMemberHealth: (id, memberId, health) =>
-    api.put(`/households/${id}/members/${memberId}/health`, { health }),
+  saveMemberHealth: (id, memberId, health, options) =>
+    api.put(`/households/${id}/members/${memberId}/health`, { health }, options),
 };
 
 export default householdsApi;

@@ -118,8 +118,12 @@ export const fileRepository = {
   removeHouseholdMember: async function () { return this.householdsUnsupported(); },
   getMemberHealthProfile: async function () { return this.householdsUnsupported(); },
   upsertMemberHealthProfile: async function () { return this.householdsUnsupported(); },
-  searchResidents: async ({ q = '', limit = 20 } = {}) => {
-    const residents = store.residents.filter((r) => matchesQuery(r, q)).slice(0, limit);
+  searchResidents: async ({ q = '', limit = 20, barangay = null, municipalityId = null } = {}) => {
+    const residents = store.residents
+      .filter((r) => matchesQuery(r, q))
+      .filter((r) => !barangay || String(r.barangay || '').toLowerCase() === String(barangay).toLowerCase())
+      .filter((r) => !municipalityId || r.municipalityId === municipalityId)
+      .slice(0, limit);
     return clone(residents);
   },
 

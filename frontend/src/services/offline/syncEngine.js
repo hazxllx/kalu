@@ -4,6 +4,7 @@ import { getSyncHandler } from './handlers.js';
 import { runSyncPass } from './syncRunner.js';
 import { listOperations, requeueOperation } from './outbox.js';
 import { summarizeOperations } from './syncCore.js';
+import { getOfflineDraftCount } from './drafts.js';
 
 /**
  * Central synchronization engine.
@@ -26,7 +27,7 @@ const defaultState = () => ({
   syncing: false,
   ownerId: null,
   lastSyncedAt: null,
-  counts: { pending: 0, syncing: 0, synced: 0, failed: 0, conflict: 0, total: 0 },
+  counts: { pending: 0, syncing: 0, synced: 0, failed: 0, conflict: 0, offlineDraft: 0, total: 0 },
   failed: [],
   conflicts: [],
   progress: null,
@@ -89,8 +90,16 @@ export const refreshSyncState = async () => {
   try {
     const ops = await listOperations(ownerId);
     const { counts, failed, conflicts } = summarizeOperations(ops);
+    const offlineDraftCount = await getOfflineDraftCount(ownerId);
     const lastSyncedAt = await readMeta(META_KEYS.LAST_SYNCED_AT, null);
-    setState({ ownerId, counts, failed, conflicts, lastSyncedAt, initialized: true });
+    setState({
+      ownerId,
+      counts: { ...counts, offlineDraft: offlineDraftCount },
+      failed,
+      conflicts,
+      lastSyncedAt,
+      initialized: true,
+    });
   } catch (error) {
     // IndexedDB unavailable (private mode, blocked storage): the app still works
     // online; only offline queueing is affected.

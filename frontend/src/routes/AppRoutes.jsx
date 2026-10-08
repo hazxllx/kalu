@@ -247,6 +247,13 @@ const AddHouseholdPage = appPage(
     )
 );
 
+const EditHouseholdPage = appPage(
+  () =>
+    import(
+      '@/features/households/pages/EditHouseholdPage'
+    )
+);
+
 // BUG/product decision: the user-facing "Household Risk Clusters" feature has
 // been removed. Its old routes now redirect to Household Profiling.
 const HouseholdRiskOverview = appPage(
@@ -983,6 +990,10 @@ const AppRoutes = () => (
           element={<AddHouseholdPage />}
         />
         <Route
+          path="households/:householdId/edit"
+          element={<EditHouseholdPage />}
+        />
+        <Route
           path="households/risk-clusters"
           element={
             <Navigate
@@ -1132,6 +1143,10 @@ const AppRoutes = () => (
         <Route
           path="households/new"
           element={<AddHouseholdPage />}
+        />
+        <Route
+          path="households/:householdId/edit"
+          element={<EditHouseholdPage />}
         />
         <Route
           path="households/risk-clusters"

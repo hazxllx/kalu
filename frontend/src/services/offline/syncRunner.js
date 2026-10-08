@@ -14,6 +14,7 @@ import {
 } from './outbox.js';
 import { releaseLock, renewLock, acquireLock, writeMeta, META_KEYS } from './meta.js';
 import { classifySyncError, SYNC_ERROR } from './errors.js';
+import { MUTATION_TIER } from './mutationPolicy.js';
 import {
   computeBackoffMs,
   dependenciesSatisfied,
@@ -113,7 +114,30 @@ export const runSyncPass = async ({
         continue;
       }
 
+      const mutationType = op.mutationType;
+      if (mutationType === MUTATION_TIER.ONLINE_ONLY) {
+        const info = {
+          code: SYNC_ERROR.MALFORMED,
+          status: 0,
+          retryable: false,
+          message: 'This action requires an internet connection.',
+        };
+        await markFailed(op.opId, info, Number.MAX_SAFE_INTEGER - 1, { exhaust: true });
+        await markDraftStatus(op.localRecordId, OUTBOX_STATUS.FAILED, { lastError: info });
+        summary.failed += 1;
+        continue;
+      }
+
       const handler = getHandler ? getHandler(op.entity, op.opType) : null;
+      if (
+        mutationType === MUTATION_TIER.OFFLINE_DRAFT &&
+        (!handler || handler.mutationType !== MUTATION_TIER.OFFLINE_DRAFT || handler.syncsDraft !== true)
+      ) {
+        // Never send a draft to a normal create/update handler: that could
+        // finalize a clinical decision instead of preserving draft state.
+        summary.deferred += 1;
+        continue;
+      }
       if (typeof handler !== 'function') {
         const info = {
           code: SYNC_ERROR.MALFORMED,
@@ -122,6 +146,18 @@ export const runSyncPass = async ({
           message: `No synchronization handler is registered for ${op.entity}:${op.opType}.`,
         };
         await markFailed(op.opId, info, Number.MAX_SAFE_INTEGER - 1);
+        await markDraftStatus(op.localRecordId, OUTBOX_STATUS.FAILED, { lastError: info });
+        summary.failed += 1;
+        continue;
+      }
+      if (handler.mutationType && handler.mutationType !== mutationType) {
+        const info = {
+          code: SYNC_ERROR.MALFORMED,
+          status: 0,
+          retryable: false,
+          message: `The ${mutationType} change is not supported by its synchronization handler.`,
+        };
+        await markFailed(op.opId, info, Number.MAX_SAFE_INTEGER - 1, { exhaust: true });
         await markDraftStatus(op.localRecordId, OUTBOX_STATUS.FAILED, { lastError: info });
         summary.failed += 1;
         continue;
@@ -135,6 +171,11 @@ export const runSyncPass = async ({
 
       try {
         const result = await handler(decrypted);
+        if (mutationType === MUTATION_TIER.OFFLINE_DRAFT && result?.draft !== true) {
+          const error = new Error('The server did not confirm that this change remains a draft.');
+          error.code = SYNC_ERROR.MALFORMED;
+          throw error;
+        }
         const serverId = result?.serverId ?? null;
         const serverRecord = result?.serverRecord ?? null;
 

@@ -68,19 +68,22 @@ const OfflineStatusIndicator = () => {
   }, []);
 
   const { counts = {}, failed = [], conflicts = [], syncing, progress, online, lastSyncedAt } = status;
-  const attention = (counts.pending || 0) + (counts.failed || 0) + (counts.conflict || 0);
+  const attention = (counts.pending || 0) + (counts.failed || 0) + (counts.conflict || 0) + (counts.offlineDraft || 0);
   const hasProblems = (counts.failed || 0) + (counts.conflict || 0) > 0;
 
   const connectionLabel = online ? 'Online' : 'Offline';
   const summary = useMemo(() => {
     if (syncing) {
       const total = progress?.total || 0;
-      return total ? `Syncing ${progress?.processed || 0}/${total}` : 'Synchronizing…';
+      return total ? `Syncing ${progress?.processed || 0}/${total}` : 'Syncing...';
     }
     if (!online) return 'Working offline';
+    if (counts.offlineDraft > 0) {
+      return `${counts.offlineDraft} offline draft${counts.offlineDraft === 1 ? '' : 's'} need review`;
+    }
     if (attention > 0) return `${attention} change${attention === 1 ? '' : 's'} pending`;
-    return 'All changes synchronized';
-  }, [syncing, progress, online, attention]);
+    return 'Synced successfully';
+  }, [syncing, progress, online, attention, counts.offlineDraft]);
 
   const handleRetry = async () => {
     setRetrying(true);
@@ -180,6 +183,11 @@ const OfflineStatusIndicator = () => {
               <p className="rounded-lg border border-brand-blue/20 bg-brand-light px-3 py-2 text-xs text-brand-dark">
                 {counts.pending} change{counts.pending === 1 ? '' : 's'} saved on this device only,
                 awaiting server confirmation.
+              </p>
+            )}
+            {counts.offlineDraft > 0 && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {counts.offlineDraft} draft{counts.offlineDraft === 1 ? '' : 's'} saved offline — requires online confirmation.
               </p>
             )}
 

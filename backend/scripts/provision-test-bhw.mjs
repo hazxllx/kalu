@@ -1,8 +1,8 @@
 /**
  * KALUSAGAP — test BHW account provisioning (DEVELOPMENT / STAGING ONLY).
  *
- * Creates (or repairs) the single synthetic BHW account the offline integration
- * tests and the authenticated Playwright suite sign in as:
+ * Creates (or repairs) the single synthetic BHW account used by development
+ * verification:
  *
  *   email:  test-bhw@kalusagap-dev.local   (override with KALUSAGAP_TEST_BHW_EMAIL)
  *   role:   bhw

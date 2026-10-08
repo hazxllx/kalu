@@ -19,12 +19,13 @@
 import { Router } from 'express';
 import authenticate from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
-import idempotency from '../middleware/idempotency.js';
+import idempotency, { createIdempotencyMiddleware } from '../middleware/idempotency.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import householdsController from '../controllers/households.controller.js';
 import householdRiskWorkflowController from '../controllers/householdRiskWorkflow.controller.js';
 import validate from '../middleware/validate.js';
+import ApiError from '../utils/apiError.js';
 import {
   createHouseholdValidator,
   householdMemberValidator,
@@ -32,6 +33,7 @@ import {
   updateHouseholdValidator,
 } from '../validators/household.validators.js';
 import { FEATURE_ROLES } from '../config/roles.js';
+import * as householdsService from '../services/households.service.js';
 
 const router = Router();
 
@@ -39,6 +41,17 @@ router.use(authenticate, resolveBarangayScope);
 
 const HOUSEHOLD_ROLES = FEATURE_ROLES.households; // BHW / Health Supervisor / PHN
 const params = validate(householdParamsValidator, 'params');
+const revalidateHouseholdScope = asyncHandler(async (req, res, next) => {
+  await householdsService.getHousehold({ id: req.params.id, user: req.user });
+  next();
+});
+const createHouseholdIdempotency = createIdempotencyMiddleware({
+  validateReplay: async (req, responseBody) => {
+    const householdId = responseBody?.data?.household?.id ?? responseBody?.household?.id;
+    if (!householdId) throw ApiError.notFound('Household not found');
+    await householdsService.getHousehold({ id: householdId, user: req.user });
+  },
+});
 
 router.get(
   '/',
@@ -49,8 +62,8 @@ router.get(
 router.post(
   '/',
   authorize(HOUSEHOLD_ROLES, { permission: 'households.create' }),
-  idempotency,
   validate(createHouseholdValidator),
+  createHouseholdIdempotency,
   asyncHandler(householdsController.createHousehold),
 );
 
@@ -68,9 +81,10 @@ router.get(
 router.put(
   '/:id',
   authorize(HOUSEHOLD_ROLES, { anyPermission: ['households.create', 'households.verify'] }),
-  idempotency,
   params,
   validate(updateHouseholdValidator),
+  revalidateHouseholdScope,
+  idempotency,
   asyncHandler(householdsController.updateHousehold),
 );
 
@@ -79,6 +93,8 @@ router.post(
   authorize(HOUSEHOLD_ROLES, { permission: 'households.create' }),
   params,
   validate(householdMemberValidator),
+  revalidateHouseholdScope,
+  idempotency,
   asyncHandler(householdsController.addHouseholdMember),
 );
 router.delete(
@@ -100,6 +116,8 @@ router.put(
   '/:id/members/:memberId/health',
   authorize(HOUSEHOLD_ROLES, { permission: 'residents.edit' }),
   params,
+  revalidateHouseholdScope,
+  idempotency,
   asyncHandler(householdsController.saveMemberHealth),
 );
 

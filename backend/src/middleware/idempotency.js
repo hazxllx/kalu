@@ -89,7 +89,8 @@ const releaseClaim = (supabase, userId, key) =>
       () => {},
     );
 
-const idempotency = asyncHandler(async (req, res, next) => {
+export const createIdempotencyMiddleware = ({ validateReplay } = {}) =>
+  asyncHandler(async (req, res, next) => {
   const key = readKey(req);
   // Make the normalized key available to the controller so the domain write can
   // carry it into the created row (database-enforced deduplication).
@@ -132,6 +133,12 @@ const idempotency = asyncHandler(async (req, res, next) => {
         'This Idempotency-Key was already used for a different request. Use a new key.',
       );
     }
+    if (
+      existing.data.status === 'completed' &&
+      typeof validateReplay === 'function'
+    ) {
+      await validateReplay(req, existing.data.response_body);
+    }
     if (replay(existing.data)) return undefined;
     const age = Date.now() - new Date(existing.data.updated_at || existing.data.created_at).getTime();
     if (age < STALE_PROCESSING_MS) {
@@ -166,6 +173,12 @@ const idempotency = asyncHandler(async (req, res, next) => {
             'This Idempotency-Key was already used for a different request. Use a new key.',
           );
         }
+        if (
+          again.data.status === 'completed' &&
+          typeof validateReplay === 'function'
+        ) {
+          await validateReplay(req, again.data.response_body);
+        }
         if (replay(again.data)) return undefined;
       }
       throw new ApiError(425, 'An identical request is still being processed. Retry shortly.');
@@ -187,6 +200,8 @@ const idempotency = asyncHandler(async (req, res, next) => {
   };
 
   return next();
-});
+  });
+
+const idempotency = createIdempotencyMiddleware();
 
 export default idempotency;

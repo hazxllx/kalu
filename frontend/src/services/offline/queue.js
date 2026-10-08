@@ -3,6 +3,7 @@ import { encryptJson } from './crypto.js';
 import { newId, newLocalRef } from './ids.js';
 import { buildOperation, OUTBOX_STATUS } from './outbox.js';
 import { DRAFT_STATUS } from './drafts.js';
+import { MUTATION_TIER, assertQueueableMutation } from './mutationPolicy.js';
 
 /**
  * High-level queueing: write a local draft and its synchronization operation
@@ -19,11 +20,23 @@ const nowMs = () => Date.now();
  *
  * @param {{entity:string, ownerId:string, data:any, dependsOn?:string[], maxAttempts?:number}} input
  */
-export const queueCreate = async ({ entity, ownerId, data, dependsOn = [], maxAttempts }) => {
+export const queueCreate = async ({
+  entity,
+  ownerId,
+  data,
+  dependsOn = [],
+  maxAttempts,
+  mutationType = MUTATION_TIER.ONLINE_ONLY,
+  opId,
+}) => {
+  assertQueueableMutation(mutationType);
+  if (mutationType !== MUTATION_TIER.SAFE_SYNC) {
+    throw new Error('Offline drafts must be saved with queueOfflineDraft and cannot be auto-synchronized.');
+  }
   const localId = newId();
   const encrypted = await encryptJson(data);
   const op = buildOperation(
-    { entity, opType: 'create', ownerId, payload: data, localRecordId: localId, dependsOn, baseRevision: null, maxAttempts },
+    { entity, opType: 'create', ownerId, payload: data, localRecordId: localId, dependsOn, baseRevision: null, maxAttempts, mutationType, opId },
     encrypted,
   );
   const createdAt = nowMs();
@@ -52,11 +65,24 @@ export const queueCreate = async ({ entity, ownerId, data, dependsOn = [], maxAt
  * Queue an update to an existing record (identified by its server id) with the
  * revision the client last saw, enabling server-side optimistic concurrency.
  */
-export const queueUpdate = async ({ entity, ownerId, serverId, data, baseRevision = null, dependsOn = [] }) => {
+export const queueUpdate = async ({
+  entity,
+  ownerId,
+  serverId,
+  data,
+  baseRevision = null,
+  dependsOn = [],
+  mutationType = MUTATION_TIER.ONLINE_ONLY,
+  opId,
+}) => {
+  assertQueueableMutation(mutationType);
+  if (mutationType !== MUTATION_TIER.SAFE_SYNC) {
+    throw new Error('Offline drafts must be saved with queueOfflineDraft and cannot be auto-synchronized.');
+  }
   const localId = newId();
   const encrypted = await encryptJson(data);
   const op = buildOperation(
-    { entity, opType: 'update', ownerId, payload: data, localRecordId: localId, dependsOn, baseRevision, targetServerId: serverId },
+    { entity, opType: 'update', ownerId, payload: data, localRecordId: localId, dependsOn, baseRevision, targetServerId: serverId, mutationType, opId },
     encrypted,
   );
   const createdAt = nowMs();
@@ -82,6 +108,33 @@ export const queueUpdate = async ({ entity, ownerId, serverId, data, baseRevisio
   return { localId, operation: op, draft: { ...draft, data } };
 };
 
+/**
+ * Save work locally for later review without putting it in the automatic-sync
+ * outbox. A feature may only promote it through its existing authorized draft
+ * workflow; this helper never finalizes the underlying operation.
+ */
+export const queueOfflineDraft = async ({ entity, ownerId, data }) => {
+  if (!ownerId) throw new Error('A signed-in user is required to save an offline draft.');
+  const localId = newId();
+  const encrypted = await encryptJson(data);
+  const createdAt = nowMs();
+  const draft = {
+    localId,
+    entity,
+    ownerId,
+    data: encrypted,
+    status: DRAFT_STATUS.OFFLINE_DRAFT,
+    serverId: null,
+    revision: null,
+    localRef: newLocalRef('DRAFT'),
+    mutationType: MUTATION_TIER.OFFLINE_DRAFT,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  await safeWrite(() => db.drafts.put(draft));
+  return { localId, draft: { ...draft, data } };
+};
+
 /** Pending (not yet server-confirmed) drafts for display, newest first. */
 export const listPendingDrafts = async (ownerId, entity = null) => {
   let rows = await db.drafts.where('ownerId').equals(ownerId).toArray();
@@ -92,18 +145,19 @@ export const listPendingDrafts = async (ownerId, entity = null) => {
 };
 
 export const getLocalCounts = async (ownerId) => {
-  if (!ownerId) return { pending: 0, failed: 0, conflict: 0 };
+  if (!ownerId) return { pending: 0, failed: 0, conflict: 0, offlineDraft: 0 };
   const rows = await db.drafts.where('ownerId').equals(ownerId).toArray();
   return rows.reduce(
     (acc, row) => {
       if (row.status === DRAFT_STATUS.PENDING) acc.pending += 1;
       else if (row.status === DRAFT_STATUS.FAILED) acc.failed += 1;
       else if (row.status === DRAFT_STATUS.CONFLICT) acc.conflict += 1;
+      else if (row.status === DRAFT_STATUS.OFFLINE_DRAFT) acc.offlineDraft += 1;
       return acc;
     },
-    { pending: 0, failed: 0, conflict: 0 },
+    { pending: 0, failed: 0, conflict: 0, offlineDraft: 0 },
   );
 };
 
 export { OUTBOX_STATUS, DRAFT_STATUS };
-export default { queueCreate, queueUpdate, listPendingDrafts, getLocalCounts };
+export default { queueCreate, queueUpdate, queueOfflineDraft, listPendingDrafts, getLocalCounts };

@@ -36,13 +36,16 @@ const withinIntakeScope = (user, submission) =>
   withinBarangayScope(user, submission?.resident) &&
   withinFacilityScope(user, submission?.facilityId);
 
-export const searchResidents = async ({ q = '', user }) => {
-  const residents = await repository.searchResidents({ q, limit: 25 });
-  // Barangay-scoped callers only ever see residents of their own barangay —
-  // filtered here at the data-access layer, not in the UI.
+export const searchResidents = async ({ q = '', user, repo = repository }) => {
   const scope = assignedBarangay(user);
-  if (!scope) return residents;
-  return residents.filter((r) => withinBarangayScope(user, r));
+  // Scope is passed into the repository query so a service-role data access
+  // path never fetches records outside the caller's authorized window.
+  return repo.searchResidents({
+    q,
+    limit: 25,
+    barangay: scope || null,
+    municipalityId: user?.municipalityId || null,
+  });
 };
 
 export const getResidentForIntake = async ({ id, user }) => {

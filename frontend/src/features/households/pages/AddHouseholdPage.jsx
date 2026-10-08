@@ -873,7 +873,7 @@ export default function AddHouseholdPage() {
       });
       const saved = result?.household;
       const toastMessage = result?.queued
-        ? `Household saved on this device (${saved?.id || "draft"}) — pending synchronization`
+        ? "Saved offline — will sync automatically"
         : `Household ${saved?.id || ""} added successfully`;
       if (householdsPath) {
         navigate(householdsPath, {
@@ -956,7 +956,7 @@ export default function AddHouseholdPage() {
           >
             {isOffline ? (
               <>
-                <AlertTriangle className="h-3.5 w-3.5" /> Offline — saved on this device, syncs later
+                <AlertTriangle className="h-3.5 w-3.5" /> Saved offline — will sync automatically
               </>
             ) : (
               <>

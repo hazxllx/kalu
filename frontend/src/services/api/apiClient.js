@@ -1,5 +1,10 @@
 import { supabase } from '@/lib/supabase';
 import { normalizeApiBaseUrl } from './apiBaseUrl';
+import {
+  MUTATION_TIER,
+  OfflineActionRequiredError,
+  requireOnlineForMutation,
+} from '@/services/offline/mutationPolicy';
 
 /**
  * Centralized HTTP client for the KALUSAGAP backend (see `backend/`).
@@ -28,6 +33,7 @@ const BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
  * @property {Record<string, any>} [params]
  * @property {RequestCredentials} [credentials]
  * @property {AbortSignal} [signal]
+ * @property {'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY'} [offlineMutationType]
  */
 
 class ApiError extends Error {
@@ -62,24 +68,40 @@ function buildUrl(path, params) {
  * @param {string} path
  * @param {RequestOptions} options
  */
-async function request(path, { method = 'GET', body, headers = {}, params, ...rest } = {}) {
+async function request(
+  path,
+  { method = 'GET', body, headers = {}, params, offlineMutationType, ...rest } = {},
+) {
+  const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase());
+  const mutationType = offlineMutationType || MUTATION_TIER.ONLINE_ONLY;
+  if (isMutation) requireOnlineForMutation(mutationType);
+
   const token = await getAccessToken();
 
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const isJsonBody = body !== undefined && body !== null && !isFormData && typeof body !== 'string' && !(body instanceof URLSearchParams);
   const requestBody = isJsonBody ? JSON.stringify(body) : body;
 
-  const response = await fetch(buildUrl(path, params), {
-    method,
-    credentials: 'include',
-    headers: {
-      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
-    },
-    ...(requestBody !== undefined && requestBody !== null ? { body: requestBody } : {}),
-    ...rest,
-  });
+  let response;
+  try {
+    response = await fetch(buildUrl(path, params), {
+      method,
+      credentials: 'include',
+      headers: {
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...headers,
+      },
+      ...(requestBody !== undefined && requestBody !== null ? { body: requestBody } : {}),
+      ...rest,
+    });
+  } catch (error) {
+    if (isMutation && mutationType === MUTATION_TIER.ONLINE_ONLY) {
+      if (error?.name === 'AbortError') throw error;
+      throw new OfflineActionRequiredError();
+    }
+    throw error;
+  }
 
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = isJson ? await response.json() : await response.text();
@@ -95,17 +117,26 @@ async function request(path, { method = 'GET', body, headers = {}, params, ...re
 }
 
 export const postFormData = async (path, formData, options = {}) => {
+  requireOnlineForMutation(options.offlineMutationType || MUTATION_TIER.ONLINE_ONLY);
+  const requestOptions = { ...options };
+  delete requestOptions.offlineMutationType;
   const token = await getAccessToken();
-  const response = await fetch(buildUrl(path, options.params), {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-    body: formData,
-    ...options,
-  });
+  let response;
+  try {
+    response = await fetch(buildUrl(path, options.params), {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(requestOptions.headers || {}),
+      },
+      body: formData,
+      ...requestOptions,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new OfflineActionRequiredError();
+  }
 
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = isJson ? await response.json() : await response.text();

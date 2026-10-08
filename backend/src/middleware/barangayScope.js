@@ -31,9 +31,18 @@ const requestedBarangays = (req) => {
     values.push(req.query.barangay_id.trim());
   }
   if (req.body && typeof req.body === 'object') {
-    const bodyBarangay = String(req.body.barangay ?? '').trim();
+    const nestedBody = req.body.household && typeof req.body.household === 'object'
+      ? req.body.household
+      : req.body;
+    const bodyBarangay = String(nestedBody.barangay ?? req.body.barangay ?? '').trim();
     if (bodyBarangay) values.push(bodyBarangay);
-    const bodyBarangayId = String(req.body.barangayId ?? req.body.barangay_id ?? '').trim();
+    const bodyBarangayId = String(
+      nestedBody.barangayId ??
+        nestedBody.barangay_id ??
+        req.body.barangayId ??
+        req.body.barangay_id ??
+        '',
+    ).trim();
     if (bodyBarangayId) values.push(bodyBarangayId);
   }
   return values;
