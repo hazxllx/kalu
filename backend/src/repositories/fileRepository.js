@@ -9,6 +9,7 @@
 import store from './fileStore.js';
 import { residentId, healthRecordNo, submissionId, referralId } from './ids.js';
 import { DEFAULT_RISK_CRITERIA } from '../config/riskConfig.js';
+import { DEFAULT_MEDICINES, medicineIdentityKey } from '../config/medicineCatalog.js';
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
@@ -507,6 +508,108 @@ export const fileRepository = {
     data.healthAuditLogs.push(row);
     return clone(row);
   }),
+
+  // ----- blood-pressure thresholds (dev driver) ----------------------------
+  getBpThresholdSettings: async () => (store.bpThresholdSettings ? clone(store.bpThresholdSettings) : null),
+
+  saveBpThresholdSettings: async (settings) => store.mutate((data) => {
+    data.bpThresholdSettings = { ...settings, updatedAt: new Date().toISOString() };
+    return clone(data.bpThresholdSettings);
+  }),
+
+  // ----- medicine catalog (dev driver) --------------------------------------
+  // Seeds the documented default catalog on first access so the dev/test
+  // backend behaves like a freshly-migrated database.
+  listMedicines: async ({ q = '', source = '', includeInactive = false } = {}) => store.mutate((data) => {
+    if (!data.medicines.length) {
+      const now = new Date().toISOString();
+      data.medicines = DEFAULT_MEDICINES.map((m) => ({
+        id: crypto.randomUUID(),
+        genericName: m.genericName,
+        brandName: m.brandName || '',
+        strength: m.strength || '',
+        dosageForm: m.dosageForm || '',
+        category: m.category || '',
+        source: m.source || 'local',
+        active: true,
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      }));
+    }
+    const query = normalizeText(q);
+    return data.medicines
+      .filter((m) => (includeInactive ? true : m.active !== false))
+      .filter((m) => (source ? m.source === source : true))
+      .filter((m) => {
+        if (!query) return true;
+        return [m.genericName, m.brandName, m.strength, m.dosageForm, m.category]
+          .some((field) => normalizeText(field).includes(query));
+      })
+      .sort((a, b) => String(a.genericName).localeCompare(String(b.genericName)))
+      .map((m) => clone(m));
+  }),
+
+  getMedicine: async (id) => {
+    const found = store.medicines.find((m) => m.id === id);
+    return found ? clone(found) : null;
+  },
+
+  findMedicineByIdentity: async (entry) => {
+    const key = medicineIdentityKey(entry);
+    const found = store.medicines.find((m) => medicineIdentityKey(m) === key);
+    return found ? clone(found) : null;
+  },
+
+  insertMedicine: async (medicine) => store.mutate((data) => {
+    const now = new Date().toISOString();
+    const row = {
+      id: crypto.randomUUID(),
+      genericName: medicine.genericName,
+      brandName: medicine.brandName || '',
+      strength: medicine.strength || '',
+      dosageForm: medicine.dosageForm || '',
+      category: medicine.category || '',
+      source: medicine.source || 'local',
+      active: medicine.active === undefined ? true : Boolean(medicine.active),
+      createdBy: medicine.createdBy ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    data.medicines.push(row);
+    return clone(row);
+  }),
+
+  updateMedicine: async (id, patch) => store.mutate((data) => {
+    const idx = data.medicines.findIndex((m) => m.id === id);
+    if (idx < 0) return null;
+    data.medicines[idx] = { ...data.medicines[idx], ...patch, id, updatedAt: new Date().toISOString() };
+    return clone(data.medicines[idx]);
+  }),
+
+  listMedicineAvailability: async (medicineId) =>
+    store.medicineAvailability.filter((a) => a.medicineId === medicineId).map((a) => clone(a)),
+
+  listMedicineAvailabilityForFacility: async (facilityId) =>
+    store.medicineAvailability.filter((a) => a.facilityId === facilityId).map((a) => clone(a)),
+
+  upsertMedicineAvailability: async ({ medicineId, facilityId, available, note, updatedBy }) => store.mutate((data) => {
+    const idx = data.medicineAvailability.findIndex((a) => a.medicineId === medicineId && a.facilityId === facilityId);
+    const row = {
+      medicineId,
+      facilityId,
+      available: Boolean(available),
+      note: note || '',
+      updatedBy: updatedBy ?? null,
+      updatedAt: new Date().toISOString(),
+    };
+    if (idx >= 0) data.medicineAvailability[idx] = row;
+    else data.medicineAvailability.push(row);
+    return clone(row);
+  }),
+
+  // The file (dev) driver has no facilities registry.
+  listFacilities: async () => [],
 
 };
 

@@ -44,8 +44,42 @@ const MANAGE_ROLES = new Set([ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR]);
 const MUNICIPALITY_WIDE_ROLES = new Set([ROLES.MHO, ROLES.PHN, ROLES.RHU_PERSONNEL]);
 
 const text = (v) => String(v ?? '').trim();
+const hhmm = (v) => (v ? String(v).slice(0, 5) : null);
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
+};
+
+/**
+ * QA / live-verification artifact accounts must never appear in the
+ * production-facing "Assign Personnel" picker.
+ *
+ * The project has no is_test/is_demo column (see
+ * supabase/migrations/20260915100000_create_core_org_and_profiles.sql), so the
+ * only reliable classifier is the account-provisioning convention: the live
+ * verification harness (backend/scripts/verify-live-workflows.mjs) registers
+ * throwaway staff on the reserved `@kalusagap.test` domain with a dot-delimited
+ * `qa` label in the local part — e.g. `bhw.qa.<timestamp>@kalusagap.test` and
+ * `qa.unapprovable.<timestamp>@kalusagap.test`. This is the exact marker
+ * documented in docs/live-verification-data.md.
+ *
+ * The rule is deliberately narrow so it cannot hide a real person:
+ *   - it requires the reserved `@kalusagap.test` test domain, AND
+ *   - a `qa` segment delimited by dots in the local part.
+ * The fixed OPERATIONAL accounts on the same test domain
+ * (admin@, mho@, phn@, supervisor@, rhu.personnel@ — see
+ * backend/scripts/provision-official-accounts.mjs) have no `qa` label and are
+ * therefore kept. Matching is on the email local part only — never the display
+ * name — so a legitimate person is never excluded for having "QA" in their name.
+ */
+const QA_LOCALPART_LABEL = /(^|\.)qa(\.|$)/i;
+const isVerificationArtifactAccount = (email) => {
+  const value = text(email).toLowerCase();
+  const at = value.lastIndexOf('@');
+  if (at < 0) return false;
+  const localPart = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  if (domain !== 'kalusagap.test') return false;
+  return QA_LOCALPART_LABEL.test(localPart);
 };
 
 // Local "YYYY-MM-DD" check (the same rule the validator applies) so a bad date
@@ -72,6 +106,13 @@ const toService = (row) => {
     facilityType: row.facility?.type || '',
     barangayId: row.barangay_id || null,
     barangay: row.barangay?.name || '',
+    schedule: {
+      startDate: row.start_date || null,
+      startTime: hhmm(row.start_time),
+      endDate: row.end_date || null,
+      endTime: hhmm(row.end_time),
+      registrationDeadline: row.registration_deadline || null,
+    },
     active: row.active !== false,
     createdBy: row.created_by || null,
     createdAt: row.created_at,
@@ -414,40 +455,256 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
   return data;
 };
 
+const BARANGAY_SCOPED_ROLES = new Set([ROLES.HEALTH_SUPERVISOR, ROLES.BHW]);
+const PLAN_TABLE = 'visit_plans';
+
+const residentDisplayName = (r) =>
+  [r?.first_name, r?.middle_name, r?.last_name].filter(Boolean).join(' ').trim() || 'Resident';
+
 /**
- * Resolve the scope columns for a new/updated service from the caller + payload.
- * A Health Supervisor is forced to their own barangay; a facility/barangay must
- * belong to the caller's municipality.
+ * Resident registrations (visit plans) for a single health service, for the
+ * authorized staff responsible for it, plus any attendance already recorded.
+ *
+ * This is the staff-facing counterpart of the resident "I plan to visit"
+ * directory: a resident who registers for a service creates a public.visit_plans
+ * row (see visitPlans.service.js); this surfaces those rows — with the
+ * resident's name, barangay, registration timestamp and status — to the staff
+ * who own the service, and cross-references public.health_service_attendance so
+ * the roster shows who has been marked attended / absent.
+ *
+ * Scope is derived from the authenticated session, never client input:
+ *   - `getById` first confirms the service is inside the caller's visibility
+ *     scope (or 404), reusing the catalog's established scope model;
+ *   - a barangay-scoped role (Health Supervisor / BHW) only ever sees
+ *     registrations from their OWN barangay, mirroring the visit_plans RLS;
+ *   - municipality-wide roles (MHO / PHN / RHU Personnel) see every
+ *     registration for the service in their municipality.
+ * No new table is introduced — visit_plans, residents and
+ * health_service_attendance are reused.
+ */
+export const listServiceRegistrations = async ({ user, serviceId, supabase = getServiceClient() }) => {
+  if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+  // Scope + existence gate (throws 404 when out of scope or unknown).
+  const service = await getById({ user, id: serviceId, supabase });
+
+  let planQuery = supabase
+    .from(PLAN_TABLE)
+    .select('id, resident_id, barangay_id, facility_type, planned_date, note, status, created_at, updated_at')
+    .eq('service_id', serviceId)
+    .order('planned_date', { ascending: false });
+
+  // A barangay-scoped role is confined to their own barangay's registrations,
+  // regardless of whether the service is barangay-specific or RHU-wide.
+  if (BARANGAY_SCOPED_ROLES.has(user.role)) {
+    if (!user.barangayId) return { service, registrations: [], counts: emptyRegistrationCounts() };
+    planQuery = planQuery.eq('barangay_id', user.barangayId);
+  }
+
+  const { data: plans, error: planErr } = await planQuery;
+  throwOnError(planErr, 'Could not load service registrations');
+  const planRows = plans || [];
+
+  const residentIds = [...new Set(planRows.map((p) => p.resident_id).filter(Boolean))];
+  const residentById = new Map();
+  const attendanceByResident = new Map();
+  if (residentIds.length > 0) {
+    const [{ data: residents, error: resErr }, { data: attendance, error: attErr }] = await Promise.all([
+      supabase
+        .from('residents')
+        .select('id, first_name, middle_name, last_name, barangay')
+        .in('id', residentIds),
+      supabase
+        .from(ATTENDANCE_TABLE)
+        .select('id, resident_id, attendance_status, attended_at, scheduled_date')
+        .eq('service_id', serviceId)
+        .in('resident_id', residentIds)
+        .order('scheduled_date', { ascending: false }),
+    ]);
+    throwOnError(resErr, 'Could not load residents');
+    throwOnError(attErr, 'Could not load attendance');
+    for (const r of residents || []) residentById.set(r.id, r);
+    // Keep the most recent attendance record per resident (ordered desc above).
+    for (const a of attendance || []) {
+      if (!attendanceByResident.has(a.resident_id)) attendanceByResident.set(a.resident_id, a);
+    }
+  }
+
+  const registrations = planRows.map((p) => {
+    const resident = residentById.get(p.resident_id) || null;
+    const att = attendanceByResident.get(p.resident_id) || null;
+    return {
+      id: p.id,
+      residentId: p.resident_id,
+      residentName: residentDisplayName(resident),
+      barangay: resident?.barangay || '',
+      facilityType: p.facility_type,
+      plannedDate: p.planned_date,
+      note: p.note || '',
+      status: p.status,
+      registeredAt: p.created_at,
+      attendance: att
+        ? {
+            id: att.id,
+            status: att.attendance_status,
+            attendedAt: att.attended_at || null,
+            scheduledDate: att.scheduled_date,
+          }
+        : null,
+    };
+  });
+
+  return { service, registrations, counts: countRegistrations(registrations) };
+};
+
+const emptyRegistrationCounts = () => ({
+  registered: 0,
+  cancelled: 0,
+  attended: 0,
+  absent: 0,
+  pendingAttendance: 0,
+});
+
+/** Tally registrations by status for the staff roster header. */
+const countRegistrations = (registrations) => {
+  const counts = emptyRegistrationCounts();
+  for (const r of registrations) {
+    if (r.status === 'Cancelled') {
+      counts.cancelled += 1;
+      continue;
+    }
+    counts.registered += 1; // Planned
+    const attStatus = r.attendance?.status || null;
+    if (attStatus === 'attended' || attStatus === 'walk_in') counts.attended += 1;
+    else if (attStatus === 'absent') counts.absent += 1;
+    else counts.pendingAttendance += 1;
+  }
+  return counts;
+};
+
+/**
+ * Find an existing facility by name within the caller's municipality
+ * (case-insensitive, so the same place is never duplicated), or create one when
+ * the user typed a brand-new name.
+ *
+ * A newly entered facility is recorded as a Barangay Health Station: for a
+ * Health Supervisor it is tied to their assigned barangay (derived from the
+ * session), otherwise it carries no barangay (a municipality-level health
+ * center) and the resulting service is municipality-wide. The service-role
+ * client is used so this works for the manage roles even though the direct
+ * `facilities` RLS limits inserts to admin/MHO; `assertManager` + the
+ * municipality scope checked here are the authoritative server-side gate.
+ */
+const resolveOrCreateFacilityByName = async (user, { municipalityId, name, supervisorBarangayId, isSupervisor }, supabase) => {
+  const trimmed = text(name);
+  if (!trimmed) throw ApiError.unprocessable('Enter a facility name.');
+
+  // Reuse an existing facility with the same name (case-insensitive) to avoid
+  // duplicates. `_` and `%` are escaped so a literal name is matched, and a
+  // limited ordered read tolerates pre-existing case variants.
+  const pattern = trimmed.replace(/[\\%_]/g, (m) => `\\${m}`);
+  const { data: matches, error: findErr } = await supabase
+    .from('facilities')
+    .select('id, municipality_id, barangay_id, type')
+    .eq('municipality_id', municipalityId)
+    .ilike('name', pattern)
+    .order('created_at', { ascending: true })
+    .limit(1);
+  throwOnError(findErr, 'Could not verify facility');
+  if (matches && matches[0]) return matches[0];
+
+  const insertRow = {
+    municipality_id: municipalityId,
+    name: trimmed,
+    type: 'barangay_health_station',
+    barangay_id: isSupervisor ? supervisorBarangayId : null,
+  };
+  const { data: created, error: createErr } = await supabase
+    .from('facilities')
+    .insert(insertRow)
+    .select('id, municipality_id, barangay_id, type')
+    .single();
+  if (createErr) {
+    // Lost a race against the unique (municipality_id, name) constraint — the
+    // other writer created it, so re-read instead of failing the request.
+    const { data: raced } = await supabase
+      .from('facilities')
+      .select('id, municipality_id, barangay_id, type')
+      .eq('municipality_id', municipalityId)
+      .ilike('name', pattern)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (raced && raced[0]) return raced[0];
+    throwOnError(createErr, 'Could not create the facility');
+  }
+  return created;
+};
+
+/**
+ * Resolve the scope columns (facility + barangay) for a new service from the
+ * caller + payload. The barangay is DERIVED, never submitted:
+ *   - municipality-wide (or no facility)   -> facility null, barangay null;
+ *   - RHU facility                          -> that facility, barangay null;
+ *   - Barangay Health Station facility      -> that facility, barangay = the
+ *     facility's barangay (for a Health Supervisor, their own assigned
+ *     barangay, which a chosen BHS must belong to).
+ * A new free-typed facility name is resolved/created by
+ * `resolveOrCreateFacilityByName`. A facility must be in the caller's
+ * municipality.
  */
 const resolveScope = async (user, payload, supabase) => {
   const municipalityId = user.municipalityId;
   if (!municipalityId) throw ApiError.unprocessable('Your account has no municipality assignment.');
 
-  let facilityId = text(payload.facilityId || payload.facility_id) || null;
-  let barangayId = text(payload.barangayId || payload.barangay_id) || null;
-
-  // Health Supervisor can only create within their assigned barangay.
-  if (user.role === ROLES.HEALTH_SUPERVISOR) {
-    barangayId = user.barangayId || null;
-    if (!barangayId) throw ApiError.unprocessable('Your account has no barangay assignment.');
+  const isSupervisor = user.role === ROLES.HEALTH_SUPERVISOR;
+  const supervisorBarangayId = isSupervisor ? (user.barangayId || null) : null;
+  if (isSupervisor && !supervisorBarangayId) {
+    throw ApiError.unprocessable('Your account has no barangay assignment.');
   }
 
+  const municipalityWide = payload.municipalityWide === true;
+  const facilityId = text(payload.facilityId || payload.facility_id) || null;
+  const facilityName = text(payload.facilityName || payload.facility_name) || null;
+
+  // Explicit municipality-wide, or nothing chosen: no facility, no barangay.
+  if (municipalityWide || (!facilityId && !facilityName)) {
+    return { municipalityId, facilityId: null, barangayId: null };
+  }
+
+  let facility = null;
   if (facilityId) {
-    const { data: facility, error } = await supabase.from('facilities').select('id, municipality_id').eq('id', facilityId).maybeSingle();
+    const { data, error } = await supabase
+      .from('facilities')
+      .select('id, municipality_id, barangay_id, type')
+      .eq('id', facilityId)
+      .maybeSingle();
     throwOnError(error, 'Could not verify facility');
-    if (!facility || facility.municipality_id !== municipalityId) {
+    if (!data || data.municipality_id !== municipalityId) {
       throw ApiError.unprocessable('The selected facility is not in your municipality.');
     }
-  }
-  if (barangayId) {
-    const { data: brgy, error } = await supabase.from('barangays').select('id, municipality_id').eq('id', barangayId).maybeSingle();
-    throwOnError(error, 'Could not verify barangay');
-    if (!brgy || brgy.municipality_id !== municipalityId) {
-      throw ApiError.unprocessable('The selected barangay is not in your municipality.');
-    }
+    facility = data;
+  } else {
+    facility = await resolveOrCreateFacilityByName(
+      user,
+      { municipalityId, name: facilityName, supervisorBarangayId, isSupervisor },
+      supabase,
+    );
   }
 
-  return { municipalityId, facilityId, barangayId };
+  // Derive coverage from the facility. RHU (or any non-BHS) stays barangay-less
+  // (municipality/RHU-wide); a Barangay Health Station scopes to its barangay.
+  let barangayId = facility.type === 'barangay_health_station' ? (facility.barangay_id || null) : null;
+
+  if (isSupervisor && facility.type === 'barangay_health_station') {
+    // A supervisor's BHS must be in their assigned barangay; a BHS with no
+    // barangay yet adopts theirs. (An RHU chosen by a supervisor stays
+    // barangay-less — an RHU-wide service, per the coverage rules.)
+    if (facility.barangay_id && facility.barangay_id !== supervisorBarangayId) {
+      throw ApiError.unprocessable('That barangay health center is not in your assigned barangay.');
+    }
+    barangayId = supervisorBarangayId;
+  }
+
+  return { municipalityId, facilityId: facility.id, barangayId };
 };
 
 const notifyAssignees = async (supabase, { serviceName, personnelIds, assignedBy }) => {
@@ -473,6 +730,8 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
 
   const scope = await resolveScope(user, payload, supabase);
 
+  const startDate = text(payload.startDate || payload.start_date) || null;
+  const endDate = text(payload.endDate || payload.end_date) || startDate; // one-day service ends on its start date
   const row = {
     name,
     category,
@@ -480,6 +739,11 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
     municipality_id: scope.municipalityId,
     facility_id: scope.facilityId,
     barangay_id: scope.barangayId,
+    start_date: startDate,
+    start_time: text(payload.startTime || payload.start_time) || null,
+    end_date: endDate,
+    end_time: text(payload.endTime || payload.end_time) || null,
+    registration_deadline: text(payload.registrationDeadline || payload.registration_deadline) || null,
     active: payload.active === false ? false : true,
     created_by: user.id,
   };
@@ -546,7 +810,19 @@ export const assignablePersonnel = async ({ user, supabase = getServiceClient() 
   const scoped = user.role === ROLES.HEALTH_SUPERVISOR
     ? (data || []).filter((p) => p.barangay_id === user.barangayId)
     : data || [];
-  return scoped.map((p) => ({
+  // Exclude QA / live-verification artifact accounts (see
+  // isVerificationArtifactAccount) and deduplicate by the stable profile id so
+  // the picker lists every eligible person exactly once — never by display
+  // name, which is not unique (profiles.full_name has no uniqueness).
+  const seen = new Set();
+  const eligible = [];
+  for (const p of scoped) {
+    if (isVerificationArtifactAccount(p.email)) continue;
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    eligible.push(p);
+  }
+  return eligible.map((p) => ({
     id: p.id,
     name: p.full_name || p.email,
     role: p.role,
@@ -559,17 +835,21 @@ export const meta = () => ({ categories: SERVICE_CATEGORIES });
 /**
  * Reference data for the service form, scoped to the caller's municipality:
  * real barangays and facilities (RHU + Barangay Health Stations) with ids, plus
- * the category vocabulary. Lets the UI populate dropdowns from the database
- * instead of hardcoding, and keeps RHU modeled as a facility (never a barangay).
+ * the category vocabulary. Lets the UI populate the facility combobox from the
+ * database instead of hardcoding, and keeps RHU modeled as a facility (never a
+ * barangay). Facilities include their `barangayId` so the UI can show the
+ * coverage a chosen Barangay Health Station implies, and `assignedBarangay`
+ * exposes the Health Supervisor's own barangay (derived from the session) so
+ * the form can display the auto-applied coverage without a barangay selector.
  */
 export const reference = async ({ user, supabase = getServiceClient() }) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
-  const out = { categories: SERVICE_CATEGORIES, barangays: [], facilities: [] };
+  const out = { categories: SERVICE_CATEGORIES, barangays: [], facilities: [], assignedBarangay: null };
   if (!user.municipalityId) return out;
 
   const [{ data: barangays, error: bErr }, { data: facilities, error: fErr }] = await Promise.all([
     supabase.from('barangays').select('id, name').eq('municipality_id', user.municipalityId).order('name'),
-    supabase.from('facilities').select('id, name, type').eq('municipality_id', user.municipalityId).order('name'),
+    supabase.from('facilities').select('id, name, type, barangay_id').eq('municipality_id', user.municipalityId).order('name'),
   ]);
   throwOnError(bErr || fErr, 'Could not load reference data');
 
@@ -579,7 +859,17 @@ export const reference = async ({ user, supabase = getServiceClient() }) => {
     : barangays || [];
 
   out.barangays = scopedBarangays.map((b) => ({ id: b.id, name: b.name }));
-  out.facilities = (facilities || []).map((f) => ({ id: f.id, name: f.name, type: f.type || '' }));
+  out.facilities = (facilities || []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    type: f.type || '',
+    barangayId: f.barangay_id || null,
+  }));
+
+  if (user.role === ROLES.HEALTH_SUPERVISOR && user.barangayId) {
+    const own = (barangays || []).find((b) => b.id === user.barangayId) || null;
+    out.assignedBarangay = { id: user.barangayId, name: own?.name || user.barangay || '' };
+  }
   return out;
 };
 
@@ -598,4 +888,5 @@ export default {
   listAttendanceByResident,
   listScopeAttendance,
   updateHealthServiceAttendance,
+  listServiceRegistrations,
 };

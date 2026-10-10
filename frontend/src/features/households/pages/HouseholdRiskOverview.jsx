@@ -8,7 +8,7 @@ import { toRiskCluster, daysSince } from "../lib/riskClusterAdapter";
 import {
   RISK_LEVELS, RISK_LEVEL_LABELS, getRiskConfig,
 } from "@/lib/householdRisk";
-import { BARANGAYS } from "@/lib/barangays";
+import { useBarangays } from "@/context/BarangaysContext";
 import { formatShortDate } from "@/lib/dateUtils";
 import { FollowUpModal } from "../components/RiskActionModals";
 import {
@@ -80,6 +80,7 @@ export default function HouseholdRiskOverview() {
   }, [load]);
 
   // --- Filters ---
+  const { barangays: liveBarangays } = useBarangays();
   const [query, setQuery] = useState("");
   const [barangayFilter, setBarangayFilter] = useState("All");
   const [levelFilter, setLevelFilter] = useState("all");
@@ -282,8 +283,8 @@ export default function HouseholdRiskOverview() {
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Barangay</label>
             <select value={barangayFilter} onChange={(e) => setBarangayFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
               <option value="All">All Barangays</option>
-              {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
-              {byBarangay.filter(([n]) => !BARANGAYS.includes(n)).map(([n]) => <option key={n} value={n}>{n}</option>)}
+              {liveBarangays.map((b) => <option key={b} value={b}>{b}</option>)}
+              {byBarangay.filter(([n]) => !liveBarangays.includes(n)).map(([n]) => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
 

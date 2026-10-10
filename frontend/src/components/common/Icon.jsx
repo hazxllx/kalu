@@ -6,7 +6,7 @@ import {
   BarChart3, Send, Map, Shield, KeyRound, ScrollText, Terminal, AlertTriangle, Database,
   ShieldCheck, ShieldAlert, Megaphone, TrendingUp, TrendingDown, AlertCircle,
   User, LifeBuoy, Lock, Building2, Siren, UserCog, Server, CheckCircle2,
-  Droplets,
+  Droplets, MapPin, Pill,
 } from "lucide-react";
 
 const MAP = {
@@ -16,7 +16,7 @@ const MAP = {
   BarChart3, Send, Map, Shield, KeyRound, ScrollText, Terminal, AlertTriangle, Database,
   ShieldCheck, ShieldAlert, Megaphone, TrendingUp, TrendingDown, AlertCircle,
   User, LifeBuoy, Lock, Building2, Siren, UserCog, Server, CheckCircle2,
-  Droplets,
+  Droplets, MapPin, Pill,
 };
 
 export default function Icon({ name, ...props }) {

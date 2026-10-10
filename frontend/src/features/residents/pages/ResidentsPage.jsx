@@ -13,7 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { residentsApi } from "@/services/api";
-import { BARANGAYS } from "@/lib/barangays";
+import { useBarangays } from "@/context/BarangaysContext";
 import { dateOfBirth } from "@/utils/validation";
 
 const CIVIL_STATUS_OPTIONS = ["Single", "Married", "Widowed", "Separated"];
@@ -283,7 +283,8 @@ export default function ResidentsPage() {
   // barangay); the scope here only drives the subtitle and the barangay picker.
   const scope = getSupervisorScope(user);
   const assignedBarangay = scope && scope.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
-  const allowedBarangays = assignedBarangay ? [assignedBarangay] : [...BARANGAYS];
+  const { barangays: liveBarangays } = useBarangays();
+  const allowedBarangays = assignedBarangay ? [assignedBarangay] : [...liveBarangays];
 
   /**
    * The MHO browses the same directory municipally but may not correct

@@ -33,6 +33,9 @@ const emptyData = () => ({
   riskCriteria: [],
   riskSettings: null,
   healthAuditLogs: [],
+  medicines: [],
+  medicineAvailability: [],
+  bpThresholdSettings: null,
 });
 
 class FileStore {
@@ -61,6 +64,9 @@ class FileStore {
     if (!Array.isArray(this.data.riskCriteria)) this.data.riskCriteria = [];
     if (this.data.riskSettings === undefined) this.data.riskSettings = null;
     if (!Array.isArray(this.data.healthAuditLogs)) this.data.healthAuditLogs = [];
+    if (!Array.isArray(this.data.medicines)) this.data.medicines = [];
+    if (!Array.isArray(this.data.medicineAvailability)) this.data.medicineAvailability = [];
+    if (this.data.bpThresholdSettings === undefined) this.data.bpThresholdSettings = null;
   }
 
   /**
@@ -142,6 +148,21 @@ class FileStore {
   get healthAuditLogs() {
     this.ensureLoaded();
     return this.data.healthAuditLogs;
+  }
+
+  get medicines() {
+    this.ensureLoaded();
+    return this.data.medicines;
+  }
+
+  get medicineAvailability() {
+    this.ensureLoaded();
+    return this.data.medicineAvailability;
+  }
+
+  get bpThresholdSettings() {
+    this.ensureLoaded();
+    return this.data.bpThresholdSettings;
   }
 }
 

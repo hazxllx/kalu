@@ -42,6 +42,7 @@ router.get('/personnel', ...managerReaders, asyncHandler(controller.personnel));
 router.get('/attendance', ...readers, validate(attendanceListQueryValidator, 'query'), asyncHandler(controller.listAttendance));
 router.get('/', ...readers, asyncHandler(controller.list));
 router.patch('/attendance/:id', ...editors, attendanceIdParam, validate(updateAttendanceValidator), asyncHandler(controller.updateAttendance));
+router.get('/:id/registrations', ...readers, idParam, asyncHandler(controller.registrations));
 router.get('/:id', ...readers, idParam, asyncHandler(controller.get));
 
 router.post('/', ...creators, validate(createServiceValidator), asyncHandler(controller.create));

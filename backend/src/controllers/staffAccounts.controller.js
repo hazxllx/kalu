@@ -62,4 +62,14 @@ export const reject = async (req, res) => {
   sendData(res, { request });
 };
 
-export default { register, listQueue, pendingCount, getRequest, approve, reject };
+export const requestResubmission = async (req, res) => {
+  const request = await staffAccountsService.requestResubmission({
+    user: req.user,
+    id: req.params.id,
+    reason: req.body?.reason,
+    remarks: req.body?.remarks,
+  });
+  sendData(res, { request });
+};
+
+export default { register, listQueue, pendingCount, getRequest, approve, reject, requestResubmission };

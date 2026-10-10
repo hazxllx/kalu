@@ -41,7 +41,12 @@ import { uploadStaffDocument, getDocumentSignedUrl } from './storage.service.js'
 
 const TABLE = 'staff_account_requests';
 const DOCUMENTS_TABLE = 'staff_registration_documents';
-const REQUEST_STATUS = Object.freeze({ PENDING: 'pending', APPROVED: 'approved', REJECTED: 'rejected' });
+const REQUEST_STATUS = Object.freeze({
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  RESUBMISSION_REQUIRED: 'resubmission_required',
+});
 
 const REQUEST_SELECT = [
   'id',
@@ -587,6 +592,65 @@ export const reject = async ({ user, id, reason, remarks = '' } = {}) => {
   return toRequest(updated);
 };
 
+/**
+ * Ask a pending applicant to correct and resubmit. A reason is required and
+ * stored on the request. Unlike `reject`, the profile is kept at
+ * `pending_verification` (not `disabled`) so the account stays recoverable and
+ * the applicant can submit a corrected request. The decision audit entry
+ * (`RESUBMISSION_REQUIRED_STAFF_ACCOUNT`) is written by the database trigger.
+ */
+export const requestResubmission = async ({ user, id, reason, remarks = '' } = {}) => {
+  const row = await requireApprovable(user, id);
+
+  if (row.status === REQUEST_STATUS.APPROVED) {
+    throw ApiError.conflict('This account request has already been approved.');
+  }
+  if (row.status === REQUEST_STATUS.REJECTED) {
+    throw ApiError.conflict('This account request was already rejected.');
+  }
+  if (row.status === REQUEST_STATUS.RESUBMISSION_REQUIRED) {
+    throw ApiError.conflict('A resubmission has already been requested for this account.');
+  }
+
+  const trimmedReason = String(reason || '').trim();
+  if (!trimmedReason) throw ApiError.badRequest('A reason is required when requesting resubmission.');
+  const trimmedRemarks = String(remarks || '').trim();
+  const stored = trimmedRemarks ? `${trimmedReason} — ${trimmedRemarks}` : trimmedReason;
+
+  const supabase = getServiceClient();
+  const { data: updated, error } = await supabase
+    .from(TABLE)
+    .update({
+      status: REQUEST_STATUS.RESUBMISSION_REQUIRED,
+      rejection_reason: stored,
+      decided_by: user.id,
+      decided_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .eq('status', REQUEST_STATUS.PENDING)
+    .select(REQUEST_SELECT)
+    .maybeSingle();
+
+  if (error) throw dbError(error, 'request resubmission');
+  if (!updated) throw ApiError.conflict('This account request was already decided by someone else.');
+
+  // Keep the profile at pending_verification (served as 403) so sign-in stays
+  // refused but the account is not disabled — the applicant can still submit a
+  // corrected request and be approved later.
+  await supabase.from('profiles').update({ status: 'pending_verification' }).eq('id', updated.auth_user_id);
+
+  await notifyResident({
+    recipientAuthUserId: updated.auth_user_id,
+    category: 'alert',
+    title: 'Resubmission requested',
+    message: `Please update and resubmit your account request. Reason: ${stored}`,
+    relatedType: 'staff_account_request',
+    relatedId: updated.id,
+  });
+
+  return toRequest(updated);
+};
+
 export default {
   REQUEST_STATUS,
   submitRequest,
@@ -595,4 +659,5 @@ export default {
   pendingCount,
   approve,
   reject,
+  requestResubmission,
 };

@@ -23,6 +23,7 @@ import visitPlansRoutes from './visitPlans.routes.js';
 import referralsRoutes from './referrals.routes.js';
 import m1Routes from './m1.routes.js';
 import usersRoutes from './users.routes.js';
+import barangaysRoutes from './barangays.routes.js';
 import reportsRoutes from './reports.routes.js';
 import healthServicesRoutes from './healthServices.routes.js';
 import appointmentsRoutes from './appointments.routes.js';
@@ -31,6 +32,8 @@ import municipalSubmissionsRoutes from './municipalSubmissions.routes.js';
 import riskConfigRoutes from './riskConfig.routes.js';
 import guardianLinksRoutes from './guardianLinks.routes.js';
 import documentBrandingRoutes from './documentBranding.routes.js';
+import medicinesRoutes from './medicines.routes.js';
+import bpConfigRoutes from './bpConfig.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -109,6 +112,12 @@ router.use('/verifications', verificationsRoutes);
 // Supabase-backed reads + role/status/profile updates on the `profiles` table.
 router.use('/users', usersRoutes);
 
+// Admin Barangay Management (admin-only) — the database-backed barangay
+// registry (public.barangays) is the single source of truth for every barangay
+// dropdown and barangay-scoped query. Create/edit/deactivate/delete with
+// safe-delete dependency checks and rename propagation to denormalized names.
+router.use('/barangays', barangaysRoutes);
+
 // Role & permission matrix (BUG-011) — authoritative access-control config in
 // public.role_permissions. Read by any staff (drives UI), written by admins.
 router.use('/roles', rolesRoutes);
@@ -118,6 +127,13 @@ router.use('/roles', rolesRoutes);
 // roles; written only by the System Administrator, audited, and propagated to
 // resident records on every change.
 router.use('/risk-config', riskConfigRoutes);
+
+// Medicine catalog (generic-first, admin-managed) + blood-pressure threshold
+// configuration. Catalog + thresholds are read by clinical roles for the
+// consultation form (medicine search + BP classification); writes are
+// admin-only, audited, and reuse the existing permissions.
+router.use('/medicines', medicinesRoutes);
+router.use('/bp-config', bpConfigRoutes);
 
 // Official logo administration and centralized document-template branding.
 router.use('/document-branding', documentBrandingRoutes);

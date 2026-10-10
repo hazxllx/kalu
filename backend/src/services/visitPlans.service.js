@@ -3,7 +3,7 @@
  *
  * Backs public.visit_plans + a read-only health-service directory for the
  * resident portal (migration
- * supabase/migrations/20261014000000_resident_visit_plans.sql).
+ * supabase/migrations/20261014010000_resident_visit_plans.sql).
  *
  * This is deliberately a THIN, separate concept from the barangay appointment
  * system (public.appointments). A visit plan is a resident's intent to come on
@@ -32,6 +32,7 @@ const SERVICE_TABLE = 'health_services';
 const SCHEDULE_TABLE = 'appointment_schedules';
 const BLACKOUT_TABLE = 'appointment_blackouts';
 const PLAN_TABLE = 'visit_plans';
+const ATTENDANCE_TABLE = 'health_service_attendance';
 
 const PLAN_WINDOW_DAYS = 14; // the resident may plan a visit within the next two weeks
 
@@ -174,7 +175,26 @@ const hasUpcomingDay = (weekdays, blackoutDates, now = new Date()) => {
 // ---------------------------------------------------------------------------
 // Directory listing — services grouped by facility.
 // ---------------------------------------------------------------------------
-const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityName, plan) => {
+/**
+ * Map a staff-recorded health_service_attendance status to the resident-facing
+ * registration status. A plan with no attendance record yet is simply
+ * "Registered"; staff never "auto-attend" a resident just for registering.
+ */
+const residentStatusFor = (attendanceStatus) => {
+  switch (attendanceStatus) {
+    case 'attended':
+    case 'walk_in':
+      return 'Attended';
+    case 'absent':
+      return 'Missed';
+    case 'cancelled':
+      return 'Cancelled';
+    default:
+      return 'Registered';
+  }
+};
+
+const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityName, plan, attendanceStatus = null) => {
   const { weekdays, windowStart, windowEnd } = summarizeSchedule(scheduleRows);
   return {
     id: service.id,
@@ -186,8 +206,25 @@ const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityN
     weekdays,
     windowStart,
     windowEnd,
+    // The concrete one-off service window (set on the service record itself),
+    // so the resident sees the actual date/time before registering.
+    schedule: {
+      startDate: service.start_date || null,
+      startTime: hhmm(service.start_time),
+      endDate: service.end_date || null,
+      endTime: hhmm(service.end_time),
+      registrationDeadline: service.registration_deadline || null,
+    },
     hasUpcoming: hasUpcomingDay(weekdays, blackoutDates),
-    plan: plan ? { id: plan.id, plannedDate: plan.planned_date, note: plan.note || '' } : null,
+    plan: plan
+      ? {
+          id: plan.id,
+          plannedDate: plan.planned_date,
+          note: plan.note || '',
+          status: residentStatusFor(attendanceStatus),
+          attendanceStatus: attendanceStatus || null,
+        }
+      : null,
   };
 };
 
@@ -203,7 +240,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
 
   const { data: services, error } = await supabase
     .from(SERVICE_TABLE)
-    .select('id, name, description, municipality_id, barangay_id, active, visit_policy')
+    .select('id, name, description, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline')
     .eq('municipality_id', resident.municipality_id)
     .eq('active', true)
     .order('name');
@@ -216,7 +253,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
   const from = todayISO(now);
   const to = addDaysISO(from, PLAN_WINDOW_DAYS - 1);
 
-  const [schedules, blackouts, plansRes, rhu] = await Promise.all([
+  const [schedules, blackouts, plansRes, attendanceRes, rhu] = await Promise.all([
     loadSchedules(supabase, ids, resident),
     loadBlackouts(supabase, ids, resident, from, to),
     supabase
@@ -225,6 +262,12 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
       .eq('resident_id', resident.id)
       .eq('status', 'Planned')
       .gte('planned_date', from),
+    supabase
+      .from(ATTENDANCE_TABLE)
+      .select('service_id, attendance_status, scheduled_date')
+      .eq('resident_id', resident.id)
+      .in('service_id', ids)
+      .order('scheduled_date', { ascending: false }),
     rhuName(supabase, resident),
   ]);
   throwOnError(plansRes.error, 'Could not load your visit plans');
@@ -245,6 +288,12 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
     const existing = planByService.get(p.service_id);
     if (!existing || p.planned_date < existing.planned_date) planByService.set(p.service_id, p);
   }
+  // Most recent attendance status per service (attendance is best-effort: a
+  // query error must not blank the directory, so it is read without throwing).
+  const attendanceByService = new Map();
+  for (const a of attendanceRes?.data || []) {
+    if (!attendanceByService.has(a.service_id)) attendanceByService.set(a.service_id, a.attendance_status);
+  }
 
   const bhcName = resident.barangay || 'Barangay Health Center';
   const rhuDisplay = rhu;
@@ -260,6 +309,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
       blackoutByService.get(service.id) || new Set(),
       type === 'BHC' ? bhcName : rhuDisplay,
       planByService.get(service.id) || null,
+      attendanceByService.get(service.id) || null,
     );
     (type === 'BHC' ? bhc : rhuServices).push(view);
   }

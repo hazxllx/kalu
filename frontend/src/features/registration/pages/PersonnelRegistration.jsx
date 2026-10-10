@@ -24,7 +24,7 @@ import {
 import UploadComponent from "@/features/registration/components/UploadComponent";
 import DatePicker from "@/components/common/DatePicker";
 import { staffAccountsApi } from "@/services/api";
-import { BARANGAYS } from "@/lib/barangays";
+import { useBarangays } from "@/context/BarangaysContext";
 import { CONSULTATION_LOCATIONS, barangayHealthCenter } from "@/lib/consultationLocations";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -155,6 +155,7 @@ function checkStrength(pw) {
 
 export default function PersonnelRegistration() {
   const navigate = useNavigate();
+  const { barangays: liveBarangays } = useBarangays();
   const [step, setStep] = useState(1);
   const [show, setShow] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -646,7 +647,7 @@ export default function PersonnelRegistration() {
                   {isBarangayScoped ? (
                     <SelectField label="Barangay" required error={errors.barangay} value={form.barangay} onChange={set("barangay")}>
                       <option value="">Select barangay</option>
-                      {BARANGAYS.map((b) => (
+                      {liveBarangays.map((b) => (
                         <option key={b} value={b}>{b}</option>
                       ))}
                     </SelectField>

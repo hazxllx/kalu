@@ -4,17 +4,80 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import DataTable from "@/components/tables/DataTable";
 import {
-  Search, FileText, Save, X, Plus, CheckCircle2, Users, ChevronLeft, Stethoscope, Calendar,
+  Search, FileText, Save, X, Plus, CheckCircle2, Users, ChevronLeft, Stethoscope, Calendar, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { consultationsApi, residentsApi } from "@/services/api";
+import { consultationsApi, residentsApi, bpConfigApi } from "@/services/api";
+import MedicineSelector from "@/features/consultations/components/MedicineSelector";
+import { classifyBloodPressure as classifyBp } from "@/features/consultations/utils/bpClassification";
 
 const inputCls = (error) =>
   `w-full bg-white border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue ${
     error ? "border-brand-danger bg-red-50/40" : "border-brand-border"
   }`;
+
+/**
+ * Inline Yes/No segmented control used for the boolean-style consultation
+ * fields (Follow-up Required, Referral Required). It replaces the old native
+ * <select> while keeping the exact "Yes"/"No" string values the form state,
+ * validation and API already expect. The control behaves as an accessible
+ * radio group: it exposes an accessible group label, uses roving tabindex so
+ * the selected option is reachable by Tab, supports arrow-key navigation, and
+ * highlights the active option with the subtle blue KALUSAGAP accent.
+ */
+function YesNoToggle({ label, value, onChange, required = false }) {
+  const options = ["Yes", "No"];
+  const handleKeyDown = (e) => {
+    const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    const current = options.indexOf(value);
+    const base = current === -1 ? 0 : current;
+    const forward = e.key === "ArrowRight" || e.key === "ArrowDown";
+    const nextIdx = forward
+      ? (base + 1) % options.length
+      : (base - 1 + options.length) % options.length;
+    onChange(options[nextIdx]);
+  };
+  return (
+    <div>
+      <p className="text-xs text-brand-gray mb-1">
+        {label}
+        {required && <span className="text-brand-danger"> *</span>}
+      </p>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        onKeyDown={handleKeyDown}
+        className="inline-flex items-center gap-0.5 rounded-btn border border-brand-border bg-white p-0.5"
+      >
+        {options.map((opt) => {
+          const active = value === opt;
+          return (
+            <button
+              key={opt}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-label={`${label}: ${opt}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onChange(opt)}
+              className={`min-w-[3.25rem] rounded-[0.45rem] px-3 py-1 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 ${
+                active
+                  ? "border border-brand-blue bg-brand-light text-brand-blue"
+                  : "border border-transparent text-brand-gray hover:text-brand-ink"
+              }`}
+            >
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /** A value is a valid, positive measurement, or empty (the field is optional). */
 const isPositiveOrEmpty = (value) => {
@@ -37,18 +100,6 @@ const computeBmiDisplay = (heightCm, weightKg) => {
   const bmi = w / (heightM * heightM);
   if (!Number.isFinite(bmi)) return "";
   return bmi.toFixed(2);
-};
-
-const classifyBloodPressure = (value) => {
-  const match = String(value || "").trim().match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/);
-  if (!match) return null;
-  const systolic = Number(match[1]);
-  const diastolic = Number(match[2]);
-  if (systolic > 180 || diastolic > 110) return { label: "Hypertensive Crisis", tone: "bg-brand-danger text-white", emergency: true };
-  if (systolic >= 160 || diastolic >= 100) return { label: "Stage 2 hypertension", tone: "bg-brand-danger/10 text-brand-danger" };
-  if (systolic >= 140 || diastolic >= 90) return { label: "Stage 1 hypertension", tone: "bg-brand-amber/10 text-brand-amber" };
-  if (systolic >= 120 || diastolic >= 80) return { label: "Prehypertension", tone: "bg-brand-goldpale text-brand-amber" };
-  return { label: "Normal", tone: "bg-brand-green/10 text-brand-green" };
 };
 
 /**
@@ -94,6 +145,7 @@ const emptyForm = () => ({
   diagnosis: "",
   treatmentGiven: "",
   medicationPrescribed: "",
+  medications: [],
   adviceGiven: "",
   followUpRequired: "No",
   nextVisitDate: "",
@@ -186,6 +238,10 @@ export default function TreatmentConsultation() {
   const [formData, setFormData] = useState(emptyForm());
   const [errors, setErrors] = useState(/** @type {FormErrors} */ ({}));
   const [toast, setToast] = useState(null);
+  // Admin-configured blood-pressure thresholds + labels. Falls back to the
+  // documented defaults in the classifier when unavailable, so classification
+  // always works even if this read fails.
+  const [bpConfig, setBpConfig] = useState(null);
 
   // Read-only BMI, recomputed immediately whenever height or weight changes.
   const bmiDisplay = useMemo(
@@ -193,8 +249,8 @@ export default function TreatmentConsultation() {
     [formData.height, formData.weight],
   );
   const bloodPressureCategory = useMemo(
-    () => classifyBloodPressure(formData.bloodPressure),
-    [formData.bloodPressure],
+    () => classifyBp(formData.bloodPressure, bpConfig?.thresholds || null, bpConfig?.labels || null),
+    [formData.bloodPressure, bpConfig],
   );
 
   const load = useCallback(() => {
@@ -217,6 +273,16 @@ export default function TreatmentConsultation() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Load the active BP thresholds once (best-effort; defaults apply on failure).
+  useEffect(() => {
+    let active = true;
+    bpConfigApi
+      .get()
+      .then((cfg) => { if (active) setBpConfig(cfg || null); })
+      .catch(() => { if (active) setBpConfig(null); });
+    return () => { active = false; };
+  }, []);
 
   const filteredResidents = residentOptions.filter(
     (r) =>
@@ -262,6 +328,7 @@ export default function TreatmentConsultation() {
       diagnosis: record.diagnosis || "",
       treatmentGiven: record.treatmentGiven || "",
       medicationPrescribed: record.medicationPrescribed || "",
+      medications: Array.isArray(record.medications) ? record.medications : [],
       adviceGiven: record.adviceGiven || "",
       followUpRequired: record.followUpRequired || "No",
       nextVisitDate: record.nextVisitDate || "",
@@ -382,7 +449,7 @@ export default function TreatmentConsultation() {
   const renderForm = () => (
     <div className="grid lg:grid-cols-3 gap-5">
       {/* Left Panel - Resident Search */}
-      <Card className="p-6 lg:col-span-1 h-fit">
+      <Card className="p-5 lg:col-span-1 h-fit">
         <h3 className="font-semibold text-brand-ink mb-4">Resident Search</h3>
         <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2.5 mb-5">
           <Search className="w-4 h-4 text-brand-gray" />
@@ -432,8 +499,8 @@ export default function TreatmentConsultation() {
       </Card>
 
       {/* Right Panel - Consultation Form */}
-      <Card className="p-6 lg:col-span-2">
-        <div className="flex items-center justify-between gap-3 mb-6">
+      <Card className="p-5 lg:col-span-2">
+        <div className="flex items-center justify-between gap-3 mb-5">
           <h3 className="font-semibold text-brand-ink">
             {editingId ? "Edit Treatment Consultation" : "Treatment Consultation Form"}
           </h3>
@@ -445,10 +512,10 @@ export default function TreatmentConsultation() {
         </div>
 
         {/* Resident Information */}
-        <div className="mb-6">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-3">Resident Information</h4>
+        <div className="mb-5">
+          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Resident Information</h4>
           {selectedResident ? (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3">
               <div>
                 <p className="text-xs text-brand-gray mb-1">Full Name</p>
                 <p className="text-sm font-medium text-brand-ink">{selectedResident.name}</p>
@@ -482,9 +549,9 @@ export default function TreatmentConsultation() {
         </div>
 
         {/* Consultation Information */}
-        <div className="mb-6">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-3">Consultation Information</h4>
-          <div className="grid sm:grid-cols-2 gap-4 mb-4">
+        <div className="mb-5">
+          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Consultation Information</h4>
+          <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3 mb-3">
             <div>
               <p className="text-xs text-brand-gray mb-1">Consultation Date <span className="text-brand-danger">*</span></p>
               <input
@@ -505,7 +572,7 @@ export default function TreatmentConsultation() {
               />
             </div>
           </div>
-          <div className="mb-4">
+          <div className="mb-3">
             <p className="text-xs text-brand-gray mb-1">Chief Complaint <span className="text-brand-danger">*</span></p>
             <input
               type="text"
@@ -519,16 +586,16 @@ export default function TreatmentConsultation() {
         </div>
 
         {/* Vital Signs */}
-        <div className="mb-6">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-3">Vital Signs</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="mb-5">
+          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Vital Signs</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-3">
             <div>
               <p className="text-xs text-brand-gray mb-1">Blood Pressure (mmHg)</p>
               <input type="text" placeholder="e.g. 120/80" value={formData.bloodPressure} onChange={(e) => setFormData({ ...formData, bloodPressure: e.target.value })} className={inputCls(errors.bloodPressure)} />
               {errors.bloodPressure && <p className="mt-1 text-xs text-brand-danger">{errors.bloodPressure}</p>}
               {bloodPressureCategory && (
                 <span className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${bloodPressureCategory.tone}`}>
-                  {bloodPressureCategory.label}
+                  Classification: {bloodPressureCategory.label}
                   {bloodPressureCategory.emergency && (
                     <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold tracking-wide">
                       EMERGENCY
@@ -583,16 +650,30 @@ export default function TreatmentConsultation() {
               {errors.oxygenSaturation && <p className="mt-1 text-xs text-brand-danger">{errors.oxygenSaturation}</p>}
             </div>
           </div>
+          {bloodPressureCategory?.emergency && (
+            <div className="mt-3 flex items-start gap-2 rounded-btn border border-brand-danger/40 bg-red-50/70 px-3 py-2.5" role="alert" aria-live="assertive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-brand-danger" aria-hidden="true" />
+              <div className="text-xs text-brand-danger">
+                <p className="font-semibold">Blood pressure is in the crisis range ({bloodPressureCategory.systolic}/{bloodPressureCategory.diastolic} mmHg).</p>
+                <p className="mt-0.5 text-brand-danger/90">
+                  Repeat the measurement after a few minutes and assess the resident promptly. If the repeat reading
+                  stays severely elevated, or there is chest pain, difficulty breathing, weakness, confusion or other
+                  emergency symptoms, follow emergency referral procedures immediately. This screening result does not
+                  prescribe or recommend any medication.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Clinical Assessment */}
-        <div className="mb-6">
-          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-3">Clinical Assessment</h4>
-          <div className="space-y-4">
+        <div className="mb-5">
+          <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Clinical Assessment</h4>
+          <div className="space-y-3">
             <div>
               <p className="text-xs text-brand-gray mb-1">Findings <span className="text-brand-danger">*</span></p>
               <textarea
-                rows={3}
+                rows={2}
                 value={formData.findings}
                 onChange={(e) => setFormData({ ...formData, findings: e.target.value })}
                 className={`${inputCls(errors.findings)} resize-none`}
@@ -611,6 +692,14 @@ export default function TreatmentConsultation() {
               {errors.diagnosis && <p className="mt-1 text-xs text-brand-danger">{errors.diagnosis}</p>}
             </div>
             <div>
+              <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
+              <MedicineSelector
+                value={formData.medications}
+                onChange={(medications) => setFormData((prev) => ({ ...prev, medications }))}
+                facilityId={user?.facilityId || ""}
+              />
+            </div>
+            <div>
               <p className="text-xs text-brand-gray mb-1">Treatment Provided <span className="text-brand-danger">*</span></p>
               <textarea
                 rows={2}
@@ -621,38 +710,27 @@ export default function TreatmentConsultation() {
               {errors.treatmentGiven && <p className="mt-1 text-xs text-brand-danger">{errors.treatmentGiven}</p>}
             </div>
             <div>
-              <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
-              <input
-                type="text"
-                value={formData.medicationPrescribed}
-                onChange={(e) => setFormData({ ...formData, medicationPrescribed: e.target.value })}
-                placeholder="e.g. Paracetamol 500mg, Ferrous Sulfate"
-                className={inputCls()}
-              />
-            </div>
-            <div>
               <p className="text-xs text-brand-gray mb-1">Recommendations / Instructions</p>
               <textarea
-                rows={3}
+                rows={2}
                 value={formData.adviceGiven}
                 onChange={(e) => setFormData({ ...formData, adviceGiven: e.target.value })}
                 className={`${inputCls()} resize-none`}
               />
             </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-brand-gray mb-1">Follow-up Required</p>
-                <select
-                  value={formData.followUpRequired}
-                  onChange={(e) => setFormData({ ...formData, followUpRequired: e.target.value })}
-                  className={inputCls()}
-                >
-                  <option value="Yes">Yes</option>
-                  <option value="No">No</option>
-                </select>
-              </div>
+            <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3">
+              <YesNoToggle
+                label="Follow-up Required"
+                value={formData.followUpRequired}
+                onChange={(val) => setFormData({ ...formData, followUpRequired: val })}
+              />
+              <YesNoToggle
+                label="Referral Required"
+                value={formData.referralRequired}
+                onChange={(val) => setFormData({ ...formData, referralRequired: val })}
+              />
               {formData.followUpRequired === "Yes" && (
-                <div>
+                <div className="sm:col-span-2">
                   <p className="text-xs text-brand-gray mb-1">Next Visit Date <span className="text-brand-danger">*</span></p>
                   <input
                     type="date"
@@ -663,19 +741,6 @@ export default function TreatmentConsultation() {
                   {errors.nextVisitDate && <p className="mt-1 text-xs text-brand-danger">{errors.nextVisitDate}</p>}
                 </div>
               )}
-            </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-brand-gray mb-1">Referral Required</p>
-                <select
-                  value={formData.referralRequired}
-                  onChange={(e) => setFormData({ ...formData, referralRequired: e.target.value })}
-                  className={inputCls()}
-                >
-                  <option value="Yes">Yes</option>
-                  <option value="No">No</option>
-                </select>
-              </div>
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Notes / Remarks</p>

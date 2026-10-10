@@ -4,6 +4,7 @@ import { BrowserRouter as Router } from 'react-router-dom';
 
 import { queryClientInstance } from '@/lib/query-client';
 import { AuthProvider } from '@/context/AuthContext';
+import { BarangaysProvider } from '@/context/BarangaysContext';
 import { PermissionsProvider } from '@/context/PermissionsContext';
 import { PhnCoverageProvider } from '@/context/PhnCoverageContext';
 import { ThemeProvider } from '@/context/ThemeContext';
@@ -22,13 +23,15 @@ function App() {
         <OfflineSyncProvider>
           <PhnCoverageProvider>
             <PermissionsProvider>
-              <QueryClientProvider client={queryClientInstance}>
-                <Router>
-                  <ScrollToTop />
-                  <AppRoutes />
-                </Router>
-                <Toaster />
-              </QueryClientProvider>
+              <BarangaysProvider>
+                <QueryClientProvider client={queryClientInstance}>
+                  <Router>
+                    <ScrollToTop />
+                    <AppRoutes />
+                  </Router>
+                  <Toaster />
+                </QueryClientProvider>
+              </BarangaysProvider>
             </PermissionsProvider>
           </PhnCoverageProvider>
         </OfflineSyncProvider>

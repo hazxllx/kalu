@@ -4,11 +4,13 @@ import { invalid, isUuid, text, valid } from './common.js';
 /**
  * Health service request validation. Municipality/barangay scope is taken from
  * the authenticated session in the service (a Health Supervisor is forced to
- * their own barangay), so only content + optional facility/barangay/personnel
- * references are accepted here.
+ * their own barangay) and the barangay is DERIVED from the chosen facility, so
+ * the client never submits a barangay. Only content + an optional facility
+ * reference (an existing id OR a new free-typed name) + an optional
+ * municipality-wide flag + personnel references are accepted here.
  */
 
-const LIMITS = { name: 160, description: 2000 };
+const LIMITS = { name: 160, description: 2000, facilityName: 160 };
 const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'cancelled', 'walk_in']);
 
 const isDateOnly = (value) => {
@@ -16,6 +18,16 @@ const isDateOnly = (value) => {
   const date = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 };
+
+// Local time-of-day "HH:MM" (24h) and local "YYYY-MM-DDTHH:MM" (datetime-local)
+// — the exact shapes the modal's <input type="time"> / "datetime-local" emit.
+const isTimeOfDay = (value) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+const isLocalDateTime = (value) => {
+  const [datePart, timePart] = String(value).split('T');
+  return Boolean(timePart) && isDateOnly(datePart) && isTimeOfDay(timePart);
+};
+// Comparable, lexicographically-ordered "YYYY-MM-DDTHH:MM" key.
+const atKey = (date, time) => `${date}T${time}`;
 
 const isDateTime = (value) => value === null || (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Date.parse(value)));
 
@@ -28,14 +40,55 @@ export const createServiceValidator = (input = {}) => {
   const category = text(input?.category);
   if (category && !SERVICE_CATEGORIES.includes(category)) errors.category = 'Select a valid service category.';
 
+  // Facility coverage: either an existing facility id, OR a new free-typed
+  // facility name, OR the explicit municipality-wide flag — never a barangay
+  // (the barangay is derived server-side from the facility + the session).
   const facilityId = text(input?.facilityId || input?.facility_id);
-  const barangayId = text(input?.barangayId || input?.barangay_id);
+  const facilityName = text(input?.facilityName || input?.facility_name);
+  const municipalityWide = input?.municipalityWide === true || input?.municipalityWide === 'true';
+
   if (facilityId && !isUuid(facilityId)) errors.facilityId = 'The selected facility is not valid.';
-  if (barangayId && !isUuid(barangayId)) errors.barangayId = 'The selected barangay is not valid.';
+  if (facilityName && facilityName.length > LIMITS.facilityName) errors.facilityName = 'The facility name is too long.';
+  if (facilityId && facilityName) errors.facilityName = 'Choose an existing facility or enter a new name, not both.';
+  if (municipalityWide && (facilityId || facilityName)) errors.municipalityWide = 'A municipality-wide service cannot also select a facility.';
 
   const personnelIdsRaw = Array.isArray(input?.personnelIds) ? input.personnelIds : [];
   const personnelIds = personnelIdsRaw.map((p) => text(p)).filter(Boolean);
   if (personnelIds.some((p) => !isUuid(p))) errors.personnelIds = 'One or more selected personnel are not valid.';
+
+  // Schedule: start date + start time + end time are required; end date is
+  // optional (defaults to the start date); registration deadline is optional.
+  const startDate = text(input?.startDate || input?.start_date);
+  const startTime = text(input?.startTime || input?.start_time);
+  const endDateRaw = text(input?.endDate || input?.end_date);
+  const endTime = text(input?.endTime || input?.end_time);
+  const registrationDeadline = text(input?.registrationDeadline || input?.registration_deadline);
+
+  if (!startDate) errors.startDate = 'A start date is required.';
+  else if (!isDateOnly(startDate)) errors.startDate = 'Enter a valid start date.';
+  if (!startTime) errors.startTime = 'A start time is required.';
+  else if (!isTimeOfDay(startTime)) errors.startTime = 'Enter a valid start time.';
+  if (!endTime) errors.endTime = 'An end time is required.';
+  else if (!isTimeOfDay(endTime)) errors.endTime = 'Enter a valid end time.';
+  if (endDateRaw && !isDateOnly(endDateRaw)) errors.endDate = 'Enter a valid end date.';
+  if (registrationDeadline && !isLocalDateTime(registrationDeadline)) {
+    errors.registrationDeadline = 'Enter a valid registration deadline.';
+  }
+
+  // A one-day service ends on its start date when no end date is supplied.
+  const endDate = endDateRaw || startDate;
+
+  // Cross-field rules (only when the referenced fields are individually valid).
+  if (!errors.startDate && !errors.startTime && !errors.endTime && !errors.endDate) {
+    if (atKey(endDate, endTime) < atKey(startDate, startTime)) {
+      errors.endTime = 'The end date and time cannot be earlier than the start.';
+    }
+  }
+  if (!errors.registrationDeadline && registrationDeadline && !errors.startDate && !errors.startTime) {
+    if (registrationDeadline > atKey(startDate, startTime)) {
+      errors.registrationDeadline = 'The registration deadline cannot be after the service start.';
+    }
+  }
 
   if (Object.keys(errors).length) return invalid(errors);
   return valid({
@@ -43,8 +96,14 @@ export const createServiceValidator = (input = {}) => {
     category: category || 'Other',
     description: text(input?.description).slice(0, LIMITS.description),
     facilityId: facilityId || null,
-    barangayId: barangayId || null,
+    facilityName: facilityName || null,
+    municipalityWide,
     personnelIds,
+    startDate,
+    startTime,
+    endDate,
+    endTime,
+    registrationDeadline: registrationDeadline || null,
     active: input?.active === false ? false : true,
   });
 };

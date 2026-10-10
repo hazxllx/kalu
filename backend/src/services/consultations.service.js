@@ -5,9 +5,18 @@ import { getServiceClient } from '../config/supabase.js';
 import * as operational from './operational.service.js';
 import { persistResidentRisk } from './residentRisk.service.js';
 import { computeBMI } from '../utils/bmi.js';
+import { normalizeMedications } from './medicines.service.js';
+import { classifyWithConfig } from './bpConfig.service.js';
+import { classifyBloodPressure as classifyBpWithThresholds } from '../config/bpThresholds.js';
 
 const STAFF_ROLES = new Set(['health_supervisor', 'phn']);
 const text = (value) => String(value ?? '').trim();
+
+/** Interpret the various truthy encodings the "Referral Required" field uses. */
+const referralIsRequired = (payload = {}) => {
+  const raw = String(payload.referralRequired ?? '').trim().toLowerCase();
+  return payload.referralRequired === true || raw === 'yes' || raw === 'true';
+};
 
 /**
  * Server-side consultation vitals validation (issue #14).
@@ -111,7 +120,7 @@ const assertResidentScope = (user, resident) => {
   }
 };
 
-export const toVisit = (payload = {}, user, residentId) => ({
+export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
   residentId,
   recordedById: user.id,
   recordedByRole: user.role,
@@ -125,6 +134,15 @@ export const toVisit = (payload = {}, user, residentId) => ({
   findings: [text(payload.findings), text(payload.diagnosis)].filter(Boolean).join('\nDiagnosis: '),
   treatmentGiven: [text(payload.treatmentGiven), text(payload.medicationPrescribed)].filter(Boolean).join('\nMedication: '),
   recommendation: [text(payload.adviceGiven), payload.nextVisitDate ? `Next visit: ${payload.nextVisitDate}` : ''].filter(Boolean).join('\n'),
+  // Structured, non-lossy prescription storage (by value, so a later catalog
+  // change never alters an already-recorded consultation).
+  medications: normalizeMedications(payload.medications),
+  // Previously-dropped field, now persisted.
+  referralRequired: referralIsRequired(payload),
+  // Blood-pressure classification SNAPSHOT recorded at the time of the
+  // consultation. Preserved historically: a later threshold change does not
+  // alter it (it is only recomputed when the consultation itself is saved).
+  bpClassification: extra.bpClassification ?? null,
   vitals: {
     bp: text(payload.bloodPressure),
     temperature: payload.temperature,
@@ -144,7 +162,7 @@ export const toVisit = (payload = {}, user, residentId) => ({
   },
 });
 
-const fromVisit = async (visit, supabase = getServiceClient()) => {
+export const fromVisit = async (visit, supabase = getServiceClient()) => {
   const resident = visit.resident || {};
   const findings = text(visit.findings);
   const diagnosisMarker = '\nDiagnosis: ';
@@ -177,6 +195,31 @@ const fromVisit = async (visit, supabase = getServiceClient()) => {
     }
   }
 
+  // Treatment / medication separation. New records store medications in the
+  // structured `medications` column; legacy records encoded a single medication
+  // string after a "\nMedication: " marker inside treatment_given.
+  const rawTreatment = text(visit.treatmentGiven);
+  const medMarker = '\nMedication: ';
+  const [treatmentText, legacyMedication] = rawTreatment.includes(medMarker)
+    ? [rawTreatment.slice(0, rawTreatment.indexOf(medMarker)), rawTreatment.slice(rawTreatment.indexOf(medMarker) + medMarker.length)]
+    : [rawTreatment, ''];
+
+  const columnMedications = Array.isArray(visit.medications) ? visit.medications : [];
+  const medications = columnMedications.length
+    ? columnMedications
+    : (text(legacyMedication)
+      ? [{ genericName: text(legacyMedication), custom: true, source: 'custom' }]
+      : []);
+  const medicationPrescribed = medications.map((m) => [m.genericName, m.strength].filter(Boolean).join(' ')).filter(Boolean).join(', ');
+
+  // Blood-pressure classification: use the snapshot recorded on the visit when
+  // present (historical); for legacy rows without one, derive a display value
+  // from the default reference thresholds. Never fabricates "Normal" for an
+  // empty/invalid reading (the classifier returns null).
+  const bloodPressureClassification = (visit.bpClassification && typeof visit.bpClassification === 'object')
+    ? visit.bpClassification
+    : classifyBpWithThresholds(visit.vitals?.bp);
+
   return {
     id: visit.id,
     resident: {
@@ -194,12 +237,15 @@ const fromVisit = async (visit, supabase = getServiceClient()) => {
     chiefComplaint: visit.chiefComplaint || '',
     findings: findingsText,
     diagnosis: text(diagnosis),
-    treatmentGiven: visit.treatmentGiven || '',
-    medicationPrescribed: '',
+    treatmentGiven: treatmentText,
+    medicationPrescribed,
+    medications,
     adviceGiven: visit.recommendation || '',
     remarks: visit.clinicalHistory || visit.phn?.notes || '',
     followUpRequired: visit.recommendation?.includes('Next visit:') ? 'Yes' : 'No',
     nextVisitDate: visit.recommendation?.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || '',
+    referralRequired: visit.referralRequired ? 'Yes' : 'No',
+    bloodPressureClassification,
     vitals: {
       ...(visit.vitals || {}),
       bloodPressureCategory: classifyBloodPressure(visit.vitals?.bp),
@@ -405,7 +451,8 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   if (followUpErrors.length) throw ApiError.unprocessable('Please correct the consultation fields shown below.', { nextVisitDate: followUpErrors.join(' ') });
   const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate };
   const ids = await repository.nextSubmissionId();
-  const visit = await repository.insertVisit({ id: ids.id, ...toVisit(cleanPayload, user, resident.id) });
+  const bpClassification = await classifyWithConfig(cleanPayload.bloodPressure);
+  const visit = await repository.insertVisit({ id: ids.id, ...toVisit(cleanPayload, user, resident.id, { bpClassification }) });
   await syncConsultationFollowUp({ user, visit, payload: cleanPayload, supabase });
   // Recorded health data changed -> recompute + persist the resident's risk
   // (backend-authoritative; best-effort so a save is never blocked by it).
@@ -424,7 +471,8 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
     throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
   }
   const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate, residentId: visit.residentId };
-  const updated = await repository.updateVisit(id, toVisit(cleanPayload, user, visit.residentId));
+  const bpClassification = await classifyWithConfig(cleanPayload.bloodPressure);
+  const updated = await repository.updateVisit(id, toVisit(cleanPayload, user, visit.residentId, { bpClassification }));
   await syncConsultationFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
   // Recorded health data changed -> recompute + persist the resident's risk.
   await persistResidentRisk({ residentId: visit.residentId });

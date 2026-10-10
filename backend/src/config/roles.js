@@ -39,11 +39,25 @@ export const FEATURE_ROLES = Object.freeze({
   users: [ROLES.ADMIN],
   system: [ROLES.ADMIN],
 
+  // Barangay registry administration (Admin Barangay Management). The barangay
+  // list is database-backed; only the System Administrator may create, edit,
+  // deactivate or delete a barangay. Reads for the editor's municipality list
+  // reuse the same admin gate. The public barangay list used by dropdowns is
+  // served separately (Supabase public-read policy on public.barangays).
+  barangays: [ROLES.ADMIN],
+
   // Resident risk assessment configuration (criteria + thresholds). Only the
   // System Administrator may change it; the clinical/monitoring roles may read
   // it so the Resident Detail breakdown and dashboards can label criteria.
   riskConfig: [ROLES.ADMIN],
   riskConfigRead: [ROLES.ADMIN, ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR],
+
+  // Medicine catalog + blood-pressure threshold configuration. Only the System
+  // Administrator may change the catalog/thresholds; clinical roles may read
+  // the catalog (to search when prescribing) and the thresholds (to classify a
+  // recorded blood-pressure reading in the consultation form).
+  medicineCatalog: [ROLES.ADMIN],
+  medicineCatalogRead: [ROLES.ADMIN, ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR, ROLES.RHU_PERSONNEL],
 
   // Operational account verification queue. The gate is deliberately NOT the
   // admin list: PHN reviews Health Supervisor + RHU Personnel requests and the
