@@ -114,9 +114,6 @@ export default function RhuTriage() {
   const [reason, setReason] = useState("");
   const [reasonDetail, setReasonDetail] = useState("");
   const [notes, setNotes] = useState("");
-  // Assigned personnel (name & designation) who performed the triage. Optional;
-  // falls back to the signed-in account name on the server.
-  const [assignedPersonnel, setAssignedPersonnel] = useState("");
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [listSearch, setListSearch] = useState("");
   const [toast, setToast] = useState(null);
@@ -359,7 +356,6 @@ export default function RhuTriage() {
       bloodSugar: vitals.bloodSugar.trim() || null,
       notes: notes.trim(),
       personnel: user?.name || "RHU Personnel",
-      assignedPersonnel: assignedPersonnel.trim(),
       visitDate: new Date().toLocaleDateString("en-US", {
         year: "numeric",
         month: "long",
@@ -917,19 +913,14 @@ export default function RhuTriage() {
                   </div>
 
                   <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
-                    <label htmlFor="assignedPersonnel" className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">
-                      Assigned Personnel (Name &amp; Designation)
-                    </label>
-                    <input
-                      id="assignedPersonnel"
-                      type="text"
-                      value={assignedPersonnel}
-                      onChange={(e) => setAssignedPersonnel(e.target.value)}
-                      placeholder="e.g. Juana Dela Cruz, RN"
-                      className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue"
-                    />
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">
+                      Performed By
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-brand-ink">
+                      {user?.name || "Your account"}
+                    </p>
                     <p className="mt-1 text-[11px] text-brand-gray">
-                      Optional. Who performed this triage. Defaults to your account name if left blank.
+                      This triage is automatically recorded under your signed-in account.
                     </p>
                   </div>
                 </div>

@@ -5,6 +5,7 @@ import { Card } from "@/components/common/Card";
 import MedicalCertificateModal, { CertificateStatusBadge } from "@/features/certificates/components/MedicalCertificateModal";
 import { useCertificateMeta, useCertificateRegister } from "@/features/certificates/hooks/useCertificateRegister";
 import { useAuth } from "@/context/AuthContext";
+import { canInitiateCertificate } from "@/lib/rhuStations";
 import { Search, FileText, Plus, X, ChevronRight, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 const formatDate = (iso) => {
@@ -34,6 +35,8 @@ export default function MedicalCertificates() {
   const { rows: certificates, loading, error, refresh, setStatus } = useCertificateRegister();
   const isReviewer = REVIEW_ROLES.includes(user?.role);
   const canPrepare = EDIT_ROLES.includes(user?.role);
+  // A Triage-station RHU Personnel may initiate a request (but not approve/issue).
+  const canInitiate = canPrepare || canInitiateCertificate(user);
   const base = user?.role ? `/app/${user.role}` : "";
 
   const [query, setQuery] = useState("");
@@ -84,13 +87,13 @@ export default function MedicalCertificates() {
       <PageHeader
         crumbs={["Medical Certificates"]}
         title="Medical Certificates"
-        subtitle={isReviewer ? "Review, approve, and issue medical certificates for your scope." : "Medical certificate register for your authorized scope."}
-        action={canPrepare && (
+        subtitle={isReviewer ? "Review, approve, and issue medical certificates for your scope." : canInitiate ? "Initiate medical certificate requests; the PHN / MHO review and issue them." : "Medical certificate register for your authorized scope."}
+        action={canInitiate && (
           <button
             onClick={() => navigate(`${base}/certificates/new`)}
             className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
           >
-            <Plus className="h-4 w-4" /> Create Certificate
+            <Plus className="h-4 w-4" /> {isReviewer ? "Create Certificate" : "Request Certificate"}
           </button>
         )}
       />

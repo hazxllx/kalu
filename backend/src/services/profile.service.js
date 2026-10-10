@@ -1,5 +1,6 @@
 import { getServiceClient } from '../config/supabase.js';
 import { approverLabelForRole } from '../config/staffApprovals.js';
+import { normalizeStations } from '../config/rhuStations.js';
 import { isPhonePH, normalizePhone } from '../validators/common.js';
 import ApiError from '../utils/apiError.js';
 
@@ -26,6 +27,7 @@ const PROFILE_SELECT = [
   'license_no',
   'contact',
   'created_at',
+  'rhu_stations',
   'barangay:barangays(name)',
   'municipality:municipalities(name)',
 ].join(',');
@@ -48,6 +50,7 @@ const PROFILE_BASE_SELECT = [
   'license_no',
   'contact',
   'created_at',
+  'rhu_stations',
 ].join(',');
 
 /** The `profiles` table itself is missing (migrations not applied here). */
@@ -137,12 +140,14 @@ export const profileToSessionUser = (profile) => ({
   barangay: profile.barangay?.name ?? null,
   facilityId: profile.facility_id ?? null,
   position: profile.position || '',
+  // RHU station assignment(s) — triage and/or consultation. Separate from role
+  // and barangay/facility assignment; drives station-based authorization.
+  rhuStations: normalizeStations(profile.rhu_stations),
   // Self-service account details surfaced to the account owner (Settings page):
   // editable contact number, plus read-only registration date and a stable
   // account reference. These are the account holder's OWN values only.
   contact: profile.contact || '',
   licenseNo: profile.license_no || '',
-  position: profile.position || '',
   createdAt: profile.created_at ?? null,
   referenceNumber: profile.id,
 });

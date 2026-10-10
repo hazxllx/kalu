@@ -129,10 +129,8 @@ export const triageToVisitPayload = (payload = {}) => ({
   visitDate: new Date().toISOString(),
   chiefComplaint: payload.chiefComplaint || payload.reason || "",
   clinicalHistory: payload.notes || "",
-  // Assigned personnel (name & designation) for the triage encounter. The
-  // backend uses it to label the recorder; the authenticated user is still the
-  // authoritative actor.
-  assignedPersonnel: payload.assignedPersonnel || payload.personnel || "",
+  // The triage performer is recorded server-side from the authenticated user;
+  // no personnel name is sent from the client.
   vitals: {
     bp: payload.bloodPressure || null,
     temperature: payload.temperature != null ? Number(payload.temperature) : null,

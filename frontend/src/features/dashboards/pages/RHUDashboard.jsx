@@ -8,28 +8,42 @@ import StatusBadge from "@/components/common/StatusBadge";
 import { SkeletonList } from "@/components/common/Skeleton";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
+import { useAuth } from "@/context/AuthContext";
+import { canTriage, canConsult } from "@/lib/rhuStations";
 import {
   Activity,
   ArrowRight,
   Bell,
   CalendarDays,
-  HeartPulse,
+  FileText,
   RefreshCw,
   Stethoscope,
 } from "lucide-react";
 
+// Quick actions are STATION-aware: a Triage-station account sees Triage +
+// Medical Certificate requests; a Consultation-station account sees
+// Consultation. Items with no `station` are shown to every RHU account.
 const QUICK_ACTIONS = [
   {
     icon: Stethoscope,
     label: "Open Triage",
     path: "/app/rhu_personnel/triage",
     description: "Record and manage RHU triage visits.",
+    station: "triage",
   },
   {
-    icon: HeartPulse,
-    label: "Health Programs",
-    path: "/app/rhu_personnel/programs",
-    description: "View RHU health programs and activities.",
+    icon: Stethoscope,
+    label: "Open Consultation",
+    path: "/app/rhu_personnel/consultation",
+    description: "Pick up triaged patients and record consultations.",
+    station: "consultation",
+  },
+  {
+    icon: FileText,
+    label: "Medical Certificate Requests",
+    path: "/app/rhu_personnel/certificates",
+    description: "Initiate a medical certificate request.",
+    station: "triage",
   },
   {
     icon: Bell,
@@ -78,12 +92,24 @@ const localDayStart = (value) => {
 };
 
 export default function RHUDashboard() {
+  const { user } = useAuth();
   const {
     patients,
     loading,
     error,
     refresh,
   } = usePhnWorkflow({ source: "intake" });
+
+  // Only surface the quick actions the signed-in station can actually use.
+  const quickActions = useMemo(
+    () =>
+      QUICK_ACTIONS.filter((action) => {
+        if (action.station === "triage") return canTriage(user);
+        if (action.station === "consultation") return canConsult(user);
+        return true;
+      }),
+    [user]
+  );
 
   const patientList = Array.isArray(patients) ? patients : [];
 
@@ -264,7 +290,7 @@ export default function RHUDashboard() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {QUICK_ACTIONS.map((action) => (
+          {quickActions.map((action) => (
             <Link
               key={action.label}
               to={action.path}
@@ -373,7 +399,7 @@ export default function RHUDashboard() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5">
         <Card className="p-4 sm:p-6">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -420,35 +446,6 @@ export default function RHUDashboard() {
               ))}
             </ul>
           )}
-        </Card>
-
-        <Card className="p-4 sm:p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-brand-ink sm:text-base">
-                Health Programs
-              </h3>
-
-              <p className="mt-1 text-xs text-brand-gray">
-                Access RHU health programs and activities.
-              </p>
-            </div>
-
-            <HeartPulse className="h-5 w-5 text-brand-blue" />
-          </div>
-
-          <p className="text-sm text-brand-gray">
-            Program-specific dashboard metrics are not
-            currently connected to the RHU dashboard.
-          </p>
-
-          <Link
-            to="/app/rhu_personnel/programs"
-            className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
-          >
-            View Health Programs
-            <ArrowRight className="h-4 w-4" />
-          </Link>
         </Card>
       </div>
 

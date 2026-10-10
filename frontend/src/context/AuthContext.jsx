@@ -53,6 +53,9 @@ const profileToFrontendUser = (profileUser) => ({
   municipalityId: profileUser.municipalityId ?? null,
   municipality: profileUser.municipality ?? null,
   facilityId: profileUser.facilityId ?? null,
+  // RHU station assignment(s) — drives station-based nav/route gating in the UI
+  // (the backend enforces the same rule authoritatively on every API call).
+  rhuStations: Array.isArray(profileUser.rhuStations) ? profileUser.rhuStations : [],
   // Self-service account details (Settings page): own editable contact number,
   // read-only registration date and stable account reference.
   contact: profileUser.contact ?? '',

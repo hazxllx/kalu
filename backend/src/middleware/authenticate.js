@@ -15,7 +15,7 @@ import asyncHandler from '../utils/asyncHandler.js';
  *
  *   req.user = { id, email, name, role, status,
  *                municipalityId, municipality, barangayId, barangay,
- *                facilityId, accessToken }
+ *                facilityId, rhuStations, accessToken }
  *
  * Account states:
  *   disabled                              -> 403 (account disabled)
@@ -100,6 +100,10 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     // compare against barangay names.
     barangay: sessionUser.barangay,
     facilityId: sessionUser.facilityId,
+    // RHU station assignment(s) — drives station-based authorization
+    // (authorizeStation middleware + service re-checks). Resolved from the
+    // profiles.rhu_stations column, never from client input.
+    rhuStations: sessionUser.rhuStations,
     accessToken: token,
     authMode: 'supabase',
   };

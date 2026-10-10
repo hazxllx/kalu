@@ -21,16 +21,19 @@ import repository from '../repositories/index.js';
 import { computeBMI } from '../utils/bmi.js';
 import { FACILITY, SUBMISSION_STATUS, PHN_EDITABLE_STATUSES } from '../config/facility.js';
 import { withinFacilityScope } from '../config/scope.js';
+import { canConsult } from '../config/rhuStations.js';
 import { validateVitals } from './intake.service.js';
 
 const isPHN = (user) => user?.role === 'phn';
 
-// RHU Consultation Station reuses the SAME visit queue the PHN uses: both the
-// PHN and RHU personnel may receive/review/update/complete a submitted
-// encounter (record findings/assessment/treatment). This does NOT change the
-// PHN assessment feature — it only additionally admits the RHU consultation
-// role. Referral generation remains PHN-only (see createReferral/updateReferral).
-const canProcessConsultation = (user) => user?.role === 'phn' || user?.role === 'rhu_personnel';
+// RHU Consultation Station reuses the SAME visit queue the PHN uses: the PHN,
+// an RHU Personnel assigned to the Consultation station, and a Health Supervisor
+// assigned to the Consultation station may all receive/review/update/complete a
+// submitted encounter (record findings/assessment/treatment). This does NOT
+// change the PHN assessment feature, and it does NOT grant consultation from a
+// role alone — `canConsult` requires the PHN role OR the Consultation station.
+// Referral generation remains PHN-only (see createReferral/updateReferral).
+const canProcessConsultation = (user) => canConsult(user);
 
 const assertCanProcessConsultation = (user) => {
   if (!canProcessConsultation(user)) throw ApiError.forbidden();
@@ -153,7 +156,9 @@ const normalizePhnVisit = (visit = {}) => {
     const phnPatch = {};
     if (visit.phn.assessment !== undefined) phnPatch.assessment = pickText(visit.phn.assessment);
     if (visit.phn.notes !== undefined) phnPatch.notes = pickText(visit.phn.notes);
-    if (visit.phn.personnel !== undefined) phnPatch.personnel = pickText(visit.phn.personnel);
+    // NOTE: the consultation personnel label is NEVER taken from the client. It
+    // is stamped from the authenticated user in updateSubmissionForPhn so the
+    // record always reflects who actually performed the consultation.
     if (Object.keys(phnPatch).length) patch.phn = phnPatch;
   }
   return patch;
@@ -169,6 +174,12 @@ export const updateSubmissionForPhn = async ({ id, patch = {}, user }) => {
   }
 
   const normalized = normalizePhnVisit(patch);
+  // Stamp the consultation personnel label from the authenticated user whenever
+  // PHN/consultation clinical fields are recorded — the performer is the signed-in
+  // account, never a client-submitted name.
+  if (normalized.phn) {
+    normalized.phn.personnel = user.name || user.email || '';
+  }
   const vitals = { ...(submission.vitals || {}), ...(normalized.vitals || {}) };
   const errors = validateVitals(vitals);
   if (errors.length) throw ApiError.badRequest('Invalid vital signs.', errors);

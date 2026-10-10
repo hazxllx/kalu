@@ -55,7 +55,11 @@ export const createCertificateValidator = (input = {}) => {
   if (!residentId) errors.residentId = 'Select the resident this certificate is for.';
   else if (!residentId) errors.residentId = 'The resident reference is not valid.';
 
-  const row = certificateFields(input, errors, { requireClinical: true });
+  // Clinical completeness (findings + medical officer) is enforced in the
+  // service for the PHN/MHO preparation path. A Triage-station RHU Personnel may
+  // submit a REQUEST without those fields (the PHN/MHO complete them on review),
+  // so the validator does not require them here.
+  const row = certificateFields(input, errors, { requireClinical: false });
   if (Object.keys(errors).length) return invalid(errors);
   return valid({ ...row, residentId });
 };

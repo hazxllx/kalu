@@ -1,4 +1,5 @@
 import { REQUESTABLE_ROLES } from '../config/staffApprovals.js';
+import { normalizeStations, RHU_STATIONS } from '../config/rhuStations.js';
 import { isUuid, text, valid, invalid } from './common.js';
 
 /**
@@ -33,6 +34,12 @@ export const registerPersonnelValidator = (input = {}) => {
   const facility = clean(input?.facility, LIMITS.short);
   const password = typeof input?.password === 'string' ? input.password : '';
 
+  // RHU station assignment. Only valid station ids survive normalization.
+  // RHU Personnel MUST pick exactly one station (Triage or Consultation); a
+  // Health Supervisor may OPTIONALLY also staff RHU Consultation; no other role
+  // may hold a station.
+  const rhuStations = normalizeStations(input?.rhuStations);
+
   if (!fullName) errors.fullName = 'Full name is required.';
   if (!email) errors.email = 'Email address is required.';
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) errors.email = 'Enter a valid email address.';
@@ -50,6 +57,18 @@ export const registerPersonnelValidator = (input = {}) => {
 
   if (barangayId && !isUuid(barangayId)) errors.barangayId = 'The selected barangay is not valid.';
   if (facilityId && !isUuid(facilityId)) errors.facilityId = 'The selected facility is not valid.';
+
+  if (role === 'rhu_personnel') {
+    if (rhuStations.length !== 1) {
+      errors.rhuStations = 'Select your RHU station: Triage or Consultation.';
+    }
+  } else if (role === 'health_supervisor') {
+    if (rhuStations.some((station) => station !== RHU_STATIONS.CONSULTATION)) {
+      errors.rhuStations = 'A Health Supervisor can only additionally staff the RHU Consultation station.';
+    }
+  } else if (rhuStations.length) {
+    errors.rhuStations = 'This role cannot be assigned an RHU station.';
+  }
 
   if (licenseExpiry && !/^\d{4}-\d{2}-\d{2}$/.test(licenseExpiry)) {
     errors.licenseExpiry = 'License expiry must be a valid date.';
@@ -88,6 +107,7 @@ export const registerPersonnelValidator = (input = {}) => {
     facility,
     password,
     documents,
+    rhuStations,
   });
 };
 

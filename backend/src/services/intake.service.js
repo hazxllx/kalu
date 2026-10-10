@@ -18,10 +18,24 @@ import repository from '../repositories/index.js';
 import { computeBMI, isPlausibleVital } from '../utils/bmi.js';
 import { SUBMISSION_STATUS } from '../config/facility.js';
 import { assignedBarangay, withinFacilityScope } from '../config/scope.js';
+import { canTriage } from '../config/rhuStations.js';
 
 const INTAKE_ROLES = ['bhw', 'rhu_personnel', 'health_supervisor'];
 
 const isIntakeRole = (user) => user?.role && INTAKE_ROLES.includes(user.role);
+
+/**
+ * Station re-check (defense in depth; the route also runs
+ * authorizeStation(TRIAGE)). An RHU Personnel account must hold the Triage
+ * station to drive the intake/triage workflow — a Consultation-only RHU account
+ * is refused. BHW community intake and the Health Supervisor's barangay intake
+ * are not station-gated, so they pass through unchanged.
+ */
+const assertTriageStation = (user) => {
+  if (user?.role === 'rhu_personnel' && !canTriage(user)) {
+    throw ApiError.forbidden('You are not assigned to the RHU Triage station.');
+  }
+};
 
 const editableStatusesForIntake = () => [SUBMISSION_STATUS.DRAFT];
 
@@ -37,6 +51,7 @@ const withinIntakeScope = (user, submission) =>
   withinFacilityScope(user, submission?.facilityId);
 
 export const searchResidents = async ({ q = '', user, repo = repository }) => {
+  assertTriageStation(user);
   const scope = assignedBarangay(user);
   // Scope is passed into the repository query so a service-role data access
   // path never fetches records outside the caller's authorized window.
@@ -50,6 +65,7 @@ export const searchResidents = async ({ q = '', user, repo = repository }) => {
 
 export const getResidentForIntake = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
+  assertTriageStation(user);
   const resident = await repository.getResident(id);
   if (!resident || !withinBarangayScope(user, resident)) {
     throw ApiError.notFound('Resident record not found');
@@ -167,6 +183,7 @@ export const validateSubmissionForSubmit = (resident, visit) => {
  */
 export const createSubmission = async ({ residentId = null, resident = null, visit = {}, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
+  assertTriageStation(user);
   if (user.role === 'rhu_personnel' && !user.facilityId) {
     throw ApiError.unprocessable('Your account must be assigned to an RHU facility before submitting triage.');
   }
@@ -215,20 +232,20 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
   }
 
   const normalized = normalizeVisit(visit);
-  // Assigned personnel (name & designation) entered on the triage form. When
-  // provided it labels the encounter's recorder; the authoritative actor id
-  // (recordedById) is always the authenticated user, so the audit trail is
-  // unaffected. Falls back to the account name.
-  const assignedPersonnel = String(visit.assignedPersonnel ?? '').trim();
+  // The performer is ALWAYS the authenticated user — never a client-supplied
+  // name. recordedById/responsiblePersonnelId are the authoritative audit ids;
+  // recordedByName is the account's own display name. There is no manually
+  // entered "assigned personnel" field.
+  const performerName = user.name || user.email || '';
   const submissionId = await repository.nextSubmissionId();
   const submission = {
     id: submissionId.id,
     residentId: residentRow.id,
     recordedById: user.id,
     recordedByRole: user.role,
-    recordedByName: assignedPersonnel || user.name || user.email || '',
+    recordedByName: performerName,
     responsiblePersonnelId: user.id,
-    responsiblePersonnelName: user.name || user.email || '',
+    responsiblePersonnelName: performerName,
     facilityId: user.facilityId || null,
     status: SUBMISSION_STATUS.DRAFT,
     ...normalized,
@@ -239,12 +256,14 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
 
 export const listMySubmissions = async ({ user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
+  assertTriageStation(user);
   const { rows } = await repository.listVisits({ submittedById: user.id, limit: 100 });
   return rows.filter((submission) => withinIntakeScope(user, submission));
 };
 
 export const getSubmissionForIntake = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
+  assertTriageStation(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id || !withinIntakeScope(user, submission)) {
@@ -256,6 +275,7 @@ export const getSubmissionForIntake = async ({ id, user }) => {
 
 export const updateSubmissionDraft = async ({ id, visit = {}, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
+  assertTriageStation(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id) throw ApiError.forbidden('You may only update submissions you created.');
@@ -271,6 +291,7 @@ export const updateSubmissionDraft = async ({ id, visit = {}, user }) => {
 
 export const submitSubmission = async ({ id, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
+  assertTriageStation(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id || !withinIntakeScope(user, submission)) {

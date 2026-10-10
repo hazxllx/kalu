@@ -5,12 +5,28 @@
  * `@/lib/permissions`. Items with permission requirements are only rendered
  * when the signed-in user's role currently holds the required permission(s).
  *
+ * An item may also declare a `station` ('triage' | 'consultation'). Station
+ * items are only rendered when the signed-in user is assigned that RHU station
+ * (see `@/lib/rhuStations`): Triage items require the Triage station, Consultation
+ * items require the Consultation station (the PHN always qualifies for
+ * consultation; a Health Supervisor always qualifies for triage/community
+ * intake). The backend enforces the same rule authoritatively on every API call.
+ *
  * An item may also declare a `group` label. Consecutive items sharing a group
  * are rendered under one small uppercase section header. Items with `children`
  * render as expandable navigation groups; child permissions are filtered in
  * the same way as top-level items. Hidden items preserve route permission
  * mappings without appearing in the sidebar.
  */
+import { canTriage, canConsult, RHU_STATIONS } from "@/lib/rhuStations";
+
+/** True when the user may see a station-gated item (or the item has no station). */
+export const stationAllows = (user, station) => {
+  if (!station) return true;
+  if (station === RHU_STATIONS.TRIAGE) return canTriage(user);
+  if (station === RHU_STATIONS.CONSULTATION) return canConsult(user);
+  return true;
+};
 export const NAV = {
   "resident-limited": [
     {
@@ -273,6 +289,16 @@ export const NAV = {
           permission: "consultation.requests.view",
         },
         {
+          // Additional capability: only when the Health Supervisor is assigned
+          // the RHU Consultation station. The existing (barangay) Consultation
+          // above is unaffected and always available.
+          label: "RHU Consultation",
+          icon: "Stethoscope",
+          path: "/app/health_supervisor/rhu-consultation",
+          permission: "consultation.requests.view",
+          station: "consultation",
+        },
+        {
           label: "Records",
           icon: "ClipboardList",
           children: [
@@ -362,11 +388,11 @@ export const NAV = {
     },
   ],
 
-  // RHU Personnel navigation is limited to their operational workspace.
-  //
-  // RHU Personnel uses ONE account for both the triage and consultation
-  // stations. The workflow is:
-  // RHU Triage -> RHU Consultation -> Findings/Assessment.
+  // RHU Personnel navigation is limited to their operational workspace and to
+  // their assigned STATION. A Triage-station account sees Triage + Medical
+  // Certificate requests; a Consultation-station account sees Consultation. The
+  // station gate (below) hides the other station's items, and the backend
+  // enforces the same rule. Health Programs is NOT an RHU Personnel feature.
   rhu_personnel: [
     {
       label: "Dashboard",
@@ -379,6 +405,7 @@ export const NAV = {
       icon: "Activity",
       path: "/app/rhu_personnel/triage",
       permission: "triage.view",
+      station: "triage",
       group: "Operations",
     },
     {
@@ -386,18 +413,14 @@ export const NAV = {
       icon: "Stethoscope",
       path: "/app/rhu_personnel/consultation",
       permission: "consultation.requests.view",
+      station: "consultation",
       group: "Operations",
     },
     {
-      label: "Medical Certificates",
+      label: "Medical Certificate Requests",
       icon: "FileText",
       path: "/app/rhu_personnel/certificates",
-      group: "Operations",
-    },
-    {
-      label: "Health Programs",
-      icon: "HeartPulse",
-      path: "/app/rhu_personnel/programs",
+      station: "triage",
       group: "Operations",
     },
     {
@@ -555,10 +578,11 @@ export const navItemIsActive = (item, pathname) => {
 };
 
 /**
- * Drops items whose declared `permission` the current role does not hold.
- * A group is removed once all of its children have been filtered out.
+ * Drops items whose declared `permission` the current role does not hold, or
+ * whose declared `station` the current user is not assigned. A group is removed
+ * once all of its children have been filtered out.
  */
-export const filterNavByPermission = (items = [], can) => {
+export const filterNavByPermission = (items = [], can, user = null) => {
   if (typeof can !== "function") return items;
 
   return items.reduce((visible, item) => {
@@ -568,9 +592,12 @@ export const filterNavByPermission = (items = [], can) => {
     if (item.anyPermissions?.length && !item.anyPermissions.some((permission) => can(permission))) {
       return visible;
     }
+    if (item.station && !stationAllows(user, item.station)) {
+      return visible;
+    }
 
     if (item.children) {
-      const children = filterNavByPermission(item.children, can);
+      const children = filterNavByPermission(item.children, can, user);
 
       if (children.length === 0) {
         return visible;
@@ -604,6 +631,24 @@ export const navPermissionsForPath = (items = [], pathname) => {
       if (item.permission) return [item.permission];
       if (item.anyPermissions?.length) return item.anyPermissions;
       return null;
+    }
+  }
+  return null;
+};
+
+/**
+ * Resolve the RHU station required for a navigation path, if any. Used by
+ * DashboardLayout to block a direct URL visit to a station-gated page when the
+ * user is not assigned that station (the backend is the authoritative gate).
+ */
+export const navStationForPath = (items = [], pathname) => {
+  for (const item of items) {
+    if (item.children) {
+      const childStation = navStationForPath(item.children, pathname);
+      if (childStation) return childStation;
+    }
+    if (navItemIsActive(item, pathname)) {
+      if (item.station) return item.station;
     }
   }
   return null;

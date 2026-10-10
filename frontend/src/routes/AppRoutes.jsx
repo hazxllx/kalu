@@ -375,13 +375,6 @@ const MidwifeHealthServices = appPage(
     )
 );
 
-const Programs = appPage(
-  () =>
-    import(
-      '@/features/health-services/pages/Programs'
-    )
-);
-
 const NotificationsPage = appPage(
   () =>
     import(
@@ -934,6 +927,17 @@ const AppRoutes = () => (
           path="consultations"
           element={<TreatmentConsultation />}
         />
+        {/*
+          Additional capability for a Health Supervisor assigned the RHU
+          Consultation station: the shared RHU consultation queue. The barangay
+          "Consultation" (TreatmentConsultation) above is unchanged. The
+          DashboardLayout station guard + the backend restrict this to an HS with
+          the Consultation station.
+        */}
+        <Route
+          path="rhu-consultation"
+          element={<RhuConsultation />}
+        />
         <Route path="tcls" element={<TCLS />} />
         <Route path="m1" element={<M1Records />} />
 
@@ -1088,10 +1092,6 @@ const AppRoutes = () => (
         <Route
           path="certificates"
           element={<MedicalCertificates />}
-        />
-        <Route
-          path="programs"
-          element={<Programs />}
         />
         <Route
           path="notifications"

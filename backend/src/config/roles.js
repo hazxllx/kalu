@@ -83,25 +83,35 @@ export const FEATURE_ROLES = Object.freeze({
   // consultation personnel pick it up from the shared queue, view the triage
   // data, record findings/assessment/treatment/recommendations and complete the
   // consultation. The PHN keeps the SAME capability (its assessment feature is
-  // unchanged), so both roles may process the shared visit queue. Referral
-  // generation stays PHN-only (enforced per-route + in the service).
-  consultationProcessing: [ROLES.PHN, ROLES.RHU_PERSONNEL],
+  // unchanged). A Health Supervisor may ALSO be admitted here, but only when
+  // explicitly assigned the Consultation station — the `authorizeStation`
+  // middleware (and the service re-check) enforce that; the role alone does not
+  // grant it. Barangay Consultation (`consultations`) is a separate feature and
+  // is unaffected. Referral generation stays PHN-only (enforced per-route + in
+  // the service).
+  consultationProcessing: [ROLES.PHN, ROLES.RHU_PERSONNEL, ROLES.HEALTH_SUPERVISOR],
   referralRecords: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
 
-  // Medical certificates are prepared by PHN/MHO and reviewed by PHN/MHO.
-  // RHU Personnel, BHW and System Admin are not clinical certificate roles.
+  // Medical certificates are PREPARED/REVIEWED/ISSUED by PHN/MHO. A Triage-station
+  // RHU Personnel may additionally INITIATE a certificate REQUEST (status
+  // 'For Review'); the station is enforced by `authorizeStation(TRIAGE)` on the
+  // read/create routes, and the service forces the request status + withholds the
+  // signatory. RHU Personnel can never approve/issue/reject (those routes stay on
+  // `certificates`).
   certificates: [ROLES.PHN, ROLES.MHO],
+  certificateRequest: [ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
   certificateReview: [ROLES.PHN, ROLES.MHO],
 
   // Monitoring / aggregate information
   reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
 
   // Health services catalog. Managed (create/assign) by PHN, MHO and the
-  // barangay-scoped Health Supervisor. Read by all staff who can be assigned a
-  // service (adds BHW and RHU Personnel), so an assigned service shows up in the
-  // assignee's account. Scope is re-enforced in the service and by RLS.
+  // barangay-scoped Health Supervisor. Read by staff who can be assigned a
+  // service. RHU Personnel are intentionally NOT here: Health Programs is not an
+  // RHU Personnel feature (removed from their navigation AND authorization).
+  // Scope is re-enforced in the service and by RLS.
   healthServices: [ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR],
-  healthServicesRead: [ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR, ROLES.RHU_PERSONNEL, ROLES.BHW],
+  healthServicesRead: [ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR, ROLES.BHW],
   // Community Health Monitoring / map analytics. MHO + PHN are municipality-wide
   // (they see every authorised barangay in Pili); a Health Supervisor is scoped
   // by the session to their assigned barangay only. RHU Personnel is NOT here:

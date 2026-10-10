@@ -67,7 +67,13 @@ export const CERT_PURPOSES = Object.freeze([
 
 const PREPARE_ROLES = new Set([ROLES.PHN, ROLES.MHO]);
 const REVIEW_ROLES = new Set([ROLES.PHN, ROLES.MHO]);
-const MUNICIPALITY_ROLES = new Set([ROLES.MHO, ROLES.PHN]);
+// Triage-station RHU Personnel may INITIATE a request (status 'For Review');
+// they can never prepare a full certificate, update, or decide.
+const REQUEST_ROLES = new Set([ROLES.RHU_PERSONNEL]);
+// Municipality-scoped readers of the register. RHU Personnel read their own
+// municipality (matches the medical_certificates RLS); they still cannot write
+// or decide — that is gated separately.
+const MUNICIPALITY_ROLES = new Set([ROLES.MHO, ROLES.PHN, ROLES.RHU_PERSONNEL]);
 const BARANGAY_ROLES = new Set([ROLES.HEALTH_SUPERVISOR]);
 const RESIDENT_ROLES = new Set([ROLES.RESIDENT, ROLES.RESIDENT_LIMITED]);
 
@@ -234,7 +240,7 @@ const residentInScope = async (supabase, user, residentId) => {
   throwOnError(error, 'Could not load resident');
   if (!data) throw ApiError.notFound('Resident record not found.');
 
-  if (user.role === ROLES.PHN || user.role === ROLES.MHO) {
+  if (user.role === ROLES.PHN || user.role === ROLES.MHO || user.role === ROLES.RHU_PERSONNEL) {
     if (user.municipalityId && data.municipality_id && data.municipality_id !== user.municipalityId) {
       throw ApiError.notFound('Resident record not found.');
     }
@@ -366,28 +372,51 @@ const sanitizeWrite = (payload = {}) => {
 };
 
 export const create = async ({ user, payload = {}, supabase = getServiceClient() }) => {
-  if (!PREPARE_ROLES.has(user?.role)) {
+  const isTriageRequest = REQUEST_ROLES.has(user?.role);
+  if (!PREPARE_ROLES.has(user?.role) && !isTriageRequest) {
     throw ApiError.forbidden('You are not authorized to prepare medical certificates.');
   }
   const resident = await residentInScope(supabase, user, payload.residentId ?? payload.resident_id);
 
   const row = sanitizeWrite(payload);
-  if (!row.findings) throw ApiError.unprocessable('Clinical findings are required.');
-  // The authorized signatory is resolved server-side from the preparer's
-  // profile (the MHO signatory is re-stamped at approval/issue time).
-  const signatory = await resolveSignatory(supabase, user);
-  row.medical_officer = signatory.fullName || user?.name || '';
-  row.license_number = signatory.licenseNumber || '';
-  if (!row.medical_officer) throw ApiError.unprocessable('The medical officer name is required.');
-  row.status = CERT_STATUS.DRAFT;
+
+  if (isTriageRequest) {
+    // Triage INITIATES a request only. It can never be a decision: the status is
+    // forced to 'For Review', and NO signatory is stamped — the authorized
+    // signatory (MHO) is resolved at approval/issue time. Clinical findings are
+    // optional at request time (the PHN/MHO complete them on review). This is the
+    // service-role enforcement; the DB trigger enforce_triage_certificate_request
+    // is the backstop for any direct user-token write.
+    row.status = CERT_STATUS.FOR_REVIEW;
+  } else {
+    if (!row.findings) throw ApiError.unprocessable('Clinical findings are required.');
+    // The authorized signatory is resolved server-side from the preparer's
+    // profile (the MHO signatory is re-stamped at approval/issue time).
+    const signatory = await resolveSignatory(supabase, user);
+    row.medical_officer = signatory.fullName || user?.name || '';
+    row.license_number = signatory.licenseNumber || '';
+    if (!row.medical_officer) throw ApiError.unprocessable('The medical officer name is required.');
+    row.status = CERT_STATUS.DRAFT;
+  }
   row.resident_id = resident.id;
   row.created_by = user.id;
   row.civil_status = row.civil_status || resident.civil_status || '';
   // municipality_id / barangay_id are set by the DB trigger from the resident.
 
   const created = await insertWithReference(supabase, row);
-  await writeLog(supabase, user, created.id, CERT_STATUS.DRAFT, null, CERT_STATUS.DRAFT, 'Certificate created');
-  await writeAudit(supabase, user, 'MEDICAL_CERTIFICATE_CREATED', created.id, created, { reference: created.reference_no });
+  await writeLog(
+    supabase,
+    user,
+    created.id,
+    row.status,
+    null,
+    row.status,
+    isTriageRequest ? 'Certificate request submitted for review' : 'Certificate created',
+  );
+  await writeAudit(supabase, user, 'MEDICAL_CERTIFICATE_CREATED', created.id, created, {
+    reference: created.reference_no,
+    request: isTriageRequest || undefined,
+  });
   return toCertificate(created, await loadAudit(supabase, created.id));
 };
 

@@ -73,6 +73,17 @@ const APPROVER_FOR_ROLE = {
 /** Roles that are assigned to a barangay (mirrors adminUserStore scope rules). */
 const BARANGAY_SCOPED_ROLES = ["health_supervisor", "bhw"];
 
+/**
+ * RHU station assignment options. An RHU Personnel account works exactly one
+ * station; a Health Supervisor may optionally also staff RHU Consultation. The
+ * station determines which RHU features/workflows the account can access, and
+ * the backend enforces it on every API call.
+ */
+const STATION_OPTIONS = [
+  { id: "triage", label: "Triage Station" },
+  { id: "consultation", label: "Consultation Station" },
+];
+
 const roleById = (id) => ROLE_OPTIONS.find((r) => r.id === id) || null;
 
 /** Required document set for the selected role — never over-requires licenses. */
@@ -175,6 +186,9 @@ export default function PersonnelRegistration() {
     municipality: "Pili",
     barangay: "",
     facility: "RHU",
+    // RHU station assignment. Required (single) for RHU Personnel; optional
+    // ('consultation') for a Health Supervisor; unused by other roles.
+    rhuStation: "",
     documents: {},
     // Step 4 — confirmation
     confirm: false,
@@ -244,6 +258,11 @@ export default function PersonnelRegistration() {
       } else if (!form.facility) {
         errs.facility = "Health facility is required.";
       }
+      // RHU Personnel must choose exactly one station; Health Supervisor station
+      // is optional (and only ever Consultation).
+      if (form.roleId === "rhu_personnel" && !form.rhuStation) {
+        errs.rhuStation = "Select your RHU station: Triage or Consultation.";
+      }
       documentList.filter((r) => r.required).forEach((r) => {
         if (!form.documents[r.key]) errs[`doc_${r.key}`] = `Please upload: ${r.label}`;
       });
@@ -290,6 +309,13 @@ export default function PersonnelRegistration() {
     // Names, not uuids — the API resolves them against the reference tables.
     fd.append("barangay", isBarangayScoped ? form.barangay : "");
     fd.append("facility", isBarangayScoped ? "" : form.facility);
+    // RHU station assignment (JSON array). RHU Personnel carry exactly one;
+    // a Health Supervisor may carry 'consultation'; other roles carry none.
+    const stations =
+      (form.roleId === "rhu_personnel" || form.roleId === "health_supervisor") && form.rhuStation
+        ? [form.rhuStation]
+        : [];
+    fd.append("rhuStations", JSON.stringify(stations));
     fd.append("documentTypes", JSON.stringify(uploaded.map((r) => r.label)));
     uploaded.forEach((r) => fd.append("documents", form.documents[r.key], form.documents[r.key].name));
     return fd;
@@ -640,6 +666,35 @@ export default function PersonnelRegistration() {
                     value={derivedFacility}
                     placeholder="Select a barangay to view your assigned facility"
                   />
+                )}
+
+                {form.roleId === "rhu_personnel" && (
+                  <SelectField
+                    label="RHU Station"
+                    required
+                    error={errors.rhuStation}
+                    value={form.rhuStation}
+                    onChange={set("rhuStation")}
+                    hint="Determines whether you work the RHU Triage or Consultation station. This is set per account and approved by the PHN."
+                  >
+                    <option value="">Select your station</option>
+                    {STATION_OPTIONS.map((s) => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </SelectField>
+                )}
+
+                {form.roleId === "health_supervisor" && (
+                  <SelectField
+                    label="RHU Consultation (optional)"
+                    error={errors.rhuStation}
+                    value={form.rhuStation}
+                    onChange={set("rhuStation")}
+                    hint="Optional: additionally staff the RHU Consultation station. Your existing barangay consultation and other Health Supervisor features are unaffected."
+                  >
+                    <option value="">Not assigned to RHU Consultation</option>
+                    <option value="consultation">Also staff RHU Consultation</option>
+                  </SelectField>
                 )}
 
                 <div className="border-t border-slate-100 pt-5">

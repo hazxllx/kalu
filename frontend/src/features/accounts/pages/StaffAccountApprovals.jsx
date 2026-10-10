@@ -216,7 +216,14 @@ export default function StaffAccountApprovals({ embedded = false }) {
                       <p className="text-xs text-brand-gray">{r.email}</p>
                     </td>
                     <td className="px-5 py-3 text-brand-gray">{ROLE_LABELS[r.role] || r.position || "—"}</td>
-                    <td className="px-5 py-3 text-brand-gray">{r.barangay || r.facility || "—"}</td>
+                    <td className="px-5 py-3 text-brand-gray">
+                      {r.barangay || r.facility || "—"}
+                      {Array.isArray(r.rhuStations) && r.rhuStations.length ? (
+                        <span className="ml-1 inline-flex items-center rounded-full bg-brand-light px-2 py-0.5 text-[11px] font-medium capitalize text-brand-blue">
+                          {r.rhuStations.join(" + ")}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="whitespace-nowrap px-5 py-3 text-brand-gray">{formatDate(r.submittedAt)}</td>
                     <td className="px-5 py-3"><StatusBadge value={r.status} /></td>
                     <td className="px-5 py-3 text-right">
@@ -308,6 +315,15 @@ function RequestReviewModal({ record, onClose, onDecide }) {
     { label: "Municipality / LGU", value: record.municipality || "—" },
     { label: "Barangay", value: record.barangay || "—" },
     { label: "Health Facility", value: record.facility || "—" },
+    {
+      label: "RHU Station",
+      value:
+        Array.isArray(record.rhuStations) && record.rhuStations.length
+          ? record.rhuStations
+              .map((s) => (s === "triage" ? "Triage" : s === "consultation" ? "Consultation" : s))
+              .join(" + ")
+          : "—",
+    },
     { label: "Professional License", value: record.licenseNo || "Not applicable" },
     { label: "License Expiration", value: record.licenseExpiry ? formatDate(record.licenseExpiry) : "Not applicable" },
     { label: "Submitted", value: formatDate(record.submittedAt) },

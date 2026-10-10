@@ -22,6 +22,8 @@ import {
   NAV,
   filterNavByPermission,
   navPermissionsForPath,
+  navStationForPath,
+  stationAllows,
   navItemIsActive,
 } from "@/lib/navConfig";
 import { homeForRole } from "@/lib/roles";
@@ -61,17 +63,25 @@ export default function DashboardLayout({ roleKey }) {
   // Entries that declare a permission disappear once an administrator removes
   // that privilege from the role; everything else behaves exactly as before.
   const items = useMemo(
-    () => filterNavByPermission(NAV[roleKey] || [], can),
-    [roleKey, can]
+    () => filterNavByPermission(NAV[roleKey] || [], can, user),
+    [roleKey, can, user]
   );
   const routePermissions = useMemo(
     () => navPermissionsForPath(NAV[roleKey] || [], location.pathname),
     [roleKey, location.pathname]
   );
+  // RHU station required for the current path (if any). Enforced here for direct
+  // URL visits; the backend is the authoritative station gate on every API call.
+  const routeStation = useMemo(
+    () => navStationForPath(NAV[roleKey] || [], location.pathname),
+    [roleKey, location.pathname]
+  );
   const permissionsReady =
     matrixLoadState.userId === user?.id && matrixLoadState.status === "ready";
+  const routeStationAllowed = stationAllows(user, routeStation);
   const routeAllowed =
-    !routePermissions || (permissionsReady && routePermissions.some((permission) => can(permission)));
+    routeStationAllowed &&
+    (!routePermissions || (permissionsReady && routePermissions.some((permission) => can(permission))));
 
   // Keep an expandable submenu (e.g. Records) open while the user is on one
   // of its child pages — including on a direct URL visit — so the active child

@@ -67,7 +67,8 @@ export const phnWorkflowApi = {
       phn: {
         assessment: recorded.healthConcern || recorded.assessment || "",
         notes: recorded.clinicalNotes || "",
-        personnel: recorded.assignedPersonnel || "",
+        // The consultation personnel is stamped server-side from the authenticated
+        // user; it is never sent from the client.
       },
     };
     await api.put(`/phn/submissions/${id}`, { submission: patch });

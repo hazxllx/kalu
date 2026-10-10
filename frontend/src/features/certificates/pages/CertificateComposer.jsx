@@ -13,8 +13,13 @@ import {
   Search, ChevronRight, ShieldAlert, Eye, Printer, RotateCcw, CheckCircle2, Users, Loader2, AlertCircle,
 } from "lucide-react";
 
-/** Roles authorized to prepare and print medical certificates. */
-const AUTHORIZED_ROLES = ["mho", "phn"];
+/**
+ * Roles authorized to open the composer. PHN/MHO prepare and print official
+ * certificates; a Triage-station RHU Personnel may INITIATE a request only
+ * (create → 'For Review'), never print/approve/issue. The RHU route is station-
+ * gated and the backend enforces the request-only rule.
+ */
+const AUTHORIZED_ROLES = ["mho", "phn", "rhu_personnel"];
 
 const CIVIL_STATUSES = ["Single", "Married", "Widowed", "Separated"];
 
@@ -154,6 +159,11 @@ export default function CertificateComposer() {
 
 function ComposerContent({ base, roleLabel, residents, residentsError, purposes }) {
   const { user } = useAuth();
+  // A Triage-station RHU Personnel INITIATES a request only: a single create
+  // lands the certificate at 'For Review' server-side (they cannot update,
+  // print, or decide). PHN/MHO keep the full prepare → draft → submit → print
+  // flow.
+  const isRequester = user?.role === "rhu_personnel";
   const { printCertificate, portal, brandingError } = useCertificatePrint();
   const { branding } = useDocumentBranding("medical_certificate");
 
@@ -320,16 +330,27 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
     }
     setSubmitting(true);
     try {
-      let id = savedId;
-      if (id) {
-        await medicalCertificatesApi.update(id, writePayload());
+      if (isRequester) {
+        // RHU request: a single create lands the certificate at 'For Review'.
+        // RHU cannot update or change status, so there is no draft round trip.
+        if (savedId) {
+          showToast("This certificate request has already been submitted.");
+          return;
+        }
+        await medicalCertificatesApi.create(writePayload());
+        showToast("Medical certificate request submitted to the PHN / MHO.");
       } else {
-        const { record } = await medicalCertificatesApi.create(writePayload());
-        id = record.id;
-        setSavedId(id);
+        let id = savedId;
+        if (id) {
+          await medicalCertificatesApi.update(id, writePayload());
+        } else {
+          const { record } = await medicalCertificatesApi.create(writePayload());
+          id = record.id;
+          setSavedId(id);
+        }
+        await medicalCertificatesApi.submitForReview(id);
+        showToast("Certificate submitted to the PHN/MHO for review and issuance.");
       }
-      await medicalCertificatesApi.submitForReview(id);
-      showToast("Certificate submitted to the PHN/MHO for review and issuance.");
       // Clear the form so the next certificate starts fresh and the submitted
       // one is not accidentally re-submitted or edited here.
       setResident(null);
@@ -352,9 +373,13 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
   return (
     <>
       <PageHeader
-        crumbs={["Medical Certificates", "Issue Certificate"]}
-        title="Medical Certificate"
-        subtitle="Prepare, preview, and print an official medical certificate for the Municipality of Pili."
+        crumbs={["Medical Certificates", isRequester ? "Request Certificate" : "Issue Certificate"]}
+        title={isRequester ? "Medical Certificate Request" : "Medical Certificate"}
+        subtitle={
+          isRequester
+            ? "Initiate a medical certificate request for the PHN / MHO to review and issue."
+            : "Prepare, preview, and print an official medical certificate for the Municipality of Pili."
+        }
         action={
           <Link
             to={`${base}/certificates`}
@@ -549,14 +574,15 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                 disabled={submitting}
                 className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Submit for Review
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {isRequester ? "Submit Request" : "Submit for Review"}
               </button>
             </div>
           </Card>
 
           <p className="text-center text-xs text-brand-gray">
-            Submitting sends the certificate to the PHN / MHO for review and issuance. Preview and print produce a
-            working copy and save it as a Draft — only a PHN or the MHO can approve and issue the official certificate.
+            {isRequester
+              ? "Submitting creates a medical certificate request for the PHN / MHO to review, approve, and issue. You cannot approve or issue certificates."
+              : "Submitting sends the certificate to the PHN / MHO for review and issuance. Preview and print produce a working copy and save it as a Draft — only a PHN or the MHO can approve and issue the official certificate."}
           </p>
         </>
       )}
@@ -571,19 +597,21 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                 <p className="text-xs text-brand-gray">A4 official document — exactly what will be printed.</p>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={handlePrint}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
-                >
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Print Draft
-                </button>
+                {!isRequester && (
+                  <button
+                    onClick={handlePrint}
+                    disabled={saving}
+                    className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Print Draft
+                  </button>
+                )}
                 <button
                   onClick={handleSubmitForReview}
                   disabled={submitting}
                   className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
                 >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Submit for Review
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {isRequester ? "Submit Request" : "Submit for Review"}
                 </button>
                 <button onClick={() => setPreviewOpen(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">
                   Close Preview

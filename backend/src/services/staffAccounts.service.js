@@ -35,6 +35,7 @@ import {
   canApproveRole,
 } from '../config/staffApprovals.js';
 import ApiError from '../utils/apiError.js';
+import { normalizeStations } from '../config/rhuStations.js';
 import { notifyResident } from './notifications.service.js';
 import { uploadStaffDocument, getDocumentSignedUrl } from './storage.service.js';
 
@@ -55,6 +56,7 @@ const REQUEST_SELECT = [
   'municipality_id',
   'barangay_id',
   'facility_id',
+  'rhu_stations',
   'status',
   'rejection_reason',
   'documents',
@@ -101,6 +103,7 @@ const toRequest = (row) => {
     barangayId: row.barangay_id,
     facility: row.facility?.name || '',
     facilityId: row.facility_id,
+    rhuStations: Array.isArray(row.rhu_stations) ? row.rhu_stations : [],
     status: row.status,
     rejectionReason: row.rejection_reason || '',
     documents: Array.isArray(row.documents) ? row.documents : [],
@@ -177,6 +180,10 @@ export const submitRequest = async (input = {}, documents = []) => {
   }
 
   const assignment = await resolveAssignment(input);
+  // Station assignment is validated upstream (registerPersonnelValidator):
+  // RHU Personnel carry exactly one station; a Health Supervisor may carry
+  // 'consultation'; everyone else carries none.
+  const rhuStations = normalizeStations(input.rhuStations);
 
   const supabase = getServiceClient();
   const { data: created, error: authError } = await supabase.auth.admin.createUser({
@@ -211,6 +218,7 @@ export const submitRequest = async (input = {}, documents = []) => {
         municipality_id: assignment.municipalityId,
         barangay_id: assignment.barangayId,
         facility_id: assignment.facilityId,
+        rhu_stations: rhuStations,
         position: input.position || '',
         license_no: input.licenseNo || '',
         contact: input.phone || '',
@@ -233,6 +241,7 @@ export const submitRequest = async (input = {}, documents = []) => {
         municipality_id: assignment.municipalityId,
         barangay_id: assignment.barangayId,
         facility_id: assignment.facilityId,
+        rhu_stations: rhuStations,
         status: REQUEST_STATUS.PENDING,
         documents: Array.isArray(input.documents) ? input.documents : [],
       })
@@ -478,29 +487,11 @@ export const approve = async ({ user, id, remarks = '' } = {}) => {
 
   const supabase = getServiceClient();
 
-  // Business rule: ONE active RHU personnel per RHU station. Before activating
-  // an RHU Personnel account, confirm no OTHER active RHU personnel is already
-  // assigned to the same facility. The database also enforces this via a
-  // partial unique index; this check surfaces a clear message instead of a
-  // raw unique-violation error.
-  if (row.role === 'rhu_personnel' && row.facility_id) {
-    const { data: existingRhu, error: rhuError } = await supabase
-      .from('profiles')
-      .select('id, full_name, email')
-      .eq('facility_id', row.facility_id)
-      .eq('role', 'rhu_personnel')
-      .eq('status', 'active')
-      .neq('id', row.auth_user_id)
-      .limit(1)
-      .maybeSingle();
-    if (rhuError) throw dbError(rhuError, 'rhu assignment check');
-    if (existingRhu) {
-      const who = existingRhu.full_name || existingRhu.email || 'another account';
-      throw ApiError.conflict(
-        `This RHU station already has an assigned RHU personnel (${who}). Only one active RHU personnel is allowed per station. Disable the existing account before approving a new one.`,
-      );
-    }
-  }
+  // NOTE: there is deliberately NO "one active RHU personnel per facility"
+  // restriction. A facility may have many active RHU personnel and many on the
+  // same station (e.g. several Triage and several Consultation accounts active
+  // at once). Approving one RHU personnel never blocks another. Station access
+  // is enforced per account via profiles.rhu_stations + the API.
 
   const decidedAt = new Date().toISOString();
 
@@ -530,6 +521,9 @@ export const approve = async ({ user, id, remarks = '' } = {}) => {
       municipality_id: updated.municipality_id,
       barangay_id: updated.barangay_id,
       facility_id: updated.facility_id,
+      // Carry the requested RHU station onto the active profile so station-based
+      // authorization applies the moment the account can sign in.
+      rhu_stations: Array.isArray(updated.rhu_stations) ? updated.rhu_stations : [],
     })
     .eq('id', updated.auth_user_id);
 
