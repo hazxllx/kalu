@@ -36,7 +36,7 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   if (!token) throw ApiError.unauthorized('Missing Bearer access token');
 
   if (!env.isSupabaseConfigured) {
-    throw ApiError(503, 'Authentication is unavailable: Supabase is not configured on the server.');
+    throw new ApiError(503, 'Authentication is unavailable: Supabase is not configured on the server.');
   }
 
   const supabase = getServiceClient();
@@ -71,10 +71,10 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   // Reporting it as "no profile" would tell a correctly provisioned user to
   // contact an administrator about a row that already exists.
   if (profileError) {
-    throw ApiError(503, 'Profile lookup failed. Please try again.');
+    throw new ApiError(503, 'Profile lookup failed. Please try again.');
   }
   if (unavailable) {
-    throw ApiError(
+    throw new ApiError(
       503,
       'The account profile service is temporarily unavailable. Please try again shortly.',
     );

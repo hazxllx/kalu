@@ -21,7 +21,7 @@ export { referralsApi } from './referralsApi';
 export { staffAccountsApi } from './staffAccountsApi';
 export { medicalCertificatesApi } from './medicalCertificatesApi';
 export { auditTrailApi, systemLogsApi } from './observabilityApi';
-export { followUpsApi, tclApi, maternalApi, immunizationsApi, notificationsApi } from './operationalApi';
+export { followUpsApi, tclApi, maternalApi, maternalVisitsApi, immunizationsApi, notificationsApi } from './operationalApi';
 export {
   programFormsApi, ncdRiskApi, ncdCervicalApi, ncdVisualApi, oralHealthApi, environmentalApi,
 } from './programFormsApi';
@@ -29,6 +29,8 @@ export { residentFollowUpsApi } from './residentFollowUpsApi';
 export { m1Api } from './m1Api';
 export { reportsApi } from './reportsApi';
 export { healthServicesApi } from './healthServicesApi';
+export { appointmentsApi } from './appointmentsApi';
+export { visitPlansApi } from './visitPlansApi';
 export { rolesApi } from './rolesApi';
 export { householdRiskApi } from './householdRiskApi';
 export { riskConfigApi } from './riskConfigApi';

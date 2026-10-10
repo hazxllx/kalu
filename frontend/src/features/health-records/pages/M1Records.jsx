@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
@@ -227,141 +227,183 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
     return Object.keys(next).length === 0;
   };
 
+  // Lock background scroll while the modal is open and allow Escape to close it.
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className="max-h-[92vh] w-full max-w-lg overflow-y-auto">
-        <div className="p-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">{isEdit ? "Edit Maternal Record" : "New Maternal Record"}</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">Prenatal monitoring details for the resident.</p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
-              <X className="h-5 w-5" />
-            </button>
+    <div
+      className="fixed inset-0 z-[70] flex items-stretch justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={isEdit ? "Edit maternal record" : "New maternal record"}
+    >
+      <Card className="flex h-full w-full max-w-3xl flex-col overflow-hidden !rounded-none sm:h-auto sm:max-h-[90vh] sm:!rounded-2xl">
+        {/* Header — stays fixed while the form body scrolls */}
+        <div className="flex items-start justify-between gap-3 border-b border-brand-border px-5 py-4 sm:px-6">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-brand-ink sm:text-lg">{isEdit ? "Edit Maternal Record" : "New Maternal Record"}</h3>
+            <p className="mt-0.5 text-sm text-brand-gray">Prenatal monitoring details for the resident.</p>
           </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="-mr-1.5 shrink-0 rounded-btn p-1.5 text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
-          <div className="mb-4 flex gap-2 overflow-x-auto border-b border-brand-border" role="tablist" aria-label="Maternal record sections">
-            {[
-              { id: "prenatal", label: "Prenatal" },
-              { id: "services", label: "Prenatal Services" },
-              { id: "postpartum", label: "Delivery & Postpartum" },
-              { id: "additional", label: "Additional Care" },
-            ].map((tab) => {
-              const selected = activeFormTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  id={`maternal-form-tab-${tab.id}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  aria-controls={`maternal-form-panel-${tab.id}`}
-                  onClick={() => setActiveFormTab(tab.id)}
-                  className={`shrink-0 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
-                    selected
-                      ? "border-brand-blue text-brand-blue"
-                      : "border-transparent text-brand-gray hover:text-brand-ink"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
+        {/* Tab navigation — wraps on narrow screens instead of showing a horizontal scrollbar */}
+        <div className="flex flex-wrap gap-x-1 border-b border-brand-border px-3 sm:px-4" role="tablist" aria-label="Maternal record sections">
+          {[
+            { id: "prenatal", label: "Prenatal" },
+            { id: "services", label: "Prenatal Services" },
+            { id: "postpartum", label: "Delivery & Postpartum" },
+            { id: "additional", label: "Additional Care" },
+          ].map((tab) => {
+            const selected = activeFormTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                id={`maternal-form-tab-${tab.id}`}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`maternal-form-panel-${tab.id}`}
+                onClick={() => setActiveFormTab(tab.id)}
+                className={`-mb-px shrink-0 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
+                  selected
+                    ? "border-brand-blue text-brand-blue"
+                    : "border-transparent text-brand-gray hover:text-brand-ink"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
 
-          <div className="space-y-4">
+        {/* Scrollable form body */}
+        <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+          <div className="space-y-5">
             <div
               id="maternal-form-panel-prenatal"
               role="tabpanel"
               aria-labelledby="maternal-form-tab-prenatal"
               hidden={activeFormTab !== "prenatal"}
-              className="space-y-4"
+              className="space-y-5"
             >
-            {isEdit ? (
-              <div className="rounded-btn bg-brand-bg px-3.5 py-2.5">
-                <p className="text-[11px] uppercase tracking-wide text-brand-gray">Resident</p>
-                <p className="mt-0.5 text-sm font-medium text-brand-ink">{initial.residentName}</p>
-              </div>
-            ) : (
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Resident <span className="text-brand-danger">*</span></label>
-                <div className="mt-1.5">
-                  <ResidentSearchSelect residents={residents} value={resident} onChange={onSelectResident} />
+              {/* Patient information */}
+              <section className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Patient information</p>
+                {isEdit ? (
+                  <div className="rounded-btn bg-brand-bg px-3.5 py-2.5">
+                    <p className="text-[11px] uppercase tracking-wide text-brand-gray">Resident</p>
+                    <p className="mt-0.5 text-sm font-medium text-brand-ink">{initial.residentName}</p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Resident <span className="text-brand-danger">*</span></label>
+                    <div className="mt-1.5">
+                      <ResidentSearchSelect residents={residents} value={resident} onChange={onSelectResident} />
+                    </div>
+                    {errors.resident && <p className="mt-1 text-xs text-brand-danger">{errors.resident}</p>}
+                  </div>
+                )}
+              </section>
+
+              {/* Pregnancy details */}
+              <section className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Pregnancy details</p>
+                <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Last Menstrual Period (LMP)</label>
+                    <input type="date" value={form.lmp} onChange={(e) => set("lmp")(e.target.value)} className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Expected Delivery Date (EDD)</label>
+                    <input type="date" value={form.edd} onChange={(e) => set("edd")(e.target.value)} className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Prenatal Visits</label>
+                    <input type="number" min={0} value={form.prenatalVisits} onChange={(e) => set("prenatalVisits")(e.target.value)} className={inputCls(errors.prenatalVisits)} />
+                    {errors.prenatalVisits && <p className="mt-1 text-xs text-brand-danger">{errors.prenatalVisits}</p>}
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Risk Classification</label>
+                    <select value={form.risk} onChange={(e) => set("risk")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                      {RISK_LEVELS.map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
                 </div>
-                {errors.resident && <p className="mt-1 text-xs text-brand-danger">{errors.resident}</p>}
-              </div>
-            )}
+              </section>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Last Menstrual Period (LMP)</label>
-                <input type="date" value={form.lmp} onChange={(e) => set("lmp")(e.target.value)} className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Expected Delivery Date (EDD)</label>
-                <input type="date" value={form.edd} onChange={(e) => set("edd")(e.target.value)} className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Prenatal Visits</label>
-                <input type="number" min={0} value={form.prenatalVisits} onChange={(e) => set("prenatalVisits")(e.target.value)} className={inputCls(errors.prenatalVisits)} />
-                {errors.prenatalVisits && <p className="mt-1 text-xs text-brand-danger">{errors.prenatalVisits}</p>}
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Risk Classification</label>
-                <select value={form.risk} onChange={(e) => set("risk")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                  {RISK_LEVELS.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Status</label>
-                <select value={form.status} onChange={(e) => set("status")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                  {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Provider</label>
-                <input type="text" value={form.provider} onChange={(e) => set("provider")(e.target.value)} placeholder="e.g. Midwife" className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Date of Registration</label>
-                <input type="date" value={form.dateOfRegistration} onChange={(e) => set("dateOfRegistration")(e.target.value)} className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Family Serial No.</label>
-                <input type="text" value={form.familySerialNo} onChange={(e) => set("familySerialNo")(e.target.value)} className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Socio-Economic Status</label>
-                <select value={form.socioEconomicStatus} onChange={(e) => set("socioEconomicStatus")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                  <option value="">—</option>
-                  <option value="NHTS">1 - NHTS</option>
-                  <option value="Non-NHTS">2 - Non-NHTS</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Gravida (G)</label>
-                <input type="number" min={0} value={form.gravida} onChange={(e) => set("gravida")(e.target.value)} className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Para (P)</label>
-                <input type="number" min={0} value={form.para} onChange={(e) => set("para")(e.target.value)} className={inputCls()} />
-              </div>
-            </div>
+              {/* Record information */}
+              <section className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Record information</p>
+                <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Status</label>
+                    <select value={form.status} onChange={(e) => set("status")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                      {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Provider</label>
+                    <input type="text" value={form.provider} onChange={(e) => set("provider")(e.target.value)} placeholder="e.g. Midwife" className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Date of Registration</label>
+                    <input type="date" value={form.dateOfRegistration} onChange={(e) => set("dateOfRegistration")(e.target.value)} className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Family Serial No.</label>
+                    <input type="text" value={form.familySerialNo} onChange={(e) => set("familySerialNo")(e.target.value)} className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Socio-Economic Status</label>
+                    <select value={form.socioEconomicStatus} onChange={(e) => set("socioEconomicStatus")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                      <option value="">—</option>
+                      <option value="NHTS">1 - NHTS</option>
+                      <option value="Non-NHTS">2 - Non-NHTS</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Gravida (G)</label>
+                    <input type="number" min={0} value={form.gravida} onChange={(e) => set("gravida")(e.target.value)} className={inputCls()} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink">Para (P)</label>
+                    <input type="number" min={0} value={form.para} onChange={(e) => set("para")(e.target.value)} className={inputCls()} />
+                  </div>
+                </div>
+              </section>
 
-            {/* Household & member context (read-only, from the resident/household profile — not duplicated here). */}
-            {(resident || initial) && (
-              <div className="rounded-btn bg-brand-bg px-3.5 py-3">
-                <p className="text-[11px] uppercase tracking-wide text-brand-gray">Household &amp; Member (from resident profile)</p>
-                <p className="mt-0.5 text-sm font-medium text-brand-ink">
-                  {resident?.name || initial?.residentName}
-                  {resident?.sex ? ` · ${resident.sex}` : ""}
-                  {resident?.age != null ? ` · ${resident.age} yrs` : ""}
-                  {(resident?.barangay || initial?.barangay) ? ` · ${resident?.barangay || initial?.barangay}` : ""}
-                </p>
-                <p className="mt-1 text-[11px] text-brand-gray">Zone No. and HH No. are managed in the household profile.</p>
-              </div>
-            )}
+              {/* Household & member context (read-only, from the resident/household profile — not duplicated here). */}
+              {(resident || initial) && (
+                <div className="rounded-btn bg-brand-bg px-3.5 py-3">
+                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Household &amp; Member (from resident profile)</p>
+                  <p className="mt-0.5 text-sm font-medium text-brand-ink">
+                    {resident?.name || initial?.residentName}
+                    {resident?.sex ? ` · ${resident.sex}` : ""}
+                    {resident?.age != null ? ` · ${resident.age} yrs` : ""}
+                    {(resident?.barangay || initial?.barangay) ? ` · ${resident?.barangay || initial?.barangay}` : ""}
+                  </p>
+                  <p className="mt-1 text-[11px] text-brand-gray">Zone No. and HH No. are managed in the household profile.</p>
+                </div>
+              )}
             </div>
 
             <div
@@ -374,7 +416,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             {/* Immunization status (TCL PN PP col 10) */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Immunization Status — Td/TT (date given)</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-3">
                 {[["td1Date", "Td1 / TT1"], ["td2Date", "Td2 / TT2"], ["td3Date", "Td3 / TT3"], ["td4Date", "Td4 / TT4"], ["td5Date", "Td5 / TT5"]].map(([key, label]) => (
                   <div key={key}>
                     <label className="text-sm font-medium text-brand-ink">{label}</label>
@@ -393,7 +435,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             {/* Micronutrient supplementation (col 11) + deworming (col 13) */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Micronutrient Supplementation &amp; Deworming</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Iron + Folic Acid (total tablets)</label>
                   <input type="number" min={0} value={form.prenatalIronFolicTablets} onChange={(e) => set("prenatalIronFolicTablets")(e.target.value)} className={inputCls()} />
@@ -416,7 +458,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             {/* Infectious disease surveillance (col 14) */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Infectious Disease Surveillance</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Syphilis Screening (date)</label>
                   <input type="date" value={form.syphilisScreenDate} onChange={(e) => set("syphilisScreenDate")(e.target.value)} className={inputCls()} />
@@ -451,7 +493,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             {/* Laboratory screening (col 15) */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Laboratory Screening</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Gestational Diabetes (date screened)</label>
                   <input type="date" value={form.gdmScreenDate} onChange={(e) => set("gdmScreenDate")(e.target.value)} className={inputCls()} />
@@ -497,7 +539,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Post-partum Care &amp; Delivery Outcome</p>
               <p className="mb-2 text-[11px] text-brand-gray">These delivery fields feed the FHSIS M1 Section B2 indicators automatically — enter the delivery here and they are counted in the report; do not re-enter them in M1 Data Entry.</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Date of Delivery</label>
                   <input type="date" value={form.deliveryDate} onChange={(e) => set("deliveryDate")(e.target.value)} className={inputCls()} />
@@ -577,7 +619,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             {/* Post-partum Check-ups (date each visit was done) */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Post-partum Check-ups</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Within 24 hours after delivery</label>
                   <input type="date" value={form.ppCheckup24h} onChange={(e) => set("ppCheckup24h")(e.target.value)} className={inputCls()} />
@@ -608,7 +650,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             {/* Supplementation / preventive care (documentation dates only) */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Supplementation / Preventive Care</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Date Dose of Iron folic Completed</label>
                   <input type="date" value={form.ironFolicCompletedDate} onChange={(e) => set("ironFolicCompletedDate")(e.target.value)} className={inputCls()} />
@@ -623,7 +665,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             {/* Health / lifestyle profile (documentation only — no risk scoring) */}
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Health / Lifestyle Profile</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                 {[
                   ["smokingHistory", "With history of smoking"],
                   ["bingeAlcohol", "Binge Alcohol Drinker"],
@@ -651,23 +693,25 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
             </div>
             </div>
           </div>
+        </div>
 
-          <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
-            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-            <button
-              disabled={saving}
-              onClick={() => {
-                if (!validate()) {
-                  setActiveFormTab("prenatal");
-                  return;
-                }
-                onSave({ ...form, prenatalVisits: Number(form.prenatalVisits) || 0 });
-              }}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-            >
-              <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : isEdit ? "Save Changes" : "Create Record"}
-            </button>
-          </div>
+        {/* Footer — stays fixed at the bottom; actions, validation and loading state preserved */}
+        <div className="flex items-center justify-end gap-3 border-t border-brand-border px-5 py-4 sm:px-6">
+          <button type="button" onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg">Cancel</button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              if (!validate()) {
+                setActiveFormTab("prenatal");
+                return;
+              }
+              onSave({ ...form, prenatalVisits: Number(form.prenatalVisits) || 0 });
+            }}
+            className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
+          >
+            <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : isEdit ? "Save Changes" : "Create Record"}
+          </button>
         </div>
       </Card>
     </div>
@@ -676,6 +720,8 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
 
 export default function M1Records() {
   const { user } = useAuth();
+  const location = useLocation();
+  const isMaternalTclRoute = location.pathname.replace(/\/+$/, "").endsWith("/maternal-tcl");
 
   const supervisor = isHealthSupervisor(user);
   const scope = supervisor ? getSupervisorScope(user) : null;
@@ -696,7 +742,7 @@ export default function M1Records() {
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(null); // record pending delete confirmation
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [activeSection, setActiveSection] = useState(null); // null = Health Services grid; 'B' = maternal; else section panel
+  const [activeSection, setActiveSection] = useState(isMaternalTclRoute ? "B" : null); // null = Health Services grid; 'B' = maternal; else section panel
   const [m1EntryOpen, setM1EntryOpen] = useState(false);
   const [m1EntrySection, setM1EntrySection] = useState("D");
   // Per-section service-record counts for the Service Summary. Keyed by FHSIS
@@ -708,7 +754,7 @@ export default function M1Records() {
   const [countsError, setCountsError] = useState(null);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const cameFromTcl = searchParams.get("from") === "tcl";
+  const cameFromTcl = isMaternalTclRoute || searchParams.get("from") === "tcl";
   const { startPrint, portal, brandingError } = useM1OfficialPrint();
   const { startPrint: startMaternalPrint, portal: maternalPrintPortal } = useMaternalRecordPrint();
 
@@ -726,7 +772,11 @@ export default function M1Records() {
   const PAGE_SIZE = 8;
 
   // Reset to the first page whenever the visible set changes.
-  useEffect(() => { setPage(1); }, [period, year, month, quarter, search, statusFilter]);
+  useEffect(() => { setPage(1); }, [period, year, month, quarter, search, statusFilter, isMaternalTclRoute]);
+
+  useEffect(() => {
+    setActiveSection(isMaternalTclRoute ? "B" : null);
+  }, [isMaternalTclRoute]);
 
   const load = React.useCallback(() => {
     setLoading(true);
@@ -820,11 +870,11 @@ export default function M1Records() {
 
   const participants = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return periodRecords
+    return (isMaternalTclRoute ? records : periodRecords)
       .filter((r) => statusFilter === "All" || r.status === statusFilter)
       .filter((r) => !q || `${r.residentName} ${r.residentId}`.toLowerCase().includes(q))
       .sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")));
-  }, [periodRecords, statusFilter, search]);
+  }, [isMaternalTclRoute, records, periodRecords, statusFilter, search]);
 
   const totalPages = Math.max(1, Math.ceil(participants.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
@@ -848,7 +898,7 @@ export default function M1Records() {
   };
 
   const periodLabel = makePeriodLabel(descriptor);
-  const exportLabel = period === "monthly" ? "Export Monthly" : period === "quarterly" ? "Export Quarterly" : "Export Annual";
+  const exportLabel = period === "monthly" ? "Export Monthly Report" : period === "quarterly" ? "Export Quarterly Report" : "Export Annual Report";
 
   // Export the official FHSIS Form M1 for the SELECTED reporting period. Data is
   // fetched fresh from the M1 aggregation API (`report` → `byCode`) for the
@@ -1003,27 +1053,41 @@ export default function M1Records() {
   return (
     <>
       {cameFromTcl && <BackToTclButton />}
-      <PageHeader
-        crumbs={cameFromTcl ? [{ label: "Records", to: "../tcls" }, { label: "TCL", to: "../tcls" }, "Maternal Care (M1)"] : ["M1"]}
-        title="M1"
-        subtitle={
-          assignedBarangay
-            ? `Monthly FHSIS service recording and reporting for Brgy. ${assignedBarangay}.`
-            : "Monthly FHSIS service recording and reporting for your assigned barangay."
-        }
-        action={
-          <div className="flex flex-wrap items-center gap-2">
+      {isMaternalTclRoute ? (
+        <PageHeader
+          crumbs={cameFromTcl
+            ? [{ label: "Records", to: "../tcls" }, { label: "TCL", to: "../tcls" }, "Prenatal and Postpartum"]
+            : ["M1"]}
+          title="Prenatal and Postpartum"
+          subtitle={
+            assignedBarangay
+              ? `Prenatal and postpartum records for Brgy. ${assignedBarangay}.`
+              : "Prenatal and postpartum records for your assigned barangay."
+          }
+        />
+      ) : (
+        /* Monthly Health Services — formal M1 consolidated report masthead,
+           rendered through the shared PageHeader using the report variant so
+           the institutional navy/gold banner stays consistent with every other
+           page header while keeping the Official Record / M1 labels and the
+           Export action. */
+        <PageHeader
+          variant="report"
+          eyebrow="M1 Consolidated Report"
+          title="Monthly Health Services"
+          subtitle={`Consolidated recording of barangay health-service delivery for FHSIS Form M1 statutory reporting${assignedBarangay ? ` — Brgy. ${assignedBarangay}` : ""}.`}
+          action={
             <button
               onClick={handleExport}
               disabled={exporting}
-              className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue disabled:opacity-50"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-btn border border-white/30 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-50 md:w-auto"
               title={`Export the official FHSIS Form M1 for ${periodLabel} (Save as PDF)`}
             >
               <Download className="h-4 w-4" /> {exporting ? "Preparing…" : exportLabel}
             </button>
-          </div>
-        }
-      />
+          }
+        />
+      )}
 
       {brandingError && <Card role="alert" className="mb-4 p-3 text-sm text-brand-danger">{brandingError}</Card>}
 
@@ -1049,7 +1113,9 @@ export default function M1Records() {
       ) : (
         <>
           {/* Period controls: Monthly | Quarterly | Annual */}
+          {!isMaternalTclRoute && (
           <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-btn border border-brand-border bg-white px-3 py-2.5">
+            <span className="mr-1 hidden text-[11px] font-semibold uppercase tracking-gov text-brand-gray sm:inline">Reporting Period</span>
             <div className="inline-flex rounded-btn border border-brand-border bg-white p-0.5">
               {["monthly", "quarterly", "annual"].map((p) => (
                 <button
@@ -1104,10 +1170,13 @@ export default function M1Records() {
               </label>
             )}
 
-            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-brand-light px-3 py-1 text-xs font-medium text-brand-blue">
+            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-brand-blue/15 bg-brand-light px-3 py-1 text-xs font-medium text-brand-blue">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-blue" aria-hidden="true" />
+              <span className="uppercase tracking-wide text-[10px] text-brand-blue/70">Active</span>
               {periodLabel}
             </span>
           </div>
+          )}
 
           {/* Health Services — standardized service summary + M1 reporting entry. */}
           {activeSection === null && (
@@ -1159,12 +1228,18 @@ export default function M1Records() {
           <>
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <button onClick={() => setActiveSection(null)} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
-                <ChevronLeft className="h-4 w-4" /> Health Services
-              </button>
+              {!isMaternalTclRoute && (
+                <button onClick={() => setActiveSection(null)} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
+                  <ChevronLeft className="h-4 w-4" /> Health Services
+                </button>
+              )}
               <div>
-                <h3 className="font-semibold text-brand-ink">Maternal Care Records</h3>
-                <p className="text-xs text-brand-gray">Individual maternal cases — the operational source for FHSIS Section B.</p>
+                <h3 className="font-semibold text-brand-ink">{isMaternalTclRoute ? "Prenatal and Postpartum Records" : "Maternal Care Records"}</h3>
+                <p className="text-xs text-brand-gray">
+                  {isMaternalTclRoute
+                    ? "Individual maternal cases with prenatal, delivery, and postpartum follow-up details."
+                    : "Individual maternal cases — the operational source for FHSIS Section B."}
+                </p>
               </div>
             </div>
             <button
@@ -1175,6 +1250,8 @@ export default function M1Records() {
             </button>
           </div>
 
+          {!isMaternalTclRoute && (
+          <>
           {/* Participation chart (period-aware) */}
           <Card className="mt-6 p-6">
             <h3 className="font-semibold text-brand-ink">M1 Participation by Month</h3>
@@ -1218,13 +1295,19 @@ export default function M1Records() {
               </div>
             </Card>
           )}
+          </>
+          )}
 
           {/* Participants table */}
           <Card className="mt-6 overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-border px-5 py-4">
               <div>
-                <h3 className="font-semibold text-brand-ink">M1 / Maternal Participants</h3>
-                <p className="text-xs text-brand-gray">Residents with maternal records for {periodLabel} — {participants.length} shown.</p>
+                <h3 className="font-semibold text-brand-ink">{isMaternalTclRoute ? "Prenatal and Postpartum Records" : "M1 / Maternal Participants"}</h3>
+                <p className="text-xs text-brand-gray">
+                  {isMaternalTclRoute
+                    ? `${participants.length} maternal record${participants.length === 1 ? "" : "s"} shown.`
+                    : `Residents with maternal records for ${periodLabel} — ${participants.length} shown.`}
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative">
@@ -1252,13 +1335,17 @@ export default function M1Records() {
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-bg">
                   <Baby className="h-7 w-7 text-brand-blue" />
                 </div>
-                <h4 className="mt-4 text-base font-semibold text-brand-ink">No M1 participants for {periodLabel}</h4>
+                <h4 className="mt-4 text-base font-semibold text-brand-ink">
+                  {isMaternalTclRoute ? "No prenatal or postpartum records found" : `No M1 participants for ${periodLabel}`}
+                </h4>
                 <p className="mx-auto mt-1.5 max-w-md text-sm text-brand-gray">
                   {records.length === 0
                     ? (assignedBarangay
                         ? `No maternal records have been recorded for Brgy. ${assignedBarangay} yet.`
                         : "No maternal records have been recorded yet.")
-                    : "No maternal records match this period or filter."}
+                    : isMaternalTclRoute
+                      ? "No maternal records match this filter."
+                      : "No maternal records match this period or filter."}
                 </p>
                 {(search.trim() !== "" || statusFilter !== "All") && (
                   <button

@@ -10,7 +10,8 @@ const resource = (kind) => ({
 export const followUpsApi = resource('followups');
 export const tclApi = resource('tcl');
 export const maternalApi = resource('maternal');
+export const maternalVisitsApi = resource('maternalvisits');
 export const immunizationsApi = resource('immunizations');
 export const notificationsApi = resource('notifications');
 
-export default { followUpsApi, tclApi, maternalApi, immunizationsApi, notificationsApi };
+export default { followUpsApi, tclApi, maternalApi, maternalVisitsApi, immunizationsApi, notificationsApi };

@@ -109,7 +109,7 @@ export default function ResidentFollowUps() {
       await residentFollowUpsApi.approve(id);
       setConfirmTarget(null); setSelected(null);
       await load();
-      showToast("Follow-up confirmed — see you at your appointment.");
+      showToast("Follow-up confirmed — see you for your scheduled follow-up.");
     } catch (err) {
       showToast(err?.message || "Could not confirm the follow-up.");
     } finally { setBusy(false); }
@@ -158,7 +158,7 @@ export default function ResidentFollowUps() {
       </div>
 
       <Card className="p-6">
-        <h3 className="font-semibold text-brand-ink mb-4">Your Follow-up Appointments</h3>
+        <h3 className="font-semibold text-brand-ink mb-4">Your Follow-ups</h3>
 
         {loading ? (
           <div className="py-12 text-center">
@@ -174,7 +174,7 @@ export default function ResidentFollowUps() {
         ) : sorted.length === 0 ? (
           <div className="text-center py-12">
             <CalendarDays className="w-12 h-12 text-brand-gray/50 mx-auto mb-4" />
-            <p className="text-brand-gray">No follow-up appointments scheduled yet.</p>
+            <p className="text-brand-gray">No follow-ups scheduled yet.</p>
             <p className="mt-1 text-xs text-brand-gray">When your health team schedules a follow-up, it will appear here.</p>
           </div>
         ) : (

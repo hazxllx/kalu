@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
-import { TrendingUp, TrendingDown, Activity, Send, MapPin } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, Send, MapPin, CalendarDays, ChevronDown } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import RiskOverview from "@/features/analytics/components/RiskOverview";
@@ -145,15 +145,26 @@ export default function HealthTrends() {
   }, [assignedBarangay, loadMunicipality]);
 
   const periodSelect = (
-    <select
-      value={period}
-      onChange={(e) => setPeriod(e.target.value)}
-      className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue"
-    >
-      <option value="3m">Last 3 Months</option>
-      <option value="6m">Last 6 Months</option>
-      <option value="12m">Last 12 Months</option>
-    </select>
+    <div className="flex h-10 max-w-full items-center gap-2 rounded-btn border border-white/25 bg-white/10 px-3 text-white">
+      <CalendarDays className="h-4 w-4 shrink-0 text-brand-goldlight" aria-hidden="true" />
+      <label htmlFor="health-trends-period" className="shrink-0 text-xs font-medium text-white/75">
+        Period
+      </label>
+      <div className="relative flex min-w-0 items-center">
+        <select
+          id="health-trends-period"
+          aria-label="Reporting period"
+          value={period}
+          onChange={(e) => setPeriod(e.target.value)}
+          className="h-9 min-w-0 appearance-none bg-transparent pr-5 text-sm font-medium text-white outline-none focus-visible:ring-2 focus-visible:ring-brand-goldlight/70"
+        >
+          <option className="bg-white text-brand-ink" value="3m">Last 3 Months</option>
+          <option className="bg-white text-brand-ink" value="6m">Last 6 Months</option>
+          <option className="bg-white text-brand-ink" value="12m">Last 12 Months</option>
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-0 h-4 w-4 text-white/75" aria-hidden="true" />
+      </div>
+    </div>
   );
 
   /* ------------------------------------------------------------------ */
@@ -175,12 +186,13 @@ export default function HealthTrends() {
           title="Health Trends"
           subtitle={`Health overview for Barangay ${assignedBarangay}`}
           action={
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
               <div
-                className="flex items-center gap-2 rounded-btn border border-brand-border bg-brand-light/40 px-3 py-2 text-sm font-medium text-brand-ink"
+                className="flex h-10 max-w-full items-center gap-2 rounded-btn border border-white/25 bg-white/10 px-3 text-sm font-medium text-white"
                 title="Your account is assigned to this barangay"
               >
-                <MapPin className="w-4 h-4 text-brand-blue" /> Barangay {assignedBarangay}
+                <MapPin className="h-4 w-4 shrink-0 text-brand-goldlight" aria-hidden="true" />
+                <span className="truncate">Barangay {assignedBarangay}</span>
               </div>
               {periodSelect}
             </div>
@@ -405,7 +417,7 @@ export default function HealthTrends() {
         crumbs={["Health Trends"]}
         title="Health Trends"
         subtitle="Municipal health overview across all barangays"
-        action={periodSelect}
+        action={<div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">{periodSelect}</div>}
       />
 
       {muniLoading ? (

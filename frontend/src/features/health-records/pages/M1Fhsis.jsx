@@ -241,7 +241,7 @@ export default function M1Fhsis() {
         title="Maternal & Family Health Report"
         subtitle={`FHSIS — MONTHLY FORM M1${assignedBarangay ? ` — Barangay ${assignedBarangay}` : ""}`}
         meta={
-          <span className="rounded-full bg-brand-blue/10 px-3 py-1 text-xs font-semibold text-brand-blue">
+          <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white">
             {tab === "annual" ? `Year ${year}` : tab === "daily" ? date : periodLabel}
           </span>
         }

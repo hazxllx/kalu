@@ -830,7 +830,7 @@ export default function UserManagement() {
         title="User Management"
         subtitle="Manage staff and resident accounts, roles, coverage, and access."
         meta={
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue/10 px-3 py-1 text-xs font-medium text-brand-blue">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-medium text-white">
             <Users className="h-3.5 w-3.5" aria-hidden="true" />
             {summary ? `${summary.total.toLocaleString()} total accounts` : "Accounts"}
           </span>

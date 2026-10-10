@@ -19,11 +19,13 @@ import consultationsRoutes from './consultations.routes.js';
 import operationalRoutes from './operational.routes.js';
 import programFormsRoutes from './programForms.routes.js';
 import residentFollowupsRoutes from './residentFollowups.routes.js';
+import visitPlansRoutes from './visitPlans.routes.js';
 import referralsRoutes from './referrals.routes.js';
 import m1Routes from './m1.routes.js';
 import usersRoutes from './users.routes.js';
 import reportsRoutes from './reports.routes.js';
 import healthServicesRoutes from './healthServices.routes.js';
+import appointmentsRoutes from './appointments.routes.js';
 import rolesRoutes from './roles.routes.js';
 import municipalSubmissionsRoutes from './municipalSubmissions.routes.js';
 import riskConfigRoutes from './riskConfig.routes.js';
@@ -76,6 +78,12 @@ router.use(observabilityRoutes);
 // Resident self-service follow-ups (list/read own + approve/reject). Separate
 // from the staff /operational endpoints; ownership is derived from the session.
 router.use('/resident', residentFollowupsRoutes);
+
+// Resident Health Services directory + "I plan to visit" intent (visit_plans).
+// A read-only, barangay/RHU-scoped service directory with a single lightweight
+// intent action — NOT the staff appointment system. Ownership + scope derived
+// from the session; a soft signal notifies the barangay health worker.
+router.use('/resident', visitPlansRoutes);
 
 // Referral coordination — real Supabase-backed workflow (health_referrals):
 // barangay-scoped create/list/update/status/delete for Health Supervisor / PHN,
@@ -141,6 +149,15 @@ router.use('/reports', reportsRoutes);
 // (public.health_services + public.health_service_assignments). Scoped by
 // municipality/facility/barangay; an assigned service follows the assignee.
 router.use('/health-services', healthServicesRoutes);
+
+// Resident appointment booking + barangay-scoped staff management — real
+// Supabase-backed tables (public.appointments + public.appointment_schedules +
+// public.appointment_blackouts). Residents request appointments for services
+// offered by their barangay; the booking RPC enforces slot capacity
+// concurrency-safely. Barangay-scoped staff review, decide and configure
+// availability within their scope. Reuses the health_services catalog and the
+// notifications + audit entities; no duplicate service/notification system.
+router.use('/appointments', appointmentsRoutes);
 
 // Early Warning analytics — barangay scope enforced from the session
 router.use('/analytics', analyticsRoutes);

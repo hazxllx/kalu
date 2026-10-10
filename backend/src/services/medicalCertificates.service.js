@@ -343,7 +343,7 @@ const insertWithReference = async (supabase, row) => {
     if (/duplicate key|unique/i.test(error.message || '') && attempt < 4) continue;
     throwOnError(error, 'Could not create medical certificate');
   }
-  throw ApiError(503, 'Could not allocate a certificate number. Please try again.');
+  throw new ApiError(503, 'Could not allocate a certificate number. Please try again.');
 };
 
 const sanitizeWrite = (payload = {}) => {

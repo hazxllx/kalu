@@ -220,8 +220,8 @@ export default function DashboardLayout({ roleKey }) {
   const NavList = () => {
     const compact = roleKey === "health_supervisor";
     const rowSize = compact
-      ? "min-h-[40px] py-1.5"
-      : "min-h-[42px] py-2";
+      ? "min-h-9 py-1.5"
+      : "min-h-9 py-1.5";
 
     const isItemActive = (item) =>
       navItemIsActive(item, location.pathname);
@@ -231,12 +231,12 @@ export default function DashboardLayout({ roleKey }) {
         return (
           <div
             key={it.label}
-            className={`flex ${rowSize} items-center gap-2.5 px-3 rounded-xl text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none`}
+            className={`flex ${rowSize} items-center gap-2.5 px-3 rounded-md text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none`}
             title="Available after account verification"
           >
             <Icon
               name={it.icon}
-              className="w-5 h-5 shrink-0"
+              className="w-[18px] h-[18px] shrink-0"
               strokeWidth={1.8}
             />
             <span className="flex-1 truncate">{it.label}</span>
@@ -264,11 +264,11 @@ export default function DashboardLayout({ roleKey }) {
                   [it.label]: !openGroup,
                 }))
               }
-              className={`flex ${rowSize} w-full items-center gap-2.5 px-3 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors`}
+              className={`flex ${rowSize} w-full items-center gap-2.5 px-3 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors`}
             >
               <Icon
                 name={it.icon}
-                className="w-5 h-5 shrink-0"
+                className="w-[18px] h-[18px] shrink-0"
                 strokeWidth={1.8}
               />
 
@@ -305,9 +305,9 @@ export default function DashboardLayout({ roleKey }) {
       return (
         <Link
           key={it.path}
-          to={it.path}
+          to={`${it.path}${it.search || ""}`}
           onClick={() => setOpen(false)}
-          className={`flex ${rowSize} items-center gap-2.5 px-3 rounded-xl text-sm transition-colors ${
+          className={`flex ${rowSize} items-center gap-2.5 px-3 rounded-md text-sm transition-colors ${
             active
               ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
               : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
@@ -315,7 +315,7 @@ export default function DashboardLayout({ roleKey }) {
         >
           <Icon
             name={it.icon}
-            className="w-5 h-5 shrink-0"
+            className="w-[18px] h-[18px] shrink-0"
             strokeWidth={1.8}
           />
           <span className="truncate">{it.label}</span>
@@ -341,12 +341,9 @@ export default function DashboardLayout({ roleKey }) {
     return (
       <div className={compact ? "space-y-0.5" : "space-y-1"}>
         {blocks.map((block, i) => (
-          <div
-            key={block.group || `block-${i}`}
-            className={block.group && i > 0 ? (compact ? "mt-2" : "mt-3") : ""}
-          >
+          <div key={block.group || `block-${i}`}>
             {block.group && (
-              <p className={`px-3 ${compact ? "pb-0.5" : "pb-1"} text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-500 select-none`}>
+              <p className={`px-3 ${i === 0 ? "pt-1" : "pt-5"} pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 dark:text-slate-500 select-none`}>
                 {block.group}
               </p>
             )}
@@ -453,10 +450,10 @@ export default function DashboardLayout({ roleKey }) {
         <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
           <button
             onClick={() => logout()}
-            className="w-full min-h-[42px] flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+                  className="w-full min-h-9 flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
           >
             <LogOut
-              className="w-5 h-5 shrink-0"
+              className="w-[18px] h-[18px] shrink-0"
               strokeWidth={1.8}
             />
             Log out
@@ -506,10 +503,10 @@ export default function DashboardLayout({ roleKey }) {
               <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
                 <button
                   onClick={() => logout()}
-                  className="w-full min-h-[42px] flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+            className="w-full min-h-9 flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
                 >
                   <LogOut
-                    className="w-5 h-5 shrink-0"
+                    className="w-[18px] h-[18px] shrink-0"
                     strokeWidth={1.8}
                   />
                   Log out
@@ -533,7 +530,7 @@ export default function DashboardLayout({ roleKey }) {
           </button>
 
           {showResidentSearch && (
-            <div className="hidden md:flex items-center gap-2 bg-slate-50 dark:bg-input border border-slate-200 dark:border-border rounded-xl px-3 py-2 w-72">
+            <div className="hidden md:flex h-9 items-center gap-2 bg-slate-50 dark:bg-input border border-slate-200 dark:border-border rounded-md px-3 w-80 xl:w-[360px]">
               <Search className="w-4 h-4 text-slate-500 dark:text-slate-400" />
 
               <input
@@ -547,7 +544,7 @@ export default function DashboardLayout({ roleKey }) {
             <OfflineStatusIndicator />
             <Link
               to={notificationsPath}
-              className="relative w-10 h-10 rounded-xl hover:bg-slate-50 dark:hover:bg-hover flex items-center justify-center"
+              className="relative w-10 h-10 rounded-md hover:bg-slate-50 dark:hover:bg-hover flex items-center justify-center"
             >
               <Bell
                 className="w-5 h-5 text-slate-600 dark:text-slate-300"
@@ -555,7 +552,7 @@ export default function DashboardLayout({ roleKey }) {
               />
 
               {unreadCount > 0 && (
-                <span className="absolute top-2 right-2 w-5 h-5 bg-brand-danger text-white text-xs rounded-full flex items-center justify-center font-medium">
+                <span className="absolute top-2 right-2 w-[18px] h-[18px] bg-brand-danger text-white text-xs rounded-full flex items-center justify-center font-medium">
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
@@ -567,14 +564,14 @@ export default function DashboardLayout({ roleKey }) {
             >
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="flex items-center gap-2 rounded-xl hover:bg-slate-50 dark:hover:bg-hover px-2 py-1.5 transition-colors"
+                className="flex items-center gap-2 rounded-md hover:bg-slate-50 dark:hover:bg-hover px-2 py-1.5 transition-colors"
               >
-                <div className="w-9 h-9 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-semibold font-heading">
+                <div className="w-8 h-8 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-semibold font-heading">
                   {initials}
                 </div>
 
                 <div className="hidden md:block text-left">
-                  <p className="text-sm font-medium text-slate-900 dark:text-foreground leading-tight">
+                  <p className="text-[13px] font-semibold text-slate-900 dark:text-foreground leading-tight">
                     {displayName}
                   </p>
 
@@ -592,13 +589,13 @@ export default function DashboardLayout({ roleKey }) {
                         />
                       ))}
 
-                    <p className="text-xs text-slate-500">
+                    <p className="text-[11px] text-slate-500">
                       {role.label}
                     </p>
                   </div>
                 </div>
 
-                <ChevronDown className="hidden md:block w-4 h-4 text-slate-500 dark:text-slate-400" />
+                <ChevronDown className="hidden md:block w-3 h-3 text-slate-500 dark:text-slate-400" />
               </button>
 
               <AnimatePresence>
@@ -608,7 +605,7 @@ export default function DashboardLayout({ roleKey }) {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.97 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-popover rounded-xl border border-slate-200 dark:border-border shadow-soft overflow-hidden z-50"
+                    className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-popover rounded-md border border-slate-200 dark:border-border shadow-soft overflow-hidden z-50"
                   >
                     <div className="px-4 py-4 border-b border-slate-200 dark:border-border bg-slate-50 dark:bg-card-nested">
                       <div className="flex items-center gap-3">
