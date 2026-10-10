@@ -5,7 +5,7 @@ import SearchableSelect from "@/components/common/SearchableSelect";
 import { intakeApi } from "@/services/api";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
-import { BARANGAYS } from "@/lib/barangays";
+import { useBarangays } from "@/context/BarangaysContext";
 import { useAuth } from "@/context/AuthContext";
 import {
   ArrowLeft,
@@ -94,6 +94,7 @@ const numeric = (value) => (value !== "" && value != null && !Number.isNaN(Numbe
 
 export default function RhuTriage() {
   const { user } = useAuth();
+  const { barangays: liveBarangays } = useBarangays();
   // BUG-008: the "recently sent" list and the triage hand-off are backed by the
   // persistent database (the caller's own /intake submissions), not localStorage.
   const { patients: sentPatients, sendToPhnQueue } = usePhnWorkflow({ source: "intake" });
@@ -564,7 +565,7 @@ export default function RhuTriage() {
                           <SearchableSelect
                             value={walkIn.barangay}
                             onChange={(v) => setWalkIn((prev) => ({ ...prev, barangay: v }))}
-                            options={[...BARANGAYS]}
+                            options={[...liveBarangays]}
                             placeholder="Search barangay..."
                             emptyText="No barangay found."
                             error={errors.barangay}

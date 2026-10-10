@@ -1,34 +1,32 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { CalendarDays, Clock, Stethoscope } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarDays, Clock, MapPin, Stethoscope, CheckCircle2, Loader2 } from "lucide-react";
+import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { Skeleton } from "@/components/common/Skeleton";
+import { useAuth } from "@/context/AuthContext";
 import { visitPlansApi } from "@/services/api";
 import VisitPlanModal from "../components/VisitPlanModal";
-import { availabilityLine, formatWeekdays, formatWindow, formatPlanDate } from "../lib/visitPlanFormat";
-
-const FACILITY_HEADING = {
-  BHC: (name) => `Barangay Health Center — ${name}`,
-  RHU: (name) => `Rural Health Unit — ${name}`,
-};
+import { availabilityLine, formatWeekdays, formatWindow, formatPlanDate, formatServiceSchedule, formatDeadline } from "../lib/visitPlanFormat";
 
 /**
- * Resident Health Services directory.
+ * Resident Health Services.
  *
- * A calm, informational directory of the services the resident's barangay
- * health center (BHC) and the covering Rural Health Unit (RHU) actually offer,
- * grouped by facility. The only action is a per-service "I plan to visit"
- * intent — the resident commits to a day and the barangay health worker is
- * notified. There is no appointment status, approval queue or plan dashboard:
- * a service either shows the action, or (when the resident already has a plan)
- * a single inline line with a Remove link.
+ * A professional, institution-styled directory of the services the resident's
+ * Barangay Health Center (BHC) and the covering Rural Health Unit (RHU) actually
+ * offer, in two clearly separated white container cards (BHC first, RHU second).
+ * Each service renders as a horizontal card; the primary action is a real
+ * Register button that creates a registration against the authenticated resident
+ * and the selected service (reusing the existing visit-plan registration
+ * endpoint). All service and registration data comes from the backend — nothing
+ * is hardcoded or fabricated.
  */
 export default function ResidentHealthServices() {
+  const { user } = useAuth();
   const [state, setState] = useState("loading"); // loading | error | ready
   const [facilities, setFacilities] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
-  const [planModal, setPlanModal] = useState(null); // the service being planned
+  const [registerModal, setRegisterModal] = useState(null); // the service being registered
   const [removeTarget, setRemoveTarget] = useState(null); // { serviceId, plan }
   const [removing, setRemoving] = useState(false);
   const [toast, setToast] = useState("");
@@ -70,9 +68,18 @@ export default function ResidentHealthServices() {
 
   const onConfirmed = useCallback(
     (plan) => {
-      if (planModal && plan) patchServicePlan(planModal.id, { id: plan.id, plannedDate: plan.plannedDate, note: plan.note || "" });
+      if (registerModal && plan)
+        patchServicePlan(registerModal.id, {
+          id: plan.id,
+          plannedDate: plan.plannedDate,
+          note: plan.note || "",
+          // A freshly created registration has no attendance yet, so the
+          // resident-facing status is always "Registered".
+          status: "Registered",
+          attendanceStatus: null,
+        });
     },
-    [planModal, patchServicePlan],
+    [registerModal, patchServicePlan],
   );
 
   const confirmRemove = useCallback(async () => {
@@ -81,25 +88,26 @@ export default function ResidentHealthServices() {
     try {
       await visitPlansApi.remove(removeTarget.plan.id);
       patchServicePlan(removeTarget.serviceId, null);
-      showToast("Visit plan removed. Your barangay health center has been notified.");
+      showToast("Your registration has been cancelled.");
       setRemoveTarget(null);
     } catch (err) {
-      showToast(err?.message || "Could not remove the visit plan. Please try again.");
+      showToast(err?.message || "Could not cancel your registration. Please try again.");
     } finally {
       setRemoving(false);
     }
   }, [removeTarget, patchServicePlan, showToast]);
 
+  const bhc = useMemo(() => facilities.find((f) => f.type === "BHC") || null, [facilities]);
+  const rhu = useMemo(() => facilities.find((f) => f.type === "RHU") || null, [facilities]);
+  const barangayName = bhc?.name || user?.barangay || "";
+
   return (
     <>
-      {/* Header block */}
-      <header className="mb-6">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Health Services</p>
-        <h1 className="mt-1 text-[22px] font-semibold leading-tight text-brand-ink">Health Services</h1>
-        <p className="mt-1 text-[13px] text-brand-gray">
-          Services offered at your barangay health center and the RHU.
-        </p>
-      </header>
+      <PageHeader
+        crumbs={["Dashboard", "Health Services"]}
+        title="Health Services"
+        subtitle="Explore health services offered by your Barangay Health Center and Rural Health Unit. Register for available services and keep track of your participation."
+      />
 
       {state === "loading" && <DirectorySkeleton />}
 
@@ -109,51 +117,38 @@ export default function ResidentHealthServices() {
         </Card>
       )}
 
-      {state === "ready" && facilities.length === 0 && (
-        <Card className="border border-brand-border shadow-none">
-          <EmptyState
-            icon={Stethoscope}
-            title="No services available"
-            description="No services available. Contact your barangay health center."
+      {state === "ready" && (
+        <div className="space-y-5">
+          {/* Barangay Health Center */}
+          <FacilitySection
+            title={`Barangay Health Center${barangayName ? ` — ${barangayName}` : ""}`}
+            subtitle="Health services organized by your barangay for the community."
+            services={bhc?.services || []}
+            onRegister={(svc) => setRegisterModal(svc)}
+            onCancel={(svc) => setRemoveTarget({ serviceId: svc.id, plan: svc.plan })}
           />
-        </Card>
+
+          {/* Rural Health Unit */}
+          <FacilitySection
+            title="Rural Health Unit (RHU)"
+            subtitle="Health services provided by the Rural Health Unit for nearby barangays."
+            services={rhu?.services || []}
+            onRegister={(svc) => setRegisterModal(svc)}
+            onCancel={(svc) => setRemoveTarget({ serviceId: svc.id, plan: svc.plan })}
+          />
+        </div>
       )}
 
-      {state === "ready" &&
-        facilities.length > 0 &&
-        facilities.map((facility, i) => (
-          <section key={facility.type} className={i === 0 ? "" : "mt-4"}>
-            <h2 className="mb-2 border-b border-brand-border pb-2 text-[13px] font-semibold text-brand-ink">
-              {(FACILITY_HEADING[facility.type] || ((n) => n))(facility.name)}
-            </h2>
-
-            {facility.services.length === 0 ? (
-              <p className="py-6 text-center text-[13px] text-brand-gray">No services offered at this facility yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {facility.services.map((svc) => (
-                  <ServiceCard
-                    key={svc.id}
-                    service={svc}
-                    onPlan={() => setPlanModal(svc)}
-                    onRemove={() => setRemoveTarget({ serviceId: svc.id, plan: svc.plan })}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        ))}
-
       <VisitPlanModal
-        open={Boolean(planModal)}
-        service={planModal}
-        onClose={() => setPlanModal(null)}
+        open={Boolean(registerModal)}
+        service={registerModal}
+        onClose={() => setRegisterModal(null)}
         onConfirmed={onConfirmed}
         showToast={showToast}
       />
 
       {removeTarget && (
-        <RemovePlanDialog
+        <CancelRegistrationDialog
           plan={removeTarget.plan}
           busy={removing}
           onCancel={() => (removing ? null : setRemoveTarget(null))}
@@ -164,69 +159,180 @@ export default function ResidentHealthServices() {
       {toast && (
         <div
           role="status"
-          className="fixed bottom-5 left-1/2 z-[80] -translate-x-1/2 rounded-card border border-brand-border bg-white px-4 py-2.5 text-[13px] text-brand-ink shadow-sm"
+          className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg"
         >
-          {toast}
+          <CheckCircle2 className="h-4 w-4 text-brand-green" aria-hidden="true" />
+          <span className="text-sm">{toast}</span>
         </div>
       )}
     </>
   );
 }
 
-/** One service row: info-dense, two columns on desktop, stacked on mobile. */
-function ServiceCard({ service, onPlan, onRemove }) {
+/** A white container card for one facility (BHC or RHU) with its service list. */
+function FacilitySection({ title, subtitle, services, onRegister, onCancel }) {
+  return (
+    <section className="overflow-hidden rounded-card border border-brand-border bg-white shadow-card">
+      <header className="border-b border-brand-border px-5 py-4 md:px-6">
+        <h2 className="text-base font-semibold text-brand-ink">{title}</h2>
+        <p className="mt-0.5 text-[13px] text-brand-gray">{subtitle}</p>
+      </header>
+      <div className="p-4 md:p-5">
+        {services.length === 0 ? (
+          <SectionEmpty />
+        ) : (
+          <div className="space-y-3">
+            {services.map((svc) => (
+              <ServiceCard
+                key={svc.id}
+                service={svc}
+                onRegister={() => onRegister(svc)}
+                onCancel={() => onCancel(svc)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** Restrained empty state shown inside a facility card when it has no services. */
+function SectionEmpty() {
+  return (
+    <div className="rounded-card border border-dashed border-brand-border bg-brand-bg px-5 py-8 text-center">
+      <p className="text-[13px] font-medium text-brand-ink">No health services available at the moment.</p>
+      <p className="mt-1 text-[13px] text-brand-gray">Please check again later for upcoming services.</p>
+    </div>
+  );
+}
+
+const STATUS_STYLES = {
+  Registered: "bg-brand-blue/10 text-brand-blue",
+  Attended: "bg-brand-green/10 text-brand-green",
+  Missed: "bg-brand-danger/10 text-brand-danger",
+  Cancelled: "bg-slate-100 text-slate-500",
+};
+
+/** A small status pill for a registration. */
+function StatusBadge({ status }) {
+  const label = status || "Registered";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${STATUS_STYLES[label] || STATUS_STYLES.Registered}`}>
+      {label}
+    </span>
+  );
+}
+
+/**
+ * One health service, laid out horizontally on desktop and stacked on mobile:
+ *   [icon]  name + type + description      date/time/location      [action]
+ * The action is a real Register button whose state reflects actual backend
+ * availability and the resident's current registration.
+ */
+function ServiceCard({ service, onRegister, onCancel }) {
   const schedule = formatWeekdays(service.weekdays);
   const window = formatWindow(service.windowStart, service.windowEnd);
-  const policyTag = service.visitPolicy === "by_notice" ? "By notice" : "Walk-in";
+  const serviceType = service.visitPolicy === "by_notice" ? "By notice" : "Walk-in";
   const avail = availabilityLine(service);
-  const hasPlan = Boolean(service.plan);
+  const plan = service.plan || null;
+  const status = plan?.status || null;
+  const isActive = status === "Registered"; // registered, not yet attended/missed
+
+  // The concrete one-off service window (set on the service record), shown so a
+  // resident sees the actual date and time before registering.
+  const serviceSchedule = formatServiceSchedule(service.schedule);
+  const registerBy = formatDeadline(service.schedule?.registrationDeadline);
 
   return (
-    <div className="rounded-card border border-brand-border bg-white px-5 py-4 transition-colors hover:bg-brand-bg">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
-        {/* Left: name, description, meta */}
-        <div className="min-w-0 lg:flex-1">
-          <h3 className="text-[15px] font-semibold leading-tight text-brand-ink">{service.name}</h3>
-          {service.description && (
-            <p className="mt-0.5 truncate text-[13px] text-brand-gray">{service.description}</p>
-          )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-brand-gray">
-            {schedule && (
-              <span className="inline-flex items-center gap-1.5">
-                <CalendarDays className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                {schedule}
-                {window ? ` · ${window}` : ""}
-              </span>
-            )}
-            <span className="inline-flex items-center rounded border border-brand-border bg-white px-1.5 py-0.5 text-[11px] font-medium text-brand-gray">
-              {policyTag}
-            </span>
-          </div>
+    <div className="rounded-card border border-brand-border bg-white px-4 py-4 transition-colors hover:border-brand-blue/40 md:px-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+        {/* Icon */}
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-card bg-brand-blue/10 text-brand-blue">
+          <Stethoscope className="h-5 w-5" aria-hidden="true" />
         </div>
 
-        {/* Right: availability line + action (or inline plan line) */}
-        <div className="shrink-0 lg:w-56 lg:text-right">
-          <p className={`mb-2 text-[12px] ${avail.open ? "text-brand-gray" : "text-slate-400"}`}>{avail.text}</p>
+        {/* Name + type + description */}
+        <div className="min-w-0 lg:flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="text-[15px] font-semibold leading-tight text-brand-ink">{service.name}</h3>
+            <span className="inline-flex items-center rounded border border-brand-border px-1.5 py-0.5 text-[11px] font-medium text-brand-gray">
+              {serviceType}
+            </span>
+          </div>
+          {service.description && (
+            <p className="mt-1 text-[13px] leading-relaxed text-brand-gray">{service.description}</p>
+          )}
+        </div>
 
-          {hasPlan ? (
-            <div className="text-[13px] lg:text-right">
-              <span className="text-brand-ink">You plan to visit on {formatPlanDate(service.plan.plannedDate)}.</span>{" "}
-              <button
-                type="button"
-                onClick={onRemove}
-                className="font-medium text-brand-blue underline-offset-2 hover:underline"
-              >
-                Remove
-              </button>
+        {/* Schedule / time / location */}
+        <div className="space-y-1.5 text-[12px] text-brand-gray lg:w-52 lg:shrink-0">
+          {serviceSchedule && (
+            <p className="flex items-center gap-1.5">
+              <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
+              <span className="font-medium text-brand-ink">{serviceSchedule}</span>
+            </p>
+          )}
+          {registerBy && (
+            <p className="flex items-center gap-1.5">
+              <Clock className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
+              <span>Register by {registerBy}</span>
+            </p>
+          )}
+          {schedule && (
+            <p className="flex items-center gap-1.5">
+              <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
+              <span>{schedule}</span>
+            </p>
+          )}
+          {window && (
+            <p className="flex items-center gap-1.5">
+              <Clock className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
+              <span>{window}</span>
+            </p>
+          )}
+          {service.facilityName && (
+            <p className="flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
+              <span className="truncate">{service.facilityName}</span>
+            </p>
+          )}
+          {!serviceSchedule && !schedule && !window && (
+            <p className="italic text-slate-400">Schedule to be announced.</p>
+          )}
+        </div>
+
+        {/* Action */}
+        <div className="shrink-0 lg:w-44 lg:text-right">
+          {plan ? (
+            <div className="flex flex-col items-start gap-1.5 lg:items-end">
+              <StatusBadge status={status} />
+              {isActive && (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="text-[12px] font-medium text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+                >
+                  Cancel registration
+                </button>
+              )}
             </div>
+          ) : avail.open ? (
+            <button
+              type="button"
+              onClick={onRegister}
+              className="w-full rounded-btn bg-brand-blue px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 lg:w-auto"
+            >
+              Register
+            </button>
           ) : (
             <button
               type="button"
-              onClick={onPlan}
-              disabled={!avail.open}
-              className="w-full rounded-btn border border-brand-blue bg-white px-3.5 py-2 text-[13px] font-medium text-brand-blue transition-colors hover:bg-brand-blue/5 disabled:cursor-not-allowed disabled:border-brand-border disabled:text-slate-400 disabled:hover:bg-white lg:w-auto"
+              disabled
+              aria-disabled="true"
+              className="w-full cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 py-2 text-[13px] font-medium text-slate-400 lg:w-auto"
             >
-              I plan to visit
+              Registration Closed
             </button>
           )}
         </div>
@@ -235,20 +341,20 @@ function ServiceCard({ service, onPlan, onRemove }) {
   );
 }
 
-/** Small confirm dialog for removing a visit plan. */
-function RemovePlanDialog({ plan, busy, onCancel, onConfirm }) {
+/** Confirm dialog for cancelling an active registration. */
+function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
   return (
     <div
       className="fixed inset-0 z-[75] flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Remove visit plan"
+      aria-label="Cancel registration"
     >
       <Card className="w-full max-w-[380px] p-5">
-        <h2 className="text-[15px] font-semibold text-brand-ink">Remove this visit plan?</h2>
+        <h2 className="text-[15px] font-semibold text-brand-ink">Cancel this registration?</h2>
         <p className="mt-1.5 text-[13px] text-brand-gray">
           The health center will be notified.
-          {plan?.plannedDate ? ` Your plan for ${formatPlanDate(plan.plannedDate)} will be removed.` : ""}
+          {plan?.plannedDate ? ` Your registration for ${formatPlanDate(plan.plannedDate)} will be released.` : ""}
         </p>
         <div className="mt-5 flex items-center justify-end gap-2">
           <button
@@ -257,15 +363,16 @@ function RemovePlanDialog({ plan, busy, onCancel, onConfirm }) {
             disabled={busy}
             className="rounded-btn px-3.5 py-2 text-[13px] font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60"
           >
-            Cancel
+            Keep registration
           </button>
           <button
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="rounded-btn bg-brand-danger px-4 py-2 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-btn bg-brand-danger px-4 py-2 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? "Removing…" : "Remove plan"}
+            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+            {busy ? "Cancelling…" : "Cancel registration"}
           </button>
         </div>
       </Card>
@@ -273,25 +380,26 @@ function RemovePlanDialog({ plan, busy, onCancel, onConfirm }) {
   );
 }
 
-/** Loading placeholder: two facility sections, 2–3 card placeholders each. */
+/** Loading placeholder: two facility container cards with card rows. */
 function DirectorySkeleton() {
   return (
-    <div role="status" aria-label="Loading health services">
+    <div role="status" aria-label="Loading health services" className="space-y-5">
       {[0, 1].map((s) => (
-        <section key={s} className={s === 0 ? "" : "mt-4"}>
-          <div className="mb-2 border-b border-brand-border pb-2">
-            <Skeleton className="h-3.5 w-56 max-w-full" />
+        <section key={s} className="overflow-hidden rounded-card border border-brand-border bg-white shadow-card">
+          <div className="border-b border-brand-border px-5 py-4">
+            <Skeleton className="h-4 w-64 max-w-full" />
+            <Skeleton className="mt-2 h-3 w-80 max-w-full" />
           </div>
-          <div className="space-y-3">
-            {Array.from({ length: s === 0 ? 3 : 2 }).map((_, i) => (
-              <div key={i} className="rounded-card border border-brand-border bg-white px-5 py-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-3 p-4 md:p-5">
+            {Array.from({ length: s === 0 ? 2 : 1 }).map((_, i) => (
+              <div key={i} className="rounded-card border border-brand-border bg-white px-4 py-4 md:px-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+                  <Skeleton className="h-11 w-11 shrink-0 rounded-card" />
                   <div className="flex-1 space-y-2">
                     <Skeleton className="h-4 w-1/3" />
                     <Skeleton className="h-3 w-2/3" />
-                    <Skeleton className="h-3 w-1/2" />
                   </div>
-                  <Skeleton className="h-9 w-full lg:w-28" />
+                  <Skeleton className="h-9 w-full lg:w-32" />
                 </div>
               </div>
             ))}

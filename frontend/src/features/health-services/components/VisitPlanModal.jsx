@@ -5,14 +5,15 @@ import { visitPlansApi } from "@/services/api";
 import { formatWindow, formatChip } from "../lib/visitPlanFormat";
 
 /**
- * Compact "I plan to visit" modal (max 420px, no inner scroll on mobile).
+ * Compact service Registration modal (max 420px, no inner scroll on mobile).
  *
- * The resident commits to a DAY, not a time slot — slot capacity is a BHW
- * concern. The day picker shows only the service's available weekdays within
- * the next two weeks (unavailable/closed days are not offered). The time window
- * is read-only, derived from the service schedule. On confirm a VisitPlan is
- * created and the barangay health worker is notified; the resident sees a
- * simple confirmation, never an appointment status.
+ * The resident registers by committing to a DAY within the service's actual
+ * availability (slot capacity is a BHW concern). The day picker shows only the
+ * service's available weekdays within the next two weeks (unavailable/closed
+ * days are not offered). The time window is read-only, derived from the service
+ * schedule. On confirm a registration is created against the authenticated
+ * resident and the selected service, and the barangay health worker is
+ * notified; the resident sees a simple confirmation.
  */
 export default function VisitPlanModal({ service, open, onClose, onConfirmed, showToast }) {
   const [loading, setLoading] = useState(false);
@@ -67,10 +68,10 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
     try {
       const res = await visitPlansApi.create({ serviceId: service.id, plannedDate: selected, note: note.trim() });
       onConfirmed?.(res?.plan);
-      showToast?.(res?.message || "Visit plan saved. Your barangay health center has been notified.");
+      showToast?.("You're registered. Your barangay health center has been notified.");
       onClose?.();
     } catch (err) {
-      setFormError(err?.message || "Could not save your visit plan. Please try again.");
+      setFormError(err?.message || "Could not complete your registration. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -82,7 +83,7 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
-      aria-label={`Plan a visit for ${service.name}`}
+      aria-label={`Register for ${service.name}`}
     >
       <Card className="flex w-full max-w-[420px] flex-col overflow-hidden">
         <div className="flex items-start justify-between gap-3 border-b border-brand-border px-5 py-4">
@@ -182,7 +183,7 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
             className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {submitting ? "Saving…" : "Confirm visit plan"}
+            {submitting ? "Registering…" : "Confirm Registration"}
           </button>
         </div>
       </Card>

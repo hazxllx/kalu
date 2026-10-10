@@ -13,7 +13,6 @@ import { usersApi, auditTrailApi, systemLogsApi, api } from "@/services/api";
  * - account statistics from the admin user directory
  * - recent audit activity
  * - system/API health diagnostics
- * - account status breakdown
  *
  * All displayed operational values are retrieved from live API sources.
  */
@@ -201,34 +200,6 @@ export default function AdminDashboard() {
     },
   ];
 
-  const total = counts.total || 0;
-
-  const pct = (value) =>
-    total > 0
-      ? Math.round(((value || 0) / total) * 100)
-      : 0;
-
-  const breakdown = [
-    {
-      label: "Active",
-      value: counts.active,
-      color: "bg-brand-green",
-      width: pct(counts.active),
-    },
-    {
-      label: "Pending Activation",
-      value: counts.pending,
-      color: "bg-brand-yellow",
-      width: pct(counts.pending),
-    },
-    {
-      label: "Disabled",
-      value: counts.disabled,
-      color: "bg-brand-danger",
-      width: pct(counts.disabled),
-    },
-  ];
-
   const diagnostics = [
     {
       label: "API status",
@@ -390,44 +361,6 @@ export default function AdminDashboard() {
               </div>
             ))}
           </div>
-        </Card>
-
-        <Card className="h-fit p-4 sm:p-6">
-          <h3 className="mb-4 text-sm font-semibold text-brand-ink sm:text-base">
-            Accounts by Status
-          </h3>
-
-          {loading ? (
-            <SkeletonList rows={3} />
-          ) : (
-            <div className="space-y-4">
-              {breakdown.map((item) => (
-                <div key={item.label}>
-                  <div className="mb-1.5 flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2 text-brand-gray">
-                      <span
-                        className={`h-2 w-2 rounded-full ${item.color}`}
-                      />
-                      {item.label}
-                    </span>
-
-                    <span className="font-stat font-bold text-brand-ink">
-                      {fmt(item.value)}
-                    </span>
-                  </div>
-
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className={`h-full ${item.color}`}
-                      style={{
-                        width: `${item.width}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </Card>
       </div>
     </>

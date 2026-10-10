@@ -25,6 +25,12 @@ export const healthServicesApi = {
   create: (payload) => api.post('/health-services', payload),
   assign: (id, personnelId) => api.post(`/health-services/${id}/assign`, { personnelId }),
   unassign: (id, personnelId) => api.delete(`/health-services/${id}/assign/${personnelId}`),
+  // Resident registrations (visit plans) for one service, with any recorded
+  // attendance — the staff roster. Returns { service, registrations, counts }.
+  registrations: (id) => api.get(`/health-services/${id}/registrations`),
+  // Record / update attendance against a service + resident.
+  createAttendance: (payload) => api.post('/health-services/attendance', payload),
+  updateAttendance: (id, payload) => api.patch(`/health-services/attendance/${id}`, payload),
 };
 
 export default healthServicesApi;

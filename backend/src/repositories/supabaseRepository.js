@@ -320,6 +320,9 @@ const VISIT_TO_DB = {
   findings: 'findings',
   treatmentGiven: 'treatment_given',
   recommendation: 'recommendation',
+  medications: 'medications',
+  bpClassification: 'bp_classification',
+  referralRequired: 'referral_required',
   submittedAt: 'submitted_at',
   receivedAt: 'received_at',
   reviewedAt: 'reviewed_at',
@@ -429,6 +432,34 @@ const RISK_CRITERION_TO_DB = {
 const DB_TO_RISK_CRITERION = Object.fromEntries(Object.entries(RISK_CRITERION_TO_DB).map(([k, v]) => [v, k]));
 const riskCriterionToRow = (criterion) => mapKeys(criterion, RISK_CRITERION_TO_DB);
 const riskCriterionFromRow = (row) => (row ? mapBack(row, DB_TO_RISK_CRITERION) : null);
+
+const medicineFromRow = (row) => (row
+  ? {
+    id: row.id,
+    genericName: row.generic_name,
+    brandName: row.brand_name || '',
+    strength: row.strength || '',
+    dosageForm: row.dosage_form || '',
+    category: row.category || '',
+    source: row.source || 'local',
+    active: row.active !== false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+  : null);
+
+const medicineToRow = (medicine) => {
+  const row = {};
+  if (medicine.genericName !== undefined) row.generic_name = medicine.genericName;
+  if (medicine.brandName !== undefined) row.brand_name = medicine.brandName;
+  if (medicine.strength !== undefined) row.strength = medicine.strength;
+  if (medicine.dosageForm !== undefined) row.dosage_form = medicine.dosageForm;
+  if (medicine.category !== undefined) row.category = medicine.category;
+  if (medicine.source !== undefined) row.source = medicine.source;
+  if (medicine.active !== undefined) row.active = medicine.active;
+  if (medicine.createdBy !== undefined) row.created_by = medicine.createdBy;
+  return row;
+};
 
 /**
  * Vitals out of the database in the DOMAIN shape (camelCase) — the same keys
@@ -598,6 +629,30 @@ const isMissingRpc = (error) => {
     code === 'PGRST202' ||
     /could not find the function|function .* does not exist|schema cache/i.test(message)
   );
+};
+
+/**
+ * True when a visit write failed only because the structured consultation
+ * columns (`medications` / `bp_classification` / `referral_required`) are not
+ * present yet — i.e. the medicine-catalog / BP-threshold migration
+ * (20261011120000) has not been applied. Lets the consultation save keep
+ * working against a database that has not received that migration; the
+ * structured fields are simply not persisted until it is applied.
+ */
+const CONSULTATION_EXTRA_COLUMNS = ['medications', 'bp_classification', 'referral_required'];
+const isMissingConsultationColumn = (error) => {
+  const code = error?.code || error?.details?.code || '';
+  const message = error?.message || error?.details?.message || '';
+  return (
+    code === 'PGRST204' ||
+    code === '42703' ||
+    (/medications|bp_classification|referral_required/i.test(message) && /column/i.test(message))
+  );
+};
+const stripConsultationExtras = (row) => {
+  const out = { ...row };
+  for (const column of CONSULTATION_EXTRA_COLUMNS) delete out[column];
+  return out;
 };
 
 // ----- resident free-text search -------------------------------------------
@@ -1565,7 +1620,13 @@ export const supabaseRepository = {
   // ----- visits / submissions ----------------------------------------------
   async insertVisit(visit) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase.from(TABLES.visits).insert(visitToRow(visit)).select().single();
+    const row = visitToRow(visit);
+    let { data, error } = await supabase.from(TABLES.visits).insert(row).select().single();
+    // Gracefully degrade when the structured consultation columns are not
+    // present yet (migration 20261011120000 not applied): retry without them.
+    if (error && isMissingConsultationColumn(error)) {
+      ({ data, error } = await supabase.from(TABLES.visits).insert(stripConsultationExtras(row)).select().single());
+    }
     throwOnError(error, 'Could not create submission');
     const resident = await this.getResident(visit.residentId);
     return { ...visitFromRow(data), resident };
@@ -1630,12 +1691,18 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     const row = visitToRow(patch);
     row.updated_at = new Date().toISOString();
-    const { data, error } = await supabase
+    const runUpdate = (updateRow) => supabase
       .from(TABLES.visits)
-      .update(row)
+      .update(updateRow)
       .eq('id', id)
       .select(`*, resident:residents(${SELECT_RESIDENT})`)
       .maybeSingle();
+    let { data, error } = await runUpdate(row);
+    // Retry without the structured consultation columns if the migration
+    // (20261011120000) has not been applied on this database.
+    if (error && isMissingConsultationColumn(error)) {
+      ({ data, error } = await runUpdate(stripConsultationExtras(row)));
+    }
     throwOnError(error, 'Could not update submission');
     if (!data) return null;
     return { ...visitFromRow(data), resident: residentFromRow(data.resident) };
@@ -1985,6 +2052,186 @@ export const supabaseRepository = {
       .single();
     throwOnError(error, 'Could not save risk settings');
     return { moderateMin: data.moderate_min, highMin: data.high_min, updatedAt: data.updated_at };
+  },
+
+  // ----- blood-pressure threshold configuration -----------------------------
+  async getBpThresholdSettings() {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('bp_threshold_settings')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    throwOnError(error, 'Could not load blood-pressure thresholds');
+    if (!data) return null;
+    return {
+      lowSystolicMax: data.low_systolic_max,
+      lowDiastolicMax: data.low_diastolic_max,
+      elevatedSystolicMin: data.elevated_systolic_min,
+      stage1SystolicMin: data.stage1_systolic_min,
+      stage1DiastolicMin: data.stage1_diastolic_min,
+      stage2SystolicMin: data.stage2_systolic_min,
+      stage2DiastolicMin: data.stage2_diastolic_min,
+      crisisSystolicMin: data.crisis_systolic_min,
+      crisisDiastolicMin: data.crisis_diastolic_min,
+      labels: data.labels || {},
+      updatedAt: data.updated_at,
+    };
+  },
+
+  async saveBpThresholdSettings(settings) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('bp_threshold_settings')
+      .upsert({
+        id: true,
+        low_systolic_max: Number(settings.lowSystolicMax),
+        low_diastolic_max: Number(settings.lowDiastolicMax),
+        elevated_systolic_min: Number(settings.elevatedSystolicMin),
+        stage1_systolic_min: Number(settings.stage1SystolicMin),
+        stage1_diastolic_min: Number(settings.stage1DiastolicMin),
+        stage2_systolic_min: Number(settings.stage2SystolicMin),
+        stage2_diastolic_min: Number(settings.stage2DiastolicMin),
+        crisis_systolic_min: Number(settings.crisisSystolicMin),
+        crisis_diastolic_min: Number(settings.crisisDiastolicMin),
+        labels: settings.labels || {},
+        updated_by: settings.updatedBy || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' })
+      .select('*')
+      .single();
+    throwOnError(error, 'Could not save blood-pressure thresholds');
+    return { ...settings, updatedAt: data.updated_at };
+  },
+
+  // ----- medicine catalog ---------------------------------------------------
+  async listMedicines({ q = '', source = '', includeInactive = false } = {}) {
+    const supabase = getServiceClient();
+    let query = supabase
+      .from('medicines')
+      .select('*')
+      .order('generic_name', { ascending: true });
+    if (!includeInactive) query = query.eq('active', true);
+    if (source) query = query.eq('source', source);
+    if (q) {
+      const term = String(q).trim();
+      query = query.or(
+        `generic_name.ilike.%${term}%,brand_name.ilike.%${term}%,strength.ilike.%${term}%,dosage_form.ilike.%${term}%,category.ilike.%${term}%`,
+      );
+    }
+    const { data, error } = await query;
+    throwOnError(error, 'Could not list medicines');
+    return (data || []).map(medicineFromRow);
+  },
+
+  async getMedicine(id) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from('medicines').select('*').eq('id', id).maybeSingle();
+    throwOnError(error, 'Could not fetch medicine');
+    return medicineFromRow(data);
+  },
+
+  async findMedicineByIdentity({ genericName = '', strength = '', dosageForm = '' } = {}) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('medicines')
+      .select('*')
+      .ilike('generic_name', String(genericName).trim())
+      .ilike('strength', String(strength).trim())
+      .ilike('dosage_form', String(dosageForm).trim())
+      .limit(1)
+      .maybeSingle();
+    throwOnError(error, 'Could not check for an existing medicine');
+    return medicineFromRow(data);
+  },
+
+  async insertMedicine(medicine) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.from('medicines').insert(medicineToRow(medicine)).select('*').single();
+    throwOnError(error, 'Could not create medicine');
+    return medicineFromRow(data);
+  },
+
+  async updateMedicine(id, patch) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('medicines')
+      .update({ ...medicineToRow(patch), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .maybeSingle();
+    throwOnError(error, 'Could not update medicine');
+    return medicineFromRow(data);
+  },
+
+  async listMedicineAvailability(medicineId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('medicine_facility_availability')
+      .select('*, facility:facilities(name, type)')
+      .eq('medicine_id', medicineId);
+    throwOnError(error, 'Could not load medicine availability');
+    return (data || []).map((row) => ({
+      medicineId: row.medicine_id,
+      facilityId: row.facility_id,
+      facility: row.facility?.name || '',
+      facilityType: row.facility?.type || '',
+      available: row.available !== false,
+      note: row.note || '',
+    }));
+  },
+
+  async listMedicineAvailabilityForFacility(facilityId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('medicine_facility_availability')
+      .select('*')
+      .eq('facility_id', facilityId);
+    throwOnError(error, 'Could not load facility medicine availability');
+    return (data || []).map((row) => ({
+      medicineId: row.medicine_id,
+      facilityId: row.facility_id,
+      available: row.available !== false,
+      note: row.note || '',
+    }));
+  },
+
+  async upsertMedicineAvailability({ medicineId, facilityId, available, note, updatedBy }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('medicine_facility_availability')
+      .upsert({
+        medicine_id: medicineId,
+        facility_id: facilityId,
+        available: Boolean(available),
+        note: note || '',
+        updated_by: updatedBy || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'medicine_id,facility_id' })
+      .select('*')
+      .single();
+    throwOnError(error, 'Could not save medicine availability');
+    return {
+      medicineId: data.medicine_id,
+      facilityId: data.facility_id,
+      available: data.available !== false,
+      note: data.note || '',
+    };
+  },
+
+  async listFacilities({ municipalityId = null } = {}) {
+    const supabase = getServiceClient();
+    let query = supabase.from('facilities').select('id,name,type,municipality_id').order('name');
+    if (municipalityId) query = query.eq('municipality_id', municipalityId);
+    const { data, error } = await query;
+    throwOnError(error, 'Could not load facilities');
+    return (data || []).map(({ id, name, type, municipality_id }) => ({
+      id,
+      name,
+      type,
+      municipalityId: municipality_id,
+    }));
   },
 
   async insertHealthAuditLog(log) {

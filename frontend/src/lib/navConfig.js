@@ -85,11 +85,6 @@ export const NAV = {
       path: "/app/resident/dashboard",
     },
     {
-      label: "Verification Status",
-      icon: "ShieldCheck",
-      path: "/app/resident/verification",
-    },
-    {
       label: "My Health Records",
       icon: "FileHeart",
       path: "/app/resident/record",
@@ -530,6 +525,13 @@ export const NAV = {
       group: "Management",
     },
     {
+      label: "Barangay Management",
+      icon: "MapPin",
+      path: "/app/admin/barangays",
+      permission: "system.settings.manage",
+      group: "Management",
+    },
+    {
       label: "Roles",
       icon: "Shield",
       path: "/app/admin/roles",
@@ -544,16 +546,19 @@ export const NAV = {
       group: "Management",
     },
     {
-      label: "Early Intervention Rules",
-      icon: "AlertTriangle",
-      path: "/app/admin/risk-rules",
+      label: "Risk & Intervention Settings",
+      icon: "ShieldAlert",
+      path: "/app/admin/risk-settings",
+      // Keep the former routes active for highlighting so bookmarks that
+      // redirect into the unified page still mark the sidebar item.
+      activePaths: ["/app/admin/risk-assessment", "/app/admin/risk-rules"],
       permission: "system.settings.manage",
       group: "Health Configuration",
     },
     {
-      label: "Risk Assessment",
-      icon: "ShieldAlert",
-      path: "/app/admin/risk-assessment",
+      label: "Medicine & BP Settings",
+      icon: "Pill",
+      path: "/app/admin/medicines",
       permission: "system.settings.manage",
       group: "Health Configuration",
     },

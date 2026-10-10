@@ -1,6 +1,6 @@
 /**
- * Formatting helpers for the resident Health Services directory and the
- * "I plan to visit" modal. Dates are parsed as UTC calendar dates (matching the
+ * Formatting helpers for the resident Health Services directory and the service
+ * registration modal. Dates are parsed as UTC calendar dates (matching the
  * backend) so a "yyyy-MM-dd" never shifts a day across timezones.
  */
 
@@ -72,4 +72,32 @@ export function availabilityLine({ weekdays = [], windowStart, windowEnd, hasUpc
   const days = formatWeekdays(weekdays);
   const window = formatWindow(windowStart, windowEnd);
   return { text: `Available ${days}${window ? ` · ${window}` : ""}`, open: true };
+}
+
+/**
+ * One-line summary of a service's concrete, one-off schedule (the start/end
+ * date-time set on the service record), or "" when no schedule is set. A
+ * one-day service shows a single date with a time range.
+ */
+export function formatServiceSchedule(schedule) {
+  if (!schedule || !schedule.startDate) return "";
+  const start = `${formatPlanDate(schedule.startDate)}${schedule.startTime ? `, ${formatTime(schedule.startTime)}` : ""}`;
+  const endDate = schedule.endDate || schedule.startDate;
+  if (endDate && endDate !== schedule.startDate) {
+    return `${start} – ${formatPlanDate(endDate)}${schedule.endTime ? `, ${formatTime(schedule.endTime)}` : ""}`;
+  }
+  if (schedule.startTime && schedule.endTime) {
+    return `${formatPlanDate(schedule.startDate)}, ${formatWindow(schedule.startTime, schedule.endTime)}`;
+  }
+  return start;
+}
+
+/** "2026-10-15T09:00[:00]" -> "Wed, 15 Oct, 9:00 AM" (registration deadline). */
+export function formatDeadline(value) {
+  if (!value || typeof value !== "string") return "";
+  const date = value.slice(0, 10);
+  const time = value.slice(11, 16);
+  const d = formatPlanDate(date);
+  if (!d) return "";
+  return `${d}${time ? `, ${formatTime(time)}` : ""}`;
 }

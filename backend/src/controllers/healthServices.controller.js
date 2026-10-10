@@ -51,6 +51,11 @@ export const unassign = async (req, res) => {
   sendData(res, { record });
 };
 
+export const registrations = async (req, res) => {
+  const data = await service.listServiceRegistrations({ user: req.user, serviceId: req.params.id });
+  sendData(res, data);
+};
+
 export const createAttendance = async (req, res) => {
   const record = await service.createHealthServiceAttendance({ user: req.user, payload: req.body || {} });
   sendCreated(res, { record });
@@ -91,4 +96,5 @@ export default {
   createAttendance,
   listAttendance,
   updateAttendance,
+  registrations,
 };

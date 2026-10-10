@@ -1,19 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
-import ReviewModal, { ModalSection, ModalRow } from "@/features/users/components/ReviewModal";
+import ReviewModal, { ModalSection, InfoGrid, InfoItem } from "@/features/users/components/ReviewModal";
+import DocumentPreviewCard from "@/features/verification/components/DocumentPreviewCard";
+import ImageLightbox from "@/features/verification/components/ImageLightbox";
+import { DecisionButton, DecisionButtonRow, DECISION_TEXTAREA_CLASS } from "@/features/verification/components/DecisionButtons";
 import { SkeletonTable } from "@/components/common/Skeleton";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationPagination from "@/features/verification/components/VerificationPagination";
 import { staffAccountsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
-import { Search, CheckCircle2, Ban, ChevronRight, Loader2, AlertCircle, Inbox } from "lucide-react";
+import { Search, CheckCircle2, ChevronRight, Loader2, AlertCircle, Inbox } from "lucide-react";
 
-const STATUS_FILTERS = ["pending", "approved", "rejected", "all"];
-const STATUS_FILTER_LABELS = { pending: "Pending", approved: "Approved", rejected: "Rejected", all: "All statuses" };
+const STATUS_FILTERS = ["pending", "approved", "rejected", "resubmission_required", "all"];
+const STATUS_FILTER_LABELS = { pending: "Pending", approved: "Approved", rejected: "Rejected", resubmission_required: "Resubmission", all: "All statuses" };
 const BHW_STATUS_FILTERS = [
   { value: "pending", label: "Pending" },
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
+  { value: "resubmission_required", label: "Resubmission" },
   { value: "all", label: "All statuses" },
 ];
 const PAGE_SIZE = 10;
@@ -21,6 +25,7 @@ const STATUS_META = {
   pending: { label: "Pending", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" },
   approved: { label: "Approved", dot: "bg-emerald-600", text: "text-emerald-700 dark:text-emerald-400" },
   rejected: { label: "Rejected", dot: "bg-rose-600", text: "text-rose-700 dark:text-rose-400" },
+  resubmission_required: { label: "Resubmission", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" },
 };
 
 const ROLE_LABELS = {
@@ -78,102 +83,6 @@ const stationLabel = (stations) =>
         .map((s) => (s === "triage" ? "Triage" : s === "consultation" ? "Consultation" : s))
         .join(" + ")
     : "";
-
-function VerificationDocumentCard({ document, onEnlarge, onRefreshUrl }) {
-  const [url, setUrl] = useState(document.url || "");
-  const [imageLoading, setImageLoading] = useState(Boolean(document.url));
-  const [imageError, setImageError] = useState(!document.url);
-  const [refreshing, setRefreshing] = useState(false);
-  const isImage = String(document.mimeType || "").toLowerCase().startsWith("image/");
-
-  useEffect(() => {
-    setUrl(document.url || "");
-    setImageLoading(Boolean(document.url));
-    setImageError(!document.url);
-  }, [document.url]);
-
-  const refreshUrl = async () => {
-    setRefreshing(true);
-    try {
-      const nextUrl = await onRefreshUrl(document.id);
-      if (!nextUrl) throw new Error("A secure document link is not available.");
-      setUrl(nextUrl);
-      setImageLoading(true);
-      setImageError(false);
-    } catch {
-      setImageError(true);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  return (
-    <article className="min-w-0 overflow-hidden rounded-card border border-brand-border bg-white dark:border-border dark:bg-card">
-      {isImage && (
-        <div className="relative flex h-48 items-center justify-center bg-brand-bg dark:bg-card-nested sm:h-52">
-          {url && !imageError ? (
-            <>
-              <img
-                src={url}
-                alt={`${document.documentType || "Verification document"}${document.originalFilename ? ` — ${document.originalFilename}` : ""}`}
-                className={`max-h-full max-w-full object-contain p-2 ${imageLoading ? "invisible" : ""}`}
-                onLoad={() => setImageLoading(false)}
-                onError={() => { setImageLoading(false); setImageError(true); }}
-              />
-              {imageLoading && (
-                <span className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-brand-gray">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading image…
-                </span>
-              )}
-              {!imageLoading && (
-                <button
-                  type="button"
-                  onClick={() => onEnlarge({ ...document, url })}
-                  className="absolute inset-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
-                  aria-label={`Enlarge ${document.documentType || "verification image"}`}
-                  title="Open larger image"
-                />
-              )}
-            </>
-          ) : (
-            <div className="flex flex-col items-center gap-2 px-4 text-center text-sm text-brand-gray">
-              <p>{imageError ? "This verification image could not be loaded." : "Image unavailable."}</p>
-              <button
-                type="button"
-                onClick={refreshUrl}
-                disabled={refreshing}
-                className="rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue disabled:opacity-60"
-              >
-                {refreshing ? "Refreshing link…" : "Refresh secure link"}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex min-w-0 items-center justify-between gap-3 border-t border-brand-border px-3 py-2.5 dark:border-border">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-brand-ink">{document.documentType || "Verification document"}</p>
-          {document.originalFilename && (
-            <p className="truncate text-xs text-brand-gray" title={document.originalFilename}>{document.originalFilename}</p>
-          )}
-        </div>
-        {!isImage && (url ? (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:border-brand-blue"
-          >
-            Open document
-          </a>
-        ) : (
-          <span className="shrink-0 text-xs text-brand-gray">Unavailable</span>
-        ))}
-      </div>
-    </article>
-  );
-}
 
 /**
  * Account Approvals (PHN and Health Supervisor).
@@ -315,11 +224,13 @@ export default function StaffAccountApprovals({
 
   /** Apply a decision, then reload so the row shows its real new state. */
   const decide = async (record, decision, reason) => {
-    if (decision === "reject" && !reason.trim()) {
-      throw new Error("A rejection reason is required.");
+    if ((decision === "reject" || decision === "resubmit") && !reason.trim()) {
+      throw new Error("A reason is required.");
     }
     if (decision === "approve") {
       await staffAccountsApi.approve(record.id, reason.trim() ? { remarks: reason.trim() } : {});
+    } else if (decision === "resubmit") {
+      await staffAccountsApi.requestResubmission(record.id, { reason: reason.trim() });
     } else {
       await staffAccountsApi.reject(record.id, { reason: reason.trim() });
     }
@@ -327,7 +238,9 @@ export default function StaffAccountApprovals({
     showToast(
       decision === "approve"
         ? `${record.fullName} approved — the account is now active and can sign in.`
-        : `${record.fullName} rejected. The account remains locked.`,
+        : decision === "resubmit"
+          ? `Resubmission requested from ${record.fullName}.`
+          : `${record.fullName} rejected. The account remains locked.`,
     );
     await load();
   };
@@ -588,7 +501,7 @@ function RequestReviewModal({ record, bhwOnly = false, onClose, onDecide }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const firstField = useRef(null);
-  const [enlargedDocument, setEnlargedDocument] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
 
   // The queue list does not carry the uploaded verification documents; fetch the
   // full request (with fresh, short-lived signed URLs) when the modal opens.
@@ -597,14 +510,11 @@ function RequestReviewModal({ record, bhwOnly = false, onClose, onDecide }) {
   const [docsError, setDocsError] = useState("");
 
   useEffect(() => {
-    firstField.current?.focus();
-  }, []);
-
-  useEffect(() => {
     let active = true;
     setFull(record);
     setDocsLoading(true);
     setDocsError("");
+    setLightboxIndex(null);
     staffAccountsApi
       .get(record.id)
       .then((payload) => { if (active) setFull(payload?.request || record); })
@@ -617,6 +527,19 @@ function RequestReviewModal({ record, bhwOnly = false, onClose, onDecide }) {
 
   const verificationDocuments = Array.isArray(full?.verificationDocuments) ? full.verificationDocuments : [];
 
+  const imageDocs = useMemo(
+    () =>
+      verificationDocuments
+        .filter((d) => String(d.mimeType || "").toLowerCase().startsWith("image/"))
+        .map((d) => ({ id: d.id, title: d.documentType || "Verification document", url: d.url })),
+    [verificationDocuments],
+  );
+
+  const openLightbox = (doc) => {
+    const idx = imageDocs.findIndex((d) => d.id === doc.id);
+    if (idx >= 0) setLightboxIndex(idx);
+  };
+
   const refreshDocumentUrl = async (documentId) => {
     const payload = await staffAccountsApi.get(record.id);
     const request = payload?.request;
@@ -625,19 +548,15 @@ function RequestReviewModal({ record, bhwOnly = false, onClose, onDecide }) {
     return request.verificationDocuments?.find((document) => document.id === documentId)?.url || null;
   };
 
-  const rows = [
-    { label: "Reference", value: record.id },
-    { label: "Applicant", value: `${record.fullName} (${record.email})` },
+  const infoItems = [
+    { label: "Email", value: record.email || "—" },
     { label: "Contact", value: record.phone || "—" },
     { label: "Position", value: record.position || "—" },
     { label: "Account type", value: ROLE_LABELS[record.role] || record.role },
     { label: "Municipality / LGU", value: record.municipality || "—" },
     { label: "Barangay", value: record.barangay || "—" },
     { label: "Health Facility", value: record.facility || "—" },
-    {
-      label: "RHU Station",
-      value: stationLabel(record.rhuStations) || "—",
-    },
+    { label: "RHU Station", value: stationLabel(record.rhuStations) || "—" },
     { label: "Professional License", value: record.licenseNo || "Not applicable" },
     { label: "License Expiration", value: record.licenseExpiry ? formatDate(record.licenseExpiry) : "Not applicable" },
     { label: "Submitted", value: formatDate(record.submittedAt) },
@@ -646,8 +565,12 @@ function RequestReviewModal({ record, bhwOnly = false, onClose, onDecide }) {
   ];
 
   const run = async (decision) => {
-    if (decision === "reject" && notes.trim().length < 5) {
-      setError("Please provide a rejection reason of at least 5 characters.");
+    if ((decision === "reject" || decision === "resubmit") && notes.trim().length < 5) {
+      setError(
+        decision === "resubmit"
+          ? "Please provide a resubmission reason of at least 5 characters."
+          : "Please provide a rejection reason of at least 5 characters.",
+      );
       return;
     }
     setError("");
@@ -663,99 +586,110 @@ function RequestReviewModal({ record, bhwOnly = false, onClose, onDecide }) {
 
   return (
     <ReviewModal
-      title={record.fullName}
-      subtitle={`${ROLE_LABELS[record.role] || record.role} · submitted ${formatDate(record.submittedAt)}`}
+      name={record.fullName}
+      reference={shortId(record.id)}
+      meta={`${ROLE_LABELS[record.role] || record.role}${record.barangay ? ` · Barangay ${record.barangay}` : ""}`}
       status={bhwOnly ? <VerificationBadge status={record.status} size="sm" /> : <StatusBadge value={record.status} />}
       onClose={onClose}
+      busy={Boolean(busy)}
+      initialFocusRef={pending ? firstField : undefined}
+      ariaLabel={`Account review for ${record.fullName}`}
     >
       <ModalSection label="Request Information">
-        <div className="space-y-2">
-          {rows.map((r) => <ModalRow key={r.label} label={r.label} value={r.value} />)}
-        </div>
+        <InfoGrid>
+          {infoItems.map((item) => <InfoItem key={item.label} label={item.label} value={item.value} />)}
+        </InfoGrid>
       </ModalSection>
 
       <ModalSection label="Verification Documents">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {docsLoading ? (
-            <p className="col-span-full flex items-center gap-2 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Loading documents…</p>
-          ) : docsError ? (
-            <p className="col-span-full text-sm text-brand-danger">{docsError}</p>
-          ) : verificationDocuments.length > 0 ? (
-            verificationDocuments.map((d) => (
-              <VerificationDocumentCard
+        {docsLoading ? (
+          <p className="flex items-center gap-2 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Loading documents…</p>
+        ) : docsError ? (
+          <p className="text-sm text-brand-danger">{docsError}</p>
+        ) : verificationDocuments.length > 0 ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {verificationDocuments.map((d) => (
+              <DocumentPreviewCard
                 key={d.id}
-                document={d}
-                onEnlarge={setEnlargedDocument}
+                doc={{
+                  id: d.id,
+                  title: d.documentType || "Verification document",
+                  filename: d.originalFilename,
+                  mimeType: d.mimeType,
+                  url: d.url,
+                }}
+                onEnlarge={openLightbox}
                 onRefreshUrl={refreshDocumentUrl}
               />
-            ))
-          ) : (
-            <p className="col-span-full text-sm text-brand-gray">No document uploaded</p>
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-brand-border bg-brand-bg px-4 py-8 text-center">
+            <p className="text-sm font-medium text-brand-ink">No documents were uploaded</p>
+            <p className="text-xs text-brand-gray">This applicant has no verification documents to review.</p>
+          </div>
+        )}
       </ModalSection>
 
-      {enlargedDocument && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Enlarged ${enlargedDocument.documentType || "verification image"}`}
-          onClick={() => setEnlargedDocument(null)}
-        >
-          <button
-            type="button"
-            onClick={() => setEnlargedDocument(null)}
-            className="absolute right-4 top-4 rounded-btn border border-white/30 bg-black/40 px-3 py-2 text-sm text-white hover:bg-black/70"
-          >
-            Close
-          </button>
-          <img
-            src={enlargedDocument.url}
-            alt={`${enlargedDocument.documentType || "Verification document"}${enlargedDocument.originalFilename ? ` — ${enlargedDocument.originalFilename}` : ""}`}
-            className="max-h-[88vh] max-w-full object-contain"
-            onClick={(event) => event.stopPropagation()}
-          />
-        </div>
-      )}
-
       {record.rejectionReason && (
-        <p className="rounded-card border border-brand-border bg-brand-bg/60 px-3.5 py-2.5 text-sm text-brand-gray dark:border-border dark:bg-card-nested">
+        <p className="rounded-xl border border-brand-border bg-brand-bg/60 px-3.5 py-2.5 text-sm text-brand-gray dark:border-border dark:bg-card-nested">
           <span className="font-semibold text-brand-ink">Decision reason:</span> {record.rejectionReason}
         </p>
       )}
 
       {pending && (
-        <section className="rounded-card border border-brand-border bg-brand-bg/50 p-4 dark:border-border dark:bg-card-nested">
-          <p className="mb-2 text-sm font-semibold text-brand-ink">Decision</p>
+        <ModalSection label="Approval Decision">
           <textarea
             ref={firstField}
             rows={3}
             value={notes}
             onChange={(e) => { setNotes(e.target.value); if (error) setError(""); }}
-            placeholder="Remarks (optional when approving; a reason is required when rejecting)"
-            className="w-full resize-none rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
+            placeholder="Remarks (optional when approving; a reason is required when requesting resubmission or rejecting)"
+            className={DECISION_TEXTAREA_CLASS}
           />
           {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => run("approve")}
-              disabled={Boolean(busy)}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 disabled:opacity-60"
-            >
-              {busy === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              Approve &amp; Activate
-            </button>
-            <button
-              onClick={() => run("reject")}
-              disabled={Boolean(busy)}
-              className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/40 bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-danger focus-visible:ring-offset-2 disabled:opacity-60 dark:bg-transparent"
-            >
-              {busy === "reject" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
-              Reject
-            </button>
+          {/* Approve & Activate | Request Resubmission | Reject — the same shared
+              decision styling and three-column layout as Resident Verification.
+              Request Resubmission is backed by
+              POST /staff-accounts/:id/request-resubmission. */}
+          <div className="mt-3">
+            <DecisionButtonRow columns={3}>
+              <DecisionButton
+                variant="approve"
+                onClick={() => run("approve")}
+                disabled={Boolean(busy)}
+                loading={busy === "approve"}
+              >
+                Approve &amp; Activate
+              </DecisionButton>
+              <DecisionButton
+                variant="resubmit"
+                onClick={() => run("resubmit")}
+                disabled={Boolean(busy)}
+                loading={busy === "resubmit"}
+              >
+                Request Resubmission
+              </DecisionButton>
+              <DecisionButton
+                variant="reject"
+                onClick={() => run("reject")}
+                disabled={Boolean(busy)}
+                loading={busy === "reject"}
+              >
+                Reject
+              </DecisionButton>
+            </DecisionButtonRow>
           </div>
-        </section>
+        </ModalSection>
+      )}
+
+      {lightboxIndex !== null && imageDocs[lightboxIndex] && (
+        <ImageLightbox
+          images={imageDocs}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onNavigate={setLightboxIndex}
+        />
       )}
     </ReviewModal>
   );

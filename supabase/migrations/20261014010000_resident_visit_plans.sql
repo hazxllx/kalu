@@ -1,6 +1,19 @@
 -- =============================================================================
 -- KALUSAGAP — Resident "I plan to visit" visit plans
 --
+-- NOTE (version fix): this migration was originally authored as
+-- 20261014000000_resident_visit_plans.sql, colliding with
+-- 20261014000000_restore_health_supervisor_account_approval.sql. Supabase keys
+-- applied migrations by their version timestamp, so only one of the two
+-- 20261014000000 files was ever recorded/applied on the remote database (the
+-- role-permission restore). This file was silently skipped, which is why
+-- `health_services.visit_policy` and `public.visit_plans` were missing in
+-- production and the resident Health Services page failed with
+-- "column health_services.visit_policy does not exist". Renaming it to a unique
+-- version (20261014010000) lets it apply cleanly. The body is unchanged and
+-- fully idempotent (ADD COLUMN IF NOT EXISTS / CREATE TABLE IF NOT EXISTS), so
+-- re-running it anywhere it may already exist is safe.
+--
 -- Additive only. No existing table is modified destructively.
 --
 -- The resident portal is a READ-ONLY health service directory with a single,

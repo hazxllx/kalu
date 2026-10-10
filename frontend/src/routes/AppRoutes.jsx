@@ -270,13 +270,6 @@ const HouseholdRiskDetail = appPage(
     )
 );
 
-const RiskRuleConfig = appPage(
-  () =>
-    import(
-      '@/features/households/pages/RiskRuleConfig'
-    )
-);
-
 const ConsultationsPage = appPage(
   () =>
     import(
@@ -445,6 +438,13 @@ const UserManagement = appPage(
     )
 );
 
+const BarangayManagement = appPage(
+  () =>
+    import(
+      '@/features/barangays/pages/BarangayManagement'
+    )
+);
+
 const AuditTrail = appPage(
   () =>
     import(
@@ -466,10 +466,10 @@ const RolePermissionsPage = appPage(
     )
 );
 
-const RiskAssessmentSettings = appPage(
+const RiskInterventionSettings = appPage(
   () =>
     import(
-      '@/features/access-control/pages/RiskAssessmentSettings'
+      '@/features/access-control/pages/RiskInterventionSettings'
     )
 );
 
@@ -477,6 +477,13 @@ const SettingsPage = appPage(
   () =>
     import(
       '@/features/settings/pages/SettingsPage'
+    )
+);
+
+const MedicineCatalog = appPage(
+  () =>
+    import(
+      '@/features/medicines/pages/MedicineCatalog'
     )
 );
 
@@ -1239,13 +1246,27 @@ const AppRoutes = () => (
           element={<UserManagement />}
         />
         <Route
-          path="risk-rules"
-          element={<RiskRuleConfig />}
+          path="barangays"
+          element={<BarangayManagement />}
         />
-        {/* Resident risk assessment configuration (criteria + thresholds). */}
+        {/* Unified resident risk + early intervention configuration. */}
+        <Route
+          path="risk-settings"
+          element={<RiskInterventionSettings />}
+        />
+        {/* Backward-compatible redirects for the former split pages. */}
+        <Route
+          path="risk-rules"
+          element={<Navigate to="/app/admin/risk-settings" replace />}
+        />
         <Route
           path="risk-assessment"
-          element={<RiskAssessmentSettings />}
+          element={<Navigate to="/app/admin/risk-settings" replace />}
+        />
+        {/* Medicine catalog + blood-pressure classification configuration. */}
+        <Route
+          path="medicines"
+          element={<MedicineCatalog />}
         />
         <Route
           path="roles"

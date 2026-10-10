@@ -26,6 +26,7 @@ export const staffAccountsApi = {
 
   approve: (id, payload = {}) => api.post(`/staff-accounts/${id}/approve`, payload),
   reject: (id, payload = {}) => api.post(`/staff-accounts/${id}/reject`, payload),
+  requestResubmission: (id, payload = {}) => api.post(`/staff-accounts/${id}/request-resubmission`, payload),
 };
 
 export default staffAccountsApi;

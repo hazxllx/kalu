@@ -27,6 +27,7 @@ import asyncHandler from '../utils/asyncHandler.js';
  *   GET  /:id                 one request
  *   POST /:id/approve         activate the account
  *   POST /:id/reject          reject with a reason
+ *   POST /:id/request-resubmission  ask the applicant to correct and resubmit (reason required)
  *
  * `authorize(APPROVER_ROLES)` is the server-side gate. System Admin and MHO
  * are NOT in that list, so they receive 403 on every queue/decision route even
@@ -63,6 +64,13 @@ router.post(
   idParam,
   validate(staffAccountDecisionValidator),
   asyncHandler(staffAccountsController.reject),
+);
+router.post(
+  '/:id/request-resubmission',
+  ...reviewer,
+  idParam,
+  validate(staffAccountDecisionValidator),
+  asyncHandler(staffAccountsController.requestResubmission),
 );
 
 export default router;
