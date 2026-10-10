@@ -129,7 +129,7 @@ const prenatalLeft = [
     lbl("b1. No. of women who delivered and who were tracked during pregnancy (Resident)", 2),
     lbl("b2. No. of TRANS-IN from other LGUs", 2),
     lbl("b3. No. of TRANS-OUT (with MOV) before completing 8ANC", 2),
-    hd("2. No. of pregnant women assessed for nutritional status during the first trimester"),
+    r("B1_2", "2. No. of pregnant women assessed for nutritional status during the first trimester"),
     r("B1_2a", "2a. Normal BMI", 1),
     r("B1_2b", "2b. Low BMI", 1),
     r("B1_2c", "2c. High BMI", 1),
@@ -285,6 +285,7 @@ const nutriLeft = [
   group("NUTRITION"),
   sex([
     r("C2_21", "1. Newborns who were initiated on breastfeeding within 1 hour after birth"),
+    r("C2_22", "2. Infants born with low birth weight (LBW) given complete Iron supplements"),
     lbl("2. Infants born with low birth weight (LBW) given complete Iron supplements"),
     r("C2_28", "3a. Infants aged 6-11 months old who received 1 dose of Vitamin A supplementation"),
     r("C2_30", "3b. Children aged 12-59 months old who completed 2 doses of Vitamin A Supplementation"),
@@ -553,6 +554,17 @@ const filariasisLeft = [
     lbl("2b. No. of individuals examined with Elephentiasis", 1),
   ]),
 ];
+const filariasisRight = [
+  group("A. Filariasis (continued)"),
+  sex([
+    lbl("3. Hydrocele"),
+    lbl("3a. No. of individuals examined with Hydrocele", 1),
+    r("E1_1", "4. Number of individuals who received Mass Drug Administration"),
+    lbl("4a. 2-4 years old", 1),
+    lbl("4b. 5-14 years old", 1),
+    lbl("4c. 15 years old and above", 1),
+  ]),
+];
 const schistoLeft = [
   group("C. Schistosomiasis"),
   sex([
@@ -581,8 +593,8 @@ const sthRight = [
 const leprosyLeft = [
   group("E. Leprosy"),
   sex([
-    lbl("1. No. of Leprosy Cases on treatment"),
-    lbl("2. No. of newly detected case"),
+    r("E7_1", "1. No. of Leprosy Cases on treatment"),
+    r("E7_2", "2. No. of newly detected case"),
     lbl("3. Confirmed Leprosy Cases"),
     lbl("4. Completed fixed duration Multi-Drug Therapy (MDT)"),
     lbl("5. No. of confirmed leprosy cases treated"),
@@ -603,13 +615,14 @@ const hivRight = [
 ];
 const sectionG = [
   section("SECTION G. INFECTIOUS DISEASE PREVENTION AND CONTROL SERVICES"),
-  twoCol(filariasisLeft, rabiesLeft),
+  twoCol(filariasisLeft, filariasisRight),
+  twoCol(rabiesLeft, rabiesRight),
   twoCol(schistoLeft, sthRight),
   twoCol(leprosyLeft, hivRight),
 ];
 
 // ===========================================================================
-// SECTION C — VITAL STATISTICS (Mortality & Natality)
+// SECTION H — VITAL STATISTICS (Mortality & Natality)
 // ===========================================================================
 const vitalLeft = [
   group("Part I. Mortality"),
@@ -640,7 +653,7 @@ const vitalRight = [
   ]),
 ];
 const sectionVital = [
-  section("SECTION C. VITAL STATISTICS"),
+  section("SECTION H. VITAL STATISTICS"),
   twoCol(vitalLeft, vitalRight),
 ];
 

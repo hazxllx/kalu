@@ -150,6 +150,7 @@ _(Use Phase 12 items — do not guess)_
 - The canonical terminology review remains in `docs/development/V10_REQUIREMENTS_AND_TERMINOLOGY.md`; the §13 maternal per-visit tracking question is recorded there.
 - HS-1 verification was documentation-only. HS-2 through HS-5 verification: `npm run build --prefix frontend` passed for each wave.
 - The HS-2 selectors update the visible period label; dashboard data fetches are not yet filtered by the selected period.
+- The selected period is intentionally limited to period-scoped analytics (community map and health trends). Operational cards and attention queues remain current-state indicators and are now labeled accordingly; no historical as-of model exists for those queues.
 - HS-5 dashboard charts consume existing server analytics responses; no local fallback values are used to populate them.
 - Earlier test/build results elsewhere in this checkpoint are historical and were not rerun as part of HS-1 through HS-5.
 - Latest dashboard refinements and verification & approvals consolidation are recorded below.

@@ -94,7 +94,7 @@ export const FEATURE_ROLES = Object.freeze({
   certificateReview: [ROLES.PHN, ROLES.MHO],
 
   // Monitoring / aggregate information
-  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
+  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
 
   // Health services catalog. Managed (create/assign) by PHN, MHO and the
   // barangay-scoped Health Supervisor. Read by all staff who can be assigned a

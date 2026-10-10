@@ -148,7 +148,7 @@ const RESIDENT_EMBED = 'resident:residents(id, first_name, middle_name, last_nam
 const CONSULTATION_EMBED = 'consultation:visits!follow_ups_consultation_id_fkey(id, visit_date, chief_complaint, status)';
 const selectFor = (kind) => kind === 'followups'
   ? `*, ${RESIDENT_EMBED}, ${CONSULTATION_EMBED}`
-  : kind === 'maternal'
+  : (kind === 'maternal' || kind === 'immunizations')
     ? `*, ${RESIDENT_EMBED}`
     : '*';
 

@@ -388,9 +388,9 @@ export function renderM1FhsisPdf(model, branding = null) {
   // ============= PAGE 4: Immunization =============
   doc.addPage();
   y = drawHeader(doc, model);
-  y = drawSectionHeader(doc, y, "SECTION A: IMMUNIZATION");
+  y = drawSectionHeader(doc, y, "SECTION C: CHILD CARE");
 
-  y = subBar(doc, y, "A1. Immunization (0-11 months)");
+  y = subBar(doc, y, "C1. Immunization (0-11 months)");
   const imm1Cols = [280, 60, 60, 60];
   y = headerRow(doc, y, imm1Cols, ["Indicator", "Male", "Female", "Total"]);
 
@@ -414,7 +414,7 @@ export function renderM1FhsisPdf(model, branding = null) {
   });
 
   y += 10;
-  y = subBar(doc, y, "A2. Immunization (12-23 months)");
+  y = subBar(doc, y, "C2. Immunization (12-23 months)");
   y = headerRow(doc, y, imm1Cols, ["Indicator", "Male", "Female", "Total"]);
 
   const imm2Items = [
@@ -428,7 +428,7 @@ export function renderM1FhsisPdf(model, branding = null) {
   });
 
   y += 10;
-  y = subBar(doc, y, "A3. Immunization (School Age Children)");
+  y = subBar(doc, y, "C3. Immunization (School Age Children)");
   y = headerRow(doc, y, imm1Cols, ["Indicator", "Male", "Female", "Total"]);
 
   const imm3Items = [
@@ -442,7 +442,7 @@ export function renderM1FhsisPdf(model, branding = null) {
   });
 
   y += 10;
-  y = subBar(doc, y, "A4. Immunization (Pregnant Women)");
+  y = subBar(doc, y, "C4. Immunization (Pregnant Women)");
   y = headerRow(doc, y, imm1Cols, ["Indicator", "Male", "Female", "Total"]);
 
   const imm4Items = [
@@ -462,7 +462,7 @@ export function renderM1FhsisPdf(model, branding = null) {
   // ============= PAGE 5: Nutrition and Sick Children =============
   doc.addPage();
   y = drawHeader(doc, model);
-  y = drawSectionHeader(doc, y, "SECTION D: NUTRITION");
+  y = drawSectionHeader(doc, y, "SECTION C: CHILD CARE (continued)");
 
   y = subBar(doc, y, "D1. Nutrition Indicators");
   const nutrCols = [280, 60, 60, 60];
@@ -502,9 +502,9 @@ export function renderM1FhsisPdf(model, branding = null) {
   });
 
   y += 10;
-  y = drawSectionHeader(doc, y, "SECTION E: ORAL HEALTH");
+  y = drawSectionHeader(doc, y, "SECTION D: ORAL HEALTH");
 
-  y = subBar(doc, y, "E1. Oral Health Services");
+  y = subBar(doc, y, "D1. Oral Health Services");
   const oralCols = [350, 100];
   y = headerRow(doc, y, oralCols, ["Indicator", "Value"]);
 

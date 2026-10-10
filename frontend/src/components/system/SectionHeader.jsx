@@ -1,5 +1,5 @@
 import React from "react";
-import { TYPE, PALETTE, RADIUS } from "@/lib/designTokens";
+import { TYPE } from "@/lib/designTokens";
 
 /**
  * Section header: uppercase eyebrow + title.

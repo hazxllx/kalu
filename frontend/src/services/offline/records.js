@@ -26,8 +26,9 @@ export const cacheRecord = async ({ entity, remoteId, ownerId, data, revision = 
 };
 
 export const getCachedRecord = async (entity, remoteId, ownerId) => {
-  const row = await db.records.get([entity, String(remoteId)]);
-  if (!row || row.ownerId !== ownerId) return null;
+  if (!ownerId) return null;
+  const row = await db.records.get([ownerId, entity, String(remoteId)]);
+  if (!row) return null;
   return { ...row, data: row.data ? await decryptJson(row.data) : null };
 };
 
@@ -41,8 +42,9 @@ export const listCachedRecords = async (ownerId, entity = null) => {
   return out.sort((a, b) => b.cachedAt - a.cachedAt);
 };
 
-export const removeCachedRecord = async (entity, remoteId) => {
-  await safeWrite(() => db.records.delete([entity, String(remoteId)]));
+export const removeCachedRecord = async (entity, remoteId, ownerId) => {
+  if (!ownerId) return;
+  await safeWrite(() => db.records.delete([ownerId, entity, String(remoteId)]));
 };
 
 export const countCachedRecords = async (ownerId) => {

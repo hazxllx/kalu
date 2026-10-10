@@ -36,6 +36,7 @@ import {
 } from "@/services/offline/householdOfflineService";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
 import { householdsApi, intakeApi } from "@/services/api";
 import {
   HH_STATUSES,
@@ -197,6 +198,7 @@ export default function Households() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { lastSyncedAt } = useSyncStatus();
   const { can, canAny } = usePermissions();
   const canCreateHousehold = can("households.create");
   const canManageMembers = can("households.create");
@@ -234,6 +236,7 @@ export default function Households() {
 
   /** Load the household list from the API (search term applied server-side). */
   const load = useCallback(async (searchTerm = "") => {
+    if (!user?.id) return;
     setLoading(true);
     setLoadError(null);
     try {
@@ -253,6 +256,16 @@ export default function Households() {
   useEffect(() => {
     load("");
   }, [load]);
+
+  // A queued household can be confirmed while this page remains open. Reload
+  // the authorized server list after that confirmation so the temporary local
+  // row is replaced by the authoritative record without a browser refresh.
+  useEffect(() => {
+    if (lastSyncedAt) load(search.trim());
+    // `search` is intentionally read from the current render when a sync
+    // completes; the separate search effect owns debounced search changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastSyncedAt, load]);
 
   // Debounced server-side search.
   const debounceRef = useRef(null);

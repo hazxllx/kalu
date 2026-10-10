@@ -1,5 +1,4 @@
 import React from "react";
-import { TYPE, PALETTE } from "@/lib/designTokens";
 
 /**
  * Calm, specific empty states for each app context.

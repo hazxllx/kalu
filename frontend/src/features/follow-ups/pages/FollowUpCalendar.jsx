@@ -3,7 +3,13 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { followUpsApi, residentsApi } from "@/services/api";
+import {
+  createFollowUpOffline,
+  listFollowUpsOffline,
+  listFollowUpResidentsOffline,
+  updateFollowUpOffline,
+} from "@/services/offline/followUpOfflineService";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
 import { DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
 import { dayLabel, groupByDay, monthLabel, toKey, weekLabel } from "../lib/scheduleDates";
 import {
@@ -34,19 +40,21 @@ const confirmationLabel = (row) => {
 };
 const mapRowToSchedule = (row) => ({
   id: row.id,
-  residentId: row.resident_id,
+  residentId: row.resident_id || row.residentId,
   residentName: row.resident
     ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
-    : "Resident",
-  barangay: row.resident?.barangay || "",
-  date: row.scheduled_date || "",
-  time: row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : "",
+    : row.residentName || "Resident",
+  barangay: row.resident?.barangay || row.barangay || "",
+  date: row.scheduled_date || row.date || "",
+  time: row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : row.time || "",
   location: row.location || "",
-  provider: row.assigned_provider || "",
-  instructions: row.notes || "",
+  provider: row.assigned_provider || row.provider || "",
+  instructions: row.notes || row.instructions || "",
   purpose: row.purpose || "",
   priority: row.priority || "Medium",
   status: row.status || "Scheduled",
+  offline: row.offline || false,
+  syncStatus: row.syncStatus || null,
   // Resident confirmation outcome (read-only for the Health Supervisor).
   confirmationStatus: confirmationLabel(row),
   respondedAt: row.resident_decision_at || "",
@@ -277,6 +285,7 @@ function FollowUpCalendarContent({ user }) {
   const [selected, setSelected] = useState(null); // schedule id (detail modal)
   const [formTarget, setFormTarget] = useState(null); // null | "new" | schedule
   const [toast, setToast] = useState(null);
+  const { lastSyncedAt } = useSyncStatus();
 
   const today = new Date();
 
@@ -288,9 +297,12 @@ function FollowUpCalendarContent({ user }) {
   const load = React.useCallback(() => {
     setLoading(true);
     setLoadError(null);
-    return Promise.all([followUpsApi.list(), residentsApi.list({ limit: 200 })])
-      .then(([followUpResult, residentResult]) => {
-        setSchedules((followUpResult?.rows || []).map(mapRowToSchedule));
+    return Promise.all([
+      listFollowUpsOffline({ ownerId: user?.id }),
+      listFollowUpResidentsOffline({ ownerId: user?.id, params: { limit: 200 } }),
+    ])
+      .then(([followUpRows, residentResult]) => {
+        setSchedules(followUpRows.map(mapRowToSchedule));
         const rows = residentResult?.rows || residentResult || [];
         setResidents(
           rows
@@ -304,11 +316,15 @@ function FollowUpCalendarContent({ user }) {
       })
       .catch((err) => setLoadError(err?.message || "Unable to load the schedule. Please try again."))
       .finally(() => setLoading(false));
-  }, [assignedBarangay]);
+  }, [assignedBarangay, user?.id]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (lastSyncedAt) load();
+  }, [lastSyncedAt, load]);
 
   /** Filtered schedules (search + status + provider). */
   const filtered = useMemo(() => {
@@ -350,7 +366,7 @@ function FollowUpCalendarContent({ user }) {
   const patchSchedule = async (id, patch, message) => {
     setSaving(true);
     try {
-      const result = await followUpsApi.update(id, patch);
+      const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: id, record: patch });
       const mapped = mapRowToSchedule(result?.record || result);
       setSchedules((prev) => prev.map((s) => (s.id === id ? { ...s, ...mapped } : s)));
       showToast(message);
@@ -367,7 +383,7 @@ function FollowUpCalendarContent({ user }) {
     setSaving(true);
     try {
       if (formTarget && formTarget !== "new") {
-        const result = await followUpsApi.update(formTarget.id, {
+        const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: formTarget.id, record: {
           purpose: form.purpose,
           scheduled_date: form.date,
           scheduled_time: form.time,
@@ -376,13 +392,14 @@ function FollowUpCalendarContent({ user }) {
           status: form.status,
           assigned_provider: form.provider,
           notes: form.instructions,
-        });
+        }});
         const mapped = mapRowToSchedule(result?.record || result);
         setSchedules((prev) => prev.map((s) => (s.id === formTarget.id ? { ...s, ...mapped } : s)));
         showToast("Follow-up schedule updated.");
       } else {
-        const result = await followUpsApi.create({
+        const result = await createFollowUpOffline({ ownerId: user?.id, record: {
           residentId: form.residentId,
+          _offlineBarangay: residents.find((resident) => resident.id === form.residentId)?.barangay || "",
           purpose: form.purpose,
           scheduled_date: form.date,
           scheduled_time: form.time,
@@ -392,7 +409,7 @@ function FollowUpCalendarContent({ user }) {
           assigned_provider: form.provider,
           notes: form.instructions,
           requiresResidentResponse: form.requiresResidentResponse,
-        });
+        }});
         const mapped = mapRowToSchedule(result?.record || result);
         setSchedules((prev) => [mapped, ...prev]);
         showToast("Follow-up schedule added.");

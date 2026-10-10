@@ -305,6 +305,13 @@ const TCLS = appPage(
     )
 );
 
+const TclWorkspace = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/TclWorkspace'
+    )
+);
+
 const M1Records = appPage(
   () =>
     import(
@@ -323,6 +330,27 @@ const TBRecords = appPage(
   () =>
     import(
       '@/features/health-records/pages/TBRecords'
+    )
+);
+
+const NcdRecords = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/NcdRecords'
+    )
+);
+
+const OralHealthRecords = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/OralHealthRecords'
+    )
+);
+
+const EnvironmentalMasterlist = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/EnvironmentalMasterlist'
     )
 );
 
@@ -400,6 +428,13 @@ const MunicipalHealthReports = appPage(
   () =>
     import(
       '@/features/reports/pages/MunicipalHealthReports'
+    )
+);
+
+const IncomingReportsPage = appPage(
+  () =>
+    import(
+      '@/features/reports/pages/IncomingReportsPage'
     )
 );
 
@@ -823,6 +858,11 @@ const AppRoutes = () => (
           path="record"
           element={<PhnHealthRecords />}
         />
+        <Route path="tcls" element={<TclWorkspace />} />
+        <Route path="tcl-register" element={<TCLS />} />
+        <Route path="ncd" element={<NcdRecords />} />
+        <Route path="oral-health" element={<OralHealthRecords />} />
+        <Route path="environmental" element={<EnvironmentalMasterlist />} />
         <Route
           path="households/risk-overview"
           element={<HouseholdRiskOverview />}
@@ -934,7 +974,8 @@ const AppRoutes = () => (
           path="consultations"
           element={<TreatmentConsultation />}
         />
-        <Route path="tcls" element={<TCLS />} />
+        <Route path="tcls" element={<TclWorkspace />} />
+        <Route path="tcl-register" element={<TCLS />} />
         <Route path="m1" element={<M1Records />} />
 
         {/*
@@ -965,6 +1006,9 @@ const AppRoutes = () => (
           element={<Immunization />}
         />
         <Route path="tb" element={<TBRecords />} />
+        <Route path="ncd" element={<NcdRecords />} />
+        <Route path="oral-health" element={<OralHealthRecords />} />
+        <Route path="environmental" element={<EnvironmentalMasterlist />} />
 
         {/* Account approval authority: the Health Supervisor approves BHW and Resident accounts. */}
         <Route
@@ -1092,6 +1136,10 @@ const AppRoutes = () => (
         <Route
           path="programs"
           element={<Programs />}
+        />
+        <Route
+          path="reports"
+          element={<IncomingReportsPage />}
         />
         <Route
           path="notifications"

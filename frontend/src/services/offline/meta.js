@@ -10,6 +10,9 @@ export const META_KEYS = Object.freeze({
   LOCK: 'syncLock',
 });
 
+export const lastSyncedKey = (ownerId) =>
+  ownerId ? `${META_KEYS.LAST_SYNCED_AT}:${ownerId}` : META_KEYS.LAST_SYNCED_AT;
+
 export const readMeta = async (key, fallback = null) => {
   const row = await db.syncMeta.get(key);
   return row ? row.value : fallback;
@@ -19,7 +22,7 @@ export const writeMeta = async (key, value) => {
   await safeWrite(() => db.syncMeta.put({ key, value, updatedAt: Date.now() }));
 };
 
-export const getLastSyncedAt = () => readMeta(META_KEYS.LAST_SYNCED_AT, null);
+export const getLastSyncedAt = (ownerId = null) => readMeta(lastSyncedKey(ownerId), null);
 
 /**
  * Acquire the single-worker lock. Returns the worker id when acquired, or null
@@ -54,6 +57,7 @@ export const releaseLock = async (workerId) => {
 
 export default {
   META_KEYS,
+  lastSyncedKey,
   readMeta,
   writeMeta,
   getLastSyncedAt,

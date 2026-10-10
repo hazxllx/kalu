@@ -1,7 +1,6 @@
 import React from "react";
 import { ChevronRight } from "lucide-react";
-import { TYPE, PALETTE, RADIUS } from "@/lib/designTokens";
-import Icon from "@/components/common/Icon";
+import { TYPE } from "@/lib/designTokens";
 
 /**
  * Compact page header: eyebrow label + page title + one-line context.
@@ -95,7 +94,7 @@ export default function PageHeader({
             </p>
           )}
         </div>
-        {action && <div className="shrink-0">{action}</div>}
+        {action && <div className="w-full shrink-0 sm:w-auto">{action}</div>}
       </div>
 
       {goldRule && (

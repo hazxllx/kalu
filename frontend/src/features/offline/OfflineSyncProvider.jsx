@@ -1,8 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 import { useAuth } from '@/context/AuthContext';
-import { purgeOfflineDb } from '@/services/offline/db';
-import { resetCachedKey } from '@/services/offline/crypto';
 import {
   configureSyncEngine,
   resetSyncEngine,
@@ -15,32 +13,23 @@ import {
  *
  *   - points the sync engine at the signed-in user's id;
  *   - starts connectivity/visibility-driven synchronization while signed in;
- *   - on logout OR account switch, destroys all local data (drafts, outbox,
- *     cache, device key) so a shared device never leaks one account's queued
- *     health records to the next account and no cached session can drive a sync
- *     under a different user.
+ *   - on logout OR account switch, stops the worker and rebinds it to the
+ *     authenticated owner. Account-scoped rows remain durable so an expired
+ *     session cannot silently discard pending work; the owner id prevents the
+ *     next account from reading or synchronizing those rows.
  */
 const OfflineSyncProvider = ({ children }) => {
   const { user } = useAuth();
   const userId = user?.id || null;
-  const previousUserRef = useRef(userId);
 
   useEffect(() => {
+    // Reset only in-memory engine state before binding the new session. Do not
+    // purge the database on logout: queued work must survive an expired
+    // session and be available again when that same user signs back in.
+    resetSyncEngine();
     configureSyncEngine({ getOwnerId: () => userId });
     if (userId) startSyncEngine();
-    else stopSyncEngine();
     return () => stopSyncEngine();
-  }, [userId]);
-
-  useEffect(() => {
-    const previous = previousUserRef.current;
-    previousUserRef.current = userId;
-    if (previous && previous !== userId) {
-      // Signed out or switched accounts: purge everything tied to the old user.
-      resetSyncEngine();
-      resetCachedKey();
-      purgeOfflineDb();
-    }
   }, [userId]);
 
   return children;

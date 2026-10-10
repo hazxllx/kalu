@@ -130,6 +130,21 @@
     @apply bg-background text-foreground font-body antialiased;
     font-feature-settings: "cv05" 1, "ss01" 1;
   }
+  img,
+  svg,
+  video,
+  canvas {
+    max-width: 100%;
+  }
+  input,
+  select,
+  textarea,
+  button {
+    max-width: 100%;
+  }
+  textarea {
+    resize: vertical;
+  }
   h1, h2, h3, h4, h5 {
     @apply font-heading;
   }
@@ -144,6 +159,24 @@
 }
 
 @layer utilities {
+  /* Keep dense datasets usable without allowing a wide table to widen the
+     entire application viewport on phones. */
+  .table-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #c3cedc transparent;
+  }
+
+  .table-scroll table {
+    width: 100%;
+  }
+
+  @media (max-width: 639px) {
+    .table-scroll {
+      -webkit-overflow-scrolling: touch;
+      box-shadow: inset -10px 0 12px -14px rgba(18, 38, 63, 0.7);
+    }
+  }
+
   /* ---------- Type helpers ---------- */
   .font-stat { font-family: var(--font-stat); font-variant-numeric: tabular-nums; }
   .font-display { font-family: var(--font-display); }
@@ -752,4 +785,37 @@
    =========================================================================== */
 @media (max-width: 640px) {
   .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+}
+
+/* ===========================================================================
+   REPORTS — full report preview print
+   ---------------------------------------------------------------------------
+   The Health Supervisor "Preview Full Report" dialog can print to paper / PDF.
+   The rules are scoped to body.printing-report (toggled only while that dialog
+   prints) so they never interfere with the certificate / M1 print flows.
+   =========================================================================== */
+@media print {
+  body.printing-report * { visibility: hidden !important; }
+  body.printing-report .report-print-area,
+  body.printing-report .report-print-area * { visibility: visible !important; }
+  body.printing-report .report-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0 12mm !important;
+  }
+  body.printing-report .no-print { display: none !important; }
+}
+
+/* Report preview table: on paper the min-width must relax so wide tables are
+   not clipped off the page; shrink the type and show borders for readability. */
+@media print {
+  body.printing-report .report-print-area table { min-width: 0 !important; width: 100% !important; font-size: 10px !important; }
+  body.printing-report .report-print-area th,
+  body.printing-report .report-print-area td { padding: 4px 6px !important; }
+  body.printing-report .report-print-area .overflow-x-auto { overflow: visible !important; }
+  body.printing-report .report-print-area table,
+  body.printing-report .report-print-area th,
+  body.printing-report .report-print-area td { border: 1px solid #d1d9e3 !important; border-collapse: collapse; }
 }

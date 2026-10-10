@@ -83,6 +83,12 @@ export const getAccountOptions = async () => ({
   ...(await repository.getAccountAssignmentOptions()),
 });
 
+/**
+ * Real account totals for the admin summary cards (All / Active / Pending
+ * verification / Deactivated). Sourced from `public.profiles`, never hardcoded.
+ */
+export const getAccountSummary = async () => repository.getAccountSummary();
+
 export const getUser = async ({ id } = {}) => {
   const user = await repository.getProfileById(id);
   if (!user) throw ApiError.notFound('User account not found');
@@ -352,4 +358,103 @@ export const resetUserAccess = async ({ id, actorId } = {}) => {
   return { sent: true };
 };
 
-export default { listUsers, getAccountOptions, getUser, createUser, updateUser, resetUserAccess };
+/**
+ * Permanently delete an account (Supabase Auth identity + cascaded profile).
+ *
+ * Safety model (defence in depth; every invariant is also re-checked inside the
+ * database under an advisory lock by `admin_assert_account_deletable`):
+ *   - the caller is already a verified active admin (authenticate + authorize),
+ *   - the target id is validated and must exist,
+ *   - an administrator may never delete their OWN account,
+ *   - the LAST active administrator can never be deleted,
+ *   - an explicit email confirmation must match the target (guards against
+ *     deleting the wrong account from the UI or a mistaken API call).
+ *
+ * Consistency: `public.profiles.id` cascades from `auth.users`, so a single
+ * successful `deleteAuthAccount` removes BOTH the auth identity and the profile
+ * together — there is no partially-deleted state. Dependent resident /
+ * consultation / referral / visit / audit rows reference the account with
+ * `on delete set null`, so they are PRESERVED (unlinked), never cascade-deleted.
+ * The audit record is written only AFTER a confirmed deletion, so a failed
+ * deletion can never leave a false "deleted" entry behind.
+ */
+export const deleteUser = async ({ id, actorId, confirmEmail } = {}) => {
+  const targetId = String(id ?? '').trim();
+  if (!targetId) throw ApiError.badRequest('A target account id is required.');
+
+  const existing = await repository.getProfileById(targetId);
+  if (!existing) throw ApiError.notFound('User account not found');
+
+  // Fail fast with clear messages before the irreversible step. The database
+  // guard RPC re-enforces each of these authoritatively.
+  if (actorId && actorId === targetId) {
+    throw ApiError.conflict('You cannot delete your own administrator account.');
+  }
+
+  const provided = String(confirmEmail ?? '').trim().toLowerCase();
+  if (!provided) {
+    throw ApiError.unprocessable('Type the account email address to confirm permanent deletion.');
+  }
+  if (provided !== String(existing.email ?? '').trim().toLowerCase()) {
+    throw ApiError.unprocessable('The confirmation email does not match this account.');
+  }
+
+  if (existing.role === ROLES.ADMIN && existing.status === 'active') {
+    const otherActiveAdmins = await repository.countActiveAdmins({ excludeId: targetId });
+    if (otherActiveAdmins < 1) {
+      throw ApiError.conflict(
+        'Cannot delete the last active administrator. Assign another administrator first.',
+      );
+    }
+  }
+
+  // Authoritative, advisory-locked re-check in the database; returns the snapshot
+  // used for the audit record. Raises (mapped to 403/404/409) on any violation.
+  const snapshot = await repository.assertAccountDeletable({ id: targetId, actorId });
+
+  // Irreversible: removes the Auth identity and (by cascade) the profile. If this
+  // throws, nothing was deleted and no audit entry is written — the caller keeps
+  // the account visible and surfaces the error.
+  await repository.deleteAuthAccount(targetId);
+
+  // The account is now gone. Record the deletion for the audit trail. A failure
+  // here does not resurrect the account, so we must not report failure; we log it
+  // server-side instead and still report the (real) successful deletion.
+  try {
+    await repository.insertHealthAuditLog({
+      actorId,
+      action: 'ACCOUNT_DELETED',
+      entityType: 'profiles',
+      entityId: targetId,
+      municipalityId: snapshot?.municipality_id || existing.municipalityId || null,
+      barangayId: snapshot?.barangay_id || existing.barangayId || null,
+      metadata: {
+        email: snapshot?.email ?? existing.email,
+        full_name: snapshot?.full_name ?? existing.name,
+        role: snapshot?.role ?? existing.role,
+        status: snapshot?.status ?? existing.status,
+        facility_id: snapshot?.facility_id ?? existing.facilityId ?? null,
+        outcome: 'deleted',
+      },
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[users] ACCOUNT_DELETED audit log failed after deletion', {
+      targetId,
+      message: error?.message,
+    });
+  }
+
+  return { deleted: true, id: targetId };
+};
+
+export default {
+  listUsers,
+  getAccountOptions,
+  getAccountSummary,
+  getUser,
+  createUser,
+  updateUser,
+  resetUserAccess,
+  deleteUser,
+};

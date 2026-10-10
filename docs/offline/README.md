@@ -42,6 +42,7 @@ backend permission matrix.
 | Existing workflow / role | Current access and server scope | Offline classification |
 | --- | --- | --- |
 | Household creation and factual household edits — BHW, Health Supervisor, PHN | Existing `/households` role/permission checks; BHW and Health Supervisor are bound to their assigned barangay, PHN to their municipality. | Create and allow-listed factual updates: `SAFE_SYNC`. Verification, approval, status decisions, deletes, and scope/identity fields are never queued. |
+| Follow-up schedule creation and factual edits — Health Supervisor and PHN | Existing `/operational/followups` permission and resident-scope checks; idempotency middleware protects retries. | Create and non-terminal schedule edits: `SAFE_SYNC`. Completion, cancellation, rejection, and other consequential status decisions remain online-only unless the server accepts the queued transition. |
 | Household member measurements — BHW, Health Supervisor, PHN, subject to the existing `residents.edit` permission and household scope | Same household route gate; service rechecks the parent household and verified-household restrictions. BMI is recomputed by the server. | Height, weight, and factual remarks: `SAFE_SYNC`. Death/trans-out fields remain online-only. |
 | Household member add/remove — BHW, Health Supervisor, PHN | Add uses the existing create permission and parent scope; remove uses create/verify permission. | Not currently registered as an offline handler. Remove is destructive and online-only. |
 | M1, resident verification, risk-workflow and other community workflows — BHW/Health Supervisor/PHN as individually authorized | Existing route role/permission checks plus barangay or municipality filtering and corresponding RLS policies. | Online-only until a workflow-specific retry-safe handler is audited and registered. Review/approval/escalation actions must not be automatically committed. |
@@ -192,10 +193,13 @@ No new backend runtime dependencies.
   not defend against same-origin script or a full IndexedDB dump, and it is not
   a substitute for device disk encryption or the server-side RLS/authorization
   controls.
-- On logout and on account switch, `OfflineSyncProvider` purges the entire
-  offline database and invalidates the key, so a shared device never leaves one
-  user's queued health data for the next user. A cached session can never drive a
-  sync under a different account (ops are filtered by `ownerId`).
+- On logout and on account switch, `OfflineSyncProvider` stops the worker and
+  rebinds it only after a valid authenticated session is available. Pending
+  work is retained rather than silently discarded after session expiry, while
+  every draft, operation, and cached record is filtered by `ownerId` and cache
+  keys include the owner. A different account cannot read or synchronize the
+  previous account's rows. Sites that require clearing all device data may call
+  the explicit `purgeOfflineDb()` device-cleanup action.
 
 ## Verification status
 
@@ -248,14 +252,16 @@ Use a throwaway/test Supabase project. Do not touch production health data.
 
 ## Known limitations
 
-- Household creation and factual member measurements are wired end-to-end
-  offline. The allow-listed household update service is not yet connected to an
-  edit UI; member-add, resident/assessment/maternal/follow-up/referral drafts
-  require their own audited handler + service wiring.
-- Offline **reads** are cached only via `records` and are not yet surfaced in the
-  household list UI; queued drafts are shown through the sync indicator.
+- Household creation, factual member measurements, and Health
+  Supervisor/PHN follow-up schedule writes are wired end-to-end offline. The
+  allow-listed household update service is not yet connected to an edit UI;
+  member-add, resident/assessment/maternal/referral writes require their own
+  audited handler + service wiring.
+- Offline **reads** are cached only via `records`; household list data is
+  refreshed after a confirmed synchronization. Other feature screens still
+  require their own cache adapters.
 - Device inactivity locking / re-authentication on resume is not implemented; the
-  app relies on Supabase session expiry and the logout purge. Recommended before
+  app relies on Supabase session expiry and owner-scoped local data. Recommended before
   enabling offline clinical data on shared devices.
 - Background Sync is not used; synchronization requires the app to be open.
 - Household **creation** is atomic once the migration is applied. Other household

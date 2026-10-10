@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Search, Filter, CheckSquare, Download } from "lucide-react";
-import { TYPE, PALETTE, RADIUS, DENSITY } from "@/lib/designTokens";
+import { Search, Filter, Download } from "lucide-react";
 
 /**
  * Canonical data table for directory/record screens.
@@ -77,7 +76,7 @@ export default function DataTable({
 
   if (loading) {
     return (
-      <div className={`overflow-hidden rounded-[8px] border border-[#D6DEE8] dark:border-[#2A3645] ${className}`}>
+      <div className={`min-w-0 overflow-hidden rounded-[8px] border border-[#D6DEE8] dark:border-[#2A3645] ${className}`}>
         <div className="flex items-center gap-3 border-b border-[#E7ECF1] bg-[#F4F6FA] px-4 py-3 dark:border-[#2A3645] dark:bg-[#0D1826]">
           <div className="h-4 w-[140px] animate-pulse rounded bg-[#D6DEE8] dark:bg-[#2A3645]" />
           <div className="h-4 w-[120px] animate-pulse rounded bg-[#D6DEE8] dark:bg-[#2A3645]" />
@@ -98,10 +97,10 @@ export default function DataTable({
   }
 
   return (
-    <div className={`overflow-hidden rounded-[8px] border border-[#D6DEE8] bg-white dark:border-[#2A3645] dark:bg-[#131E2C] ${className}`}>
+    <div className={`min-w-0 overflow-hidden rounded-[8px] border border-[#D6DEE8] bg-white dark:border-[#2A3645] dark:bg-[#131E2C] ${className}`}>
       <div className="flex flex-col gap-3 border-b border-[#E7ECF1] bg-[#F4F6FA] px-4 py-3 dark:border-[#2A3645] dark:bg-[#0D1826] sm:flex-row sm:items-center sm:justify-between">
         {primaryAction && <div>{primaryAction}</div>}
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#8A95A4]" aria-hidden="true" />
             <input
@@ -119,7 +118,7 @@ export default function DataTable({
               <select
                 value={filter}
                 onChange={(e) => { setFilter(e.target.value); if (onFilter) onFilter(e.target.value); }}
-                className="h-9 appearance-none rounded-[4px] border border-[#D6DEE8] bg-white py-1.5 pl-8 pr-7 text-[13px] outline-none transition-colors focus:border-[#0B4A8F] dark:border-[#2A3645] dark:bg-[#131E2C] dark:text-[#E8EDF3] dark:focus:border-[#1464A3]"
+                className="h-9 w-full appearance-none rounded-[4px] border border-[#D6DEE8] bg-white py-1.5 pl-8 pr-7 text-[13px] outline-none transition-colors focus:border-[#0B4A8F] dark:border-[#2A3645] dark:bg-[#131E2C] dark:text-[#E8EDF3] dark:focus:border-[#1464A3] sm:w-auto"
               >
                 <option value="">All</option>
                 {filterOptions.map((o) => (
@@ -140,8 +139,8 @@ export default function DataTable({
         )}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-[13px]">
+      <div className="table-scroll overflow-x-auto">
+        <table className="min-w-[640px] text-[13px]">
           <thead className="sticky top-0 bg-[#F4F6FA] text-[11px] font-semibold uppercase tracking-[0.08em] text-[#54637A] dark:bg-[#0D1826] dark:text-[#9AA7B5]">
             <tr>
               {columns.map((col, i) => (

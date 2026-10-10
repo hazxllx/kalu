@@ -1,5 +1,4 @@
 import React from "react";
-import { TYPE, PALETTE, RADIUS } from "@/lib/designTokens";
 
 /**
  * Skeleton loading primitives matching the final layout.

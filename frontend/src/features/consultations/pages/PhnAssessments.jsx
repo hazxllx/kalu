@@ -1,19 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
-import { consultationsApi } from "@/services/api";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
-import { workflowHelpers } from "@/services/local/workflowStore";
 import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
 import { filterRowsByScope, scopeLabel } from "@/lib/phnScope";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { riskOfPatient } from "@/lib/riskRules";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useAuth } from "@/context/AuthContext";
-import { Search, CheckCircle2, UserCheck } from "lucide-react";
+import { Search, CheckCircle2 } from "lucide-react";
 
 const EMPTY_STATE = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
@@ -72,36 +70,6 @@ export default function PhnCheckups() {
   const [activePatientId, setActivePatientId] = useState(null);
   const [toast, setToast] = useState(null);
 
-  // Completed consultations are read from the REAL backend (visits-backed
-  // /api/consultations, scope-enforced server-side). The database — not the
-  // local workflow store — is the source of truth for persisted PHN
-  // consultation records displayed here.
-  const [consults, setConsults] = useState([]);
-  const [consultsLoading, setConsultsLoading] = useState(true);
-  const [consultsError, setConsultsError] = useState("");
-
-  const loadConsults = useCallback(async () => {
-    setConsultsLoading(true);
-    setConsultsError("");
-    try {
-      const result = await consultationsApi.list();
-      setConsults(result?.rows || []);
-    } catch (err) {
-      setConsultsError(err?.message || "Unable to load consultations. Please try again.");
-      setConsults([]);
-    } finally {
-      setConsultsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { loadConsults(); }, [loadConsults]);
-
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const completedTodayCount = useMemo(
-    () => consults.filter((c) => c.consultationDate === todayIso).length,
-    [consults, todayIso],
-  );
-
   const visiblePatients = useMemo(
     () => filterRowsByScope(workflowPatients, user, coverage),
     [workflowPatients, user, coverage]
@@ -113,14 +81,10 @@ export default function PhnCheckups() {
   };
 
   const stats = useMemo(() => {
-    const today = workflowHelpers.todayLong();
     return {
       waiting: visiblePatients.filter((p) => p.status === CHECKUP_STATUS.WAITING).length,
       inCheckup: visiblePatients.filter((p) => p.status === CHECKUP_STATUS.IN_CHECKUP).length,
       priority: visiblePatients.filter((p) => riskOfPatient(p).level === "High").length,
-      completed: visiblePatients.filter(
-        (p) => p.status === CHECKUP_STATUS.COMPLETED && p.checkup?.completedAt === today
-      ).length,
     };
   }, [visiblePatients]);
 
@@ -175,7 +139,6 @@ export default function PhnCheckups() {
     try {
       await completeCheckup(patientId, recorded);
       showToast("Check-up completed successfully.");
-      loadConsults();
     } catch (err) {
       showToast(err?.message || "Could not complete the check-up.");
     }
@@ -233,7 +196,6 @@ export default function PhnCheckups() {
           { label: "Waiting for PHN", value: stats.waiting, icon: "Users", tone: "accent", index: 0 },
           { label: "In Check-up", value: stats.inCheckup, icon: "ClipboardCheck", tone: "blue", index: 1 },
           { label: "Priority Cases", value: stats.priority, icon: "AlertTriangle", tone: "danger", index: 2 },
-          { label: "Completed Today", value: completedTodayCount, icon: "UserCheck", tone: "green", index: 3 },
         ].map((stat) => (
           <StatCard
             key={stat.label}
@@ -338,64 +300,6 @@ export default function PhnCheckups() {
                 <tr>
                   <td colSpan={6} className="px-4 py-10 text-center text-sm text-brand-gray">
                     No check-ups match the selected filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {/* Completed consultations — sourced from the real backend records
-          (/api/consultations, visits-backed, scope-enforced). This list is the
-          database source of truth; it does not read the local workflow store. */}
-      <Card className="p-4 sm:p-6 mt-5">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Completed Consultations</h3>
-            <p className="text-xs text-brand-gray mt-0.5">Recorded PHN consultations from the database (most recent first).</p>
-          </div>
-          <UserCheck className="w-4 h-4 text-brand-gray shrink-0" />
-        </div>
-        {consultsError && (
-          <div className="mb-3 flex items-start gap-2 rounded-btn bg-brand-danger/10 px-3 py-2 text-sm text-brand-danger">
-            <span>{consultsError}</span>
-            <button onClick={loadConsults} className="ml-2 font-medium underline">Retry</button>
-          </div>
-        )}
-        <div className="overflow-x-auto -mx-1">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-brand-bg border-b border-brand-border text-left">
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Patient</th>
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Barangay</th>
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Chief Complaint</th>
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Diagnosis</th>
-                <th className="px-4 py-2.5 text-xs font-semibold text-brand-gray uppercase tracking-wide">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {consults.map((c) => (
-                <tr key={c.id} className="border-b border-brand-border last:border-0">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-brand-ink">{c.resident?.name || "—"}</p>
-                    <p className="text-xs text-brand-gray">{[c.resident?.age && `${c.resident.age} yrs`, c.resident?.sex].filter(Boolean).join(" · ")}</p>
-                  </td>
-                  <td className="px-4 py-3 text-brand-gray">{c.resident?.barangay || "—"}</td>
-                  <td className="px-4 py-3 text-brand-ink">{c.chiefComplaint || "—"}</td>
-                  <td className="px-4 py-3 text-brand-ink">{c.diagnosis || "—"}</td>
-                  <td className="px-4 py-3 text-brand-gray">{c.consultationDate || "—"}</td>
-                </tr>
-              ))}
-              {consultsLoading && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-brand-gray">Loading consultations…</td>
-                </tr>
-              )}
-              {!consultsLoading && !consultsError && consults.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-brand-gray">
-                    No recorded consultations yet.
                   </td>
                 </tr>
               )}

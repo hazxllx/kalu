@@ -22,6 +22,9 @@ export { staffAccountsApi } from './staffAccountsApi';
 export { medicalCertificatesApi } from './medicalCertificatesApi';
 export { auditTrailApi, systemLogsApi } from './observabilityApi';
 export { followUpsApi, tclApi, maternalApi, immunizationsApi, notificationsApi } from './operationalApi';
+export {
+  programFormsApi, ncdRiskApi, ncdCervicalApi, ncdVisualApi, oralHealthApi, environmentalApi,
+} from './programFormsApi';
 export { residentFollowUpsApi } from './residentFollowUpsApi';
 export { m1Api } from './m1Api';
 export { reportsApi } from './reportsApi';

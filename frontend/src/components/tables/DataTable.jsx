@@ -3,8 +3,8 @@ import { motion } from "framer-motion";
 
 export default function DataTable({ columns, rows, renderCell }) {
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
-      <table className="w-full text-sm">
+    <div className="table-scroll min-w-0 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
+      <table className="min-w-[640px] text-sm">
         <thead>
           <tr className="bg-slate-50 text-left">
             {columns.map((c) => (

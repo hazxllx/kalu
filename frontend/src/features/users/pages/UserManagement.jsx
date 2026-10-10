@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
-import DataTable from "@/components/tables/DataTable";
-import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { usersApi } from "@/services/api";
 import {
-  AlertTriangle, Ban, Building2, CheckCircle2, KeyRound, Pencil, Plus, Search, ShieldCheck, X,
+  AlertTriangle, Ban, Building2, CheckCircle2, ChevronDown, Clock, Eye, Filter, KeyRound,
+  Loader2, Mail, MoreHorizontal, Pencil, Phone, Plus, RotateCcw, Search, ShieldCheck,
+  Trash2, UserCheck, UserCog, Users, UserX, X,
 } from "lucide-react";
 
 const ROLE_LABELS = {
@@ -21,18 +21,32 @@ const ROLE_LABELS = {
   "resident-limited": "Resident (Pending Verification)",
 };
 
-const STATUS_LABELS = {
-  active: "Active",
-  disabled: "Disabled",
-  pending_verification: "Pending Verification",
+// Human-readable status presentation. Raw enum values (e.g. `pending_verification`)
+// are NEVER shown directly to administrators.
+const STATUS_META = {
+  active: { label: "Active", badge: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20", dot: "bg-emerald-500" },
+  pending_verification: { label: "Pending Verification", badge: "bg-amber-50 text-amber-700 ring-1 ring-amber-600/20", dot: "bg-amber-500" },
+  disabled: { label: "Deactivated", badge: "bg-rose-50 text-rose-700 ring-1 ring-rose-600/20", dot: "bg-rose-500" },
 };
 
 const roleLabel = (id) => ROLE_LABELS[id] || id || "—";
-const statusLabel = (id) => STATUS_LABELS[id] || id || "—";
+const statusMeta = (id) => STATUS_META[id] || { label: id || "—", badge: "bg-slate-100 text-slate-600 ring-1 ring-slate-500/20", dot: "bg-slate-400" };
 const inputCls = (error = false) =>
   `mt-1 w-full rounded-btn border bg-white px-3 py-2.5 text-sm outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:bg-input dark:text-foreground ${
     error ? "border-brand-danger" : "border-slate-200 dark:border-border"
   }`;
+const selectCls =
+  "h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm text-brand-ink outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-border dark:bg-input";
+
+function StatusPill({ statusId }) {
+  const meta = statusMeta(statusId);
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${meta.badge}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} aria-hidden="true" />
+      {meta.label}
+    </span>
+  );
+}
 
 function Field({ label, htmlFor, required = false, hint, error, children }) {
   return (
@@ -47,10 +61,153 @@ function Field({ label, htmlFor, required = false, hint, error, children }) {
   );
 }
 
+/* ------------------------------------------------------------------------- */
+/* Summary cards                                                             */
+/* ------------------------------------------------------------------------- */
+
+const SUMMARY_CARDS = [
+  { key: "", label: "All accounts", metric: "total", icon: Users, tone: "text-brand-blue bg-brand-blue/10" },
+  { key: "active", label: "Active", metric: "active", icon: UserCheck, tone: "text-emerald-700 bg-emerald-50" },
+  { key: "pending_verification", label: "Pending verification", metric: "pending_verification", icon: Clock, tone: "text-amber-700 bg-amber-50" },
+  { key: "disabled", label: "Deactivated", metric: "disabled", icon: UserX, tone: "text-rose-700 bg-rose-50" },
+];
+
+function SummaryCards({ summary, loading, error, activeStatus, onPick }) {
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {SUMMARY_CARDS.map((card) => {
+        const selected = activeStatus === card.key;
+        const Icon = card.icon;
+        const value = summary ? summary[card.metric] ?? 0 : null;
+        return (
+          <button
+            key={card.label}
+            type="button"
+            onClick={() => onPick(card.key)}
+            aria-pressed={selected}
+            className={`flex items-center gap-3 rounded-xl border bg-white px-4 py-3 text-left shadow-card transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 ${
+              selected ? "border-brand-blue ring-1 ring-brand-blue/30" : "border-slate-200 hover:border-brand-blue/50"
+            }`}
+          >
+            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${card.tone}`}>
+              <Icon className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xl font-semibold tabular-nums text-brand-ink">
+                {error ? "—" : loading && value === null ? "…" : (value ?? 0).toLocaleString()}
+              </span>
+              <span className="block truncate text-xs text-brand-gray">{card.label}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Actions dropdown menu                                                     */
+/* ------------------------------------------------------------------------- */
+
+function ActionsMenu({ items, buttonLabel = "Account actions" }) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+
+  const close = useCallback(() => setOpen(false), []);
+
+  const reposition = useCallback(() => {
+    if (!btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setCoords({ top: rect.bottom + 6, left: rect.right });
+  }, []);
+
+  const toggle = () => {
+    if (!open) reposition();
+    setOpen((value) => !value);
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (event) => {
+      if (menuRef.current?.contains(event.target) || btnRef.current?.contains(event.target)) return;
+      close();
+    };
+    const onKey = (event) => { if (event.key === "Escape") close(); };
+    const onReflow = () => close();
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onReflow);
+    window.addEventListener("scroll", onReflow, true);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onReflow);
+      window.removeEventListener("scroll", onReflow, true);
+    };
+  }, [open, close]);
+
+  const available = items.filter(Boolean);
+  if (available.length === 0) return <span className="text-xs text-brand-gray">—</span>;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={buttonLabel}
+        className="inline-flex h-9 items-center gap-1 rounded-btn border border-slate-200 bg-white px-2.5 text-sm font-medium text-brand-ink hover:bg-brand-bg focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:border-border"
+      >
+        <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+        <span className="hidden sm:inline">Actions</span>
+        <ChevronDown className="hidden h-3.5 w-3.5 sm:inline" aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label={buttonLabel}
+          style={{ position: "fixed", top: coords.top, left: coords.left, transform: "translateX(-100%)" }}
+          className="z-[95] w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-border dark:bg-card"
+        >
+          {available.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitem"
+              disabled={item.disabled}
+              title={item.title || undefined}
+              onClick={() => { if (item.disabled) return; close(); item.onClick(); }}
+              className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors ${
+                item.disabled
+                  ? "cursor-not-allowed text-slate-400"
+                  : item.danger
+                    ? "text-brand-danger hover:bg-brand-danger/10"
+                    : "text-brand-ink hover:bg-brand-bg"
+              }`}
+            >
+              <item.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Confirm dialog (deactivate / reactivate / reset access)                   */
+/* ------------------------------------------------------------------------- */
+
 function ConfirmDialog({ title, message, confirmLabel, busy, onConfirm, onClose }) {
   return (
     <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/50 p-4" role="presentation">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md" role="dialog" aria-modal="true" aria-label={title}>
         <div className="p-5">
           <div className="flex items-start gap-3">
             <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand-blue" />
@@ -72,6 +229,155 @@ function ConfirmDialog({ title, message, confirmLabel, busy, onConfirm, onClose 
     </div>
   );
 }
+
+/* ------------------------------------------------------------------------- */
+/* Delete confirmation dialog (type-to-confirm)                              */
+/* ------------------------------------------------------------------------- */
+
+function DeleteDialog({ target, busy, error, onConfirm, onClose }) {
+  const [typed, setTyped] = useState("");
+  const matches = typed.trim().toLowerCase() === String(target.email || "").trim().toLowerCase();
+
+  useEffect(() => {
+    const onKey = (event) => { if (event.key === "Escape" && !busy) onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[88] flex items-center justify-center bg-black/50 p-4" role="presentation">
+      <Card className="w-full max-w-md" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
+        <div className="p-5">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-danger/10 text-brand-danger">
+              <Trash2 className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <h2 id="delete-account-title" className="text-lg font-semibold text-brand-ink">Delete account?</h2>
+              <p className="mt-1 break-words text-sm text-brand-gray">
+                You are about to permanently delete <span className="font-medium text-brand-ink">{target.name}</span>{" "}
+                (<span className="break-all">{target.email}</span>).
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-btn bg-brand-danger/10 px-3 py-2.5 text-sm text-brand-danger">
+            <p className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>
+                This permanently removes the sign-in account and cannot be undone. The person can no longer log in.
+                Linked health records are preserved but will no longer be attributed to this account.
+              </span>
+            </p>
+          </div>
+
+          <div className="mt-4">
+            <label htmlFor="delete-confirm-email" className="text-sm font-medium text-brand-ink">
+              Type <span className="font-semibold">{target.email}</span> to confirm
+            </label>
+            <input
+              id="delete-confirm-email"
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
+              disabled={busy}
+              autoComplete="off"
+              className={inputCls(false)}
+              placeholder={target.email}
+              aria-describedby="delete-confirm-help"
+            />
+            <p id="delete-confirm-help" className="mt-1 text-xs text-brand-gray">
+              Confirmation protects against deleting the wrong account.
+            </p>
+          </div>
+
+          {error && (
+            <div className="mt-3 flex items-start gap-2 rounded-btn bg-brand-danger/10 px-3 py-2 text-sm text-brand-danger" role="alert">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span>
+            </div>
+          )}
+
+          <div className="mt-5 flex justify-end gap-2">
+            <button onClick={onClose} disabled={busy} className="rounded-btn px-3 py-2 text-sm text-brand-gray hover:bg-brand-bg disabled:opacity-60">
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={busy || !matches}
+              className="inline-flex items-center gap-2 rounded-btn bg-brand-danger px-4 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Trash2 className="h-4 w-4" aria-hidden="true" />}
+              {busy ? "Deleting…" : "Delete account"}
+            </button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* View details modal                                                        */
+/* ------------------------------------------------------------------------- */
+
+function DetailRow({ label, value }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-b border-slate-100 py-2.5 last:border-0 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <dt className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</dt>
+      <dd className="break-words text-sm text-brand-ink sm:max-w-[60%] sm:text-right">{value}</dd>
+    </div>
+  );
+}
+
+function DetailsModal({ target, onClose }) {
+  useEffect(() => {
+    const onKey = (event) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const coverage = target.barangay || target.facility || target.municipality
+    || (target.roleId === "admin" ? "System-wide" : "Not assigned");
+
+  return (
+    <div className="fixed inset-0 z-[82] flex items-center justify-center bg-black/50 p-4" role="presentation">
+      <Card className="max-h-[90vh] w-full max-w-lg overflow-y-auto" role="dialog" aria-modal="true" aria-label="Account details">
+        <div className="p-5 sm:p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-semibold text-brand-ink">{target.name}</h2>
+              <p className="mt-0.5 flex items-center gap-1.5 text-sm text-brand-gray">
+                <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="break-all">{target.email}</span>
+              </p>
+            </div>
+            <button onClick={onClose} className="rounded p-1 text-brand-gray hover:bg-brand-bg" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <dl className="rounded-xl border border-slate-200 px-4 py-1">
+            <DetailRow label="Status" value={<StatusPill statusId={target.statusId} />} />
+            <DetailRow label="Role" value={roleLabel(target.roleId)} />
+            <DetailRow label="Coverage" value={coverage} />
+            <DetailRow label="Municipality" value={target.municipality || "—"} />
+            <DetailRow label="Barangay" value={target.barangay || "—"} />
+            <DetailRow label="RHU facility" value={target.facility || "—"} />
+            <DetailRow label="Contact number" value={target.contact || "Not provided"} />
+            <DetailRow label="Position" value={target.position || "—"} />
+            <DetailRow label="License number" value={target.licenseNo || "—"} />
+          </dl>
+          <div className="mt-5 flex justify-end">
+            <button onClick={onClose} className="rounded-btn border border-slate-200 px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:border-border">
+              Close
+            </button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Invite / edit account modal                                               */
+/* ------------------------------------------------------------------------- */
 
 function AccountModal({ initial, options, busy, error, canManageRoles, canDeactivate, canEdit, onClose, onSave }) {
   const isNew = !initial;
@@ -176,7 +482,7 @@ function AccountModal({ initial, options, busy, error, canManageRoles, canDeacti
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
-      <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto">
+      <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto" role="dialog" aria-modal="true" aria-label={isNew ? "Invite staff account" : "Edit account"}>
         <div className="p-5 sm:p-6">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
@@ -228,7 +534,7 @@ function AccountModal({ initial, options, busy, error, canManageRoles, canDeacti
               <Field label="Initial status" htmlFor="account-status">
                 <select id="account-status" value={form.status || "active"} onChange={(event) => change("status", event.target.value)} className={inputCls()}>
                   <option value="active">Active</option>
-                  {canDeactivate && <option value="disabled">Disabled</option>}
+                  {canDeactivate && <option value="disabled">Deactivated</option>}
                 </select>
               </Field>
             )}
@@ -272,6 +578,28 @@ function AccountModal({ initial, options, busy, error, canManageRoles, canDeacti
   );
 }
 
+/* ------------------------------------------------------------------------- */
+/* Account identity cell (shared desktop + mobile)                           */
+/* ------------------------------------------------------------------------- */
+
+function AccountIdentity({ row }) {
+  return (
+    <div className="flex min-w-0 items-start gap-3">
+      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-sm font-semibold uppercase text-brand-blue">
+        {(row.name || "?").trim().charAt(0)}
+      </span>
+      <div className="min-w-0">
+        <p className="truncate font-medium text-brand-ink" title={row.name}>{row.name}</p>
+        <p className="truncate text-xs text-brand-gray" title={row.email}>{row.email}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Page                                                                      */
+/* ------------------------------------------------------------------------- */
+
 export default function UserManagement() {
   const { user: currentUser } = useAuth();
   const { can } = usePermissions();
@@ -280,9 +608,13 @@ export default function UserManagement() {
   const canManageRoles = can("accounts.roles.manage");
   const canDeactivate = can("accounts.deactivate");
   const canResetAccess = can("accounts.access.reset");
+  const canDelete = can("accounts.delete");
 
   const [users, setUsers] = useState([]);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState(null);
+  const [summaryError, setSummaryError] = useState("");
+  const [summaryLoading, setSummaryLoading] = useState(true);
   const [options, setOptions] = useState({ roles: [], municipalities: [], barangays: [], facilities: [] });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -292,9 +624,13 @@ export default function UserManagement() {
   const [statusFilter, setStatusFilter] = useState("");
   const [municipalityFilter, setMunicipalityFilter] = useState("");
   const [barangayFilter, setBarangayFilter] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [modalTarget, setModalTarget] = useState(null);
+  const [detailsTarget, setDetailsTarget] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [toast, setToast] = useState("");
@@ -305,6 +641,19 @@ export default function UserManagement() {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
   };
+
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const result = await usersApi.summary();
+      setSummary(result);
+      setSummaryError("");
+    } catch (error) {
+      setSummaryError(error?.message || "Unable to load account summary.");
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     const sequence = ++requestSequence.current;
@@ -326,7 +675,6 @@ export default function UserManagement() {
         roleId: account.role,
         role: roleLabel(account.role),
         statusId: account.status,
-        status: statusLabel(account.status),
       })));
       setTotal(result?.total || 0);
     } catch (error) {
@@ -343,7 +691,8 @@ export default function UserManagement() {
     usersApi.options()
       .then((result) => setOptions(result))
       .catch((error) => setOptionsError(error?.message || "Unable to load account assignment options."));
-  }, []);
+    void loadSummary();
+  }, [loadSummary]);
 
   useEffect(() => {
     const timer = window.setTimeout(load, 250);
@@ -355,6 +704,19 @@ export default function UserManagement() {
     [options.barangays, municipalityFilter],
   );
 
+  const hasActiveFilters = Boolean(query || roleFilter || statusFilter || municipalityFilter || barangayFilter);
+
+  const resetFilters = () => {
+    setQuery("");
+    setRoleFilter("");
+    setStatusFilter("");
+    setMunicipalityFilter("");
+    setBarangayFilter("");
+    setPage(0);
+  };
+
+  const pickStatus = (status) => { setStatusFilter(status); setPage(0); };
+
   const saveAccount = async (data) => {
     setBusy(true);
     setActionError("");
@@ -362,9 +724,10 @@ export default function UserManagement() {
       if (modalTarget?.isNew) await usersApi.create(data);
       else if (!modalTarget) return;
       else await usersApi.update(modalTarget.id, data);
+      const wasNew = modalTarget?.isNew;
       setModalTarget(null);
-      await load();
-      showToast(modalTarget?.isNew ? "Invitation sent." : "Account updated.");
+      await Promise.all([load(), loadSummary()]);
+      showToast(wasNew ? "Invitation sent." : "Account updated.");
     } catch (error) {
       setActionError(error?.message || "Could not save the account.");
     } finally {
@@ -380,7 +743,7 @@ export default function UserManagement() {
     try {
       if (kind === "disable" || kind === "enable") {
         await usersApi.update(target.id, { status: kind === "disable" ? "disabled" : "active" });
-        await load();
+        await Promise.all([load(), loadSummary()]);
         showToast(kind === "disable" ? "Account deactivated." : "Account reactivated.");
       } else if (kind === "reset") {
         await usersApi.resetAccess(target.id);
@@ -391,6 +754,23 @@ export default function UserManagement() {
       setActionError(error?.message || "The requested action failed.");
       setConfirm(null);
       showToast(error?.message || "The requested action failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget || busy) return;
+    setBusy(true);
+    setDeleteError("");
+    try {
+      await usersApi.remove(deleteTarget.id, deleteTarget.email);
+      setDeleteTarget(null);
+      await Promise.all([load(), loadSummary()]);
+      showToast("Account permanently deleted.");
+    } catch (error) {
+      // Deletion failed server-side: keep the account visible and show why.
+      setDeleteError(error?.message || "Could not delete the account.");
     } finally {
       setBusy(false);
     }
@@ -414,21 +794,47 @@ export default function UserManagement() {
     },
   }[confirm.kind] : null;
 
-  const columns = [
-    { key: "name", label: "Account" },
-    { key: "role", label: "Role" },
-    { key: "scope", label: "Coverage" },
-    { key: "contact", label: "Contact" },
-    { key: "status", label: "Status" },
-    { key: "actions", label: "" },
-  ];
+  const buildActions = (row) => {
+    const isSelf = row.id === currentUser?.id;
+    return [
+      { key: "view", label: "View details", icon: Eye, onClick: () => setDetailsTarget(row) },
+      canEdit && { key: "edit", label: "Edit account", icon: Pencil, onClick: () => { setActionError(""); setModalTarget(row); } },
+      canResetAccess && { key: "reset", label: "Reset access", icon: KeyRound, onClick: () => setConfirm({ kind: "reset", target: row }) },
+      canDeactivate && !isSelf && (
+        row.statusId === "disabled"
+          ? { key: "enable", label: "Reactivate account", icon: UserCheck, onClick: () => setConfirm({ kind: "enable", target: row }) }
+          : { key: "disable", label: "Deactivate account", icon: Ban, onClick: () => setConfirm({ kind: "disable", target: row }) }
+      ),
+      canDelete && {
+        key: "delete",
+        label: "Delete account",
+        icon: Trash2,
+        danger: true,
+        disabled: isSelf,
+        title: isSelf ? "You cannot delete your own account." : undefined,
+        onClick: () => { setDeleteError(""); setDeleteTarget(row); },
+      },
+    ].filter(Boolean);
+  };
+
+  const coverageOf = (row) =>
+    row.barangay || row.facility || row.municipality || (row.roleId === "admin" ? "System-wide" : "—");
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const showEmpty = !loading && !loadError && users.length === 0;
 
   return (
     <>
       <PageHeader
         crumbs={["User Management"]}
         title="User Management"
-        subtitle="Invite staff, assign roles and coverage, and control account access."
+        subtitle="Manage staff and resident accounts, roles, coverage, and access."
+        meta={
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue/10 px-3 py-1 text-xs font-medium text-brand-blue">
+            <Users className="h-3.5 w-3.5" aria-hidden="true" />
+            {summary ? `${summary.total.toLocaleString()} total accounts` : "Accounts"}
+          </span>
+        }
       />
 
       {toast && (
@@ -437,36 +843,81 @@ export default function UserManagement() {
         </div>
       )}
 
+      <SummaryCards
+        summary={summary}
+        loading={summaryLoading}
+        error={summaryError}
+        activeStatus={statusFilter}
+        onPick={pickStatus}
+      />
+
+      {/* Filter toolbar */}
       <Card className="mb-4 p-3 sm:p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-btn border border-slate-200 bg-brand-bg/60 px-3 py-2.5 dark:border-border dark:bg-input sm:max-w-sm">
-            <Search className="h-4 w-4 shrink-0 text-brand-gray" />
-            <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} placeholder="Search name or email…" className="w-full bg-transparent text-sm outline-none" aria-label="Search user accounts" />
-          </div>
-          <select value={roleFilter} onChange={(event) => { setRoleFilter(event.target.value); setPage(0); }} className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm dark:border-border dark:bg-input" aria-label="Filter by role">
-            <option value="">All roles</option>
-            {options.roles.filter((item) => item.id !== "resident-limited").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            <option value="resident">Resident</option>
-          </select>
-          <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0); }} className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm dark:border-border dark:bg-input" aria-label="Filter by status">
-            <option value="">All statuses</option>
-            <option value="active">Active</option>
-            <option value="disabled">Disabled</option>
-            <option value="pending_verification">Pending verification</option>
-          </select>
-          <select value={municipalityFilter} onChange={(event) => { setMunicipalityFilter(event.target.value); setBarangayFilter(""); setPage(0); }} className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm dark:border-border dark:bg-input" aria-label="Filter by municipality">
-            <option value="">All municipalities</option>
-            {options.municipalities.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
-          <select value={barangayFilter} onChange={(event) => { setBarangayFilter(event.target.value); setPage(0); }} className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm dark:border-border dark:bg-input" aria-label="Filter by barangay">
-            <option value="">All barangays</option>
-            {visibleBarangays.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
-          {canCreate && canManageRoles && (
-            <button onClick={() => { setActionError(""); setModalTarget({ isNew: true }); }} disabled={Boolean(optionsError) || options.roles.length === 0} className="ml-auto inline-flex items-center gap-2 rounded-btn bg-brand-blue px-3.5 py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
-              <Plus className="h-4 w-4" /> Invite staff
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-[200px] flex-1 items-center gap-2 rounded-btn border border-slate-200 bg-brand-bg/60 px-3 py-2.5 dark:border-border dark:bg-input sm:max-w-sm">
+              <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+              <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} placeholder="Search name or email…" className="w-full bg-transparent text-sm outline-none" aria-label="Search user accounts" />
+              {query && (
+                <button onClick={() => { setQuery(""); setPage(0); }} className="rounded p-0.5 text-brand-gray hover:bg-brand-bg" aria-label="Clear search">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setFiltersOpen((value) => !value)}
+              aria-expanded={filtersOpen}
+              className="inline-flex items-center gap-2 rounded-btn border border-slate-200 px-3 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:border-border md:hidden"
+            >
+              <Filter className="h-4 w-4" aria-hidden="true" /> Filters
+              {hasActiveFilters && <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-brand-blue" aria-hidden="true" />}
             </button>
-          )}
+            {canCreate && canManageRoles && (
+              <button onClick={() => { setActionError(""); setModalTarget({ isNew: true }); }} disabled={Boolean(optionsError) || options.roles.length === 0} className="ml-auto inline-flex items-center gap-2 rounded-btn bg-brand-blue px-3.5 py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
+                <Plus className="h-4 w-4" aria-hidden="true" /> Invite Staff
+              </button>
+            )}
+          </div>
+
+          <div className={`${filtersOpen ? "grid" : "hidden"} grid-cols-1 gap-2 sm:grid-cols-2 md:flex md:flex-wrap md:items-end`}>
+            <div className="md:w-44">
+              <label htmlFor="filter-role" className="mb-1 block text-xs font-medium text-brand-gray">Role</label>
+              <select id="filter-role" value={roleFilter} onChange={(event) => { setRoleFilter(event.target.value); setPage(0); }} className={selectCls}>
+                <option value="">All roles</option>
+                {options.roles.filter((item) => item.id !== "resident-limited").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                <option value="resident">Resident</option>
+              </select>
+            </div>
+            <div className="md:w-44">
+              <label htmlFor="filter-status" className="mb-1 block text-xs font-medium text-brand-gray">Status</label>
+              <select id="filter-status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0); }} className={selectCls}>
+                <option value="">All statuses</option>
+                <option value="active">Active</option>
+                <option value="pending_verification">Pending verification</option>
+                <option value="disabled">Deactivated</option>
+              </select>
+            </div>
+            <div className="md:w-48">
+              <label htmlFor="filter-municipality" className="mb-1 block text-xs font-medium text-brand-gray">Municipality</label>
+              <select id="filter-municipality" value={municipalityFilter} onChange={(event) => { setMunicipalityFilter(event.target.value); setBarangayFilter(""); setPage(0); }} className={selectCls}>
+                <option value="">All municipalities</option>
+                {options.municipalities.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>
+            <div className="md:w-48">
+              <label htmlFor="filter-barangay" className="mb-1 block text-xs font-medium text-brand-gray">Barangay</label>
+              <select id="filter-barangay" value={barangayFilter} onChange={(event) => { setBarangayFilter(event.target.value); setPage(0); }} disabled={!municipalityFilter} className={`${selectCls} disabled:cursor-not-allowed disabled:opacity-60`}>
+                <option value="">{municipalityFilter ? "All barangays" : "Select municipality first"}</option>
+                {visibleBarangays.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>
+            {hasActiveFilters && (
+              <button onClick={resetFilters} className="inline-flex h-10 items-center gap-1.5 rounded-btn px-3 text-sm font-medium text-brand-blue hover:bg-brand-blue/10">
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Reset filters
+              </button>
+            )}
+          </div>
         </div>
       </Card>
 
@@ -483,44 +934,96 @@ export default function UserManagement() {
         </div>
       )}
 
-      <DataTable
-        columns={columns}
-        rows={users}
-        renderCell={(key, row) => {
-          if (key === "name") return (
-            <div className="min-w-[220px]">
-              <p className="font-medium text-brand-ink">{row.name}</p>
-              <p className="truncate text-xs text-brand-gray">{row.email}</p>
-            </div>
-          );
-          if (key === "role") return <span className="text-sm text-brand-ink">{row.role}</span>;
-          if (key === "scope") return (
-            <div className="flex min-w-[140px] items-center gap-1.5 text-sm text-brand-gray">
-              <Building2 className="h-3.5 w-3.5 shrink-0" />
-              <span>{row.barangay || row.facility || row.municipality || (row.roleId === "admin" ? "System-wide" : "—")}</span>
-            </div>
-          );
-          if (key === "contact") return <span className="text-sm text-brand-gray">{row.contact || "—"}</span>;
-          if (key === "status") return <StatusBadge value={row.statusId} />;
-          if (key === "actions") return (
-            <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
-              {canEdit && <button onClick={() => { setActionError(""); setModalTarget(row); }} className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"><Pencil className="h-3.5 w-3.5" /> Edit</button>}
-              {canResetAccess && <button onClick={() => setConfirm({ kind: "reset", target: row })} className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"><KeyRound className="h-3.5 w-3.5" /> Reset access</button>}
-              {canDeactivate && row.id !== currentUser?.id && (
-                row.statusId === "disabled"
-                  ? <button onClick={() => setConfirm({ kind: "enable", target: row })} className="text-sm font-medium text-brand-green hover:underline">Reactivate</button>
-                  : <button onClick={() => setConfirm({ kind: "disable", target: row })} className="inline-flex items-center gap-1 text-sm font-medium text-brand-danger hover:underline"><Ban className="h-3.5 w-3.5" /> Deactivate</button>
-              )}
-            </div>
-          );
-          return row[key];
-        }}
-      />
-      {!loading && !loadError && users.length === 0 && <p className="py-10 text-center text-sm text-brand-gray">No accounts match these filters.</p>}
-      {loading && <p className="py-6 text-center text-sm text-brand-gray">Loading accounts…</p>}
+      {/* Desktop table */}
+      <div className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card md:block">
+        <table className="w-full table-fixed text-sm">
+          <colgroup>
+            <col className="w-[28%]" /><col className="w-[16%]" /><col className="w-[18%]" />
+            <col className="w-[16%]" /><col className="w-[12%]" /><col className="w-[10%]" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
+              <th className="px-4 py-3 font-semibold">Account</th>
+              <th className="px-4 py-3 font-semibold">Role</th>
+              <th className="px-4 py-3 font-semibold">Coverage</th>
+              <th className="px-4 py-3 font-semibold">Contact</th>
+              <th className="px-4 py-3 font-semibold">Status</th>
+              <th className="px-4 py-3 text-right font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {loading && users.length === 0 && Array.from({ length: 6 }).map((_, index) => (
+              <tr key={`sk-${index}`}>
+                <td className="px-4 py-4" colSpan={6}>
+                  <div className="h-9 w-full animate-pulse rounded bg-slate-100" />
+                </td>
+              </tr>
+            ))}
+            {!loading && users.map((row) => (
+              <tr key={row.id} className="align-middle transition-colors hover:bg-slate-50/70">
+                <td className="px-4 py-3"><AccountIdentity row={row} /></td>
+                <td className="px-4 py-3 text-brand-ink">{row.role}</td>
+                <td className="px-4 py-3">
+                  <span className="flex items-center gap-1.5 text-brand-gray">
+                    <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate" title={coverageOf(row)}>{coverageOf(row)}</span>
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  {row.contact
+                    ? <span className="flex items-center gap-1.5 text-brand-ink"><Phone className="h-3.5 w-3.5 shrink-0 text-brand-gray" aria-hidden="true" /><span className="truncate">{row.contact}</span></span>
+                    : <span className="text-brand-gray">Not provided</span>}
+                </td>
+                <td className="px-4 py-3"><StatusPill statusId={row.statusId} /></td>
+                <td className="px-4 py-3 text-right"><div className="flex justify-end"><ActionsMenu items={buildActions(row)} buttonLabel={`Actions for ${row.name}`} /></div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {showEmpty && (
+          <div className="flex flex-col items-center gap-2 px-4 py-14 text-center">
+            <UserCog className="h-8 w-8 text-slate-300" aria-hidden="true" />
+            <p className="text-sm font-medium text-brand-ink">No accounts found</p>
+            <p className="text-sm text-brand-gray">{hasActiveFilters ? "No accounts match these filters." : "No accounts have been created yet."}</p>
+            {hasActiveFilters && <button onClick={resetFilters} className="mt-1 text-sm font-medium text-brand-blue hover:underline">Reset filters</button>}
+          </div>
+        )}
+      </div>
 
+      {/* Mobile cards */}
+      <div className="space-y-3 md:hidden">
+        {loading && users.length === 0 && Array.from({ length: 4 }).map((_, index) => (
+          <Card key={`msk-${index}`} className="p-4"><div className="h-16 w-full animate-pulse rounded bg-slate-100" /></Card>
+        ))}
+        {!loading && users.map((row) => (
+          <Card key={row.id} className="p-4">
+            <div className="flex items-start justify-between gap-2">
+              <AccountIdentity row={row} />
+              <ActionsMenu items={buildActions(row)} buttonLabel={`Actions for ${row.name}`} />
+            </div>
+            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <div><dt className="text-xs text-brand-gray">Role</dt><dd className="text-brand-ink">{row.role}</dd></div>
+              <div><dt className="text-xs text-brand-gray">Status</dt><dd className="mt-0.5"><StatusPill statusId={row.statusId} /></dd></div>
+              <div className="min-w-0"><dt className="text-xs text-brand-gray">Coverage</dt><dd className="truncate text-brand-ink" title={coverageOf(row)}>{coverageOf(row)}</dd></div>
+              <div className="min-w-0"><dt className="text-xs text-brand-gray">Contact</dt><dd className="truncate text-brand-ink">{row.contact || "Not provided"}</dd></div>
+            </dl>
+          </Card>
+        ))}
+        {showEmpty && (
+          <Card className="flex flex-col items-center gap-2 px-4 py-12 text-center">
+            <UserCog className="h-8 w-8 text-slate-300" aria-hidden="true" />
+            <p className="text-sm font-medium text-brand-ink">No accounts found</p>
+            <p className="text-sm text-brand-gray">{hasActiveFilters ? "No accounts match these filters." : "No accounts have been created yet."}</p>
+            {hasActiveFilters && <button onClick={resetFilters} className="mt-1 text-sm font-medium text-brand-blue hover:underline">Reset filters</button>}
+          </Card>
+        )}
+      </div>
+
+      {/* Pagination */}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-brand-gray">
-        <span>{total.toLocaleString()} account{total === 1 ? "" : "s"} · page {page + 1} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+        <span>
+          {loading ? "Loading accounts…" : `${total.toLocaleString()} account${total === 1 ? "" : "s"} · page ${page + 1} of ${totalPages}`}
+        </span>
         <div className="flex gap-2">
           <button onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0 || loading} className="rounded-btn border border-slate-200 px-3 py-1.5 disabled:opacity-50 dark:border-border">Previous</button>
           <button onClick={() => setPage((value) => value + 1)} disabled={(page + 1) * pageSize >= total || loading} className="rounded-btn border border-slate-200 px-3 py-1.5 disabled:opacity-50 dark:border-border">Next</button>
@@ -540,7 +1043,17 @@ export default function UserManagement() {
           onSave={saveAccount}
         />
       )}
+      {detailsTarget && <DetailsModal target={detailsTarget} onClose={() => setDetailsTarget(null)} />}
       {confirmContent && <ConfirmDialog {...confirmContent} busy={busy} onConfirm={handleConfirm} onClose={() => setConfirm(null)} />}
+      {deleteTarget && (
+        <DeleteDialog
+          target={deleteTarget}
+          busy={busy}
+          error={deleteError}
+          onConfirm={handleDelete}
+          onClose={() => { if (!busy) { setDeleteTarget(null); setDeleteError(""); } }}
+        />
+      )}
     </>
   );
 }

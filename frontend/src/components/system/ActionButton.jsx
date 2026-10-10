@@ -1,5 +1,5 @@
 import React from "react";
-import { TYPE, PALETTE, RADIUS } from "@/lib/designTokens";
+import { TYPE } from "@/lib/designTokens";
 
 /**
  * Primary and secondary action buttons.
@@ -75,7 +75,7 @@ export default function ActionButton({
 
   return (
     <button
-      type={type}
+      type={/** @type {"button"|"submit"|"reset"} */ (type)}
       onClick={onClick}
       disabled={disabled}
       className={base}
