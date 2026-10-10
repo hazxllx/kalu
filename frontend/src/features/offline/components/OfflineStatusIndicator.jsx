@@ -104,7 +104,7 @@ const OfflineStatusIndicator = () => {
         onClick={() => setOpen((v) => !v)}
         aria-label={`Connection status: ${connectionLabel}. ${summary}`}
         aria-expanded={open}
-        className="relative flex h-10 items-center gap-2 rounded-xl px-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-hover"
+        className="relative flex h-10 items-center gap-2 rounded-md px-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-hover"
       >
         {online ? (
           <Wifi className="h-5 w-5 text-brand-green" strokeWidth={1.8} />
@@ -130,7 +130,7 @@ const OfflineStatusIndicator = () => {
         <div
           role="dialog"
           aria-label="Connection and synchronization status"
-          className="absolute right-0 top-full z-50 mt-2 w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-soft dark:border-border dark:bg-popover"
+          className="absolute right-0 top-full z-50 mt-2 w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-slate-200 bg-white shadow-soft dark:border-border dark:bg-popover"
         >
           <div className="border-b border-slate-200 bg-brand-bg/60 px-4 py-3 dark:border-border">
             <div className="flex items-center gap-2">

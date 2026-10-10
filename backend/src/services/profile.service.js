@@ -186,11 +186,11 @@ export const updateOwnContact = async ({ user, contact }) => {
         .eq('id', user.id)
         .select(PROFILE_BASE_SELECT)
         .maybeSingle();
-      if (retry.error) throw ApiError(500, 'Could not update your contact number. Please try again.');
+      if (retry.error) throw new ApiError(500, 'Could not update your contact number. Please try again.');
       if (!retry.data) throw ApiError.notFound('Your profile was not found.');
       return profileToSessionUser(retry.data);
     }
-    throw ApiError(500, 'Could not update your contact number. Please try again.');
+    throw new ApiError(500, 'Could not update your contact number. Please try again.');
   }
   if (!data) throw ApiError.notFound('Your profile was not found.');
   return profileToSessionUser(data);

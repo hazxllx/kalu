@@ -20,10 +20,17 @@ import api from './apiClient';
  *   PATCH /verifications/:id/resubmit
  */
 
-export const fetchVerificationQueue = async ({ status = 'pending', q = '' } = {}) => {
+export const fetchVerificationQueue = async ({
+  status = 'pending',
+  q = '',
+  limit = 100,
+  offset = 0,
+} = {}) => {
   const params = new URLSearchParams();
   if (status) params.set('status', status);
   if (q) params.set('q', q);
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
   const payload = await api.get(`/verifications/queue?${params.toString()}`);
   return { rows: payload?.rows || [], total: payload?.total ?? 0 };
 };

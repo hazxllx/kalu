@@ -4,6 +4,8 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationReviewDrawer from "@/features/verification/components/VerificationReviewDrawer";
+import VerificationQueueToolbar from "@/features/verification/components/VerificationQueueToolbar";
+import VerificationPagination from "@/features/verification/components/VerificationPagination";
 import { SkeletonTable } from "@/components/common/Skeleton";
 import {
   approveResident,
@@ -13,7 +15,7 @@ import {
   rejectResident,
   requestResubmission,
 } from "@/services/api/verificationsApi";
-import { CheckCircle2, ChevronRight, History, Search } from "lucide-react";
+import { CheckCircle2, ChevronRight, History } from "lucide-react";
 
 /**
  * Health Supervisor resident-verification page.
@@ -30,6 +32,7 @@ const TABS = [
   { key: "rejected", label: "Rejected" },
   { key: "resubmission_required", label: "Resubmission" },
 ];
+const PAGE_SIZE = 10;
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -45,7 +48,11 @@ const formatDateTime = (value) => {
   return d.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
-export default function PendingVerifications({ embedded = false }) {
+export default function PendingVerifications({
+  embedded = false,
+  onPendingCount,
+  pendingCountKey = "resident",
+}) {
   const [tab, setTab] = useState("pending");
   const [rows, setRows] = useState([]);
   const [history, setHistory] = useState([]);
@@ -56,20 +63,30 @@ export default function PendingVerifications({ embedded = false }) {
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
   const [error, setError] = useState("");
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
 
   const loadQueue = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const { rows: data } = await fetchVerificationQueue({ status: tab });
+      const { rows: data, total: resultTotal } = await fetchVerificationQueue({
+        status: tab,
+        q: query,
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
+      });
       setRows(data);
+      setTotal(resultTotal);
+      if (tab === "pending" && !query.trim()) onPendingCount?.(pendingCountKey, resultTotal);
     } catch (err) {
       setRows([]);
+      setTotal(0);
       setError(err?.message || "We could not load the verification queue. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, [onPendingCount, page, pendingCountKey, query, tab]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -129,25 +146,22 @@ export default function PendingVerifications({ embedded = false }) {
     }
   };
 
-  const filtered = rows.filter((r) => {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      String(r.name || "").toLowerCase().includes(q) ||
-      String(r.ref || "").toLowerCase().includes(q) ||
-      String(r.barangay || "").toLowerCase().includes(q)
-    );
-  });
+  const filtered = rows;
 
   const activeTab = TABS.find((t) => t.key === tab);
+
+  useEffect(() => {
+    const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (page > pageCount) setPage(pageCount);
+  }, [page, total]);
 
   return (
     <>
       {!embedded && (
         <PageHeader
-          crumbs={["Dashboard", "Resident Verifications"]}
-          title="Resident Verifications"
-          subtitle="Review resident registrations and record an approval or rejection."
+          eyebrow="Administration"
+          title="Verifications & Approvals"
+          subtitle="Review resident, household, and BHW requests in one place."
         />
       )}
 
@@ -165,48 +179,32 @@ export default function PendingVerifications({ embedded = false }) {
       )}
 
       <Card className="overflow-hidden">
-        {/* Tabs + search */}
-        <div className="flex flex-col gap-3 border-b border-brand-border px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-1.5">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-                  tab === t.key ? "bg-brand-blue text-white" : "bg-brand-bg text-brand-gray hover:text-brand-ink"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex max-w-sm items-center gap-2 rounded-input border border-brand-border bg-brand-bg px-3.5 py-2.5">
-            <Search className="h-4 w-4 text-brand-gray" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name, reference or barangay..."
-              className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
-            />
-          </div>
-        </div>
+        <VerificationQueueToolbar
+          filters={TABS.map((filter) => ({ value: filter.key, label: filter.label }))}
+          status={tab}
+          onStatusChange={(value) => { setPage(1); setTab(value); }}
+          searchValue={query}
+          onSearchChange={(value) => { setPage(1); setQuery(value); }}
+          searchPlaceholder="Search residents by name, reference, or barangay"
+          resultText={loading ? "Loading…" : `${total} request${total === 1 ? "" : "s"}`}
+        />
 
         <div className="overflow-x-auto">
           {loading ? (
             <SkeletonTable rows={5} cols={6} className="px-6 py-5" />
           ) : (
-            <table className="w-full text-sm">
+            <table className="verification-table">
               <thead>
                 <tr className="bg-brand-bg text-left">
-                  <th className="px-6 py-3 font-medium text-brand-gray">Resident</th>
-                  <th className="px-6 py-3 font-medium text-brand-gray">Barangay</th>
-                  <th className="px-6 py-3 font-medium text-brand-gray">Submitted</th>
-                  <th className="px-6 py-3 font-medium text-brand-gray">Reference</th>
-                  <th className="px-6 py-3 font-medium text-brand-gray">Status</th>
-                  <th className="px-6 py-3 text-right font-medium text-brand-gray">Action</th>
+                  <th scope="col">Applicant</th>
+                  <th scope="col">Assignment</th>
+                  <th scope="col">Submitted</th>
+                  <th scope="col">Reference no.</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" className="text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-brand-border">
+              <tbody>
                 {filtered.map((r, i) => (
                   <motion.tr
                     key={r.id}
@@ -215,7 +213,7 @@ export default function PendingVerifications({ embedded = false }) {
                     transition={{ delay: i * 0.04 }}
                     className="transition-colors hover:bg-brand-bg/50"
                   >
-                    <td className="px-6 py-3.5">
+                    <td>
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-light text-xs font-heading font-semibold text-brand-blue">
                           {(r.name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("")}
@@ -223,18 +221,19 @@ export default function PendingVerifications({ embedded = false }) {
                         <span className="font-medium text-brand-ink">{r.name}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-3.5 text-brand-gray">{r.barangay}</td>
-                    <td className="px-6 py-3.5 text-brand-gray">{formatDate(r.submittedAt)}</td>
-                    <td className="px-6 py-3.5">
+                    <td className="text-brand-gray">{r.barangay}</td>
+                    <td className="whitespace-nowrap text-brand-gray">{formatDate(r.submittedAt)}</td>
+                    <td>
                       <span className="font-stat text-xs font-medium text-brand-ink">{r.ref}</span>
                     </td>
-                    <td className="px-6 py-3.5">
+                    <td>
                       <VerificationBadge status={r.status} size="sm" />
                     </td>
-                    <td className="px-6 py-3.5 text-right">
+                    <td className="text-right">
                       <button
+                        type="button"
                         onClick={() => openReview(r)}
-                        className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                        className="inline-flex items-center gap-1.5 rounded-btn px-1.5 py-1 text-sm font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
                       >
                         Review <ChevronRight className="h-3.5 w-3.5" />
                       </button>
@@ -255,6 +254,12 @@ export default function PendingVerifications({ embedded = false }) {
             <p className="mt-1 text-xs text-brand-gray">Nothing to show for this filter.</p>
           </div>
         )}
+        <VerificationPagination
+          page={page}
+          pageCount={Math.ceil(total / PAGE_SIZE)}
+          total={total}
+          onPageChange={setPage}
+        />
       </Card>
 
       {/* Decision history */}
@@ -265,7 +270,7 @@ export default function PendingVerifications({ embedded = false }) {
           <span className="ml-auto text-xs text-brand-gray">{history.length} recorded</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="verification-table">
             <thead>
               <tr className="bg-brand-bg text-left">
                 <th className="px-6 py-3 font-medium text-brand-gray">Resident</th>

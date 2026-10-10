@@ -110,7 +110,7 @@ export const NAV = {
     {
       label: "Health Services",
       icon: "Stethoscope",
-      path: "/app/resident/services",
+      path: "/app/resident/health-services",
     },
     {
       label: "Notifications",
@@ -166,6 +166,13 @@ export const NAV = {
       icon: "Users",
       path: "/app/phn/residents",
       permission: "residents.directory.view",
+    },
+    {
+      label: "Account Approvals",
+      icon: "ShieldCheck",
+      path: "/app/phn/account-approvals",
+      permission: "accounts.personnel.approve",
+      group: "Main",
     },
     {
       label: "Clinical Care",
@@ -246,12 +253,6 @@ export const NAV = {
       ],
     },
     {
-      label: "Account Approvals",
-      icon: "ShieldCheck",
-      path: "/app/phn/account-approvals",
-      permission: "accounts.personnel.approve",
-    },
-    {
       label: "Notifications",
       icon: "Bell",
       path: "/app/phn/notifications",
@@ -281,6 +282,14 @@ export const NAV = {
       icon: "Users",
       path: "/app/health_supervisor/residents",
       permission: "residents.directory.view",
+      group: "Main",
+    },
+    {
+      label: "Account Approvals",
+      icon: "ShieldCheck",
+      path: "/app/health_supervisor/verifications",
+      search: "?tab=accounts",
+      permission: "accounts.personnel.approve",
       group: "Main",
     },
     {
@@ -338,7 +347,7 @@ export const NAV = {
           permission: "referrals.view",
         },
         {
-          label: "Health Services / Programs",
+          label: "Health Services",
           icon: "Activity",
           path: "/app/health_supervisor/services",
           permission: "services.view",

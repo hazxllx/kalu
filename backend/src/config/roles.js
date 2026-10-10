@@ -125,6 +125,21 @@ export const FEATURE_ROLES = Object.freeze({
   m1Read: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
   m1Write: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.BHW],
 
+  // Resident appointment booking for barangay health services.
+  //
+  // Residents request appointments through the resident self-service endpoints
+  // (ownership derived from the session, never a client id). Barangay-scoped
+  // staff manage the requests for THEIR barangay: the Barangay Health Worker is
+  // the front-line manager for barangay appointments here (an explicit, feature
+  // -scoped capability — it does NOT grant the BHW the clinical/resident-record
+  // groups it is otherwise excluded from), alongside the Health Supervisor;
+  // municipality-wide PHN/MHO may also review within their municipality. Scope
+  // is re-enforced in the service and by Supabase RLS.
+  appointmentManage: [ROLES.BHW, ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
+  // Service availability configuration (operating days/hours, slot interval,
+  // per-slot capacity, closures). Same authorized staff, barangay-scoped.
+  appointmentSchedule: [ROLES.BHW, ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
+
   // Cross-cutting
   notifications: ALL_ROLES,
   // Resident self-service (a resident only ever sees their own data; that is

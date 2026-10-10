@@ -40,7 +40,7 @@ function SummaryRowSkeleton() {
 }
 
 /** One desktop table row. */
-function ServiceRow({ service, count, onOpen }) {
+function ServiceRow({ service, count, index, onOpen }) {
   const Icon = service.icon;
   const accent = SOURCE_ACCENT[service.source] || SOURCE_ACCENT.m1;
   const records = count == null ? "—" : count;
@@ -62,8 +62,11 @@ function ServiceRow({ service, count, onOpen }) {
       className="cursor-pointer border-t border-brand-border first:border-t-0 transition-colors hover:bg-brand-bg/40 focus-visible:bg-brand-bg/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30"
     >
       <td className="px-4 py-3">
-        <span className="flex items-center gap-2.5">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] bg-brand-bg text-brand-gray">
+        <span className="flex items-center gap-3">
+          <span className="w-5 shrink-0 text-right font-stat text-[11px] font-semibold tabular-nums text-brand-gray/60">
+            {String(index + 1).padStart(2, "0")}
+          </span>
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[3px] border border-brand-border bg-brand-bg text-brand-gray">
             <Icon className="h-3.5 w-3.5" aria-hidden="true" />
           </span>
           <span className="text-[15px] font-semibold leading-tight text-brand-ink">{service.name}</span>
@@ -104,7 +107,7 @@ function ServiceRow({ service, count, onOpen }) {
 }
 
 /** One compact mobile block. */
-function ServiceBlock({ service, count, onOpen }) {
+function ServiceBlock({ service, count, index, onOpen }) {
   const Icon = service.icon;
   const accent = SOURCE_ACCENT[service.source] || SOURCE_ACCENT.m1;
   const records = count == null ? "—" : count;
@@ -126,7 +129,10 @@ function ServiceBlock({ service, count, onOpen }) {
       className="flex items-start justify-between gap-3 border-b border-brand-border px-4 py-3 last:border-b-0 transition-colors hover:bg-brand-bg/40 focus-visible:bg-brand-bg/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30"
     >
       <div className="flex min-w-0 items-start gap-3">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] bg-brand-bg text-brand-gray">
+        <span className="mt-0.5 w-5 shrink-0 text-right font-stat text-[11px] font-semibold tabular-nums text-brand-gray/60">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[3px] border border-brand-border bg-brand-bg text-brand-gray">
           <Icon className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
         <div className="min-w-0">
@@ -190,10 +196,10 @@ export default function HealthServicesSummary(props) {
     !rows.some((r) => r.count == null) && totalReportedIndicators === 0;
 
   const stats = [
-    { value: HEALTH_SERVICES.length, label: "Health services", strong: true, accent: true },
+    { value: HEALTH_SERVICES.length, label: "Total health services", strong: true, accent: true },
     { value: countsLoading ? "—" : totalReportedIndicators, label: "Reported indicators", strong: true },
     { value: operationalSources, label: "Operational sources", strong: true },
-    { value: countsLoading ? "—" : servicesWithRecords, label: "With reported values", strong: true },
+    { value: countsLoading ? "—" : servicesWithRecords, label: "Services with reported values", strong: true },
   ];
 
   return (
@@ -201,8 +207,9 @@ export default function HealthServicesSummary(props) {
       {/* Header: the parent M1 workspace owns the reporting-period selector. */}
       <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 border-b border-brand-border px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold leading-tight text-brand-ink">Health Services</h2>
-          <p className="mt-0.5 text-[13px] text-brand-gray">Manage service records and M1 reporting data</p>
+          <p className="text-[10px] font-semibold uppercase tracking-gov text-brand-blue">Service Registry</p>
+          <h2 className="mt-1 text-lg font-semibold leading-tight text-brand-ink">Health Services</h2>
+          <p className="mt-0.5 text-[13px] text-brand-gray">Manage service records and M1 reporting data.</p>
         </div>
         <span className="text-xs text-brand-gray">Selected period: <strong className="text-brand-ink">{periodLabel}</strong></span>
       </div>
@@ -223,6 +230,9 @@ export default function HealthServicesSummary(props) {
             key={i}
             className="flex min-w-[9.5rem] flex-1 flex-col justify-center gap-1 border-r border-brand-border px-5 py-3 last:border-r-0"
           >
+            <span className="font-stat text-[10px] font-semibold tabular-nums text-brand-gray/60">
+              {String(i + 1).padStart(2, "0")}
+            </span>
             <p
               className={`font-stat text-lg font-bold leading-none tabular-nums ${
                 stat.strong ? (stat.accent ? "text-brand-blue" : "text-brand-ink") : "text-brand-ink"
@@ -294,11 +304,12 @@ export default function HealthServicesSummary(props) {
                     </td>
                   </tr>
                 ))
-              : rows.map(({ service, count }) => (
+              : rows.map(({ service, count }, i) => (
                   <ServiceRow
                     key={service.key}
                     service={service}
                     count={count}
+                    index={i}
                     onOpen={onOpenService}
                   />
                 ))}
@@ -314,11 +325,12 @@ export default function HealthServicesSummary(props) {
                 <SummaryRowSkeleton />
               </div>
             ))
-          : rows.map(({ service, count }) => (
+          : rows.map(({ service, count }, i) => (
               <ServiceBlock
                 key={service.key}
                 service={service}
                 count={count}
+                index={i}
                 onOpen={onOpenService}
               />
             ))}

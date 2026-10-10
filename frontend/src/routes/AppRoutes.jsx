@@ -382,13 +382,6 @@ const HealthReferrals = appPage(
     )
 );
 
-const Appointments = appPage(
-  () =>
-    import(
-      '@/features/appointments/pages/Appointments'
-    )
-);
-
 const ResidentHealthServices = appPage(
   () =>
     import(
@@ -606,11 +599,7 @@ const AppRoutes = () => (
           element={<Navigate to="../followups" replace />}
         />
         <Route
-          path="appointments"
-          element={<Appointments />}
-        />
-        <Route
-          path="services"
+          path="health-services"
           element={<ResidentHealthServices />}
         />
         <Route
@@ -974,6 +963,7 @@ const AppRoutes = () => (
         <Route path="tcls" element={<TclWorkspace />} />
         <Route path="tcl-register" element={<TCLS />} />
         <Route path="m1" element={<M1Records />} />
+        <Route path="maternal-tcl" element={<M1Records />} />
 
         {/*
           "Maternal Monitoring" (the standalone FHSIS M1 report page) was merged

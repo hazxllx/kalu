@@ -73,7 +73,7 @@ const REQUEST_SELECT = [
 
 const dbError = (err, context) => {
   console.error(`staffAccounts: ${context} failed: ${err?.message}`);
-  return ApiError(503, 'The account service is temporarily unavailable. Please try again shortly.');
+  return new ApiError(503, 'The account service is temporarily unavailable. Please try again shortly.');
 };
 
 const assertApprover = (user) => {
@@ -201,7 +201,7 @@ export const submitRequest = async (input = {}, documents = []) => {
   }
 
   const authUserId = created?.user?.id;
-  if (!authUserId) throw ApiError(503, 'The account could not be created. Please try again.');
+  if (!authUserId) throw new ApiError(503, 'The account could not be created. Please try again.');
 
   try {
     // handle_new_user() has already inserted the profile at the default role and
@@ -422,21 +422,11 @@ const loadRequestDocuments = async (requestId) => {
     .select('id, document_type, storage_path, original_filename, mime_type, file_size, uploaded_at')
     .eq('request_id', requestId)
     .order('uploaded_at', { ascending: true });
-  if (error) {
-    // A missing documents table (migration not yet applied) or read error must
-    // not break the approval view — surface an empty document list instead.
-    console.error(`staffAccounts: document lookup failed: ${error?.message}`);
-    return [];
-  }
+  if (error) throw dbError(error, 'document lookup');
   const rows = data || [];
   return Promise.all(
     rows.map(async (d) => {
-      let url = null;
-      try {
-        url = await getDocumentSignedUrl(d.storage_path);
-      } catch (err) {
-        console.error(`staffAccounts: signed URL failed for ${d.id}: ${err?.message}`);
-      }
+      const url = await getDocumentSignedUrl(d.storage_path);
       return {
         id: d.id,
         documentType: d.document_type,
@@ -530,7 +520,7 @@ export const approve = async ({ user, id, remarks = '' } = {}) => {
   if (profileError) {
     // The decision is recorded; surface the activation failure instead of
     // leaving the applicant with an approved request and a locked account.
-    throw ApiError(503, 'The request was approved but the account could not be activated. Please contact a system administrator.');
+    throw new ApiError(503, 'The request was approved but the account could not be activated. Please contact a system administrator.');
   }
 
   await notifyResident({

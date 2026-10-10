@@ -129,7 +129,7 @@ export const createResidentAuthUser = async ({
       );
     }
 
-    throw ApiError(
+    throw new ApiError(
       500,
       'The resident invitation could not be sent. Please check the email and try again.',
     );
@@ -138,7 +138,7 @@ export const createResidentAuthUser = async ({
   const authUserId = data?.user?.id;
 
   if (!authUserId) {
-    throw ApiError(
+    throw new ApiError(
       503,
       'The resident account could not be created. Please try again.',
     );
@@ -161,7 +161,7 @@ export const createResidentAuthUser = async ({
       // best effort: leave the orphaned auth record for admin review
     }
 
-    throw ApiError(
+    throw new ApiError(
       500,
       'The resident account was created but could not be set up. Please try again.',
     );

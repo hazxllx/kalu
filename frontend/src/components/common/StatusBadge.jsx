@@ -13,6 +13,11 @@ const TONES = {
   Today: "bg-brand-accent/10 text-brand-accent",
   Missed: "bg-rose-50 text-rose-700",
   Pending: "bg-amber-50 text-amber-700",
+  // Appointment lifecycle labels
+  Approved: "bg-emerald-50 text-emerald-700",
+  "Reschedule Proposed": "bg-brand-blue/10 text-brand-blue",
+  Declined: "bg-rose-50 text-rose-700",
+  Cancelled: "bg-slate-100 text-slate-600",
   Accepted: "bg-emerald-50 text-emerald-700",
   Received: "bg-brand-blue/10 text-brand-blue",
   Due: "bg-amber-50 text-amber-700",

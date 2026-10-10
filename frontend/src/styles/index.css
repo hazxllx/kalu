@@ -159,6 +159,42 @@
 }
 
 @layer utilities {
+  .verification-table {
+    @apply w-full min-w-[720px] text-sm;
+  }
+
+  .verification-table thead {
+    @apply border-b border-brand-border bg-brand-bg/70 dark:border-border dark:bg-card-nested;
+  }
+
+  .verification-table th {
+    @apply px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-gray;
+  }
+
+  .verification-table tbody {
+    @apply divide-y divide-brand-border dark:divide-border;
+  }
+
+  .verification-table tbody tr {
+    @apply transition-colors hover:bg-brand-bg/50;
+  }
+
+  .dark .verification-table tbody tr:hover {
+    background-color: hsl(var(--hover));
+  }
+
+  .verification-table td {
+    @apply px-4 py-3 align-middle;
+  }
+
+  .tab-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .tab-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   /* Keep dense datasets usable without allowing a wide table to widen the
      entire application viewport on phones. */
   .table-scroll {

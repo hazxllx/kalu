@@ -2,9 +2,29 @@ import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { assignedBarangay } from '../config/scope.js';
 
-const TABLES = Object.freeze({ followups: 'follow_ups', tcl: 'tcl_entries', maternal: 'maternal_records', immunizations: 'immunizations' });
+const TABLES = Object.freeze({
+  followups: 'follow_ups',
+  tcl: 'tcl_entries',
+  maternal: 'maternal_records',
+  maternalvisits: 'maternal_visits',
+  'maternal-visits': 'maternal_visits',
+  'maternalVisits': 'maternal_visits',
+  immunizations: 'immunizations',
+  notifications: 'notifications',
+});
 const STAFF = new Set(['health_supervisor', 'phn', 'mho']);
 const text = (v) => String(v ?? '').trim();
+const normalizeKind = (kind) => {
+  const candidate = String(kind ?? '').trim().toLowerCase();
+  if (!candidate) return '';
+  const compact = candidate.replace(/[-_\s]+/g, '');
+  if (compact === 'maternalvisits' || compact === 'maternalvisit') return 'maternalvisits';
+  if (compact === 'followups' || compact === 'followup') return 'followups';
+  if (compact === 'tclentries' || compact === 'tclentry') return 'tcl';
+  if (compact === 'immunizations' || compact === 'immunization') return 'immunizations';
+  if (compact === 'notifications' || compact === 'notification') return 'notifications';
+  return candidate;
+};
 const throwOnError = (error, fallback) => { if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error }); };
 
 /** Local "YYYY-MM-DD" format check (same rule the health-services validator uses). */
@@ -145,12 +165,63 @@ const audit = async (supabase, user, action, entityType, entityId, resident) => 
 // (which read `row.resident.first_name`) fell back to the literal string
 // "Resident" and overwrote the correct name after any edit.
 const RESIDENT_EMBED = 'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, cellphone_no)';
+const MATERNAL_CASE_EMBED = 'maternal_case:maternal_records(id, resident_id, lmp, edd, status, provider, created_at)';
 const CONSULTATION_EMBED = 'consultation:visits!follow_ups_consultation_id_fkey(id, visit_date, chief_complaint, status)';
-const selectFor = (kind) => kind === 'followups'
-  ? `*, ${RESIDENT_EMBED}, ${CONSULTATION_EMBED}`
-  : (kind === 'maternal' || kind === 'immunizations')
-    ? `*, ${RESIDENT_EMBED}`
-    : '*';
+const selectFor = (kind) => {
+  const normalizedKind = normalizeKind(kind);
+  if (normalizedKind === 'followups') return `*, ${RESIDENT_EMBED}, ${CONSULTATION_EMBED}`;
+  if (normalizedKind === 'maternalvisits') return `*, ${RESIDENT_EMBED}, ${MATERNAL_CASE_EMBED}`;
+  if (normalizedKind === 'maternal' || normalizedKind === 'immunizations') return `*, ${RESIDENT_EMBED}`;
+  return '*';
+};
+
+export const validateMaternalVisit = (payload = {}) => {
+  const row = { ...payload };
+  const visitType = text(row.visit_type || row.type || 'prenatal');
+  const validTypes = new Set(['prenatal', 'intrapartum', 'postpartum']);
+  if (!row.visit_date && !row.visitDate) {
+    throw ApiError.unprocessable('Maternal visit date is required.');
+  }
+  const visitDate = text(row.visit_date || row.visitDate);
+  if (!visitDate || !dateIsDateOnly(visitDate)) {
+    throw ApiError.unprocessable('Maternal visit date is invalid.');
+  }
+  if (!validTypes.has(visitType.toLowerCase())) {
+    throw ApiError.unprocessable('Maternal visit type must be prenatal, intrapartum, or postpartum.');
+  }
+  row.visit_type = visitType.toLowerCase();
+  row.visit_date = visitDate;
+  if (row.blood_pressure != null && text(row.blood_pressure) && !/^\d{2,3}\/\d{2,3}$/.test(text(row.blood_pressure))) {
+    throw ApiError.unprocessable('Blood pressure must be in the format SYSTOLIC/DIASTOLIC.');
+  }
+  if (row.weight != null && text(row.weight) && Number.isNaN(Number(row.weight))) {
+    throw ApiError.unprocessable('Visit weight must be numeric when supplied.');
+  }
+  if (row.gestational_age_weeks != null && text(row.gestational_age_weeks) && Number.isNaN(Number(row.gestational_age_weeks))) {
+    throw ApiError.unprocessable('Gestational age weeks must be numeric when supplied.');
+  }
+  return row;
+};
+
+export const buildMaternalVisitTable = ({ maternalRecord = {}, visits = [] } = {}) => {
+  const ordered = [...visits]
+    .map((visit) => ({ ...visit, visit_date: visit.visit_date || visit.visitDate || '' }))
+    .filter((visit) => visit.visit_date)
+    .sort((a, b) => new Date(a.visit_date) - new Date(b.visit_date));
+
+  return ordered.map((visit, index) => ({
+    row_number: index + 1,
+    visit_date: visit.visit_date,
+    visit_type: visit.visit_type || 'prenatal',
+    blood_pressure: visit.blood_pressure || '',
+    weight: visit.weight ?? '',
+    fundal_height: visit.fundal_height || '',
+    fetal_heart_tone: visit.fetal_heart_tone || '',
+    gestational_age_weeks: visit.gestational_age_weeks ?? '',
+    provider: visit.provider || maternalRecord.provider || '',
+    notes: visit.notes || '',
+  }));
+};
 
 /** Statuses a follow-up can no longer leave. */
 const CLOSED_FOLLOW_UP_STATUSES = new Set(['Completed', 'Cancelled', 'Rejected', 'Missed']);
@@ -175,30 +246,26 @@ export const withScheduleState = (row, today = manilaDateString()) => {
 };
 
 export const list = async ({ user, kind, residentId = null, status = null, from = null, to = null, supabase = getServiceClient() }) => {
-  if (!TABLES[kind] && kind !== 'notifications') throw ApiError.badRequest('Unknown operational record type.');
-  if (kind === 'notifications') {
-    // Resident/staff notifications are ALWAYS scoped to the authenticated
-    // account's auth.users id (req.user.id). The service-role client bypasses
-    // RLS, so this explicit recipient filter — not RLS — is the isolation
-    // boundary here; it is covered by operational.notifications.isolation.test.
+  const normalizedKind = normalizeKind(kind);
+  const tableName = TABLES[normalizedKind] || TABLES[kind];
+  if (!tableName && normalizedKind !== 'notifications') throw ApiError.badRequest('Unknown operational record type.');
+  if (normalizedKind === 'notifications') {
     const { data, error } = await supabase.from('notifications').select('*').eq('recipient_id', user.id).order('created_at', { ascending: false }).limit(100);
     throwOnError(error, 'Could not load notifications');
     return data || [];
   }
-  // Validate optional date-range filters (follow-ups & health-service schedules
-  // expose scheduled_date; other kinds simply ignore the window).
   const hasRange = Boolean(from) || Boolean(to);
-  if (hasRange && !(kind === 'followups')) {
+  if (hasRange && !(normalizedKind === 'followups')) {
     // Silently ignore date filters for non-scheduled kinds.
   }
-  if (from && kind === 'followups' && !dateIsDateOnly(from)) {
+  if (from && normalizedKind === 'followups' && !dateIsDateOnly(from)) {
     throw ApiError.badRequest('Invalid "from" date for follow-ups.');
   }
-  if (to && kind === 'followups' && !dateIsDateOnly(to)) {
+  if (to && normalizedKind === 'followups' && !dateIsDateOnly(to)) {
     throw ApiError.badRequest('Invalid "to" date for follow-ups.');
   }
   if (!STAFF.has(user?.role)) {
-    if (!['resident', 'resident-limited'].includes(user?.role) || kind !== 'followups') {
+    if (!['resident', 'resident-limited'].includes(user?.role) || normalizedKind !== 'followups') {
       throw ApiError.forbidden('You are not authorized to view this operational record.');
     }
     const { data: ownResident, error: ownResidentError } = await supabase.from('residents').select('id').eq('auth_user_id', user.id).maybeSingle();
@@ -206,15 +273,8 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
     if (!ownResident) return [];
     residentId = ownResident.id;
   }
-  // Records that render a resident name embed the CURRENT resident row (already
-  // authorized by the scope filters + RLS below), so the UI shows the live name
-  // after a reload instead of a create-time snapshot. No extra/unrestricted
-  // resident query is issued — the embed only resolves each row's own resident.
-  const select = selectFor(kind);
-  let query = supabase.from(TABLES[kind]).select(select).order('created_at', { ascending: false }).limit(200);
-  // Server-side barangay/municipality scope (defense in depth beyond RLS): a
-  // barangay-assigned Health Supervisor only ever sees their own barangay, and
-  // municipality-wide staff only their own municipality — never the whole table.
+  const select = selectFor(normalizedKind);
+  let query = supabase.from(tableName).select(select).order('created_at', { ascending: false }).limit(200);
   if (user.role === 'health_supervisor') {
     if (!user.barangayId) return [];
     query = query.eq('barangay_id', user.barangayId);
@@ -222,37 +282,62 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
     if (!user.municipalityId) return [];
     query = query.eq('municipality_id', user.municipalityId);
   }
-   if (residentId) { await residentFor(supabase, user, residentId); query = query.eq('resident_id', residentId); }
+  if (residentId) { await residentFor(supabase, user, residentId); query = query.eq('resident_id', residentId); }
   if (status) query = query.eq('status', status);
-  // Follow-ups: narrow by scheduled_date window so the dashboard calendar only
-  // loads rows for the visible month range — still barangay/municipality-scoped
-  // by the filter above, so no cross-scope leak is possible.
-  if (kind === 'followups') {
+  if (normalizedKind === 'followups') {
     if (from) query = query.gte('scheduled_date', from);
     if (to) query = query.lte('scheduled_date', to);
   }
+  if (normalizedKind === 'maternalvisits') {
+    if (from) query = query.gte('visit_date', from);
+    if (to) query = query.lte('visit_date', to);
+  }
   const { data, error } = await query;
-  throwOnError(error, `Could not load ${kind}`);
-  if (kind === 'followups') return (data || []).map((row) => withScheduleState(row));
+  throwOnError(error, `Could not load ${normalizedKind}`);
+  if (normalizedKind === 'followups') return (data || []).map((row) => withScheduleState(row));
   return data || [];
 };
 
 export const create = async ({ user, kind, payload = {}, supabase = getServiceClient() }) => {
+  const normalizedKind = normalizeKind(kind);
   assertStaff(user);
-  const resident = await residentFor(supabase, user, payload.residentId);
-  const table = TABLES[kind];
+  const table = TABLES[normalizedKind] || TABLES[kind];
   if (!table) throw ApiError.badRequest('Unknown operational record type.');
+  const resident = await residentFor(supabase, user, payload.residentId || payload.resident_id);
   const row = { ...payload, resident_id: resident.id, created_by: user.id };
   delete row.residentId;
+  delete row.resident_id;
   delete row.consultationId;
   delete row.id;
+
+  if (normalizedKind === 'maternalvisits') {
+    const maternalCaseId = text(row.maternal_case_id || row.maternalCaseId || row.maternal_record_id || row.maternalRecordId);
+    if (!maternalCaseId) {
+      throw ApiError.unprocessable('A maternal case is required for each visit.');
+    }
+    const { data: maternalCase, error: maternalError } = await supabase
+      .from('maternal_records')
+      .select('id, resident_id')
+      .eq('id', maternalCaseId)
+      .maybeSingle();
+    throwOnError(maternalError, 'Could not verify maternal case');
+    if (!maternalCase || maternalCase.resident_id !== resident.id) {
+      throw ApiError.unprocessable('The selected maternal case does not belong to this resident.');
+    }
+    row.maternal_case_id = maternalCase.id;
+    delete row.maternalCaseId;
+    delete row.maternal_record_id;
+    delete row.maternalRecordId;
+    Object.assign(row, validateMaternalVisit(row));
+  }
+
   // A follow-up may require the resident to confirm (approve) or reject it
   // before it becomes an approved/scheduled calendar event. When requested it
   // is created in the 'Pending' lifecycle status with a pending resident
   // decision; the resident is notified to respond. The client-supplied
   // decision fields are never trusted — they are set here from the workflow.
   let followUpAwaitsResident = false;
-  if (kind === 'followups') {
+  if (normalizedKind === 'followups') {
     const consultationId = text(payload.consultation_id);
     delete row.consultation_id;
     if (consultationId) {
@@ -281,34 +366,32 @@ export const create = async ({ user, kind, payload = {}, supabase = getServiceCl
     } else {
       row.requires_resident_response = false;
     }
-    // A new follow-up is a scheduled event — it can never be created already
-    // Completed (that is how a future date was being back-dated to done).
     const initialStatus = text(row.status);
     if (['Completed', 'Missed'].includes(initialStatus)) {
       throw ApiError.unprocessable('A new follow-up cannot be created as Completed or Missed; it must be scheduled first.');
     }
-    // Reject a nonsensical / unparseable scheduled date up front.
     const sched = text(row.scheduled_date);
     if (sched && Number.isNaN(Date.parse(sched))) {
       throw ApiError.unprocessable('The scheduled date is invalid.');
     }
   }
-  const { data, error } = await supabase.from(table).insert(row).select(selectFor(kind)).single();
-  throwOnError(error, `Could not create ${kind}`);
-  await audit(supabase, user, `${kind.toUpperCase()}_CREATED`, table, data.id, resident);
-  await notifyResident(supabase, resident, kind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);
-  return kind === 'followups' ? withScheduleState(data) : data;
+  const { data, error } = await supabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
+  throwOnError(error, `Could not create ${normalizedKind}`);
+  await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
+  await notifyResident(supabase, resident, normalizedKind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);
+  return normalizedKind === 'followups' ? withScheduleState(data) : data;
 };
 
 export const update = async ({ user, kind, id, payload = {}, consultationId = null, supabase = getServiceClient() }) => {
-  const table = TABLES[kind];
+  const normalizedKind = normalizeKind(kind);
+  const table = TABLES[normalizedKind] || TABLES[kind];
   if (!table) {
-    if (kind === 'notifications') return markNotificationRead({ user, id });
+    if (normalizedKind === 'notifications') return markNotificationRead({ user, id });
     throw ApiError.badRequest('Unknown operational record type.');
   }
   assertStaff(user);
   const { data: existing, error: readError } = await supabase.from(table).select('*').eq('id', id).maybeSingle();
-  throwOnError(readError, `Could not load ${kind}`);
+  throwOnError(readError, `Could not load ${normalizedKind}`);
   if (!existing) throw ApiError.notFound('Operational record not found.');
   const resident = await residentFor(supabase, user, existing.resident_id);
   const row = { ...payload };
@@ -321,7 +404,26 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
   delete row.created_at;
   delete row.consultation_id;
   delete row.consultationId;
-  if (kind === 'followups' && consultationId) {
+  if (normalizedKind === 'maternalvisits') {
+    const maternalCaseId = text(row.maternal_case_id || row.maternalCaseId || row.maternal_record_id || row.maternalRecordId);
+    if (maternalCaseId) {
+      const { data: maternalCase, error: maternalError } = await supabase
+        .from('maternal_records')
+        .select('id, resident_id')
+        .eq('id', maternalCaseId)
+        .maybeSingle();
+      throwOnError(maternalError, 'Could not verify maternal case');
+      if (!maternalCase || maternalCase.resident_id !== existing.resident_id) {
+        throw ApiError.unprocessable('The selected maternal case does not belong to this resident.');
+      }
+      row.maternal_case_id = maternalCase.id;
+      delete row.maternalCaseId;
+      delete row.maternal_record_id;
+      delete row.maternalRecordId;
+    }
+    Object.assign(row, validateMaternalVisit({ ...existing, ...row }));
+  }
+  if (normalizedKind === 'followups' && consultationId) {
     const { data: consultation, error: consultationError } = await supabase
       .from('visits')
       .select('id, resident_id')
@@ -333,33 +435,23 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
     }
     row.consultation_id = consultation.id;
   }
-  // The resident confirmation outcome is owned by the resident-follow-up
-  // endpoints, never by a staff update — strip any client-supplied decision.
   delete row.resident_decision;
   delete row.resident_decision_at;
   delete row.resident_decision_reason;
   delete row.requires_resident_response;
   delete row.requiresResidentResponse;
-  // Completing a follow-up stamps completed_at server-side.
-  if (kind === 'followups' && text(row.status) === 'Completed' && !existing.completed_at) {
+  if (normalizedKind === 'followups' && text(row.status) === 'Completed' && !existing.completed_at) {
     row.completed_at = new Date().toISOString();
   }
-  // Enforce the follow-up lifecycle server-side (state machine + future-date
-  // completion guard) BEFORE writing. A rejected/pending/cancelled/missed or
-  // future-dated follow-up can never be silently marked Completed.
-  if (kind === 'followups' && Object.prototype.hasOwnProperty.call(payload, 'status')) {
+  if (normalizedKind === 'followups' && Object.prototype.hasOwnProperty.call(payload, 'status')) {
     assertFollowUpTransition(existing, payload.status);
   }
-  const { data, error } = await supabase.from(table).update(row).eq('id', id).select(selectFor(kind)).single();
-  throwOnError(error, `Could not update ${kind}`);
-  await audit(supabase, user, `${kind.toUpperCase()}_UPDATED`, table, id, resident);
+  const { data, error } = await supabase.from(table).update(row).eq('id', id).select(selectFor(normalizedKind)).single();
+  throwOnError(error, `Could not update ${normalizedKind}`);
+  await audit(supabase, user, `${normalizedKind.toUpperCase()}_UPDATED`, table, id, resident);
 
-  // Resident-facing notifications for meaningful follow-up transitions.
-  if (kind === 'followups') {
+  if (normalizedKind === 'followups') {
     const newStatus = text(data.status);
-    // Only treat a schedule change as a reschedule when the caller actually
-    // sent a new date/time and it differs from the stored value (compare on
-    // the date and the HH:mm prefix to avoid time-format false positives).
     const dateSent = Object.prototype.hasOwnProperty.call(payload, 'scheduled_date');
     const timeSent = Object.prototype.hasOwnProperty.call(payload, 'scheduled_time');
     const scheduleChanged =
@@ -373,7 +465,7 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
       await notifyResident(supabase, resident, 'followups', 'rescheduled', data);
     }
   }
-  return kind === 'followups' ? withScheduleState(data) : data;
+  return normalizedKind === 'followups' ? withScheduleState(data) : data;
 };
 
 /**
@@ -385,18 +477,18 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
  * other operational kinds keep their append-only history.
  */
 export const remove = async ({ user, kind, id, supabase = getServiceClient() }) => {
-  const table = TABLES[kind];
+  const normalizedKind = normalizeKind(kind);
+  const table = TABLES[normalizedKind] || TABLES[kind];
   if (!table) throw ApiError.badRequest('Unknown operational record type.');
-  if (kind !== 'maternal') throw ApiError.forbidden('This record type cannot be deleted.');
+  if (!['maternal', 'maternalvisits'].includes(normalizedKind)) throw ApiError.forbidden('This record type cannot be deleted.');
   assertStaff(user);
   const { data: existing, error: readError } = await supabase.from(table).select('*').eq('id', id).maybeSingle();
-  throwOnError(readError, `Could not load ${kind}`);
+  throwOnError(readError, `Could not load ${normalizedKind}`);
   if (!existing) throw ApiError.notFound('Operational record not found.');
-  // Enforce barangay/municipality scope via the record's resident.
   const resident = await residentFor(supabase, user, existing.resident_id);
   const { error } = await supabase.from(table).delete().eq('id', id);
-  throwOnError(error, `Could not delete ${kind}`);
-  await audit(supabase, user, `${kind.toUpperCase()}_DELETED`, table, id, resident);
+  throwOnError(error, `Could not delete ${normalizedKind}`);
+  await audit(supabase, user, `${normalizedKind.toUpperCase()}_DELETED`, table, id, resident);
   return { id };
 };
 

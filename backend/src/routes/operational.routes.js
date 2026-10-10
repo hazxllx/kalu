@@ -7,7 +7,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import * as controller from '../controllers/operational.controller.js';
 
 const router = Router();
-const kinds = ['followups', 'tcl', 'maternal', 'immunizations', 'notifications'];
+const kinds = ['followups', 'tcl', 'maternal', 'maternalvisits', 'immunizations', 'notifications'];
 const staff = ['admin', 'mho', 'phn', 'health_supervisor'];
 router.use(authenticate, resolveBarangayScope);
 

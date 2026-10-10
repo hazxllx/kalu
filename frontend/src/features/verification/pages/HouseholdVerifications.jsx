@@ -2,13 +2,22 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import { SkeletonTable } from "@/components/common/Skeleton";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
+import VerificationQueueToolbar from "@/features/verification/components/VerificationQueueToolbar";
+import VerificationPagination from "@/features/verification/components/VerificationPagination";
 import HouseholdVerificationReviewDrawer from "@/features/verification/components/HouseholdVerificationReviewDrawer";
 import { useAuth } from "@/context/AuthContext";
-import { getAssignedBarangay } from "@/lib/barangayScope";
 import { householdsApi } from "@/services/api";
 import { ROLES } from "@/lib/brand";
-import { Search, CheckCircle2, ChevronRight, History, Home } from "lucide-react";
+import { CheckCircle2, ChevronRight, History, Home } from "lucide-react";
+
+const PAGE_SIZE = 10;
+const HOUSEHOLD_STATUS_FILTERS = [
+  { value: "pending", label: "Pending", match: "Pending Verification" },
+  { value: "approved", label: "Approved", match: "Verified" },
+  { value: "resubmission_required", label: "Resubmission", match: "Returned for Correction" },
+];
 
 const formatHistoryDate = (iso) => {
   if (!iso) return "—";
@@ -29,6 +38,7 @@ const toRow = (h) => ({
   verifiedBy: h.verifiedBy || "",
   verifiedAt: h.verifiedAt || "",
   correctionReason: h.correctionReason || "",
+  createdAt: h.createdAt || "",
 });
 
 /** Raw API household → review drawer shape. */
@@ -66,9 +76,12 @@ const toDrawer = (h) => ({
  * household row through `householdsApi.update`; the reviewer identity and
  * timestamp are set on the server from the authenticated session, never here.
  */
-export default function HouseholdVerifications({ embedded = false }) {
+export default function HouseholdVerifications({
+  embedded = false,
+  onPendingCount,
+  pendingCountKey = "household",
+}) {
   const { user } = useAuth();
-  const assignedBarangay = getAssignedBarangay(user);
   const reviewerName = (user?.role && ROLES[user.role] && ROLES[user.role].name) || user?.name || "";
   const reviewerRoleLabel = (user?.role && ROLES[user.role] && ROLES[user.role].label) || "Health Supervisor";
 
@@ -76,42 +89,70 @@ export default function HouseholdVerifications({ embedded = false }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
   const [reviewing, setReviewing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
   const showToast = (message) => { setToast(message); setTimeout(() => setToast(null), 4000); };
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    return householdsApi
-      .list({ limit: 100 })
-      .then((result) => {
-        const rows = result?.rows || result || [];
-        setHouseholds(rows.map(toRow));
-      })
-      .catch((err) => setLoadError(err?.message || "Unable to load households. Please try again."))
-      .finally(() => setLoading(false));
-  }, []);
+    try {
+      const firstPage = await householdsApi.list({ limit: 100, offset: 0 });
+      const rows = [...(firstPage?.rows || firstPage || [])];
+      const total = Number(firstPage?.total) || rows.length;
+      for (let offset = rows.length; offset < total; offset += 100) {
+        const nextPage = await householdsApi.list({ limit: 100, offset });
+        const nextRows = nextPage?.rows || nextPage || [];
+        if (!nextRows.length) break;
+        rows.push(...nextRows);
+      }
+      const mappedRows = rows.map(toRow);
+      setHouseholds(mappedRows);
+      onPendingCount?.(
+        pendingCountKey,
+        mappedRows.filter((household) => household.verificationStatus === "Pending Verification").length,
+      );
+    } catch (err) {
+      setLoadError(err?.message || "Unable to load households. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [onPendingCount, pendingCountKey]);
 
   useEffect(() => { load(); }, [load]);
 
-  const pending = useMemo(
-    () => households.filter((h) => h.verificationStatus === "Pending Verification"),
-    [households]
-  );
   const history = useMemo(
     () => households.filter((h) => h.verificationStatus !== "Pending Verification"),
     [households]
   );
 
-  const filtered = pending.filter(
-    (h) =>
-      h.head.toLowerCase().includes(query.toLowerCase()) ||
-      h.householdId.toLowerCase().includes(query.toLowerCase()) ||
-      h.ref.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    const selectedStatus = HOUSEHOLD_STATUS_FILTERS.find((filter) => filter.value === statusFilter);
+    const normalizedQuery = query.trim().toLowerCase();
+    return households.filter((household) => {
+      if (household.verificationStatus !== selectedStatus?.match) return false;
+      if (
+        normalizedQuery &&
+        ![household.head, household.householdId, household.ref, household.barangay]
+          .some((value) => String(value || "").toLowerCase().includes(normalizedQuery))
+      ) return false;
+      if (dateFrom && (!household.createdAt || household.createdAt.slice(0, 10) < dateFrom)) return false;
+      if (dateTo && (!household.createdAt || household.createdAt.slice(0, 10) > dateTo)) return false;
+      return true;
+    });
+  }, [dateFrom, dateTo, households, query, statusFilter]);
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  useEffect(() => {
+    const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    if (page > pageCount) setPage(pageCount);
+  }, [filtered.length, page]);
 
   const openReview = async (row) => {
     try {
@@ -145,15 +186,13 @@ export default function HouseholdVerifications({ embedded = false }) {
     }
   };
 
-  const scopeLabel = assignedBarangay ? `in Barangay ${assignedBarangay}` : "in your barangay";
-
   return (
     <>
       {!embedded && (
         <PageHeader
-          crumbs={["Dashboard", "Household Verifications"]}
-          title="Household Verification"
-          subtitle={`${pending.length} households awaiting verification of profiling information ${scopeLabel}.`}
+          eyebrow="Administration"
+          title="Verifications & Approvals"
+          subtitle="Review resident, household, and BHW requests in one place."
         />
       )}
 
@@ -165,32 +204,52 @@ export default function HouseholdVerifications({ embedded = false }) {
       )}
 
       <Card className="overflow-hidden">
-        <div className="px-6 py-4 border-b border-brand-border">
-          <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-input px-3.5 py-2.5 max-w-sm">
-            <Search className="w-4 h-4 text-brand-gray" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by household head, ID, or reference..."
-              className="bg-transparent text-sm outline-none w-full placeholder:text-brand-gray/70"
-            />
-          </div>
-        </div>
+        <VerificationQueueToolbar
+          filters={HOUSEHOLD_STATUS_FILTERS}
+          status={statusFilter}
+          onStatusChange={(value) => { setPage(1); setStatusFilter(value); }}
+          searchValue={query}
+          onSearchChange={(value) => { setPage(1); setQuery(value); }}
+          searchPlaceholder="Search households by head, ID, or barangay"
+          resultText={loading ? "Loading…" : `${filtered.length} household${filtered.length === 1 ? "" : "s"}`}
+        >
+          <label className="sr-only" htmlFor="household-date-from">Submitted from</label>
+          <input
+            id="household-date-from"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => { setPage(1); setDateFrom(event.target.value); }}
+            aria-label="Submitted from"
+            className="h-10 rounded-input border border-brand-border bg-white px-3 text-[13px] text-brand-ink focus:border-brand-blue focus:outline-none dark:border-border dark:bg-input dark:text-foreground"
+          />
+          <label className="sr-only" htmlFor="household-date-to">Submitted through</label>
+          <input
+            id="household-date-to"
+            type="date"
+            value={dateTo}
+            onChange={(event) => { setPage(1); setDateTo(event.target.value); }}
+            aria-label="Submitted through"
+            className="h-10 rounded-input border border-brand-border bg-white px-3 text-[13px] text-brand-ink focus:border-brand-blue focus:outline-none dark:border-border dark:bg-input dark:text-foreground"
+          />
+        </VerificationQueueToolbar>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          {loading ? (
+            <SkeletonTable rows={5} cols={6} className="px-4 py-5" />
+          ) : (
+          <table className="verification-table">
             <thead>
-              <tr className="bg-brand-bg text-left">
-                <th className="px-6 py-3 font-medium text-brand-gray">Household</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Household Head</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Barangay</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Reference</th>
-                <th className="px-6 py-3 font-medium text-brand-gray">Status</th>
-                <th className="px-6 py-3 font-medium text-brand-gray text-right">Action</th>
+              <tr>
+                <th scope="col">Household ID</th>
+                <th scope="col">Representative</th>
+                <th scope="col">Assignment</th>
+                <th scope="col">Submitted</th>
+                <th scope="col">Status</th>
+                <th scope="col" className="text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-brand-border">
-              {filtered.map((h, i) => (
+            <tbody>
+              {pageRows.map((h, i) => (
                 <motion.tr
                   key={h.householdId}
                   initial={{ opacity: 0, y: 8 }}
@@ -198,37 +257,48 @@ export default function HouseholdVerifications({ embedded = false }) {
                   transition={{ delay: i * 0.05 }}
                   className="hover:bg-brand-bg/50 transition-colors"
                 >
-                  <td className="px-6 py-3.5">
+                  <td>
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center">
                         <Home className="w-4 h-4" />
                       </div>
-                      <span className="font-medium text-brand-ink">{h.householdId}</span>
+                      <div>
+                        <p className="font-medium text-brand-ink">{h.householdId}</p>
+                        <p className="text-xs text-brand-gray">{h.members} members · {h.families} {h.families === 1 ? "family" : "families"}</p>
+                      </div>
                     </div>
                   </td>
-                  <td className="px-6 py-3.5">
+                  <td>
                     <p className="font-medium text-brand-ink">{h.head}</p>
-                    <p className="text-xs text-brand-gray">{h.members} members · {h.families} {h.families === 1 ? "family" : "families"}</p>
                   </td>
-                  <td className="px-6 py-3.5 text-brand-gray">{h.barangay}</td>
-                  <td className="px-6 py-3.5">
-                    <span className="font-stat font-medium text-brand-ink text-xs">{h.ref}</span>
+                  <td className="text-brand-gray">{h.barangay || "—"}</td>
+                  <td className="whitespace-nowrap text-brand-gray">{h.createdAt ? new Date(h.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</td>
+                  <td>
+                    <VerificationBadge
+                      status={
+                        h.verificationStatus === "Verified"
+                          ? "approved"
+                          : h.verificationStatus === "Returned for Correction"
+                            ? "resubmission_required"
+                            : "pending"
+                      }
+                      size="sm"
+                    />
                   </td>
-                  <td className="px-6 py-3.5">
-                    <VerificationBadge status="pending" size="sm" />
-                  </td>
-                  <td className="px-6 py-3.5 text-right">
-                    <button
+                  <td className="text-right">
+                    {h.verificationStatus === "Pending Verification" ? <button
+                      type="button"
                       onClick={() => openReview(h)}
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                      className="inline-flex items-center gap-1.5 rounded-btn px-1.5 py-1 text-sm font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
                     >
                       Review <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
+                    </button> : <span className="text-xs text-brand-gray">Reviewed</span>}
                   </td>
                 </motion.tr>
               ))}
             </tbody>
           </table>
+          )}
         </div>
 
         {filtered.length === 0 && (
@@ -237,7 +307,7 @@ export default function HouseholdVerifications({ embedded = false }) {
               <Home className="w-7 h-7 text-brand-gray" strokeWidth={1.5} />
             </div>
             <p className="mt-4 text-sm font-medium text-brand-ink">
-              {loading ? "Loading households..." : loadError ? "Unable to load households" : "No pending household verifications"}
+              {loading ? "Loading households..." : loadError ? "Unable to load households" : `No ${HOUSEHOLD_STATUS_FILTERS.find((filter) => filter.value === statusFilter)?.label.toLowerCase()} household verifications`}
             </p>
             <p className="text-xs text-brand-gray mt-1">
               {loading ? "Please wait." : loadError ? loadError : "All caught up."}
@@ -249,6 +319,12 @@ export default function HouseholdVerifications({ embedded = false }) {
             )}
           </div>
         )}
+        <VerificationPagination
+          page={page}
+          pageCount={Math.ceil(filtered.length / PAGE_SIZE)}
+          total={filtered.length}
+          onPageChange={setPage}
+        />
       </Card>
 
       {/* Verification history */}
@@ -259,7 +335,7 @@ export default function HouseholdVerifications({ embedded = false }) {
           <span className="ml-auto text-xs text-brand-gray">{history.length} reviewed</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="verification-table">
             <thead>
               <tr className="bg-brand-bg text-left">
                 <th className="px-6 py-3 font-medium text-brand-gray">Household</th>
