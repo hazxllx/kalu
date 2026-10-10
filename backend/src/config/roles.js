@@ -102,8 +102,9 @@ export const FEATURE_ROLES = Object.freeze({
   certificateRequest: [ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
   certificateReview: [ROLES.PHN, ROLES.MHO],
 
-  // Monitoring / aggregate information
-  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
+  // Monitoring / aggregate information. The Incoming Report inbox was removed
+  // from RHU Personnel, so RHU is no longer a reports role (HS/PHN/MHO keep it).
+  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
 
   // Health services catalog. Managed (create/assign) by PHN, MHO and the
   // barangay-scoped Health Supervisor. Read by staff who can be assigned a

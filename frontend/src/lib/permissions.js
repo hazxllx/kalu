@@ -834,11 +834,6 @@ const DEFAULT_GRANTS = Object.freeze({
     'triage.assessment.update',
     'triage.forward',
     'services.view',
-    // RHU Personnel are the recipient side of the report workflow: they open
-    // and review the Incoming Reports addressed to them (reports.view). They do
-    // NOT author/generate reports, so `reports.generate` is intentionally not
-    // granted — the backend also refuses RHU report submissions.
-    'reports.view',
   ],
 
   // DATA GATHERING ONLY. No consultation, no referral approval, no resident

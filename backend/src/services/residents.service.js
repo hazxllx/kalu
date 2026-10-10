@@ -243,6 +243,17 @@ const toResidentRecord = (visit = {}) => {
     },
 
     seenBy: clean(visit.recordedByName),
+    // Unified-workflow enrichment: who performed the consultation (the queue
+    // flow stamps the performer into phn.personnel), their role, the facility,
+    // and whether this encounter arose from a barangay referral. These let the
+    // Health Record show the consulting personnel/role/facility and referral
+    // context without a separate record or table.
+    assessment: clean(visit.phn?.assessment),
+    consultingPersonnel: clean(visit.phn?.personnel || visit.responsiblePersonnelName || visit.recordedByName),
+    consultingRole: clean(visit.recordedByRole),
+    facilityId: visit.facilityId || null,
+    referralId: visit.referralId || null,
+    fromReferral: Boolean(visit.referralId),
     status: visit.status || '',
   };
 };

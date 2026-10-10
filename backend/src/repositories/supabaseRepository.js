@@ -320,6 +320,7 @@ const VISIT_TO_DB = {
   findings: 'findings',
   treatmentGiven: 'treatment_given',
   recommendation: 'recommendation',
+  referralId: 'referral_id',
   submittedAt: 'submitted_at',
   receivedAt: 'received_at',
   reviewedAt: 'reviewed_at',

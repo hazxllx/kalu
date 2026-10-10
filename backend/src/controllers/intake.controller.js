@@ -19,6 +19,7 @@ export const createSubmission = async (req, res) => {
     residentId: req.body.residentId || null,
     resident: req.body.resident || null,
     visit: req.body.visit || {},
+    referralId: req.body.referralId || null,
     user: req.user,
   });
   sendCreated(res, { submission });

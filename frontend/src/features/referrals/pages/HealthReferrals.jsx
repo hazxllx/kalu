@@ -79,6 +79,15 @@ const mapRecord = (row) => ({
   laboratoryTestRequired: row.laboratory_test_required || false,
   laboratoryTest: row.laboratory_test || "",
   additionalInstructions: row.additional_instructions || "",
+  // Unified workflow: barangay clinical detail + scheduling + RHU encounter link.
+  chiefComplaints: row.chief_complaints || "",
+  medicalHistory: row.medical_history || "",
+  physicalExamFindings: row.physical_exam_findings || "",
+  impression: row.impression || "",
+  scheduledAt: row.scheduled_at || "",
+  treatmentVisitId: row.treatment_visit_id || "",
+  // Derived progress stage (set by the backend when the row is expanded).
+  stage: row.stage || null,
 });
 
 const inputCls = (error) =>
@@ -88,6 +97,7 @@ const inputCls = (error) =>
 
 const EMPTY_FORM = () => ({
   referralDate: todayIso(),
+  scheduledAt: "",
   destinationFacility: "RHU Pili",
   destinationService: "",
   reason: "",
@@ -97,6 +107,11 @@ const EMPTY_FORM = () => ({
   laboratoryTestRequired: false,
   laboratoryTest: "",
   additionalInstructions: "",
+  chiefComplaints: "",
+  medicalHistory: "",
+  physicalExamFindings: "",
+  impression: "",
+  treatmentVisitId: "",
 });
 
 /**
@@ -121,6 +136,7 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
     if (initial) {
       return {
         referralDate: initial.referralDate || todayIso(),
+        scheduledAt: initial.scheduledAt || "",
         destinationFacility: initial.destinationFacility || "RHU Pili",
         destinationService: initial.destinationService || "",
         reason: initial.reason || "",
@@ -130,15 +146,26 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
         laboratoryTestRequired: initial.laboratoryTestRequired || false,
         laboratoryTest: initial.laboratoryTest || "",
         additionalInstructions: initial.additionalInstructions || "",
+        chiefComplaints: initial.chiefComplaints || "",
+        medicalHistory: initial.medicalHistory || "",
+        physicalExamFindings: initial.physicalExamFindings || "",
+        impression: initial.impression || "",
       };
     }
     if (draft) {
-      // Pre-fill from the completed check-up the draft came from.
+      // Pre-fill from the completed check-up / treatment record the draft came
+      // from (PHN check-up or HS Treatment Record "needs referral").
       return {
         ...EMPTY_FORM(),
         reason: draft.reason || draft.findings || "",
         priority: ["Low", "Medium", "High"].includes(draft.riskLevel) ? draft.riskLevel : "High",
         notes: draftNotesOf(draft),
+        referringFacility: draft.referringFacility || "",
+        chiefComplaints: draft.chiefComplaints || draft.chiefComplaint || "",
+        medicalHistory: draft.medicalHistory || draft.clinicalHistory || "",
+        physicalExamFindings: draft.physicalExamFindings || draft.findings || "",
+        impression: draft.impression || draft.diagnosis || "",
+        treatmentVisitId: draft.treatmentVisitId || "",
       };
     }
     return EMPTY_FORM();
@@ -193,6 +220,10 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
               <div>
                 <label className="text-sm font-medium text-brand-ink">Referral Date</label>
                 <input type="date" value={form.referralDate} onChange={(e) => set("referralDate")(e.target.value)} className={inputCls()} />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Scheduled Date &amp; Time</label>
+                <input type="datetime-local" value={form.scheduledAt} onChange={(e) => set("scheduledAt")(e.target.value)} className={inputCls()} />
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Priority</label>
@@ -254,6 +285,29 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
                   </div>
                 </>
               )}
+            </div>
+
+            <div className="rounded-btn border border-brand-border p-4">
+              <p className="text-sm font-semibold text-brand-ink mb-3">Clinical Detail</p>
+              <p className="text-xs text-brand-gray mb-3">Clinical findings from the barangay health station to share with the RHU.</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Chief Complaints</label>
+                  <textarea rows={2} value={form.chiefComplaints} onChange={(e) => set("chiefComplaints")(e.target.value)} placeholder="Presenting symptoms and complaints..." className={`${inputCls()} resize-none`} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Medical History</label>
+                  <textarea rows={2} value={form.medicalHistory} onChange={(e) => set("medicalHistory")(e.target.value)} placeholder="Relevant past medical history, medications, allergies..." className={`${inputCls()} resize-none`} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Physical Examination Findings</label>
+                  <textarea rows={2} value={form.physicalExamFindings} onChange={(e) => set("physicalExamFindings")(e.target.value)} placeholder="Vital signs, general appearance, exam findings..." className={`${inputCls()} resize-none`} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Impression / Working Diagnosis</label>
+                  <input type="text" value={form.impression} onChange={(e) => set("impression")(e.target.value)} placeholder="Initial impression or working diagnosis..." className={inputCls()} />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -416,6 +470,7 @@ export default function HealthReferrals() {
 
   const toPayload = (form) => ({
     referral_date: form.referralDate || null,
+    scheduled_at: form.scheduledAt || null,
     destination_facility: form.destinationFacility.trim(),
     destination_service: form.destinationService.trim(),
     reason: form.reason.trim(),
@@ -425,6 +480,11 @@ export default function HealthReferrals() {
     laboratory_test_required: Boolean(form.laboratoryTestRequired),
     laboratory_test: form.laboratoryTest ? form.laboratoryTest.trim() : "",
     additional_instructions: form.additionalInstructions ? form.additionalInstructions.trim() : "",
+    chief_complaints: form.chiefComplaints || "",
+    medical_history: form.medicalHistory || "",
+    physical_exam_findings: form.physicalExamFindings || "",
+    impression: form.impression || "",
+    treatment_visit_id: form.treatmentVisitId || null,
   });
 
   const handleSave = async (form) => {
@@ -516,8 +576,8 @@ export default function HealthReferrals() {
   };
 
   const columns = isResident
-    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Status", ""]
-    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Status", "Actions"];
+    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Stage", ""]
+    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Stage", "Actions"];
 
   return (
     <>
@@ -605,7 +665,15 @@ export default function HealthReferrals() {
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${PRIORITY_COLORS[r.priority] || ""}`}>{r.priority}</span>
                   </td>
-                  <td className="px-4 py-3"><StatusBadge value={r.status} /></td>
+                  <td className="px-4 py-3">
+                    {r.stage ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-brand-blue/10 px-2 py-1 text-xs font-medium text-brand-blue">
+                        {r.stage.label}
+                      </span>
+                    ) : (
+                      <StatusBadge value={r.status} />
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       <button onClick={() => setDetail(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="View Details">
@@ -675,13 +743,21 @@ export default function HealthReferrals() {
                 </div>
                 <button onClick={() => setDetail(null)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
               </div>
+              <div className="mb-3 flex items-center gap-2 flex-wrap">
+                {detail.stage && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-blue">
+                    {detail.stage.label}
+                  </span>
+                )}
+                <StatusBadge value={detail.status} />
+              </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
                   ["Referral Date", formatDate(detail.referralDate)],
+                  ["Scheduled", detail.scheduledAt ? new Date(detail.scheduledAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "—"],
                   ["Priority", detail.priority],
                   ["Destination Service", detail.destinationService || "—"],
                   ["Referring Facility", detail.referringFacility || "—"],
-                  ["Status", detail.status],
                   ["Completed", formatDate(detail.completedAt)],
                   ["Lab Test Required", detail.laboratoryTestRequired ? "Yes" : "No"],
                 ].map(([label, value]) => (
@@ -695,6 +771,30 @@ export default function HealthReferrals() {
                 <p className="text-[11px] uppercase tracking-wide text-brand-gray">Reason</p>
                 <p className="mt-0.5 text-sm text-brand-ink">{detail.reason || "—"}</p>
               </div>
+              {detail.chiefComplaints && (
+                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
+                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Chief Complaints</p>
+                  <p className="mt-0.5 text-sm text-brand-ink">{detail.chiefComplaints}</p>
+                </div>
+              )}
+              {detail.medicalHistory && (
+                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
+                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Medical History</p>
+                  <p className="mt-0.5 text-sm text-brand-ink">{detail.medicalHistory}</p>
+                </div>
+              )}
+              {detail.physicalExamFindings && (
+                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
+                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Physical Examination Findings</p>
+                  <p className="mt-0.5 text-sm text-brand-ink">{detail.physicalExamFindings}</p>
+                </div>
+              )}
+              {detail.impression && (
+                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
+                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Impression / Working Diagnosis</p>
+                  <p className="mt-0.5 text-sm text-brand-ink">{detail.impression}</p>
+                </div>
+              )}
               <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
                 <p className="text-[11px] uppercase tracking-wide text-brand-gray">Notes</p>
                 <p className="mt-0.5 text-sm text-brand-ink">{detail.notes || "No notes recorded."}</p>

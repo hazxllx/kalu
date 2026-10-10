@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import SearchableSelect from "@/components/common/SearchableSelect";
-import { intakeApi } from "@/services/api";
+import { intakeApi, referralsApi } from "@/services/api";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { BARANGAYS } from "@/lib/barangays";
@@ -125,6 +125,29 @@ export default function RhuTriage() {
   const [matches, setMatches] = useState([]);
   const [searching, setSearching] = useState(false);
 
+  // Incoming barangay referrals destined to the RHU (replaces the removed
+  // Incoming Reports). Opening one seeds the triage with the referred resident
+  // and links the screening visit to the referral server-side.
+  const [incomingReferrals, setIncomingReferrals] = useState([]);
+  const [activeReferral, setActiveReferral] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    referralsApi
+      .list()
+      .then((result) => {
+        if (!active) return;
+        const open = (result?.rows || []).filter(
+          (r) => !["Completed", "Cancelled"].includes(r.status),
+        );
+        setIncomingReferrals(open);
+      })
+      .catch(() => active && setIncomingReferrals([]));
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const visibleHistory = useMemo(
     () =>
       sentPatients.filter((p) => {
@@ -225,6 +248,7 @@ export default function RhuTriage() {
     setReasonDetail("");
     setNotes("");
     setAssignedPersonnel("");
+    setActiveReferral(null);
     setErrors({});
   };
 
@@ -235,6 +259,26 @@ export default function RhuTriage() {
     setSelected(resident);
     setSearchQuery("");
     setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
+    setErrors({});
+  };
+
+  /**
+   * Start screening a referred patient. Seeds the wizard with the referral's
+   * resident and reason, links this screening to the referral (referralId), and
+   * jumps to vitals. The original barangay referral is read-only context — the
+   * triage records its own findings.
+   */
+  const beginReferralTriage = (ref) => {
+    const r = ref.resident || {};
+    const name = [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(" ").trim();
+    const age = r.birth_date
+      ? Math.max(0, new Date().getFullYear() - new Date(r.birth_date).getFullYear())
+      : "";
+    chooseRegistered({ id: r.id || ref.resident_id, name, age, sex: r.sex || "", barangay: r.barangay || "" });
+    setActiveReferral(ref);
+    setReason("Other");
+    setReasonDetail(ref.reason || ref.chief_complaints || "");
+    setCurrentStep("vitals");
     setErrors({});
   };
 
@@ -338,6 +382,9 @@ export default function RhuTriage() {
       // Registered patients carry their real residents.id (from the backend
       // search); walk-ins have none until they are created through intake.
       residentId: patientType === "registered" ? selected?.id || null : null,
+      // When screening a referred patient, link this encounter to the barangay
+      // referral; the backend treats the referral as authoritative for identity.
+      referralId: activeReferral?.id || null,
       patient: patientName,
       age: numeric(patientAge),
       sex: patientSex,
@@ -478,6 +525,57 @@ export default function RhuTriage() {
                 {!hasPatient ? (
                   <>
                     {stepIndicator(1, "Identify Patient", "Who are you helping today?")}
+
+                    {entryMode === "choose" && incomingReferrals.length > 0 && (
+                      <div className="mb-5 max-w-2xl rounded-btn border border-brand-border bg-brand-bg/40 p-4">
+                        <p className="text-sm font-semibold text-brand-ink">Incoming Barangay Referrals</p>
+                        <p className="mt-0.5 text-xs text-brand-gray">
+                          Patients referred from a barangay. Open one to begin RHU screening.
+                        </p>
+                        <ul className="mt-3 space-y-2">
+                          {incomingReferrals.map((ref) => {
+                            const r = ref.resident || {};
+                            const name =
+                              [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(" ").trim() ||
+                              "Unnamed resident";
+                            return (
+                              <li
+                                key={ref.id}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded-btn border border-brand-border bg-white px-3 py-2"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium text-brand-ink">{name}</p>
+                                  <p className="truncate text-xs text-brand-gray">
+                                    {r.barangay || "—"}
+                                    {ref.scheduled_at
+                                      ? ` · ${new Date(ref.scheduled_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+                                      : ""}
+                                    {ref.priority ? ` · ${ref.priority}` : ""}
+                                  </p>
+                                  <p className="truncate text-xs text-brand-gray">
+                                    {ref.reason || ref.chief_complaints || ""}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {ref.stage?.label && (
+                                    <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[11px] font-medium text-brand-blue">
+                                      {ref.stage.label}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => beginReferralTriage(ref)}
+                                    className="rounded-btn bg-brand-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark"
+                                  >
+                                    Begin screening
+                                  </button>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
 
                     {entryMode === "choose" ? (
                       /* Two clear ways to identify the patient. */

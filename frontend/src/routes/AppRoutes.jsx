@@ -424,13 +424,6 @@ const MunicipalHealthReports = appPage(
     )
 );
 
-const IncomingReportsPage = appPage(
-  () =>
-    import(
-      '@/features/reports/pages/IncomingReportsPage'
-    )
-);
-
 const MunicipalSubmissions = appPage(
   () =>
     import(
@@ -1136,10 +1129,6 @@ const AppRoutes = () => (
         <Route
           path="certificates"
           element={<MedicalCertificates />}
-        />
-        <Route
-          path="reports"
-          element={<IncomingReportsPage />}
         />
         <Route
           path="notifications"

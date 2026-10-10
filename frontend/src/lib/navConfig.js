@@ -425,13 +425,6 @@ export const NAV = {
       group: "Operations",
     },
     {
-      label: "Incoming Reports",
-      icon: "ClipboardList",
-      path: "/app/rhu_personnel/reports",
-      permission: "reports.view",
-      group: "Operations",
-    },
-    {
       label: "Notifications",
       icon: "Bell",
       path: "/app/rhu_personnel/notifications",

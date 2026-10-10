@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import DataTable from "@/components/tables/DataTable";
@@ -151,6 +152,7 @@ const initialsOf = (name) =>
 
 export default function TreatmentConsultation() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { can } = usePermissions();
   const canConductConsultation = can("consultation.conduct");
   const canEditConsultation = can("consultation.records.update");
@@ -309,6 +311,7 @@ export default function TreatmentConsultation() {
       residentId: selectedResident.id,
     };
     setBusy(true);
+    const needsReferral = !editingId && formData.referralRequired === "Yes";
     const request = editingId ? consultationsApi.update(editingId, payload) : consultationsApi.create(payload);
     request.then((result) => {
       const saved = result?.consultation;
@@ -316,6 +319,29 @@ export default function TreatmentConsultation() {
         ? current.map((item) => item.id === editingId ? saved : item)
         : [saved, ...current]);
       showToast(editingId ? "Consultation updated successfully." : "Consultation saved successfully.");
+      // "Does this patient need a referral? Yes" — open the shared referral form
+      // prefilled from this Treatment Record, linking back to it via
+      // treatmentVisitId. One shared form; no duplicate resident/record.
+      if (needsReferral) {
+        const referralDraft = {
+          residentId: selectedResident.id,
+          resident: selectedResident.name,
+          reason: formData.diagnosis || formData.chiefComplaint || "",
+          riskLevel: "High",
+          findings: formData.findings || "",
+          chiefComplaints: formData.chiefComplaint || "",
+          clinicalHistory: "",
+          physicalExamFindings: formData.findings || "",
+          impression: formData.diagnosis || "",
+          recommendations: formData.adviceGiven || "",
+          clinicalNotes: formData.remarks || "",
+          referringFacility: selectedResident.barangay ? `${selectedResident.barangay} Health Station` : "",
+          treatmentVisitId: saved?.id || "",
+        };
+        cancelForm();
+        navigate("/app/health_supervisor/referrals", { state: { referralDraft } });
+        return;
+      }
       cancelForm();
     }).catch((err) => {
       // Never fail silently: log the real error for debugging (no secrets) and

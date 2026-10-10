@@ -23,6 +23,7 @@ import { FACILITY, SUBMISSION_STATUS, PHN_EDITABLE_STATUSES } from '../config/fa
 import { withinFacilityScope } from '../config/scope.js';
 import { canConsult } from '../config/rhuStations.js';
 import { validateVitals } from './intake.service.js';
+import { markCompletedFromVisit } from './referrals.service.js';
 
 const isPHN = (user) => user?.role === 'phn';
 
@@ -246,12 +247,20 @@ export const completeSubmission = async ({ id, user }) => {
   }
 
   const now = new Date().toISOString();
-  return repository.updateVisit(id, {
+  const updated = await repository.updateVisit(id, {
     status: SUBMISSION_STATUS.COMPLETED,
     receivedAt: submission.receivedAt || now,
     reviewedAt: submission.reviewedAt || now,
     completedAt: now,
   });
+
+  // If this RHU encounter is linked to a barangay referral, mark it completed
+  // from the referral side so the Health Supervisor sees the unified stage advance.
+  if (updated.referralId) {
+    await markCompletedFromVisit(updated.referralId);
+  }
+
+  return updated;
 };
 
 const referralDraftDefaults = (submission, user) => {

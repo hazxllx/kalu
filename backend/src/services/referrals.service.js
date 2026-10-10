@@ -1,6 +1,7 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { assignedBarangay } from '../config/scope.js';
+import { deriveStage } from '../config/referralStage.js';
 
 /**
  * Health Supervisor referral coordination service.
@@ -27,10 +28,11 @@ const TABLE = 'health_referrals';
 
 // Roles allowed to create / mutate referrals (barangay/municipality scoped).
 const WRITE_ROLES = new Set(['health_supervisor', 'phn']);
-// Municipality-wide staff that may READ referrals. RHU Personnel is not part
-// of the referral workflow, so it is deliberately absent here, in the Express
-// route gate and in the health_referrals RLS policy.
-const MUNICIPALITY_ROLES = new Set(['mho', 'phn']);
+// Municipality-wide staff that may READ referrals. RHU Personnel is READ-ONLY
+// here (and gated additionally by its RHU station + the route): it needs to see
+// incoming barangay referrals destined to the RHU, but never authors or edits a
+// referral — those stay with the Health Supervisor and PHN (WRITE_ROLES).
+const MUNICIPALITY_ROLES = new Set(['mho', 'phn', 'rhu_personnel']);
 // Barangay-scoped staff.
 const BARANGAY_ROLES = new Set(['health_supervisor']);
 const RESIDENT_ROLES = new Set(['resident', 'resident-limited']);
@@ -144,6 +146,63 @@ const ownResident = async (supabase, user) => {
   return data || null;
 };
 
+// Clinical columns of the linked RHU encounter visit surfaced alongside a
+// referral (triage + consultation live on the same visit).
+const ENCOUNTER_SELECT = [
+  'id', 'referral_id', 'status', 'visit_date', 'chief_complaint', 'clinical_history',
+  'findings', 'treatment_given', 'recommendation', 'phn_assessment', 'phn_notes',
+  'phn_personnel', 'recorded_by_name', 'recorded_by_role', 'responsible_personnel_name',
+  'facility_id', 'bp', 'hr', 'rr', 'o2sat', 'temperature', 'height_cm', 'weight_kg',
+  'bmi', 'bmi_category', 'blood_sugar', 'received_at', 'reviewed_at', 'completed_at',
+  'created_at',
+].join(', ');
+
+/** Attach the derived progress stage to a list of referral rows (batched). */
+const attachStages = async (supabase, rows) => {
+  const ids = (rows || []).map((r) => r.id).filter(Boolean);
+  if (!ids.length) return rows || [];
+  const { data: visits } = await supabase
+    .from('visits')
+    .select('id, referral_id, status, completed_at, created_at')
+    .in('referral_id', ids)
+    .order('created_at', { ascending: false });
+  const newestByReferral = new Map();
+  for (const v of visits || []) {
+    if (!newestByReferral.has(v.referral_id)) newestByReferral.set(v.referral_id, v);
+  }
+  return rows.map((r) => ({ ...r, stage: deriveStage(r, newestByReferral.get(r.id) || null) }));
+};
+
+/** Load the single most-recent RHU encounter visit linked to a referral. */
+const linkedEncounter = async (supabase, referralId) => {
+  const { data } = await supabase
+    .from('visits')
+    .select(ENCOUNTER_SELECT)
+    .eq('referral_id', referralId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+};
+
+/**
+ * Mark a referral Completed when its linked RHU encounter visit is completed.
+ * Idempotent; never downgrades a Completed/Cancelled referral. Called from the
+ * consultation-completion path (service-role), so RLS is bypassed by design.
+ */
+export const markCompletedFromVisit = async (referralId, { supabase = getServiceClient() } = {}) => {
+  if (!referralId) return null;
+  const { data: ref } = await supabase.from(TABLE).select('id, status, completed_at').eq('id', referralId).maybeSingle();
+  if (!ref || ref.status === 'Completed' || ref.status === 'Cancelled') return ref || null;
+  const { data } = await supabase
+    .from(TABLE)
+    .update({ status: 'Completed', completed_at: ref.completed_at ?? new Date().toISOString() })
+    .eq('id', referralId)
+    .select('id, status')
+    .maybeSingle();
+  return data;
+};
+
 /**
  * List referrals visible to the caller. Scope is enforced server-side:
  *   health_supervisor / bhw     -> own barangay
@@ -172,7 +231,8 @@ export const list = async ({ user, residentId = null, status = null, supabase = 
   if (status) query = query.eq('status', status);
   const { data, error } = await query;
   throwOnError(error, 'Could not load referrals');
-  return data || [];
+  const rows = data || [];
+  return attachStages(supabase, rows);
 };
 
 /** Fetch one referral, enforcing the same scope as list(). */
@@ -190,7 +250,12 @@ export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   } else if (user?.role !== 'admin') {
     throw ApiError.forbidden('You are not authorized to view referrals.');
   }
-  return data;
+
+  const visit = await linkedEncounter(supabase, id);
+  // `encounter` carries the RHU triage + consultation data (both live on the same
+  // visit) so a referral detail view can render those sections without a second
+  // request. Null until the resident arrives and triage starts.
+  return { ...data, stage: deriveStage(data, visit), encounter: visit };
 };
 
 const sanitizeWrite = (payload = {}) => {
@@ -204,6 +269,12 @@ const sanitizeWrite = (payload = {}) => {
     row.priority = payload.priority;
   }
   if (payload.referral_date !== undefined) row.referral_date = payload.referral_date || null;
+  if (payload.scheduled_at !== undefined) row.scheduled_at = payload.scheduled_at || null;
+  if (payload.chief_complaints !== undefined) row.chief_complaints = text(payload.chief_complaints);
+  if (payload.medical_history !== undefined) row.medical_history = text(payload.medical_history);
+  if (payload.physical_exam_findings !== undefined) row.physical_exam_findings = text(payload.physical_exam_findings);
+  if (payload.impression !== undefined) row.impression = text(payload.impression);
+  if (payload.treatment_visit_id !== undefined) row.treatment_visit_id = text(payload.treatment_visit_id) || null;
   if (payload.notes !== undefined) row.notes = text(payload.notes);
   if (payload.resolution_notes !== undefined) row.resolution_notes = text(payload.resolution_notes);
   if (payload.laboratory_test_required !== undefined) row.laboratory_test_required = Boolean(payload.laboratory_test_required);

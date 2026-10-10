@@ -15,6 +15,7 @@
  */
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
+import { getServiceClient } from '../config/supabase.js';
 import { computeBMI, isPlausibleVital } from '../utils/bmi.js';
 import { SUBMISSION_STATUS } from '../config/facility.js';
 import { assignedBarangay, withinFacilityScope } from '../config/scope.js';
@@ -181,11 +182,41 @@ export const validateSubmissionForSubmit = (resident, visit) => {
  * new-resident demographic payload (resident), plus the current-visit payload.
  * New residents are identity-matched first to prevent duplicates.
  */
-export const createSubmission = async ({ residentId = null, resident = null, visit = {}, user }) => {
+export const createSubmission = async ({ residentId = null, resident = null, visit = {}, referralId = null, user }) => {
   if (!isIntakeRole(user)) throw ApiError.forbidden();
   assertTriageStation(user);
   if (user.role === 'rhu_personnel' && !user.facilityId) {
     throw ApiError.unprocessable('Your account must be assigned to an RHU facility before submitting triage.');
+  }
+
+  // Triage of a referred patient: the barangay referral is authoritative for the
+  // resident identity (never trust a client-supplied residentId here), and one
+  // referral has at most ONE active RHU encounter — reopening reuses it rather
+  // than creating a duplicate triage.
+  let linkedReferralId = null;
+  if (referralId) {
+    const supabase = getServiceClient();
+    const { data: ref } = await supabase
+      .from('health_referrals')
+      .select('id, resident_id, municipality_id')
+      .eq('id', referralId)
+      .maybeSingle();
+    if (!ref) throw ApiError.notFound('Referral not found.');
+    if (user.municipalityId && ref.municipality_id && user.municipalityId !== ref.municipality_id) {
+      throw ApiError.notFound('Referral not found.');
+    }
+    const { data: existingVisits } = await supabase
+      .from('visits')
+      .select('id')
+      .eq('referral_id', referralId)
+      .neq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (Array.isArray(existingVisits) && existingVisits.length) {
+      return repository.getVisit(existingVisits[0].id);
+    }
+    residentId = ref.resident_id; // authoritative
+    linkedReferralId = ref.id;
   }
 
   const scope = assignedBarangay(user);
@@ -247,6 +278,7 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
     responsiblePersonnelId: user.id,
     responsiblePersonnelName: performerName,
     facilityId: user.facilityId || null,
+    referralId: linkedReferralId,
     status: SUBMISSION_STATUS.DRAFT,
     ...normalized,
   };

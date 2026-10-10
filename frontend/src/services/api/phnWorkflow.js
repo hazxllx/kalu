@@ -102,8 +102,11 @@ export const phnWorkflowApi = {
    */
   sendToPhnQueue: async (payload) => {
     const visit = triageToVisitPayload(payload);
+    // When the patient arrived via a barangay referral, the referral is
+    // authoritative for identity + is linked to this encounter server-side.
+    const referralId = payload.referralId || null;
     const body = payload.residentId
-      ? { residentId: payload.residentId, visit }
+      ? { residentId: payload.residentId, visit, referralId }
       : {
           resident: {
             ...splitWalkInName(payload.patient),
@@ -111,6 +114,7 @@ export const phnWorkflowApi = {
             barangay: payload.barangay || "",
           },
           visit,
+          referralId,
         };
     const created = await api.post("/intake/visits", body);
     const id = created?.submission?.id;
