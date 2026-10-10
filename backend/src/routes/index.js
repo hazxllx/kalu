@@ -17,6 +17,7 @@ import documentsRoutes from './documents.routes.js';
 import transferRoutes from './transfer.routes.js';
 import consultationsRoutes from './consultations.routes.js';
 import operationalRoutes from './operational.routes.js';
+import programFormsRoutes from './programForms.routes.js';
 import residentFollowupsRoutes from './residentFollowups.routes.js';
 import referralsRoutes from './referrals.routes.js';
 import m1Routes from './m1.routes.js';
@@ -54,6 +55,11 @@ router.use('/auth', authRoutes);
 router.use('/registration', registrationRoutes);
 router.use('/consultations', consultationsRoutes);
 router.use('/operational', operationalRoutes);
+
+// Program-specific official TCL / health forms (NCD Parts 1-3, Oral Health,
+// Environmental Health Masterlist) — real Supabase-backed tables with
+// per-worksheet validation. FHSIS M1 is a separate, untouched system.
+router.use('/program-forms', programFormsRoutes);
 
 // Personnel registration + operational account verification.
 //   POST /staff-accounts/register                 public registration

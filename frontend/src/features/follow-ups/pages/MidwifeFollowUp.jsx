@@ -8,7 +8,14 @@ import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2 } from "lucide-re
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
-import { followUpsApi, healthServicesApi, residentsApi } from "@/services/api";
+import { healthServicesApi } from "@/services/api";
+import {
+  createFollowUpOffline,
+  listFollowUpsOffline,
+  listFollowUpResidentsOffline,
+  updateFollowUpOffline,
+} from "@/services/offline/followUpOfflineService";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
 
 const FOLLOW_UP_TYPES = [
   "General Check-up",
@@ -94,8 +101,8 @@ const FOLLOW_UPS = [];
 const mapFollowUpRow = (row) => ({
   ...row,
   id: row.id,
-  residentId: row.resident_id,
-  resident: row.resident ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ") : "Resident",
+  residentId: row.resident_id || row.residentId,
+  resident: row.resident ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ") : row.residentName || "Resident",
   barangay: row.resident?.barangay || "",
   sex: row.resident?.sex || "",
   contact: row.resident?.cellphone_no || "",
@@ -103,15 +110,17 @@ const mapFollowUpRow = (row) => ({
   purpose: row.purpose,
   type: row.purpose,
   consultation: row.consultation || null,
-  scheduledDateRaw: row.scheduled_date,
-  scheduledTimeRaw: row.scheduled_time,
-  scheduledDate: formatDate(row.scheduled_date),
-  scheduledTime: formatTime(row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : ""),
+  scheduledDateRaw: row.scheduled_date || row.date,
+  scheduledTimeRaw: row.scheduled_time || row.time,
+  scheduledDate: formatDate(row.scheduled_date || row.date),
+  scheduledTime: formatTime(row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : row.time),
   location: row.location,
   priority: row.priority,
   status: row.status,
-  assignedMidwife: row.assigned_provider,
-  remarks: row.notes,
+  assignedMidwife: row.assigned_provider || row.provider,
+  remarks: row.notes || row.instructions,
+  offline: row.offline || false,
+  syncStatus: row.syncStatus || null,
 });
 
 const STATUS_COLORS = {
@@ -180,14 +189,15 @@ export default function MidwifeFollowUp() {
   const [remarksDraft, setRemarksDraft] = useState("");
   const [touched, setTouched] = useState(/** @type {Record<string, boolean>} */ ({}));
   const [toast, setToast] = useState(null);
+  const { lastSyncedAt } = useSyncStatus();
 
-  useEffect(() => {
+  const load = React.useCallback(() => {
     let active = true;
     setLoading(true);
     setLoadError(null);
     Promise.all([
-      followUpsApi.list(),
-      residentsApi.list({ limit: 200 }),
+      listFollowUpsOffline({ ownerId: user?.id }),
+      listFollowUpResidentsOffline({ ownerId: user?.id, params: { limit: 200 } }),
       healthServicesApi.personnel().catch(() => ({ rows: [] })),
     ])
       .then(([followUpResult, residentResult, personnelResult]) => {
@@ -204,7 +214,12 @@ export default function MidwifeFollowUp() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [user?.id]);
+
+  useEffect(() => load(), [load]);
+  useEffect(() => {
+    if (lastSyncedAt) load();
+  }, [lastSyncedAt, load]);
 
   const showToast = (message, ms = 3000) => {
     setToast(message);
@@ -215,7 +230,7 @@ export default function MidwifeFollowUp() {
   const persistFollowUp = async (id, patch, successMessage) => {
     setSaving(true);
     try {
-      const result = await followUpsApi.update(id, patch);
+      const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: id, record: patch });
       const updated = mapFollowUpRow(result?.record || result);
       setFollowUps((prev) => prev.map((f) => (f.id === id ? { ...f, ...updated } : f)));
       if (successMessage) showToast(successMessage);
@@ -492,8 +507,9 @@ export default function MidwifeFollowUp() {
     }
 
     try {
-      const result = await followUpsApi.create({
+      const result = await createFollowUpOffline({ ownerId: user?.id, record: {
         residentId: selectedResident.id,
+        _offlineBarangay: selectedResident.barangay,
         purpose: scheduleForm.reason.trim(),
         scheduled_date: scheduleForm.date,
         scheduled_time: scheduleForm.time,
@@ -502,7 +518,7 @@ export default function MidwifeFollowUp() {
         status: deriveStatus(scheduleForm.date),
         assigned_provider: scheduleForm.personnel || defaultPersonnel,
         notes: scheduleForm.notes.trim(),
-      });
+      }});
       const record = result?.record || result;
       const newFollowUp = {
         ...mapFollowUpRow(record),

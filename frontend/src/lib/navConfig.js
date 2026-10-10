@@ -178,6 +178,11 @@ export const NAV = {
           permission: "residents.profile.view",
         },
         {
+          label: "TCL",
+          icon: "ClipboardList",
+          path: "/app/phn/tcls",
+        },
+        {
           label: "PHN Check-ups",
           icon: "ClipboardList",
           path: "/app/phn/consultations",
@@ -189,6 +194,7 @@ export const NAV = {
           path: "/app/phn/services",
           permission: "services.view",
         },
+        { label: "Program Enrollment Register", path: "/app/phn/tcl-register", hidden: true },
       ],
     },
     {
@@ -322,12 +328,7 @@ export const NAV = {
               icon: "Activity",
               path: "/app/health_supervisor/tb",
             },
-            {
-              label: "Follow-ups",
-              icon: "CalendarClock",
-              path: "/app/health_supervisor/followups",
-              permission: "followups.view",
-            },
+            { label: "Program Enrollment Register", path: "/app/health_supervisor/tcl-register", hidden: true },
           ],
         },
         {
@@ -421,6 +422,13 @@ export const NAV = {
       icon: "FileText",
       path: "/app/rhu_personnel/certificates",
       station: "triage",
+      group: "Operations",
+    },
+    {
+      label: "Incoming Reports",
+      icon: "ClipboardList",
+      path: "/app/rhu_personnel/reports",
+      permission: "reports.view",
       group: "Operations",
     },
     {

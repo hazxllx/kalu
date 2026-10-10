@@ -1341,6 +1341,30 @@ export const supabaseRepository = {
     return count ?? 0;
   },
 
+  /**
+   * Real account totals for the admin summary cards. Each count is an exact,
+   * head-only query (no rows transferred) over the single source of truth,
+   * `public.profiles`. Returned keys mirror the stored status enum values so the
+   * API contract stays aligned with the status filter.
+   */
+  async getAccountSummary() {
+    const supabase = getServiceClient();
+    const countWhere = async (apply) => {
+      let query = supabase.from(TABLES.profiles).select('id', { count: 'exact', head: true });
+      query = apply ? apply(query) : query;
+      const { count, error } = await query;
+      throwOnError(error, 'Could not summarise accounts');
+      return count ?? 0;
+    };
+    const [total, active, pendingVerification, disabled] = await Promise.all([
+      countWhere(null),
+      countWhere((query) => query.eq('status', 'active')),
+      countWhere((query) => query.eq('status', 'pending_verification')),
+      countWhere((query) => query.eq('status', 'disabled')),
+    ]);
+    return { total, active, pending_verification: pendingVerification, disabled };
+  },
+
   async getAccountAssignmentOptions() {
     const supabase = getServiceClient();
     const [municipalitiesResult, barangaysResult, facilitiesResult] = await Promise.all([
@@ -1409,6 +1433,41 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     const { error } = await supabase.auth.admin.deleteUser(id);
     throwOnError(error, 'Could not clean up the unprovisioned invitation');
+  },
+
+  /**
+   * Transactional, advisory-locked re-check of every account-deletion safety
+   * invariant (active-admin actor, target exists, no self-delete, not the last
+   * active admin). Performs no mutation; returns the target profile snapshot the
+   * caller uses for the post-deletion audit record. Raises a Postgres error
+   * (mapped to an HTTP status by the service) when a guard fails.
+   */
+  async assertAccountDeletable({ id, actorId }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('admin_assert_account_deletable', {
+      p_target_id: id,
+      p_actor_id: actorId,
+    });
+    throwOnError(error, 'Could not verify that the account may be deleted');
+    return data || null;
+  },
+
+  /**
+   * Permanently delete the Supabase Auth identity. `public.profiles.id` has an
+   * `on delete cascade` to `auth.users`, so this single call atomically removes
+   * the profile too and drops the user's Auth sessions/identities (the account
+   * can no longer sign in). Operational, clinical and audit references to the
+   * account are `on delete set null`, so those historical records are preserved.
+   */
+  async deleteAuthAccount(id) {
+    const supabase = getServiceClient();
+    const { error } = await supabase.auth.admin.deleteUser(id);
+    if (error) {
+      throw Object.assign(new Error(error.message || 'Could not delete the account'), {
+        statusCode: 502,
+        details: error,
+      });
+    }
   },
 
   async updateAdminAccountProfile({ id, actorId, profile }) {

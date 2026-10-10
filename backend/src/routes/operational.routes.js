@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
+import idempotency from '../middleware/idempotency.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import * as controller from '../controllers/operational.controller.js';
@@ -44,12 +45,14 @@ for (const kind of kinds) {
       `/${kind}`,
       withKind(kind),
       authorize(staff, { permission: followUpPermission('POST') }),
+      idempotency,
       asyncHandler(controller.create),
     );
     router.put(
       `/${kind}/:id`,
       withKind(kind),
       authorize(staff, { permission: followUpPermission('PUT') }),
+      idempotency,
       asyncHandler(controller.update),
     );
     // Maternal records support deletion (spec PART 13). Other operational kinds

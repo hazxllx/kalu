@@ -2,8 +2,8 @@ import { api } from './apiClient';
 
 const resource = (kind) => ({
   list: (params) => api.get(`/operational/${kind}`, { params }),
-  create: (record) => api.post(`/operational/${kind}`, { record }),
-  update: (id, record) => api.put(`/operational/${kind}/${id}`, { record }),
+  create: (record, options) => api.post(`/operational/${kind}`, { record }, options),
+  update: (id, record, options) => api.put(`/operational/${kind}/${id}`, { record }, options),
   remove: (id) => api.delete(`/operational/${kind}/${id}`),
 });
 

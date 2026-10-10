@@ -1,6 +1,5 @@
 import React from "react";
-import { TYPE, PALETTE, RADIUS } from "@/lib/designTokens";
-import Field from "./Field";
+import { TYPE } from "@/lib/designTokens";
 
 /**
  * Group of fields under a labeled section.

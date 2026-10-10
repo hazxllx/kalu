@@ -12,7 +12,7 @@ import {
   markSyncing,
   recoverInterruptedOperations,
 } from './outbox.js';
-import { releaseLock, renewLock, acquireLock, writeMeta, META_KEYS } from './meta.js';
+import { releaseLock, renewLock, acquireLock, writeMeta, lastSyncedKey } from './meta.js';
 import { classifySyncError, SYNC_ERROR } from './errors.js';
 import { MUTATION_TIER } from './mutationPolicy.js';
 import {
@@ -193,7 +193,7 @@ export const runSyncPass = async ({
           });
         }
         allById.set(op.opId, { ...op, status: OUTBOX_STATUS.SYNCED, serverId });
-        await writeMeta(META_KEYS.LAST_SYNCED_AT, now());
+        await writeMeta(lastSyncedKey(ownerId), now());
         summary.synced += 1;
       } catch (error) {
         const info = classifySyncError(error);

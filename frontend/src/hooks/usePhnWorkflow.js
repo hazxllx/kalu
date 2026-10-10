@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { phnWorkflowApi } from "@/services/api/phnWorkflow";
+import { useAuth } from "@/context/AuthContext";
+import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 
 /**
  * usePhnWorkflow — persistent RHU triage → PHN check-up pipeline (BUG-008).
@@ -16,6 +18,8 @@ import { phnWorkflowApi } from "@/services/api/phnWorkflow";
  * persist to the backend and refresh from it (never local-only writes).
  */
 export function usePhnWorkflow({ source = "queue" } = {}) {
+  const { user } = useAuth();
+  const ownerId = user?.id;
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -26,8 +30,8 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
     try {
       const rows =
         source === "intake"
-          ? await phnWorkflowApi.listMyIntake()
-          : await phnWorkflowApi.listQueue();
+          ? await phnWorkflowApi.listMyIntakeOffline(ownerId)
+          : await phnWorkflowApi.listQueueOffline(ownerId);
       setPatients(rows);
     } catch (e) {
       setError(e?.message || "Unable to load the patient workflow.");
@@ -35,7 +39,7 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
     } finally {
       setLoading(false);
     }
-  }, [source]);
+  }, [source, ownerId]);
 
   useEffect(() => {
     let active = true;
@@ -43,8 +47,8 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
       try {
         const rows =
           source === "intake"
-            ? await phnWorkflowApi.listMyIntake()
-            : await phnWorkflowApi.listQueue();
+            ? await phnWorkflowApi.listMyIntakeOffline(ownerId)
+            : await phnWorkflowApi.listQueueOffline(ownerId);
         if (active) setPatients(rows);
       } catch (e) {
         if (active) {
@@ -58,12 +62,20 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
     return () => {
       active = false;
     };
-  }, [source]);
+  }, [source, ownerId]);
 
   const sendToPhnQueue = useCallback(async (payload) => {
-    await phnWorkflowApi.sendToPhnQueue(payload);
-    await refresh();
-  }, [refresh]);
+    try {
+      await phnWorkflowApi.sendToPhnQueue(payload);
+      await refresh();
+      return false;
+    } catch (error) {
+      if (classifySyncError(error).code !== SYNC_ERROR.NETWORK) throw error;
+      await phnWorkflowApi.saveTriageDraft(ownerId, payload);
+      await refresh();
+      return true;
+    }
+  }, [ownerId, refresh]);
 
   const startCheckup = useCallback(async (id) => {
     await phnWorkflowApi.startCheckup(id);

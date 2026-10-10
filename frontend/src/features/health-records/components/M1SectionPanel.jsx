@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Pencil, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Pencil, RefreshCw, Search, X } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import { m1Api } from "@/services/api";
 import { toReportParams } from "@/features/health-records/lib/reportingPeriod";
@@ -30,10 +30,6 @@ const MODULE_HINT = {
   m1_records: { label: "Family planning service events", to: null },
 };
 
-const SOURCE_LABEL = {
-  m1_manual: "Monthly reporting figure",
-};
-
 export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, periodLabel, onBack, onEditManual, navigate }) {
   const [byCode, setByCode] = useState({});
   const [mapping, setMapping] = useState([]);
@@ -42,6 +38,7 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All"); // All | Derived | Manual
   const [expanded, setExpanded] = useState(() => new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set()); // subsection keys collapsed by the user
 
   const load = React.useCallback(() => {
     setLoading(true);
@@ -57,29 +54,20 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
 
   useEffect(() => { load(); }, [load]);
 
-  // Group the section's indicators by source so the source label is shown ONCE
-  // per group instead of on every row.
-  const itSourceLabel = (source, items) => {
-    const first = items.find((i) => i.source === source);
-    return first?.sourceLabel || source;
-  };
+  // Group the section's indicators by their official FHSIS subsection (A1, A2,
+  // C1 …) so the on-screen structure mirrors the printed M1 form. The catalog is
+  // served in displayOrder, and a Map preserves first-insertion order, so the
+  // official indicator order is kept intact. Derived vs manual stays visible per
+  // row via the Status badge, so no information is lost by grouping on subsection.
   const groups = useMemo(() => {
     const items = mapping.filter((m) => m.section === sectionKey);
-    const bySource = new Map();
+    const bySub = new Map();
     for (const it of items) {
-      const key = it.source || "unknown";
-      if (!bySource.has(key)) bySource.set(key, []);
-      bySource.get(key).push(it);
+      const key = it.subsection || "Other indicators";
+      if (!bySub.has(key)) bySub.set(key, []);
+      bySub.get(key).push(it);
     }
-    const sourceOrder = [...bySource.keys()].sort((a, b) => {
-      const manual = (k) => (k === "m1_manual" ? 1 : 0);
-      return manual(a) - manual(b);
-    });
-    return sourceOrder.map((source) => ({
-      source,
-      sourceLabel: SOURCE_LABEL[source] || MODULE_HINT[source]?.label || itSourceLabel(source, items),
-      indicators: bySource.get(source),
-    }));
+    return [...bySub.entries()].map(([key, indicators]) => ({ key, label: key, indicators }));
   }, [mapping, sectionKey]);
 
   const manualCount = useMemo(
@@ -90,19 +78,29 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
   const filteredGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
     return groups
-      .map((g) => ({
-        ...g,
-        indicators: g.indicators.filter((ind) => {
+      .map((g) => {
+        const indicators = g.indicators.filter((ind) => {
           if (q && !ind.name.toLowerCase().includes(q) && !ind.code.toLowerCase().includes(q)) return false;
           if (statusFilter === "Derived" && ind.source === "m1_manual") return false;
           if (statusFilter === "Manual" && ind.source !== "m1_manual") return false;
           return true;
-        }),
-      }))
+        });
+        // Subsection subtotal — a plain sum of the already-aggregated indicator
+        // totals for the group (display only; nothing is recomputed here).
+        const subtotal = indicators.reduce((sum, ind) => sum + (Number(byCode[ind.code]?.total) || 0), 0);
+        return { ...g, indicators, subtotal };
+      })
       .filter((g) => g.indicators.length > 0);
-  }, [groups, search, statusFilter]);
+  }, [groups, search, statusFilter, byCode]);
 
   const allCount = mapping.filter((m) => m.section === sectionKey).length;
+  const visibleCount = useMemo(
+    () => filteredGroups.reduce((sum, g) => sum + g.indicators.length, 0),
+    [filteredGroups],
+  );
+  const isFiltering = search.trim() !== "" || statusFilter !== "All";
+
+  const resetFilters = () => { setSearch(""); setStatusFilter("All"); };
 
   const toggleExpand = (code) =>
     setExpanded((prev) => {
@@ -110,6 +108,17 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
       next.has(code) ? next.delete(code) : next.add(code);
       return next;
     });
+
+  const toggleGroup = (key) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+
+  const allGroupsCollapsed = filteredGroups.length > 0 && filteredGroups.every((g) => collapsedGroups.has(g.key));
+  const toggleAllGroups = () =>
+    setCollapsedGroups(() => (allGroupsCollapsed ? new Set() : new Set(filteredGroups.map((g) => g.key))));
 
   return (
     <div className="mt-6">
@@ -140,7 +149,7 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
       </div>
 
       {/* Toolbar: search + Derived/Manual filter */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-2.5 flex flex-wrap items-center gap-2">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-brand-gray" />
           <input
@@ -165,9 +174,30 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
             </button>
           ))}
         </div>
-        <span className="ml-auto text-xs text-brand-gray">
-          DERIVED = calculated automatically from real records · MANUAL = entered as a reporting figure
-        </span>
+        {isFiltering && (
+          <button
+            onClick={resetFilters}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-blue hover:underline"
+          >
+            <X className="h-3.5 w-3.5" /> Reset
+          </button>
+        )}
+        {!loading && filteredGroups.length > 0 && (
+          <button
+            onClick={toggleAllGroups}
+            className="inline-flex items-center gap-1 rounded-md border border-brand-border bg-white px-2.5 py-1 text-xs font-medium text-brand-gray hover:text-brand-ink"
+          >
+            {allGroupsCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            {allGroupsCollapsed ? "Expand all" : "Collapse all"}
+          </button>
+        )}
+        {!loading && (
+          <span className="ml-auto text-xs text-brand-gray">
+            <span className="font-medium text-brand-ink">
+              {isFiltering ? `${visibleCount} of ${allCount}` : allCount}
+            </span> indicators
+          </span>
+        )}
       </div>
 
       {error && <Card className="p-5 text-sm text-brand-danger">{error}</Card>}
@@ -176,26 +206,48 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
         <Card className="p-8 text-center text-sm text-brand-gray">Loading section report…</Card>
       ) : (
         <div className="overflow-hidden rounded-btn border border-brand-border">
-          <div className="overflow-x-auto">
+          {/* Single scroll container (both axes) so the column headers can stay
+              pinned while scrolling long sections. */}
+          <div className="max-h-[70vh] overflow-auto">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-brand-border bg-brand-bg/50 text-left">
-                  <th className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Indicator</th>
-                  <th className="w-24 px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-brand-gray">{periodLabel}</th>
-                  <th className="w-24 px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Status</th>
-                  <th className="w-28 px-4 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Action</th>
+              <thead className="sticky top-0 z-20">
+                <tr className="border-b border-brand-border bg-brand-bg text-left">
+                  <th className="border-b border-brand-border bg-brand-bg px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Indicator</th>
+                  <th className="w-24 border-b border-brand-border bg-brand-bg px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-brand-gray">{periodLabel}</th>
+                  <th className="w-24 border-b border-brand-border bg-brand-bg px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-brand-gray" title="DERIVED = calculated automatically from real records. MANUAL = entered as a monthly reporting figure.">Source</th>
+                  <th className="w-28 border-b border-brand-border bg-brand-bg px-4 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-brand-border">
-                {filteredGroups.map((g) => (
-                  <React.Fragment key={g.source}>
-                    {/* Source group header — shown once per source, not per row */}
-                    <tr className="bg-brand-bg/30">
-                      <td colSpan={4} className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-brand-gray">
-                        {g.sourceLabel}
+                {filteredGroups.map((g) => {
+                  const groupCollapsed = collapsedGroups.has(g.key);
+                  return (
+                  <React.Fragment key={g.key}>
+                    {/* Collapsible subsection header — official M1 subsection name,
+                        indicator count and a display-only subtotal. */}
+                    <tr className="bg-brand-bg/40">
+                      <td colSpan={4} className="p-0">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(g.key)}
+                          aria-expanded={!groupCollapsed}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30"
+                        >
+                          {groupCollapsed
+                            ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-brand-gray" aria-hidden="true" />
+                            : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-brand-gray" aria-hidden="true" />}
+                          <span className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{g.label}</span>
+                          <span className="rounded-full bg-brand-border/60 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-brand-gray">
+                            {g.indicators.length}
+                          </span>
+                          <span className="ml-auto flex items-baseline gap-1.5 pr-1 text-[11px] font-medium uppercase tracking-wide text-brand-gray">
+                            Subtotal
+                            <span className="font-stat text-sm font-bold tabular-nums text-brand-ink">{g.subtotal}</span>
+                          </span>
+                        </button>
                       </td>
                     </tr>
-                    {g.indicators.map((ind) => {
+                    {!groupCollapsed && g.indicators.map((ind) => {
                       const value = byCode[ind.code]?.total ?? 0;
                       const byAge = byCode[ind.code]?.byAge;
                       const ageGroups = byCode[ind.code]?.ageGroups || (ind.ageScheme && ind.ageScheme !== "none" ? (ind.ageGroups || []) : null);
@@ -214,7 +266,7 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
                               <p className="font-medium leading-snug text-brand-ink">{ind.name}</p>
                               <p className="text-[11px] text-brand-gray">{ind.code}</p>
                             </td>
-                            <td className="px-3 py-2 text-right align-middle font-stat text-base font-bold text-brand-ink">{value}</td>
+                            <td className="px-3 py-2 text-right align-middle font-stat text-base font-bold tabular-nums text-brand-ink">{value}</td>
                             <td className="px-3 py-2 text-center align-middle">
                               {manual ? (
                                 <span className="inline-flex rounded-full bg-brand-yellow/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#B07E00]">Manual</span>
@@ -256,11 +308,23 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
                       );
                     })}
                   </React.Fragment>
-                ))}
+                  );
+                })}
                 {filteredGroups.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-sm text-brand-gray">
-                      No indicators match the current filter.
+                    <td colSpan={4} className="px-4 py-10 text-center">
+                      <p className="text-sm font-medium text-brand-ink">No indicators match the current filter.</p>
+                      <p className="mx-auto mt-1 max-w-sm text-xs text-brand-gray">
+                        Try a different search term or source filter.
+                      </p>
+                      {isFiltering && (
+                        <button
+                          onClick={resetFilters}
+                          className="mt-3 inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue"
+                        >
+                          <X className="h-3.5 w-3.5" /> Reset filters
+                        </button>
+                      )}
                     </td>
                   </tr>
                 )}

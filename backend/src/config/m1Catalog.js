@@ -428,7 +428,7 @@ oral('D_10', 'Pregnant women who received BOHC');
 // ===========================================================================
 // SECTION E — INFECTIOUS DISEASE
 // ===========================================================================
-ind('E', 'E1. Filariasis', 'E1_1', 'Filariasis cases/mass drug administration (annual)', { frequency: 'annual', aggregation: 'COUNT_CASES', sex: true });
+ind('E', 'E1. Filariasis', 'E1_1', 'Number of individuals who received Mass Drug Administration', { aggregation: 'COUNT_CASES', sex: true });
 
 const E2 = 'E2. Schistosomiasis';
 ind('E', E2, 'E2_1', 'Patients seen', { aggregation: 'COUNT_EVENTS' });

@@ -458,6 +458,14 @@ export const PERMISSION_MODULES = Object.freeze([
         impact: 'deactivate system user accounts',
       },
       {
+        id: 'accounts.delete',
+        label: 'Delete user accounts',
+        action: ACTION.DELETE,
+        description: 'Permanently remove an account and its sign-in identity. Linked health records are preserved.',
+        sensitive: true,
+        impact: 'permanently delete system user accounts',
+      },
+      {
         id: 'accounts.access.reset',
         label: 'Reset user access',
         action: ACTION.EDIT,
@@ -826,6 +834,10 @@ const DEFAULT_GRANTS = Object.freeze({
     'triage.assessment.update',
     'triage.forward',
     'services.view',
+    // RHU Personnel are the recipient side of the report workflow: they open
+    // and review the Incoming Reports addressed to them (reports.view). They do
+    // NOT author/generate reports, so `reports.generate` is intentionally not
+    // granted — the backend also refuses RHU report submissions.
     'reports.view',
   ],
 

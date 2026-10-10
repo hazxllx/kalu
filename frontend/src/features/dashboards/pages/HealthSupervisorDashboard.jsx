@@ -457,6 +457,9 @@ export default function HealthSupervisorDashboard() {
       />
 
       <section aria-label="Key indicators">
+        <p className="mb-3 text-xs text-brand-gray">
+          Operational indicators below reflect the current open queues. The selected reporting period applies to the map and health trends.
+        </p>
         {loadError && (
           <Card className="!rounded-card mb-3 flex items-start justify-between gap-3 !border-brand-border !bg-brand-paper p-4 !shadow-none">
             <div className="flex items-start gap-3">
@@ -594,6 +597,7 @@ export default function HealthSupervisorDashboard() {
                 {scope?.level === "barangay"
                   ? `Cases within ${scope.assignedBarangay} that need supervisory action.`
                   : "Cases within your authorized coverage that need supervisory action."}
+                {" "}These are current operational cases; the reporting period above applies to the period-scoped analytics.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter attention cases">

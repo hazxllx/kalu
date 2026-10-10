@@ -6,13 +6,13 @@ import { householdsApi } from "@/services/api/householdsApi";
 import { householdRiskApi } from "@/services/api/householdRiskApi";
 import { toRiskCluster, daysSince } from "../lib/riskClusterAdapter";
 import {
-  RISK_LEVELS, RISK_LEVEL_LABELS, RISK_CLASSIFICATION_BASIS, getRiskConfig,
+  RISK_LEVELS, RISK_LEVEL_LABELS, getRiskConfig,
 } from "@/lib/householdRisk";
 import { BARANGAYS } from "@/lib/barangays";
 import { formatShortDate } from "@/lib/dateUtils";
 import { FollowUpModal } from "../components/RiskActionModals";
 import {
-  Search, Home, ShieldCheck, AlertTriangle, PhoneCall, X, ChevronRight, Users, Info, MapPin, RefreshCw,
+  Search, Home, ShieldCheck, AlertTriangle, PhoneCall, X, ChevronRight, Users, MapPin, RefreshCw,
 } from "lucide-react";
 
 const levelTone = {
@@ -446,48 +446,6 @@ export default function HouseholdRiskOverview() {
           )}
         </Card>
       </div>
-
-      {/* Basis of risk classification */}
-      <Card className="p-5 mb-6">
-        <div className="flex items-center gap-2 mb-1">
-          <h3 className="text-base font-semibold text-brand-ink">Basis of Risk Classification</h3>
-          <span className="group relative inline-flex">
-            <Info className="h-4 w-4 text-brand-gray cursor-help" strokeWidth={1.8} />
-            <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-64 -translate-x-1/2 rounded-btn border border-slate-200 bg-white p-3 text-xs leading-relaxed text-brand-gray opacity-0 shadow-float transition-opacity group-hover:opacity-100">
-              Risk classifications are based on configured household health-monitoring indicators and workflow rules. They are intended to support early intervention and do not constitute a medical diagnosis.
-            </span>
-          </span>
-        </div>
-        <p className="text-xs text-brand-gray mb-4">
-          Household risk levels are determined by the presence, number, persistence, and configured priority of health-related risk indicators recorded in the system.
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {levelOrder.map((l) => {
-            const basis = RISK_CLASSIFICATION_BASIS[l];
-            return (
-              <div key={l} className="rounded-btn border border-slate-200 dark:border-border bg-brand-bg/60 dark:bg-card-nested p-4">
-                <p className="flex items-center gap-1.5 text-sm font-semibold text-brand-ink">
-                  <span className={`h-2 w-2 rounded-full ${levelTone[l].dot}`} /> {RISK_LEVEL_LABELS[l]}
-                </p>
-                <p className="mt-1 text-xs text-brand-gray">
-                  <span className="font-medium text-brand-ink">Basis:</span> {basis.summary}
-                </p>
-                <p className="mt-2 text-xs text-brand-gray">
-                  <span className="font-medium text-brand-ink">Typical state:</span>
-                </p>
-                <ul className="mt-1 space-y-0.5 text-xs text-brand-gray">
-                  {basis.typicalState.slice(0, 3).map((t) => (
-                    <li key={t} className="flex items-start gap-1.5"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-gray/60" /> {t}</li>
-                  ))}
-                </ul>
-                <p className="mt-2 text-xs text-brand-gray">
-                  <span className="font-medium text-brand-ink">Recommended response:</span> {basis.recommendedResponse}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
 
       {/* Risk by barangay */}
       <Card className="p-5 mb-6">

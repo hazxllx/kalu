@@ -152,7 +152,7 @@ export default function RhuTriage() {
     setSearching(true);
     const timer = setTimeout(async () => {
       try {
-        const rows = await intakeApi.searchResidents(trimmedQuery);
+        const rows = await intakeApi.searchResidentsOffline(trimmedQuery, user?.id);
         if (cancelled) return;
         const mapped = rows
           .map((r) => ({
@@ -180,7 +180,7 @@ export default function RhuTriage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [trimmedQuery, shouldSearch]);
+  }, [trimmedQuery, shouldSearch, user?.id]);
 
   /* --------------------- Derived patient identity ---------------------- */
   const hasPatient = patientType !== null;
@@ -364,9 +364,11 @@ export default function RhuTriage() {
     };
     setSending(true);
     try {
-      await sendToPhnQueue(payload);
+      const wasOffline = await sendToPhnQueue(payload);
       resetAll();
-      showToast("Triage completed. Patient sent to the consultation queue.");
+      showToast(wasOffline
+        ? "Triage saved offline. Reconnect and submit it to the consultation queue."
+        : "Triage completed. Patient sent to the consultation queue.");
     } catch (err) {
       showToast(err?.message || "Could not send the patient to the consultation queue. Please try again.");
     } finally {

@@ -1,5 +1,5 @@
 import React from "react";
-import { TYPE, PALETTE } from "@/lib/designTokens";
+import { TYPE } from "@/lib/designTokens";
 
 /**
  * Restrained status indicator: colored dot + text label.
@@ -78,7 +78,7 @@ const TINT = {
   rose: "rgba(179,32,44,0.08)",
 };
 
-export default function StatusIndicator({ value, tinted = false, size = "sm", className = "", labelClass }) {
+export default function StatusIndicator({ value, tinted = false, size = "sm", className = "", labelClass = "" }) {
   const tone = toneFor(value);
   const isDark = document.documentElement.classList.contains("dark");
   const dotColor = isDark ? DOT.dark[tone] : DOT[tone];

@@ -17,16 +17,19 @@ import * as controller from '../controllers/users.controller.js';
  *
  *   GET  /api/users        list accounts (search: ?q, ?role, ?status; ?limit,?offset)
  *   GET  /api/users/options assignment and role options for the admin editor
+ *   GET  /api/users/summary real account totals for the summary cards
  *   POST /api/users        invite and provision a real Supabase Auth account
  *   GET  /api/users/:id    read one account
  *   PUT  /api/users/:id    update profile, role and scope / status
  *   POST /api/users/:id/access-reset send a Supabase password recovery email
+ *   DELETE /api/users/:id  permanently delete the Auth identity + profile
  */
 const router = Router();
 
 router.use(authenticate, authorize(FEATURE_ROLES.users));
 
 router.get('/options', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), asyncHandler(controller.getAccountOptions));
+router.get('/summary', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), asyncHandler(controller.getAccountSummary));
 router.get('/', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), asyncHandler(controller.listUsers));
 router.post(
   '/',
@@ -64,6 +67,11 @@ router.post(
   '/:id/access-reset',
   authorize(FEATURE_ROLES.users, { permission: 'accounts.access.reset' }),
   asyncHandler(controller.resetUserAccess),
+);
+router.delete(
+  '/:id',
+  authorize(FEATURE_ROLES.users, { permission: 'accounts.delete' }),
+  asyncHandler(controller.deleteUser),
 );
 
 export default router;

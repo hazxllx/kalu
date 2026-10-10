@@ -22,6 +22,10 @@ export const getAccountOptions = async (_req, res) => {
   sendData(res, await usersService.getAccountOptions());
 };
 
+export const getAccountSummary = async (_req, res) => {
+  sendData(res, await usersService.getAccountSummary());
+};
+
 export const createUser = async (req, res) => {
   const user = await usersService.createUser({
     actorId: req.user.id,
@@ -49,4 +53,22 @@ export const resetUserAccess = async (req, res) => {
   sendData(res, { sent: true });
 };
 
-export default { listUsers, getAccountOptions, createUser, getUser, updateUser, resetUserAccess };
+export const deleteUser = async (req, res) => {
+  const result = await usersService.deleteUser({
+    id: req.params.id,
+    actorId: req.user.id,
+    confirmEmail: req.body?.confirmEmail ?? req.body?.user?.confirmEmail,
+  });
+  sendData(res, result);
+};
+
+export default {
+  listUsers,
+  getAccountOptions,
+  getAccountSummary,
+  createUser,
+  getUser,
+  updateUser,
+  resetUserAccess,
+  deleteUser,
+};

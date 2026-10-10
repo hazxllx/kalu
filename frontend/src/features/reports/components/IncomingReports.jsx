@@ -38,7 +38,10 @@ const formatDateTime = (iso) => {
 
 export default function IncomingReports() {
   const { can } = usePermissions();
-  const canReview = can("reports.generate");
+  // Reviewing an incoming report is a RECIPIENT action, gated by reports.view
+  // (not reports.generate) so the RHU Personnel inbox can acknowledge/review
+  // without being granted report authoring.
+  const canReview = can("reports.view");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

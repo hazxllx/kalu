@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
 import PageHeader from "@/components/common/PageHeader";
+import BackToTclButton from "@/features/health-records/components/BackToTclButton";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import {
-  Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight, Trash2, Printer, CalendarClock,
+  Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight, Trash2, Printer,
 } from "lucide-react";
 import { maternalApi, residentsApi, referralsApi, m1Api } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
@@ -77,11 +78,47 @@ const mapRecord = (row) => ({
   status: row.status || "Active",
   notes: row.notes || "",
   provider: row.provider || "",
+  // Registration & identity (TCL PN PP)
+  dateOfRegistration: row.date_of_registration || "",
+  familySerialNo: row.family_serial_no || "",
+  socioEconomicStatus: row.socio_economic_status || "",
+  gravida: row.gravida ?? "",
+  para: row.para ?? "",
+  // Immunization status (Td/TT dose dates + FIM)
+  td1Date: row.tt_td_doses?.td1 || "",
+  td2Date: row.tt_td_doses?.td2 || "",
+  td3Date: row.tt_td_doses?.td3 || "",
+  td4Date: row.tt_td_doses?.td4 || "",
+  td5Date: row.tt_td_doses?.td5 || "",
+  fimStatus: Boolean(row.fim_status),
+  // Micronutrient supplementation + deworming
+  prenatalIronFolicTablets: row.prenatal_micronutrients?.iron_folic_tablets ?? "",
+  calciumTablets: row.prenatal_micronutrients?.calcium_tablets ?? "",
+  iodineGivenDate: row.iodine_given_date || "",
+  dewormingDate: row.deworming_date || "",
+  // Infectious disease surveillance
+  syphilisScreenDate: row.syphilis_screen_date || "",
+  syphilisResult: row.syphilis_result || "",
+  hepbScreenDate: row.hepb_screen_date || "",
+  hepbResult: row.hepb_result || "",
+  hivScreenDate: row.hiv_screen_date || "",
+  // Laboratory screening
+  gdmScreenDate: row.gdm_screen_date || "",
+  gdmResult: row.gdm_result || "",
+  cbcScreenDate: row.cbc_screen_date || "",
+  cbcResult: row.cbc_result || "",
+  cbcIronGiven: Boolean(row.cbc_iron_given),
+  // Pregnancy outcome
+  pregnancyOutcome: row.pregnancy_outcome || "",
+  pregnancyOutcomeDate: row.pregnancy_outcome_date || "",
+  newbornSex: row.newborn_sex || "",
   // Post-partum care & delivery outcome
   typeOfDelivery: row.type_of_delivery || "",
   deliveryDate: row.delivery_date || "",
+  deliveryTime: row.delivery_time || "",
   deliveryOutcome: row.delivery_outcome || "",
   birthWeight: row.birth_weight || "",
+  birthWeightClass: row.birth_weight_class || "",
   placeOfDelivery: row.place_of_delivery || "",
   birthAttendant: row.birth_attendant || "",
   ppCheckup24h: row.pp_checkup_24h || "",
@@ -110,10 +147,46 @@ const EMPTY_FORM = () => ({
   status: "Active",
   provider: "",
   notes: "",
+  // Registration & identity (TCL PN PP cols 1,2,5,7)
+  dateOfRegistration: "",
+  familySerialNo: "",
+  socioEconomicStatus: "",
+  gravida: "",
+  para: "",
+  // Immunization status (col 10)
+  td1Date: "",
+  td2Date: "",
+  td3Date: "",
+  td4Date: "",
+  td5Date: "",
+  fimStatus: false,
+  // Micronutrient supplementation (col 11) + deworming (col 13)
+  prenatalIronFolicTablets: "",
+  calciumTablets: "",
+  iodineGivenDate: "",
+  dewormingDate: "",
+  // Infectious disease surveillance (col 14)
+  syphilisScreenDate: "",
+  syphilisResult: "",
+  hepbScreenDate: "",
+  hepbResult: "",
+  hivScreenDate: "",
+  // Laboratory screening (col 15)
+  gdmScreenDate: "",
+  gdmResult: "",
+  cbcScreenDate: "",
+  cbcResult: "",
+  cbcIronGiven: false,
+  // Pregnancy outcome (col 16)
+  pregnancyOutcome: "",
+  pregnancyOutcomeDate: "",
+  newbornSex: "",
   typeOfDelivery: "",
   deliveryDate: "",
+  deliveryTime: "",
   deliveryOutcome: "",
   birthWeight: "",
+  birthWeightClass: "",
   placeOfDelivery: "",
   birthAttendant: "",
   ppCheckup24h: "",
@@ -171,6 +244,7 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
           <div className="mb-4 flex gap-2 overflow-x-auto border-b border-brand-border" role="tablist" aria-label="Maternal record sections">
             {[
               { id: "prenatal", label: "Prenatal" },
+              { id: "services", label: "Prenatal Services" },
               { id: "postpartum", label: "Delivery & Postpartum" },
               { id: "additional", label: "Additional Care" },
             ].map((tab) => {
@@ -249,6 +323,30 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 <label className="text-sm font-medium text-brand-ink">Provider</label>
                 <input type="text" value={form.provider} onChange={(e) => set("provider")(e.target.value)} placeholder="e.g. Midwife" className={inputCls()} />
               </div>
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Date of Registration</label>
+                <input type="date" value={form.dateOfRegistration} onChange={(e) => set("dateOfRegistration")(e.target.value)} className={inputCls()} />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Family Serial No.</label>
+                <input type="text" value={form.familySerialNo} onChange={(e) => set("familySerialNo")(e.target.value)} className={inputCls()} />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Socio-Economic Status</label>
+                <select value={form.socioEconomicStatus} onChange={(e) => set("socioEconomicStatus")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                  <option value="">—</option>
+                  <option value="NHTS">1 - NHTS</option>
+                  <option value="Non-NHTS">2 - Non-NHTS</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Gravida (G)</label>
+                <input type="number" min={0} value={form.gravida} onChange={(e) => set("gravida")(e.target.value)} className={inputCls()} />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Para (P)</label>
+                <input type="number" min={0} value={form.para} onChange={(e) => set("para")(e.target.value)} className={inputCls()} />
+              </div>
             </div>
 
             {/* Household & member context (read-only, from the resident/household profile — not duplicated here). */}
@@ -264,6 +362,128 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 <p className="mt-1 text-[11px] text-brand-gray">Zone No. and HH No. are managed in the household profile.</p>
               </div>
             )}
+            </div>
+
+            <div
+              id="maternal-form-panel-services"
+              role="tabpanel"
+              aria-labelledby="maternal-form-tab-services"
+              hidden={activeFormTab !== "services"}
+              className="space-y-4"
+            >
+            {/* Immunization status (TCL PN PP col 10) */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Immunization Status — Td/TT (date given)</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {[["td1Date", "Td1 / TT1"], ["td2Date", "Td2 / TT2"], ["td3Date", "Td3 / TT3"], ["td4Date", "Td4 / TT4"], ["td5Date", "Td5 / TT5"]].map(([key, label]) => (
+                  <div key={key}>
+                    <label className="text-sm font-medium text-brand-ink">{label}</label>
+                    <input type="date" value={form[key]} onChange={(e) => set(key)(e.target.value)} className={inputCls()} />
+                  </div>
+                ))}
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">FIM Status</label>
+                  <select value={String(form.fimStatus)} onChange={(e) => set("fimStatus")(e.target.value === "true")} className={`${inputCls()} cursor-pointer`}>
+                    {YES_NO.map((o) => <option key={o.label} value={String(o.value)}>{o.label}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Micronutrient supplementation (col 11) + deworming (col 13) */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Micronutrient Supplementation &amp; Deworming</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Iron + Folic Acid (total tablets)</label>
+                  <input type="number" min={0} value={form.prenatalIronFolicTablets} onChange={(e) => set("prenatalIronFolicTablets")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Calcium Carbonate (total tablets)</label>
+                  <input type="number" min={0} value={form.calciumTablets} onChange={(e) => set("calciumTablets")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Iodine Capsules (date 2 capsules given)</label>
+                  <input type="date" value={form.iodineGivenDate} onChange={(e) => set("iodineGivenDate")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Deworming Tablet (date, 2nd/3rd tri)</label>
+                  <input type="date" value={form.dewormingDate} onChange={(e) => set("dewormingDate")(e.target.value)} className={inputCls()} />
+                </div>
+              </div>
+            </div>
+
+            {/* Infectious disease surveillance (col 14) */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Infectious Disease Surveillance</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Syphilis Screening (date)</label>
+                  <input type="date" value={form.syphilisScreenDate} onChange={(e) => set("syphilisScreenDate")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Syphilis Result</label>
+                  <select value={form.syphilisResult} onChange={(e) => set("syphilisResult")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    <option value="+">+ positive</option>
+                    <option value="-">- negative</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Hepatitis B Screening (date)</label>
+                  <input type="date" value={form.hepbScreenDate} onChange={(e) => set("hepbScreenDate")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Hepatitis B Result (HBsAg)</label>
+                  <select value={form.hepbResult} onChange={(e) => set("hepbResult")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    <option value="+">+ positive</option>
+                    <option value="-">- negative</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">HIV Screening (date)</label>
+                  <input type="date" value={form.hivScreenDate} onChange={(e) => set("hivScreenDate")(e.target.value)} className={inputCls()} />
+                </div>
+              </div>
+            </div>
+
+            {/* Laboratory screening (col 15) */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Laboratory Screening</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Gestational Diabetes (date screened)</label>
+                  <input type="date" value={form.gdmScreenDate} onChange={(e) => set("gdmScreenDate")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Gestational Diabetes Result</label>
+                  <select value={form.gdmResult} onChange={(e) => set("gdmResult")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    <option value="+">+ positive</option>
+                    <option value="-">- negative</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">CBC / Hgb &amp; Hct (date screened)</label>
+                  <input type="date" value={form.cbcScreenDate} onChange={(e) => set("cbcScreenDate")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">CBC Result</label>
+                  <select value={form.cbcResult} onChange={(e) => set("cbcResult")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    <option value="+">+ with anemia</option>
+                    <option value="-">- without anemia</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Given Iron (if anemic)</label>
+                  <select value={String(form.cbcIronGiven)} onChange={(e) => set("cbcIronGiven")(e.target.value === "true")} className={`${inputCls()} cursor-pointer`}>
+                    {YES_NO.map((o) => <option key={o.label} value={String(o.value)}>{o.label}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
             </div>
 
             <div
@@ -314,6 +534,41 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                   <select value={form.birthAttendant} onChange={(e) => set("birthAttendant")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
                     <option value="">—</option>
                     {BIRTH_ATTENDANTS.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Time of Delivery</label>
+                  <input type="time" value={form.deliveryTime} onChange={(e) => set("deliveryTime")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Birth Weight Classification</label>
+                  <select value={form.birthWeightClass} onChange={(e) => set("birthWeightClass")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    <option value="low">Low (&lt; 2,500 g)</option>
+                    <option value="normal">Normal (&ge; 2,500 g)</option>
+                    <option value="unknown">Unknown</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Pregnancy Outcome</label>
+                  <select value={form.pregnancyOutcome} onChange={(e) => set("pregnancyOutcome")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    <option value="FT">FT - Full Term</option>
+                    <option value="PT">PT - Pre-term</option>
+                    <option value="FD">FD - Fetal Death</option>
+                    <option value="AB">AB - Abortion/Miscarriage</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Date Terminated</label>
+                  <input type="date" value={form.pregnancyOutcomeDate} onChange={(e) => set("pregnancyOutcomeDate")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-brand-ink">Newborn Sex</label>
+                  <select value={form.newbornSex} onChange={(e) => set("newbornSex")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">—</option>
+                    <option value="M">Male</option>
+                    <option value="F">Female</option>
                   </select>
                 </div>
               </div>
@@ -452,6 +707,8 @@ export default function M1Records() {
   const [countsLoading, setCountsLoading] = useState(false);
   const [countsError, setCountsError] = useState(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const cameFromTcl = searchParams.get("from") === "tcl";
   const { startPrint, portal, brandingError } = useM1OfficialPrint();
   const { startPrint: startMaternalPrint, portal: maternalPrintPortal } = useMaternalRecordPrint();
 
@@ -543,7 +800,7 @@ export default function M1Records() {
         for (const row of Object.values(byCode)) {
           const key = row?.section;
           if (!key) continue;
-          totals[key] = (totals[key] || 0) + (Number(row.total) || 0);
+          if (Number(row.total) > 0) totals[key] = (totals[key] || 0) + 1;
         }
         setSectionCounts(totals);
       })
@@ -572,17 +829,6 @@ export default function M1Records() {
   const totalPages = Math.max(1, Math.ceil(participants.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const pagedParticipants = participants.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
-
-  // M1 workspace metrics (computed from the maternal operational records already
-  // loaded for the selected period — no fabricated values).
-  const m1Metrics = useMemo(() => {
-    const unique = new Set(periodRecords.map((r) => r.residentId).filter(Boolean));
-    return {
-      periodRecords: periodRecords.length,
-      residentsServed: unique.size,
-      totalRecords: records.length,
-    };
-  }, [periodRecords, records]);
 
   const openManualEntry = (sectionKey) => { setM1EntrySection(sectionKey || "D"); setM1EntryOpen(true); };
   const openService = (svc) => {
@@ -657,10 +903,50 @@ export default function M1Records() {
       status: form.status,
       provider: form.provider,
       notes: form.notes,
+      // Registration & identity (TCL PN PP cols 1,2,5,7)
+      date_of_registration: form.dateOfRegistration || null,
+      family_serial_no: form.familySerialNo || "",
+      socio_economic_status: form.socioEconomicStatus || "",
+      gravida: form.gravida === "" || form.gravida === null || form.gravida === undefined ? null : Number(form.gravida),
+      para: form.para === "" || form.para === null || form.para === undefined ? null : Number(form.para),
+      // Immunization status (col 10) — assemble Td/TT dose map
+      tt_td_doses: {
+        ...(form.td1Date ? { td1: form.td1Date } : {}),
+        ...(form.td2Date ? { td2: form.td2Date } : {}),
+        ...(form.td3Date ? { td3: form.td3Date } : {}),
+        ...(form.td4Date ? { td4: form.td4Date } : {}),
+        ...(form.td5Date ? { td5: form.td5Date } : {}),
+      },
+      fim_status: Boolean(form.fimStatus),
+      // Micronutrient supplementation (col 11) + deworming (col 13)
+      prenatal_micronutrients: {
+        ...(form.prenatalIronFolicTablets !== "" && form.prenatalIronFolicTablets != null ? { iron_folic_tablets: Number(form.prenatalIronFolicTablets) } : {}),
+        ...(form.calciumTablets !== "" && form.calciumTablets != null ? { calcium_tablets: Number(form.calciumTablets) } : {}),
+      },
+      iodine_given_date: form.iodineGivenDate || null,
+      deworming_date: form.dewormingDate || null,
+      // Infectious disease surveillance (col 14)
+      syphilis_screen_date: form.syphilisScreenDate || null,
+      syphilis_result: form.syphilisResult || "",
+      hepb_screen_date: form.hepbScreenDate || null,
+      hepb_result: form.hepbResult || "",
+      hiv_screen_date: form.hivScreenDate || null,
+      // Laboratory screening (col 15)
+      gdm_screen_date: form.gdmScreenDate || null,
+      gdm_result: form.gdmResult || "",
+      cbc_screen_date: form.cbcScreenDate || null,
+      cbc_result: form.cbcResult || "",
+      cbc_iron_given: Boolean(form.cbcIronGiven),
+      // Pregnancy outcome (col 16)
+      pregnancy_outcome: form.pregnancyOutcome || "",
+      pregnancy_outcome_date: form.pregnancyOutcomeDate || null,
+      newborn_sex: form.newbornSex || "",
       type_of_delivery: form.typeOfDelivery || "",
       delivery_date: form.deliveryDate || null,
+      delivery_time: form.deliveryTime || "",
       delivery_outcome: form.deliveryOutcome || "",
       birth_weight: form.birthWeight || "",
+      birth_weight_class: form.birthWeightClass || "",
       place_of_delivery: form.placeOfDelivery || "",
       birth_attendant: form.birthAttendant || "",
       pp_checkup_24h: form.ppCheckup24h || null,
@@ -716,8 +1002,9 @@ export default function M1Records() {
 
   return (
     <>
+      {cameFromTcl && <BackToTclButton />}
       <PageHeader
-        crumbs={["M1"]}
+        crumbs={cameFromTcl ? [{ label: "Records", to: "../tcls" }, { label: "TCL", to: "../tcls" }, "Maternal Care (M1)"] : ["M1"]}
         title="M1"
         subtitle={
           assignedBarangay
@@ -762,7 +1049,7 @@ export default function M1Records() {
       ) : (
         <>
           {/* Period controls: Monthly | Quarterly | Annual */}
-          <div className="mb-5 flex flex-wrap items-center gap-3">
+          <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-btn border border-brand-border bg-white px-3 py-2.5">
             <div className="inline-flex rounded-btn border border-brand-border bg-white p-0.5">
               {["monthly", "quarterly", "annual"].map((p) => (
                 <button
@@ -817,19 +1104,8 @@ export default function M1Records() {
               </label>
             )}
 
-            <span className="text-sm text-brand-gray">Showing: <span className="font-medium text-brand-ink">{periodLabel}</span></span>
-          </div>
-
-          {/* M1 workspace metrics — compact summary strip (high density) */}
-          <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm">
-            <span className="inline-flex items-center gap-2 font-semibold text-brand-ink">
-              <CalendarClock className="h-4 w-4 text-brand-blue" /> {periodLabel}
-            </span>
-            <span className="text-brand-gray">Maternal records (period): <strong className="text-brand-ink">{m1Metrics.periodRecords}</strong></span>
-            <span className="text-brand-gray">Residents served: <strong className="text-brand-ink">{m1Metrics.residentsServed}</strong></span>
-            <span className="text-brand-gray">Total maternal records: <strong className="text-brand-ink">{m1Metrics.totalRecords}</strong></span>
-            <span className="ml-auto hidden text-xs text-brand-gray sm:inline">
-              Derived indicators are computed automatically from operational records.
+            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-brand-light px-3 py-1 text-xs font-medium text-brand-blue">
+              {periodLabel}
             </span>
           </div>
 
@@ -838,13 +1114,6 @@ export default function M1Records() {
             <HealthServicesSummary
               periodLabel={periodLabel}
               period={period}
-              year={year}
-              month={month}
-              years={yearsList}
-              onPeriodChange={({ year: y, month: m }) => {
-                if (y !== undefined) setYear(y);
-                if (m !== undefined) setMonth(m);
-              }}
               countsBySection={sectionCounts || {}}
               countsLoading={countsLoading}
               countsError={countsError}
@@ -860,7 +1129,7 @@ export default function M1Records() {
                     for (const row of Object.values(byCode)) {
                       const key = row?.section;
                       if (!key) continue;
-                      totals[key] = (totals[key] || 0) + (Number(row.total) || 0);
+                      if (Number(row.total) > 0) totals[key] = (totals[key] || 0) + 1;
                     }
                     setSectionCounts(totals);
                     setCountsError(null);
@@ -868,7 +1137,6 @@ export default function M1Records() {
                   .catch((err) => setCountsError(err?.message || "Unable to load record counts."))
                   .finally(() => setCountsLoading(false));
               }}
-              maternalPeriodCount={m1Metrics.periodRecords}
               onOpenService={openService}
             />
           )}
@@ -992,6 +1260,14 @@ export default function M1Records() {
                         : "No maternal records have been recorded yet.")
                     : "No maternal records match this period or filter."}
                 </p>
+                {(search.trim() !== "" || statusFilter !== "All") && (
+                  <button
+                    onClick={() => { setSearch(""); setStatusFilter("All"); }}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue"
+                  >
+                    <X className="h-3.5 w-3.5" /> Reset filters
+                  </button>
+                )}
               </div>
             ) : (
               <>

@@ -28,6 +28,10 @@ const unwrap = (result, key) => {
   if (result && typeof result === 'object' && key in result) return result[key];
   return result;
 };
+const serverPayload = (payload = {}) => {
+  const { _offlineBarangay, ...record } = payload;
+  return record;
+};
 
 export const SYNC_HANDLERS = {
   household: {
@@ -64,6 +68,25 @@ export const SYNC_HANDLERS = {
       );
       const profile = unwrap(result, 'profile');
       return { serverId: memberId, serverRecord: profile ?? null };
+    },
+  },
+  followup: {
+    async create(op) {
+      const result = await api.post('/operational/followups',       { record: serverPayload(op.payload) }, {
+        ...idempotencyHeaders(op),
+        offlineMutationType: MUTATION_TIER.SAFE_SYNC,
+      });
+      const record = unwrap(result, 'record');
+      return { serverId: record?.id ?? null, serverRecord: record ?? null };
+    },
+    async update(op) {
+      const id = op.targetServerId || op.serverId;
+      const result = await api.put(`/operational/followups/${id}`, { record: serverPayload(op.payload) }, {
+        ...idempotencyHeaders(op),
+        offlineMutationType: MUTATION_TIER.SAFE_SYNC,
+      });
+      const record = unwrap(result, 'record');
+      return { serverId: record?.id ?? id, serverRecord: record ?? null };
     },
   },
 };

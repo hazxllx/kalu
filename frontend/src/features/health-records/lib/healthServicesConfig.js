@@ -67,7 +67,7 @@ export const HEALTH_SERVICES = Object.freeze([
     description: "Immunization, nutrition and child services",
     icon: SERVICE_ICONS.childCare,
     source: "operational",
-    open: { to: "../immunization" },
+    open: { section: "C" },
   },
   {
     key: "D",
@@ -91,7 +91,7 @@ export const HEALTH_SERVICES = Object.freeze([
     description: "Household water supply and sanitation",
     icon: SERVICE_ICONS.environmentalHealth,
     source: "operational",
-    open: { to: "../households" },
+    open: { section: "G" },
   },
   {
     key: "E",

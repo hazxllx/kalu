@@ -95,6 +95,46 @@ function intensityColor(intensity, caseCount) {
   return "#F6C453"; // low
 }
 
+const COMMUNITY_RISK_LEVELS = [
+  {
+    label: "High Risk",
+    description: "High community health risk",
+    color: "#B91C1C",
+  },
+  {
+    label: "Moderate Risk",
+    description: "Moderate community health risk",
+    color: "#EA580C",
+  },
+  {
+    label: "Low Risk",
+    description: "Low community health risk",
+    color: "#16A34A",
+  },
+  {
+    label: "No Data",
+    description: "Classification unavailable",
+    color: "#94A3B8",
+  },
+];
+
+const VALID_COMMUNITY_RISK_LEVELS = new Set(
+  COMMUNITY_RISK_LEVELS.slice(0, 3).map((level) => level.label),
+);
+
+// The map API may provide a persisted, authorized community classification in
+// future deployments. Never infer one from case counts or population here.
+function communityRiskLevel(barangay) {
+  const level = String(
+    barangay?.communityRiskLevel ?? barangay?.riskLevel ?? barangay?.risk_level ?? "",
+  ).trim();
+  return VALID_COMMUNITY_RISK_LEVELS.has(level) ? level : "No Data";
+}
+
+function communityRiskColor(level) {
+  return COMMUNITY_RISK_LEVELS.find((item) => item.label === level)?.color || "#94A3B8";
+}
+
 // Household risk marker colour. Active-case households are emphasised; the
 // colour reflects the household risk level reported by the backend.
 function householdColor(riskLevel, hasActiveCase) {
@@ -274,7 +314,8 @@ export default function CommunityHealthMap({
             <InvalidateSize />
             {plotted.map((b) => {
               const caseCount = b.caseCount ?? 0;
-              const color = intensityColor(b.intensity ?? 0, caseCount);
+              const fillColor = intensityColor(b.intensity ?? 0, caseCount);
+              const riskColor = communityRiskColor(communityRiskLevel(b));
               const isSelected = selectedName && b.name === selectedName;
               return (
                 <CircleMarkerCompat
@@ -282,8 +323,8 @@ export default function CommunityHealthMap({
                   center={[b.latitude, b.longitude]}
                   radius={isSelected ? 16 : 12}
                   pathOptions={{
-                    color: isSelected ? "#1D4ED8" : color,
-                    fillColor: color,
+                    color: riskColor,
+                    fillColor,
                     fillOpacity: caseCount ? 0.7 : 0.4,
                     weight: isSelected ? 4 : 2,
                   }}
@@ -346,7 +387,29 @@ export default function CommunityHealthMap({
         </div>
       )}
 
-      {/* Heatmap legend + any barangays we could not plot (coordinates unavailable). */}
+      <div className="mt-3 rounded-lg border border-brand-border bg-white/95 p-3 shadow-sm">
+        <p className="text-xs font-semibold text-brand-ink">Community Health Risk</p>
+        <p className="mt-0.5 text-[11px] text-brand-gray">
+          Marker outlines use the authorized barangay classification when provided; case intensity remains the fill.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+          {COMMUNITY_RISK_LEVELS.map((level) => (
+            <span key={level.label} className="inline-flex min-w-0 items-center gap-1.5 text-xs text-brand-gray">
+              <span
+                className="h-3 w-3 shrink-0 rounded-full border-2 bg-white"
+                style={{ borderColor: level.color }}
+                aria-hidden="true"
+              />
+              <span className="min-w-0">
+                <span className="block font-medium text-brand-ink">{level.label}</span>
+                <span className="block truncate text-[10px]">{level.description}</span>
+              </span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Case-intensity legend + any barangays we could not plot (coordinates unavailable). */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-brand-gray">
         <span className="font-medium text-brand-ink">Case intensity:</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#94A3B8" }} /> No data</span>

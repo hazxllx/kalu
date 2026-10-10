@@ -1,5 +1,9 @@
 import { api } from "./apiClient";
 import { mapVisitsToPatients, splitWalkInName, triageToVisitPayload } from "@/lib/phnWorkflowMap";
+import { cacheRecord, listCachedRecords } from "@/services/offline/records";
+import { queueOfflineDraft } from "@/services/offline/queue";
+import { listDrafts } from "@/services/offline/drafts";
+import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 
 /**
  * PHN clinical workflow API (BUG-008).
@@ -15,11 +19,80 @@ export const phnWorkflowApi = {
     const payload = await api.get("/phn/submissions");
     return mapVisitsToPatients(payload?.submissions || []);
   },
+  listQueueOffline: async (ownerId) => {
+    if (!ownerId) throw new Error("A signed-in user is required.");
+    let patients = null;
+    try {
+      patients = await phnWorkflowApi.listQueue();
+      await Promise.all(patients.map((patient) =>
+        cacheRecord({
+          entity: "phnQueueVisit",
+          remoteId: patient.id,
+          ownerId,
+          data: patient,
+        }),
+      ));
+    } catch (error) {
+      if (classifySyncError(error).code !== SYNC_ERROR.NETWORK) throw error;
+    }
+    if (!patients) {
+      patients = (await listCachedRecords(ownerId, "phnQueueVisit")).map((row) => row.data);
+    }
+    return patients;
+  },
 
   /** The caller's own intake submissions (RHU personnel / BHW view). */
   listMyIntake: async () => {
     const payload = await api.get("/intake/visits");
     return mapVisitsToPatients(payload?.submissions || []);
+  },
+
+  listMyIntakeOffline: async (ownerId) => {
+    if (!ownerId) throw new Error("A signed-in user is required.");
+    let patients = null;
+    try {
+      patients = await phnWorkflowApi.listMyIntake();
+      await Promise.all(patients.map((patient) =>
+        cacheRecord({
+          entity: "rhuIntakeVisit",
+          remoteId: patient.id,
+          ownerId,
+          data: patient,
+        }),
+      ));
+    } catch (error) {
+      if (classifySyncError(error).code !== SYNC_ERROR.NETWORK) throw error;
+    }
+    if (!patients) {
+      patients = (await listCachedRecords(ownerId, "rhuIntakeVisit")).map((row) => row.data);
+    }
+    const drafts = await listDrafts(ownerId, "rhuTriage");
+    return [
+      ...drafts.filter((draft) => draft.status !== "synced").map((draft) => ({
+        ...draft.data,
+        id: draft.localId,
+        status: "Saved Offline",
+        offline: true,
+        syncStatus: "Saved Offline",
+      })),
+      ...patients,
+    ];
+  },
+
+  saveTriageDraft: async (ownerId, payload) => {
+    if (!ownerId) throw new Error("A signed-in user is required.");
+    const result = await queueOfflineDraft({
+      entity: "rhuTriage",
+      ownerId,
+      data: payload,
+    });
+    return {
+      ...payload,
+      id: result.localId,
+      status: "Saved Offline",
+      offline: true,
+      syncStatus: "Saved Offline",
+    };
   },
 
   /**

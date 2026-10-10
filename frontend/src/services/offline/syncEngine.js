@@ -1,5 +1,5 @@
 import { isNavigatorOnline, subscribeConnectivity } from './connectivity.js';
-import { META_KEYS, readMeta } from './meta.js';
+import { lastSyncedKey, readMeta } from './meta.js';
 import { getSyncHandler } from './handlers.js';
 import { runSyncPass } from './syncRunner.js';
 import { listOperations, requeueOperation } from './outbox.js';
@@ -91,7 +91,7 @@ export const refreshSyncState = async () => {
     const ops = await listOperations(ownerId);
     const { counts, failed, conflicts } = summarizeOperations(ops);
     const offlineDraftCount = await getOfflineDraftCount(ownerId);
-    const lastSyncedAt = await readMeta(META_KEYS.LAST_SYNCED_AT, null);
+    const lastSyncedAt = await readMeta(lastSyncedKey(ownerId), null);
     setState({
       ownerId,
       counts: { ...counts, offlineDraft: offlineDraftCount },

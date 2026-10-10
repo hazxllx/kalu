@@ -46,12 +46,32 @@ export const REPORT_ROUTES = Object.freeze({
   [ROLES.MHO]: [ROLES.MHO],
 });
 
+export const REPORT_RECIPIENT_ROLES = Object.freeze([
+  ROLES.RHU_PERSONNEL,
+  ROLES.PHN,
+  ROLES.MHO,
+]);
+
 /** Statuses a recipient may set when acting on a received report. */
 const RECIPIENT_DECISIONS = new Set([REPORT_STATUS.RECEIVED, REPORT_STATUS.REVIEWED, REPORT_STATUS.REJECTED]);
 
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
+};
+
+export const assertNoDuplicateSubmission = async (supabase, row) => {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('id')
+    .eq('created_by', row.created_by)
+    .eq('report_type', row.report_type)
+    .eq('report_period', row.report_period)
+    .eq('recipient_role', row.recipient_role)
+    .neq('status', REPORT_STATUS.DRAFT)
+    .maybeSingle();
+  throwOnError(error, 'Could not check for an existing report');
+  if (data) throw ApiError.conflict('This report has already been submitted for the selected period.');
 };
 
 /** The recipient role for a sender, validating any explicit request. */
@@ -102,7 +122,7 @@ const SELECT = `*, ${SENDER_EMBED}, ${REVIEWER_EMBED}, ${BARANGAY_EMBED}`;
 
 const assertStaff = (user) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
-  if (!REPORT_ROUTES[user.role]) {
+  if (!REPORT_ROUTES[user.role] && !REPORT_RECIPIENT_ROLES.includes(user.role)) {
     throw ApiError.forbidden('Your role is not authorized to use reports.');
   }
 };
@@ -197,7 +217,14 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
     submitted_at: asDraft ? null : new Date().toISOString(),
   };
 
+  if (!asDraft) {
+    await assertNoDuplicateSubmission(supabase, row);
+  }
+
   const { data, error } = await supabase.from(TABLE).insert(row).select(SELECT).single();
+  if (error?.code === '23505') {
+    throw ApiError.conflict('This report has already been submitted for the selected period.');
+  }
   throwOnError(error, 'Could not submit report');
 
   // Notify the routed recipients (per authenticated recipient account). Skipped
@@ -279,4 +306,16 @@ export const meta = () => ({
   routes: REPORT_ROUTES,
 });
 
-export default { REPORT_STATUS, REPORT_STATUSES, REPORT_ROUTES, resolveRecipientRole, list, getById, create, review, meta };
+export default {
+  REPORT_STATUS,
+  REPORT_STATUSES,
+  REPORT_ROUTES,
+  REPORT_RECIPIENT_ROLES,
+  assertNoDuplicateSubmission,
+  resolveRecipientRole,
+  list,
+  getById,
+  create,
+  review,
+  meta,
+};

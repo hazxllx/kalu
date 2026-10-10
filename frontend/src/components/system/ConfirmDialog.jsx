@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { X, AlertTriangle } from "lucide-react";
-import { TYPE, PALETTE, RADIUS, Z } from "@/lib/designTokens";
+import { TYPE } from "@/lib/designTokens";
 
 /**
  * Accessible confirm dialog (delete / destructive action).
@@ -23,6 +23,11 @@ export default function ConfirmDialog({
   const [visible, setVisible] = useState(isOpen);
   const [closing, setClosing] = useState(false);
 
+  const handleCancel = React.useCallback(() => {
+    setClosing(true);
+    setTimeout(() => onCancel?.(), 150);
+  }, [onCancel]);
+
   React.useEffect(() => {
     if (isOpen) {
       setVisible(true);
@@ -38,16 +43,9 @@ export default function ConfirmDialog({
     }
   }, [isOpen]);
 
-  if (!visible) return null;
-
   const handleConfirm = () => {
     setClosing(true);
     setTimeout(() => onConfirm?.(), 150);
-  };
-
-  const handleCancel = () => {
-    setClosing(true);
-    setTimeout(() => onCancel?.(), 150);
   };
 
   React.useEffect(() => {
@@ -56,7 +54,11 @@ export default function ConfirmDialog({
     };
     if (isOpen) document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [isOpen]);
+  }, [isOpen, handleCancel]);
+
+  if (!visible) return null;
+
+  const Icon = icon;
 
   return (
     <div
@@ -67,7 +69,7 @@ export default function ConfirmDialog({
       aria-labelledby="confirm-title"
     >
       <div
-        className={`w-full max-w-md overflow-hidden rounded-[12px] bg-white shadow-[0_20px_50px_-12px_rgba(9,30,66,0.5)] dark:bg-[#131E2C] ${closing ? "opacity-0 scale-95" : "opacity-100 scale-100"} transition-all`}
+        className={`flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-[12px] bg-white shadow-[0_20px_50px_-12px_rgba(9,30,66,0.5)] dark:bg-[#131E2C] ${closing ? "opacity-0 scale-95" : "opacity-100 scale-100"} transition-all`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 border-b border-[#E7ECF1] bg-[#F4F6FA] px-5 py-4 dark:border-[#2A3645] dark:bg-[#0D1826]">
@@ -76,7 +78,7 @@ export default function ConfirmDialog({
               ? "bg-[#FDECEC] dark:bg-[#6B2830]"
               : "bg-[#E8F0FA] dark:bg-[#144175]"
           }`}>
-            <icon
+            <Icon
               className={`h-5 w-5 ${
                 tone === "danger"
                   ? "text-[#B3202C] dark:text-[#E05D67]"
@@ -110,7 +112,7 @@ export default function ConfirmDialog({
         </div>
 
         {!closing && (
-          <div className="px-5 py-4">
+          <div className="min-h-0 overflow-y-auto px-5 py-4">
             <p
               className="m-0 text-[13px] text-[#54637A] dark:text-[#9AA7B5]"
               style={{ fontFamily: TYPE.body.family }}
@@ -120,11 +122,11 @@ export default function ConfirmDialog({
           </div>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-[#E7ECF1] bg-[#F4F6FA] px-5 py-3.5 dark:border-[#2A3645] dark:bg-[#0D1826]">
+        <div className="flex flex-col-reverse gap-2 border-t border-[#E7ECF1] bg-[#F4F6FA] px-5 py-3.5 sm:flex-row sm:justify-end dark:border-[#2A3645] dark:bg-[#0D1826]">
           <button
             type="button"
             onClick={handleCancel}
-            className="rounded-[4px] px-4 py-2 text-[13px] font-medium text-[#54637A] transition-colors hover:bg-[#D6DEE8] hover:text-[#12263F] dark:hover:bg-[#1B2635] dark:hover:text-[#E8EDF3]"
+            className="min-h-10 rounded-[4px] px-4 py-2 text-[13px] font-medium text-[#54637A] transition-colors hover:bg-[#D6DEE8] hover:text-[#12263F] dark:hover:bg-[#1B2635] dark:hover:text-[#E8EDF3]"
             style={{ fontFamily: TYPE.body.family }}
           >
             {cancelLabel}
@@ -133,7 +135,7 @@ export default function ConfirmDialog({
             type="button"
             onClick={handleConfirm}
             disabled={closing}
-            className={`rounded-[4px] px-4 py-2 text-[13px] font-medium text-white transition-colors ${
+            className={`min-h-10 rounded-[4px] px-4 py-2 text-[13px] font-medium text-white transition-colors ${
               tone === "danger"
                 ? "bg-[#B3202C] hover:bg-[#991B26] disabled:opacity-60"
                 : "bg-[#0B4A8F] hover:bg-[#072F5F] disabled:opacity-60"

@@ -17,8 +17,9 @@ import { db } from './db.js';
  *     persisted as a NON-EXTRACTABLE CryptoKey (its bytes cannot be read back
  *     out). Environments that cannot structured-clone a CryptoKey fall back to
  *     storing raw key bytes — this is a test-environment path, not the browser
- *     path. The key never leaves the device and is destroyed with the rest of the
- *     database on logout (`purgeOfflineDb`).
+ *     path. The key never leaves the device. It remains available for
+ *     owner-scoped pending work after logout/session expiry and is removed only
+ *     when the explicit device cleanup action calls `purgeOfflineDb`.
  *   - Residual risk (documented, not fully mitigable in a browser): the key is
  *     co-located with the ciphertext, so same-origin script or an attacker who
  *     can read the whole IndexedDB can still decrypt. At-rest encryption here is

@@ -20,7 +20,7 @@ import Dexie from 'dexie';
 export const OFFLINE_DB_NAME = 'kalusagap-offline';
 
 /** Current local schema version. Bump together with a new `.version(n)` block. */
-export const OFFLINE_DB_VERSION = 1;
+export const OFFLINE_DB_VERSION = 2;
 
 export class OfflineStorageError extends Error {
   /**
@@ -52,6 +52,24 @@ db.version(1).stores({
   // Device key material for at-rest encryption.
   keys: 'id',
 });
+
+// Include the authenticated owner in the cache key.  The previous schema
+// keyed cached records only by entity and server id, so one account could
+// overwrite another account's cached copy before the owner check ran.
+db.version(2)
+  .stores({
+    drafts: 'localId, entity, ownerId, status, updatedAt',
+    outbox:
+      'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
+    records: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
+    syncMeta: 'key',
+    keys: 'id',
+  })
+  .upgrade(async (tx) => {
+    const records = await tx.table('records').toArray();
+    await tx.table('records').clear();
+    await Promise.all(records.map((record) => tx.table('records').put(record)));
+  });
 
 /** True when an error is an IndexedDB storage-quota exhaustion. */
 export const isQuotaError = (error) => {
@@ -92,8 +110,9 @@ export const openOfflineDb = async () => {
 };
 
 /**
- * Delete the entire offline database. Called on logout and on account switch so
- * a shared device never leaves one user's queued health data for the next user.
+ * Delete the entire offline database for an explicit device cleanup action.
+ * Normal logout/session expiry must not call this: pending work is retained
+ * and remains inaccessible to other accounts through owner-scoped queries.
  */
 export const purgeOfflineDb = async () => {
   try {

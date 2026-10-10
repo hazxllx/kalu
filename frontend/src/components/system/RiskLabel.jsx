@@ -1,5 +1,5 @@
 import React from "react";
-import { TYPE, PALETTE } from "@/lib/designTokens";
+import { TYPE } from "@/lib/designTokens";
 import StatusIndicator from "./StatusIndicator";
 
 /**
@@ -42,7 +42,7 @@ export default function RiskLabel({ level, className = "" }) {
     >
       <span
         className={`inline-block shrink-0 rounded-full h-1.5 w-1.5`}
-        style={{ backgroundColor: tone.dot }}
+        style={{ backgroundColor: dotColor.dot }}
         aria-hidden="true"
       />
       {level}

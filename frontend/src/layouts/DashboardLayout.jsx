@@ -185,6 +185,27 @@ export default function DashboardLayout({ roleKey }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    setOpen(false);
+    setMenuOpen(false);
+  }, [location.pathname]);
+
   const settingsPath = `/${
     roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`
   }/settings`;
@@ -459,7 +480,8 @@ export default function DashboardLayout({ roleKey }) {
               animate={{ x: 0 }}
               exit={{ x: -280 }}
               transition={{ type: "spring", damping: 26, stiffness: 240 }}
-              className="fixed inset-y-0 left-0 w-72 bg-white dark:bg-sidebar z-50 lg:hidden flex flex-col"
+              aria-label="Mobile navigation"
+              className="fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col bg-white dark:bg-sidebar lg:hidden"
             >
               <div className="h-20 shrink-0 flex items-center justify-between gap-3 px-5 border-b border-slate-200 dark:border-border">
                 <SidebarBrand />
@@ -502,6 +524,9 @@ export default function DashboardLayout({ roleKey }) {
         <header className="sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 md:px-6">
           <button
             onClick={() => setOpen(true)}
+            type="button"
+            aria-label="Open navigation menu"
+            aria-expanded={open}
             className="lg:hidden text-slate-600 dark:text-slate-300"
           >
             <Menu className="w-6 h-6" />
@@ -682,7 +707,7 @@ export default function DashboardLayout({ roleKey }) {
           </div>
         </header>
 
-        <main className="max-w-content mx-auto px-4 md:px-8 py-8">
+        <main className="mx-auto min-w-0 max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8">
           {matrixLoadState.userId === user?.id && matrixLoadState.status === "error" && (
             <div
               className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-brand-danger/30 bg-white px-4 py-3 text-sm text-brand-ink"

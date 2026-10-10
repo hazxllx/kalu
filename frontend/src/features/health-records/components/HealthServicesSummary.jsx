@@ -1,11 +1,9 @@
 import React from "react";
 import { Info, RefreshCw, ArrowRight } from "lucide-react";
 import { Skeleton } from "@/components/common/Skeleton";
-import { MONTH_LABELS } from "@/features/health-records/lib/m1Analytics";
 import {
   HEALTH_SERVICES,
   SERVICE_SOURCE_LABEL,
-  recordCountLabel,
 } from "@/features/health-records/lib/healthServicesConfig";
 
 /**
@@ -46,8 +44,8 @@ function ServiceRow({ service, count, onOpen }) {
   const Icon = service.icon;
   const accent = SOURCE_ACCENT[service.source] || SOURCE_ACCENT.m1;
   const records = count == null ? "—" : count;
-  const countLabel = count == null ? "records" : recordCountLabel(count);
-  const actionLabel = service.source === "operational" ? "View records" : "View M1";
+  const countLabel = count == null ? "indicators" : (Number(count) === 1 ? "indicator" : "indicators");
+  const actionLabel = "View M1";
 
   return (
     <tr
@@ -110,8 +108,8 @@ function ServiceBlock({ service, count, onOpen }) {
   const Icon = service.icon;
   const accent = SOURCE_ACCENT[service.source] || SOURCE_ACCENT.m1;
   const records = count == null ? "—" : count;
-  const countLabel = count == null ? "records" : recordCountLabel(count);
-  const actionLabel = service.source === "operational" ? "View records" : "View M1";
+  const countLabel = count == null ? "indicators" : (Number(count) === 1 ? "indicator" : "indicators");
+  const actionLabel = "View M1";
 
   return (
     <div
@@ -157,45 +155,30 @@ function ServiceBlock({ service, count, onOpen }) {
 /**
  * @param {{
  *   periodLabel: string,
- *   period: string,
- *   year: number,
- *   month: number,
- *   years: number[],
- *   onPeriodChange: (patch: { year?: number, month?: number }) => void,
  *   countsBySection: Record<string, number|null>,
  *   countsLoading: boolean,
  *   countsError: string|null,
  *   onRetryCounts: () => void,
- *   maternalPeriodCount: number,
  *   onOpenService: (svc: object) => void,
  * }} props
  */
 export default function HealthServicesSummary(props) {
   const {
     periodLabel,
-    period = "monthly",
-    year,
-    month,
-    years,
-    onPeriodChange,
     countsBySection,
     countsLoading,
     countsError,
     onRetryCounts,
-    maternalPeriodCount,
     onOpenService,
   } = props;
 
   const rows = HEALTH_SERVICES.map((svc) => {
-    const count =
-      svc.key === "B"
-        ? maternalPeriodCount
-        : (countsBySection[svc.key] ?? null);
+    const count = countsBySection[svc.key] ?? null;
     return { service: svc, count };
   });
 
   // Dynamic status-bar values (all real, none hardcoded).
-  const totalRecords = rows.reduce(
+  const totalReportedIndicators = rows.reduce(
     (sum, r) => sum + (r.count == null ? 0 : r.count),
     0,
   );
@@ -204,55 +187,24 @@ export default function HealthServicesSummary(props) {
   ).length;
   const servicesWithRecords = rows.filter((r) => r.count > 0).length;
   const allZero =
-    !rows.some((r) => r.count == null) && totalRecords === 0;
+    !rows.some((r) => r.count == null) && totalReportedIndicators === 0;
 
   const stats = [
-    { value: periodLabel, label: "Reporting period", strong: false },
     { value: HEALTH_SERVICES.length, label: "Health services", strong: true, accent: true },
-    { value: countsLoading ? "—" : totalRecords, label: "Total records", strong: true },
+    { value: countsLoading ? "—" : totalReportedIndicators, label: "Reported indicators", strong: true },
     { value: operationalSources, label: "Operational sources", strong: true },
-    { value: countsLoading ? "—" : servicesWithRecords, label: "With records", strong: true },
+    { value: countsLoading ? "—" : servicesWithRecords, label: "With reported values", strong: true },
   ];
 
   return (
     <section className="mt-6 overflow-hidden rounded-btn border border-brand-border bg-white">
-      {/* Header: title + reporting-period selector */}
+      {/* Header: the parent M1 workspace owns the reporting-period selector. */}
       <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 border-b border-brand-border px-5 py-4">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold leading-tight text-brand-ink">Health Services</h2>
           <p className="mt-0.5 text-[13px] text-brand-gray">Manage service records and M1 reporting data</p>
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">
-            Reporting period
-          </span>
-          <select
-            value={year}
-            onChange={(e) => onPeriodChange({ year: Number(e.target.value) })}
-            aria-label="Reporting year"
-            className="h-8 rounded-[3px] border border-brand-border bg-white px-2.5 text-sm text-brand-ink outline-none transition-colors focus:border-brand-blue"
-          >
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
-          {period === "monthly" && (
-            <select
-              value={month}
-              onChange={(e) => onPeriodChange({ month: Number(e.target.value) })}
-              aria-label="Reporting month"
-              className="h-8 rounded-[3px] border border-brand-border bg-white px-2.5 text-sm text-brand-ink outline-none transition-colors focus:border-brand-blue"
-            >
-              {MONTH_LABELS.map((label, i) => (
-                <option key={label} value={i}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
+        <span className="text-xs text-brand-gray">Selected period: <strong className="text-brand-ink">{periodLabel}</strong></span>
       </div>
 
       {/* M1 reporting note (subtle, uses the selected period). */}
@@ -328,7 +280,7 @@ export default function HealthServicesSummary(props) {
             <tr className="bg-brand-bg/50 text-left">
               <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Service</th>
               <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Description</th>
-              <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Records</th>
+              <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Reported indicators</th>
               <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Reporting source</th>
               <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Action</th>
             </tr>

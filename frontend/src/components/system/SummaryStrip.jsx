@@ -1,6 +1,6 @@
 import React, { forwardRef } from "react";
 import { ChevronRight } from "lucide-react";
-import { TYPE, PALETTE, RADIUS } from "@/lib/designTokens";
+import { TYPE } from "@/lib/designTokens";
 import Icon from "@/components/common/Icon";
 
 /**
