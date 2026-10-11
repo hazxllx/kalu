@@ -197,6 +197,10 @@ const RhuTriage = appPage(
     )
 );
 
+const IncomingReferrals = appPage(
+  () => import('@/features/triage/pages/IncomingReferrals')
+);
+
 const RhuConsultation = appPage(
   () =>
     import(
@@ -407,13 +411,6 @@ const MunicipalHealthReports = appPage(
   () =>
     import(
       '@/features/reports/pages/MunicipalHealthReports'
-    )
-);
-
-const RhuIncomingReports = appPage(
-  () =>
-    import(
-      '@/features/reports/pages/RhuIncomingReports'
     )
 );
 
@@ -1114,25 +1111,18 @@ const AppRoutes = () => (
           path="triage"
           element={<RhuTriage />}
         />
+        <Route
+          path="incoming-referrals"
+          element={<IncomingReferrals />}
+        />
 
-        {/* RHU Personnel uses one account for both triage and consultation. */}
+        {/* RHU Personnel accounts are station-assigned; each account sees its own workspace. */}
         <Route
           path="consultation"
           element={<RhuConsultation />}
         />
 
-        {/* Incoming Reports — RHU Personnel are the routed recipients of Health
-            Supervisor barangay reports (read/review only; they cannot author). */}
-        <Route
-          path="reports"
-          element={<RhuIncomingReports />}
-        />
-
-        {/*
-          No referrals route: the API denies RHU Personnel referral access
-          (403), so there is no referral page for this role. Direct access
-          falls through to the dashboard catch-all below.
-        */}
+        {/* RHU Incoming Referrals is a triage-station workflow; PHN/HS tracking stays in HealthReferrals. */}
         <Route
           path="certificates/new"
           element={<CertificateComposer />}

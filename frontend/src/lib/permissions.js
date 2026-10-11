@@ -817,10 +817,8 @@ const DEFAULT_GRANTS = Object.freeze({
   // to the resident directory — resident records are owned by the barangay
   // Health Supervisor / municipal roles. Their triage flow only ever searches
   // residents as a reference and never opens the directory page.
-  // RHU Personnel are granted NO referral permissions: the API denies them
-  // referral access outright (backend config/roles.js excludes rhu_personnel
-  // from the referral read/write scope), so granting them here would only
-  // advertise a capability the server refuses.
+  // RHU referral reads are station-gated by the API; writes remain Health
+  // Supervisor / PHN only. The Incoming Referrals screen is Triage-only.
   [ROLE.RHU_PERSONNEL]: [
     'consultation.requests.view',
     'consultation.conduct',
@@ -833,12 +831,8 @@ const DEFAULT_GRANTS = Object.freeze({
     'triage.perform',
     'triage.assessment.update',
     'triage.forward',
+    'referrals.view',
     'services.view',
-    // RHU Personnel are the routed RECIPIENTS of Health Supervisor reports.
-    // reports.view opens the Incoming Reports inbox (read + acknowledge/review).
-    // reports.generate is deliberately NOT granted: RHU can never author a
-    // report, only receive and act on one (mirrors backend reports.routes.js).
-    'reports.view',
   ],
 
   // DATA GATHERING ONLY. No consultation, no referral approval, no resident

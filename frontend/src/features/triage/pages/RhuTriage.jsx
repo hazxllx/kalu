@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup } from "@/components/system";
@@ -99,6 +100,8 @@ const numeric = (value) => (value !== "" && value != null && !Number.isNaN(Numbe
 
 export default function RhuTriage() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { barangays: liveBarangays } = useBarangays();
   // BUG-008: the "recently sent" list and the triage hand-off are backed by the
   // persistent database (the caller's own /intake submissions), not localStorage.
@@ -113,6 +116,8 @@ export default function RhuTriage() {
   const [entryMode, setEntryMode] = useState("choose");
   const [patientType, setPatientType] = useState(null); // null | "registered" | "walkin"
   const [selected, setSelected] = useState(null); // registered resident object (real record only)
+  const [residentContext, setResidentContext] = useState(null);
+  const [residentContextLoading, setResidentContextLoading] = useState(false);
   const [walkIn, setWalkIn] = useState({ name: "", age: "", sex: "Female", barangay: "" }); // walk-in draft
 
   // Remaining triage sections (kept in state so Back/Continue never lose data).
@@ -140,6 +145,7 @@ export default function RhuTriage() {
   // overwrite the state produced by a newer load (e.g. a refresh fired right
   // after a successful hand-off).
   const referralLoadSeq = useRef(0);
+  const residentLoadSeq = useRef(0);
 
   const loadIncomingReferrals = useCallback(async () => {
     const seq = (referralLoadSeq.current += 1);
@@ -156,6 +162,29 @@ export default function RhuTriage() {
   useEffect(() => {
     loadIncomingReferrals();
   }, [loadIncomingReferrals]);
+
+  useEffect(() => {
+    const seq = (residentLoadSeq.current += 1);
+    setResidentContext(null);
+    if (!selected?.id) {
+      setResidentContextLoading(false);
+      return undefined;
+    }
+    setResidentContextLoading(true);
+    intakeApi.getResident(selected.id)
+      .then((resident) => {
+        if (seq === residentLoadSeq.current) setResidentContext(resident);
+      })
+      .catch(() => {
+        if (seq === residentLoadSeq.current) setResidentContext(null);
+      })
+      .finally(() => {
+        if (seq === residentLoadSeq.current) setResidentContextLoading(false);
+      });
+    return () => {
+      if (seq === residentLoadSeq.current) residentLoadSeq.current += 1;
+    };
+  }, [selected?.id]);
 
   const visibleHistory = useMemo(
     () =>
@@ -249,6 +278,7 @@ export default function RhuTriage() {
     setCurrentStep("patient");
     setPatientType(null);
     setSelected(null);
+    setResidentContext(null);
     setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
     setSearchQuery("");
     setEntryMode("choose");
@@ -265,6 +295,8 @@ export default function RhuTriage() {
     if (!resident) return;
     setPatientType("registered");
     setSelected(resident);
+    setResidentContext(null);
+    setVitals(emptyVitals());
     setSearchQuery("");
     setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
     setErrors({});
@@ -284,11 +316,28 @@ export default function RhuTriage() {
       : "";
     chooseRegistered({ id: r.id || ref.resident_id, name, age, sex: r.sex || "", barangay: r.barangay || "" });
     setActiveReferral(ref);
+    const draft = ref.encounter?.status === "draft" ? ref.encounter : null;
+    if (draft) {
+      setVitals({
+        heightCm: draft.height_cm == null ? "" : String(draft.height_cm),
+        weightKg: draft.weight_kg == null ? "" : String(draft.weight_kg),
+        bloodPressure: draft.bp || "",
+        bloodSugar: draft.blood_sugar == null ? "" : String(draft.blood_sugar),
+      });
+    }
+    setNotes(draft?.clinical_history || "");
     setReason("Other");
-    setReasonDetail(ref.reason || ref.chief_complaints || "");
+    setReasonDetail(draft?.chief_complaint || ref.reason || ref.chief_complaints || "");
     setCurrentStep("vitals");
     setErrors({});
   };
+
+  useEffect(() => {
+    const referral = location.state?.referralToScreen;
+    if (!referral) return;
+    beginReferralTriage(referral);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, navigate]);
 
   const startSearch = () => {
     setEntryMode("search");
@@ -310,6 +359,7 @@ export default function RhuTriage() {
   const changePatient = () => {
     setPatientType(null);
     setSelected(null);
+    setResidentContext(null);
     setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
     setEntryMode("choose");
     setSearchQuery("");
@@ -541,55 +591,18 @@ export default function RhuTriage() {
                   <>
                     {stepIndicator(1, "Identify Patient", "Who are you helping today?")}
 
-                    {entryMode === "choose" && incomingReferrals.length > 0 && (
-                      <div className="mb-5 max-w-2xl rounded-btn border border-brand-border bg-brand-bg/40 p-4">
-                        <p className="text-sm font-semibold text-brand-ink">Incoming Barangay Referrals</p>
-                        <p className="mt-0.5 text-xs text-brand-gray">
-                          Patients referred from a barangay. Open one to begin RHU screening.
-                        </p>
-                        <ul className="mt-3 space-y-2">
-                          {incomingReferrals.map((ref) => {
-                            const r = ref.resident || {};
-                            const name =
-                              [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(" ").trim() ||
-                              "Unnamed resident";
-                            return (
-                              <li
-                                key={ref.id}
-                                className="flex flex-wrap items-center justify-between gap-2 rounded-btn border border-brand-border bg-white px-3 py-2"
-                              >
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium text-brand-ink">{name}</p>
-                                  <p className="truncate text-xs text-brand-gray">
-                                    {r.barangay || "—"}
-                                    {ref.scheduled_at
-                                      ? ` · ${new Date(ref.scheduled_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                                      : ""}
-                                    {ref.priority ? ` · ${ref.priority}` : ""}
-                                  </p>
-                                  <p className="truncate text-xs text-brand-gray">
-                                    {ref.reason || ref.chief_complaints || ""}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {ref.stage?.label && (
-                                    <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[11px] font-medium text-brand-blue">
-                                      {ref.stage.label}
-                                    </span>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => beginReferralTriage(ref)}
-                                    className="rounded-btn bg-brand-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark"
-                                  >
-                                    Begin screening
-                                  </button>
-                                </div>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
+                    {entryMode === "choose" && (
+                      <Link
+                        to="/app/rhu_personnel/incoming-referrals"
+                        className="mb-5 inline-flex items-center gap-2 rounded-btn border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-sm font-medium text-brand-blue hover:bg-brand-blue/10"
+                      >
+                        Review Incoming Referrals
+                        {incomingReferrals.length > 0 && (
+                          <span className="rounded-full bg-brand-blue px-2 py-0.5 text-xs text-white">
+                            {incomingReferrals.length}
+                          </span>
+                        )}
+                      </Link>
                     )}
 
                     {entryMode === "choose" ? (
@@ -813,6 +826,11 @@ export default function RhuTriage() {
                                 <dd className="font-medium text-brand-ink">{patientBarangay || "—"}</dd>
                               </div>
                             </dl>
+                            {patientType === "registered" && (
+                              <p className="mt-2 text-xs text-brand-gray">
+                                Address: {residentContextLoading ? "Loading resident record…" : [residentContext?.currentAddress || residentContext?.permanentAddress, residentContext?.barangay || patientBarangay, residentContext?.municipality].filter(Boolean).join(", ") || "Not recorded"}
+                              </p>
+                            )}
                           </div>
                         </div>
                         <button
@@ -842,6 +860,33 @@ export default function RhuTriage() {
                 )}
 
                 <div className="max-w-2xl space-y-4">
+                  {patientType === "registered" && (
+                    <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
+                      <h4 className="text-sm font-semibold text-brand-ink">Previous Measurements</h4>
+                      {residentContextLoading ? (
+                        <p className="mt-1 text-xs text-brand-gray">Loading this resident’s completed health records…</p>
+                      ) : (
+                        <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                          <p>Height: <strong>{residentContext?.latestMeasurements?.heightCm ? `${residentContext.latestMeasurements.heightCm} cm` : "Not recorded"}</strong>{residentContext?.latestMeasurements?.heightMeasuredAt ? ` · ${new Date(residentContext.latestMeasurements.heightMeasuredAt).toLocaleDateString()}` : ""}</p>
+                          <p>Weight: <strong>{residentContext?.latestMeasurements?.weightKg ? `${residentContext.latestMeasurements.weightKg} kg` : "Not recorded"}</strong>{residentContext?.latestMeasurements?.weightMeasuredAt ? ` · ${new Date(residentContext.latestMeasurements.weightMeasuredAt).toLocaleDateString()}` : ""}</p>
+                        </div>
+                      )}
+                      <p className="mt-2 text-[11px] text-brand-gray">These are historical values from completed encounters. Enter today’s measurements below; the historical values are not copied into this screening.</p>
+                      {(residentContext?.recentClinicalHistory || []).length > 0 && (
+                        <details className="mt-3">
+                          <summary className="cursor-pointer text-xs font-medium text-brand-blue">Recent clinical history</summary>
+                          <ul className="mt-2 space-y-2">
+                            {residentContext.recentClinicalHistory.map((entry, index) => (
+                              <li key={`${entry.date || "history"}-${index}`} className="border-t border-brand-border pt-2">
+                                <p className="font-medium text-brand-ink">{entry.date ? new Date(entry.date).toLocaleDateString() : "Date not recorded"} · {entry.chiefComplaint || "Clinical encounter"}</p>
+                                <p>{entry.findings || entry.assessment || "No findings recorded"}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-brand-ink">Height *</label>
@@ -1065,8 +1110,8 @@ export default function RhuTriage() {
           <div className="border-b border-brand-border/70 px-4 py-4 sm:px-6">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-semibold text-brand-ink">Recently Sent Patients</h3>
-                <p className="mt-0.5 text-xs text-brand-gray">Patients recently sent to the consultation queue.</p>
+                <h3 className="text-base font-semibold text-brand-ink">Screening Completion &amp; Hand-offs</h3>
+                <p className="mt-0.5 text-xs text-brand-gray">Your completed screenings and their separate consultation progress.</p>
               </div>
               <Users className="h-4 w-4 shrink-0 text-brand-gray" />
             </div>
@@ -1120,7 +1165,10 @@ export default function RhuTriage() {
                           {p.reason || p.triage?.chiefComplaint}
                         </p>
                         <p className="truncate text-xs text-brand-gray">
-                          Responsible personnel: {p.raw?.responsiblePersonnelName || p.raw?.responsiblePersonnelId || "—"}
+                          Screening recorded by: {p.raw?.recordedByName || user?.name || "Your account"}
+                        </p>
+                        <p className="truncate text-xs text-brand-gray">
+                          Screening submitted: {p.raw?.submittedAt ? new Date(p.raw.submittedAt).toLocaleString() : "Date not recorded"}
                         </p>
                       </div>
                       <div className="md:flex md:justify-end">
@@ -1129,9 +1177,18 @@ export default function RhuTriage() {
                           title={meta.note}
                         >
                           <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                          {meta.text}
+                          {p.status === CHECKUP_STATUS.COMPLETED ? "Consultation completed" : p.status === CHECKUP_STATUS.IN_CHECKUP ? "Consultation in progress" : "Screening sent — awaiting consultation"}
                         </span>
                       </div>
+                      <details className="rounded-btn bg-brand-bg/60 px-3 py-2 text-xs md:col-span-5">
+                        <summary className="cursor-pointer font-medium text-brand-blue">Review screening details</summary>
+                        <div className="mt-2 grid gap-2 text-brand-gray sm:grid-cols-2">
+                          <p><strong className="text-brand-ink">Screening:</strong> Submitted successfully; required information passed server validation.</p>
+                          <p><strong className="text-brand-ink">Next step:</strong> {p.status === CHECKUP_STATUS.WAITING ? "Awaiting consultation review." : p.status === CHECKUP_STATUS.IN_CHECKUP ? "Consultation is in progress." : "Consultation is complete."}</p>
+                          <p><strong className="text-brand-ink">Vital signs:</strong> {[p.triage?.bloodPressure && `BP ${p.triage.bloodPressure}`, p.triage?.temperature && `Temp ${p.triage.temperature} °C`, p.triage?.pulseRate && `HR ${p.triage.pulseRate}`, p.triage?.respiratoryRate && `RR ${p.triage.respiratoryRate}`, p.triage?.oxygenSaturation && `O₂ ${p.triage.oxygenSaturation}%`, p.triage?.heightCm && `Height ${p.triage.heightCm} cm`, p.triage?.weight && `Weight ${p.triage.weight} kg`].filter(Boolean).join(" · ") || "Not recorded"}</p>
+                          <p><strong className="text-brand-ink">Initial screening findings:</strong> {p.triage?.notes || "Not recorded"}</p>
+                        </div>
+                      </details>
                     </li>
                   );
                 })}

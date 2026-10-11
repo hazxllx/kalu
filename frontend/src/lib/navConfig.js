@@ -423,6 +423,14 @@ export const NAV = {
       group: "Operations",
     },
     {
+      label: "Incoming Referrals",
+      icon: "Inbox",
+      path: "/app/rhu_personnel/incoming-referrals",
+      permission: "referrals.view",
+      station: "triage",
+      group: "Operations",
+    },
+    {
       label: "Consultation",
       icon: "Stethoscope",
       path: "/app/rhu_personnel/consultation",
@@ -435,13 +443,6 @@ export const NAV = {
       icon: "FileText",
       path: "/app/rhu_personnel/certificates",
       station: "triage",
-      group: "Operations",
-    },
-    {
-      label: "Incoming Reports",
-      icon: "Inbox",
-      path: "/app/rhu_personnel/reports",
-      permission: "reports.view",
       group: "Operations",
     },
     {

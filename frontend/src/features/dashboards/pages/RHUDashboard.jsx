@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
@@ -10,11 +10,12 @@ import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { useAuth } from "@/context/AuthContext";
 import { canTriage, canConsult } from "@/lib/rhuStations";
+import { referralsApi } from "@/services/api";
+import { filterOpenReferrals } from "@/features/triage/lib/triageWorkflow";
 import {
   Activity,
   ArrowRight,
   Bell,
-  CalendarDays,
   FileText,
   RefreshCw,
   Stethoscope,
@@ -24,6 +25,13 @@ import {
 // Medical Certificate requests; a Consultation-station account sees
 // Consultation. Items with no `station` are shown to every RHU account.
 const QUICK_ACTIONS = [
+  {
+    icon: FileText,
+    label: "Incoming Referrals",
+    path: "/app/rhu_personnel/incoming-referrals",
+    description: "Review barangay referrals and begin resident screening.",
+    station: "triage",
+  },
   {
     icon: Stethoscope,
     label: "Open Triage",
@@ -93,12 +101,40 @@ const localDayStart = (value) => {
 
 export default function RHUDashboard() {
   const { user } = useAuth();
+  const triageStation = canTriage(user);
+  const consultationStation = canConsult(user);
+  const [incomingCount, setIncomingCount] = useState(0);
+  const [referralStageCounts, setReferralStageCounts] = useState({ awaitingTriage: 0, screening: 0, awaitingConsultation: 0 });
+  const [referralsLoading, setReferralsLoading] = useState(false);
+  const [referralsError, setReferralsError] = useState("");
   const {
     patients,
     loading,
     error,
     refresh,
-  } = usePhnWorkflow({ source: "intake" });
+  } = usePhnWorkflow({ source: consultationStation ? "queue" : "intake" });
+
+  const refreshReferrals = useCallback(async () => {
+    if (!triageStation) return;
+    setReferralsLoading(true);
+    setReferralsError("");
+    try {
+      const result = await referralsApi.list();
+      const openReferrals = filterOpenReferrals(result?.rows || []);
+      setIncomingCount(openReferrals.length);
+      setReferralStageCounts({
+        awaitingTriage: openReferrals.filter((referral) => referral.stage?.key === "awaiting_rhu").length,
+        screening: openReferrals.filter((referral) => referral.stage?.key === "triage").length,
+        awaitingConsultation: openReferrals.filter((referral) => referral.stage?.key === "awaiting_consultation").length,
+      });
+    } catch (err) {
+      setReferralsError(err?.message || "Could not load incoming referral totals.");
+    } finally {
+      setReferralsLoading(false);
+    }
+  }, [triageStation]);
+
+  useEffect(() => { void refreshReferrals(); }, [refreshReferrals]);
 
   // Only surface the quick actions the signed-in station can actually use.
   const quickActions = useMemo(
@@ -115,7 +151,6 @@ export default function RHUDashboard() {
 
   const counts = useMemo(() => {
     return {
-      total: patientList.length,
       waiting: patientList.filter(
         (p) => p.status === CHECKUP_STATUS.WAITING,
       ).length,
@@ -152,9 +187,11 @@ export default function RHUDashboard() {
     () =>
       patientList.filter(
         (visit) =>
-          localDayStart(visit.visitDate) === todayStart,
+          localDayStart(consultationStation
+            ? visit.checkup?.completedAt || visit.raw?.updatedAt || visit.visitDate
+            : visit.visitDate) === todayStart,
       ),
-    [patientList, todayStart],
+    [patientList, todayStart, consultationStation],
   );
 
   const columns = [
@@ -181,65 +218,59 @@ export default function RHUDashboard() {
   };
 
   const stats = [
-    {
-      icon: "ClipboardList",
-      label: "Triage Patients",
-      value: loading ? "—" : counts.total.toLocaleString(),
-      tone: "accent",
-    },
-    {
-      icon: "CalendarClock",
-      label: "Waiting for Consultation",
-      value: loading ? "—" : counts.waiting.toLocaleString(),
-      tone: "yellow",
-    },
-    {
-      icon: "Stethoscope",
-      label: "In Consultation",
-      value: loading ? "—" : counts.inCheckup.toLocaleString(),
-      tone: "blue",
-    },
-    {
-      icon: "CheckCircle2",
-      label: "Completed",
-      value: loading ? "—" : counts.completed.toLocaleString(),
-      tone: "green",
-    },
+    ...(consultationStation
+      ? [
+          { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "yellow" },
+          { icon: "Stethoscope", label: "In Consultation", value: loading ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
+          { icon: "CheckCircle2", label: "Completed Consultations", value: loading ? "—" : counts.completed.toLocaleString(), tone: "green" },
+        ]
+      : [
+          { icon: "Inbox", label: "Incoming Referrals", value: referralsLoading ? "—" : incomingCount.toLocaleString(), tone: "accent" },
+          { icon: "ClipboardList", label: "Patients Awaiting Triage", value: referralsLoading ? "—" : referralStageCounts.awaitingTriage.toLocaleString(), tone: "yellow" },
+          { icon: "Activity", label: "Resident Arrived / Triage Stage", value: referralsLoading ? "—" : referralStageCounts.screening.toLocaleString(), tone: "blue" },
+          { icon: "CheckCircle2", label: "Awaiting PHN / Consultation", value: referralsLoading ? "—" : referralStageCounts.awaitingConsultation.toLocaleString(), tone: "green" },
+        ]),
   ];
 
   const todayActivity = useMemo(() => {
     return visitsToday
       .map((visit) => ({
         id: visit.id,
-        kind: "Triage recorded",
+        kind: consultationStation
+          ? visit.status === CHECKUP_STATUS.COMPLETED ? "Consultation completed" : "Consultation activity"
+          : "Screening submitted",
         patient: visit.patient,
-        at: visit.visitDate,
+        at: consultationStation
+          ? visit.checkup?.completedAt || visit.raw?.updatedAt || visit.visitDate
+          : visit.visitDate,
       }))
       .sort(
         (left, right) =>
           new Date(right.at).getTime() -
           new Date(left.at).getTime(),
       );
-  }, [visitsToday]);
+  }, [visitsToday, consultationStation]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         crumbs={["Dashboard"]}
-        title="RHU Overview"
-        subtitle="Manage RHU triage visits and the consultation workflow."
+        title={consultationStation ? "RHU Consultation Dashboard" : "RHU Triage Dashboard"}
+        subtitle={consultationStation
+          ? "Review the consultation queue and track completed consultations."
+          : "Review incoming barangay referrals and manage initial resident screening."}
       />
 
       <div className="flex justify-end">
         <button
           type="button"
-          onClick={refresh}
-          disabled={loading}
+          onClick={() => { void refresh(); void refreshReferrals(); }}
+          disabled={loading || referralsLoading}
           className="inline-flex items-center gap-2 rounded-btn border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue disabled:opacity-50"
         >
           <RefreshCw
             className={`h-4 w-4 ${
-              loading ? "animate-spin" : ""
+              loading || referralsLoading ? "animate-spin" : ""
             }`}
           />
           Refresh
@@ -251,6 +282,7 @@ export default function RHUDashboard() {
           {error}
         </Card>
       )}
+      {referralsError && triageStation && <Card className="p-4 text-sm text-brand-danger">{referralsError}</Card>}
 
       <section aria-labelledby="summary-heading">
         <div className="mb-3 flex items-center justify-between">
@@ -268,7 +300,7 @@ export default function RHUDashboard() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${consultationStation ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
           {stats.map((stat, index) => (
             <StatCard
               key={stat.label}
@@ -324,14 +356,14 @@ export default function RHUDashboard() {
         <Card className="p-4 sm:p-6 lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-brand-ink sm:text-base">
-              Recent Triage Hand-offs
+              {consultationStation ? "Consultation Queue" : "Recent Screening Hand-offs"}
             </h3>
 
             <Link
-              to="/app/rhu_personnel/triage"
+              to={consultationStation ? "/app/rhu_personnel/consultation" : "/app/rhu_personnel/triage"}
               className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
             >
-              Open Triage
+              {consultationStation ? "Open Consultation" : "Open Triage"}
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
@@ -340,7 +372,7 @@ export default function RHUDashboard() {
             <SkeletonList rows={5} />
           ) : recent.length === 0 ? (
             <p className="py-6 text-center text-sm text-brand-gray">
-              No triage records yet.
+              {consultationStation ? "No consultation queue records yet." : "No screening hand-offs yet."}
             </p>
           ) : (
             <DataTable
@@ -351,7 +383,7 @@ export default function RHUDashboard() {
           )}
         </Card>
 
-        <Card className="h-fit p-4 sm:p-6">
+        {triageStation && <Card className="h-fit p-4 sm:p-6">
           <h3 className="mb-4 text-sm font-semibold text-brand-ink sm:text-base">
             Consultation Queue
           </h3>
@@ -396,7 +428,7 @@ export default function RHUDashboard() {
           >
             Open Consultation Queue
           </Link>
-        </Card>
+        </Card>}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:gap-5">
@@ -408,7 +440,7 @@ export default function RHUDashboard() {
               </h3>
 
               <p className="mt-1 text-xs text-brand-gray">
-                RHU activities recorded today
+              {consultationStation ? "Consultation activity recorded today" : "Triage activity recorded today"}
               </p>
             </div>
 
@@ -419,7 +451,7 @@ export default function RHUDashboard() {
             <SkeletonList rows={3} />
           ) : todayActivity.length === 0 ? (
             <p className="py-6 text-center text-sm text-brand-gray">
-              No RHU activity recorded today.
+              No {consultationStation ? "consultation" : "triage"} activity recorded today.
             </p>
           ) : (
             <ul className="divide-y divide-slate-100">
@@ -449,23 +481,6 @@ export default function RHUDashboard() {
         </Card>
       </div>
 
-      <Card className="p-4 text-sm text-brand-gray sm:p-6">
-        <div className="flex items-start gap-3">
-          <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-brand-blue" />
-
-          <div>
-            <p className="font-medium text-brand-ink">
-              RHU Workflow
-            </p>
-
-            <p className="mt-1">
-              Patients are recorded through RHU Triage and
-              then sent to the RHU Consultation Station for
-              consultation and findings/assessment.
-            </p>
-          </div>
-        </div>
-      </Card>
     </div>
   );
 }

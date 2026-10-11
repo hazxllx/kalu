@@ -2,6 +2,7 @@ import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { assignedBarangay } from '../config/scope.js';
 import { deriveStage } from '../config/referralStage.js';
+import { canTriage } from '../config/rhuStations.js';
 
 /**
  * Health Supervisor referral coordination service.
@@ -50,7 +51,7 @@ const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
  * edit. One constant keeps the payload identical on every path.
  */
 const RESIDENT_EMBED =
-  'resident:residents(id, first_name, middle_name, last_name, barangay, barangay_id, sex, birth_date, auth_user_id, municipality_id)';
+  'resident:residents(id, first_name, middle_name, last_name, barangay, barangay_id, sex, birth_date, current_address, permanent_address, auth_user_id, municipality_id)';
 const REFERRAL_SELECT = `*, ${RESIDENT_EMBED}`;
 
 const text = (v) => String(v ?? '').trim();
@@ -210,6 +211,9 @@ export const markCompletedFromVisit = async (referralId, { supabase = getService
  *   resident                    -> only their own referrals
  */
 export const list = async ({ user, residentId = null, status = null, supabase = getServiceClient() }) => {
+  if (user?.role === 'rhu_personnel' && !canTriage(user)) {
+    throw ApiError.forbidden('Incoming referrals are available to RHU Triage personnel only.');
+  }
   let query = supabase.from(TABLE).select(REFERRAL_SELECT).order('created_at', { ascending: false }).limit(200);
 
   if (RESIDENT_ROLES.has(user?.role)) {
@@ -237,6 +241,9 @@ export const list = async ({ user, residentId = null, status = null, supabase = 
 
 /** Fetch one referral, enforcing the same scope as list(). */
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
+  if (user?.role === 'rhu_personnel' && !canTriage(user)) {
+    throw ApiError.forbidden('Incoming referrals are available to RHU Triage personnel only.');
+  }
   const { data, error } = await supabase.from(TABLE).select(REFERRAL_SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load referral');
   if (!data) throw ApiError.notFound('Referral not found.');

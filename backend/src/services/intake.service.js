@@ -71,7 +71,44 @@ export const getResidentForIntake = async ({ id, user }) => {
   if (!resident || !withinBarangayScope(user, resident)) {
     throw ApiError.notFound('Resident record not found');
   }
-  return resident;
+
+  // Historical measurements and recent clinical context come only from this
+  // resident's own completed encounters. They are displayed as historical and
+  // are never copied into a new screening encounter automatically.
+  const { data, error } = await getServiceClient()
+    .from('visits')
+    .select('id, visit_date, height_cm, weight_kg, chief_complaint, findings, phn_assessment, status')
+    .eq('resident_id', resident.id)
+    .eq('status', SUBMISSION_STATUS.COMPLETED)
+    .order('visit_date', { ascending: false, nullsFirst: false })
+    .limit(50);
+  if (error) throw new ApiError(503, 'Could not load resident clinical history.');
+
+  const validHeight = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) < 300;
+  const validWeight = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) < 500;
+  const visits = data || [];
+  const heightVisit = visits.find((visit) => validHeight(visit.height_cm));
+  const weightVisit = visits.find((visit) => validWeight(visit.weight_kg));
+  const recentClinicalHistory = visits
+    .filter((visit) => visit.chief_complaint || visit.findings || visit.phn_assessment)
+    .slice(0, 5)
+    .map((visit) => ({
+      date: visit.visit_date || null,
+      chiefComplaint: visit.chief_complaint || '',
+      findings: visit.findings || '',
+      assessment: visit.phn_assessment || '',
+    }));
+
+  return {
+    ...resident,
+    latestMeasurements: {
+      heightCm: heightVisit ? Number(heightVisit.height_cm) : null,
+      heightMeasuredAt: heightVisit?.visit_date || null,
+      weightKg: weightVisit ? Number(weightVisit.weight_kg) : null,
+      weightMeasuredAt: weightVisit?.visit_date || null,
+    },
+    recentClinicalHistory,
+  };
 };
 
 const normalizeDemographics = (resident = {}) => ({
@@ -207,13 +244,21 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
     }
     const { data: existingVisits } = await supabase
       .from('visits')
-      .select('id')
+      .select('id, status, recorded_by_id')
       .eq('referral_id', referralId)
       .neq('status', 'completed')
       .order('created_at', { ascending: false })
       .limit(1);
     if (Array.isArray(existingVisits) && existingVisits.length) {
-      return repository.getVisit(existingVisits[0].id);
+      const existing = existingVisits[0];
+      if (existing.status !== SUBMISSION_STATUS.DRAFT) {
+        throw ApiError.conflict('This referral already has a screening submitted to the consultation queue.');
+      }
+      if (existing.recorded_by_id !== user.id) {
+        throw ApiError.forbidden('Only the personnel who started this draft may continue it.');
+      }
+      await repository.updateVisit(existing.id, normalizeVisit(visit));
+      return repository.getVisit(existing.id);
     }
     residentId = ref.resident_id; // authoritative
     linkedReferralId = ref.id;
@@ -279,6 +324,10 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
     responsiblePersonnelName: performerName,
     facilityId: user.facilityId || null,
     referralId: linkedReferralId,
+    // Existing visits.received_at records the resident's arrival at the RHU.
+    // A referral-linked screening is marked arrived when triage starts; this is
+    // independent from the later triage hand-off status.
+    receivedAt: linkedReferralId ? new Date().toISOString() : null,
     status: SUBMISSION_STATUS.DRAFT,
     ...normalized,
   };

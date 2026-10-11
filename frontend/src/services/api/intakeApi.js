@@ -12,6 +12,10 @@ export const intakeApi = {
     const payload = await api.get('/intake/residents/search', { params: { q } });
     return payload?.residents || [];
   },
+  getResident: async (id) => {
+    const payload = await api.get(`/intake/residents/${encodeURIComponent(id)}`);
+    return payload?.resident || null;
+  },
   searchResidentsOffline: async (q, ownerId) => {
     if (!ownerId) throw new Error('A signed-in user is required.');
     try {

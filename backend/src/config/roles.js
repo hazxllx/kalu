@@ -76,7 +76,7 @@ export const FEATURE_ROLES = Object.freeze({
   verification: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN],
   consultations: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN],
   triage: [ROLES.RHU_PERSONNEL, ROLES.HEALTH_SUPERVISOR],
-  referrals: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
+  referrals: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
   followUps: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN],
 
   // Resident -> RHU -> PHN submission workflow.
@@ -121,7 +121,7 @@ export const FEATURE_ROLES = Object.freeze({
   // are the routed RECIPIENTS of Health Supervisor reports, so they are
   // included here for read/review access ONLY — they can open and acknowledge
   // their incoming queue but can never originate a report.
-  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
+  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
 
   // Health services catalog. Managed (create/assign) by PHN, MHO and the
   // barangay-scoped Health Supervisor. Read by staff who can be assigned a

@@ -13,16 +13,13 @@ import * as controller from '../controllers/referrals.controller.js';
  *   route -> authenticate -> resolveBarangayScope -> authorize(roles) -> controller -> service
  *
  * Reads are open to the referral-record roles (Health Supervisor / PHN / MHO),
- * to RHU Personnel (read-only, to see incoming barangay referrals destined to
- * the RHU — the service scopes them to their municipality), and to a resident
- * for their own referrals; writes are limited to the staff who own the workflow
- * (Health Supervisor / PHN). The service re-checks role + barangay/municipality
- * scope on every call, so route authorization is the first gate, not the only
- * one.
+ * RHU Triage personnel (read-only, with station and municipality checks in the
+ * service), and residents for their own referrals. Writes remain limited to
+ * Health Supervisor / PHN. The service re-checks role + scope on every call.
  */
 const router = Router();
 
-const READ_ROLES = [...FEATURE_ROLES.referrals, 'rhu_personnel', 'resident', 'resident-limited'];
+const READ_ROLES = [...FEATURE_ROLES.referrals, 'resident', 'resident-limited'];
 const WRITE_ROLES = ['health_supervisor', 'phn'];
 const statusPermission = (req) => {
   if (req.body?.status === 'Accepted') return ['referrals.approve'];
