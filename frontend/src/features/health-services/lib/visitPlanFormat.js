@@ -63,15 +63,49 @@ export function formatChip(iso) {
 }
 
 /**
- * The one-line availability summary for a service card.
- * Returns "" when the service has an open day in the next two weeks, else the
- * fallback copy. Callers decide the muted styling for the fallback.
+ * Human copy for each server-provided closed reason. Falls back to a neutral
+ * message for an unknown reason so the UI never shows a raw code.
  */
-export function availabilityLine({ weekdays = [], windowStart, windowEnd, hasUpcoming }) {
-  if (!hasUpcoming || weekdays.length === 0) return { text: "No open slots in the next two weeks.", open: false };
+export const CLOSED_REASON_TEXT = {
+  inactive: "This service is currently unavailable.",
+  registration_closed: "Registration deadline has passed.",
+  ended: "This service has ended.",
+  blackout: "No open dates available.",
+  no_slots: "No open slots in the next two weeks.",
+  unconfigured: "Schedule to be announced.",
+};
+
+/**
+ * The one-line availability summary for a service card.
+ *
+ * The backend is authoritative: when it supplies a structured `availability`
+ * ({ open, reason }) the card renders that result directly, so a validly
+ * configured one-time service (which has no recurring weekday rows) is never
+ * shown as closed. The legacy weekday-derived path is kept only as a fallback
+ * for responses that predate the `availability` field.
+ */
+export function availabilityLine(service = {}) {
+  const { weekdays = [], windowStart, windowEnd, hasUpcoming, availability } = service;
+
+  if (availability && typeof availability.open === "boolean") {
+    if (availability.open) {
+      const days = formatWeekdays(weekdays);
+      const window = formatWindow(windowStart, windowEnd);
+      if (days) return { text: `Available ${days}${window ? ` · ${window}` : ""}`, open: true, reason: null };
+      return { text: "Open for registration.", open: true, reason: null };
+    }
+    return {
+      text: CLOSED_REASON_TEXT[availability.reason] || "Registration is closed.",
+      open: false,
+      reason: availability.reason || null,
+    };
+  }
+
+  // Legacy fallback (recurring-only services without an availability object).
+  if (!hasUpcoming || weekdays.length === 0) return { text: "No open slots in the next two weeks.", open: false, reason: "no_slots" };
   const days = formatWeekdays(weekdays);
   const window = formatWindow(windowStart, windowEnd);
-  return { text: `Available ${days}${window ? ` · ${window}` : ""}`, open: true };
+  return { text: `Available ${days}${window ? ` · ${window}` : ""}`, open: true, reason: null };
 }
 
 /**

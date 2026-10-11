@@ -10,12 +10,9 @@ import {
   ChevronDown,
   User,
   Settings,
-  ShieldCheck,
-  ShieldAlert,
   Lock,
 } from "lucide-react";
 import Icon from "@/components/common/Icon";
-import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import OfflineStatusIndicator from "@/features/offline/components/OfflineStatusIndicator";
 import { LOGO_URL, ROLES } from "@/lib/brand";
 import {
@@ -51,10 +48,6 @@ export default function DashboardLayout({ roleKey }) {
     window.addEventListener("focus", refreshPermissions);
     return () => window.removeEventListener("focus", refreshPermissions);
   }, [refreshMatrix]);
-
-  const isResident =
-    roleKey === "resident" || roleKey === "resident-limited";
-  const verified = roleKey === "resident";
 
   // BHW gathers community/household data only, so the resident/record lookup
   // is not exposed to that role. Every other role keeps it.
@@ -570,29 +563,14 @@ export default function DashboardLayout({ roleKey }) {
                   {initials}
                 </div>
 
-                <div className="hidden md:block text-left">
+                  <div className="hidden md:block text-left">
                   <p className="text-[13px] font-semibold text-slate-900 dark:text-foreground leading-tight">
                     {displayName}
                   </p>
 
-                  <div className="flex items-center gap-1.5">
-                    {isResident &&
-                      (verified ? (
-                        <ShieldCheck
-                          className="w-3.5 h-3.5 text-brand-green"
-                          strokeWidth={2}
-                        />
-                      ) : (
-                        <ShieldAlert
-                          className="w-3.5 h-3.5 text-brand-yellow"
-                          strokeWidth={2}
-                        />
-                      ))}
-
-                    <p className="text-[11px] text-slate-500">
-                      {role.label}
-                    </p>
-                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {role.label}
+                  </p>
                 </div>
 
                 <ChevronDown className="hidden md:block w-3 h-3 text-slate-500 dark:text-slate-400" />
@@ -618,33 +596,9 @@ export default function DashboardLayout({ roleKey }) {
                             {displayName}
                           </p>
 
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            {isResident &&
-                              (verified ? (
-                                <ShieldCheck
-                                  className="w-4 h-4 text-brand-green shrink-0"
-                                  strokeWidth={2}
-                                />
-                              ) : (
-                                <ShieldAlert
-                                  className="w-4 h-4 text-brand-yellow shrink-0"
-                                  strokeWidth={2}
-                                />
-                              ))}
-
-                            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                              {role.label}
-                            </p>
-                          </div>
-
-                          {isResident && (
-                            <div className="mt-1">
-                              <VerificationBadge
-                                status={verified ? "verified" : "pending"}
-                                size="sm"
-                              />
-                            </div>
-                          )}
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                            {role.label}
+                          </p>
 
                           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
                             {displayEmail}

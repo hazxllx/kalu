@@ -309,3 +309,222 @@ test('idParamValidator requires a uuid', () => {
   assert.ok(idParamValidator({ id: 'nope' }).error);
   assert.equal(idParamValidator({ id: '11111111-1111-1111-1111-111111111111' }).error, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// One-time / dated service availability (regression for the "Registration
+// Closed" bug). A service created through the Add Health Service modal records
+// a concrete start/end date-time + registration deadline on the service row and
+// has NO recurring appointment_schedules rows. Availability must therefore come
+// from the service's own configured window, not from recurring weekday rows.
+//
+// NOTE: there is no "registration opens" field in the data model, so the
+// "before registration opening time" case is not applicable and is intentionally
+// not asserted here (documented rather than invented).
+// ---------------------------------------------------------------------------
+
+/**
+ * Supabase stub for a single in-scope service. `health_services` returns one
+ * row (single reads) or a one-element list (directory). Visit-plan selects
+ * return no existing/other plans; an insert echoes a Planned row.
+ */
+const singleServiceSupabase = ({ service, schedules = [], blackouts = [], plans = [] }) =>
+  makeSupabase((ctx) => {
+    switch (ctx.table) {
+      case 'residents':
+        return ok(resident);
+      case 'health_services':
+        return ok(ctx.single ? service : [service]);
+      case 'appointment_schedules':
+        return ok(schedules);
+      case 'appointment_blackouts':
+        return ok(blackouts);
+      case 'visit_plans':
+        if (ctx.op === 'insert') {
+          return ok({
+            id: 'new-plan',
+            service_id: service.id,
+            facility_type: 'BHC',
+            planned_date: ctx.payload.planned_date,
+            note: ctx.payload.note,
+            status: 'Planned',
+          });
+        }
+        return ok(plans);
+      case 'facilities':
+        return ok([{ name: 'Sta. Maria', type: 'rhu', municipality_id: 'm1' }]);
+      case 'profiles':
+        return ok([]);
+      default:
+        return ok(null);
+    }
+  });
+
+// A one-day BHC immunization drive on Thu 8 Jan 2026 (NOW is Mon 5 Jan 2026).
+const datedService = (overrides = {}) => ({
+  id: 'svc-dated',
+  name: 'Measles Immunization Drive',
+  description: 'One-day drive.',
+  municipality_id: 'm1',
+  barangay_id: 'b1',
+  active: true,
+  visit_policy: 'walk_in',
+  start_date: '2026-01-08',
+  start_time: '09:00:00',
+  end_date: '2026-01-08',
+  end_time: '12:00:00',
+  registration_deadline: null,
+  ...overrides,
+});
+
+test('availability: a valid one-time service with no appointment_schedules is OPEN from its own date', async () => {
+  const supabase = singleServiceSupabase({ service: datedService() });
+  const result = await listDirectory({ user: residentUser, supabase, now: NOW });
+  const svc = result.facilities[0].services[0];
+  assert.equal(svc.availability.open, true);
+  assert.equal(svc.availability.reason, null);
+  assert.equal(svc.hasUpcoming, true);
+  assert.deepEqual(svc.weekdays, []); // it is not a recurring service
+});
+
+test('serviceAvailability offers a one-time service own date(s) without recurring rows', async () => {
+  const supabase = singleServiceSupabase({ service: datedService() });
+  const result = await serviceAvailability({ user: residentUser, serviceId: 'svc-dated', supabase, now: NOW });
+  assert.deepEqual(result.dates.map((d) => d.date), ['2026-01-08']);
+  assert.equal(result.available, true);
+  assert.equal(result.availability.open, true);
+  assert.deepEqual(result.weekdays, []);
+});
+
+test('createPlan registers a resident for a one-time service on its configured date', async () => {
+  const supabase = singleServiceSupabase({ service: datedService() });
+  const result = await createPlan({ user: residentUser, serviceId: 'svc-dated', plannedDate: '2026-01-08', supabase, now: NOW });
+  assert.equal(result.plan.status, 'Planned');
+  assert.equal(result.plan.facilityType, 'BHC');
+});
+
+test('createPlan rejects a day outside the one-time service window (422)', async () => {
+  const supabase = singleServiceSupabase({ service: datedService() }); // Jan 8 only
+  await assert.rejects(
+    () => createPlan({ user: residentUser, serviceId: 'svc-dated', plannedDate: '2026-01-09', supabase, now: NOW }),
+    (err) => err.statusCode === 422,
+  );
+});
+
+test('availability: registration CLOSES once the deadline has passed; the deadline minute itself is still open', async () => {
+  const closed = singleServiceSupabase({
+    service: datedService({ start_date: '2026-01-20', end_date: '2026-01-20', registration_deadline: '2026-01-04T23:59' }),
+  });
+  const after = await serviceAvailability({ user: residentUser, serviceId: 'svc-dated', supabase: closed, now: NOW });
+  assert.equal(after.availability.open, false);
+  assert.equal(after.availability.reason, 'registration_closed');
+  assert.equal(after.available, false);
+
+  const atNow = singleServiceSupabase({
+    service: datedService({ start_date: '2026-01-20', end_date: '2026-01-20', registration_deadline: '2026-01-05T00:00' }),
+  });
+  const at = await serviceAvailability({ user: residentUser, serviceId: 'svc-dated', supabase: atNow, now: NOW });
+  assert.equal(at.availability.open, true);
+});
+
+test('createPlan refuses registration after the deadline has passed (422)', async () => {
+  const supabase = singleServiceSupabase({
+    service: datedService({ start_date: '2026-01-20', end_date: '2026-01-20', registration_deadline: '2026-01-04T23:59' }),
+  });
+  await assert.rejects(
+    () => createPlan({ user: residentUser, serviceId: 'svc-dated', plannedDate: '2026-01-20', supabase, now: NOW }),
+    (err) => err.statusCode === 422,
+  );
+});
+
+test('availability: a one-time service whose date has passed is CLOSED as ended', async () => {
+  const supabase = singleServiceSupabase({ service: datedService({ start_date: '2026-01-02', end_date: '2026-01-02' }) });
+  const result = await serviceAvailability({ user: residentUser, serviceId: 'svc-dated', supabase, now: NOW });
+  assert.equal(result.availability.open, false);
+  assert.equal(result.availability.reason, 'ended');
+});
+
+test('createPlan refuses registration once a one-time service has ended (422)', async () => {
+  const supabase = singleServiceSupabase({ service: datedService({ start_date: '2026-01-02', end_date: '2026-01-02' }) });
+  await assert.rejects(
+    () => createPlan({ user: residentUser, serviceId: 'svc-dated', plannedDate: '2026-01-05', supabase, now: NOW }),
+    (err) => err.statusCode === 422,
+  );
+});
+
+test('availability: a one-time service whose only date is a blackout is CLOSED', async () => {
+  const supabase = singleServiceSupabase({
+    service: datedService(),
+    blackouts: [{ service_id: 'svc-dated', blackout_date: '2026-01-08', barangay_id: 'b1' }],
+  });
+  const result = await serviceAvailability({ user: residentUser, serviceId: 'svc-dated', supabase, now: NOW });
+  assert.equal(result.availability.open, false);
+  assert.equal(result.availability.reason, 'blackout');
+  assert.equal(result.dates.length, 0);
+});
+
+test('availability: a recurring service with a valid weekday is OPEN (reason null)', async () => {
+  const supabase = singleServiceSupabase({
+    service: { id: 'svc-rec', name: 'BP Monitoring', municipality_id: 'm1', barangay_id: 'b1', active: true, visit_policy: 'walk_in' },
+    schedules: [{ service_id: 'svc-rec', weekday: 1, start_time: '08:00:00', end_time: '11:00:00', barangay_id: 'b1', active: true }],
+  });
+  const result = await listDirectory({ user: residentUser, supabase, now: NOW });
+  const view = result.facilities[0].services[0];
+  assert.equal(view.availability.open, true);
+  assert.equal(view.availability.reason, null);
+  assert.deepEqual(view.weekdays, [1]);
+});
+
+test('availability: a recurring (appointment-based) service with all upcoming days blacked out reports no_slots', async () => {
+  const supabase = singleServiceSupabase({
+    service: { id: 'svc-rec', name: 'BP Monitoring', municipality_id: 'm1', barangay_id: 'b1', active: true, visit_policy: 'walk_in' },
+    schedules: [{ service_id: 'svc-rec', weekday: 2, start_time: '08:00:00', end_time: '11:00:00', barangay_id: 'b1', active: true }],
+    // Tuesdays in [2026-01-05, 2026-01-18]: Jan 6 and Jan 13 — both closed.
+    blackouts: [
+      { service_id: 'svc-rec', blackout_date: '2026-01-06', barangay_id: 'b1' },
+      { service_id: 'svc-rec', blackout_date: '2026-01-13', barangay_id: 'b1' },
+    ],
+  });
+  const result = await listDirectory({ user: residentUser, supabase, now: NOW });
+  const view = result.facilities[0].services[0];
+  assert.equal(view.availability.open, false);
+  assert.equal(view.availability.reason, 'no_slots');
+});
+
+test('availability: a service with neither a date nor a recurring schedule is UNCONFIGURED (closed, never auto-opened)', async () => {
+  const supabase = singleServiceSupabase({
+    service: { id: 'svc-x', name: 'Unscheduled', municipality_id: 'm1', barangay_id: 'b1', active: true, visit_policy: 'walk_in' },
+  });
+  const result = await listDirectory({ user: residentUser, supabase, now: NOW });
+  const view = result.facilities[0].services[0];
+  assert.equal(view.availability.open, false);
+  assert.equal(view.availability.reason, 'unconfigured');
+});
+
+test('availability: an inactive one-time service is reported inactive (defensive)', async () => {
+  // listDirectory filters active=true at the query, so this exercises the
+  // evaluator's defensive inactive branch directly through the directory view.
+  const supabase = singleServiceSupabase({ service: datedService({ active: false }) });
+  const result = await listDirectory({ user: residentUser, supabase, now: NOW });
+  const view = result.facilities[0].services[0];
+  assert.equal(view.availability.open, false);
+  assert.equal(view.availability.reason, 'inactive');
+});
+
+test('availability (timezone/boundary): a date-only registration deadline is inclusive through the end of that day', async () => {
+  // The deadline is today's date; registration must remain open all of today
+  // (no accidental UTC shift that closes it at midnight).
+  const supabase = singleServiceSupabase({
+    service: datedService({ start_date: '2026-01-05', end_date: '2026-01-05', registration_deadline: '2026-01-05' }),
+  });
+  const result = await serviceAvailability({ user: residentUser, serviceId: 'svc-dated', supabase, now: NOW });
+  assert.equal(result.availability.open, true);
+  assert.deepEqual(result.dates.map((d) => d.date), ['2026-01-05']);
+});
+
+test('availability: a Postgres-style (space-separated) deadline timestamp parses correctly', async () => {
+  const supabase = singleServiceSupabase({
+    service: datedService({ start_date: '2026-01-20', end_date: '2026-01-20', registration_deadline: '2026-01-20 08:00:00' }),
+  });
+  const result = await serviceAvailability({ user: residentUser, serviceId: 'svc-dated', supabase, now: NOW });
+  assert.equal(result.availability.open, true);
+});

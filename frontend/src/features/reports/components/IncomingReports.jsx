@@ -3,6 +3,7 @@ import { Card } from "@/components/common/Card";
 import { Inbox, RefreshCw, CheckCircle2, X, FileText } from "lucide-react";
 import { usePermissions } from "@/context/PermissionsContext";
 import { reportsApi } from "@/services/api";
+import ReportSnapshotView from "@/features/reports/components/ReportSnapshotView";
 
 /**
  * Incoming Reports — the recipient side of the report submission workflow.
@@ -46,6 +47,11 @@ export default function IncomingReports() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [detail, setDetail] = useState(null);
+  // The persisted snapshot for the opened report, fetched on demand so the
+  // recipient sees the EXACT submitted content, not a live reconstruction.
+  const [detailContent, setDetailContent] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [busy, setBusy] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [toast, setToast] = useState(null);
@@ -68,6 +74,26 @@ export default function IncomingReports() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Load the full persisted snapshot whenever a report is opened. Legacy rows
+  // return hasContent=false so the modal shows an explicit unavailable state.
+  useEffect(() => {
+    if (!detail?.id) {
+      setDetailContent(null);
+      setDetailError("");
+      setDetailLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setDetailLoading(true);
+    setDetailError("");
+    setDetailContent(null);
+    reportsApi.get(detail.id)
+      .then((res) => { if (active) setDetailContent(res?.record || null); })
+      .catch((err) => { if (active) setDetailError(err?.message || "Could not load the submitted report."); })
+      .finally(() => { if (active) setDetailLoading(false); });
+    return () => { active = false; };
+  }, [detail]);
 
   const sortedRows = useMemo(
     () => [...rows].sort((a, b) => String(b.submittedAt || b.createdAt || "").localeCompare(String(a.submittedAt || a.createdAt || ""))),
@@ -190,6 +216,23 @@ export default function IncomingReports() {
                     <p className="min-w-0 text-right font-medium text-brand-ink">{value}</p>
                   </div>
                 ))}
+              </div>
+
+              {/* Full submitted report — the exact snapshot persisted at
+                  submission, retrieved by id (never regenerated from live data). */}
+              <div className="mt-4">
+                <h4 className="mb-2 text-sm font-semibold text-brand-ink">Submitted Report</h4>
+                {detailLoading ? (
+                  <p className="inline-flex items-center gap-2 text-sm text-brand-gray">
+                    <RefreshCw className="h-4 w-4 animate-spin" /> Loading submitted report…
+                  </p>
+                ) : detailError ? (
+                  <div className="rounded-btn border border-brand-danger/30 bg-brand-danger/5 p-4 text-sm text-brand-danger">
+                    {detailError}
+                  </div>
+                ) : (
+                  <ReportSnapshotView content={detailContent?.content} />
+                )}
               </div>
 
               {canReview && detail.status !== "Reviewed" && detail.status !== "Rejected" && (

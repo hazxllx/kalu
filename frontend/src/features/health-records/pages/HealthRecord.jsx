@@ -208,7 +208,7 @@ export default function HealthRecord() {
                         <p className="text-brand-gray"><span className="font-medium text-brand-ink">Diagnosis:</span> {dash(c.diagnosis)}</p>
                         <p className="text-brand-gray"><span className="font-medium text-brand-ink">Findings:</span> {dash(c.findings)}</p>
                         <p className="text-brand-gray"><span className="font-medium text-brand-ink">Treatment:</span> {dash(c.treatmentGiven)}</p>
-                        {c.medications && <p className="text-brand-gray"><span className="font-medium text-brand-ink">Medications:</span> {c.medications}</p>}
+                        {c.medications && <p className="text-brand-gray whitespace-pre-line"><span className="font-medium text-brand-ink">Medications:</span> {c.medications}</p>}
                         {c.recommendations && <p className="text-brand-gray"><span className="font-medium text-brand-ink">Recommendations:</span> {c.recommendations}</p>}
                         <p className="text-brand-gray"><span className="font-medium text-brand-ink">Follow-up:</span> {c.followUpRequired === "Yes" ? `Yes${c.nextVisitDate ? ` (${formatDate(c.nextVisitDate)})` : ""}` : "No"}</p>
                       </div>

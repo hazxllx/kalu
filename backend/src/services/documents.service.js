@@ -13,12 +13,13 @@ import {
 } from '../validators/documents.validators.js';
 import {
   applyGovernmentIdCrossVerification,
+  applyIdenticalIdSides,
+  buffersAreIdentical,
   crossVerifyGovernmentIdSides,
   screenDocument,
 } from './documentVerification.service.js';
 import {
   IMAGE_QUALITY,
-  SCREENING_MESSAGES,
   SCREENING_REASON,
   SCREENING_STATUS,
 } from '../config/documentScreening.js';
@@ -42,7 +43,9 @@ const screeningReasonForStorage = (screening) => {
     ? SCREENING_REASON.ID_SIDE_FIELDS_CONFLICT
     : comparison.status === 'consistent'
       ? SCREENING_REASON.ID_SIDE_FIELDS_CONSISTENT
-      : SCREENING_REASON.ID_SIDE_COMPARISON_INCONCLUSIVE;
+      : comparison.status === 'identical'
+        ? SCREENING_REASON.ID_SIDES_IDENTICAL
+        : SCREENING_REASON.ID_SIDE_COMPARISON_INCONCLUSIVE;
   const conflictingFields = (comparison.conflictingFields || [])
     .filter((field) => COMPARABLE_FIELD_NAMES.has(field));
   const fields = conflictingFields.length ? `|${conflictingFields.join(',')}` : '';
@@ -126,6 +129,7 @@ export const screenUploadedGovernmentIdPair = async ({
   frontFile,
   backFile,
   governmentIdType,
+  ocr,
   requestId,
 } = {}) => {
   if (!frontFile || !backFile) {
@@ -143,6 +147,7 @@ export const screenUploadedGovernmentIdPair = async ({
       file: frontFile,
       documentType: 'government_id_front',
       governmentIdType: normalizedIdType,
+      ocr,
       requestId,
       onOcrText: (text) => { frontText = text; },
     }),
@@ -150,10 +155,33 @@ export const screenUploadedGovernmentIdPair = async ({
       file: backFile,
       documentType: 'government_id_back',
       governmentIdType: normalizedIdType,
+      ocr,
       requestId,
       onOcrText: (text) => { backText = text; },
     }),
   ]);
+
+  // Precedence 2: if the SAME image was uploaded for both sides, that takes
+  // priority over any cross-side/field comparison. Compared by SHA-256 of the
+  // raw bytes — not filename, size or MIME type. (Precedence 1, a per-side
+  // file/upload failure, is honoured inside applyIdenticalIdSides.)
+  const frontBuffer = Buffer.from(await frontFile.arrayBuffer());
+  const backBuffer = Buffer.from(await backFile.arrayBuffer());
+  if (buffersAreIdentical(frontBuffer, backBuffer)) {
+    if (requestId) {
+      console.info(JSON.stringify({
+        event: 'government_id_cross_verification',
+        requestId,
+        documentSlot: 'government_id_pair',
+        stage: 'identical_check',
+        status: 'identical',
+        reason: SCREENING_REASON.ID_SIDES_IDENTICAL,
+      }));
+    }
+    const identical = applyIdenticalIdSides(frontScreening, backScreening);
+    return { front: identical.front, back: identical.back };
+  }
+
   const comparison = crossVerifyGovernmentIdSides(frontText, backText);
   return applyGovernmentIdCrossVerification(frontScreening, backScreening, comparison);
 };
@@ -398,63 +426,71 @@ export const uploadResidentDocument = async ({
         requestId,
         onOcrText: (text) => { counterpartText = text; },
       });
-      const comparison = documentType === 'government_id_front'
-        ? crossVerifyGovernmentIdSides(uploadedOcrText, counterpartText)
-        : crossVerifyGovernmentIdSides(counterpartText, uploadedOcrText);
-      const pair = documentType === 'government_id_front'
-        ? applyGovernmentIdCrossVerification(screening, counterpartScreening, comparison)
-        : applyGovernmentIdCrossVerification(counterpartScreening, screening, comparison);
-      screening = documentType === 'government_id_front' ? pair.front : pair.back;
-      const updatedCounterpartScreening = documentType === 'government_id_front' ? pair.back : pair.front;
-      counterpartScreeningResult = updatedCounterpartScreening;
-      crossVerification = screening.crossVerification;
-      counterpartScreeningUpdate = {
-        screeningStatus: updatedCounterpartScreening.status,
-        screeningReason: screeningReasonForStorage(updatedCounterpartScreening),
-        screeningQuality: updatedCounterpartScreening.quality,
-        screeningOcrDetected: updatedCounterpartScreening.ocrDetected,
-        screeningCheckedAt: new Date().toISOString(),
-      };
+
+      // Precedence 2: the same image on both sides overrides cross-side
+      // comparison. Compared by SHA-256 of the raw bytes.
+      const uploadedBuffer = Buffer.from(await file.arrayBuffer());
+      const counterpartBuffer = Buffer.from(await counterpartFile.arrayBuffer());
+      if (buffersAreIdentical(uploadedBuffer, counterpartBuffer)) {
+        const identical = documentType === 'government_id_front'
+          ? applyIdenticalIdSides(screening, counterpartScreening)
+          : applyIdenticalIdSides(counterpartScreening, screening);
+        screening = documentType === 'government_id_front' ? identical.front : identical.back;
+        const updatedCounterpartScreening = documentType === 'government_id_front' ? identical.back : identical.front;
+        counterpartScreeningResult = updatedCounterpartScreening;
+        crossVerification = screening.crossVerification;
+        counterpartScreeningUpdate = {
+          screeningStatus: updatedCounterpartScreening.status,
+          screeningReason: screeningReasonForStorage(updatedCounterpartScreening),
+          screeningQuality: updatedCounterpartScreening.quality,
+          screeningOcrDetected: updatedCounterpartScreening.ocrDetected,
+          screeningCheckedAt: new Date().toISOString(),
+        };
+        if (requestId) {
+          console.info(JSON.stringify({
+            event: 'government_id_cross_verification',
+            requestId,
+            documentSlot: documentType,
+            stage: 'identical_check',
+            status: 'identical',
+            reason: SCREENING_REASON.ID_SIDES_IDENTICAL,
+          }));
+        }
+      } else {
+        const comparison = documentType === 'government_id_front'
+          ? crossVerifyGovernmentIdSides(uploadedOcrText, counterpartText)
+          : crossVerifyGovernmentIdSides(counterpartText, uploadedOcrText);
+        const pair = documentType === 'government_id_front'
+          ? applyGovernmentIdCrossVerification(screening, counterpartScreening, comparison)
+          : applyGovernmentIdCrossVerification(counterpartScreening, screening, comparison);
+        screening = documentType === 'government_id_front' ? pair.front : pair.back;
+        const updatedCounterpartScreening = documentType === 'government_id_front' ? pair.back : pair.front;
+        counterpartScreeningResult = updatedCounterpartScreening;
+        crossVerification = screening.crossVerification;
+        counterpartScreeningUpdate = {
+          screeningStatus: updatedCounterpartScreening.status,
+          screeningReason: screeningReasonForStorage(updatedCounterpartScreening),
+          screeningQuality: updatedCounterpartScreening.quality,
+          screeningOcrDetected: updatedCounterpartScreening.ocrDetected,
+          screeningCheckedAt: new Date().toISOString(),
+        };
+      }
     } catch {
-      crossVerification = {
-        status: 'inconclusive',
-        comparedFields: [],
-        conflictingFields: [],
-        message: SCREENING_MESSAGES.ID_SIDE_COMPARISON_INCONCLUSIVE,
-      };
-      counterpartScreeningUpdate = {
-        screeningStatus: SCREENING_STATUS.AUTOMATED_FLAGGED,
-        screeningReason: screeningReasonForStorage({
-          ...screening,
-          crossVerification,
-          reason: SCREENING_REASON.ID_SIDE_COMPARISON_INCONCLUSIVE,
-          sideReason: screening.sideReason || screening.reason,
-        }),
-        screeningCheckedAt: new Date().toISOString(),
-      };
-      counterpartScreeningResult = {
-        documentType: counterpart.documentType,
-        status: SCREENING_STATUS.AUTOMATED_FLAGGED,
-        reason: SCREENING_REASON.ID_SIDE_COMPARISON_INCONCLUSIVE,
-        quality: counterpart.screeningQuality || IMAGE_QUALITY.NOT_ANALYZED,
-        ocrDetected: false,
-        message: SCREENING_MESSAGES.ID_SIDE_COMPARISON_INCONCLUSIVE,
-        crossVerification,
-      };
-      screening = {
-        ...screening,
-        status: SCREENING_STATUS.AUTOMATED_FLAGGED,
-        reason: SCREENING_REASON.ID_SIDE_COMPARISON_INCONCLUSIVE,
-        message: SCREENING_MESSAGES.ID_SIDE_COMPARISON_INCONCLUSIVE,
-        crossVerification,
-      };
+      // The counterpart file could not be downloaded or re-screened. This is a
+      // technical inability to COMPARE the two sides, not evidence of a problem
+      // with either side. Each side keeps its own independent screening result
+      // and is left for staff review; we never downgrade a readable side to
+      // "flagged" just because the other side could not be re-read.
+      crossVerification = null;
+      counterpartScreeningUpdate = null;
+      counterpartScreeningResult = null;
       if (requestId) {
         console.info(JSON.stringify({
           event: 'government_id_cross_verification',
           requestId,
           documentSlot: documentType,
           stage: 'counterpart_read',
-          status: 'inconclusive',
+          status: 'not_compared',
           reason: SCREENING_REASON.ID_SIDE_COMPARISON_INCONCLUSIVE,
         }));
       }

@@ -25,7 +25,7 @@ const SUMMARY_ICONS = [
 ];
 
 const CONDITION_PALETTE = ["#0B5CAD", "#2A7DE1", "#F5B400", "#28B463", "#E74C3C", "#5B6472"];
-const RISK_COLORS = { "Low Risk": "#28B463", "Moderate Risk": "#0B5CAD", "High Risk": "#F5B400", Critical: "#E74C3C" };
+const RISK_COLORS = { "Low Risk": "#28B463", "Moderate Risk": "#0B5CAD", "High Risk": "#F5B400", Critical: "#E74C3C", Unassessed: "#94A3B8" };
 
 /** Live server figures override the mock values; shape stays the same. */
 const mergeLiveScopedData = (base, live) => ({

@@ -116,9 +116,12 @@ export const FEATURE_ROLES = Object.freeze({
   certificateRequest: [ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
   certificateReview: [ROLES.PHN, ROLES.MHO],
 
-  // Monitoring / aggregate information. The Incoming Report inbox was removed
-  // from RHU Personnel, so RHU is no longer a reports role (HS/PHN/MHO keep it).
-  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
+  // Monitoring / aggregate information. Report SENDERS are HS/PHN/MHO (POST is
+  // additionally restricted to those roles in reports.routes.js). RHU Personnel
+  // are the routed RECIPIENTS of Health Supervisor reports, so they are
+  // included here for read/review access ONLY — they can open and acknowledge
+  // their incoming queue but can never originate a report.
+  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
 
   // Health services catalog. Managed (create/assign) by PHN, MHO and the
   // barangay-scoped Health Supervisor. Read by staff who can be assigned a

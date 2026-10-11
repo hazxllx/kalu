@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTriangle, FileText } from "lucide-react";
+import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTriangle, FileText, Pill } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import { calculateRiskLevel } from "@/lib/riskRules";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useWorkflowStore } from "@/services/local/workflowStore";
 import { useAuth } from "@/context/AuthContext";
 import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
+import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 
 export const CHECKUP_STATUS_TONES = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
@@ -34,6 +35,15 @@ const inputCls = (error) =>
   `w-full bg-white border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue ${
     error ? "border-brand-danger" : "border-brand-border"
   }`;
+
+/** Human-readable one-line summary of a structured prescription entry. */
+const formatMedicationLine = (m = {}) => {
+  const name = [m.genericName, m.strength, m.dosageForm].map((p) => String(p || "").trim()).filter(Boolean).join(" ");
+  const sig = [m.dose, m.route, m.frequency, m.duration].map((p) => String(p || "").trim()).filter(Boolean).join(" · ");
+  const qty = String(m.quantity || "").trim() ? `Qty ${String(m.quantity).trim()}` : "";
+  const instructions = String(m.instructions || "").trim();
+  return [name || "(unnamed medicine)", sig, qty, instructions].filter(Boolean).join(" — ");
+};
 
 const InfoItem = ({ label, value, fallback = "—" }) => (
   <div>
@@ -85,6 +95,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const [healthConcern, setHealthConcern] = useState("");
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [recommendations, setRecommendations] = useState("");
+  const [medications, setMedications] = useState(/** @type {any[]} */ ([]));
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [justCompleted, setJustCompleted] = useState(false);
   const [certOpen, setCertOpen] = useState(false);
@@ -121,6 +132,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       setHealthConcern(checkup.healthConcern || "");
       setClinicalNotes(checkup.clinicalNotes || "");
       setRecommendations(checkup.recommendations || "");
+      setMedications(Array.isArray(checkup.medications) ? checkup.medications : []);
     }
   }, [checkup]);
 
@@ -154,6 +166,11 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       consultationLocation,
       clinicalNotes: clinicalNotes.trim(),
       recommendations: recommendations.trim(),
+      // Structured prescriptions (may be empty — a check-up without a
+      // prescription is valid). Only medicines with a name are kept.
+      medications: (Array.isArray(medications) ? medications : []).filter(
+        (m) => String(m?.genericName || "").trim(),
+      ),
     };
     setJustCompleted(true);
     onComplete?.(recorded);
@@ -305,6 +322,21 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                       <p className="text-sm text-brand-ink whitespace-pre-line">{checkup.recommendations}</p>
                     </div>
                   ) : null}
+                  <div className="mt-3">
+                    <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
+                    {Array.isArray(checkup.medications) && checkup.medications.length > 0 ? (
+                      <ul className="space-y-1.5">
+                        {checkup.medications.map((m, i) => (
+                          <li key={`${m.medicineId || "custom"}-${i}`} className="flex items-start gap-2 text-sm text-brand-ink">
+                            <Pill className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
+                            <span>{formatMedicationLine(m)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-brand-gray">No medication prescribed for this check-up.</p>
+                    )}
+                  </div>
                 </div>
 
                 {/* OUTCOME */}
@@ -413,6 +445,16 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                       value={recommendations}
                       onChange={(e) => setRecommendations(e.target.value)}
                       className={`${inputCls()} resize-none`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-brand-ink block mb-1.5">
+                      Medications / Prescriptions
+                    </label>
+                    <MedicineSelector
+                      value={medications}
+                      onChange={setMedications}
+                      facilityId={user?.facilityId || ""}
                     />
                   </div>
                   <div>

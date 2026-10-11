@@ -39,6 +39,20 @@ export const REPORT_STATUS = Object.freeze({
 
 export const REPORT_STATUSES = Object.freeze(Object.values(REPORT_STATUS));
 
+/**
+ * Current report-content snapshot schema version. The frontend stamps the same
+ * version into the snapshot it builds (see
+ * frontend/src/features/reports/lib/reportSnapshot.js); bump both together when
+ * the snapshot shape changes so old snapshots stay identifiable.
+ */
+export const REPORT_CONTENT_SCHEMA_VERSION = 1;
+
+/** Max serialized size (bytes) of a submitted content snapshot. */
+export const REPORT_CONTENT_MAX_BYTES = 1_000_000;
+
+/** A plain JSON object (snapshot) — not an array, scalar, or null. */
+const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+
 /** Recipient roles a given sender role is allowed to route a report to. */
 export const REPORT_ROUTES = Object.freeze({
   [ROLES.PHN]: [ROLES.MHO],
@@ -93,6 +107,10 @@ const toReport = (row) => {
   if (!row) return null;
   const sender = row.sender || null;
   const reviewer = row.reviewer || null;
+  // `content` is only selected by the detail/create/review queries, never the
+  // list query, so a listed row has no `content` key at all. Expose
+  // `hasContent` only when the column was actually read.
+  const contentRead = Object.prototype.hasOwnProperty.call(row, 'content');
   return {
     id: row.id,
     reportType: row.report_type || '',
@@ -112,13 +130,31 @@ const toReport = (row) => {
     reviewedByName: reviewer?.full_name || reviewer?.email || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(contentRead
+      ? {
+          content: row.content ?? null,
+          contentSchemaVersion: row.content_schema_version ?? null,
+          hasContent: row.content != null,
+        }
+      : {}),
   };
 };
 
 const SENDER_EMBED = 'sender:profiles!created_by(full_name, email, role)';
 const REVIEWER_EMBED = 'reviewer:profiles!reviewed_by(full_name, email, role)';
 const BARANGAY_EMBED = 'barangay:barangays(name)';
-const SELECT = `*, ${SENDER_EMBED}, ${REVIEWER_EMBED}, ${BARANGAY_EMBED}`;
+const EMBEDS = `${SENDER_EMBED}, ${REVIEWER_EMBED}, ${BARANGAY_EMBED}`;
+// Scalar columns common to every query. `content` is intentionally excluded
+// here so list/inbox queries stay lean (a submitted snapshot can be large).
+const BASE_COLUMNS = [
+  'id', 'report_type', 'report_period', 'title', 'created_by', 'sender_role',
+  'recipient_role', 'municipality_id', 'barangay_id', 'status', 'remarks',
+  'submitted_at', 'reviewed_by', 'reviewed_at', 'created_at', 'updated_at',
+].join(', ');
+// List/inbox: metadata + embeds, WITHOUT the content snapshot.
+const LIST_SELECT = `${BASE_COLUMNS}, ${EMBEDS}`;
+// Detail/create/review: everything the list has PLUS the persisted snapshot.
+const DETAIL_SELECT = `${BASE_COLUMNS}, content, content_schema_version, ${EMBEDS}`;
 
 const assertStaff = (user) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
@@ -134,7 +170,7 @@ const assertStaff = (user) => {
  */
 export const list = async ({ user, box = 'incoming', status = null, supabase = getServiceClient() }) => {
   assertStaff(user);
-  let query = supabase.from(TABLE).select(SELECT).order('created_at', { ascending: false }).limit(200);
+  let query = supabase.from(TABLE).select(LIST_SELECT).order('created_at', { ascending: false }).limit(200);
 
   if (box === 'outgoing') {
     query = query.eq('created_by', user.id);
@@ -175,7 +211,7 @@ const inScope = (user, row) => {
 
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   assertStaff(user);
-  const { data, error } = await supabase.from(TABLE).select(SELECT).eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from(TABLE).select(DETAIL_SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load report');
   if (!data || !inScope(user, data)) throw ApiError.notFound('Report not found.');
   return toReport(data);
@@ -202,6 +238,22 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
 
   const recipientRole = resolveRecipientRole(user.role, payload.recipientRole || payload.recipient_role);
 
+  // The submitted report snapshot. Validated/sanitized upstream, but re-checked
+  // here (defense in depth): only a plain object within the size cap is stored,
+  // otherwise the report is persisted with NO snapshot rather than a bad one.
+  let content = null;
+  const candidate = payload.content;
+  if (isPlainObject(candidate)) {
+    let bytes = 0;
+    try {
+      bytes = Buffer.byteLength(JSON.stringify(candidate), 'utf8');
+    } catch {
+      bytes = REPORT_CONTENT_MAX_BYTES + 1; // non-serializable -> reject below
+    }
+    if (bytes <= REPORT_CONTENT_MAX_BYTES) content = candidate;
+    else throw ApiError.unprocessable('The report content is too large to submit.');
+  }
+
   const asDraft = text(payload.status) === REPORT_STATUS.DRAFT;
   const row = {
     report_type: reportType,
@@ -215,13 +267,17 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
     status: asDraft ? REPORT_STATUS.DRAFT : REPORT_STATUS.SUBMITTED,
     remarks: text(payload.remarks),
     submitted_at: asDraft ? null : new Date().toISOString(),
+    // One atomic INSERT writes the submission AND its snapshot together, so a
+    // report can never be left Submitted with its content missing.
+    content,
+    content_schema_version: content ? REPORT_CONTENT_SCHEMA_VERSION : null,
   };
 
   if (!asDraft) {
     await assertNoDuplicateSubmission(supabase, row);
   }
 
-  const { data, error } = await supabase.from(TABLE).insert(row).select(SELECT).single();
+  const { data, error } = await supabase.from(TABLE).insert(row).select(DETAIL_SELECT).single();
   if (error?.code === '23505') {
     throw ApiError.conflict('This report has already been submitted for the selected period.');
   }
@@ -263,7 +319,7 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
   if (!RECIPIENT_DECISIONS.has(target)) {
     throw ApiError.unprocessable('Invalid report review status.');
   }
-  const { data: existing, error: readError } = await supabase.from(TABLE).select(SELECT).eq('id', id).maybeSingle();
+  const { data: existing, error: readError } = await supabase.from(TABLE).select(DETAIL_SELECT).eq('id', id).maybeSingle();
   throwOnError(readError, 'Could not load report');
   if (!existing) throw ApiError.notFound('Report not found.');
 
@@ -285,7 +341,7 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
     reviewed_by: user.id,
     reviewed_at: new Date().toISOString(),
   };
-  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(SELECT).single();
+  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(DETAIL_SELECT).single();
   throwOnError(error, 'Could not update report');
 
   // Notify the sender that their report advanced.
@@ -311,6 +367,8 @@ export default {
   REPORT_STATUSES,
   REPORT_ROUTES,
   REPORT_RECIPIENT_ROLES,
+  REPORT_CONTENT_SCHEMA_VERSION,
+  REPORT_CONTENT_MAX_BYTES,
   assertNoDuplicateSubmission,
   resolveRecipientRole,
   list,

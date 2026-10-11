@@ -23,6 +23,7 @@ import { FACILITY, SUBMISSION_STATUS, PHN_EDITABLE_STATUSES } from '../config/fa
 import { withinFacilityScope } from '../config/scope.js';
 import { canConsult } from '../config/rhuStations.js';
 import { validateVitals } from './intake.service.js';
+import { normalizeMedications } from './medicines.service.js';
 import { markCompletedFromVisit } from './referrals.service.js';
 
 const isPHN = (user) => user?.role === 'phn';
@@ -123,7 +124,7 @@ export const viewSubmission = async ({ id, user }) => {
   return submission;
 };
 
-const normalizePhnVisit = (visit = {}) => {
+export const normalizePhnVisit = (visit = {}) => {
   const pickText = (value) => String(value ?? '').trim();
   const vitals = visit.vitals
     ? (() => {
@@ -152,6 +153,11 @@ const normalizePhnVisit = (visit = {}) => {
   if (visit.findings !== undefined) patch.findings = pickText(visit.findings);
   if (visit.treatmentGiven !== undefined) patch.treatmentGiven = pickText(visit.treatmentGiven);
   if (visit.recommendation !== undefined) patch.recommendation = pickText(visit.recommendation);
+  // Structured prescriptions (visits.medications JSONB). Normalized with the
+  // same catalogue-aware helper the Health-Supervisor consultation uses, so the
+  // PHN check-up persists prescriptions identically. Only written when the
+  // client includes the field, so unrelated PHN edits never clear it.
+  if (visit.medications !== undefined) patch.medications = normalizeMedications(visit.medications);
   if (vitals) patch.vitals = vitals;
   if (visit.phn) {
     const phnPatch = {};

@@ -35,9 +35,15 @@ export const SCREENING_REASON = Object.freeze({
   DOCUMENT_TYPE_MISMATCH: 'DOCUMENT_TYPE_MISMATCH',
   DOCUMENT_SIDE_INCONCLUSIVE: 'DOCUMENT_SIDE_INCONCLUSIVE',
   ID_TYPE_UNCONFIRMED: 'ID_TYPE_UNCONFIRMED',
+  // The resident selected an ID type that has no automated validator (e.g.
+  // "Other"). Not a failure — it routes straight to staff review.
+  ID_TYPE_UNSUPPORTED: 'ID_TYPE_UNSUPPORTED',
   ID_SIDE_FIELDS_CONFLICT: 'ID_SIDE_FIELDS_CONFLICT',
   ID_SIDE_FIELDS_CONSISTENT: 'ID_SIDE_FIELDS_CONSISTENT',
   ID_SIDE_COMPARISON_INCONCLUSIVE: 'ID_SIDE_COMPARISON_INCONCLUSIVE',
+  // The exact same image was uploaded for both the front and the back. The
+  // applicant must replace one side with the real other side of the ID.
+  ID_SIDES_IDENTICAL: 'ID_SIDES_IDENTICAL',
   OCR_TIMEOUT: 'OCR_TIMEOUT',
   SCREENING_TECHNICAL_ERROR: 'SCREENING_TECHNICAL_ERROR',
   // Retained for non-ID document rules that use an explicit indicator check.
@@ -94,6 +100,11 @@ export const SCREENING_MESSAGES = Object.freeze({
     'The uploaded image does not appear to contain the required identification document information. Please upload a clear copy of your accepted government-issued ID.',
   IDENTITY_PHOTO_MANUAL_REVIEW:
     'We could not automatically verify this photo. Staff review is required.',
+  // Normal, by-design identity-photo outcome: the file uploaded fine and there
+  // is no automated face/ID matcher, so it simply awaits staff review. This
+  // must NOT imply the photo was verified or the identity confirmed.
+  IDENTITY_PHOTO_UPLOADED:
+    'Your photo was uploaded successfully and is awaiting staff review.',
   IDENTITY_PHOTO_INVALID_FILE:
     'Please upload a valid JPG or PNG photo of yourself holding your government ID.',
   IDENTITY_PHOTO_FILE_SIZE:
@@ -108,8 +119,20 @@ export const SCREENING_MESSAGES = Object.freeze({
     'Some readable details on the front and back appear inconsistent. Please check that both images are from the same ID. Staff review is required.',
   ID_SIDE_COMPARISON_INCONCLUSIVE:
     'We could not compare enough information across both sides. Staff review is required.',
+  // Benign, EXPECTED outcome for most IDs: OCR found no labelled details that
+  // appear on BOTH the front and back, so there was nothing to cross-check.
+  // This is not a failure and must not be shown as one.
+  ID_SIDE_COMPARISON_NOT_APPLICABLE:
+    'Each side was checked on its own. There were no matching printed details to compare across both sides, which is normal for many IDs. Authorized staff will review your submission.',
+  // Same image uploaded to both sides — a clear, actionable instruction.
+  ID_SIDES_IDENTICAL:
+    'The front and back images appear to be identical. Please upload a separate image of the other side of your government ID.',
   ID_TYPE_UNCONFIRMED:
     'We could not automatically confirm the selected ID type. Staff review is required; unsupported documents may need replacement.',
+  // The selected ID type has no automated validator ("Other"). Honest, neutral
+  // wording that routes to staff rather than implying a validation failure.
+  ID_TYPE_UNSUPPORTED:
+    'Automatic verification is unavailable for this ID type. Staff review is required.',
   OCR_INCONCLUSIVE:
     'We could not complete the automatic document check. Staff review is required.',
   NO_DOCUMENT_INDICATORS_RESIDENCY:

@@ -46,7 +46,9 @@ import { isPasswordReuseError } from "@/features/registration/passwordErrors";
 import {
   normalizeRegistrationEmail,
   signupResponseIssue,
+  classifySignupError,
 } from "@/features/registration/signupResponse";
+import { isSendCodeDisabled } from "@/features/registration/sendCodeGate";
 import {
   CIVIL_STATUSES,
   NAME_SUFFIXES,
@@ -168,6 +170,7 @@ const STEPS = [
 // text stays readable (the previous washed-out header reduced contrast).
 const REVIEW_TONE = {
   success: "border-emerald-200 bg-emerald-50/70 text-emerald-800",
+  info: "border-brand-blue/25 bg-brand-light/50 text-brand-blue",
   warning: "border-amber-200 bg-amber-50/70 text-amber-800",
   danger: "border-brand-danger/25 bg-brand-danger/5 text-brand-danger",
   neutral: "border-slate-200 bg-slate-100 text-slate-600",
@@ -304,6 +307,11 @@ export default function NewResidentRegistration() {
   const [otpError, setOtpError] = useState("");
   const [sendError, setSendError] = useState("");
   const [resendIn, setResendIn] = useState(0);
+  // True once Supabase Auth confirms this email already has a registered
+  // account. Blocks the "Send Verification Code" button and surfaces the
+  // login / password-recovery options instead of sending a code to an address
+  // the applicant may not control.
+  const [emailDuplicate, setEmailDuplicate] = useState(false);
   const otpRefs = useRef(new Array(OTP_LENGTH).fill(null));
   const signupInFlightRef = useRef(false);
 
@@ -334,6 +342,8 @@ export default function NewResidentRegistration() {
     const normalizedEmail = normalizeRegistrationEmail(form.email);
     const emailErr = validateEmail(normalizedEmail, { label: "Email address" });
     if (emailErr) { setErrors((p) => ({ ...p, email: emailErr })); return; }
+    // A previously confirmed duplicate must never trigger another signup/send.
+    if (emailDuplicate) return;
     setForm((p) => ({ ...p, email: normalizedEmail }));
     setErrors((p) => ({ ...p, email: "", emailVerified: "" }));
     if (!supabase) {
@@ -375,10 +385,31 @@ export default function NewResidentRegistration() {
           sessionStorage.removeItem("pendingSignupTempPassword");
           tempPasswordRef.current = "";
           setEmailPhase("idle");
+          setEmailDuplicate(true);
           setErrors((p) => ({
             ...p,
             email: "This email address is already registered. Please log in or use a different email address.",
           }));
+          return;
+        }
+        if (responseIssue === "profile_conflict") {
+          // A profile/record collision in the database — NOT a confirmed Auth
+          // account. Do not claim the email is registered; do not create a
+          // second account. Direct the applicant to the RHU without exposing
+          // any account details.
+          sessionStorage.removeItem("pendingSignupTempPassword");
+          tempPasswordRef.current = "";
+          setEmailPhase("idle");
+          setSendError(
+            "We couldn't start verification for this email due to a record conflict. Please contact the RHU, or use a different email address you control."
+          );
+          return;
+        }
+        if (responseIssue === "rate_limited") {
+          sessionStorage.removeItem("pendingSignupTempPassword");
+          tempPasswordRef.current = "";
+          setEmailPhase("idle");
+          setSendError("Too many verification emails were sent recently. Please wait a minute, then request a new code.");
           return;
         }
         if (responseIssue) {
@@ -391,23 +422,28 @@ export default function NewResidentRegistration() {
       setResendIn(60);
     } catch (err) {
       const msg = err?.message || "";
-      const duplicateEmail =
-        err?.code === "user_already_exists"
-        || err?.code === "email_exists"
-        || /already registered|already exists|user already/i.test(String(msg));
+      // Use the same classifier as the signUp response path so both stay
+      // consistent (duplicate vs. profile conflict vs. rate limit vs. generic).
+      const errClass = classifySignupError(err);
+      const duplicateEmail = errClass === "duplicate_email";
       setEmailPhase(duplicateEmail ? "idle" : (isResend ? "sent" : "idle"));
-      if (duplicateEmail && !isResend) {
+      if ((duplicateEmail || errClass === "profile_conflict") && !isResend) {
         sessionStorage.removeItem("pendingSignupTempPassword");
         tempPasswordRef.current = "";
       }
-      if (/email rate limit exceeded|frequency/i.test(msg)) {
+      if (errClass === "rate_limited") {
         setSendError("Too many verification emails were sent recently. Please wait a minute, then request a new code.");
       } else if (duplicateEmail) {
+        setEmailDuplicate(true);
         setErrors((p) => ({
           ...p,
           email: "This email address is already registered. Please log in or use a different email address.",
         }));
         setSendError("");
+      } else if (errClass === "profile_conflict") {
+        setSendError(
+          "We couldn't start verification for this email due to a record conflict. Please contact the RHU, or use a different email address you control."
+        );
       } else {
         setSendError(msg || "Could not send the verification code. Please try again.");
       }
@@ -800,6 +836,8 @@ export default function NewResidentRegistration() {
     if (errors.email || errors.emailVerified) {
       setErrors((p) => ({ ...p, email: "", emailVerified: "" }));
     }
+    // A new address is no longer the one we flagged as already-registered.
+    if (emailDuplicate) setEmailDuplicate(false);
     if (emailPhase !== "idle") {
       setEmailPhase("idle");
       setOtpDigits(new Array(OTP_LENGTH).fill(""));
@@ -1320,7 +1358,7 @@ export default function NewResidentRegistration() {
                         <button
                           type="button"
                           onClick={sendCode}
-                          disabled={emailPhase === "sending" || resendIn > 0 && /** @type {string} */ (emailPhase) === "sent"}
+                          disabled={isSendCodeDisabled({ email: form.email, emailPhase, resendIn, emailDuplicate })}
                           className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {emailPhase === "sending" ? (
@@ -1333,6 +1371,18 @@ export default function NewResidentRegistration() {
                           <span className="text-[12px] font-medium text-slate-500 tabular-nums">Resend code in {resendIn}s</span>
                         )}
                       </div>
+                      {emailDuplicate && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-[12px] text-amber-900">
+                          <p className="font-semibold">This email is already registered.</p>
+                          <p className="mt-0.5 leading-relaxed">
+                            If this is your account, you can{" "}
+                            <Link to="/login" className="font-semibold text-brand-blue underline underline-offset-2">log in</Link>{" "}
+                            or{" "}
+                            <Link to="/forgot-password" className="font-semibold text-brand-blue underline underline-offset-2">reset your password</Link>.
+                            If you don't recognize it, enter a different email address you control.
+                          </p>
+                        </div>
+                      )}
                       {sendError && <p className="text-[11.5px] font-medium text-brand-danger">{sendError}</p>}
                       {errors.emailVerified && <p className="text-[11.5px] font-medium text-brand-danger">{errors.emailVerified}</p>}
                     </div>

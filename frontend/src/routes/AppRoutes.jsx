@@ -410,6 +410,13 @@ const MunicipalHealthReports = appPage(
     )
 );
 
+const RhuIncomingReports = appPage(
+  () =>
+    import(
+      '@/features/reports/pages/RhuIncomingReports'
+    )
+);
+
 const MunicipalSubmissions = appPage(
   () =>
     import(
@@ -1112,6 +1119,13 @@ const AppRoutes = () => (
         <Route
           path="consultation"
           element={<RhuConsultation />}
+        />
+
+        {/* Incoming Reports — RHU Personnel are the routed recipients of Health
+            Supervisor barangay reports (read/review only; they cannot author). */}
+        <Route
+          path="reports"
+          element={<RhuIncomingReports />}
         />
 
         {/*

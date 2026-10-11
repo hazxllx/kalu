@@ -834,6 +834,11 @@ const DEFAULT_GRANTS = Object.freeze({
     'triage.assessment.update',
     'triage.forward',
     'services.view',
+    // RHU Personnel are the routed RECIPIENTS of Health Supervisor reports.
+    // reports.view opens the Incoming Reports inbox (read + acknowledge/review).
+    // reports.generate is deliberately NOT granted: RHU can never author a
+    // report, only receive and act on one (mirrors backend reports.routes.js).
+    'reports.view',
   ],
 
   // DATA GATHERING ONLY. No consultation, no referral approval, no resident

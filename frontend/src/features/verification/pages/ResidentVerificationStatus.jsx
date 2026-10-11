@@ -209,17 +209,18 @@ export default function ResidentVerificationStatus() {
             <div className="text-sm">
               <p className="flex flex-wrap gap-x-2">
                 <span className="font-semibold text-brand-ink">Verification:</span>
-                <span className="text-brand-gray">
-                  {currentStatus === "approved"
-                    ? "Approved"
-                    : currentStatus === "rejected"
-                      ? "Rejected"
-                      : "Pending review"}
-                </span>
+                <span className="text-brand-gray">{statusLabel(currentStatus)}</span>
               </p>
-              {currentStatus === "rejected" && verification.rejectionReason && (
-                <p className="mt-1 text-brand-danger">
-                  Rejection reason: {verification.rejectionReason}
+              {(currentStatus === "rejected" || currentStatus === "resubmission_required") &&
+                verification.rejectionReason && (
+                  <p className="mt-1 text-brand-danger">
+                    {currentStatus === "resubmission_required" ? "Resubmission reason" : "Rejection reason"}:{" "}
+                    {verification.rejectionReason}
+                  </p>
+                )}
+              {currentStatus === "resubmission_required" && (
+                <p className="mt-1 text-brand-gray">
+                  Please resubmit the requested documents using the panel above.
                 </p>
               )}
               {currentStatus === "pending" && (

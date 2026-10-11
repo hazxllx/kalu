@@ -8,8 +8,10 @@ import { invalid, isUuid, text, valid } from './common.js';
  * are accepted here.
  */
 
-const LIMITS = { short: 120, notes: 2000 };
+const LIMITS = { short: 120, notes: 2000, content: 1_000_000 };
 const RECIPIENT_DECISIONS = [REPORT_STATUS.RECEIVED, REPORT_STATUS.REVIEWED, REPORT_STATUS.REJECTED];
+
+const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
 export const createReportValidator = (input = {}) => {
   const errors = {};
@@ -27,6 +29,28 @@ export const createReportValidator = (input = {}) => {
   if (recipientRole) row.recipientRole = recipientRole;
   const status = text(input?.status);
   if (status === REPORT_STATUS.DRAFT) row.status = REPORT_STATUS.DRAFT;
+
+  // Optional report-content snapshot. When present it must be a JSON object
+  // within the size cap; a bad shape/size is rejected rather than silently
+  // dropped so the client learns the submission was not snapshotted.
+  const content = input?.content;
+  if (content !== undefined && content !== null) {
+    if (!isPlainObject(content)) {
+      errors.content = 'The report content must be an object.';
+    } else {
+      let bytes = Number.POSITIVE_INFINITY;
+      try {
+        bytes = JSON.stringify(content).length;
+      } catch {
+        bytes = Number.POSITIVE_INFINITY;
+      }
+      if (!Number.isFinite(bytes) || bytes > LIMITS.content) {
+        errors.content = 'The report content is too large to submit.';
+      } else {
+        row.content = content;
+      }
+    }
+  }
 
   if (Object.keys(errors).length) return invalid(errors);
   return valid(row);

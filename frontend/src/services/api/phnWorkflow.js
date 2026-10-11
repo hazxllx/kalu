@@ -141,6 +141,10 @@ export const phnWorkflowApi = {
       treatmentGiven:
         recorded.recommendations || recorded.clinicalNotes || recorded.healthConcern || "",
       recommendation: recorded.recommendations || "",
+      // Structured prescriptions recorded in the workbench's MedicineSelector.
+      // Forwarded verbatim (never renamed/dropped) so the backend persists them
+      // to visits.medications; an empty array clears nothing it did not set.
+      medications: Array.isArray(recorded.medications) ? recorded.medications : [],
       phn: {
         assessment: recorded.healthConcern || recorded.assessment || "",
         notes: recorded.clinicalNotes || "",

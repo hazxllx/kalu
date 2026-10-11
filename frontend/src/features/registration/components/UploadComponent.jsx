@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { UploadCloud, FileText, X, CheckCircle2, ImageIcon, AlertTriangle, XCircle, Loader2, RotateCcw } from "lucide-react";
+import { UploadCloud, FileText, X, ImageIcon, AlertTriangle, XCircle, Loader2, RotateCcw, FileCheck2 } from "lucide-react";
 import { labelCls } from "@/features/registration/components/RegistrationDesign";
 import { SLOT_STATUS, slotStatusLabel } from "@/features/registration/documentScreening";
 
@@ -10,9 +10,12 @@ const MAX_SIZE = 10 * 1024 * 1024;
 
 // Status presentation for the automated document check. Neutral until the
 // backend result arrives; a rejected/error result is never shown as accepted.
+// PASSED (backend pending_manual_review) means "uploaded, awaiting staff
+// review" — it is shown in an informational blue, NOT a green "verified" tone,
+// so it never implies the document or identity was confirmed.
 const STATUS_META = {
   [SLOT_STATUS.CHECKING]: { tone: "text-brand-blue", bg: "bg-brand-blue/5 border-brand-blue/20", Icon: Loader2, spin: true },
-  [SLOT_STATUS.PASSED]: { tone: "text-emerald-700", bg: "bg-emerald-50/70 border-emerald-200", Icon: CheckCircle2 },
+  [SLOT_STATUS.PASSED]: { tone: "text-brand-blue", bg: "bg-brand-light/50 border-brand-blue/20", Icon: FileCheck2 },
   [SLOT_STATUS.FLAGGED]: { tone: "text-amber-700", bg: "bg-amber-50/70 border-amber-200", Icon: AlertTriangle },
   [SLOT_STATUS.REJECTED]: { tone: "text-brand-danger", bg: "bg-brand-danger/5 border-brand-danger/25", Icon: XCircle },
   [SLOT_STATUS.ERROR]: { tone: "text-brand-danger", bg: "bg-brand-danger/5 border-brand-danger/25", Icon: XCircle },

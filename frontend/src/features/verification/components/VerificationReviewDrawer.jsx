@@ -152,6 +152,16 @@ export default function VerificationReviewDrawer({
     setDocuments(docs);
   }, [verification.id]);
 
+  // Re-fetch the resident's documents to mint fresh signed URLs and return the
+  // new URL for a single document, so a reviewer whose secure link expired
+  // mid-review can recover without reopening the drawer (parity with the staff
+  // account approval drawer).
+  const refreshDocumentUrl = useCallback(async (documentId) => {
+    const docs = await fetchResidentDocuments(verification.id);
+    setDocuments(docs);
+    return docs.find((d) => d.id === documentId)?.url || null;
+  }, [verification.id]);
+
   // Reset per-resident state and fetch the SELECTED resident's documents only.
   // Clearing `documents` up front prevents a previous resident's images from
   // lingering while the new request is in flight.
@@ -404,6 +414,7 @@ export default function VerificationReviewDrawer({
                   statusLabel: docStatusLabel(doc.verificationStatus),
                 }}
                 onEnlarge={openLightbox}
+                onRefreshUrl={refreshDocumentUrl}
                 footer={
                   <>
                     {doc.documentType === "student_id" && doc.verificationStatus === "pending" && (

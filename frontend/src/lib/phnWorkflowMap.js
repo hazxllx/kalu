@@ -98,6 +98,7 @@ export const mapVisitToPatient = (visit) => {
           healthConcern: phn.assessment || "",
           clinicalNotes: phn.notes || "",
           recommendations: visit.recommendation || visit.treatmentGiven || "",
+          medications: Array.isArray(visit.medications) ? visit.medications : [],
           riskLevel: visit.riskLevel || "",
           outcome: visit.outcome || "No Further Action",
           personnel: phn.personnel || "",

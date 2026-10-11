@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { RefreshCw, MapPin, Home, AlertCircle } from "lucide-react";
 
 import { fetchCommunityMap, fetchHouseholdMap } from "@/services/api/earlyWarningApi";
+import { canonicalRiskLevel } from "@/lib/riskLevel";
 
 /**
  * Community Health Map — real interactive Leaflet map for disease/health
@@ -136,11 +137,15 @@ function communityRiskColor(level) {
 }
 
 // Household risk marker colour. Active-case households are emphasised; the
-// colour reflects the household risk level reported by the backend.
+// colour reflects the household risk level reported by the backend. The level
+// is normalized through canonicalRiskLevel so the legacy "Medium" alias and
+// "Moderate" map to the same colour (single boundary instead of scattered
+// string checks).
 function householdColor(riskLevel, hasActiveCase) {
   if (hasActiveCase) {
-    if (riskLevel === "High") return "#B91C1C"; // red-700
-    if (riskLevel === "Moderate" || riskLevel === "Medium") return "#EA580C"; // orange-600
+    const level = canonicalRiskLevel(riskLevel);
+    if (level === "High") return "#B91C1C"; // red-700
+    if (level === "Moderate") return "#EA580C"; // orange-600
     return "#F59E0B"; // amber-500
   }
   return "#2563EB"; // brand blue — household with no active case

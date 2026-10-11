@@ -391,7 +391,7 @@ export default function RHUDashboard() {
           )}
 
           <Link
-            to="/app/rhu_personnel/triage"
+            to="/app/rhu_personnel/consultation"
             className="mt-4 block w-full text-center text-sm font-medium text-brand-blue hover:underline"
           >
             Open Consultation Queue

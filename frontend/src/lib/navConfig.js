@@ -342,6 +342,15 @@ export const NAV = {
           permission: "referrals.view",
         },
         {
+          // The follow-up management routes already exist for this role
+          // (AppRoutes: followups + followup-calendar); surface them in the nav
+          // so they are reachable without a direct URL.
+          label: "Follow-ups",
+          icon: "CalendarClock",
+          path: "/app/health_supervisor/followups",
+          permission: "followups.view",
+        },
+        {
           label: "Health Services",
           icon: "Activity",
           path: "/app/health_supervisor/services",
@@ -426,6 +435,13 @@ export const NAV = {
       icon: "FileText",
       path: "/app/rhu_personnel/certificates",
       station: "triage",
+      group: "Operations",
+    },
+    {
+      label: "Incoming Reports",
+      icon: "Inbox",
+      path: "/app/rhu_personnel/reports",
+      permission: "reports.view",
       group: "Operations",
     },
     {

@@ -53,3 +53,5 @@ qa/
 evidence/
 evidence1/
 test-results/
+playwright-report/
+playwright/.cache/

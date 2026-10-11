@@ -19,6 +19,7 @@
  */
 import { PNG } from 'pngjs';
 import jpeg from 'jpeg-js';
+import { createHash } from 'node:crypto';
 
 import {
   IMAGE_LIMITS,
@@ -390,6 +391,11 @@ export const matchesDocumentIndicator = (normalized, documentType, governmentIdT
 const isGovernmentIdType = (documentType) =>
   documentType === 'government_id' || documentType === 'government_id_front' || documentType === 'government_id_back';
 
+// Government ID types that have an automated text validator. Any selected type
+// outside this set (e.g. "other") is routed to staff review rather than being
+// put through type-mismatch / indicator checks it can never satisfy.
+const GOVERNMENT_ID_VALIDATOR_TYPES = new Set(Object.keys(GOVERNMENT_ID_TYPE_DETECTORS));
+
 const normalizeGovernmentIdType = (value) => {
   const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
   if (['philsys / national id', 'philsys national id', 'national id'].includes(normalized)) return 'philsys';
@@ -416,13 +422,15 @@ const messageForReason = (reason, documentType) => {
       return SCREENING_MESSAGES.DOCUMENT_SIDE_INCONCLUSIVE;
     case SCREENING_REASON.ID_TYPE_UNCONFIRMED:
       return SCREENING_MESSAGES.ID_TYPE_UNCONFIRMED;
+    case SCREENING_REASON.ID_TYPE_UNSUPPORTED:
+      return SCREENING_MESSAGES.ID_TYPE_UNSUPPORTED;
     case SCREENING_REASON.OCR_UNAVAILABLE:
     case SCREENING_REASON.OCR_TIMEOUT:
     case SCREENING_REASON.SCREENING_TECHNICAL_ERROR:
       return SCREENING_MESSAGES.OCR_INCONCLUSIVE;
     case SCREENING_REASON.IMAGE_REQUIRES_MANUAL_REVIEW:
       return documentType === 'identity_photo'
-        ? SCREENING_MESSAGES.IDENTITY_PHOTO_MANUAL_REVIEW
+        ? SCREENING_MESSAGES.IDENTITY_PHOTO_UPLOADED
         : SCREENING_MESSAGES.PASSED;
     case SCREENING_REASON.INVALID_FILE_TYPE:
     case SCREENING_REASON.CORRUPTED_FILE:
@@ -431,6 +439,8 @@ const messageForReason = (reason, documentType) => {
         : SCREENING_MESSAGES.INVALID_FILE;
     case SCREENING_REASON.DOCUMENT_TYPE_MISMATCH:
       return SCREENING_MESSAGES.DOCUMENT_TYPE_MISMATCH;
+    case SCREENING_REASON.ID_SIDES_IDENTICAL:
+      return SCREENING_MESSAGES.ID_SIDES_IDENTICAL;
     case SCREENING_REASON.INSUFFICIENT_RESOLUTION:
     case SCREENING_REASON.CLEARLY_UNUSABLE:
     case SCREENING_REASON.LOW_IMAGE_QUALITY:
@@ -692,6 +702,22 @@ const screenDocumentCore = async ({
   const evidence = inspectTypeEvidence(normalized, documentType, governmentIdType);
   const indicatorMatches = findDocumentIndicators(normalized, documentType, governmentIdType);
   const profile = getGovernmentIdProfile(documentType, governmentIdType);
+
+  // If the selected government ID type has no automated validator (e.g.
+  // "Other"), there is nothing to confirm or mismatch against. Route it
+  // straight to staff review instead of presenting a misleading "no document
+  // indicators" failure. OCR text was still captured above for cross-side
+  // comparison.
+  if (isGovernmentIdType(documentType) && !GOVERNMENT_ID_VALIDATOR_TYPES.has(governmentIdType)) {
+    return manualReview(
+      SCREENING_REASON.ID_TYPE_UNSUPPORTED,
+      documentType,
+      quality,
+      true,
+      metrics,
+      indicatorMatches,
+    );
+  }
 
   if (documentType === 'government_id_front' || documentType === 'government_id') {
     if (evidence.status === 'mismatch') {
@@ -1101,16 +1127,27 @@ export const crossVerifyGovernmentIdSides = (frontText, backText) => {
 
 /** Apply advisory cross-side evidence without granting verification. */
 export const applyGovernmentIdCrossVerification = (front, back, comparison) => {
-  const crossVerificationMessage = comparison.status === 'conflict'
+  // Internal, audit-facing description of the comparison outcome.
+  const description = comparison.status === 'conflict'
     ? SCREENING_MESSAGES.ID_SIDE_FIELDS_CONFLICT
     : comparison.status === 'consistent'
       ? 'Available overlapping details did not conflict. This is not proof of authenticity; staff review is still required.'
-      : SCREENING_MESSAGES.ID_SIDE_COMPARISON_INCONCLUSIVE;
+      // No labelled fields appeared on BOTH sides. That is expected for most
+      // IDs (the back rarely repeats the front's printed fields) and is NOT a
+      // failure, so it never changes either side's own result.
+      : SCREENING_MESSAGES.ID_SIDE_COMPARISON_NOT_APPLICABLE;
+
+  // Only surface a cross-side note to the applicant when it is ACTIONABLE — a
+  // genuine conflict between the two sides. The benign "consistent" and
+  // "inconclusive" notes merely restate "staff will review", which the side's
+  // own status/message already says, so they are suppressed to avoid showing
+  // two warnings for the same outcome.
+  const crossVerificationMessage = comparison.status === 'conflict' ? description : '';
   const metadata = {
     status: comparison.status,
     comparedFields: comparison.comparedFields,
     conflictingFields: comparison.conflictingFields,
-    message: crossVerificationMessage,
+    message: description,
   };
 
   const applyResult = (screening) => {
@@ -1118,13 +1155,13 @@ export const applyGovernmentIdCrossVerification = (front, back, comparison) => {
     let status = screening.status;
     let reason = screening.reason;
     if (comparison.status === 'conflict') {
+      // Genuinely comparable fields were present on both sides but disagreed.
       status = SCREENING_STATUS.AUTOMATED_FLAGGED;
       reason = SCREENING_REASON.ID_SIDE_FIELDS_CONFLICT;
     } else if (comparison.status === 'inconclusive') {
-      if (status !== SCREENING_STATUS.AUTOMATED_REJECTED) {
-        status = SCREENING_STATUS.AUTOMATED_FLAGGED;
-        reason = SCREENING_REASON.ID_SIDE_COMPARISON_INCONCLUSIVE;
-      }
+      // Nothing overlapping to compare: leave each side's independent result
+      // untouched. Do NOT flag or downgrade — absence of shared fields is not
+      // evidence of a problem.
     } else if (
       status === SCREENING_STATUS.AUTOMATED_FLAGGED
       && [
@@ -1133,6 +1170,8 @@ export const applyGovernmentIdCrossVerification = (front, back, comparison) => {
         SCREENING_REASON.NO_DOCUMENT_INDICATORS,
       ].includes(reason)
     ) {
+      // comparison.status === 'consistent': overlapping details matched, so a
+      // borderline side can be promoted from flagged to plain manual review.
       status = SCREENING_STATUS.PENDING_MANUAL_REVIEW;
     }
     return {
@@ -1150,10 +1189,85 @@ export const applyGovernmentIdCrossVerification = (front, back, comparison) => {
   };
 };
 
+// File/quality-level failures. These describe a file that could not be read at
+// all, and take precedence over an "identical images" result (an unreadable
+// file is replaced regardless of whether the two sides match).
+const UPLOAD_FAILURE_REASONS = new Set([
+  SCREENING_REASON.INVALID_FILE_TYPE,
+  SCREENING_REASON.CORRUPTED_FILE,
+  SCREENING_REASON.FILE_TOO_LARGE,
+  SCREENING_REASON.INSUFFICIENT_RESOLUTION,
+  SCREENING_REASON.BLANK_IMAGE,
+  SCREENING_REASON.TOO_DARK,
+]);
+
+/**
+ * SHA-256 of a file's raw bytes. Used only to detect that the SAME file was
+ * uploaded for both ID sides. The digest is derived locally and never logged.
+ */
+export const hashImageBuffer = (buffer) =>
+  createHash('sha256').update(buffer).digest('hex');
+
+/**
+ * True only when both buffers contain byte-for-byte identical content. Compares
+ * SHA-256 digests rather than filenames, sizes or MIME types.
+ */
+export const buffersAreIdentical = (a, b) => {
+  if (!Buffer.isBuffer(a) || !Buffer.isBuffer(b)) return false;
+  if (a.length !== b.length) return false;
+  return hashImageBuffer(a) === hashImageBuffer(b);
+};
+
+/**
+ * Produce a consistent result when the SAME image was uploaded for both sides.
+ *
+ * Precedence: a genuine file/upload failure (precedence 1) is kept as-is; only
+ * otherwise does the identical-images result (precedence 2) override the
+ * per-side classification. The BACK is the side requested for replacement so
+ * the instruction is unambiguous, and it is rejected so the upload is blocked;
+ * the FRONT is flagged (not rejected) with the same message, so exactly one
+ * side needs replacing. Neither side is auto-approved.
+ */
+export const applyIdenticalIdSides = (front, back) => {
+  if (UPLOAD_FAILURE_REASONS.has(front?.reason) || UPLOAD_FAILURE_REASONS.has(back?.reason)) {
+    return { front, back, identical: true, overridden: false };
+  }
+  const message = SCREENING_MESSAGES.ID_SIDES_IDENTICAL;
+  const metadata = {
+    status: 'identical',
+    comparedFields: [],
+    conflictingFields: [],
+    message,
+  };
+  return {
+    identical: true,
+    overridden: true,
+    front: {
+      ...front,
+      status: SCREENING_STATUS.AUTOMATED_FLAGGED,
+      reason: SCREENING_REASON.ID_SIDES_IDENTICAL,
+      message,
+      crossVerification: metadata,
+      crossVerificationMessage: message,
+    },
+    back: {
+      ...back,
+      status: SCREENING_STATUS.AUTOMATED_REJECTED,
+      reason: SCREENING_REASON.ID_SIDES_IDENTICAL,
+      message,
+      crossVerification: metadata,
+      crossVerificationMessage: message,
+    },
+  };
+};
+
 export default {
   screenDocument,
   crossVerifyGovernmentIdSides,
   applyGovernmentIdCrossVerification,
+  hashImageBuffer,
+  buffersAreIdentical,
+  applyIdenticalIdSides,
   sniffFileType,
   validateFileBasics,
   decodeImage,

@@ -17,6 +17,16 @@ import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { monthlyConsultations, comparisonMonthlyConsultations } from "@/services/local/dashboardData";
 import { reportsApi, referralsApi, followUpsApi, maternalApi, immunizationsApi } from "@/services/api";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid, Legend } from "recharts";
+import IncomingReports from "@/features/reports/components/IncomingReports";
+import ReportSnapshotView from "@/features/reports/components/ReportSnapshotView";
+import {
+  REPORT_COLUMNS,
+  GENERIC_COLUMNS,
+  recordDate,
+  recordStatusTone,
+  buildReportContent,
+  hasSnapshot,
+} from "@/features/reports/lib/reportSnapshot";
 
 const REPORTS = [];
 
@@ -47,7 +57,11 @@ const REPORT_TYPE_LABELS = ["Health Records", "Referrals", "Follow-ups", "Health
 // detailed summary available" note rather than inventing numbers.
 
 /** Candidate per-record date fields, most clinically-relevant first. */
-const DATE_FIELDS = ["scheduled_date", "referral_date", "service_date", "visit_date", "administered_date", "delivery_date", "record_date", "date", "created_at"];
+// NOTE: per-record date resolution, resident-name formatting, the per-type
+// column maps and the status-badge tone now live in the shared snapshot lib
+// (@/features/reports/lib/reportSnapshot) so the live preview and the persisted
+// recipient view render identically. Only the preview-building helpers that
+// are specific to this page remain below.
 
 /** Compute the inclusive [from,to] YYYY-MM-DD window for a "YYYY-MM" period. */
 const monthWindow = (period) => {
@@ -55,13 +69,6 @@ const monthWindow = (period) => {
   const [y, m] = period.split("-").map(Number);
   const lastDay = new Date(y, m, 0).getDate();
   return { from: `${period}-01`, to: `${period}-${String(lastDay).padStart(2, "0")}` };
-};
-
-const recordDate = (rec) => {
-  for (const f of DATE_FIELDS) {
-    if (rec?.[f]) return String(rec[f]).slice(0, 10);
-  }
-  return null;
 };
 
 /** Normalize an API response (array | {records} | {rows} | {data}) to an array. */
@@ -91,76 +98,6 @@ const summarizeRecords = (res, window) => {
   }
   return { total: scoped.length, byStatus, periodFiltered: Boolean(anyDated && window), records: scoped };
 };
-
-/** Full name from an embedded resident record, or "" when unavailable. */
-const residentName = (r) => {
-  const res = r?.resident;
-  if (!res) return "";
-  return [res.first_name, res.middle_name, res.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-};
-
-/** Readable date from a YYYY-MM-DD or ISO value; placeholder when absent. */
-const fmtDate = (v) => {
-  if (!v) return "—";
-  const raw = String(v);
-  const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
-  if (Number.isNaN(d.getTime())) return raw;
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-};
-
-/**
- * Columns shown in the full-report preview per report type, mapped to the ACTUAL
- * fields the source APIs return (follow_ups / health_referrals / maternal_records
- * / immunizations, each with the resident embed the API provides). A field that
- * the API does not return is shown as "—", never fabricated.
- */
-const REPORT_COLUMNS = {
-  "Follow-up Report": [
-    { label: "Resident", get: (r) => residentName(r) || "—" },
-    { label: "Scheduled", get: (r) => fmtDate(r.scheduled_date || r.date) },
-    { label: "Purpose", get: (r) => r.purpose || "—" },
-    { label: "Priority", get: (r) => r.priority || "—" },
-    { label: "Status", get: (r) => r.status || "—", badge: true },
-  ],
-  "Referral Report": [
-    { label: "Resident", get: (r) => residentName(r) || "—" },
-    { label: "Referral Date", get: (r) => fmtDate(r.referral_date || r.created_at) },
-    { label: "Destination", get: (r) => r.destination_facility || r.destination_service || "—" },
-    { label: "Reason", get: (r) => r.reason || "—" },
-    { label: "Status", get: (r) => r.status || "—", badge: true },
-  ],
-  "Monthly Maternal Report": [
-    { label: "Resident", get: (r) => residentName(r) || "—" },
-    { label: "EDD", get: (r) => fmtDate(r.edd) },
-    { label: "Prenatal Visits", get: (r) => (r.prenatal_visits ?? r.prenatal_visits === 0 ? String(r.prenatal_visits) : "—") },
-    { label: "Risk", get: (r) => r.risk || "—" },
-    { label: "Status", get: (r) => r.status || "—", badge: true },
-  ],
-  "Immunization Report": [
-    { label: "Resident", get: (r) => residentName(r) || "—" },
-    { label: "Vaccine", get: (r) => r.vaccine || "—" },
-    { label: "Dose", get: (r) => r.dose || "—" },
-    { label: "Administered", get: (r) => fmtDate(r.administered_date || r.created_at) },
-    { label: "Next Dose", get: (r) => fmtDate(r.next_dose) },
-    { label: "Status", get: (r) => r.status || "—", badge: true },
-  ],
-};
-
-/** Light tone for a record-level status badge (neutral default). */
-const recordStatusTone = (status) => {
-  const s = String(status || "").toLowerCase();
-  if (["completed", "accepted", "reviewed", "active"].includes(s)) return "bg-brand-green/10 text-brand-green";
-  if (["rejected", "cancelled", "missed"].includes(s)) return "bg-brand-danger/10 text-brand-danger";
-  if (["pending", "for review", "ongoing", "scheduled", "upcoming", "today", "high"].includes(s)) return "bg-brand-yellow/15 text-[#B07E00]";
-  return "bg-brand-gray/10 text-brand-gray";
-};
-
-/** Fallback columns for any record-list type without a specific mapping. */
-const GENERIC_COLUMNS = [
-  { label: "Resident", get: (r) => residentName(r) || "—" },
-  { label: "Date", get: (r) => fmtDate(recordDate(r)) },
-  { label: "Status", get: (r) => r.status || "—", badge: true },
-];
 
 /** The authenticated, scope-enforced source fetcher for a report type, or null. */
 const sourceForType = (type, window) => {
@@ -233,6 +170,11 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const [submitting, setSubmitting] = useState(false);
   // Read-only details of a persisted, submitted report (View action).
   const [detailReport, setDetailReport] = useState(/** @type {any} */ (null));
+  // The persisted snapshot for the opened report, fetched on demand so the
+  // sender reviews EXACTLY what was submitted (not a live reconstruction).
+  const [detailContent, setDetailContent] = useState(/** @type {any} */ (null));
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [formErrors, setFormErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [toast, setToast] = useState(null);
   const [reportForm, setReportForm] = useState(() => ({
@@ -291,6 +233,36 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     loadOutgoing().finally(() => { if (!active) return; });
     return () => { active = false; };
   }, [loadOutgoing]);
+
+  // Fetch the persisted snapshot whenever a submitted report is opened for
+  // viewing. Local, not-yet-submitted drafts have no server content and skip
+  // the fetch; legacy rows return with hasContent=false so the modal can show
+  // an explicit "content unavailable" state.
+  useEffect(() => {
+    if (!detailReport?.id || !detailReport.persisted) {
+      setDetailContent(null);
+      setDetailError("");
+      setDetailLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setDetailLoading(true);
+    setDetailError("");
+    setDetailContent(null);
+    reportsApi.get(detailReport.id)
+      .then((res) => {
+        if (!active) return;
+        setDetailContent(res?.record || null);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setDetailError(err?.message || "Could not load the submitted report.");
+      })
+      .finally(() => {
+        if (active) setDetailLoading(false);
+      });
+    return () => { active = false; };
+  }, [detailReport]);
 
   const showToast = (message) => {
     setToast(message);
@@ -385,6 +357,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         reportType: preview.type,
         reportPeriod: preview.period || "",
         title: preview.name || "",
+        // Persist the EXACT reviewed report as an immutable snapshot so the
+        // recipient (and this sender later) sees what was submitted, not a
+        // reconstruction from live records.
+        content: buildReportContent(preview),
       });
     } catch (err) {
       // Honest failure — the report is NOT marked submitted and the preview
@@ -495,6 +471,15 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         <div className="fixed bottom-4 right-4 bg-brand-ink text-white px-4 py-3 rounded-btn shadow-lg flex items-center gap-2 z-50 animate-in slide-in-from-bottom-2">
           <CheckCircle2 className="w-4 h-4 text-brand-green" />
           <span className="text-sm">{toast}</span>
+        </div>
+      )}
+
+      {/* Incoming oversight inbox — PHN has municipality-wide read/review
+          oversight of reports routed to the RHU. Barangay-level Health
+          Supervisors are senders only, so this is shown for the PHN view. */}
+      {isPhn && (
+        <div className="mb-5">
+          <IncomingReports />
         </div>
       )}
 
@@ -1076,6 +1061,28 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   </div>
                 ))}
               </div>
+
+              {/* Submitted report snapshot — the EXACT content submitted, read
+                  back from the server (never regenerated from live records). */}
+              <div className="mt-4">
+                <h4 className="mb-2 text-sm font-semibold text-brand-ink">Submitted Report</h4>
+                {detailLoading ? (
+                  <p className="inline-flex items-center gap-2 text-sm text-brand-gray">
+                    <RefreshCw className="h-4 w-4 animate-spin" /> Loading submitted report…
+                  </p>
+                ) : detailError ? (
+                  <div className="rounded-btn border border-brand-danger/30 bg-brand-danger/5 p-4 text-sm text-brand-danger">
+                    {detailError}
+                  </div>
+                ) : hasSnapshot(detailContent?.content) ? (
+                  <ReportSnapshotView content={detailContent.content} />
+                ) : (
+                  <div className="rounded-btn border border-dashed border-brand-border p-4 text-sm text-brand-gray">
+                    The full content for this report was not captured at submission time, so it cannot be displayed. Only the submission details above are available for this record.
+                  </div>
+                )}
+              </div>
+
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => setDetailReport(null)}

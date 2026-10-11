@@ -326,14 +326,20 @@ function ServiceCard({ service, onRegister, onCancel }) {
               Register
             </button>
           ) : (
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              className="w-full cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 py-2 text-[13px] font-medium text-slate-400 lg:w-auto"
-            >
-              Registration Closed
-            </button>
+            <div className="flex flex-col items-start gap-1 lg:items-end">
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                title={avail.text}
+                className="w-full cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 py-2 text-[13px] font-medium text-slate-400 lg:w-auto"
+              >
+                Registration Closed
+              </button>
+              {avail.text && (
+                <span className="text-[11px] leading-tight text-slate-400 lg:text-right">{avail.text}</span>
+              )}
+            </div>
           )}
         </div>
       </div>

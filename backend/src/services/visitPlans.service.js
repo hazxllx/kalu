@@ -76,6 +76,78 @@ const addDaysISO = (iso, days) => {
   return toISO(date);
 };
 
+// A comparable "YYYY-MM-DDTHH:MM" wall-clock key for now, using the same UTC
+// calendar convention the rest of this module applies to dates.
+const nowKeyOf = (now = new Date()) =>
+  `${todayISO(now)}T${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
+
+/**
+ * Normalize a stored naive-local registration deadline (timestamp without time
+ * zone, e.g. "2026-01-10T09:00:00" or "2026-01-10 09:00:00") into a comparable
+ * "YYYY-MM-DDTHH:MM" key, or '' when absent/unparseable. A date-only deadline is
+ * treated as the end of that day (inclusive).
+ */
+const deadlineKeyOf = (value) => {
+  const raw = text(value).replace(' ', 'T');
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw}T23:59`;
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(raw);
+  return match ? `${match[1]}T${match[2]}` : '';
+};
+
+/**
+ * A service is "dated" (a one-time event or a date range) when a concrete
+ * start_date is recorded on the service row itself — the shape the Add Health
+ * Service modal produces. Such a service is governed by its own
+ * start/end date + registration deadline, NOT by recurring appointment_schedules.
+ */
+const isDatedService = (service) => Boolean(service?.start_date);
+
+// A dated service window is scanned day-by-day; cap the scan so a mis-entered
+// multi-year range can never spin.
+const MAX_DATED_SCAN_DAYS = 366;
+
+/**
+ * Server-authoritative availability decision for the resident directory and
+ * registration. Returns { open, reason }.
+ *
+ *   - inactive            : the service is disabled.
+ *   - registration_closed : a configured registration deadline has passed.
+ *   - ended               : a dated service's last day is in the past.
+ *   - blackout            : every remaining dated day is a closure.
+ *   - no_slots            : a recurring service has no open day in the window.
+ *   - unconfigured        : neither a dated window nor a recurring schedule
+ *                           exists (never auto-opened).
+ *
+ * A dated service is evaluated from its own configured date + registration
+ * deadline (recurring weekday rows are not required and do not override it); a
+ * recurring service keeps the existing weekday + blackout behavior.
+ */
+const evaluateAvailability = (service, scheduleRows, blackoutDates, now = new Date()) => {
+  if (service.active === false) return { open: false, reason: 'inactive' };
+
+  const today = todayISO(now);
+  const deadline = deadlineKeyOf(service.registration_deadline);
+  if (deadline && nowKeyOf(now) > deadline) return { open: false, reason: 'registration_closed' };
+
+  if (isDatedService(service)) {
+    const start = service.start_date;
+    const end = service.end_date || start;
+    if (end < today) return { open: false, reason: 'ended' };
+    const first = start < today ? today : start;
+    let scanned = 0;
+    for (let iso = first; iso <= end && scanned < MAX_DATED_SCAN_DAYS; iso = addDaysISO(iso, 1), scanned += 1) {
+      if (!blackoutDates.has(iso)) return { open: true, reason: null };
+    }
+    return { open: false, reason: 'blackout' };
+  }
+
+  const { weekdays } = summarizeSchedule(scheduleRows);
+  if (weekdays.length === 0) return { open: false, reason: 'unconfigured' };
+  if (hasUpcomingDay(weekdays, blackoutDates, now)) return { open: true, reason: null };
+  return { open: false, reason: 'no_slots' };
+};
+
 // ---------------------------------------------------------------------------
 // Resolve the authenticated caller's own resident record.
 // ---------------------------------------------------------------------------
@@ -194,8 +266,9 @@ const residentStatusFor = (attendanceStatus) => {
   }
 };
 
-const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityName, plan, attendanceStatus = null) => {
+const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityName, plan, attendanceStatus = null, now = new Date()) => {
   const { weekdays, windowStart, windowEnd } = summarizeSchedule(scheduleRows);
+  const availability = evaluateAvailability(service, scheduleRows, blackoutDates, now);
   return {
     id: service.id,
     name: service.name,
@@ -215,7 +288,12 @@ const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityN
       endTime: hhmm(service.end_time),
       registrationDeadline: service.registration_deadline || null,
     },
-    hasUpcoming: hasUpcomingDay(weekdays, blackoutDates),
+    hasUpcoming: availability.open,
+    // Server-authoritative availability result. The resident UI renders this
+    // directly instead of re-deriving open/closed from the weekday summary, so a
+    // validly-configured one-time service is never shown as closed just because
+    // it has no recurring appointment_schedules rows.
+    availability,
     plan: plan
       ? {
           id: plan.id,
@@ -251,7 +329,15 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
 
   const ids = inScope.map((s) => s.id);
   const from = todayISO(now);
-  const to = addDaysISO(from, PLAN_WINDOW_DAYS - 1);
+  // Load closures across the recurring two-week horizon AND every dated
+  // service's own window, so a dated event beyond two weeks still has its
+  // blackouts considered when deciding availability.
+  const planWindowEnd = addDaysISO(from, PLAN_WINDOW_DAYS - 1);
+  const to = inScope
+    .filter(isDatedService)
+    .map((s) => s.end_date || s.start_date)
+    .filter(Boolean)
+    .reduce((max, end) => (end > max ? end : max), planWindowEnd);
 
   const [schedules, blackouts, plansRes, attendanceRes, rhu] = await Promise.all([
     loadSchedules(supabase, ids, resident),
@@ -310,6 +396,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
       type === 'BHC' ? bhcName : rhuDisplay,
       planByService.get(service.id) || null,
       attendanceByService.get(service.id) || null,
+      now,
     );
     (type === 'BHC' ? bhc : rhuServices).push(view);
   }
@@ -326,7 +413,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
 const loadScopedService = async (supabase, resident, serviceId) => {
   const { data, error } = await supabase
     .from(SERVICE_TABLE)
-    .select('id, name, description, municipality_id, barangay_id, active, visit_policy')
+    .select('id, name, description, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline')
     .eq('id', serviceId)
     .maybeSingle();
   throwOnError(error, 'Could not load the service');
@@ -346,6 +433,45 @@ const loadScopedService = async (supabase, resident, serviceId) => {
 export const serviceAvailability = async ({ user, serviceId, from, to, supabase = getServiceClient(), now = new Date() }) => {
   const resident = await ownResident(supabase, user);
   const service = await loadScopedService(supabase, resident, serviceId);
+
+  // A dated (one-time / date-range) service is selectable on its own configured
+  // day(s), independent of the recurring two-week horizon, so an event further
+  // out can still be registered for.
+  if (isDatedService(service)) {
+    const today = todayISO(now);
+    const start = service.start_date;
+    const end = service.end_date || start;
+    const first = start < today ? today : start;
+    const rangeTo = end < first ? first : end;
+
+    const blackouts = await loadBlackouts(supabase, [service.id], resident, first, rangeTo);
+    const blackoutDates = new Set(blackouts.map((b) => b.blackout_date));
+    const availability = evaluateAvailability(service, [], blackoutDates, now);
+
+    const dates = [];
+    if (availability.open) {
+      let scanned = 0;
+      for (let iso = first; iso <= end && scanned < MAX_DATED_SCAN_DAYS; iso = addDaysISO(iso, 1), scanned += 1) {
+        if (!blackoutDates.has(iso)) dates.push({ date: iso, weekday: weekdayOf(iso) });
+      }
+    }
+
+    return {
+      serviceId: service.id,
+      serviceName: service.name,
+      facilityType: facilityTypeOf(service, resident),
+      visitPolicy: service.visit_policy === 'by_notice' ? 'by_notice' : 'walk_in',
+      weekdays: [],
+      windowStart: hhmm(service.start_time),
+      windowEnd: hhmm(service.end_time),
+      from: first,
+      to: rangeTo,
+      dates,
+      unavailableDates: [...blackoutDates],
+      availability,
+      available: availability.open && dates.length > 0,
+    };
+  }
 
   const windowStart = todayISO(now);
   const windowEnd = addDaysISO(windowStart, PLAN_WINDOW_DAYS - 1);
@@ -383,6 +509,7 @@ export const serviceAvailability = async ({ user, serviceId, from, to, supabase 
     to: rangeTo,
     dates,
     unavailableDates: [...blackoutDates],
+    availability: evaluateAvailability(service, schedules, blackoutDates, now),
     available: dates.length > 0,
   };
 };
@@ -436,20 +563,43 @@ export const createPlan = async ({ user, serviceId, plannedDate, note = '', supa
   if (!date) throw ApiError.unprocessable('Select a valid date.');
   const iso = plannedDate;
   const todayStr = todayISO(now);
-  const windowEnd = addDaysISO(todayStr, PLAN_WINDOW_DAYS - 1);
   if (iso < todayStr) throw ApiError.unprocessable('The visit date cannot be in the past.');
-  if (iso > windowEnd) throw ApiError.unprocessable('You can only plan a visit within the next two weeks.');
 
-  const [schedules, blackouts] = await Promise.all([
-    loadSchedules(supabase, [service.id], resident),
-    loadBlackouts(supabase, [service.id], resident, iso, iso),
-  ]);
-  const { weekdays } = summarizeSchedule(schedules);
-  if (!weekdays.includes(weekdayOf(iso))) {
-    throw ApiError.unprocessable('This service is not offered on the selected day.');
+  // Server-authoritative revalidation (never trust the displayed status): a
+  // configured registration deadline closes registration for every service.
+  const deadline = deadlineKeyOf(service.registration_deadline);
+  if (deadline && nowKeyOf(now) > deadline) {
+    throw ApiError.unprocessable('Registration for this service has closed.');
   }
-  if (blackouts.length > 0) {
-    throw ApiError.unprocessable('The health center is closed on the selected day. Please choose another day.');
+
+  const blackouts = await loadBlackouts(supabase, [service.id], resident, iso, iso);
+
+  if (isDatedService(service)) {
+    // A dated (one-time / date-range) service: the chosen day must fall inside
+    // the service's own configured window and not be a closure. Recurring
+    // weekday rows are not required and must not override the dated window.
+    const start = service.start_date;
+    const end = service.end_date || start;
+    if (end < todayStr) throw ApiError.unprocessable('This service has already ended.');
+    if (iso < start || iso > end) {
+      throw ApiError.unprocessable('This service is not offered on the selected day.');
+    }
+    if (blackouts.length > 0) {
+      throw ApiError.unprocessable('The health center is closed on the selected day. Please choose another day.');
+    }
+  } else {
+    // A recurring service: the chosen day must be within the two-week horizon,
+    // an active weekday and not a closure.
+    const windowEnd = addDaysISO(todayStr, PLAN_WINDOW_DAYS - 1);
+    if (iso > windowEnd) throw ApiError.unprocessable('You can only plan a visit within the next two weeks.');
+    const schedules = await loadSchedules(supabase, [service.id], resident);
+    const { weekdays } = summarizeSchedule(schedules);
+    if (!weekdays.includes(weekdayOf(iso))) {
+      throw ApiError.unprocessable('This service is not offered on the selected day.');
+    }
+    if (blackouts.length > 0) {
+      throw ApiError.unprocessable('The health center is closed on the selected day. Please choose another day.');
+    }
   }
 
   // One active plan per service: the card hides the action when a plan exists,

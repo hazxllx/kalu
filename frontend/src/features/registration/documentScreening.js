@@ -11,7 +11,7 @@
 export const SLOT_STATUS = Object.freeze({
   NOT_CHECKED: 'not_checked',
   CHECKING: 'checking',
-  PASSED: 'passed', // backend pending_manual_review — eligible for staff review
+  PASSED: 'passed', // backend pending_manual_review — uploaded, awaiting staff review
   FLAGGED: 'flagged', // backend automated_flagged — eligible, needs attention
   REJECTED: 'rejected', // backend automated_rejected — must not be submitted
   ERROR: 'error', // screening request failed — must be retried
@@ -128,7 +128,9 @@ export const slotStatusLabel = (slot) => {
     case SLOT_STATUS.CHECKING:
       return 'Checking document...';
     case SLOT_STATUS.PASSED:
-      return 'Accepted for Staff Review';
+      // backend pending_manual_review — the file uploaded fine but was NOT
+      // automatically verified; it is awaiting authorized staff review.
+      return 'Uploaded — Manual Review Required';
     case SLOT_STATUS.FLAGGED:
       return 'Manual Review Required';
     case SLOT_STATUS.REJECTED:
@@ -144,7 +146,10 @@ export const slotStatusLabel = (slot) => {
 export const slotStatusTone = (slot) => {
   switch (slot?.status) {
     case SLOT_STATUS.PASSED:
-      return 'success';
+      // Uploaded and queued for manual review — informational, NOT a success/
+      // verified state. Rendering it green would imply the identity was
+      // confirmed, which has not happened.
+      return 'info';
     case SLOT_STATUS.FLAGGED:
       return 'warning';
     case SLOT_STATUS.REJECTED:

@@ -13,7 +13,7 @@
  * coding schema is connected.
  */
 import repository from '../repositories/index.js';
-import { assessVitals } from '../utils/residentRisk.js';
+import { assessVitals, hasAssessableVitals } from '../utils/residentRisk.js';
 import { DEFAULT_RISK_CONFIG } from '../config/riskConfig.js';
 import { getRiskConfig } from './riskConfig.service.js';
 
@@ -83,7 +83,8 @@ export const topConditionFrom = (distribution = []) => {
  * behavior); callers pass the active DB configuration to honour administrator
  * changes.
  */
-export const riskFromVitals = (vitals, config = DEFAULT_RISK_CONFIG) => assessVitals(vitals, config).level;
+export const riskFromVitals = (vitals, config = DEFAULT_RISK_CONFIG) =>
+  hasAssessableVitals(vitals) ? assessVitals(vitals, config).level : null;
 
 const isSameMonth = (isoDate, reference) => {
   const d = new Date(isoDate);
@@ -161,14 +162,19 @@ export const getEarlyWarning = async ({ barangay = null, municipalityId = null }
       latestVisitByResident.set(v.residentId, v);
     }
   });
-  const riskCounts = { Low: 0, Moderate: 0, High: 0 };
+  const riskCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
   latestVisitByResident.forEach((visit) => {
-    riskCounts[riskFromVitals(visit.vitals, riskConfig)] += 1;
+    // A visit without assessable vitals is UNASSESSED — never silently counted
+    // as Low (consistent with the resident directory/detail/dashboard, which
+    // report null for the same resident).
+    const level = riskFromVitals(visit.vitals, riskConfig);
+    riskCounts[level || 'Unassessed'] += 1;
   });
   const riskDistribution = [
     { name: 'Low Risk', value: riskCounts.Low },
     { name: 'Moderate Risk', value: riskCounts.Moderate },
     { name: 'High Risk', value: riskCounts.High },
+    { name: 'Unassessed', value: riskCounts.Unassessed },
   ];
 
   // --- 12-month consultation & referral trend -------------------------------

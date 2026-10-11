@@ -563,14 +563,14 @@ export default function SettingsPage({ roleKey = "resident" }) {
                     value: isResident ? (account?.ref || dash) : (user?.referenceNumber || dash),
                   },
                 ];
-                if (isResident && !isProfileRoute) {
+                if (isResident) {
                   fields.push({
                     label: "Verification Status",
                     icon: ShieldCheck,
                     badge: true,
                     status: account?.status,
                   });
-                } else if (!isResident) {
+                } else {
                   fields.push({
                     label: "Account Status",
                     icon: ShieldCheck,

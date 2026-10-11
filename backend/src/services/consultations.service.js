@@ -33,15 +33,15 @@ const inRange = (value, lo, hi) => {
 const present = (value) => value !== undefined && value !== null && String(value).trim() !== '';
 
 export const classifyBloodPressure = (bloodPressure) => {
-  const match = text(bloodPressure).match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/);
-  if (!match) return null;
-  const systolic = Number(match[1]);
-  const diastolic = Number(match[2]);
-  if (systolic > 180 || diastolic > 110) return 'Hypertensive Crisis';
-  if (systolic >= 160 || diastolic >= 100) return 'Stage 2 hypertension';
-  if (systolic >= 140 || diastolic >= 90) return 'Stage 1 hypertension';
-  if (systolic >= 120 || diastolic >= 80) return 'Prehypertension';
-  return 'Normal';
+  // Single source of truth: delegate to the authoritative, admin-configurable
+  // classifier (config/bpThresholds.js) and return its human label (or null).
+  // The previous hardcoded thresholds here diverged from the authoritative
+  // table (wrong crisis/stage boundaries) and had NO hypotension band, so a
+  // valid low reading like "85/55" was mislabelled "Normal". Delegating removes
+  // that divergence while preserving the string shape of
+  // `vitals.bloodPressureCategory`.
+  const result = classifyBpWithThresholds(bloodPressure);
+  return result ? result.label : null;
 };
 
 const validateVitalsByField = (payload = {}) => {

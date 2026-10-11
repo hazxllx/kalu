@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup } from "@/components/system";
@@ -6,6 +6,11 @@ import SearchableSelect from "@/components/common/SearchableSelect";
 import { intakeApi, referralsApi } from "@/services/api";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
+import {
+  filterOpenReferrals,
+  submitTriage,
+  TRIAGE_MESSAGES,
+} from "@/features/triage/lib/triageWorkflow";
 import { useBarangays } from "@/context/BarangaysContext";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -131,23 +136,26 @@ export default function RhuTriage() {
   // and links the screening visit to the referral server-side.
   const [incomingReferrals, setIncomingReferrals] = useState([]);
   const [activeReferral, setActiveReferral] = useState(null);
+  // Monotonic request token: a slower, older /referrals response must never
+  // overwrite the state produced by a newer load (e.g. a refresh fired right
+  // after a successful hand-off).
+  const referralLoadSeq = useRef(0);
+
+  const loadIncomingReferrals = useCallback(async () => {
+    const seq = (referralLoadSeq.current += 1);
+    try {
+      const result = await referralsApi.list();
+      if (seq !== referralLoadSeq.current) return;
+      setIncomingReferrals(filterOpenReferrals(result?.rows || []));
+    } catch {
+      if (seq !== referralLoadSeq.current) return;
+      setIncomingReferrals([]);
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    referralsApi
-      .list()
-      .then((result) => {
-        if (!active) return;
-        const open = (result?.rows || []).filter(
-          (r) => !["Completed", "Cancelled"].includes(r.status),
-        );
-        setIncomingReferrals(open);
-      })
-      .catch(() => active && setIncomingReferrals([]));
-    return () => {
-      active = false;
-    };
-  }, []);
+    loadIncomingReferrals();
+  }, [loadIncomingReferrals]);
 
   const visibleHistory = useMemo(
     () =>
@@ -248,7 +256,6 @@ export default function RhuTriage() {
     setReason("");
     setReasonDetail("");
     setNotes("");
-    setAssignedPersonnel("");
     setActiveReferral(null);
     setErrors({});
   };
@@ -412,13 +419,20 @@ export default function RhuTriage() {
     };
     setSending(true);
     try {
-      const wasOffline = await sendToPhnQueue(payload);
-      resetAll();
-      showToast(wasOffline
-        ? "Triage saved offline. Reconnect and submit it to the consultation queue."
-        : "Triage completed. Patient sent to the consultation queue.");
-    } catch (err) {
-      showToast(err?.message || "Could not send the patient to the consultation queue. Please try again.");
+      // The submission contract (see features/triage/lib/triageWorkflow.js):
+      //  - only a real API failure preserves the active referral + wizard and
+      //    shows the error toast;
+      //  - a confirmed success resets the wizard, clears the active referral,
+      //    notifies, and refreshes the incoming referral list;
+      //  - post-success cleanup/refresh errors can never produce a false
+      //    failure toast.
+      await submitTriage({
+        send: () => sendToPhnQueue(payload),
+        reset: resetAll,
+        notify: ({ message }) => showToast(message),
+        refresh: loadIncomingReferrals,
+        messages: TRIAGE_MESSAGES,
+      });
     } finally {
       setSending(false);
     }
@@ -963,7 +977,7 @@ export default function RhuTriage() {
               <div>
 
             {stepIndicator(
-              5,
+              4,
               "Review",
               "Check the details before sending the patient to the consultation station."
               )}

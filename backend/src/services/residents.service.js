@@ -175,6 +175,15 @@ export const createResidentAuthUser = async ({
   };
 };
 
+/** One-line human-readable summary of a structured prescription entry. */
+export const formatMedicationText = (m = {}) => {
+  const name = [m.genericName, m.strength, m.dosageForm].map((p) => String(p || '').trim()).filter(Boolean).join(' ');
+  const sig = [m.dose, m.route, m.frequency, m.duration].map((p) => String(p || '').trim()).filter(Boolean).join(' · ');
+  const qty = String(m.quantity || '').trim() ? `Qty ${String(m.quantity).trim()}` : '';
+  const instructions = String(m.instructions || '').trim();
+  return [name || '(unnamed medicine)', sig, qty, instructions].filter(Boolean).join(' — ');
+};
+
 /**
  * Map a stored visit to the BASIC, resident-safe view for "My Health Record".
  *
@@ -182,7 +191,7 @@ export const createResidentAuthUser = async ({
  * sees the same computed value the staff form shows. No internal identifiers
  * or other residents' data are ever included.
  */
-const toResidentRecord = (visit = {}) => {
+export const toResidentRecord = (visit = {}) => {
   const v = visit.vitals || {};
 
   const findings = clean(visit.findings);
@@ -195,9 +204,32 @@ const toResidentRecord = (visit = {}) => {
   const treatment = clean(visit.treatmentGiven);
   const medMarker = '\nMedication: ';
 
-  const [treatmentText, medication] = treatment.includes(medMarker)
+  const [treatmentText, legacyMedication] = treatment.includes(medMarker)
     ? treatment.split(medMarker)
     : [treatment, ''];
+
+  // Prefer the structured prescriptions on the visit (visits.medications JSONB).
+  // Fall back to the legacy inline "Medication:" string for older records that
+  // never carried structured entries, so historical records stay readable.
+  const structuredMeds = Array.isArray(visit.medications)
+    ? visit.medications.filter((m) => String(m?.genericName || '').trim())
+    : [];
+  const medicationList = structuredMeds.map((m) => ({
+    genericName: clean(m.genericName),
+    brandName: clean(m.brandName),
+    strength: clean(m.strength),
+    dosageForm: clean(m.dosageForm),
+    dose: clean(m.dose),
+    route: clean(m.route),
+    frequency: clean(m.frequency),
+    duration: clean(m.duration),
+    quantity: clean(m.quantity),
+    instructions: clean(m.instructions),
+    source: m.custom ? 'custom' : clean(m.source) || 'local',
+  }));
+  const medication = structuredMeds.length
+    ? medicationList.map(formatMedicationText).join('\n')
+    : clean(legacyMedication);
 
   const recommendation = clean(visit.recommendation);
 
@@ -226,6 +258,7 @@ const toResidentRecord = (visit = {}) => {
     diagnosis: clean(diagnosis),
     treatmentGiven: clean(treatmentText),
     medications: clean(medication),
+    medicationList,
     recommendations: adviceText,
     followUpRequired: nextVisitDate ? 'Yes' : 'No',
     nextVisitDate,
