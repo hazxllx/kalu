@@ -46,6 +46,29 @@ export const classifySignupError = (error) => {
 };
 
 /**
+ * Best-effort extraction of the server-mandated retry interval (in seconds)
+ * from a Supabase Auth rate-limit error. GoTrue surfaces the remaining time in
+ * the message, e.g. "For security purposes, you can only request this after 54
+ * seconds." or exposes it on `retry_after`. This lets the UI restore an
+ * accurate resend countdown even after a page refresh or a second tab, where
+ * the client-side timer was lost but the server still enforces the interval.
+ *
+ * @param {unknown} error
+ * @returns {number} Seconds to wait, or 0 when no value can be determined.
+ */
+export const rateLimitRetrySeconds = (error) => {
+  const err = /** @type {{ retry_after?: unknown }} */ (error) || {};
+  const direct = Number(err.retry_after);
+  if (Number.isFinite(direct) && direct > 0) return Math.ceil(direct);
+  const match = messageOf(error).match(/after\s+(\d+)\s*second/i);
+  if (match) {
+    const secs = Number(match[1]);
+    if (Number.isFinite(secs) && secs > 0) return Math.ceil(secs);
+  }
+  return 0;
+};
+
+/**
  * Inspect a `supabase.auth.signUp` result.
  *
  * Supabase Auth may return an obfuscated user with no identities for an

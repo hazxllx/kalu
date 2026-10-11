@@ -22,6 +22,7 @@ import {
   btnGhost,
 } from "@/features/registration/components/RegistrationDesign";
 import UploadComponent from "@/features/registration/components/UploadComponent";
+import { ButtonSelectGroup } from "@/components/system";
 import DatePicker from "@/components/common/DatePicker";
 import { staffAccountsApi } from "@/services/api";
 import { useBarangays } from "@/context/BarangaysContext";
@@ -454,7 +455,7 @@ export default function PersonnelRegistration() {
       }
     >
       <RegistrationCard>
-        <div className="px-5 py-6 sm:px-10 sm:py-8">
+        <div className="px-5 py-4 sm:px-10 sm:py-6">
           <StepIndicator current={step} steps={STEPS} flowLabel="Health Personnel Registration" />
 
           <motion.div
@@ -462,13 +463,13 @@ export default function PersonnelRegistration() {
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.28 }}
-            className="mt-6 space-y-5"
+            className="mt-4 space-y-4"
           >
             <PageHeading title={STEPS_META[step - 1].title} subtitle={STEPS_META[step - 1].subtitle} />
 
             {/* STEP 1 — Personal Information */}
             {step === 1 && (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
                 <Field label="First Name" required error={errors.firstName}>
                   <input type="text" placeholder="Juan" value={form.firstName} onChange={set("firstName")} className={inputCls(errors.firstName)} />
                 </Field>
@@ -493,11 +494,16 @@ export default function PersonnelRegistration() {
                 <Field label="Age" hint="Calculated automatically from the date of birth.">
                   <input type="text" value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" className={`${inputCls()} cursor-not-allowed text-slate-500`} />
                 </Field>
-                <SelectField label="Sex" required error={errors.sex} value={form.sex} onChange={set("sex")}>
-                  <option value="">Select sex</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                </SelectField>
+                <Field label="Sex" required error={errors.sex}>
+                  <ButtonSelectGroup
+                    ariaLabel="Sex"
+                    variant="registration"
+                    options={["Male", "Female"]}
+                    value={form.sex}
+                    onChange={set("sex")}
+                    error={Boolean(errors.sex)}
+                  />
+                </Field>
                 <SelectField label="Civil Status" required error={errors.civilStatus} value={form.civilStatus} onChange={set("civilStatus")}>
                   <option value="">Select status</option>
                   <option value="Single">Single</option>
@@ -510,7 +516,7 @@ export default function PersonnelRegistration() {
 
             {/* STEP 2 — Account & Contact */}
             {step === 2 && (
-              <div className="space-y-5">
+              <div className="space-y-4">
                 <Field label="Official Email Address" required error={errors.email} hint="Used to sign in once your account is verified.">
                   <input type="email" placeholder="name@example.gov.ph" value={form.email} onChange={set("email")} className={inputCls(errors.email)} />
                 </Field>
@@ -600,8 +606,8 @@ export default function PersonnelRegistration() {
 
             {/* STEP 3 — Professional Information */}
             {step === 3 && (
-              <div className="space-y-5">
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-[2fr_3fr]">
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-[2fr_3fr]">
                   <Field label="Full Name" hint="Composed from your personal information.">
                     <input type="text" readOnly value={composedName} className={`${inputCls()} cursor-not-allowed text-slate-500`} />
                   </Field>
@@ -624,7 +630,7 @@ export default function PersonnelRegistration() {
                 </InfoNote>
 
                 {role?.licenseRequired && (
-                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
                     <Field label="Professional License Number" required error={errors.licenseNumber}>
                       <input type="text" placeholder="e.g. PRC-0012345" value={form.licenseNumber} onChange={set("licenseNumber")} className={inputCls(errors.licenseNumber)} />
                     </Field>
@@ -640,7 +646,7 @@ export default function PersonnelRegistration() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
                   <SelectField label="Municipality / LGU" required error={errors.municipality} value={form.municipality} onChange={set("municipality")}>
                     <option value="Pili">Pili, Camarines Sur</option>
                   </SelectField>
@@ -727,7 +733,7 @@ export default function PersonnelRegistration() {
 
             {/* STEP 4 — Review & Submit */}
             {step === 4 && (
-              <div className="space-y-5">
+              <div className="space-y-4">
                 {submitError && (
                   <InfoNote tone="danger" icon={AlertCircle}>{submitError}</InfoNote>
                 )}
@@ -787,7 +793,7 @@ export default function PersonnelRegistration() {
           </motion.div>
 
           {/* Navigation */}
-          <div className="mt-8 flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
+          <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
             {step > 1 ? (
               <button onClick={back} className={btnGhost}>
                 <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" /> Back

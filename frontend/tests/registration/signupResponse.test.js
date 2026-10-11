@@ -12,6 +12,7 @@ import {
   normalizeRegistrationEmail,
   classifySignupError,
   signupResponseIssue,
+  rateLimitRetrySeconds,
 } from "../../src/features/registration/signupResponse.js";
 
 const okUser = (email, identities = [{ id: "idp" }]) => ({
@@ -58,6 +59,21 @@ test("profile/record conflict is NOT reported as a duplicate account", () => {
 test("rate-limit errors are classified separately", () => {
   assert.equal(classifySignupError({ code: "over_email_send_rate_limit" }), "rate_limited");
   assert.equal(classifySignupError({ message: "email rate limit exceeded" }), "rate_limited");
+});
+
+test("rateLimitRetrySeconds reads the server-mandated interval", () => {
+  // Message form used by GoTrue for the resend/signup-confirm interval.
+  assert.equal(
+    rateLimitRetrySeconds({ message: "For security purposes, you can only request this after 54 seconds." }),
+    54
+  );
+  // Explicit retry_after field (seconds) is honored and rounded up.
+  assert.equal(rateLimitRetrySeconds({ retry_after: 12 }), 12);
+  assert.equal(rateLimitRetrySeconds({ retry_after: 11.2 }), 12);
+  // No parsable hint -> 0 so the caller can fall back to the default 60s.
+  assert.equal(rateLimitRetrySeconds({ message: "email rate limit exceeded" }), 0);
+  assert.equal(rateLimitRetrySeconds(null), 0);
+  assert.equal(rateLimitRetrySeconds({ message: "after 0 seconds" }), 0);
 });
 
 test("unknown errors fall back to signup_failed, never duplicate", () => {

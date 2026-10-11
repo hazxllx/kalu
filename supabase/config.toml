@@ -226,7 +226,11 @@ enable_confirmations = false
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
-max_frequency = "1s"
+# Enforces the 60-second resend interval for registration email OTPs server-side
+# (GoTrue tracks this per user, so it cannot be bypassed by refreshing the page,
+# opening another tab, or calling the endpoint directly). The client countdown
+# mirrors this value; see frontend NewResidentRegistration resend flow.
+max_frequency = "60s"
 # Number of characters used in the email OTP.
 otp_length = 4
 # Number of seconds before the email OTP expires (defaults to 1 hour).

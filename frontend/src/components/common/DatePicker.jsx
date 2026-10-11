@@ -133,7 +133,7 @@ export default function DatePicker({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className={`flex w-full items-center gap-2 rounded-xl border px-4 py-3 text-left text-sm outline-none transition-all duration-200 ${
+        className={`flex w-full items-center gap-2 rounded-xl border px-4 py-2.5 text-left text-sm outline-none transition-all duration-200 ${
           error
             ? "border-brand-danger bg-rose-50/50 focus:border-brand-danger focus:ring-4 focus:ring-brand-danger/10"
             : "border-slate-200 bg-slate-50/60 hover:border-slate-300 focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-blue/10"

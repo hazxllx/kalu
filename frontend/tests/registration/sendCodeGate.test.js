@@ -41,6 +41,14 @@ test("disabled during the resend cooldown after a successful send", () => {
   assert.match(sendCodeDisabledReason({ ...base, emailPhase: "sent", resendIn: 42 }), /42s/);
 });
 
+test("a server-reported cooldown on the first attempt (idle) also disables the button", () => {
+  // When the server rate-limits the very first send, the flow stays in the
+  // idle phase but seeds a countdown; the button must stay disabled so no
+  // duplicate request is issued before the interval elapses.
+  assert.equal(isSendCodeDisabled({ ...base, emailPhase: "idle", resendIn: 30 }), true);
+  assert.match(sendCodeDisabledReason({ ...base, emailPhase: "idle", resendIn: 30 }), /30s/);
+});
+
 test("re-enabled after the cooldown elapses", () => {
   assert.equal(isSendCodeDisabled({ ...base, emailPhase: "sent", resendIn: 0 }), false);
 });

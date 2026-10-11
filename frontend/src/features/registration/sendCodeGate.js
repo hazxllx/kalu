@@ -29,9 +29,10 @@ export const isSendCodeDisabled = ({ email, emailPhase, resendIn = 0, emailDupli
   if (emailPhase === 'sending' || emailPhase === 'verifying') return true;
   if (emailDuplicate) return true;
   if (!isEmail(normalizeRegistrationEmail(email))) return true;
-  // After a successful send, the button becomes "Send Code Again" and is only
-  // re-enabled once the cooldown elapses.
-  if (emailPhase === 'sent' && resendIn > 0) return true;
+  // A cooldown is in effect (either after a successful send, or because the
+  // server reported a rate limit on the first attempt). The button is only
+  // re-enabled once it elapses. This mirrors the server-enforced interval.
+  if (resendIn > 0) return true;
   return false;
 };
 
@@ -44,6 +45,6 @@ export const sendCodeDisabledReason = ({ email, emailPhase, resendIn = 0, emailD
   if (emailPhase === 'verifying') return 'Verifying the code you entered.';
   if (emailDuplicate) return 'This email is already registered. Log in or reset your password instead.';
   if (!isEmail(normalizeRegistrationEmail(email))) return 'Enter a valid email address first.';
-  if (emailPhase === 'sent' && resendIn > 0) return `You can request another code in ${resendIn}s.`;
+  if (resendIn > 0) return `You can request another code in ${resendIn}s.`;
   return '';
 };

@@ -47,6 +47,7 @@ import {
   normalizeRegistrationEmail,
   signupResponseIssue,
   classifySignupError,
+  rateLimitRetrySeconds,
 } from "@/features/registration/signupResponse";
 import { isSendCodeDisabled } from "@/features/registration/sendCodeGate";
 import {
@@ -306,7 +307,12 @@ export default function NewResidentRegistration() {
   const [otpDigits, setOtpDigits] = useState(new Array(OTP_LENGTH).fill(""));
   const [otpError, setOtpError] = useState("");
   const [sendError, setSendError] = useState("");
+  const [sendNotice, setSendNotice] = useState("");
   const [resendIn, setResendIn] = useState(0);
+  // True only while a resend request is in flight. Kept separate from
+  // `emailPhase` so the OTP card stays visible (instead of collapsing back to
+  // the email input) and the Resend control can show its own spinner.
+  const [resending, setResending] = useState(false);
   // True once Supabase Auth confirms this email already has a registered
   // account. Blocks the "Send Verification Code" button and surfaces the
   // login / password-recovery options instead of sending a code to an address
@@ -344,17 +350,25 @@ export default function NewResidentRegistration() {
     if (emailErr) { setErrors((p) => ({ ...p, email: emailErr })); return; }
     // A previously confirmed duplicate must never trigger another signup/send.
     if (emailDuplicate) return;
+    const isResend = emailPhase === "sent";
+    // During the cooldown the resend request would be rejected by the server
+    // (max_frequency = 60s). Block it client-side too so no duplicate request
+    // is ever issued from a stray click.
+    if (isResend && (resendIn > 0 || resending)) return;
     setForm((p) => ({ ...p, email: normalizedEmail }));
     setErrors((p) => ({ ...p, email: "", emailVerified: "" }));
     if (!supabase) {
       setSendError("Authentication is not configured. Please try again later or contact the RHU.");
       return;
     }
-    const isResend = emailPhase === "sent";
     signupInFlightRef.current = true;
-    setEmailPhase("sending");
+    // A resend keeps the OTP card on screen and shows its own spinner; the first
+    // send flips the whole block into the "sending" state.
+    if (isResend) setResending(true);
+    else setEmailPhase("sending");
     setSendError("");
     setOtpError("");
+    setSendNotice("");
     try {
       if (isResend) {
         const { error } = await supabase.auth.resend({ type: "signup", email: normalizedEmail });
@@ -409,7 +423,9 @@ export default function NewResidentRegistration() {
           sessionStorage.removeItem("pendingSignupTempPassword");
           tempPasswordRef.current = "";
           setEmailPhase("idle");
-          setSendError("Too many verification emails were sent recently. Please wait a minute, then request a new code.");
+          const retry = rateLimitRetrySeconds(error) || 60;
+          setResendIn(retry);
+          setSendError(`Too many verification emails were sent recently. Please wait ${retry}s, then request a new code.`);
           return;
         }
         if (responseIssue) {
@@ -420,6 +436,11 @@ export default function NewResidentRegistration() {
       setEmailPhase("sent");
       clearOtp();
       setResendIn(60);
+      setSendNotice(
+        isResend
+          ? "A new verification code has been sent to your email."
+          : "A verification code has been sent to your email."
+      );
     } catch (err) {
       const msg = err?.message || "";
       // Use the same classifier as the signUp response path so both stay
@@ -432,7 +453,11 @@ export default function NewResidentRegistration() {
         tempPasswordRef.current = "";
       }
       if (errClass === "rate_limited") {
-        setSendError("Too many verification emails were sent recently. Please wait a minute, then request a new code.");
+        // Honor the server-enforced interval: restore the countdown from the
+        // retry hint so a refresh/second tab cannot bypass the 60s window.
+        const retry = rateLimitRetrySeconds(err) || 60;
+        setResendIn(retry);
+        setSendError(`Too many requests. Please wait ${retry}s before requesting another code.`);
       } else if (duplicateEmail) {
         setEmailDuplicate(true);
         setErrors((p) => ({
@@ -445,10 +470,15 @@ export default function NewResidentRegistration() {
           "We couldn't start verification for this email due to a record conflict. Please contact the RHU, or use a different email address you control."
         );
       } else {
-        setSendError(msg || "Could not send the verification code. Please try again.");
+        setSendError(
+          isResend
+            ? (msg || "Unable to resend the code. Please try again.")
+            : (msg || "Could not send the verification code. Please try again.")
+        );
       }
     } finally {
       signupInFlightRef.current = false;
+      setResending(false);
     }
   };
 
@@ -466,6 +496,7 @@ export default function NewResidentRegistration() {
     }
     setEmailPhase("verifying");
     setOtpError("");
+    setSendNotice("");
     try {
       // The COMPLETE token from the email is passed through unmodified.
       const { data, error } = await supabase.auth.verifyOtp({
@@ -1243,7 +1274,7 @@ export default function NewResidentRegistration() {
       }
     >
       <RegistrationCard>
-        <div className="px-5 py-6 sm:px-10 sm:py-8">
+        <div className="px-5 py-4 sm:px-10 sm:py-6">
           <StepIndicator current={step} steps={STEPS} flowLabel="Personal Registration" />
 
           <motion.div
@@ -1251,14 +1282,14 @@ export default function NewResidentRegistration() {
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.28 }}
-            className="mt-6 space-y-5"
+            className="mt-4 space-y-4"
           >
             <PageHeading title={meta.title} subtitle={meta.subtitle} />
 
             {/* STEP 1: Personal Information */}
             {step === 1 && (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
+                <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
                   <label className="flex cursor-pointer items-start gap-3">
                     <input
                       type="checkbox"
@@ -1328,7 +1359,7 @@ export default function NewResidentRegistration() {
                   <input type="text" value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" className={`${inputCls()} cursor-not-allowed text-slate-500`} />
                 </Field>
                 <Field label="Sex" required error={errors.sex}>
-                  <ButtonSelectGroup ariaLabel="Sex" options={["Male", "Female"]} value={form.sex} onChange={set("sex")} error={Boolean(errors.sex)} />
+                  <ButtonSelectGroup ariaLabel="Sex" variant="registration" options={["Male", "Female"]} value={form.sex} onChange={set("sex")} error={Boolean(errors.sex)} />
                 </Field>
                 <SelectField label="Civil Status" required error={errors.civilStatus} value={form.civilStatus} onChange={set("civilStatus")}>
                   <option value="">Select status</option>
@@ -1342,7 +1373,7 @@ export default function NewResidentRegistration() {
 
             {/* STEP 2: Account & Contact */}
             {step === 2 && (
-              <div className="space-y-5">
+              <div className="space-y-4">
                 <Field label="Email Address" required error={errors.email}>
                   {emailPhase === "idle" || emailPhase === "sending" ? (
                     <div className="space-y-2.5">
@@ -1433,12 +1464,15 @@ export default function NewResidentRegistration() {
                           </div>
 
                           {otpError && <p className="mt-2 text-[11.5px] font-medium text-brand-danger">{otpError}</p>}
+                          {!otpError && sendNotice && (
+                            <p className="mt-2 text-[11.5px] font-medium text-brand-green">{sendNotice}</p>
+                          )}
 
                           <div className="mt-3.5 flex flex-wrap items-center gap-2.5">
                             <button
                               type="button"
                               onClick={verifyEmail}
-                              disabled={emailPhase === "verifying"}
+                              disabled={emailPhase === "verifying" || resending}
                               className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {emailPhase === "verifying"
@@ -1448,10 +1482,13 @@ export default function NewResidentRegistration() {
                             <button
                               type="button"
                               onClick={sendCode}
-                              disabled={emailPhase === "verifying" || resendIn > 0}
+                              disabled={emailPhase === "verifying" || resending || resendIn > 0}
+                              aria-label={resendIn > 0 ? `Resend available in ${resendIn} seconds` : "Resend verification code"}
                               className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-[12.5px] font-semibold text-brand-ink transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend Code"}
+                              {resending
+                                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending</>
+                                : resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend Code"}
                             </button>
                           </div>
                         </>
@@ -1534,7 +1571,7 @@ export default function NewResidentRegistration() {
 
                 <div className="border-t border-slate-100 pt-5">
                   <SectionKicker>Contact Information</SectionKicker>
-                  <div className="mt-5 space-y-5">
+                  <div className="mt-4 space-y-4">
                     <Field label="Mobile Number" required error={errors.mobile} hint="Enter your 11-digit Philippine mobile number (must start with 09).">
                         <input
                           type="tel"
@@ -1554,7 +1591,7 @@ export default function NewResidentRegistration() {
                           className={`${inputCls(errors.mobile)} tabular-nums`}
                         />
                       </Field>
-                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
                       <Field label="Province">
                         <input type="text" value={form.province} onChange={set("province")} className={inputCls()} />
                       </Field>
@@ -1607,7 +1644,7 @@ export default function NewResidentRegistration() {
                       </div>
                     </Field>
 
-                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
                       <SelectField
                         label="Zone"
                         required
@@ -1624,7 +1661,7 @@ export default function NewResidentRegistration() {
                         <input type="text" placeholder="Mabini St." value={form.street} onChange={set("street")} className={inputCls()} />
                       </Field>
                     </div>
-                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
                       <Field label="House Number" optional>
                         <input type="text" placeholder="Leave blank if not applicable" value={form.houseNo} onChange={set("houseNo")} className={inputCls()} />
                       </Field>
@@ -1855,7 +1892,7 @@ export default function NewResidentRegistration() {
                 {/* 2 & 3. Government ID — Front / Back */}
                 <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
                   <SectionKicker className="mb-3.5">2. Government ID — Front &amp; Back</SectionKicker>
-                  <div className="space-y-5">
+                  <div className="space-y-4">
                     <UploadComponent
                       label="Government ID — Front"
                       optional={false}
@@ -1937,7 +1974,7 @@ export default function NewResidentRegistration() {
 
             {/* STEP 4: Review Information */}
             {step === 4 && (
-              <div className="space-y-5">
+              <div className="space-y-4">
                 <ReviewBlock title="Personal Information" onEdit={() => goTo(1)} items={[
                   ["Name", `${form.firstName} ${form.middleName} ${form.lastName} ${form.suffix}`.trim()],
                   ["Birth Date", form.dob],
@@ -2015,7 +2052,7 @@ export default function NewResidentRegistration() {
           )}
 
           {/* Navigation */}
-          <div className="mt-8 flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
+          <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
             {step > 1 ? (
               <button onClick={back} className={btnGhost}>
                 <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" /> Back

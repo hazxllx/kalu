@@ -25,7 +25,7 @@ export const labelCls =
   "block text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-500";
 
 export const inputCls = (error) =>
-  `w-full rounded-xl border bg-slate-50/60 px-4 py-3 text-sm text-brand-ink outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-blue/10 ${
+  `w-full rounded-xl border bg-slate-50/60 px-4 py-2.5 text-sm text-brand-ink outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-blue/10 ${
     error
       ? "border-brand-danger bg-rose-50/50 focus:border-brand-danger focus:ring-brand-danger/10"
       : "border-slate-200 hover:border-slate-300"
@@ -53,7 +53,7 @@ export function Field({
           </span>
         )}
       </label>
-      <div className="mt-1.5">
+      <div className="mt-1">
         {trailing ? (
           <div className="relative">
             {children}
@@ -64,10 +64,10 @@ export function Field({
         )}
       </div>
       {hint && !error && (
-        <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">{hint}</p>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-slate-400">{hint}</p>
       )}
       {error && (
-        <p className="mt-1.5 flex items-center gap-1 text-[11.5px] font-medium text-brand-danger">
+        <p className="mt-1 flex items-center gap-1 text-[11.5px] font-medium text-brand-danger">
           <span className="inline-block h-1 w-1 rounded-full bg-brand-danger" aria-hidden="true" />
           {error}
         </p>
@@ -291,9 +291,9 @@ export function PageHeading({ title, subtitle }) {
       <h1 className="font-display text-[20px] font-bold leading-tight text-brand-dark sm:text-[22px]">
         {title}
       </h1>
-      <div className="mt-3 h-[3px] w-12 rounded-full bg-brand-gold" aria-hidden="true" />
+      <div className="mt-2 h-[3px] w-12 rounded-full bg-brand-gold" aria-hidden="true" />
       {subtitle && (
-        <p className="mt-3.5 text-[12.5px] leading-relaxed text-slate-500">{subtitle}</p>
+        <p className="mt-2.5 text-[12.5px] leading-relaxed text-slate-500">{subtitle}</p>
       )}
     </div>
   );
@@ -369,7 +369,7 @@ export function StepIndicator({ current, steps, flowLabel, showStepCount = true 
 
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-3 border-b border-slate-200/80 pb-3">
+      <div className="flex items-baseline justify-between gap-3 border-b border-slate-200/80 pb-2.5">
         <p className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-brand-blue">
           {flowLabel}{showStepCount ? ` · Step ${String(current).padStart(2, "0")} of ${String(total).padStart(2, "0")}` : ""}
         </p>
@@ -378,7 +378,7 @@ export function StepIndicator({ current, steps, flowLabel, showStepCount = true 
       {/* Flexible grid: every step gets an equal, shrinkable column so long
           labels wrap instead of overflowing/clipping the card. */}
       <div
-        className="mt-6 grid items-start"
+        className="mt-4 grid items-start"
         style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}
       >
         {steps.map((step, i) => {
@@ -443,13 +443,13 @@ export function StepIndicator({ current, steps, flowLabel, showStepCount = true 
 /* -------------------------------------------------------------------------- */
 
 export const btnPrimary =
-  "group inline-flex items-center justify-center gap-2 rounded-xl bg-brand-blue px-6 py-3 text-[12.5px] font-bold uppercase tracking-[0.1em] text-white transition-all hover:bg-brand-dark hover:shadow-[0_8px_20px_-6px_rgba(18,81,143,0.5)] focus-visible:ring-4 focus-visible:ring-brand-blue/20 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-brand-blue disabled:hover:shadow-none";
+  "group inline-flex items-center justify-center gap-2 rounded-xl bg-brand-blue px-6 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.1em] text-white transition-all hover:bg-brand-dark hover:shadow-[0_8px_20px_-6px_rgba(18,81,143,0.5)] focus-visible:ring-4 focus-visible:ring-brand-blue/20 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-brand-blue disabled:hover:shadow-none";
 
 export const btnSecondary =
-  "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-[12.5px] font-bold uppercase tracking-[0.1em] text-brand-dark transition-colors hover:border-brand-blue hover:text-brand-blue focus-visible:ring-4 focus-visible:ring-brand-blue/10 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.1em] text-brand-dark transition-colors hover:border-brand-blue hover:text-brand-blue focus-visible:ring-4 focus-visible:ring-brand-blue/10 disabled:cursor-not-allowed disabled:opacity-60";
 
 export const btnGhost =
-  "group inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[12.5px] font-semibold text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand-ink";
+  "group inline-flex items-center gap-2 rounded-xl px-4 py-2 text-[12.5px] font-semibold text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand-ink";
 
 /* -------------------------------------------------------------------------- */
 /* Shell + card                                                                */
@@ -458,7 +458,7 @@ export const btnGhost =
 /** Navy portal background + KALUSAGAP masthead + centered content column. */
 export function RegistrationShell({ children, footer = undefined }) {
   return (
-    <div className="relative flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden gov-navy-panel px-4 py-6 sm:px-6 sm:py-10">
+    <div className="relative flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden gov-navy-panel px-4 py-4 sm:px-6 sm:py-6">
       <div
         className="pointer-events-none absolute inset-0"
         aria-hidden="true"
@@ -484,7 +484,7 @@ export function RegistrationShell({ children, footer = undefined }) {
         transition={{ duration: 0.35 }}
         className="relative flex w-full max-w-3xl flex-col"
       >
-        <div className="mb-4 flex items-center justify-center gap-3 sm:mb-5">
+        <div className="mb-3 flex items-center justify-center gap-3 sm:mb-4">
           <GovSeal height={40} eager onDark />
           <div className="text-left">
             <p className="font-display text-[16px] font-bold leading-tight tracking-[0.02em] text-white">

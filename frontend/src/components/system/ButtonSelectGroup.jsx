@@ -32,6 +32,29 @@ function normalize(options) {
   );
 }
 
+/**
+ * Visual variants. `default` keeps the compact system look used across the app.
+ * `registration` matches the KALUSAGAP registration form inputs (same rounding,
+ * padding and light-gray border as `inputCls` in RegistrationDesign) so the
+ * Sex buttons sit flush with the surrounding fields; the selected state stays a
+ * solid brand-blue chip with white text, and the unselected state is white with
+ * a thin light-gray border per the registration design.
+ */
+const VARIANTS = {
+  default: {
+    base: "min-w-[7rem] flex-1 rounded-btn border px-3.5 py-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60",
+    selected: "border-brand-blue bg-brand-blue text-white hover:bg-brand-dark",
+    unselectedError: "bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light border-brand-danger",
+    unselected: "bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light border-brand-border",
+  },
+  registration: {
+    base: "min-w-[7rem] flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium outline-none transition-all duration-200 focus-visible:ring-4 focus-visible:ring-brand-blue/20 focus-visible:border-brand-blue disabled:cursor-not-allowed disabled:opacity-60",
+    selected: "border-brand-blue bg-brand-blue text-white shadow-sm hover:bg-brand-dark hover:border-brand-dark",
+    unselectedError: "bg-white text-brand-ink hover:border-slate-300 border-brand-danger",
+    unselected: "bg-white text-brand-ink hover:border-slate-300 border-slate-200",
+  },
+};
+
 export default function ButtonSelectGroup({
   options,
   value,
@@ -40,8 +63,10 @@ export default function ButtonSelectGroup({
   name,
   disabled = false,
   error = false,
+  variant = "default",
   className = "",
 }) {
+  const styles = VARIANTS[variant] || VARIANTS.default;
   const items = normalize(options);
   const selectedIndex = items.findIndex((o) => o.value === value);
 
@@ -80,12 +105,12 @@ export default function ButtonSelectGroup({
             disabled={isDisabled}
             tabIndex={selected || (selectedIndex === -1 && idx === 0) ? 0 : -1}
             onClick={() => onChange(opt.value)}
-            className={`min-w-[7rem] flex-1 rounded-btn border px-3.5 py-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`${styles.base} ${
               selected
-                ? "border-brand-blue bg-brand-blue text-white hover:bg-brand-dark"
-                : `bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light ${
-                    error ? "border-brand-danger" : "border-brand-border"
-                  }`
+                ? styles.selected
+                : error
+                  ? styles.unselectedError
+                  : styles.unselected
             }`}
           >
             {opt.label}
