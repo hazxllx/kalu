@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import { ButtonSelectGroup } from "@/components/system";
 import { Plus, Search, X, Save, Pencil, Pill, AlertTriangle } from "lucide-react";
 import { medicinesApi, bpConfigApi } from "@/services/api";
 import { useToast } from "@/components/ui/use-toast";
@@ -361,10 +362,12 @@ export default function MedicineCatalog() {
               </div>
               <div>
                 <label className="block text-xs text-brand-gray mb-1">Source</label>
-                <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className={inputCls}>
-                  <option value="local">Local / facility catalog</option>
-                  <option value="yakap">YAKAP (PhilHealth 2026-0007)</option>
-                </select>
+                <ButtonSelectGroup
+                  ariaLabel="Source"
+                  options={[{ value: "local", label: "Local / facility catalog" }, { value: "yakap", label: "YAKAP (PhilHealth 2026-0007)" }]}
+                  value={form.source}
+                  onChange={(v) => setForm({ ...form, source: v })}
+                />
               </div>
               <div className="flex items-center gap-2 sm:col-span-2">
                 <input id="med-active" type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />

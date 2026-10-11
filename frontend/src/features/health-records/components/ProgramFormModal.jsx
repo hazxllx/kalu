@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { X, Save } from "lucide-react";
 import { Card } from "@/components/common/Card";
+import { ButtonSelectGroup } from "@/components/system";
 import { ORAL_SERVICES, toRecord } from "../lib/programFormConfig";
 
 const inputCls = (error) =>
@@ -26,6 +27,20 @@ function Field({ config, field, fieldKey, form, setForm, error }) {
     case "int":
       return <input {...common} type="number" value={value ?? ""} onChange={(e) => set(e.target.value === "" ? "" : Number(e.target.value))} className={inputCls(error)} placeholder={field.placeholder} />;
     case "select":
+      // Categorical fields with exactly two meaningful options render as the
+      // standard button group; 3+ options keep the native dropdown. The empty
+      // value stays unselected (no placeholder button, no auto-select).
+      if (Array.isArray(field.options) && field.options.length === 2) {
+        return (
+          <ButtonSelectGroup
+            ariaLabel={field.label}
+            options={field.options}
+            value={value ?? ""}
+            onChange={(v) => set(v)}
+            error={Boolean(error)}
+          />
+        );
+      }
       return (
         <select {...common} value={value || ""} onChange={(e) => set(e.target.value)} className={`${inputCls(error)} cursor-pointer`}>
           <option value="">Select…</option>

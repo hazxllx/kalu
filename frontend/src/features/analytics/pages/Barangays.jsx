@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
+import { ButtonSelectGroup } from "@/components/system";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonStatGrid } from "@/components/common/Skeleton";
 import {
@@ -247,15 +248,12 @@ export default function Barangays() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">Status</label>
-                  <select
-                    name="status"
+                  <ButtonSelectGroup
+                    ariaLabel="Status"
+                    options={["Active", "Inactive"]}
                     value={formData.status}
-                    onChange={handleInputChange}
-                    className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
+                    onChange={(v) => handleInputChange({ target: { name: "status", value: v } })}
+                  />
                 </div>
               </div>
               <div className="flex justify-end gap-3 mt-6">

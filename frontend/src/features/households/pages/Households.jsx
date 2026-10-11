@@ -6,6 +6,7 @@ import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
+import { ButtonSelectGroup } from "@/components/system";
 import {
   Users,
   Droplet,
@@ -909,15 +910,12 @@ export default function Households() {
                           </div>
                           <div>
                             <label className="text-sm font-medium text-brand-ink">Sex *</label>
-                            <select
+                            <ButtonSelectGroup
+                              ariaLabel="Sex"
+                              options={["Male", "Female"]}
                               value={memberForm.sex}
-                              onChange={(e) => setMemberForm((p) => ({ ...p, sex: e.target.value }))}
-                              className="mt-1.5 w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue"
-                            >
-                              <option value="">Select…</option>
-                              <option>Male</option>
-                              <option>Female</option>
-                            </select>
+                              onChange={(v) => setMemberForm((p) => ({ ...p, sex: v }))}
+                            />
                           </div>
                           <div>
                             <label className="text-sm font-medium text-brand-ink">Age</label>

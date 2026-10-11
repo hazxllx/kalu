@@ -19,6 +19,7 @@ import {
   btnPrimary,
   btnGhost,
 } from "@/features/registration/components/RegistrationDesign";
+import { ButtonSelectGroup } from "@/components/system";
 import DatePicker from "@/components/common/DatePicker";
 import { REGISTRATION_OTP_LENGTH, isValidRegistrationOtp } from "@/features/registration/otp";
 import { supabase } from "@/lib/supabase";
@@ -1288,11 +1289,9 @@ export default function NewResidentRegistration() {
                 <Field label="Age" hint="Calculated automatically from the date of birth.">
                   <input type="text" value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" className={`${inputCls()} cursor-not-allowed text-slate-500`} />
                 </Field>
-                <SelectField label="Sex" required error={errors.sex} value={form.sex} onChange={set("sex")}>
-                  <option value="">Select sex</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                </SelectField>
+                <Field label="Sex" required error={errors.sex}>
+                  <ButtonSelectGroup ariaLabel="Sex" options={["Male", "Female"]} value={form.sex} onChange={set("sex")} error={Boolean(errors.sex)} />
+                </Field>
                 <SelectField label="Civil Status" required error={errors.civilStatus} value={form.civilStatus} onChange={set("civilStatus")}>
                   <option value="">Select status</option>
                   <option value="Single">Single</option>

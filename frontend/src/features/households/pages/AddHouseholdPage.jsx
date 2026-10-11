@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
 import { Card } from "@/components/common/Card";
+import { ButtonSelectGroup } from "@/components/system";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { householdsApi } from "@/services/api";
@@ -344,16 +345,13 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
                 </select>
               </Field>
               <Field label="Sex" required error={errors.sex}>
-                <select
+                <ButtonSelectGroup
+                  ariaLabel="Sex"
+                  options={SEX_OPTIONS}
                   value={draft.sex}
-                  onChange={(e) => onChange("sex", e.target.value)}
-                  className={`${errors.sex ? inputErr : input} cursor-pointer`}
-                >
-                  <option value="">Select...</option>
-                  {SEX_OPTIONS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
+                  onChange={(v) => onChange("sex", v)}
+                  error={Boolean(errors.sex)}
+                />
               </Field>
             </div>
 
@@ -410,15 +408,12 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
                 </label>
               </Field>
               <Field label="PhilHealth Membership">
-                <select
+                <ButtonSelectGroup
+                  ariaLabel="PhilHealth Membership"
+                  options={[{ value: "member", label: "Member" }, { value: "non-member", label: "Non-member" }]}
                   value={draft.philhealth}
-                  onChange={(e) => onChange("philhealth", e.target.value)}
-                  className={`${input} cursor-pointer`}
-                >
-                  <option value="">Unspecified</option>
-                  <option value="member">Member</option>
-                  <option value="non-member">Non-member</option>
-                </select>
+                  onChange={(v) => onChange("philhealth", v)}
+                />
               </Field>
               <Field label="Contact Number" hint="Optional" error={errors.contact}>
                 <input

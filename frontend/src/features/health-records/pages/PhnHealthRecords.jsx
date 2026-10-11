@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
+import { ButtonSelectGroup } from "@/components/system";
 import { phnResidents } from "@/services/local/phnData";
 import { useWorkflowStore } from "@/services/local/workflowStore";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
@@ -438,14 +439,12 @@ export default function PhnHealthRecords() {
         </div>
         <div>
           <label className="text-sm font-medium text-brand-ink block mb-1.5">Sex</label>
-          <select
+          <ButtonSelectGroup
+            ariaLabel="Sex"
+            options={["Female", "Male"]}
             value={form.sex}
-            onChange={(e) => setForm({ ...form, sex: e.target.value })}
-            className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-          >
-            <option>Female</option>
-            <option>Male</option>
-          </select>
+            onChange={(v) => setForm({ ...form, sex: v })}
+          />
         </div>
       </div>
       <div>
@@ -494,14 +493,12 @@ export default function PhnHealthRecords() {
       </div>
       <div>
         <label className="text-sm font-medium text-brand-ink block mb-1.5">Status</label>
-        <select
+        <ButtonSelectGroup
+          ariaLabel="Status"
+          options={["Active", "Inactive"]}
           value={form.status}
-          onChange={(e) => setForm({ ...form, status: e.target.value })}
-          className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
-        >
-          <option>Active</option>
-          <option>Inactive</option>
-        </select>
+          onChange={(v) => setForm({ ...form, status: v })}
+        />
       </div>
       <div>
         <label className="text-sm font-medium text-brand-ink block mb-1.5">Notes</label>

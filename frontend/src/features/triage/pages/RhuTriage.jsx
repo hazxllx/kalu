@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import { ButtonSelectGroup } from "@/components/system";
 import SearchableSelect from "@/components/common/SearchableSelect";
 import { intakeApi, referralsApi } from "@/services/api";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
@@ -15,7 +16,6 @@ import {
   Plus,
   Check,
   Stethoscope,
-  ChevronDown,
   ChevronRight,
 } from "lucide-react";
 
@@ -643,17 +643,12 @@ export default function RhuTriage() {
                           </div>
                           <div>
                             <label className="mb-1.5 block text-sm font-medium text-brand-ink">Sex *</label>
-                            <div className="relative">
-                              <select
-                                value={walkIn.sex}
-                                onChange={(e) => setWalkIn((prev) => ({ ...prev, sex: e.target.value }))}
-                                className={`${inputCls()} cursor-pointer appearance-none pr-9`}
-                              >
-                                <option>Female</option>
-                                <option>Male</option>
-                              </select>
-                              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-gray" />
-                            </div>
+                            <ButtonSelectGroup
+                              ariaLabel="Sex"
+                              options={["Female", "Male"]}
+                              value={walkIn.sex}
+                              onChange={(v) => setWalkIn((prev) => ({ ...prev, sex: v }))}
+                            />
                           </div>
                         </div>
                         <div className="max-w-xl">

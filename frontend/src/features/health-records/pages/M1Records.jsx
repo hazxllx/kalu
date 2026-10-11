@@ -8,6 +8,7 @@ import BackToTclButton from "@/features/health-records/components/BackToTclButto
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
+import { ButtonSelectGroup as SelectButtonGroup } from "@/components/system";
 import {
   Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight, Trash2, Printer,
 } from "lucide-react";
@@ -39,6 +40,35 @@ const DELIVERY_TYPES = ["Vaginal", "Cesarean"];
 const DELIVERY_OUTCOMES = ["Live Birth", "Fetal Death"];
 const DELIVERY_PLACES = ["Public Facility", "Private Facility", "Home / Non-Facility"];
 const BIRTH_ATTENDANTS = ["Doctor", "Nurse", "Midwife", "Hilot/TBA", "Other"];
+
+// Single-select button-group option sets. Values mirror the previous <select> options
+// exactly so the backend payload, DB values and reporting mappings stay unchanged.
+// No placeholder ("—") option: an empty form value simply renders nothing selected.
+const asOpts = (arr) => arr.map((o) => ({ value: o, label: o }));
+const GDM_RESULT_OPTS = [{ value: "+", label: "+ positive" }, { value: "-", label: "- negative" }];
+const POS_NEG_OPTS = [{ value: "+", label: "+ positive" }, { value: "-", label: "- negative" }];
+const CBC_RESULT_OPTS = [{ value: "+", label: "+ with anemia" }, { value: "-", label: "- without anemia" }];
+const DELIVERY_OUTCOME_OPTS = asOpts(DELIVERY_OUTCOMES);
+const DELIVERY_TYPE_OPTS = asOpts(DELIVERY_TYPES);
+const DELIVERY_PLACE_OPTS = asOpts(DELIVERY_PLACES);
+const BIRTH_ATTENDANT_OPTS = asOpts(BIRTH_ATTENDANTS);
+const BIRTH_WEIGHT_CLASS_OPTS = [
+  { value: "low", label: "Low (< 2,500 g)" },
+  { value: "normal", label: "Normal (\u2265 2,500 g)" },
+  { value: "unknown", label: "Unknown" },
+];
+const PREGNANCY_OUTCOME_OPTS = [
+  { value: "FT", label: "FT - Full Term" },
+  { value: "PT", label: "PT - Pre-term" },
+  { value: "FD", label: "FD - Fetal Death" },
+  { value: "AB", label: "AB - Abortion/Miscarriage" },
+];
+const NEWBORN_SEX_OPTS = [{ value: "M", label: "Male" }, { value: "F", label: "Female" }];
+const SES_OPTS = [
+  { value: "", label: "Not Specified" },
+  { value: "NHTS", label: "1 - NHTS" },
+  { value: "Non-NHTS", label: "2 - Non-NHTS" },
+];
 
 // ---------------------------------------------------------------------------
 // FHSIS M1 export (official reporting-form layout).
@@ -138,6 +168,11 @@ const inputCls = (error) =>
   `mt-1.5 w-full rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue ${
     error ? "border-brand-danger" : "border-brand-border"
   }`;
+
+// Single-select button groups use the shared ButtonSelectGroup (imported above
+// as SelectButtonGroup) so the maternal record form matches the app-wide
+// KALUSAGAP standard.
+
 
 const EMPTY_FORM = () => ({
   lmp: "",
@@ -374,11 +409,12 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                   </div>
                   <div>
                     <label className="text-sm font-medium text-brand-ink">Socio-Economic Status</label>
-                    <select value={form.socioEconomicStatus} onChange={(e) => set("socioEconomicStatus")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                      <option value="">—</option>
-                      <option value="NHTS">1 - NHTS</option>
-                      <option value="Non-NHTS">2 - Non-NHTS</option>
-                    </select>
+                    <SelectButtonGroup
+                      ariaLabel="Socio-Economic Status"
+                      options={SES_OPTS}
+                      value={form.socioEconomicStatus}
+                      onChange={set("socioEconomicStatus")}
+                    />
                   </div>
                   <div>
                     <label className="text-sm font-medium text-brand-ink">Gravida (G)</label>
@@ -425,9 +461,12 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 ))}
                 <div>
                   <label className="text-sm font-medium text-brand-ink">FIM Status</label>
-                  <select value={String(form.fimStatus)} onChange={(e) => set("fimStatus")(e.target.value === "true")} className={`${inputCls()} cursor-pointer`}>
-                    {YES_NO.map((o) => <option key={o.label} value={String(o.value)}>{o.label}</option>)}
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="FIM Status"
+                    options={YES_NO}
+                    value={form.fimStatus}
+                    onChange={set("fimStatus")}
+                  />
                 </div>
               </div>
             </div>
@@ -465,11 +504,12 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Syphilis Result</label>
-                  <select value={form.syphilisResult} onChange={(e) => set("syphilisResult")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    <option value="+">+ positive</option>
-                    <option value="-">- negative</option>
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Syphilis Result"
+                    options={POS_NEG_OPTS}
+                    value={form.syphilisResult}
+                    onChange={set("syphilisResult")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Hepatitis B Screening (date)</label>
@@ -477,11 +517,12 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Hepatitis B Result (HBsAg)</label>
-                  <select value={form.hepbResult} onChange={(e) => set("hepbResult")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    <option value="+">+ positive</option>
-                    <option value="-">- negative</option>
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Hepatitis B Result (HBsAg)"
+                    options={POS_NEG_OPTS}
+                    value={form.hepbResult}
+                    onChange={set("hepbResult")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">HIV Screening (date)</label>
@@ -500,11 +541,12 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Gestational Diabetes Result</label>
-                  <select value={form.gdmResult} onChange={(e) => set("gdmResult")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    <option value="+">+ positive</option>
-                    <option value="-">- negative</option>
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Gestational Diabetes Result"
+                    options={GDM_RESULT_OPTS}
+                    value={form.gdmResult}
+                    onChange={set("gdmResult")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">CBC / Hgb &amp; Hct (date screened)</label>
@@ -512,17 +554,21 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">CBC Result</label>
-                  <select value={form.cbcResult} onChange={(e) => set("cbcResult")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    <option value="+">+ with anemia</option>
-                    <option value="-">- without anemia</option>
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="CBC Result"
+                    options={CBC_RESULT_OPTS}
+                    value={form.cbcResult}
+                    onChange={set("cbcResult")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Given Iron (if anemic)</label>
-                  <select value={String(form.cbcIronGiven)} onChange={(e) => set("cbcIronGiven")(e.target.value === "true")} className={`${inputCls()} cursor-pointer`}>
-                    {YES_NO.map((o) => <option key={o.label} value={String(o.value)}>{o.label}</option>)}
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Given Iron (if anemic)"
+                    options={YES_NO}
+                    value={form.cbcIronGiven}
+                    onChange={set("cbcIronGiven")}
+                  />
                 </div>
               </div>
             </div>
@@ -547,17 +593,21 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Delivery Outcome</label>
-                  <select value={form.deliveryOutcome} onChange={(e) => set("deliveryOutcome")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    {DELIVERY_OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Delivery Outcome"
+                    options={DELIVERY_OUTCOME_OPTS}
+                    value={form.deliveryOutcome}
+                    onChange={set("deliveryOutcome")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Type of Delivery</label>
-                  <select value={form.typeOfDelivery} onChange={(e) => set("typeOfDelivery")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    {DELIVERY_TYPES.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Type of Delivery"
+                    options={DELIVERY_TYPE_OPTS}
+                    value={form.typeOfDelivery}
+                    onChange={set("typeOfDelivery")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Birth Weight (kg)</label>
@@ -566,17 +616,21 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Place of Delivery</label>
-                  <select value={form.placeOfDelivery} onChange={(e) => set("placeOfDelivery")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    {DELIVERY_PLACES.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Place of Delivery"
+                    options={DELIVERY_PLACE_OPTS}
+                    value={form.placeOfDelivery}
+                    onChange={set("placeOfDelivery")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Birth Attendant</label>
-                  <select value={form.birthAttendant} onChange={(e) => set("birthAttendant")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    {BIRTH_ATTENDANTS.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Birth Attendant"
+                    options={BIRTH_ATTENDANT_OPTS}
+                    value={form.birthAttendant}
+                    onChange={set("birthAttendant")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Time of Delivery</label>
@@ -584,22 +638,21 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Birth Weight Classification</label>
-                  <select value={form.birthWeightClass} onChange={(e) => set("birthWeightClass")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    <option value="low">Low (&lt; 2,500 g)</option>
-                    <option value="normal">Normal (&ge; 2,500 g)</option>
-                    <option value="unknown">Unknown</option>
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Birth Weight Classification"
+                    options={BIRTH_WEIGHT_CLASS_OPTS}
+                    value={form.birthWeightClass}
+                    onChange={set("birthWeightClass")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Pregnancy Outcome</label>
-                  <select value={form.pregnancyOutcome} onChange={(e) => set("pregnancyOutcome")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    <option value="FT">FT - Full Term</option>
-                    <option value="PT">PT - Pre-term</option>
-                    <option value="FD">FD - Fetal Death</option>
-                    <option value="AB">AB - Abortion/Miscarriage</option>
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Pregnancy Outcome"
+                    options={PREGNANCY_OUTCOME_OPTS}
+                    value={form.pregnancyOutcome}
+                    onChange={set("pregnancyOutcome")}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Date Terminated</label>
@@ -607,11 +660,12 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink">Newborn Sex</label>
-                  <select value={form.newbornSex} onChange={(e) => set("newbornSex")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                    <option value="">—</option>
-                    <option value="M">Male</option>
-                    <option value="F">Female</option>
-                  </select>
+                  <SelectButtonGroup
+                    ariaLabel="Newborn Sex"
+                    options={NEWBORN_SEX_OPTS}
+                    value={form.newbornSex}
+                    onChange={set("newbornSex")}
+                  />
                 </div>
               </div>
             </div>
@@ -674,9 +728,12 @@ function MaternalFormModal({ initial, resident, residents, saving, onClose, onSa
                 ].map(([key, label]) => (
                   <div key={key}>
                     <label className="text-sm font-medium text-brand-ink">{label}</label>
-                    <select value={String(form[key])} onChange={(e) => set(key)(e.target.value === "true")} className={`${inputCls()} cursor-pointer`}>
-                      {YES_NO.map((o) => <option key={o.label} value={String(o.value)}>{o.label}</option>)}
-                    </select>
+                    <SelectButtonGroup
+                      ariaLabel={label}
+                      options={YES_NO}
+                      value={form[key]}
+                      onChange={set(key)}
+                    />
                   </div>
                 ))}
                 <div>

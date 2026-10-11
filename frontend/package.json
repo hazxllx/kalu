@@ -9,6 +9,8 @@
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
+    "test": "node --test tests/offline/engine.test.js tests/offline/consultationDraft.test.js",
+    "test:offline": "node --test tests/offline/engine.test.js tests/offline/consultationDraft.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

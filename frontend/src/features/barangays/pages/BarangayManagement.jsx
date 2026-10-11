@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import { ButtonSelectGroup } from "@/components/system";
 import { useToast } from "@/components/ui/use-toast";
 import { usePermissions } from "@/context/PermissionsContext";
 import { useBarangays } from "@/context/BarangaysContext";
@@ -231,10 +232,12 @@ function BarangayModal({ mode, record, municipalities, onClose, onSaved }) {
               {/* Row 2 — two columns */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="Status" htmlFor="brgy-status" hint="Inactive barangays stay in records but are hidden from new selections.">
-                  <select id="brgy-status" value={form.status} onChange={set("status")} className={selectCls}>
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
+                  <ButtonSelectGroup
+                    ariaLabel="Status"
+                    options={["Active", "Inactive"]}
+                    value={form.status}
+                    onChange={(v) => set("status")({ target: { value: v } })}
+                  />
                 </Field>
 
                 <Field label="Barangay Captain" htmlFor="brgy-captain">

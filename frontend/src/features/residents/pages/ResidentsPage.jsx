@@ -5,6 +5,7 @@ import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
 import RiskBadge from "@/components/common/RiskBadge";
 import SearchableSelect from "@/components/common/SearchableSelect";
+import { ButtonSelectGroup } from "@/components/system";
 import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
@@ -484,8 +485,9 @@ export default function ResidentsPage() {
     }
   };
 
+  /** @returns {ValidationErrors} */
   const validateEdit = () => {
-    const errs = {};
+    const errs = /** @type {ValidationErrors} */ ({});
     if (!editForm.barangay) errs.barangay = "Barangay is required.";
     else if (!allowedBarangays.includes(editForm.barangay)) errs.barangay = "You can only edit residents within your assigned barangay.";
     if (editForm.contact && !/^[0-9+\-\s()]{7,20}$/.test(editForm.contact.trim())) errs.contact = "Enter a valid contact number.";
@@ -494,7 +496,12 @@ export default function ResidentsPage() {
 
   /** Save the permitted corrections through the API. */
   const handleEditSave = async () => {
-    if (!canEdit || !validateEdit() || !editTarget) return;
+    if (!canEdit || !editTarget) return;
+    const errs = validateEdit();
+    if (Object.keys(errs).length > 0) {
+      setEditErrors(errs);
+      return;
+    }
     setEditSubmitting(true);
     setEditError(null);
     try {
@@ -715,7 +722,11 @@ export default function ResidentsPage() {
                 <Field label="Date of Birth" type="date" value={form.dob} onChange={onDobChange} error={errors.dob} />
                 <Field label="Age" value={form.age} onChange={() => {}} placeholder="Auto-calculated" readOnly optional />
 
-                <Select label="Sex" value={form.gender} onChange={set("gender")} options={SEX_OPTIONS} placeholder="Select sex" error={errors.gender} />
+                <div>
+                  <label className={labelClass}>Sex</label>
+                  <ButtonSelectGroup ariaLabel="Sex" options={SEX_OPTIONS} value={form.gender} onChange={set("gender")} error={Boolean(errors.gender)} />
+                  {errors.gender && <p className={errorClass}>{errors.gender}</p>}
+                </div>
                 <Select label="Civil Status" value={form.civilStatus} onChange={set("civilStatus")} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
 
                 <Field label="Contact Number" value={form.contact} onChange={set("contact")} placeholder="e.g. 0917 123 4567" error={errors.contact} optional />

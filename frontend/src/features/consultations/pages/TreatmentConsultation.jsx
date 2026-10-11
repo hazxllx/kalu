@@ -12,6 +12,14 @@ import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { consultationsApi, residentsApi, bpConfigApi } from "@/services/api";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 import { classifyBloodPressure as classifyBp } from "@/features/consultations/utils/bpClassification";
+import {
+  saveConsultationOffline,
+  submitConsultationDraft,
+  listConsultationDrafts,
+  restoreConsultationDraft,
+  deleteConsultationDraft,
+} from "@/services/offline/consultationOfflineService";
+import { isNavigatorOnline } from "@/services/offline/connectivity";
 
 const inputCls = (error) =>
   `w-full bg-white border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue ${
@@ -213,6 +221,12 @@ export default function TreatmentConsultation() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Locally saved consultation drafts (saved offline; require an explicit online
+  // submission). Owner-scoped and persisted in IndexedDB so they survive a
+  // refresh or browser restart. These are NEVER auto-synchronized.
+  const ownerId = user?.id || null;
+  const [offlineDrafts, setOfflineDrafts] = useState([]);
+  const [draftBusyId, setDraftBusyId] = useState(null);
 
   // Records list view by default. Clicking "+ Add Treatment Consultation"
   // opens the consultation entry form below; saving persists the record to the
@@ -273,6 +287,22 @@ export default function TreatmentConsultation() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Load any locally saved offline drafts for this user (best-effort; the online
+  // records load is independent and must not be blocked by this).
+  const refreshDrafts = useCallback(() => {
+    if (!ownerId) {
+      setOfflineDrafts([]);
+      return Promise.resolve();
+    }
+    return listConsultationDrafts(ownerId)
+      .then((rows) => setOfflineDrafts(rows))
+      .catch(() => setOfflineDrafts([]));
+  }, [ownerId]);
+
+  useEffect(() => {
+    refreshDrafts();
+  }, [refreshDrafts]);
 
   // Load the active BP thresholds once (best-effort; defaults apply on failure).
   useEffect(() => {
@@ -379,40 +409,9 @@ export default function TreatmentConsultation() {
     };
     setBusy(true);
     const needsReferral = !editingId && formData.referralRequired === "Yes";
-    const request = editingId ? consultationsApi.update(editingId, payload) : consultationsApi.create(payload);
-    request.then((result) => {
-      const saved = result?.consultation;
-      setConsultations((current) => editingId
-        ? current.map((item) => item.id === editingId ? saved : item)
-        : [saved, ...current]);
-      showToast(editingId ? "Consultation updated successfully." : "Consultation saved successfully.");
-      // "Does this patient need a referral? Yes" — open the shared referral form
-      // prefilled from this Treatment Record, linking back to it via
-      // treatmentVisitId. One shared form; no duplicate resident/record.
-      if (needsReferral) {
-        const referralDraft = {
-          residentId: selectedResident.id,
-          resident: selectedResident.name,
-          reason: formData.diagnosis || formData.chiefComplaint || "",
-          riskLevel: "High",
-          findings: formData.findings || "",
-          chiefComplaints: formData.chiefComplaint || "",
-          clinicalHistory: "",
-          physicalExamFindings: formData.findings || "",
-          impression: formData.diagnosis || "",
-          recommendations: formData.adviceGiven || "",
-          clinicalNotes: formData.remarks || "",
-          referringFacility: selectedResident.barangay ? `${selectedResident.barangay} Health Station` : "",
-          treatmentVisitId: saved?.id || "",
-        };
-        cancelForm();
-        navigate("/app/health_supervisor/referrals", { state: { referralDraft } });
-        return;
-      }
-      cancelForm();
-    }).catch((err) => {
-      // Never fail silently: log the real error for debugging (no secrets) and
-      // show the user a clear, status-appropriate message.
+
+    // Shared, status-appropriate error presentation (never fail silently).
+    const showSaveError = (err) => {
       console.error("Consultation save failed:", err?.status, err?.message, err?.payload);
       const serverErrors = err?.payload?.error?.errors;
       if (serverErrors && typeof serverErrors === "object" && !Array.isArray(serverErrors)) {
@@ -427,8 +426,116 @@ export default function TreatmentConsultation() {
         const detailMessage = Array.isArray(details) ? details.join(" ") : "";
         setErrors((prev) => ({ ...prev, submit: detailMessage || submitErrorMessage(err) }));
       }
-    })
-      .finally(() => setBusy(false));
+    };
+
+    const openReferral = (saved) => {
+      const referralDraft = {
+        residentId: selectedResident.id,
+        resident: selectedResident.name,
+        reason: formData.diagnosis || formData.chiefComplaint || "",
+        riskLevel: "High",
+        findings: formData.findings || "",
+        chiefComplaints: formData.chiefComplaint || "",
+        clinicalHistory: "",
+        physicalExamFindings: formData.findings || "",
+        impression: formData.diagnosis || "",
+        recommendations: formData.adviceGiven || "",
+        clinicalNotes: formData.remarks || "",
+        referringFacility: selectedResident.barangay ? `${selectedResident.barangay} Health Station` : "",
+        treatmentVisitId: saved?.id || "",
+      };
+      cancelForm();
+      navigate("/app/health_supervisor/referrals", { state: { referralDraft } });
+    };
+
+    if (editingId) {
+      // Updates require an authoritative server round-trip (online only).
+      consultationsApi.update(editingId, payload).then((result) => {
+        const saved = result?.consultation;
+        setConsultations((current) => current.map((item) => (item.id === editingId ? saved : item)));
+        showToast("Consultation updated successfully.");
+        cancelForm();
+      }).catch(showSaveError).finally(() => setBusy(false));
+      return;
+    }
+
+    // Create is offline-capable: when offline (or the request drops on the
+    // network), it is saved as a local OFFLINE_DRAFT that survives refresh and
+    // restart and is submitted later by an explicit online action. It is never
+    // auto-synchronized, so an unconfirmed consultation is never shown as saved
+    // on the server. Non-network errors (validation/authorization) still surface.
+    saveConsultationOffline({
+      ownerId,
+      payload,
+      create: (data) => consultationsApi.create(data),
+    }).then((res) => {
+      if (res.source === "server") {
+        const saved = res.record;
+        setConsultations((current) => [saved, ...current]);
+        showToast("Consultation saved successfully.");
+        if (needsReferral) {
+          openReferral(saved);
+          return;
+        }
+        cancelForm();
+        return;
+      }
+      // Saved locally — referral creation needs a server-confirmed visit, so it
+      // is deferred until this draft is submitted online.
+      showToast("Saved offline. Submit this consultation when you're back online.");
+      refreshDrafts();
+      cancelForm();
+    }).catch(showSaveError).finally(() => setBusy(false));
+  };
+
+  // Submit a locally saved draft to the server (explicit, online-only). On
+  // success the only local copy is removed so it cannot become a duplicate.
+  const handleSubmitDraft = (localId) => {
+    if (draftBusyId) return;
+    if (!isNavigatorOnline()) {
+      showToast("You're offline. Reconnect to submit this consultation.");
+      return;
+    }
+    setDraftBusyId(localId);
+    submitConsultationDraft({
+      ownerId,
+      localId,
+      create: (data) => consultationsApi.create(data),
+    }).then((out) => {
+      if (out?.record) setConsultations((current) => [out.record, ...current]);
+      showToast("Consultation submitted successfully.");
+      refreshDrafts();
+    }).catch((err) => {
+      console.error("Draft submission failed:", err?.status, err?.message);
+      showToast(submitErrorMessage(err));
+      refreshDrafts();
+    }).finally(() => setDraftBusyId(null));
+  };
+
+  // Load a saved draft back into the form for review/editing before submission.
+  const handleEditDraft = (localId) => {
+    if (!canConductConsultation) return;
+    restoreConsultationDraft({ ownerId, localId }).then((restored) => {
+      if (!restored) {
+        refreshDrafts();
+        return;
+      }
+      const data = restored.data || {};
+      const resident =
+        residentOptions.find((r) => r.id === data.residentId) ||
+        (data.residentId ? { id: data.residentId, name: data.residentId, barangay: "" } : null);
+      setEditingId(null);
+      setSelectedResident(resident);
+      setFormData({ ...emptyForm(), ...data });
+      setErrors({});
+      setSearchQuery("");
+      setMode("form");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  };
+
+  const handleDiscardDraft = (localId) => {
+    deleteConsultationDraft(localId).then(() => refreshDrafts());
   };
 
   const recordRows = useMemo(
@@ -829,6 +936,61 @@ export default function TreatmentConsultation() {
           <h3 className="font-semibold text-brand-ink">Treatment Consultation Records</h3>
           <p className="text-xs text-brand-gray mt-0.5">Consultations recorded for residents in your area.</p>
         </div>
+
+        {offlineDrafts.length > 0 && (
+          <div className="mb-5 rounded-btn border border-amber-300 bg-amber-50/70 p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <p className="text-sm font-semibold text-amber-800">
+                Saved offline — not yet submitted ({offlineDrafts.length})
+              </p>
+            </div>
+            <p className="text-xs text-amber-700 mb-3">
+              These consultations are stored only on this device and have not been saved to the server.
+              Submit them while online to record them. They are never submitted automatically.
+            </p>
+            <ul className="space-y-2">
+              {offlineDrafts.map((draft) => (
+                <li
+                  key={draft.localId}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-btn border border-amber-200 bg-white px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-brand-ink truncate">
+                      {draft.chiefComplaint || "Consultation"}
+                      {draft.diagnosis ? ` — ${draft.diagnosis}` : ""}
+                    </p>
+                    <p className="text-xs text-brand-gray">
+                      {formatDate(draft.consultationDate)} · Resident {draft.residentId || "—"} · Saved Offline
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button
+                      onClick={() => handleEditDraft(draft.localId)}
+                      className="text-brand-blue text-sm font-medium hover:underline"
+                    >
+                      Review
+                    </button>
+                    <button
+                      onClick={() => handleSubmitDraft(draft.localId)}
+                      disabled={draftBusyId === draft.localId}
+                      className="inline-flex items-center gap-1 rounded-btn bg-brand-blue text-white px-3 py-1.5 text-sm font-medium hover:bg-brand-dark transition-colors disabled:opacity-60"
+                    >
+                      <Save className="w-4 h-4" />
+                      {draftBusyId === draft.localId ? "Submitting..." : "Submit"}
+                    </button>
+                    <button
+                      onClick={() => handleDiscardDraft(draft.localId)}
+                      className="text-brand-danger text-sm font-medium hover:underline"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {loadError ? (
           <div className="py-10 text-center">
