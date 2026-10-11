@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Bell, CheckCheck, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Bell, CheckCheck, RefreshCw, ChevronRight } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
 import { ICONS, CATEGORIES } from "@/services/local/notificationData";
 import { notificationsApi } from "@/services/api";
+import { notifyUnreadChanged } from "@/services/notifications/unreadBus";
+import { useAuth } from "@/context/AuthContext";
 
 const CATEGORY_FILTERS = ["information", "reminder", "alert", "success", "warning"];
 
@@ -36,7 +39,45 @@ const mapNotification = (row) => ({
   createdAt: row.created_at,
   time: relativeTime(row.created_at),
   read: Boolean(row.read_at),
+  // Kept so the card can deep-link to the related record (e.g. a saved
+  // consultation → My Health Records). Never contains clinical detail.
+  relatedType: row.related_type || "",
+  relatedId: row.related_id || null,
 });
+
+/**
+ * Resolve a notification's in-app destination from its related record.
+ *
+ * Only safe, resident-owned destinations are mapped. A "consultation saved"
+ * notification links the resident to their My Health Records page (where the
+ * Consultation History tab lives). Unknown types stay non-clickable.
+ */
+const destinationFor = (notification, role) => {
+  if (!notification?.relatedType) return null;
+  if (notification.relatedType === "consultation" && role === "resident") {
+    return "/app/resident/record";
+  }
+  // Residency transfer requests. Staff reviewers deep-link to the Resident
+  // Transfer Requests queue, pre-opening the specific request; a resident is
+  // taken to their dashboard, where the transfer status banner shows the
+  // decision and any resubmission instructions (no sensitive detail in-feed).
+  if (notification.relatedType === "transfer_request") {
+    const id = notification.relatedId ? `?request=${encodeURIComponent(notification.relatedId)}` : "";
+    if (["health_supervisor", "phn", "mho", "admin"].includes(role)) {
+      return `/app/${role}/transfer-requests${id}`;
+    }
+    if (role === "resident") return "/app/resident/dashboard";
+  }
+  return null;
+};
+
+/** Short, role-aware label for a notification's deep-link action button. */
+const actionLabelFor = (notification, role) => {
+  if (notification?.relatedType === "transfer_request") {
+    return role === "resident" ? "View transfer status" : "Open transfer request";
+  }
+  return "View My Health Records";
+};
 
 /**
  * Notifications (all roles).
@@ -48,6 +89,8 @@ const mapNotification = (row) => ({
  * same row so the state survives refresh and re-login.
  */
 export default function NotificationsPage({ crumbs = ["Notifications"] }) {
+  const navigate = useNavigate();
+  const { role } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -61,6 +104,8 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
       .then((result) => {
         const rows = result?.rows || result || [];
         setNotifications(rows.map(mapNotification));
+        // Keep the shared bell badge aligned with the freshly loaded list.
+        notifyUnreadChanged();
       })
       .catch((err) => setLoadError(err?.message || "Unable to load notifications. Please try again."))
       .finally(() => setLoading(false));
@@ -77,23 +122,45 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
   });
 
   const markAsRead = async (id) => {
-    // Optimistic — revert on failure.
+    // Already read → nothing to persist (avoids an unnecessary write/request).
+    const target = notifications.find((n) => n.id === id);
+    if (target && target.read) return;
+    // Optimistic — update the list and the shared bell badge immediately,
+    // revert on failure so the UI stays consistent with the server.
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    notifyUnreadChanged();
     try {
-      await notificationsApi.update(id, {});
+      await notificationsApi.markRead(id);
     } catch {
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: false } : n)));
+      notifyUnreadChanged();
     }
   };
 
   const markAllAsRead = async () => {
-    const unread = notifications.filter((n) => !n.read);
+    const hadUnread = notifications.some((n) => !n.read);
+    if (!hadUnread) return;
+    const snapshot = notifications;
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    notifyUnreadChanged();
     try {
-      await Promise.all(unread.map((n) => notificationsApi.update(n.id, {})));
+      // One atomic server request marks every unread row read — no per-row race.
+      await notificationsApi.markAllRead();
     } catch {
+      // Restore the pre-click state, then reconcile with the server.
+      setNotifications(snapshot);
+      notifyUnreadChanged();
       load();
     }
+  };
+
+  // Open a notification: mark it read (so the unread count updates), then
+  // navigate to its related record when one is mapped. An already-read
+  // notification still navigates but creates no extra update.
+  const openNotification = (n) => {
+    const destination = destinationFor(n, role);
+    if (!n.read) markAsRead(n.id);
+    if (destination) navigate(destination);
   };
 
   const getCategoryColor = (category) => CATEGORIES[category]?.color || "bg-brand-gray/10 text-brand-gray";
@@ -244,9 +311,36 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                     <div className="space-y-2">
                       {items.map((n, i) => {
                         const CategoryIcon = getCategoryIcon(n.category);
+                        const destination = destinationFor(n, role);
+                        const navigates = Boolean(destination);
+                        // The whole card is interactive: clicking it marks the
+                        // notification read (and navigates when a destination is
+                        // mapped). An already-read, non-navigating card needs no
+                        // action, so it is left non-interactive.
+                        const interactive = navigates || !n.read;
+                        const actionLabel = actionLabelFor(n, role);
+                        const ariaLabel = navigates
+                          ? `${n.title} — ${actionLabel.toLowerCase()}`
+                          : `${n.title} — mark as read`;
                         return (
                           <motion.div key={n.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                            <div className={`flex items-start gap-3 p-3 rounded-btn transition-all hover:shadow-sm hover:bg-brand-light ${!n.read ? "bg-brand-blue/5" : ""}`}>
+                            <div
+                              className={`flex items-start gap-3 p-3 rounded-btn transition-all hover:shadow-sm hover:bg-brand-light ${!n.read ? "bg-brand-blue/5" : ""} ${interactive ? "cursor-pointer" : ""}`}
+                              {...(interactive
+                                ? {
+                                    role: "button",
+                                    tabIndex: 0,
+                                    "aria-label": ariaLabel,
+                                    onClick: () => openNotification(n),
+                                    onKeyDown: (e) => {
+                                      if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        openNotification(n);
+                                      }
+                                    },
+                                  }
+                                : {})}
+                            >
                               <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${getCategoryColor(n.category)}`}>
                                 <CategoryIcon className="w-4 h-4" strokeWidth={1.8} />
                               </div>
@@ -266,11 +360,25 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                                     </span>
                                   </div>
                                 </div>
-                                {!n.read && (
-                                  <button onClick={() => markAsRead(n.id)} className="mt-2 text-xs font-medium text-brand-blue hover:underline">
-                                    Mark as read
-                                  </button>
-                                )}
+                                <div className="mt-2 flex items-center gap-4">
+                                  {navigates && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); openNotification(n); }}
+                                      className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline"
+                                    >
+                                      {actionLabel} <ChevronRight className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                  {!n.read && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
+                                      className="text-xs font-medium text-brand-blue hover:underline"
+                                    >
+                                      Mark as read
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </motion.div>

@@ -25,6 +25,7 @@ import {
 } from "@/lib/navConfig";
 import { homeForRole } from "@/lib/roles";
 import { notificationsApi } from "@/services/api";
+import { onUnreadChanged } from "@/services/notifications/unreadBus";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 
@@ -135,18 +136,26 @@ export default function DashboardLayout({ roleKey }) {
   useEffect(() => {
     let active = true;
 
-    notificationsApi
-      .list()
-      .then((result) => {
-        if (!active) return;
+    const refreshUnread = () =>
+      notificationsApi
+        .list()
+        .then((result) => {
+          if (!active) return;
 
-        const rows = result?.rows || result || [];
-        setUnreadCount(rows.filter((n) => !n.read_at).length);
-      })
-      .catch(() => active && setUnreadCount(0));
+          const rows = result?.rows || result || [];
+          setUnreadCount(rows.filter((n) => !n.read_at).length);
+        })
+        .catch(() => active && setUnreadCount(0));
+
+    refreshUnread();
+
+    // Re-sync the badge the instant the Notifications page marks something read
+    // (or marks all read), without waiting for the next navigation.
+    const unsubscribe = onUnreadChanged(refreshUnread);
 
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [location.pathname]);
 

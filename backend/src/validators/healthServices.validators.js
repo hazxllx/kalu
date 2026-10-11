@@ -108,6 +108,49 @@ export const createServiceValidator = (input = {}) => {
   });
 };
 
+/**
+ * Update validation. The edit form reuses the create form, so a FULL content
+ * update is validated exactly like create (name + schedule required, facility
+ * coverage rules, cross-field schedule rules) with an optional `active` flag.
+ *
+ * A STATUS-ONLY payload — `{ active }` with no content/schedule/coverage/
+ * personnel fields — is accepted on its own so the activate/deactivate action
+ * can flip the flag without resubmitting the whole schedule.
+ */
+const CONTENT_KEYS = [
+  'name', 'category', 'description',
+  'facilityId', 'facility_id', 'facilityName', 'facility_name', 'municipalityWide',
+  'personnelIds',
+  'startDate', 'start_date', 'startTime', 'start_time',
+  'endDate', 'end_date', 'endTime', 'end_time',
+  'registrationDeadline', 'registration_deadline',
+];
+
+const hasActiveFlag = (input) =>
+  input?.active === true || input?.active === false || input?.active === 'true' || input?.active === 'false';
+const normalizeActive = (input) => !(input?.active === false || input?.active === 'false');
+
+export const updateServiceValidator = (input = {}) => {
+  const hasContent = CONTENT_KEYS.some((k) => {
+    if (input == null || !Object.prototype.hasOwnProperty.call(input, k)) return false;
+    const value = input[k];
+    return Array.isArray(value) || text(value) !== '';
+  });
+
+  // Status-only update: just the active flag, nothing else to validate.
+  if (!hasContent) {
+    if (!hasActiveFlag(input)) return invalid({ _root: 'Provide at least one field to update.' });
+    return valid({ active: normalizeActive(input) });
+  }
+
+  const result = createServiceValidator(input);
+  if (result.error) return result;
+  // Carry the active flag through when supplied (defaults to active for a full
+  // update that omits it, mirroring create).
+  result.value.active = hasActiveFlag(input) ? normalizeActive(input) : (input?.active === false ? false : true);
+  return result;
+};
+
 export const assignValidator = (input = {}) => {
   const personnelId = text(input?.personnelId || input?.personnel_id);
   if (!personnelId) return invalid({ personnelId: 'Select a personnel to assign.' });
@@ -187,6 +230,7 @@ export const attendanceIdParamValidator = (params = {}) => {
 
 export default {
   createServiceValidator,
+  updateServiceValidator,
   assignValidator,
   serviceIdParamValidator,
   createAttendanceValidator,

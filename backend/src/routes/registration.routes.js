@@ -26,6 +26,15 @@ const registerLimiter = rateLimit({
   message: 'Too many registration attempts. Please try again later.',
 });
 
+// A tighter limiter for the PUBLIC existing-record lookup to blunt Resident ID
+// enumeration (the endpoint returns no personal data, only an eligibility
+// state, but we still rate-limit it per client).
+const lookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: 'Too many lookups. Please try again later.',
+});
+
 router.post(
   '/resident',
   authenticate,
@@ -43,6 +52,30 @@ router.post(
   authenticate,
   authorize(FEATURE_ROLES.residentSelf),
   asyncHandler(registrationController.activateAccount),
+);
+
+// Existing-resident activation — simplified "I already have a barangay health
+// record" flow.
+//
+//   POST /registration/existing/lookup    public: validate a Resident ID and
+//                                          report ONLY an eligibility state
+//                                          (no personal data is returned)
+//   POST /registration/existing/activate  authenticated: link the signed-in
+//                                          (email-verified) account to the
+//                                          existing record after a server-side
+//                                          date-of-birth identity check
+router.post(
+  '/existing/lookup',
+  lookupLimiter,
+  asyncHandler(registrationController.lookupExistingResident),
+);
+
+router.post(
+  '/existing/activate',
+  authenticate,
+  authorize(FEATURE_ROLES.residentSelf),
+  registerLimiter,
+  asyncHandler(registrationController.activateExistingResident),
 );
 
 export default router;

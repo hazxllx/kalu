@@ -29,6 +29,7 @@ import { notifyResident } from './notifications.service.js';
 const TABLE = 'health_services';
 const ASSIGN_TABLE = 'health_service_assignments';
 const ATTENDANCE_TABLE = 'health_service_attendance';
+const APPOINTMENTS_TABLE = 'appointments';
 const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'cancelled', 'walk_in']);
 
 export const SERVICE_CATEGORIES = Object.freeze([
@@ -142,6 +143,40 @@ const dedupeById = (rows) => {
 };
 
 /**
+ * Attach a live `registrationCount` (non-cancelled resident visit plans) to each
+ * shaped service for the catalog cards. One grouped read over the already-scoped
+ * service ids; a barangay-scoped role is confined to their own barangay's plans,
+ * mirroring the registrations roster scope. Best-effort: a failure here must
+ * never blank the catalog, so the count is simply omitted on error.
+ */
+const attachRegistrationCounts = async (user, services, supabase) => {
+  const ids = services.map((s) => s.id);
+  if (ids.length === 0) return services;
+  try {
+    let query = supabase
+      .from(PLAN_TABLE)
+      .select('service_id, status, barangay_id')
+      .in('service_id', ids)
+      .neq('status', 'Cancelled');
+    if (BARANGAY_SCOPED_ROLES.has(user.role)) {
+      if (!user.barangayId) {
+        for (const s of services) s.registrationCount = 0;
+        return services;
+      }
+      query = query.eq('barangay_id', user.barangayId);
+    }
+    const { data, error } = await query;
+    if (error) return services;
+    const counts = new Map();
+    for (const row of data || []) counts.set(row.service_id, (counts.get(row.service_id) || 0) + 1);
+    for (const s of services) s.registrationCount = counts.get(s.id) || 0;
+  } catch {
+    /* best-effort enrichment only */
+  }
+  return services;
+};
+
+/**
  * Services visible to the caller.
  *   mine=true  -> only services ASSIGNED to the caller
  *   otherwise  -> services in the caller's scope + services assigned to them
@@ -164,7 +199,7 @@ export const list = async ({ user, mine = false, category = null, supabase = get
     if (category) q = q.eq('category', category);
     const { data, error } = await q;
     throwOnError(error, 'Could not load services');
-    return (data || []).map(toService);
+    return attachRegistrationCounts(user, (data || []).map(toService), supabase);
   }
 
   // In-scope services.
@@ -194,7 +229,7 @@ export const list = async ({ user, mine = false, category = null, supabase = get
     }
   }
 
-  return dedupeById(results).map(toService);
+  return attachRegistrationCounts(user, dedupeById(results).map(toService), supabase);
 };
 
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
@@ -770,6 +805,158 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   return getById({ user, id: data.id, supabase });
 };
 
+/**
+ * Update an existing health service. BUG/REDESIGN: edit must never create a new
+ * row — it mutates the existing record in place, preserving its id and every
+ * dependent record (visit_plans registrations, attendance). Scope + management
+ * authority are re-checked server-side via `manageableService` (a Health
+ * Supervisor is confined to services in their own barangay). The barangay is
+ * never submitted: when the facility/coverage is changed it is re-derived from
+ * the chosen facility + the session, exactly like create.
+ *
+ * Two payload shapes are accepted:
+ *   - a STATUS-ONLY update ({ active }) — used by the activate/deactivate
+ *     action — which touches only the `active` flag;
+ *   - a FULL content update (name/category/description/schedule/facility/
+ *     personnel/active) from the shared create/edit form.
+ */
+export const update = async ({ user, serviceId, payload = {}, supabase = getServiceClient() }) => {
+  assertManager(user);
+  const existing = await manageableService(user, serviceId, supabase); // BUG-004: scope + management check
+
+  const row = { updated_at: new Date().toISOString() };
+  const has = (key) => Object.prototype.hasOwnProperty.call(payload, key);
+
+  // Content fields — only written when supplied, so a status-only toggle leaves
+  // the schedule/coverage untouched.
+  if (has('name')) {
+    const name = text(payload.name);
+    if (!name) throw ApiError.unprocessable('A service name is required.');
+    row.name = name;
+  }
+  if (has('category')) {
+    row.category = SERVICE_CATEGORIES.includes(text(payload.category)) ? text(payload.category) : 'Other';
+  }
+  if (has('description')) row.description = text(payload.description);
+
+  if (has('startDate') || has('start_date')) row.start_date = text(payload.startDate || payload.start_date) || null;
+  if (has('startTime') || has('start_time')) row.start_time = text(payload.startTime || payload.start_time) || null;
+  if (has('endTime') || has('end_time')) row.end_time = text(payload.endTime || payload.end_time) || null;
+  if (has('endDate') || has('end_date')) {
+    // A one-day service (no end date) is stored as ending on its start date.
+    const endDate = text(payload.endDate || payload.end_date);
+    const startDate = row.start_date !== undefined ? row.start_date : existing.start_date;
+    row.end_date = endDate || startDate || null;
+  }
+  if (has('registrationDeadline') || has('registration_deadline')) {
+    row.registration_deadline = text(payload.registrationDeadline || payload.registration_deadline) || null;
+  }
+
+  // Facility / coverage: only re-derive the scope when a coverage field was
+  // supplied, so a status-only or content-only edit never silently moves the
+  // service to a different barangay.
+  if (has('facilityId') || has('facility_id') || has('facilityName') || has('facility_name') || has('municipalityWide')) {
+    const scope = await resolveScope(user, payload, supabase);
+    row.facility_id = scope.facilityId;
+    row.barangay_id = scope.barangayId;
+  }
+
+  if (has('active')) row.active = payload.active === false ? false : Boolean(payload.active);
+
+  const { error } = await supabase.from(TABLE).update(row).eq('id', serviceId);
+  throwOnError(error, 'Could not update the health service');
+
+  // Personnel reconciliation — add newly selected, deactivate removed. Existing
+  // assignments (and their id) are preserved; a removed person is soft-marked
+  // inactive, never hard-deleted, so historical attendance stays attributable.
+  if (has('personnelIds') && Array.isArray(payload.personnelIds)) {
+    const wanted = new Set(payload.personnelIds.map((p) => text(p)).filter(Boolean));
+    const current = (existing[ASSIGN_TABLE] || []).filter((a) => a.active !== false);
+    const currentIds = new Set(current.map((a) => a.personnel_id));
+
+    const toAdd = [...wanted].filter((id) => !currentIds.has(id));
+    const toRemove = [...currentIds].filter((id) => !wanted.has(id));
+
+    if (toAdd.length > 0) {
+      const rows = toAdd.map((personnelId) => ({
+        service_id: serviceId,
+        personnel_id: personnelId,
+        assigned_by: user.id,
+        active: true,
+      }));
+      const { error: addErr } = await supabase.from(ASSIGN_TABLE).upsert(rows, { onConflict: 'service_id,personnel_id' });
+      throwOnError(addErr, 'Could not update personnel assignments');
+      await notifyAssignees(supabase, { serviceName: row.name || existing.name, personnelIds: toAdd, assignedBy: serviceId });
+    }
+    if (toRemove.length > 0) {
+      const { error: remErr } = await supabase
+        .from(ASSIGN_TABLE)
+        .update({ active: false })
+        .eq('service_id', serviceId)
+        .in('personnel_id', toRemove);
+      throwOnError(remErr, 'Could not update personnel assignments');
+    }
+  }
+
+  return getById({ user, id: serviceId, supabase });
+};
+
+/**
+ * Dependent-record counts for a service. Used to decide whether a destructive
+ * delete is safe. Registrations (visit_plans) and attendance records both
+ * reference the service with ON DELETE CASCADE, so a hard delete would destroy
+ * resident data; booked appointments reference it ON DELETE RESTRICT, so the DB
+ * itself refuses the delete. These counts gate that with a clear message.
+ */
+const countServiceDependents = async (serviceId, supabase) => {
+  const [
+    { count: planCount, error: planErr },
+    { count: attCount, error: attErr },
+    { count: apptCount, error: apptErr },
+  ] = await Promise.all([
+    supabase.from(PLAN_TABLE).select('id', { count: 'exact', head: true }).eq('service_id', serviceId),
+    supabase.from(ATTENDANCE_TABLE).select('id', { count: 'exact', head: true }).eq('service_id', serviceId),
+    supabase.from(APPOINTMENTS_TABLE).select('id', { count: 'exact', head: true }).eq('service_id', serviceId),
+  ]);
+  throwOnError(planErr || attErr || apptErr, 'Could not check dependent records');
+  return { registrations: planCount || 0, attendance: attCount || 0, appointments: apptCount || 0 };
+};
+
+/**
+ * Delete a health service SAFELY.
+ *
+ * public.visit_plans and public.health_service_attendance reference
+ * health_services ON DELETE CASCADE, and public.appointments references it ON
+ * DELETE RESTRICT, so an unconditional delete would either cascade-destroy
+ * resident registrations/attendance history or be refused outright by the
+ * appointments FK. Per the data-retention rules this is refused up-front: when
+ * ANY dependent record exists the service is NOT deleted and a 409 is returned
+ * telling the caller to deactivate (archive) it instead. Deactivation is a
+ * reversible `active = false` update, which hides the service from the active
+ * catalog while preserving all records.
+ *
+ * Only when a service has no registrations, no attendance and no appointments
+ * is a hard delete performed (it then cascades only personnel assignment links,
+ * which carry no clinical/resident data). Scope + management authority are
+ * enforced first.
+ */
+export const remove = async ({ user, serviceId, supabase = getServiceClient() }) => {
+  assertManager(user);
+  const service = await manageableService(user, serviceId, supabase); // BUG-004: scope + management check
+
+  const dependents = await countServiceDependents(serviceId, supabase);
+  if (dependents.registrations > 0 || dependents.attendance > 0 || dependents.appointments > 0) {
+    throw ApiError.conflict(
+      'This service has resident registrations, appointments, or attendance records and cannot be deleted. Deactivate (archive) it instead to preserve those records.',
+      { reason: 'has_dependents', dependents },
+    );
+  }
+
+  const { error } = await supabase.from(TABLE).delete().eq('id', serviceId);
+  throwOnError(error, 'Could not delete the health service');
+  return { id: serviceId, name: service.name, deleted: true };
+};
+
 export const assign = async ({ user, serviceId, personnelId, supabase = getServiceClient() }) => {
   assertManager(user);
   const pid = text(personnelId);
@@ -878,6 +1065,8 @@ export default {
   list,
   getById,
   create,
+  update,
+  remove,
   assign,
   unassign,
   assignablePersonnel,

@@ -29,5 +29,6 @@ router.get('/transfer-requests/queue', ...staff, asyncHandler(controller.listQue
 router.get('/transfer-requests/:id/review', ...staff, asyncHandler(controller.getForReview));
 router.post('/transfer-requests/:id/approve', ...staff, asyncHandler(controller.approve));
 router.post('/transfer-requests/:id/reject', ...staff, asyncHandler(controller.reject));
+router.post('/transfer-requests/:id/request-resubmission', ...staff, asyncHandler(controller.requestResubmission));
 
 export default router;

@@ -188,7 +188,11 @@ const toResidentOption = (r) => ({
   barangay: r.barangay || "",
   program: r.program || "General",
   bloodType: r.bloodType || "—",
-  contact: r.contact || "—",
+  // The /residents list maps the DB `cellphone_no` column to `cellphoneNo`
+  // (there is no `contact` field on a resident-list row), so read that; keep
+  // `contact` as a fallback for any already-normalized source. Only show the
+  // placeholder when a contact number is genuinely absent.
+  contact: r.contact || r.cellphoneNo || "—",
 });
 
 /** Keep the record list readable: strip time for the table. */
@@ -270,7 +274,11 @@ export default function TreatmentConsultation() {
   const load = useCallback(() => {
     setLoading(true);
     setLoadError(null);
-    return Promise.all([residentsApi.list({ limit: 200 }), consultationsApi.list()])
+    // Verified residents only: the selector must offer residents who are
+    // individually approved OR verified via their household (the backend's
+    // verified directory). Pending/rejected/unverified residents are excluded
+    // server-side; the submission endpoint re-checks eligibility as well.
+    return Promise.all([residentsApi.list({ limit: 200, verified: true }), consultationsApi.list()])
       .then(([residentResult, consultationResult]) => {
         setAllResidents(residentResult?.rows || residentResult || []);
         setConsultations(consultationResult?.rows || []);

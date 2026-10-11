@@ -52,11 +52,19 @@ const sanitizeNote = (value) => {
   return cleaned.slice(0, 140);
 };
 
-// --- date helpers (UTC calendar dates, matching the appointment service) ----
+// --- date helpers -----------------------------------------------------------
+// Civil dates here are Philippine local dates. `registration_deadline` and the
+// service's start/end dates are stored as naive local (Asia/Manila) values, so
+// "today" / "now" must be derived on the SAME local calendar — otherwise a UTC
+// server compares a UTC "now" against a local deadline and the window drifts by
+// up to the offset. The Philippines is UTC+8 all year (no DST), so a fixed
+// shift yields the correct local wall-clock.
+const PH_OFFSET_MS = 8 * 60 * 60 * 1000;
 const pad = (n) => String(n).padStart(2, '0');
 const toISO = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-const todayISO = (now = new Date()) =>
-  `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
+/** An instant viewed as Philippine wall-clock (read via the UTC getters). */
+const phWallClock = (now = new Date()) => new Date(now.getTime() + PH_OFFSET_MS);
+const todayISO = (now = new Date()) => toISO(phWallClock(now));
 const parseISO = (value) => {
   const raw = text(value);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
@@ -76,23 +84,35 @@ const addDaysISO = (iso, days) => {
   return toISO(date);
 };
 
-// A comparable "YYYY-MM-DDTHH:MM" wall-clock key for now, using the same UTC
-// calendar convention the rest of this module applies to dates.
-const nowKeyOf = (now = new Date()) =>
-  `${todayISO(now)}T${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
+// A comparable "YYYY-MM-DDTHH:MM" Philippine wall-clock key for now, matching
+// the local calendar the stored deadline uses.
+const nowKeyOf = (now = new Date()) => {
+  const d = phWallClock(now);
+  return `${todayISO(now)}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+};
 
 /**
  * Normalize a stored naive-local registration deadline (timestamp without time
  * zone, e.g. "2026-01-10T09:00:00" or "2026-01-10 09:00:00") into a comparable
- * "YYYY-MM-DDTHH:MM" key, or '' when absent/unparseable. A date-only deadline is
- * treated as the end of that day (inclusive).
+ * "YYYY-MM-DDTHH:MM" key, or '' when absent/unparseable.
+ *
+ * A date-only deadline — or one whose time is exactly midnight (00:00), which is
+ * what the staff date picker stores when no explicit time is chosen — is treated
+ * as the END of that day (inclusive, 23:59). Registration therefore stays open
+ * through the whole deadline day, matching the "Register by <date>" the resident
+ * is shown. Without this, a deadline of "Oct 15" (stored as 2026-10-15T00:00)
+ * would close registration at the very START of Oct 15, blocking eligible
+ * residents while the window is still, by every human measure, open.
  */
 const deadlineKeyOf = (value) => {
   const raw = text(value).replace(' ', 'T');
   if (!raw) return '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw}T23:59`;
   const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(raw);
-  return match ? `${match[1]}T${match[2]}` : '';
+  if (!match) return '';
+  const [, datePart, timePart] = match;
+  if (timePart === '00:00') return `${datePart}T23:59`;
+  return `${datePart}T${timePart}`;
 };
 
 /**
@@ -273,6 +293,7 @@ const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityN
     id: service.id,
     name: service.name,
     description: service.description || '',
+    category: service.category || '',
     facilityType: facilityTypeOf(service, resident),
     facilityName,
     visitPolicy: service.visit_policy === 'by_notice' ? 'by_notice' : 'walk_in',
@@ -318,7 +339,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
 
   const { data: services, error } = await supabase
     .from(SERVICE_TABLE)
-    .select('id, name, description, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline')
+    .select('id, name, description, category, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline')
     .eq('municipality_id', resident.municipality_id)
     .eq('active', true)
     .order('name');
@@ -374,11 +395,20 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
     const existing = planByService.get(p.service_id);
     if (!existing || p.planned_date < existing.planned_date) planByService.set(p.service_id, p);
   }
-  // Most recent attendance status per service (attendance is best-effort: a
-  // query error must not blank the directory, so it is read without throwing).
-  const attendanceByService = new Map();
+  // Attendance status keyed by service AND the exact scheduled date, so a plan's
+  // resident-facing status is only ever derived from the attendance record for
+  // THAT plan's day. Keying by service alone would let an unrelated past record
+  // (e.g. a service the resident attended last month) override a brand-new
+  // future registration, wrongly showing "Attended"/"Missed"/"Cancelled" and
+  // hiding the "Cancel registration" action for a plan that is, in fact, still
+  // just Registered. Attendance is best-effort (read without throwing), so a
+  // query error must not blank the directory.
+  const attendanceByServiceDate = new Map();
   for (const a of attendanceRes?.data || []) {
-    if (!attendanceByService.has(a.service_id)) attendanceByService.set(a.service_id, a.attendance_status);
+    const key = `${a.service_id}|${a.scheduled_date}`;
+    // Query is ordered by scheduled_date desc; keep the first (latest) seen for
+    // a given service+date so a single day resolves deterministically.
+    if (!attendanceByServiceDate.has(key)) attendanceByServiceDate.set(key, a.attendance_status);
   }
 
   const bhcName = resident.barangay || 'Barangay Health Center';
@@ -388,14 +418,20 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
   const rhuServices = [];
   for (const service of inScope) {
     const type = facilityTypeOf(service, resident);
+    const plan = planByService.get(service.id) || null;
+    // Only an attendance record for this plan's own day affects its status; a
+    // future plan with no attendance for that day stays "Registered".
+    const attendanceStatus = plan
+      ? attendanceByServiceDate.get(`${service.id}|${plan.planned_date}`) || null
+      : null;
     const view = toServiceView(
       service,
       resident,
       schedulesByService.get(service.id) || [],
       blackoutByService.get(service.id) || new Set(),
       type === 'BHC' ? bhcName : rhuDisplay,
-      planByService.get(service.id) || null,
-      attendanceByService.get(service.id) || null,
+      plan,
+      attendanceStatus,
       now,
     );
     (type === 'BHC' ? bhc : rhuServices).push(view);

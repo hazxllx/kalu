@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import { shouldShowPregnancyStatus } from "./pregnancyVisibility.js";
 
 /**
  * "My Health Record" PDF export (A4, portrait) — black & white / grayscale.
@@ -389,7 +390,11 @@ export async function downloadHealthRecordPdf(data = {}, meta = {}) {
   fieldRow("Chronic Conditions", medicalHistory.chronicConditions);
   fieldRow("Allergies", medicalHistory.allergies);
   fieldRow("Current Medications", medicalHistory.currentMedications);
-  fieldRow("Pregnancy Status", medicalHistory.pregnancyStatus);
+  // Pregnancy Status mirrors the resident view: suppressed only for residents
+  // explicitly recorded as male; shown for female/other/unknown sex.
+  if (shouldShowPregnancyStatus(resident.sex)) {
+    fieldRow("Pregnancy Status", medicalHistory.pregnancyStatus);
+  }
   y += 4;
 
   // ------------------------------------------------------------- vaccinations

@@ -160,11 +160,42 @@ const requireApprovable = async (user, id) => {
   return row;
 };
 
-const emailTaken = async (email) => {
+/**
+ * Is this email already in use anywhere that would make a new personnel
+ * account a duplicate? Two sources are checked, both case-insensitively against
+ * the already-normalized (trimmed + lower-cased) email:
+ *
+ *   1. staff_account_requests — any non-rejected row (pending, approved or
+ *      resubmission_required) still owns the email. Only a rejected request
+ *      frees it, matching the partial unique index on the table.
+ *   2. profiles — the application mirror of every Supabase Auth identity
+ *      (residents, staff, admins). A hit here means a real account already
+ *      exists for that email, so a second one must not be created.
+ *
+ * Returns a boolean only; no other user's details are ever exposed to the
+ * caller. Supabase Auth's own unique-email constraint remains the final
+ * backstop at `createUser` time, closing any check-then-create race.
+ */
+const emailInUse = async (email) => {
   const supabase = getServiceClient();
-  const { data, error } = await supabase.from(TABLE).select('id, status').ilike('email', email).limit(1);
-  if (error) throw dbError(error, 'email availability check');
-  return Array.isArray(data) && data.some((r) => r.status !== REQUEST_STATUS.REJECTED);
+
+  const { data: requests, error: reqError } = await supabase
+    .from(TABLE)
+    .select('id, status')
+    .ilike('email', email)
+    .limit(50);
+  if (reqError) throw dbError(reqError, 'email availability check');
+  if (Array.isArray(requests) && requests.some((r) => r.status !== REQUEST_STATUS.REJECTED)) {
+    return true;
+  }
+
+  const { data: profiles, error: profileError } = await supabase
+    .from('profiles')
+    .select('id')
+    .ilike('email', email)
+    .limit(1);
+  if (profileError) throw dbError(profileError, 'email availability check');
+  return Array.isArray(profiles) && profiles.length > 0;
 };
 
 /**
@@ -180,8 +211,8 @@ export const submitRequest = async (input = {}, documents = []) => {
   assertRoleIsRequestable(input.role);
 
   const email = String(input.email || '').trim().toLowerCase();
-  if (await emailTaken(email)) {
-    throw ApiError.conflict('An account request for this email already exists. Contact your approving officer if it needs to be reviewed again.');
+  if (await emailInUse(email)) {
+    throw ApiError.conflict('An account with this email already exists. Please sign in instead, or register with a different email. If you believe this is an error, contact your approving officer.');
   }
 
   const assignment = await resolveAssignment(input);
@@ -271,6 +302,11 @@ export const submitRequest = async (input = {}, documents = []) => {
         original_filename: doc.originalFilename || '',
         mime_type: doc.mimeType || '',
         file_size: Number(doc.fileSize) || 0,
+        // No automated identity verification runs for personnel documents, so
+        // every uploaded document is persisted as awaiting manual review. It is
+        // NEVER stored as verified on upload; only an authorized approver can
+        // activate the account (see `approve`).
+        review_status: 'pending_manual_review',
       });
       if (docError) throw dbError(docError, 'document record insert');
     }
@@ -424,7 +460,7 @@ const loadRequestDocuments = async (requestId) => {
   const supabase = getServiceClient();
   const { data, error } = await supabase
     .from(DOCUMENTS_TABLE)
-    .select('id, document_type, storage_path, original_filename, mime_type, file_size, uploaded_at')
+    .select('id, document_type, storage_path, original_filename, mime_type, file_size, review_status, uploaded_at')
     .eq('request_id', requestId)
     .order('uploaded_at', { ascending: true });
   if (error) throw dbError(error, 'document lookup');
@@ -438,6 +474,7 @@ const loadRequestDocuments = async (requestId) => {
         originalFilename: d.original_filename || '',
         mimeType: d.mime_type || '',
         fileSize: d.file_size || 0,
+        reviewStatus: d.review_status || 'pending_manual_review',
         uploadedAt: d.uploaded_at,
         url,
       };

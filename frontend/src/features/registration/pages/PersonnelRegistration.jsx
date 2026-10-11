@@ -27,6 +27,7 @@ import DatePicker from "@/components/common/DatePicker";
 import { staffAccountsApi } from "@/services/api";
 import { useBarangays } from "@/context/BarangaysContext";
 import { CONSULTATION_LOCATIONS, barangayHealthCenter } from "@/lib/consultationLocations";
+import { digitsOnly, isStrictMobile } from "@/utils/validation";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -76,9 +77,9 @@ const BARANGAY_SCOPED_ROLES = ["health_supervisor", "bhw"];
 
 /**
  * RHU station assignment options. An RHU Personnel account works exactly one
- * station; a Health Supervisor may optionally also staff RHU Consultation. The
- * station determines which RHU features/workflows the account can access, and
- * the backend enforces it on every API call.
+ * station (Triage or Consultation). The station determines which RHU
+ * features/workflows the account can access, and the backend enforces it on
+ * every API call. No other role selects a station at registration.
  */
 const STATION_OPTIONS = [
   { id: "triage", label: "Triage Station" },
@@ -134,8 +135,13 @@ function calcAge(dob) {
   return age > 0 && age < 120 ? String(age) : "";
 }
 
-/** Philippine mobile number: 09XXXXXXXXX or +639XXXXXXXXX (spaces/dashes allowed). */
-const isValidPHMobile = (value) => /^(?:\+?63|0)9\d{9}$/.test(String(value || "").replace(/[\s\-()]/g, ""));
+/**
+ * Contact number rule for personnel registration: EXACTLY 11 numeric digits
+ * starting 09 (e.g. 09171234567). This mirrors the backend `isStrictMobile`
+ * rule and the database CHECK constraint so the three layers agree. Letters,
+ * separators and a +63 prefix are rejected rather than silently stripped.
+ */
+const CONTACT_MAX_DIGITS = 11;
 
 function checkStrength(pw) {
   const checks = [
@@ -188,8 +194,8 @@ export default function PersonnelRegistration() {
     municipality: "Pili",
     barangay: "",
     facility: "RHU",
-    // RHU station assignment. Required (single) for RHU Personnel; optional
-    // ('consultation') for a Health Supervisor; unused by other roles.
+    // RHU station assignment. Required (single) for RHU Personnel; unused by
+    // other roles.
     rhuStation: "",
     documents: {},
     // Step 4 — confirmation
@@ -200,6 +206,17 @@ export default function PersonnelRegistration() {
     const value = e && e.target ? e.target.value : e;
     setForm((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) setErrors((prev) => ({ ...prev, [key]: "" }));
+  };
+
+  // Contact number accepts digits only and never exceeds 11 digits. Non-numeric
+  // characters are rejected on entry (not silently kept) and the length cap
+  // matches the backend/database rule, so the value shown is exactly the value
+  // submitted — nothing is truncated after the fact on the server.
+  const setContact = (e) => {
+    const raw = e && e.target ? e.target.value : e;
+    const digits = digitsOnly(raw).slice(0, CONTACT_MAX_DIGITS);
+    setForm((prev) => ({ ...prev, contact: digits }));
+    if (errors.contact) setErrors((prev) => ({ ...prev, contact: "" }));
   };
 
   const setDoc = (key) => (file) => {
@@ -237,7 +254,7 @@ export default function PersonnelRegistration() {
       if (!form.email.trim()) errs.email = "Official email is required.";
       else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errs.email = "Enter a valid email address.";
       if (!form.contact.trim()) errs.contact = "Contact number is required.";
-      else if (!isValidPHMobile(form.contact)) errs.contact = "Enter a valid Philippine mobile number (e.g. 0917 123 4567).";
+      else if (!isStrictMobile(form.contact)) errs.contact = "Enter an 11-digit mobile number starting with 09 (e.g. 09171234567).";
       if (!form.password) errs.password = "Password is required.";
       else if (pwStrength.score < 5) errs.password = "Password must meet all the requirements below.";
       if (!form.confirmPassword) errs.confirmPassword = "Please confirm your password.";
@@ -311,12 +328,10 @@ export default function PersonnelRegistration() {
     // Names, not uuids — the API resolves them against the reference tables.
     fd.append("barangay", isBarangayScoped ? form.barangay : "");
     fd.append("facility", isBarangayScoped ? "" : form.facility);
-    // RHU station assignment (JSON array). RHU Personnel carry exactly one;
-    // a Health Supervisor may carry 'consultation'; other roles carry none.
+    // RHU station assignment (JSON array). Only RHU Personnel carry a station
+    // (exactly one); every other role carries none.
     const stations =
-      (form.roleId === "rhu_personnel" || form.roleId === "health_supervisor") && form.rhuStation
-        ? [form.rhuStation]
-        : [];
+      form.roleId === "rhu_personnel" && form.rhuStation ? [form.rhuStation] : [];
     fd.append("rhuStations", JSON.stringify(stations));
     fd.append("documentTypes", JSON.stringify(uploaded.map((r) => r.label)));
     uploaded.forEach((r) => fd.append("documents", form.documents[r.key], form.documents[r.key].name));
@@ -520,8 +535,17 @@ export default function PersonnelRegistration() {
                 <Field label="Official Email Address" required error={errors.email} hint="Used to sign in once your account is verified.">
                   <input type="email" placeholder="name@example.gov.ph" value={form.email} onChange={set("email")} className={inputCls(errors.email)} />
                 </Field>
-                <Field label="Contact Number" required error={errors.contact}>
-                  <input type="tel" placeholder="0917 123 4567" value={form.contact} onChange={set("contact")} className={inputCls(errors.contact)} />
+                <Field label="Contact Number" required error={errors.contact} hint="11-digit mobile number starting with 09.">
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={CONTACT_MAX_DIGITS}
+                    autoComplete="tel-national"
+                    placeholder="09171234567"
+                    value={form.contact}
+                    onChange={setContact}
+                    className={inputCls(errors.contact)}
+                  />
                 </Field>
 
                 <Field
@@ -691,19 +715,6 @@ export default function PersonnelRegistration() {
                   </SelectField>
                 )}
 
-                {form.roleId === "health_supervisor" && (
-                  <SelectField
-                    label="RHU Consultation (optional)"
-                    error={errors.rhuStation}
-                    value={form.rhuStation}
-                    onChange={set("rhuStation")}
-                    hint="Optional: additionally staff the RHU Consultation station. Your existing barangay consultation and other Health Supervisor features are unaffected."
-                  >
-                    <option value="">Not assigned to RHU Consultation</option>
-                    <option value="consultation">Also staff RHU Consultation</option>
-                  </SelectField>
-                )}
-
                 <div className="border-t border-slate-100 pt-5">
                   <SectionKicker>Supporting Documents</SectionKicker>
                   <div className="mt-4 space-y-4">
@@ -720,6 +731,7 @@ export default function PersonnelRegistration() {
                             file={form.documents[req.key] || null}
                             onFile={setDoc(req.key)}
                             onRemove={() => setForm((prev) => ({ ...prev, documents: { ...prev.documents, [req.key]: null } }))}
+                            manualReview
                           />
                           {req.description && <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">{req.description}</p>}
                           {errors[`doc_${req.key}`] && <p className="mt-1.5 text-[11.5px] font-medium text-brand-danger">{errors[`doc_${req.key}`]}</p>}

@@ -16,6 +16,11 @@ export const residentsApi = {
   create: (payload) => api.post('/residents', payload),
   update: (id, payload) => api.put(`/residents/${id}`, payload),
   remove: (id) => api.delete(`/residents/${id}`),
+  // Invite + link a login account for an EXISTING resident record. The backend
+  // creates the Supabase Auth user, links residents.auth_user_id, and leaves the
+  // account Pending Activation. It never duplicates the resident or changes the
+  // verification status.
+  createAccount: (id, payload) => api.post(`/residents/${id}/account`, payload),
   // Resident self-service: update own profile (contact number). The resident is
   // derived from the authenticated session server-side; no id is sent.
   updateMine: (payload) => api.patch('/residents/me', payload),

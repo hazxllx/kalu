@@ -33,6 +33,7 @@ export default function UploadComponent({
   hint = "",
   screening = null,
   onRetry,
+  manualReview = false,
 }) {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
@@ -197,8 +198,24 @@ export default function UploadComponent({
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                {/* Automated document check result — the resident must never
-                    have to guess whether the file was accepted. */}
+                {/* Document status. In manual-review mode (e.g. personnel
+                    registration, where no automated verification runs) the file
+                    is only ever "Uploaded — Manual Review Required": it is NEVER
+                    presented as verified just because it was uploaded. Otherwise
+                    the automated screening result is shown. */}
+                {manualReview ? (
+                  <div className="flex items-start gap-2 border-t bg-brand-light/50 border-brand-blue/20 px-3 py-2.5 text-[11.5px] leading-relaxed">
+                    <FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" strokeWidth={2} />
+                    <div className="min-w-0">
+                      <span className="font-semibold text-brand-blue">
+                        Uploaded — Manual Review Required
+                      </span>
+                      <p className="mt-0.5 text-brand-ink">
+                        Your document was received and will be checked by authorized personnel. Uploading does not verify your account.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
                 <div className={`flex items-start gap-2 border-t px-3 py-2.5 text-[11.5px] leading-relaxed ${meta.bg}`}>
                   <StatusIcon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${meta.tone} ${meta.spin ? "animate-spin" : ""}`} strokeWidth={2} />
                   <div className="min-w-0">
@@ -237,6 +254,7 @@ export default function UploadComponent({
                     )}
                   </div>
                 </div>
+                )}
               </>
             )}
           </motion.div>

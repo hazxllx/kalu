@@ -28,6 +28,7 @@ const STATUS_LABELS = {
   draft: "Draft",
   pending: "Pending Review",
   under_review: "Under Review",
+  resubmission_required: "Resubmission Required",
   approved: "Approved",
   rejected: "Rejected",
   cancelled: "Cancelled",
@@ -36,6 +37,7 @@ const STATUS_LABELS = {
 const STATUS_TONE = {
   pending: "text-brand-amber",
   under_review: "text-brand-amber",
+  resubmission_required: "text-sky-700",
   approved: "text-emerald-700",
   rejected: "text-brand-danger",
   cancelled: "text-slate-400",
@@ -78,6 +80,7 @@ export default function TransferRegistration() {
 
   const message = (err) => err?.message || "We could not complete this step. Please try again.";
   const activeRequest = context?.activeRequest || null;
+  const needsResubmission = activeRequest?.status === "resubmission_required";
   const resident = context?.resident || null;
   const destinations = context?.destinations || [];
   const history = context?.history || [];
@@ -180,6 +183,19 @@ export default function TransferRegistration() {
     finally { setBusy(false); }
   };
 
+  // Resume a request the reviewer returned for corrections: reuse the SAME
+  // request id (history + prior documents are preserved) and jump to the
+  // documents step so the resident can re-upload the supporting document and
+  // resubmit. Resubmission returns the request to pending review.
+  const resumeResubmission = () => {
+    if (!activeRequest?.id) return;
+    setError("");
+    setRequestId(activeRequest.id);
+    setDocuments({});
+    setHealthRecords([]);
+    setStep(2);
+  };
+
   const hasSupporting = Boolean(documents[SUPPORTING_TYPE]);
   const currentStage = step >= 4 ? 3 : step;
 
@@ -263,8 +279,10 @@ export default function TransferRegistration() {
             {step === 1 && authed && activeRequest && (
               <>
                 <PageHeading
-                  title="Transfer request in progress"
-                  subtitle="You already have a pending transfer request. Please wait for the current request to be reviewed before submitting another transfer."
+                  title={needsResubmission ? "Corrections needed for your transfer" : "Transfer request in progress"}
+                  subtitle={needsResubmission
+                    ? "The health office has returned your transfer request for corrections. Review the instructions, then resubmit your request."
+                    : "You already have a pending transfer request. Please wait for the current request to be reviewed before submitting another transfer."}
                 />
                 <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                   <p className="px-4 py-3 text-sm text-brand-ink"><strong>Current Barangay:</strong> {activeRequest.fromBarangay || resident?.barangay || "—"}</p>
@@ -272,9 +290,16 @@ export default function TransferRegistration() {
                   <p className="px-4 py-3 text-sm text-brand-ink"><strong>Status:</strong> {STATUS_LABELS[activeRequest.status] || activeRequest.status}</p>
                   <p className="px-4 py-3 text-sm text-brand-ink"><strong>Submitted:</strong> {formatDate(activeRequest.submittedAt) || "—"}</p>
                 </div>
-                <InfoNote icon={Clock}>
-                  The new transfer submission is disabled while this request is pending. Once it is approved or rejected, you can start another transfer.
-                </InfoNote>
+                {needsResubmission ? (
+                  <InfoNote tone="gold" icon={AlertCircle}>
+                    <strong className="block text-brand-dark">What to correct</strong>
+                    <span className="mt-1 block">{activeRequest.resubmissionInstructions || "Please review your submission and provide the requested corrections."}</span>
+                  </InfoNote>
+                ) : (
+                  <InfoNote icon={Clock}>
+                    The new transfer submission is disabled while this request is pending. Once it is approved or rejected, you can start another transfer.
+                  </InfoNote>
+                )}
                 <HistoryList />
               </>
             )}
@@ -476,9 +501,15 @@ export default function TransferRegistration() {
                 <button type="button" onClick={cancelPending} disabled={busy} className={btnSecondary}>
                   {busy && <Loader2 className="h-4 w-4 animate-spin" />}Cancel Request
                 </button>
-                <button type="button" onClick={() => navigate("/app/resident")} className={btnPrimary}>
-                  Go to Dashboard <ArrowRight className="h-4 w-4" />
-                </button>
+                {needsResubmission ? (
+                  <button type="button" onClick={resumeResubmission} disabled={busy} className={btnPrimary}>
+                    Provide corrections <ArrowRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => navigate("/app/resident")} className={btnPrimary}>
+                    Go to Dashboard <ArrowRight className="h-4 w-4" />
+                  </button>
+                )}
               </div>
             )}
             {step === 1 && authed && !activeRequest && (

@@ -305,6 +305,7 @@ export function InfoNote({ tone = "info", icon: Icon = null, children, className
     info: "border-brand-blue/15 bg-brand-light/40 text-slate-500",
     gold: "border-brand-gold/30 bg-brand-goldpale/70 text-brand-amber",
     danger: "border-brand-danger/25 bg-rose-50/60 text-brand-danger",
+    success: "border-brand-green/25 bg-emerald-50/70 text-brand-green",
   };
   return (
     <div

@@ -35,11 +35,6 @@ export const NAV = {
       path: "/app/resident-limited/dashboard",
     },
     {
-      label: "Verification Status",
-      icon: "ShieldCheck",
-      path: "/app/resident-limited/verification",
-    },
-    {
       label: "Health Services",
       icon: "Stethoscope",
       path: "/app/resident-limited/services",
@@ -55,6 +50,9 @@ export const NAV = {
       path: "/app/resident-limited/announcements",
     },
     {
+      // The resident's current verification status now lives in the Profile
+      // section (see SettingsPage); there is no separate "Verification Status"
+      // sidebar entry.
       label: "Profile",
       icon: "User",
       path: "/app/resident-limited/profile",
@@ -65,14 +63,10 @@ export const NAV = {
       path: "/app/resident-limited/settings",
     },
     {
+      // Consultation history is consolidated into "My Health Records" (a tab
+      // inside that page). Unlocks once the resident is verified.
       label: "My Health Records",
       icon: "FileHeart",
-      path: "#",
-      locked: true,
-    },
-    {
-      label: "Consultation History",
-      icon: "ClipboardList",
       path: "#",
       locked: true,
     },
@@ -85,16 +79,12 @@ export const NAV = {
       path: "/app/resident/dashboard",
     },
     {
+      // My Health Records now also contains Consultation History as a tab, so
+      // there is no separate "Consultation History" sidebar entry.
       label: "My Health Records",
       icon: "FileHeart",
       path: "/app/resident/record",
       permission: "residents.profile.view",
-    },
-    {
-      label: "Consultation History",
-      icon: "ClipboardList",
-      path: "/app/resident/consultations",
-      permission: "consultation.history.view",
     },
     {
       label: "Follow-ups",
@@ -111,6 +101,13 @@ export const NAV = {
       label: "Notifications",
       icon: "Bell",
       path: "/app/resident/notifications",
+    },
+    {
+      // The resident's current verification status is shown in the Profile
+      // section (see SettingsPage).
+      label: "Profile",
+      icon: "User",
+      path: "/app/resident/profile",
     },
     {
       label: "Settings",
@@ -350,13 +347,19 @@ export const NAV = {
           path: "/app/health_supervisor/followups",
           permission: "followups.view",
         },
-        {
-          label: "Health Services",
-          icon: "Activity",
-          path: "/app/health_supervisor/services",
-          permission: "services.view",
-        },
       ],
+    },
+    {
+      // Standalone entry (renamed from the former in-group "Health Services"
+      // duplicate) linking to the barangay-scoped health services/programs page
+      // (route: /app/health_supervisor/services -> MidwifeHealthServices). The
+      // sidebar LABEL is "Health Programs"; the PAGE heading remains
+      // "Health Services" by design.
+      label: "Health Programs",
+      icon: "HeartPulse",
+      path: "/app/health_supervisor/services",
+      permission: "services.view",
+      group: "Health Operations",
     },
     {
       label: "Monitoring & Reports",

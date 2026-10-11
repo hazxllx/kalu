@@ -372,6 +372,23 @@ export const fileRepository = {
     });
   },
 
+  // Dev-driver parity for the existing-resident activation RPC
+  // (activate_resident_by_id). Links an UNLINKED record by Resident ID when the
+  // date of birth matches; returns null otherwise.
+  activateResidentById: async ({ authUserId, residentId, birthDate }) => {
+    return store.mutate((data) => {
+      const found = data.residents.find(
+        (r) => r.id === String(residentId || '').trim()
+          && !r.authUserId
+          && String(r.birthDate || '') === String(birthDate || ''),
+      );
+      if (!found) return null;
+      found.authUserId = authUserId;
+      found.updatedAt = new Date().toISOString();
+      return clone(found);
+    });
+  },
+
   createTransferRequest: async ({
     authUserId, residentId = null, fromBarangayId = null, toBarangayId = null,
     reason = '', status = 'draft', otpHash = null, otpExpiresAt = null,
@@ -383,6 +400,7 @@ export const fileRepository = {
       fromBarangayId, from_barangay_id: fromBarangayId,
       toBarangayId, to_barangay_id: toBarangayId,
       reason, status,
+      resubmissionInstructions: '', resubmission_instructions: '',
       otpHash, otp_hash: otpHash, otpExpiresAt, otp_expires_at: otpExpiresAt,
       otpAttempts: 0, otp_attempts: 0, otpVerifiedAt: null, otp_verified_at: null,
       createdAt: now, created_at: now, updatedAt: now, updated_at: now,
@@ -430,6 +448,9 @@ export const fileRepository = {
     // raw id (e.g. "dev-San Antonio") instead of "San Antonio" after approval.
     const destinationName = DEV_BARANGAYS.find((name) => `dev-${name}` === request.toBarangayId)
       || request.toBarangayId;
+    // Record the resident's actual previous barangay for durable transfer history.
+    request.fromBarangayId = resident.barangayId || request.fromBarangayId || null;
+    request.from_barangay_id = request.fromBarangayId;
     resident.barangayId = request.toBarangayId;
     resident.barangay = destinationName;
     request.status = 'approved';
@@ -444,6 +465,9 @@ export const fileRepository = {
   }),
   listDocumentsByTransferRequest: async () => [],
   deleteDocument: async () => true,
+  // Dev driver has no staff profiles; the receiving-supervisor notification is a
+  // no-op here (notifications require a configured Supabase backend anyway).
+  listActiveHealthSupervisorsByBarangay: async () => [],
 
   // ----- risk configuration (dev driver) -----------------------------------
   // Mirrors the Supabase risk_criteria / risk_settings tables. The config

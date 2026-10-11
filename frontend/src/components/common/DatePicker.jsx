@@ -6,6 +6,37 @@ import { Calendar as CalendarIcon } from "lucide-react";
 import "react-day-picker/dist/style.css";
 
 /**
+ * Normalize free-typed date text to a canonical ISO date ("yyyy-MM-dd").
+ *
+ * Accepts "yyyy-MM-dd" and "MM/dd/yyyy" (and single-digit month/day), and
+ * rejects impossible calendar dates (e.g. 2020-02-31). Returns "" when the
+ * text is not yet a complete, valid date so a half-typed value never commits.
+ */
+export function normalizeTypedDate(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  let y;
+  let m;
+  let d;
+  let match = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (match) {
+    [, y, m, d] = match;
+  } else {
+    match = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) return "";
+    [, m, d, y] = match;
+  }
+  y = Number(y);
+  m = Number(m);
+  d = Number(d);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    return "";
+  }
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/**
  * KALUSAGAP date picker.
  *
  * Replaces the browser's native date input, whose popup cannot be positioned
@@ -30,6 +61,9 @@ import "react-day-picker/dist/style.css";
  * @param {boolean} [props.disabled] disables field interaction
  * @param {string} [props.id] input/button id
  * @param {string} [props.className] extra classes for wrapper
+ * @param {boolean} [props.typeable] also allow typing the date directly (the
+ *   calendar is still available via the trailing button). The field accepts
+ *   "yyyy-MM-dd" or "MM/dd/yyyy"; a complete valid date commits automatically.
  */
 export default function DatePicker({
   value,
@@ -41,12 +75,22 @@ export default function DatePicker({
   error = false,
   id,
   className = "",
+  typeable = false,
 }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState("bottom");
   const [coords, setCoords] = useState(null);
   const triggerRef = useRef(null);
   const popRef = useRef(null);
+  // Local text buffer for the typeable field so a half-typed value stays on
+  // screen while only COMPLETE, valid dates are committed to `value`.
+  const [typed, setTyped] = useState(value || "");
+
+  // Keep the text field in sync when `value` is set externally (calendar pick,
+  // reset, or a parent update) without clobbering what the user is typing.
+  useEffect(() => {
+    setTyped((prev) => (normalizeTypedDate(prev) === (value || "") ? prev : value || ""));
+  }, [value]);
 
   const selected = toDate(value);
   const minDate = toDate(min);
@@ -120,30 +164,78 @@ export default function DatePicker({
     setOpen(false);
   };
 
+  // Typed input: keep the raw text locally; commit only a complete, valid date.
+  // An empty field clears the value; a partial/invalid entry commits "" so the
+  // parent's required/validity check can flag it (the typed text is preserved).
+  const onType = (e) => {
+    const raw = e.target.value;
+    setTyped(raw);
+    if (raw.trim() === "") {
+      onChange("");
+      return;
+    }
+    onChange(normalizeTypedDate(raw));
+  };
+
   const todayDisabled =
     (minDate && today < startOfDay(minDate)) || (maxDate && today > startOfDay(maxDate));
 
   return (
     <div className={`relative ${className}`}>
-      <button
-        ref={triggerRef}
-        type="button"
-        id={id}
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        className={`flex w-full items-center gap-2 rounded-xl border px-4 py-2.5 text-left text-sm outline-none transition-all duration-200 ${
-          error
-            ? "border-brand-danger bg-rose-50/50 focus:border-brand-danger focus:ring-4 focus:ring-brand-danger/10"
-            : "border-slate-200 bg-slate-50/60 hover:border-slate-300 focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-blue/10"
-        } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
-      >
-        <span className={`truncate ${selected ? "text-brand-ink" : "text-slate-400"}`}>
-          {selected ? format(selected, "MMM d, yyyy") : placeholder}
-        </span>
-        <CalendarIcon className="ml-auto h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-      </button>
+      {typeable ? (
+        <div
+          ref={triggerRef}
+          className={`flex w-full items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition-all duration-200 ${
+            error
+              ? "border-brand-danger bg-rose-50/50 focus-within:border-brand-danger focus-within:ring-4 focus-within:ring-brand-danger/10"
+              : "border-slate-200 bg-slate-50/60 hover:border-slate-300 focus-within:border-brand-blue focus-within:bg-white focus-within:ring-4 focus-within:ring-brand-blue/10"
+          } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+        >
+          <input
+            id={id}
+            type="text"
+            inputMode="numeric"
+            autoComplete="bday"
+            disabled={disabled}
+            value={typed}
+            onChange={onType}
+            placeholder="YYYY-MM-DD"
+            aria-label={placeholder}
+            className="w-full bg-transparent text-brand-ink outline-none placeholder:text-slate-400"
+          />
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setOpen((o) => !o)}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-label="Open calendar"
+            className="shrink-0 text-slate-400 transition-colors hover:text-brand-blue"
+          >
+            <CalendarIcon className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          id={id}
+          disabled={disabled}
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          className={`flex w-full items-center gap-2 rounded-xl border px-4 py-2.5 text-left text-sm outline-none transition-all duration-200 ${
+            error
+              ? "border-brand-danger bg-rose-50/50 focus:border-brand-danger focus:ring-4 focus:ring-brand-danger/10"
+              : "border-slate-200 bg-slate-50/60 hover:border-slate-300 focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-blue/10"
+          } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+        >
+          <span className={`truncate ${selected ? "text-brand-ink" : "text-slate-400"}`}>
+            {selected ? format(selected, "MMM d, yyyy") : placeholder}
+          </span>
+          <CalendarIcon className="ml-auto h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+        </button>
+      )}
 
       {open &&
         coords &&

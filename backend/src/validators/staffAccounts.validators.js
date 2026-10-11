@@ -1,6 +1,6 @@
 import { REQUESTABLE_ROLES } from '../config/staffApprovals.js';
-import { normalizeStations, RHU_STATIONS } from '../config/rhuStations.js';
-import { isUuid, text, valid, invalid } from './common.js';
+import { normalizeStations } from '../config/rhuStations.js';
+import { isUuid, isStrictMobile, text, valid, invalid } from './common.js';
 
 /**
  * Staff account registration + verification request validation.
@@ -20,7 +20,11 @@ export const registerPersonnelValidator = (input = {}) => {
 
   const fullName = clean(input?.fullName, LIMITS.short);
   const email = text(input?.email).toLowerCase();
-  const phone = clean(input?.phone, 30);
+  // Contact number is kept verbatim (trimmed only) and validated as an exact
+  // 11-digit PH mobile. It is deliberately NOT truncated: an over-long or
+  // non-numeric value is rejected with an error instead of being silently cut
+  // down, so the stored number is always exactly what the applicant entered.
+  const phone = text(input?.phone);
   const position = clean(input?.position, LIMITS.short);
   const licenseNo = clean(input?.licenseNo, LIMITS.short);
   const licenseExpiry = text(input?.licenseExpiry);
@@ -35,14 +39,18 @@ export const registerPersonnelValidator = (input = {}) => {
   const password = typeof input?.password === 'string' ? input.password : '';
 
   // RHU station assignment. Only valid station ids survive normalization.
-  // RHU Personnel MUST pick exactly one station (Triage or Consultation); a
-  // Health Supervisor may OPTIONALLY also staff RHU Consultation; no other role
-  // may hold a station.
+  // RHU Personnel MUST pick exactly one station (Triage or Consultation); no
+  // other role may hold a station.
   const rhuStations = normalizeStations(input?.rhuStations);
 
   if (!fullName) errors.fullName = 'Full name is required.';
   if (!email) errors.email = 'Email address is required.';
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) errors.email = 'Enter a valid email address.';
+
+  if (!phone) errors.phone = 'Contact number is required.';
+  else if (!isStrictMobile(phone)) {
+    errors.phone = 'Enter an 11-digit mobile number starting with 09 (e.g. 09171234567).';
+  }
 
   if (!password) errors.password = 'A password is required.';
   else if (password.length < 8) errors.password = 'Password must be at least 8 characters.';
@@ -61,10 +69,6 @@ export const registerPersonnelValidator = (input = {}) => {
   if (role === 'rhu_personnel') {
     if (rhuStations.length !== 1) {
       errors.rhuStations = 'Select your RHU station: Triage or Consultation.';
-    }
-  } else if (role === 'health_supervisor') {
-    if (rhuStations.some((station) => station !== RHU_STATIONS.CONSULTATION)) {
-      errors.rhuStations = 'A Health Supervisor can only additionally staff the RHU Consultation station.';
     }
   } else if (rhuStations.length) {
     errors.rhuStations = 'This role cannot be assigned an RHU station.';

@@ -274,13 +274,6 @@ const HouseholdRiskDetail = appPage(
     )
 );
 
-const ConsultationsPage = appPage(
-  () =>
-    import(
-      '@/features/consultations/pages/ConsultationsPage'
-    )
-);
-
 const TreatmentConsultation = appPage(
   () =>
     import(
@@ -590,11 +583,11 @@ const AppRoutes = () => (
           element={<SettingsPage roleKey="resident" />}
         />
         <Route path="record" element={<HealthRecord />} />
+        {/* Consultation History is consolidated into "My Health Records" (a tab
+            on that page); keep the old path as a redirect for bookmarks/links. */}
         <Route
           path="consultations"
-          element={
-            <ConsultationsPage showResidentSearch={false} />
-          }
+          element={<Navigate to="../record" replace />}
         />
         <Route
           path="referrals"

@@ -95,6 +95,55 @@ test('listDirectory groups services by facility and embeds the resident plan', a
   assert.equal(rhu.services[0].plan, null);
 });
 
+test('listDirectory: an UNRELATED past attendance record does not mislabel a future plan (stays Registered + cancelable)', async () => {
+  // The resident attended this service on an earlier date, then registered
+  // again for a future day. The future plan must stay "Registered" (so the
+  // "Cancel registration" action shows) — the stale attendance record for the
+  // old date must not leak onto the new plan.
+  const supabase = makeSupabase((ctx) => {
+    if (ctx.table === 'residents') return ok(resident);
+    if (ctx.table === 'health_services') return ok([bhcService]);
+    if (ctx.table === 'appointment_schedules') {
+      return ok([{ service_id: 'svc-bhc', weekday: 1, start_time: '08:00:00', end_time: '11:00:00', barangay_id: 'b1', active: true }]);
+    }
+    if (ctx.table === 'appointment_blackouts') return ok([]);
+    if (ctx.table === 'visit_plans') return ok([{ id: 'p1', service_id: 'svc-bhc', planned_date: '2026-01-12', note: '', status: 'Planned' }]);
+    if (ctx.table === 'health_service_attendance') {
+      return ok([{ service_id: 'svc-bhc', attendance_status: 'attended', scheduled_date: '2025-12-01' }]);
+    }
+    if (ctx.table === 'facilities') return ok([{ name: 'Sta. Maria', type: 'rhu', municipality_id: 'm1' }]);
+    return ok(null);
+  });
+
+  const result = await listDirectory({ user: residentUser, supabase, now: NOW });
+  const svc = result.facilities[0].services[0];
+  assert.equal(svc.plan.plannedDate, '2026-01-12');
+  assert.equal(svc.plan.status, 'Registered');
+  assert.equal(svc.plan.attendanceStatus, null);
+});
+
+test('listDirectory: an attendance record ON the plan date drives the plan status (Attended)', async () => {
+  const supabase = makeSupabase((ctx) => {
+    if (ctx.table === 'residents') return ok(resident);
+    if (ctx.table === 'health_services') return ok([bhcService]);
+    if (ctx.table === 'appointment_schedules') {
+      return ok([{ service_id: 'svc-bhc', weekday: 1, start_time: '08:00:00', end_time: '11:00:00', barangay_id: 'b1', active: true }]);
+    }
+    if (ctx.table === 'appointment_blackouts') return ok([]);
+    if (ctx.table === 'visit_plans') return ok([{ id: 'p1', service_id: 'svc-bhc', planned_date: '2026-01-12', note: '', status: 'Planned' }]);
+    if (ctx.table === 'health_service_attendance') {
+      return ok([{ service_id: 'svc-bhc', attendance_status: 'attended', scheduled_date: '2026-01-12' }]);
+    }
+    if (ctx.table === 'facilities') return ok([{ name: 'Sta. Maria', type: 'rhu', municipality_id: 'm1' }]);
+    return ok(null);
+  });
+
+  const result = await listDirectory({ user: residentUser, supabase, now: NOW });
+  const svc = result.facilities[0].services[0];
+  assert.equal(svc.plan.status, 'Attended');
+  assert.equal(svc.plan.attendanceStatus, 'attended');
+});
+
 test('listDirectory returns no facilities when the resident has no municipality', async () => {
   const supabase = makeSupabase((ctx) => (ctx.table === 'residents' ? ok({ ...resident, municipality_id: null }) : ok(null)));
   const result = await listDirectory({ user: residentUser, supabase, now: NOW });

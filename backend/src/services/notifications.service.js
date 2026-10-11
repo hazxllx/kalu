@@ -60,4 +60,53 @@ export const notifyResident = async ({
   }
 };
 
-export default { notifyResident };
+/**
+ * Idempotent variant of {@link notifyResident}.
+ *
+ * Creates the notification only when no notification with the same
+ * (recipient_id, related_type, related_id) already exists. This makes
+ * event-driven notifications safe against retries, repeated save requests and
+ * page refreshes: a given source record (identified by `relatedType` +
+ * `relatedId`) produces at most one notification per recipient.
+ *
+ * The pre-check avoids the common sequential duplicate; a matching partial
+ * unique index on the `notifications` table is the authoritative guard for the
+ * rare concurrent race (a duplicate insert then fails harmlessly and is
+ * swallowed by {@link notifyResident}). When no dedup key is supplied this
+ * falls back to a plain insert. Best-effort, like {@link notifyResident}.
+ *
+ * @param {object} params same shape as {@link notifyResident}
+ * @returns {Promise<boolean>} true when a new row was written
+ */
+export const notifyResidentOnce = async (params = {}) => {
+  const { recipientAuthUserId, title, relatedType = '', relatedId = null } = params;
+  if (!env.isSupabaseConfigured) return false;
+  if (!recipientAuthUserId || !title) return false;
+
+  const hasDedupKey =
+    relatedType && relatedId !== null && relatedId !== undefined && String(relatedId) !== '';
+  // Nothing to dedupe against — behave exactly like notifyResident.
+  if (!hasDedupKey) return notifyResident(params);
+
+  try {
+    const supabase = getServiceClient();
+    const { data: existing, error } = await supabase
+      .from('notifications')
+      .select('id')
+      .eq('recipient_id', recipientAuthUserId)
+      .eq('related_type', relatedType)
+      .eq('related_id', String(relatedId))
+      .limit(1);
+    // If the pre-check succeeds and a row already exists, this is a duplicate.
+    if (!error && Array.isArray(existing) && existing.length > 0) return false;
+    // Otherwise insert. If the pre-check errored, we still attempt the insert;
+    // the DB unique index remains the final guard against a true duplicate.
+  } catch (err) {
+    console.error(`notifyResidentOnce: dedup check failed: ${err.message}`);
+    // Fall through to the insert; the unique index guards against duplicates.
+  }
+
+  return notifyResident(params);
+};
+
+export default { notifyResident, notifyResidentOnce };

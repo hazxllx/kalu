@@ -15,7 +15,7 @@ import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { residentsApi } from "@/services/api";
 import { useBarangays } from "@/context/BarangaysContext";
-import { dateOfBirth } from "@/utils/validation";
+import { dateOfBirth, isPhonePH, normalizePhone } from "@/utils/validation";
 
 const CIVIL_STATUS_OPTIONS = ["Single", "Married", "Widowed", "Separated"];
 const SEX_OPTIONS = ["Female", "Male"];
@@ -183,6 +183,43 @@ const AccountStatusPill = ({ status }) => {
 };
 
 /**
+ * Account-linking state, derived purely from PERSISTED data the API returns:
+ * `authUserId` (is a Supabase Auth account linked to this resident record?) and
+ * the linked account's `accountStatus` (profiles.status). This is the staff-
+ * facing wording the task calls for and is never computed from form state.
+ *
+ *   Not Linked          — no auth account is linked (authUserId null)
+ *   Pending Verification — linked, but the account is not active yet
+ *   Linked              — linked and the account is active
+ *   Account Disabled    — linked, but the account was disabled by an admin
+ *
+ * @param {{authUserId?: string, accountStatus?: string}|null|undefined} resident
+ */
+const linkingStateOf = (resident) => {
+  if (!resident?.authUserId || resident.accountStatus === "none") {
+    return { key: "not_linked", label: "Not Linked", cls: "bg-slate-100 text-slate-500" };
+  }
+  if (resident.accountStatus === "active") {
+    return { key: "linked", label: "Linked", cls: "bg-emerald-50 text-emerald-700" };
+  }
+  if (resident.accountStatus === "disabled") {
+    return { key: "disabled", label: "Account Disabled", cls: "bg-rose-50 text-rose-700" };
+  }
+  return { key: "pending", label: "Pending Verification", cls: "bg-amber-50 text-amber-700" };
+};
+
+/** @param {{resident: ResidentRow|null}} props */
+const LinkingStatePill = ({ resident }) => {
+  const state = linkingStateOf(resident);
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${state.cls}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+      {state.label}
+    </span>
+  );
+};
+
+/**
  * @param {{label: string, value: string, onChange: (value: string) => void, options?: string[], placeholder?: string, error?: string, emptyLabel?: string, children?: import("react").ReactNode}} props
  */
 function Select({ label, value, onChange, options = [], placeholder = "", error = "", emptyLabel = "", children = null }) {
@@ -273,6 +310,15 @@ export default function ResidentsPage() {
   const [editError, setEditError] = useState(/** @type {string|null} */ (null));
   const [toast, setToast] = useState(/** @type {string|null} */ (null));
 
+  // "Create login account" action inside the View modal, shown only for records
+  // that are Not Linked. It invites a Supabase Auth account for the EXISTING
+  // resident record (backend links residents.auth_user_id) — it never creates a
+  // second resident and never changes the verification status.
+  const [linkPanelOpen, setLinkPanelOpen] = useState(false);
+  const [linkEmail, setLinkEmail] = useState("");
+  const [linkSubmitting, setLinkSubmitting] = useState(false);
+  const [linkError, setLinkError] = useState(/** @type {string|null} */ (null));
+
   /** @param {string} message */
   const showToast = (message) => {
     setToast(message);
@@ -360,7 +406,55 @@ export default function ResidentsPage() {
   /** @param {ResidentRow} resident */
   const openView = (resident) => {
     setSelected(resident);
+    setLinkPanelOpen(false);
+    setLinkEmail("");
+    setLinkError(null);
     setShowViewModal(true);
+  };
+
+  /**
+   * Invite a login account for an EXISTING, unlinked resident record. The
+   * backend creates the Supabase Auth user, links it to this resident
+   * (residents.auth_user_id) in Pending Activation, and emails an invitation —
+   * it never duplicates the resident and never auto-verifies anyone.
+   */
+  const handleCreateAccount = async () => {
+    if (!canCreateLoginAccount || !selected) return;
+    const email = linkEmail.trim();
+    if (!email) {
+      setLinkError("An email is required to create a login account.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setLinkError("Enter a valid email address.");
+      return;
+    }
+    setLinkSubmitting(true);
+    setLinkError(null);
+    try {
+      const result = await residentsApi.createAccount(selected.id, { email });
+      const record = result?.resident;
+      // Reflect the new linked-but-pending state immediately; the list refresh
+      // below reads the authoritative status from the API.
+      setSelected((prev) =>
+        prev
+          ? { ...prev, authUserId: record?.authUserId || prev.authUserId || "linked", accountStatus: "pending" }
+          : prev,
+      );
+      setLinkPanelOpen(false);
+      setLinkEmail("");
+      showToast(`Invitation emailed to ${email}. The account is Pending Verification until the resident activates it.`);
+      await load(q.trim());
+    } catch (err) {
+      const error = /** @type {RequestError} */ (err);
+      if (error?.status === 422 && Array.isArray(error?.payload?.error?.details)) {
+        setLinkError(error.payload.error.details.join(" "));
+      } else {
+        setLinkError(error?.message || "Could not create the login account. Please try again.");
+      }
+    } finally {
+      setLinkSubmitting(false);
+    }
   };
 
   /**
@@ -404,8 +498,11 @@ export default function ResidentsPage() {
     if (dobError) errs.dob = dobError;
     if (!form.gender) errs.gender = "Sex is required";
     if (!form.barangay) errs.barangay = "Barangay is required";
-    if (form.contact && !/^[0-9+\-\s()]{7,20}$/.test(form.contact.trim())) {
-      errs.contact = "Enter a valid contact number";
+    // Contact is optional, but when present it must be a valid PH mobile — the
+    // same rule the backend and the database CHECK enforce. A looser rule here
+    // let numbers through that the database then rejected, failing the save.
+    if (form.contact.trim() && !isPhonePH(form.contact)) {
+      errs.contact = "Enter a valid PH mobile number (e.g. 0917 123 4567)";
     }
     // An email is required only when a login account is being created.
     if (form.createAccount) {
@@ -435,7 +532,7 @@ export default function ResidentsPage() {
         sex: form.gender,
         civilStatus: form.civilStatus,
         barangay: form.barangay,
-        cellphoneNo: form.contact.trim(),
+        cellphoneNo: normalizePhone(form.contact.trim()),
         currentAddress: composeAddress(form),
         permanentAddress: composeAddress(form),
       });
@@ -490,7 +587,7 @@ export default function ResidentsPage() {
     const errs = /** @type {ValidationErrors} */ ({});
     if (!editForm.barangay) errs.barangay = "Barangay is required.";
     else if (!allowedBarangays.includes(editForm.barangay)) errs.barangay = "You can only edit residents within your assigned barangay.";
-    if (editForm.contact && !/^[0-9+\-\s()]{7,20}$/.test(editForm.contact.trim())) errs.contact = "Enter a valid contact number.";
+    if (editForm.contact && !isPhonePH(editForm.contact)) errs.contact = "Enter a valid PH mobile number (e.g. 0917 123 4567).";
     return errs;
   };
 
@@ -507,7 +604,7 @@ export default function ResidentsPage() {
     try {
       await residentsApi.update(editTarget.id, {
         resident: {
-          cellphoneNo: editForm.contact.trim(),
+          cellphoneNo: normalizePhone(editForm.contact.trim()),
           barangay: editForm.barangay,
           civilStatus: editForm.civilStatus,
           currentAddress: editForm.currentAddress.trim(),
@@ -847,20 +944,26 @@ export default function ResidentsPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-6">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
                 <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Record Information</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div>
+                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Resident ID</p>
+                    <p className="mt-0.5 text-sm font-medium text-brand-ink font-stat">{selected.id || "—"}</p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-brand-gray">
+                      Internal master-record ID. A resident self-registering gives this to link their account.
+                    </p>
+                  </div>
+                  <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Health Record No.</p>
-                    <p className="mt-0.5 text-sm font-medium text-brand-ink">{selected.healthRecordNo || "—"}</p>
+                    <p className="mt-0.5 text-sm font-medium text-brand-ink font-stat">{selected.healthRecordNo || "—"}</p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-brand-gray">
+                      Clinical chart number used across consultations and referrals.
+                    </p>
                   </div>
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Verification Status</p>
                     <div className="mt-1"><StatusBadge value={selected.status} /></div>
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Account Status</p>
-                    <div className="mt-1"><AccountStatusPill status={selected.accountStatus} /></div>
                   </div>
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Registered</p>
@@ -869,6 +972,82 @@ export default function ResidentsPage() {
                     </p>
                   </div>
                 </div>
+              </div>
+
+              {/* Account Linking — the actual, persisted link between this
+                  resident record and a Supabase Auth login account. Verification
+                  Status (clinical review) and Account Linking (login) are kept
+                  separate on purpose: linking a login never verifies a resident,
+                  and verifying a resident never creates a login. */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-6">
+                <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Account Linking</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Linking State</p>
+                    <div className="mt-1"><LinkingStatePill resident={selected} /></div>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-brand-gray uppercase tracking-wide">Account Status</p>
+                    <div className="mt-1"><AccountStatusPill status={selected.accountStatus} /></div>
+                  </div>
+                </div>
+                <p className="mt-3 text-[11px] leading-snug text-brand-gray">
+                  {linkingStateOf(selected).key === "not_linked"
+                    ? "No login account is linked to this record. The resident can self-register and link using their Resident ID, or you can invite a login below."
+                    : linkingStateOf(selected).key === "linked"
+                      ? "A login account is linked and active. The resident can sign in and view their own health record."
+                      : linkingStateOf(selected).key === "disabled"
+                        ? "The linked login account has been disabled by an administrator."
+                        : "A login account is linked but not yet active — awaiting the resident to accept the invitation and set a password."}
+                </p>
+
+                {canCreateLoginAccount && linkingStateOf(selected).key === "not_linked" && (
+                  <div className="mt-4 border-t border-brand-border pt-4">
+                    {!linkPanelOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => { setLinkPanelOpen(true); setLinkError(null); }}
+                        className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+                      >
+                        <Plus className="h-4 w-4" /> Create login account
+                      </button>
+                    ) : (
+                      <div>
+                        <label className={labelClass}>Email for login account</label>
+                        <input
+                          type="email"
+                          value={linkEmail}
+                          placeholder="e.g. resident@example.com"
+                          onChange={(e) => { setLinkEmail(e.target.value); if (linkError) setLinkError(null); }}
+                          className={inputClass(linkError)}
+                        />
+                        {linkError && <p className={errorClass}>{linkError}</p>}
+                        <p className="mt-1 text-[11px] leading-snug text-brand-gray">
+                          An invitation link is emailed to this address. The resident sets their own password to
+                          activate the account. This links the login to the existing Resident ID and does not change
+                          the verification status.
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setLinkPanelOpen(false); setLinkEmail(""); setLinkError(null); }}
+                            className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCreateAccount}
+                            disabled={linkSubmitting}
+                            className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
+                          >
+                            {linkSubmitting ? "Sending invitation..." : "Send invitation"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Risk Assessment — the authoritative, backend-computed result for

@@ -4,6 +4,7 @@ import { assignedBarangay } from '../config/scope.js';
 import { getServiceClient } from '../config/supabase.js';
 import * as operational from './operational.service.js';
 import { persistResidentRisk } from './residentRisk.service.js';
+import { notifyResidentOnce } from './notifications.service.js';
 import { computeBMI } from '../utils/bmi.js';
 import { normalizeMedications } from './medicines.service.js';
 import { classifyWithConfig } from './bpConfig.service.js';
@@ -50,7 +51,13 @@ const validateVitalsByField = (payload = {}) => {
     if (!present(payload[field])) return;
     if (!inRange(payload[field], lo, hi)) errors[field] = `${label} must be between ${lo} and ${hi}.`;
   };
-  check('temperature', 'Temperature (°C)', 30, 45);
+  // Body-temperature plausibility range for data integrity (NOT a diagnosis).
+  // The previous hardcoded 30–45 °C floor wrongly rejected genuine, clinically
+  // recorded severe-hypothermia readings (survival is documented below 20 °C).
+  // Aligned with the app's clinically reviewed vital range already used at RHU
+  // triage/intake (see intake.service.js: 25–46 °C) so the same reading is
+  // accepted everywhere in °C.
+  check('temperature', 'Temperature (°C)', 25, 46);
   check('pulseRate', 'Pulse rate (bpm)', 20, 250);
   check('respiratoryRate', 'Respiratory rate (breaths/min)', 5, 80);
   check('height', 'Height (cm)', 30, 250);
@@ -120,6 +127,52 @@ const assertResidentScope = (user, resident) => {
   }
 };
 
+/**
+ * Consultation eligibility (verified residents only).
+ *
+ * A consultation may only be recorded for a resident who is verified under the
+ * existing status model — i.e. individually `approved`
+ * (residents.verification_status), OR a linked member of a `Verified` household
+ * in the same scope. This mirrors EXACTLY the "verified directory" the resident
+ * selector is populated from (residents.service.listResidents verifiedOnly), so
+ * the UI list and the server submission enforce the same rule. Pending,
+ * rejected, resubmission_required and otherwise unverified residents are
+ * excluded. Barangay/municipality scope is enforced separately by
+ * `assertResidentScope` and is NOT weakened here.
+ */
+const CONSULTATION_ELIGIBLE_STATUSES = new Set(['approved']);
+
+export const isResidentConsultationEligible = async (resident, repo = repository) => {
+  if (!resident) return false;
+  if (CONSULTATION_ELIGIBLE_STATUSES.has(text(resident.verificationStatus).toLowerCase())) {
+    return true;
+  }
+  // Household-verified members qualify too (no second verification system).
+  if (typeof repo.verifiedHouseholdResidentIds === 'function') {
+    try {
+      const ids = await repo.verifiedHouseholdResidentIds({
+        barangay: resident.barangay || null,
+        municipalityId: resident.municipalityId || null,
+      });
+      if (Array.isArray(ids) && ids.includes(resident.id)) return true;
+    } catch {
+      // A lookup failure must never silently ALLOW an unverified resident; fall
+      // through to not-eligible so the stricter outcome wins.
+    }
+  }
+  return false;
+};
+
+const assertResidentEligibleForConsultation = async (resident, repo = repository) => {
+  const eligible = await isResidentConsultationEligible(resident, repo);
+  if (!eligible) {
+    throw ApiError.unprocessable(
+      'This resident is not verified yet. Only approved or verified residents can receive a consultation.',
+      { residentId: 'Select a verified resident. Pending or unverified residents are not eligible for a consultation.' },
+    );
+  }
+};
+
 export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
   residentId,
   recordedById: user.id,
@@ -153,7 +206,10 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
     o2sat: payload.oxygenSaturation,
     ...(() => {
       const { bmi, category } = computeBMI(payload.height, payload.weight);
-      return { bmi, bmiCategory: category };
+      // `visits.bmi_category` is NOT NULL (default ''), so a consultation saved
+      // without both height and weight must store '' here, not null — otherwise
+      // the insert fails with a NOT-NULL violation. `bmi` itself is nullable.
+      return { bmi, bmiCategory: category || '' };
     })(),
   },
   phn: {
@@ -404,6 +460,51 @@ export const syncConsultationFollowUp = async ({
   }
 };
 
+/**
+ * Notify the resident that a consultation record was saved for them.
+ *
+ * Runs ONLY after the consultation row is persisted, so a failed save can never
+ * produce a success notification. Reuses the shared notification infrastructure
+ * (`notifications.service.notifyResidentOnce`) rather than a competing system,
+ * and is idempotent per consultation (keyed on the visit id) so retries,
+ * repeated saves and refreshes do not create duplicates.
+ *
+ * The copy is deliberately non-clinical: it never includes the diagnosis,
+ * findings, treatment or any other sensitive medical detail — only that a new
+ * record is available and (safely) its date. Best-effort: a notification
+ * failure never fails or rolls back the consultation save.
+ */
+const notifyResidentOfConsultation = async ({ resident = null, residentId = null, visit }) => {
+  try {
+    if (!visit?.id) return;
+    let recipientAuthUserId = resident?.authUserId || null;
+    const lookupId = residentId || visit.residentId || resident?.id || null;
+    if (!recipientAuthUserId && lookupId) {
+      const fetched = await repository.getResident(lookupId);
+      recipientAuthUserId = fetched?.authUserId || null;
+    }
+    if (!recipientAuthUserId) return;
+
+    const visitDate = text(visit.visitDate).slice(0, 10);
+    const message = visitDate
+      ? `A new consultation record from ${visitDate} is now available in My Health Records.`
+      : 'A new consultation record is now available in My Health Records.';
+
+    await notifyResidentOnce({
+      recipientAuthUserId,
+      category: 'information',
+      title: 'New consultation record',
+      message,
+      relatedType: 'consultation',
+      relatedId: String(visit.id),
+    });
+  } catch (err) {
+    // Best-effort: never fail the consultation save because of the notification.
+    // eslint-disable-next-line no-console
+    console.error(`notifyResidentOfConsultation: ${err?.message || err}`);
+  }
+};
+
 export const list = async ({ user, q = '', repo = repository, supabase = getServiceClient() }) => {
   if (user?.role === 'resident') {
     const resident = await repo.getResidentByAuthUserId(user.id);
@@ -447,6 +548,10 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   }
   const resident = await repository.getResident(payload.residentId);
   assertResidentScope(user, resident);
+  // Verified residents only: enforce eligibility on the submission endpoint so a
+  // direct API call cannot record a consultation for a pending/unverified
+  // resident even though the UI filters them out of the selector.
+  await assertResidentEligibleForConsultation(resident);
   const { errors: followUpErrors, normalized } = validateFollowUp(payload);
   if (followUpErrors.length) throw ApiError.unprocessable('Please correct the consultation fields shown below.', { nextVisitDate: followUpErrors.join(' ') });
   const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate };
@@ -457,6 +562,9 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   // Recorded health data changed -> recompute + persist the resident's risk
   // (backend-authoritative; best-effort so a save is never blocked by it).
   await persistResidentRisk({ residentId: resident.id });
+  // Only after the consultation is persisted: tell the resident a new record is
+  // available (idempotent, non-clinical, best-effort).
+  await notifyResidentOfConsultation({ resident, visit });
   return fromVisit(visit, supabase);
 };
 
@@ -476,6 +584,9 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
   await syncConsultationFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
   // Recorded health data changed -> recompute + persist the resident's risk.
   await persistResidentRisk({ residentId: visit.residentId });
+  // Only after the consultation is persisted. Idempotent per visit id, so
+  // editing an existing consultation does not create a duplicate notification.
+  await notifyResidentOfConsultation({ residentId: visit.residentId, visit: updated });
   return fromVisit(updated, supabase);
 };
 

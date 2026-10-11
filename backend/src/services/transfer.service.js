@@ -3,7 +3,7 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { deleteDocument, getDocumentSignedUrl, uploadTransferDocument } from './storage.service.js';
 import { validateDocumentUpload } from '../validators/documents.validators.js';
-import { notifyResident } from './notifications.service.js';
+import { notifyResident, notifyResidentOnce } from './notifications.service.js';
 
 /**
  * Transfer of Residency — change of the EXISTING resident's barangay.
@@ -24,10 +24,19 @@ import { notifyResident } from './notifications.service.js';
 
 const SELF_ROLES = new Set(['resident', 'resident-limited']);
 const REVIEW_ROLES = new Set(['admin', 'mho', 'phn', 'health_supervisor']);
-// A request is "open" (blocks a new one) only while awaiting review.
-const OPEN_STATUSES = new Set(['pending', 'under_review']);
-// Documents attach while the request is a draft or open (pre-approval).
-const EDITABLE_STATUSES = new Set(['draft', 'pending', 'under_review']);
+// A request awaiting a reviewer decision (approve / reject / request
+// resubmission). Only these can be acted on by a reviewer.
+const REVIEW_OPEN_STATUSES = new Set(['pending', 'under_review']);
+// A request that blocks the resident from starting a brand-new transfer: it is
+// either awaiting review OR has been returned to them for corrections. This is
+// also the resident's "active request" shown by the UI.
+const BLOCKING_STATUSES = new Set(['pending', 'under_review', 'resubmission_required']);
+// Documents attach while the request is a draft, open, or returned for
+// resubmission (i.e. any pre-approval, resident-editable state).
+const EDITABLE_STATUSES = new Set(['draft', 'pending', 'under_review', 'resubmission_required']);
+// Statuses a resident may (re)submit from: a fresh draft or a request the
+// reviewer returned for corrections. Both move to 'pending' on submit.
+const SUBMITTABLE_STATUSES = new Set(['draft', 'resubmission_required']);
 const HEALTH_RECORD_TYPE = 'transfer_previous_health_record';
 const SUPPORTING_TYPE = 'transfer_proof_of_address';
 
@@ -141,6 +150,7 @@ const shapeRequest = (request, byId = new Map()) => request && ({
   toBarangay: byId.get(field(request, 'to_barangay_id', 'toBarangayId')) || '',
   reason: field(request, 'reason', 'reason') || '',
   rejectionReason: field(request, 'rejection_reason', 'rejectionReason') || '',
+  resubmissionInstructions: field(request, 'resubmission_instructions', 'resubmissionInstructions') || '',
   submittedAt: field(request, 'submitted_at', 'submittedAt') || null,
   reviewedAt: field(request, 'reviewed_at', 'reviewedAt') || null,
   createdAt: field(request, 'created_at', 'createdAt') || null,
@@ -159,6 +169,7 @@ const residentView = (resident, byId) => ({
   id: resident.id,
   name: [resident.firstName, resident.middleName, resident.lastName, resident.suffix]
     .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(),
+  healthRecordNo: resident.healthRecordNo || resident.health_record_no || '',
   barangayId: resident.barangayId || null,
   barangay: resident.barangay || byId.get(resident.barangayId) || '',
   municipalityId: resident.municipalityId || null,
@@ -187,7 +198,7 @@ export const getContext = async ({ user }) => {
     if (isMissingTransferSchema(error)) throw transferSchemaUnavailable();
     throw error;
   }
-  const activeRequest = history.find((row) => OPEN_STATUSES.has(row.status)) || null;
+  const activeRequest = history.find((row) => BLOCKING_STATUSES.has(row.status)) || null;
 
   const destinations = eligibleDestinations(barangays, currentBarangayId);
 
@@ -213,9 +224,9 @@ export const startTransfer = async ({ user, toBarangayId, reason = '' }) => {
   const resident = await loadOwnResident(user);
 
   const latest = await latestRequest(user);
-  if (latest && OPEN_STATUSES.has(latest.status)) {
+  if (latest && BLOCKING_STATUSES.has(latest.status)) {
     throw ApiError.conflict(
-      'You already have a pending transfer request. Please wait for the current request to be reviewed before submitting another transfer.',
+      'You already have a transfer request in progress. Please wait for it to be reviewed, or complete the requested corrections, before starting another transfer.',
     );
   }
 
@@ -353,13 +364,15 @@ export const removeDocument = async ({ user, requestId, documentId }) => {
 /**
  * The resident-facing residency status derived from the transfer request. This
  * is what the dashboard shows instead of a static "Approved":
- *   - no open/decided transfer  -> 'verified' (normal resident)
- *   - pending / under_review     -> 'transfer_pending'
- *   - approved                   -> 'transfer_approved'
- *   - rejected                   -> 'transfer_rejected'
+ *   - no open/decided transfer    -> 'verified' (normal resident)
+ *   - pending / under_review       -> 'transfer_pending'
+ *   - resubmission_required         -> 'transfer_resubmission'
+ *   - approved                     -> 'transfer_approved'
+ *   - rejected                     -> 'transfer_rejected'
  */
-const residencyStatusFrom = (status) => {
-  if (OPEN_STATUSES.has(status)) return 'transfer_pending';
+export const residencyStatusFrom = (status) => {
+  if (REVIEW_OPEN_STATUSES.has(status)) return 'transfer_pending';
+  if (status === 'resubmission_required') return 'transfer_resubmission';
   if (status === 'approved') return 'transfer_approved';
   if (status === 'rejected') return 'transfer_rejected';
   return 'verified';
@@ -396,20 +409,24 @@ export const getMine = async ({ user }) => {
 };
 
 /**
- * Submit the draft for review. A supporting document is required; the health
- * record is optional. Turns the draft into an OPEN (pending) request, which is
- * what blocks any further transfer until it is reviewed.
+ * Submit the draft (or a request returned for corrections) for review. A
+ * supporting document is required; the health record is optional. Turns the
+ * request into an OPEN (pending) request, which is what blocks any further
+ * transfer until it is reviewed. On a successful save, the authorized receiving
+ * Health Supervisor(s) are notified exactly once per request (dedup-safe
+ * against retries).
  */
 export const submit = async ({ user, requestId }) => {
   assertSelf(user);
   const request = await ownRequest(user, requestId);
-  if (request.status !== 'draft') {
-    if (OPEN_STATUSES.has(request.status)) {
+  if (!SUBMITTABLE_STATUSES.has(request.status)) {
+    if (REVIEW_OPEN_STATUSES.has(request.status)) {
       throw ApiError.conflict('This transfer request has already been submitted for review.');
     }
     throw ApiError.conflict('This transfer request can no longer be submitted.');
   }
-  if (!field(request, 'to_barangay_id', 'toBarangayId') || !field(request, 'resident_id', 'residentId')) {
+  const toBarangayId = field(request, 'to_barangay_id', 'toBarangayId');
+  if (!toBarangayId || !field(request, 'resident_id', 'residentId')) {
     throw ApiError.unprocessable('Select a destination barangay before submitting.');
   }
   const docs = await repository.listDocumentsByTransferRequest(request.id);
@@ -417,29 +434,65 @@ export const submit = async ({ user, requestId }) => {
   if (!hasSupporting) {
     throw ApiError.unprocessable('Upload a supporting document before submitting your transfer request.');
   }
+  const wasResubmission = request.status === 'resubmission_required';
   const updated = await repository.updateTransferRequest(request.id, {
     status: 'pending',
     submitted_at: new Date().toISOString(),
+    // A fresh submission clears any prior resubmission instructions.
+    resubmission_instructions: '',
   });
-  await audit(request.id, user.id, 'transfer_request_submitted');
+  await audit(request.id, user.id, wasResubmission ? 'transfer_request_resubmitted' : 'transfer_request_submitted');
   // Best-effort resident notification (never rolls back the submission).
   await notifyResident({
     recipientAuthUserId: user.id,
     category: 'information',
-    title: 'Residency transfer submitted',
-    message: 'Your residency transfer request has been submitted and is awaiting review by the health office.',
+    title: wasResubmission ? 'Residency transfer resubmitted' : 'Residency transfer submitted',
+    message: wasResubmission
+      ? 'Your corrected residency transfer request has been resubmitted and is awaiting review by the health office.'
+      : 'Your residency transfer request has been submitted and is awaiting review by the health office.',
     relatedType: 'transfer_request',
     relatedId: request.id,
   });
+  // Notify the authorized RECEIVING Health Supervisor(s) only AFTER the request
+  // is persisted. Dedup-safe: at most one submission notice per supervisor per
+  // request, so an HTTP retry / double-click never duplicates it.
+  await notifyReceivingSupervisors({ toBarangayId, requestId: request.id });
   return { id: updated.id, status: updated.status, submittedAt: field(updated, 'submitted_at', 'submittedAt') };
+};
+
+/**
+ * Create one in-app notification for every active Health Supervisor assigned to
+ * the destination (receiving) barangay. Recipients are derived server-side from
+ * the barangay assignment — never from client input — so a request is only ever
+ * surfaced to the authorized receiving supervisor(s). Best-effort and
+ * idempotent per (recipient, request).
+ */
+const notifyReceivingSupervisors = async ({ toBarangayId, requestId }) => {
+  if (!toBarangayId) return;
+  let recipients = [];
+  try {
+    recipients = await repository.listActiveHealthSupervisorsByBarangay(toBarangayId);
+  } catch (err) {
+    console.error(`transfer: could not resolve receiving supervisors: ${err.message}`);
+    return;
+  }
+  await Promise.all(recipients.map((recipientAuthUserId) => notifyResidentOnce({
+    recipientAuthUserId,
+    category: 'information',
+    title: 'Incoming resident transfer request',
+    // No clinical detail — the review page carries the particulars.
+    message: 'A resident has requested a transfer into your barangay. Open the Resident Transfer Requests queue to review it.',
+    relatedType: 'transfer_request',
+    relatedId: requestId,
+  })));
 };
 
 /** Resident withdraws their own open request, freeing them to submit a new one. */
 export const cancel = async ({ user, requestId }) => {
   assertSelf(user);
   const request = await ownRequest(user, requestId);
-  if (!OPEN_STATUSES.has(request.status) && request.status !== 'draft') {
-    throw ApiError.conflict('Only a pending transfer request can be cancelled.');
+  if (!BLOCKING_STATUSES.has(request.status) && request.status !== 'draft') {
+    throw ApiError.conflict('Only a transfer request that is still in progress can be cancelled.');
   }
   const updated = await repository.updateTransferRequest(request.id, { status: 'cancelled' });
   await audit(request.id, user.id, 'transfer_request_cancelled');
@@ -457,10 +510,11 @@ const assertReviewer = (user) => {
 };
 
 /**
- * BUG-005: is this transfer request inside the reviewer's scope?
+ * BUG-005: is this transfer request VISIBLE to the reviewer (list / open)?
  *   admin / mho / phn  -> municipality-wide (single-municipality deployment)
  *   health_supervisor  -> only requests whose ORIGIN or DESTINATION barangay is
- *                         their assigned barangay
+ *                         their assigned barangay (so the losing and the
+ *                         receiving barangay can both observe the request)
  * Scope is derived from the authenticated session, never a client id, so a
  * barangay-scoped reviewer can neither list nor open another barangay's request.
  */
@@ -476,14 +530,66 @@ const transferInReviewerScope = (user, request) => {
   return false;
 };
 
+/**
+ * Who may DECIDE a transfer (approve / reject / request resubmission). The
+ * decision belongs to the authorized RECEIVING Health Supervisor — the one
+ * assigned to the DESTINATION barangay — because approval admits the resident
+ * into that barangay. Municipality-wide roles (admin/mho/phn) may also decide.
+ * A losing-barangay supervisor can observe (see transferInReviewerScope) but
+ * cannot approve a transfer into a barangay they are not responsible for.
+ */
+const canDecideTransfer = (user, request) => {
+  if (!user) return false;
+  if (['admin', 'mho', 'phn'].includes(user.role)) return true;
+  if (user.role === 'health_supervisor') {
+    if (!user.barangayId) return false;
+    return field(request, 'to_barangay_id', 'toBarangayId') === user.barangayId;
+  }
+  return false;
+};
+
 export const listQueue = async ({ user, status = 'pending' }) => {
   assertReviewer(user);
-  const result = await repository.listTransferRequests({ status });
+  // 'all' lists every status (the tab filters client-side); any other value is
+  // a server-side status filter. Drafts are never surfaced to reviewers.
+  const normalized = String(status || 'pending').trim().toLowerCase();
+  const result = normalized && normalized !== 'all'
+    ? await repository.listTransferRequests({ status: normalized })
+    : await repository.listTransferRequests({});
   const { byId } = await barangayIndex(user?.municipalityId);
   // BUG-005: a barangay-scoped reviewer only sees requests touching their barangay.
-  const rows = result.rows
-    .filter((row) => transferInReviewerScope(user, row))
-    .map((row) => shapeRequest(row, byId));
+  const visible = result.rows
+    .filter((row) => row.status !== 'draft')
+    .filter((row) => transferInReviewerScope(user, row));
+
+  // Enrich each row with the resident's name + Health Record Number so the
+  // queue can display them without a per-row review fetch. Residents are read
+  // through the service-role repository; the row is already scope-checked above.
+  const residentIds = [...new Set(visible
+    .map((row) => field(row, 'resident_id', 'residentId'))
+    .filter(Boolean))];
+  const residentById = new Map();
+  await Promise.all(residentIds.map(async (id) => {
+    try {
+      const r = await repository.getResident(id);
+      if (r) residentById.set(id, r);
+    } catch { /* best-effort enrichment */ }
+  }));
+
+  const rows = visible.map((row) => {
+    const shaped = shapeRequest(row, byId);
+    const resident = residentById.get(shaped.residentId);
+    return {
+      ...shaped,
+      residentName: resident
+        ? [resident.firstName, resident.middleName, resident.lastName, resident.suffix]
+          .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+        : '',
+      healthRecordNo: resident?.healthRecordNo || resident?.health_record_no || '',
+      // Can THIS reviewer decide (approve/reject/resubmit) this request?
+      canDecide: canDecideTransfer(user, row),
+    };
+  });
   return { ...result, rows, total: rows.length };
 };
 
@@ -520,23 +626,26 @@ export const approve = async ({ user, requestId }) => {
   assertReviewer(user);
   const request = await repository.getTransferRequest(requestId);
   if (!request) throw ApiError.notFound('Transfer request not found.');
-  if (!OPEN_STATUSES.has(request.status)) {
+  // Must still be visible to this reviewer at all (404 hides other barangays).
+  if (!transferInReviewerScope(user, request)) throw ApiError.notFound('Transfer request not found.');
+  if (!REVIEW_OPEN_STATUSES.has(request.status)) {
     throw ApiError.conflict('This transfer request is no longer awaiting review.');
   }
   const residentId = field(request, 'resident_id', 'residentId');
   const resident = residentId ? await repository.getResident(residentId) : null;
   if (!resident) throw ApiError.conflict('The resident for this transfer request could not be found.');
 
-  // BUG-005: a barangay-scoped reviewer may only act on transfers touching their
-  // own barangay (origin or destination). Derived from the session id, not names.
-  if (!transferInReviewerScope(user, request)) {
-    throw ApiError.forbidden('This transfer request is outside your assigned barangay.');
+  // Only the authorized RECEIVING supervisor (destination barangay) may approve
+  // a transfer INTO their barangay. Derived from the session id, not names.
+  if (!canDecideTransfer(user, request)) {
+    throw ApiError.forbidden('Only the receiving barangay\u2019s authorized health supervisor may approve this transfer.');
   }
 
   const result = await repository.approveTransferRequest({ requestId, reviewerId: user.id });
   if (!result) throw ApiError.conflict('This transfer request cannot be approved.');
   await audit(requestId, user.id, 'transfer_request_approved', { residentId });
   await audit(requestId, user.id, 'resident_barangay_updated', {
+    fromBarangayId: field(request, 'from_barangay_id', 'fromBarangayId'),
     toBarangayId: field(request, 'to_barangay_id', 'toBarangayId'),
   });
   await notifyResident({
@@ -555,9 +664,12 @@ export const reject = async ({ user, requestId, reason }) => {
   if (!String(reason || '').trim()) throw ApiError.badRequest('A rejection reason is required.');
   const request = await repository.getTransferRequest(requestId);
   if (!request) throw ApiError.notFound('Transfer request not found.');
-  // BUG-005: a barangay-scoped reviewer may only reject a request in their scope.
+  // BUG-005: a reviewer may only see/act on a request in their visible scope.
   if (!transferInReviewerScope(user, request)) throw ApiError.notFound('Transfer request not found.');
-  if (!OPEN_STATUSES.has(request.status)) {
+  if (!canDecideTransfer(user, request)) {
+    throw ApiError.forbidden('Only the receiving barangay\u2019s authorized health supervisor may decide this transfer.');
+  }
+  if (!REVIEW_OPEN_STATUSES.has(request.status)) {
     throw ApiError.conflict('This transfer request is no longer awaiting review.');
   }
   const updated = await repository.updateTransferRequest(requestId, {
@@ -583,6 +695,56 @@ export const reject = async ({ user, requestId, reason }) => {
   return { id: updated.id, status: updated.status };
 };
 
+/**
+ * Return a request to the resident for corrections. Requires a written
+ * explanation/instructions. Preserves the request history and all uploaded
+ * documents; the resident corrects and resubmits the SAME request, which
+ * returns it to 'pending'. Only the authorized receiving supervisor (or a
+ * municipality-wide role) may request resubmission, and only while the request
+ * is still awaiting review.
+ */
+export const requestResubmission = async ({ user, requestId, instructions }) => {
+  assertReviewer(user);
+  const clean = String(instructions || '').trim();
+  if (!clean) throw ApiError.badRequest('Resubmission instructions are required.');
+  const request = await repository.getTransferRequest(requestId);
+  if (!request) throw ApiError.notFound('Transfer request not found.');
+  if (!transferInReviewerScope(user, request)) throw ApiError.notFound('Transfer request not found.');
+  if (!canDecideTransfer(user, request)) {
+    throw ApiError.forbidden('Only the receiving barangay\u2019s authorized health supervisor may decide this transfer.');
+  }
+  if (!REVIEW_OPEN_STATUSES.has(request.status)) {
+    throw ApiError.conflict('This transfer request is no longer awaiting review.');
+  }
+  const updated = await repository.updateTransferRequest(requestId, {
+    status: 'resubmission_required',
+    resubmission_instructions: clean.slice(0, 1000),
+    reviewed_by: user.id,
+    reviewed_at: new Date().toISOString(),
+  });
+  await audit(requestId, user.id, 'transfer_request_resubmission_requested', { instructions: clean.slice(0, 1000) });
+  const residentId = field(request, 'resident_id', 'residentId');
+  const resident = residentId ? await repository.getResident(residentId) : null;
+  if (resident?.authUserId) {
+    await notifyResident({
+      recipientAuthUserId: resident.authUserId,
+      category: 'reminder',
+      title: 'Residency transfer needs corrections',
+      message: 'Your residency transfer request needs corrections before it can be approved. Open your transfer request to see the instructions and resubmit.',
+      relatedType: 'transfer_request',
+      relatedId: requestId,
+    });
+  }
+  return { id: updated.id, status: updated.status };
+};
+
+export {
+  // Exported for authorization regression tests. These are pure predicates over
+  // (user, request) and never read the request body for role/barangay.
+  transferInReviewerScope,
+  canDecideTransfer,
+};
+
 export default {
   getContext,
   startTransfer,
@@ -596,4 +758,5 @@ export default {
   getForReview,
   approve,
   reject,
+  requestResubmission,
 };

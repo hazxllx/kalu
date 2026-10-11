@@ -6,6 +6,7 @@ import validate from '../middleware/validate.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import {
   createServiceValidator,
+  updateServiceValidator,
   assignValidator,
   serviceIdParamValidator,
   createAttendanceValidator,
@@ -33,6 +34,7 @@ const managerReaders = [
 ];
 const creators = [authenticate, authorize(FEATURE_ROLES.healthServices, { permission: 'services.create' })];
 const editors = [authenticate, authorize(FEATURE_ROLES.healthServices, { permission: 'services.edit' })];
+const deleters = [authenticate, authorize(FEATURE_ROLES.healthServices, { permission: 'services.delete' })];
 const idParam = validate(serviceIdParamValidator, 'params');
 const attendanceIdParam = validate(attendanceIdParamValidator, 'params');
 
@@ -46,6 +48,8 @@ router.get('/:id/registrations', ...readers, idParam, asyncHandler(controller.re
 router.get('/:id', ...readers, idParam, asyncHandler(controller.get));
 
 router.post('/', ...creators, validate(createServiceValidator), asyncHandler(controller.create));
+router.patch('/:id', ...editors, idParam, validate(updateServiceValidator), asyncHandler(controller.update));
+router.delete('/:id', ...deleters, idParam, asyncHandler(controller.remove));
 router.post('/attendance', ...editors, validate(createAttendanceValidator), asyncHandler(controller.createAttendance));
 router.post('/:id/assign', ...editors, idParam, validate(assignValidator), asyncHandler(controller.assign));
 router.delete('/:id/assign/:personnelId', ...editors, idParam, asyncHandler(controller.unassign));

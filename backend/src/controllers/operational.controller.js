@@ -20,6 +20,7 @@ export const update = async (req, res) => sendData(res, { record: await service.
   id: req.params.id,
   payload: req.body?.record || req.body || {},
 }) });
+export const markAllRead = async (req, res) => sendData(res, await service.markAllNotificationsRead({ user: req.user }));
 export const remove = async (req, res) => sendData(res, await service.remove({ user: req.user, kind: req.params.kind, id: req.params.id }));
 
-export default { list, create, update, remove };
+export default { list, create, update, markAllRead, remove };

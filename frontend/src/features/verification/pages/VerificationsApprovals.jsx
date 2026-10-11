@@ -7,6 +7,7 @@ import PageHeader from "@/components/common/PageHeader";
 const PendingVerifications = lazy(() => import("@/features/verification/pages/PendingVerifications"));
 const HouseholdVerifications = lazy(() => import("@/features/verification/pages/HouseholdVerifications"));
 const StaffAccountApprovals = lazy(() => import("@/features/accounts/pages/StaffAccountApprovals"));
+const TransferRequests = lazy(() => import("@/features/verification/pages/TransferRequests"));
 
 const TABS = [
   { id: "resident", label: "Resident Verification", permission: "residents.registration.approve" },
@@ -17,6 +18,7 @@ const TABS = [
     permission: "accounts.personnel.approve",
     roles: ["health_supervisor"],
   },
+  { id: "transfer", label: "Resident Transfer Requests", permission: "residents.transfer.approve" },
 ];
 
 export default function VerificationsApprovals() {
@@ -91,10 +93,10 @@ export default function VerificationsApprovals() {
                   document.getElementById(`verification-tab-${nextTab.id}`)?.focus();
                 }
               }}
-              className={`-mb-px flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue sm:px-4 ${
+              className={`-mb-px flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-[3px] px-3 text-sm transition-[color,border-color] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue focus-visible:rounded-sm sm:px-4 ${
                 activeTab === tab.id
-                  ? "border-brand-blue font-semibold text-brand-ink dark:text-foreground"
-                  : "border-transparent font-medium text-brand-gray hover:text-brand-ink dark:hover:text-foreground"
+                  ? "border-brand-blue font-semibold text-brand-blue"
+                  : "border-transparent font-medium text-brand-gray hover:border-brand-border hover:text-brand-ink dark:hover:text-foreground"
               }`}
             >
               <span>{tab.label}</span>
@@ -124,6 +126,9 @@ export default function VerificationsApprovals() {
                 embedded
                 bhwOnly
               />
+            )}
+            {activeTab === "transfer" && (
+              <TransferRequests embedded />
             )}
           </Suspense>
         </div>

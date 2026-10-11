@@ -9,6 +9,8 @@ import { sendCreated, sendData } from '../utils/apiResponse.js';
  *   GET   /personnel             assignable personnel in my municipality
  *   GET   /:id                   one service (scope-checked)
  *   POST  /                      create a service (+ optional assignment)
+ *   PATCH /:id                   update a service (content or status), in place
+ *   DELETE /:id                  delete a service (blocked when it has dependents)
  *   POST  /:id/assign            assign a personnel to a service
  *   DELETE /:id/assign/:personnelId  remove an assignment
  */
@@ -39,6 +41,16 @@ export const get = async (req, res) => {
 export const create = async (req, res) => {
   const record = await service.create({ user: req.user, payload: req.body || {} });
   sendCreated(res, { record });
+};
+
+export const update = async (req, res) => {
+  const record = await service.update({ user: req.user, serviceId: req.params.id, payload: req.body || {} });
+  sendData(res, { record });
+};
+
+export const remove = async (req, res) => {
+  const result = await service.remove({ user: req.user, serviceId: req.params.id });
+  sendData(res, result);
 };
 
 export const assign = async (req, res) => {
@@ -91,6 +103,8 @@ export default {
   personnel,
   get,
   create,
+  update,
+  remove,
   assign,
   unassign,
   createAttendance,

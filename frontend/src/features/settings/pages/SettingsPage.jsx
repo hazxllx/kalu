@@ -77,7 +77,11 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
   useEffect(() => {
     loadAccount();
-  }, [loadAccount]);
+    // Re-fetch when the authoritative profile flips (e.g. a Health Supervisor
+    // approves this resident and the VerificationBanner re-resolves the
+    // session). This keeps the verification status shown here in step with the
+    // server without a manual refresh or re-login.
+  }, [loadAccount, user?.status, user?.role]);
 
   // Staff accounts (MHO / PHN / RHU Personnel / Health Supervisor) read their
   // account details straight from the authoritative profile resolved by

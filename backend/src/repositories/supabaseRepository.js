@@ -379,6 +379,17 @@ const mapBack = (row, mapping) => {
 const residentToRow = (resident) => mapKeys(resident, RESIDENT_TO_DB);
 const residentFromRow = (row) => (row ? mapBack(row, DB_TO_RESIDENT) : null);
 
+// A plpgsql function declared `RETURNS public.residents` that returns SQL NULL
+// is rendered by PostgREST as a composite object with EVERY column null (not a
+// JSON null). Treating that as a real resident would make a "no eligible record
+// matched" result look like success, so collapse an all-null row (no primary
+// key) back to null. The permanent Resident ID is NOT NULL on a real row, so a
+// null `id` unambiguously means "the function returned NULL".
+const residentFromRpcRow = (row) =>
+  row && row.id !== null && row.id !== undefined && String(row.id).trim() !== ''
+    ? residentFromRow(row)
+    : null;
+
 const GUARDIAN_LINK_TO_DB = {
   id: 'id',
   minorResidentId: 'minor_resident_id',
@@ -581,7 +592,7 @@ const SELECT_RESIDENT = Object.keys(DB_TO_RESIDENT)
 // on every transfer read/write path. OTP verification stays server-side inside
 // public.approve_transfer_request().
 const TRANSFER_SAFE_COLUMNS =
-  'id, auth_user_id, status, resident_id, target_resident_id, from_barangay_id, to_barangay_id, reason, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at';
+  'id, auth_user_id, status, resident_id, target_resident_id, from_barangay_id, to_barangay_id, reason, resubmission_instructions, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at';
 
 const throwOnError = (error, fallback) => {
   if (error) {
@@ -1880,6 +1891,25 @@ export const supabaseRepository = {
     return (data || []).map(documentFromRow);
   },
 
+  /**
+   * Active Health Supervisor profiles assigned to a barangay. Used to notify the
+   * authorized receiving supervisor(s) when a transfer request is submitted.
+   * A profile id IS the supervisor's auth.users id (notifications.recipient_id).
+   */
+  async listActiveHealthSupervisorsByBarangay(barangayId) {
+    if (!barangayId) return [];
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from(TABLES.profiles)
+      .select('id')
+      .eq('role', 'health_supervisor')
+      .eq('status', 'active')
+      .eq('barangay_id', barangayId);
+    throwOnError(error, 'Could not load receiving health supervisors');
+    return (data || []).map((row) => row.id).filter(Boolean);
+  },
+
+
   /** Atomically claims an unlinked record; identity matching stays server-side. */
   async claimResidentForAccount({ authUserId, identityNo, birthDate }) {
     const supabase = getServiceClient();
@@ -1889,7 +1919,25 @@ export const supabaseRepository = {
       p_birth_date: birthDate,
     });
     throwOnError(error, 'Could not complete resident account linking');
-    return residentFromRow(data);
+    return residentFromRpcRow(data);
+  },
+
+  /**
+   * Atomically link a NEW account to an existing resident record by its
+   * permanent Resident ID. Only an UNLINKED record whose id + birth_date match
+   * is claimed (the RPC enforces auth_user_id IS NULL), so concurrent requests
+   * cannot double-link and no second profile is ever created. Returns null when
+   * no eligible record matched (not found / DOB mismatch / already linked).
+   */
+  async activateResidentById({ authUserId, residentId, birthDate }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('activate_resident_by_id', {
+      p_auth_user_id: authUserId,
+      p_resident_id: String(residentId || '').trim(),
+      p_birth_date: birthDate,
+    });
+    throwOnError(error, 'Could not complete resident account activation');
+    return residentFromRpcRow(data);
   },
 
   // ----- documents ----------------------------------------------------------

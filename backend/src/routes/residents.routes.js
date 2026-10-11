@@ -61,6 +61,14 @@ router.get(
   authorize(FEATURE_ROLES.referralRecords, { permission: 'residents.profile.view' }),
   asyncHandler(residentsController.getResident),
 );
+// Invite + link a login account for an EXISTING resident. Requires the
+// account-creation permission; the service re-checks role, barangay scope, and
+// that the record is not already linked, then links residents.auth_user_id.
+router.post(
+  '/:id/account',
+  authorize(FEATURE_ROLES.residents, { permission: 'accounts.create' }),
+  asyncHandler(residentsController.createResidentAccount),
+);
 router.put(
   '/:id',
   authorize(['phn', 'health_supervisor'], { permission: 'residents.edit' }),

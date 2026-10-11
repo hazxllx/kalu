@@ -12,6 +12,14 @@ export const tclApi = resource('tcl');
 export const maternalApi = resource('maternal');
 export const maternalVisitsApi = resource('maternalvisits');
 export const immunizationsApi = resource('immunizations');
-export const notificationsApi = resource('notifications');
+export const notificationsApi = {
+  ...resource('notifications'),
+  // Mark one notification read. The empty record body is intentional — the
+  // server sets `read_at` and ignores any client-supplied fields.
+  markRead: (id, options) => api.put(`/operational/notifications/${id}`, { record: {} }, options),
+  // Mark every unread notification for the authenticated user read in one
+  // atomic request (avoids the per-row race of firing N parallel updates).
+  markAllRead: (options) => api.put('/operational/notifications/read-all', { record: {} }, options),
+};
 
 export default { followUpsApi, tclApi, maternalApi, maternalVisitsApi, immunizationsApi, notificationsApi };

@@ -38,6 +38,9 @@ for (const kind of kinds) {
     asyncHandler(controller.list),
   );
   if (kind === 'notifications') {
+    // Recipients may mark all of their own notifications read in one request.
+    // Registered before the `:id` route so "read-all" is not captured as an id.
+    router.put(`/${kind}/read-all`, withKind(kind), authorize(roles), asyncHandler(controller.markAllRead));
     // Recipients may mark their own notifications read.
     router.put(`/${kind}/:id`, withKind(kind), authorize(roles), asyncHandler(controller.update));
   } else {

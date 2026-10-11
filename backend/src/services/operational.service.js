@@ -306,7 +306,6 @@ export const create = async ({ user, kind, payload = {}, supabase = getServiceCl
   const resident = await residentFor(supabase, user, payload.residentId || payload.resident_id);
   const row = { ...payload, resident_id: resident.id, created_by: user.id };
   delete row.residentId;
-  delete row.resident_id;
   delete row.consultationId;
   delete row.id;
 
@@ -384,9 +383,16 @@ export const create = async ({ user, kind, payload = {}, supabase = getServiceCl
 
 export const update = async ({ user, kind, id, payload = {}, consultationId = null, supabase = getServiceClient() }) => {
   const normalizedKind = normalizeKind(kind);
+  // Notifications are owned by their recipient (any role), not scoped like the
+  // staff operational records. Dispatch BEFORE the table/staff checks: a
+  // notification "update" is only ever a recipient marking their own row read.
+  // (`TABLES.notifications` is a truthy table name, so this must be handled
+  // explicitly rather than relying on an `if (!table)` fallthrough.)
+  if (normalizedKind === 'notifications') {
+    return markNotificationRead({ user, id, supabase });
+  }
   const table = TABLES[normalizedKind] || TABLES[kind];
   if (!table) {
-    if (normalizedKind === 'notifications') return markNotificationRead({ user, id });
     throw ApiError.badRequest('Unknown operational record type.');
   }
   assertStaff(user);
@@ -506,4 +512,21 @@ export const markNotificationRead = async ({ user, id, supabase = getServiceClie
   return data;
 };
 
-export default { list, create, update, remove, markNotificationRead, withScheduleState };
+/**
+ * Recipient marks all of their own unread notifications read in one atomic
+ * statement. Scoped to `recipient_id = user.id` so a caller can never affect
+ * another user's rows, and limited to currently-unread rows (`read_at is null`)
+ * so already-read timestamps are preserved. Returns how many rows changed.
+ */
+export const markAllNotificationsRead = async ({ user, supabase = getServiceClient() }) => {
+  const { data, error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('recipient_id', user.id)
+    .is('read_at', null)
+    .select('id');
+  throwOnError(error, 'Could not update notifications');
+  return { updated: (data || []).length };
+};
+
+export default { list, create, update, remove, markNotificationRead, markAllNotificationsRead, withScheduleState };

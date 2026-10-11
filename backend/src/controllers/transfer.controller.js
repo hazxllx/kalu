@@ -12,5 +12,6 @@ export const listQueue = async (req, res) => sendData(res, await transferService
 export const getForReview = async (req, res) => sendData(res, await transferService.getForReview({ user: req.user, requestId: req.params.id }));
 export const approve = async (req, res) => sendData(res, { transfer: await transferService.approve({ user: req.user, requestId: req.params.id }) });
 export const reject = async (req, res) => sendData(res, { transfer: await transferService.reject({ user: req.user, requestId: req.params.id, reason: req.body?.reason }) });
+export const requestResubmission = async (req, res) => sendData(res, { transfer: await transferService.requestResubmission({ user: req.user, requestId: req.params.id, instructions: req.body?.instructions }) });
 
-export default { getContext, startTransfer, uploadDocument, removeDocument, getMine, submit, cancel, listQueue, getForReview, approve, reject };
+export default { getContext, startTransfer, uploadDocument, removeDocument, getMine, submit, cancel, listQueue, getForReview, approve, reject, requestResubmission };

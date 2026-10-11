@@ -27,6 +27,7 @@ import { registrationApi } from "@/services/api";
 import { postFormData } from "@/services/api/apiClient";
 import { guardianLinksApi } from "@/services/api/guardianLinksApi";
 import UploadComponent from "@/features/registration/components/UploadComponent";
+import ExistingResidentActivation from "@/features/registration/pages/ExistingResidentActivation";
 import {
   SLOT_STATUS,
   SLOT_DOCUMENT_TYPE,
@@ -222,13 +223,11 @@ export default function NewResidentRegistration() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [possibleExisting, setPossibleExisting] = useState(false);
-  // "Already registered by a BHW / Health Personnel?" claim flow. When enabled,
-  // the resident may supply the Resident ID of the profile a health worker
-  // created for them so the new account links to that EXISTING profile instead
-  // of creating a duplicate. Blank is allowed — the server then matches on the
-  // submitted name + date of birth.
+  // "I already have a barangay health record" — the simplified existing-record
+  // activation flow. When enabled, the whole page switches to the dedicated
+  // 3-step activation wizard (Resident ID → verify identity → set password);
+  // unchecking it returns to the normal new-resident registration.
   const [claimMode, setClaimMode] = useState(false);
-  const [claimResidentId, setClaimResidentId] = useState("");
   const [barangayQuery, setBarangayQuery] = useState("");
   const [barangayOpen, setBarangayOpen] = useState(false);
   // Live barangay list from the backend (public.barangays for Pili). Falls back
@@ -1037,9 +1036,6 @@ export default function NewResidentRegistration() {
           cellphoneNo: form.mobile.trim(),
           barangay: form.barangay,
           zone: form.zone ? Number(form.zone) : undefined,
-          // Optional claim reference: link this account to an existing profile a
-          // health worker already created, instead of creating a duplicate.
-          ...(claimMode && claimResidentId.trim() ? { residentId: claimResidentId.trim() } : {}),
           // Identity metadata so the Health Supervisor can see the selected ID
           // type and the submitted identity documents. The individual files are
           // uploaded separately to the documents API below.
@@ -1256,6 +1252,13 @@ export default function NewResidentRegistration() {
   const canSubmit = documentsSubmittable && !submitting;
   const blockingSlot = isAdultApplicant ? firstBlockingSlot(screening) : null;
 
+  // When the applicant indicates they already have a barangay health record,
+  // switch to the dedicated simplified activation flow. Rendered as a full
+  // replacement so the normal 4-step personal registration is never forced.
+  if (claimMode) {
+    return <ExistingResidentActivation onBack={() => setClaimMode(false)} />;
+  }
+
   return (
     <RegistrationShell
       footer={
@@ -1299,31 +1302,12 @@ export default function NewResidentRegistration() {
                     />
                     <span className="text-[13px] leading-relaxed text-slate-700">
                       <span className="font-semibold text-brand-ink">
-                        Already registered by a Barangay Health Worker or Health Personnel?
+                        I already have a barangay health record.
                       </span>
                       <br />
-                      Tick this if a health worker already created your record. We will link this account to your
-                      existing profile instead of creating a new one.
+                      Enter the Resident ID provided by your Health Supervisor to retrieve your existing record.
                     </span>
                   </label>
-                  {claimMode && (
-                    <div className="mt-3">
-                      <Field label="Resident ID" optional error={errors.residentId}>
-                        <input
-                          type="text"
-                          placeholder="e.g. RES-000123"
-                          value={claimResidentId}
-                          onChange={(e) => setClaimResidentId(e.target.value)}
-                          className={inputCls(errors.residentId)}
-                        />
-                      </Field>
-                      <p className="mt-1 text-[11.5px] text-slate-500">
-                        Enter the Resident ID from your record for an exact match. If you don&apos;t have it, continue —
-                        we&apos;ll match your record using your name and date of birth. Your identity is confirmed before
-                        linking, so your existing health records stay with the same Resident ID.
-                      </p>
-                    </div>
-                  )}
                 </div>
                 <Field label="First Name" required error={errors.firstName}>
                   <input type="text" placeholder="Juan" value={form.firstName} onChange={set("firstName")} className={inputCls(errors.firstName)} />
@@ -1349,6 +1333,7 @@ export default function NewResidentRegistration() {
                 <Field label="Birth Date" required error={errors.dob}>
                   <DatePicker
                     value={form.dob}
+                    typeable
                     max={new Date().toISOString().slice(0, 10)}
                     error={Boolean(errors.dob)}
                     placeholder="Select birth date..."

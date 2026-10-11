@@ -36,6 +36,18 @@ export const getResident = async (req, res) => {
   sendData(res, { resident });
 };
 
+// Invite + link a login account for an EXISTING resident record. Authorization
+// (accounts.create permission) is enforced on the route; the service re-checks
+// the role, barangay scope, and that the record is not already linked.
+export const createResidentAccount = async (req, res) => {
+  const resident = await residentsService.createResidentLoginAccount({
+    id: req.params.id,
+    email: req.body?.email,
+    user: req.user,
+  });
+  sendCreated(res, { resident });
+};
+
 export const updateResident = async (req, res) => {
   const resident = await residentsService.updateResident({
     id: req.params.id,
@@ -59,4 +71,4 @@ export const getMyHealthRecords = async (req, res) => {
   sendData(res, data);
 };
 
-export default { listResidents, createResident, getResident, updateResident, updateMyProfile, getMyHealthRecords };
+export default { listResidents, createResident, getResident, createResidentAccount, updateResident, updateMyProfile, getMyHealthRecords };

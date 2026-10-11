@@ -126,12 +126,20 @@ export function formatServiceSchedule(schedule) {
   return start;
 }
 
-/** "2026-10-15T09:00[:00]" -> "Wed, 15 Oct, 9:00 AM" (registration deadline). */
+/**
+ * "2026-10-15T09:00[:00]" -> "Wed, 15 Oct, 9:00 AM" (registration deadline).
+ *
+ * A midnight (00:00) or date-only deadline is shown as the date alone
+ * ("Wed, 15 Oct") because the backend treats such a deadline as inclusive of
+ * the whole day — registration stays open through that date. Showing
+ * "12:00 AM" here would wrongly imply the window closes at the start of the day.
+ */
 export function formatDeadline(value) {
   if (!value || typeof value !== "string") return "";
   const date = value.slice(0, 10);
   const time = value.slice(11, 16);
   const d = formatPlanDate(date);
   if (!d) return "";
-  return `${d}${time ? `, ${formatTime(time)}` : ""}`;
+  if (!time || time === "00:00") return d;
+  return `${d}, ${formatTime(time)}`;
 }

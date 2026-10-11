@@ -1,24 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { Syringe, FlaskConical, Download, ClipboardCheck, Stethoscope, Loader2 } from "lucide-react";
+import { Syringe, FlaskConical, Download, Stethoscope, Loader2 } from "lucide-react";
 import { residentsApi } from "@/services/api";
 import { downloadHealthRecordPdf } from "@/features/health-records/lib/healthRecordPdf";
+import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
 
-// These sections are sourced from separate modules (immunization, laboratory,
-// PhilPEN) that are not part of the consultation record. They intentionally
-// render an empty state here until those data sources are wired to the resident
-// view; the consultation history + vitals below come from the live API.
+// These sections are sourced from separate modules (immunization, laboratory)
+// that are not part of the consultation record. They intentionally render an
+// empty state here until those data sources are wired to the resident view; the
+// consultation history + vitals below come from the live API.
 const vaccinations = [];
 const labs = [];
-const philpenResults = [];
 const MEDICAL_HISTORY = {};
-
-const RISK_TONES = {
-  Low: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
-  Moderate: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
-  High: "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
-};
 
 const dash = (value) => (value === null || value === undefined || value === "" ? "—" : value);
 
@@ -52,6 +46,9 @@ export default function HealthRecord() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const exportingRef = useRef(false);
+  // Consultation History is consolidated into this page as a tab/subsection
+  // rather than a separate sidebar entry.
+  const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
     let active = true;
@@ -80,6 +77,15 @@ export default function HealthRecord() {
   const latestVitals = useMemo(
     () => (consultations.length ? vitalCards(consultations[0].vitals) : []),
     [consultations],
+  );
+
+  // Pregnancy Status is suppressed only for residents explicitly recorded as
+  // male. Female, "Other", and missing/unknown sex keep the field visible so an
+  // unknown sex is never mistaken for male. Driven by the authoritative profile
+  // `sex`, so it stays correct after load, refresh, and profile updates.
+  const showPregnancyStatus = useMemo(
+    () => shouldShowPregnancyStatus(resident?.sex),
+    [resident?.sex],
   );
 
   /**
@@ -166,33 +172,111 @@ export default function HealthRecord() {
             </div>
           </Card>
 
-          <div className="mb-2 flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-brand-gray uppercase tracking-wide">
-              Latest Vitals{consultations.length ? ` — ${formatDate(consultations[0].date)}` : ""}
-            </h3>
-          </div>
-          <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-            {latestVitals.length === 0 ? (
-              <Card className="p-5 text-sm text-brand-gray xl:col-span-4">No vitals recorded yet.</Card>
-            ) : (
-              latestVitals.map((v) => (
-                <Card key={v.label} className="p-5">
-                  <p className="text-xs text-brand-gray">{v.label}</p>
-                  <p className="font-stat font-bold text-brand-ink text-lg">
-                    {v.value} {v.unit && <span className="text-xs font-normal text-brand-gray">{v.unit}</span>}
-                  </p>
-                </Card>
-              ))
-            )}
+          {/* Section tabs — Consultation History is a subsection of this page. */}
+          <div className="mb-6 flex flex-wrap gap-1 border-b border-brand-border" role="tablist" aria-label="Health record sections">
+            {[
+              { key: "overview", label: "Overview" },
+              { key: "consultations", label: `Consultation History${consultations.length ? ` (${consultations.length})` : ""}` },
+            ].map((tab) => {
+              const active = activeTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`-mb-px rounded-t-btn border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                    active
+                      ? "border-brand-blue text-brand-blue"
+                      : "border-transparent text-brand-gray hover:text-brand-ink"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-5">
-            <Card className="p-6 lg:col-span-2">
+          {activeTab === "overview" ? (
+            <>
+              <div className="mb-2 flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-brand-gray uppercase tracking-wide">
+                  Latest Vitals{consultations.length ? ` — ${formatDate(consultations[0].date)}` : ""}
+                </h3>
+              </div>
+              <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                {latestVitals.length === 0 ? (
+                  <Card className="p-5 text-sm text-brand-gray xl:col-span-4">No vitals recorded yet.</Card>
+                ) : (
+                  latestVitals.map((v) => (
+                    <Card key={v.label} className="p-5">
+                      <p className="text-xs text-brand-gray">{v.label}</p>
+                      <p className="font-stat font-bold text-brand-ink text-lg">
+                        {v.value} {v.unit && <span className="text-xs font-normal text-brand-gray">{v.unit}</span>}
+                      </p>
+                    </Card>
+                  ))
+                )}
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                <Card className="p-6">
+                  <h3 className="font-semibold text-brand-ink mb-4">Medical History &amp; Allergies</h3>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Chronic Conditions</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.chronicConditions || "—"}</span></div>
+                    <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Allergies</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.allergies || "—"}</span></div>
+                    <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Current Medications</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.currentMedications || "—"}</span></div>
+                    {showPregnancyStatus && (
+                      <div className="flex justify-between"><span className="text-brand-gray">Pregnancy Status</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.pregnancyStatus || "—"}</span></div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="p-6">
+                  <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2"><Syringe className="w-4 h-4 text-brand-blue" /> Vaccinations</h3>
+                  <div className="space-y-3">
+                    {vaccinations.length === 0 ? (
+                      <p className="text-sm text-brand-gray">No vaccinations recorded yet.</p>
+                    ) : (
+                      vaccinations.map((v) => (
+                        <div key={v.name} className="flex items-center justify-between text-sm border-b border-brand-border pb-3 last:border-0 last:pb-0">
+                          <div><p className="text-brand-ink font-medium">{v.name}</p><p className="text-brand-gray text-xs">{v.date}</p></div>
+                          <span className="text-xs text-brand-green bg-brand-green/10 px-2 py-1 rounded-full">{v.status}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="p-6">
+                  <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2"><FlaskConical className="w-4 h-4 text-brand-blue" /> Laboratory Results</h3>
+                  <div className="space-y-3">
+                    {labs.length === 0 ? (
+                      <p className="text-sm text-brand-gray">No laboratory results recorded yet.</p>
+                    ) : (
+                      labs.map((l) => (
+                        <div key={l.name} className="flex items-center justify-between text-sm border-b border-brand-border pb-3 last:border-0 last:pb-0">
+                          <div><p className="text-brand-ink font-medium">{l.name}</p><p className="text-brand-gray text-xs">{l.date}</p></div>
+                          <span className="text-brand-ink font-medium">{l.result}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </Card>
+              </div>
+            </>
+          ) : (
+            <Card className="p-6">
               <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2">
                 <Stethoscope className="w-4 h-4 text-brand-blue" /> Consultation History
               </h3>
               {consultations.length === 0 ? (
-                <p className="text-sm text-brand-gray">No consultations recorded yet.</p>
+                <div className="rounded-2xl border border-dashed border-brand-border p-8 text-center">
+                  <Stethoscope className="mx-auto h-8 w-8 text-brand-gray/60" />
+                  <p className="mt-3 text-sm font-medium text-brand-ink">No consultations recorded yet</p>
+                  <p className="mt-1 text-xs text-brand-gray">Your completed consultations will appear here.</p>
+                </div>
               ) : (
                 <div className="space-y-4">
                   {consultations.map((c) => (
@@ -222,78 +306,7 @@ export default function HealthRecord() {
                 </div>
               )}
             </Card>
-
-            <Card className="p-6">
-              <h3 className="font-semibold text-brand-ink mb-4">Medical History & Allergies</h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Chronic Conditions</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.chronicConditions || "—"}</span></div>
-                <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Allergies</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.allergies || "—"}</span></div>
-                <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Current Medications</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.currentMedications || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-brand-gray">Pregnancy Status</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.pregnancyStatus || "—"}</span></div>
-              </div>
-            </Card>
-
-            <Card className="p-6">
-              <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2"><Syringe className="w-4 h-4 text-brand-blue" /> Vaccinations</h3>
-              <div className="space-y-3">
-                {vaccinations.length === 0 ? (
-                  <p className="text-sm text-brand-gray">No vaccinations recorded yet.</p>
-                ) : (
-                  vaccinations.map((v) => (
-                    <div key={v.name} className="flex items-center justify-between text-sm border-b border-brand-border pb-3 last:border-0 last:pb-0">
-                      <div><p className="text-brand-ink font-medium">{v.name}</p><p className="text-brand-gray text-xs">{v.date}</p></div>
-                      <span className="text-xs text-brand-green bg-brand-green/10 px-2 py-1 rounded-full">{v.status}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </Card>
-
-            <Card className="p-6">
-              <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2"><FlaskConical className="w-4 h-4 text-brand-blue" /> Laboratory Results</h3>
-              <div className="space-y-3">
-                {labs.length === 0 ? (
-                  <p className="text-sm text-brand-gray">No laboratory results recorded yet.</p>
-                ) : (
-                  labs.map((l) => (
-                    <div key={l.name} className="flex items-center justify-between text-sm border-b border-brand-border pb-3 last:border-0 last:pb-0">
-                      <div><p className="text-brand-ink font-medium">{l.name}</p><p className="text-brand-gray text-xs">{l.date}</p></div>
-                      <span className="text-brand-ink font-medium">{l.result}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </Card>
-
-            {/* PhilPEN assessment results — read-only, own records only */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2">
-                <ClipboardCheck className="w-4 h-4 text-brand-blue" /> PhilPEN Assessment Results
-              </h3>
-              <div className="space-y-4">
-                {philpenResults.length === 0 ? (
-                  <p className="text-sm text-brand-gray">No PhilPEN assessments recorded yet.</p>
-                ) : (
-                  philpenResults.map((a) => (
-                    <div key={a.date} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-card">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-brand-ink">Assessment Date: {a.date}</p>
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${RISK_TONES[a.risk] || RISK_TONES.Low}`}>
-                          <span className="h-2 w-2 rounded-full bg-current opacity-70" /> {a.risk} Risk
-                        </span>
-                      </div>
-                      <div className="mt-3 space-y-2 text-sm">
-                        <p className="text-brand-gray"><span className="font-medium text-brand-ink">Findings:</span> {a.findings}</p>
-                        <p className="text-brand-gray"><span className="font-medium text-brand-ink">Recommendations:</span> {a.recommendations}</p>
-                        <p className="text-brand-gray"><span className="font-medium text-brand-ink">Follow-up Advice:</span> {a.followUp}</p>
-                      </div>
-                      <p className="mt-3 text-xs text-brand-gray">Status: {a.status}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </Card>
-          </div>
+          )}
         </>
       )}
     </>

@@ -21,6 +21,7 @@ import {
   ageFromDateOnly,
   isFutureDateOnly,
   isPhonePH,
+  normalizePhone,
   parseDateOnly,
 } from '../validators/common.js';
 import { computeBMI } from '../utils/bmi.js';
@@ -718,6 +719,11 @@ export const createResident = async ({
   const birthDate = text(payload.birthDate);
   const sex = text(payload.sex);
   const barangay = text(payload.barangay);
+  const cellphoneNoRaw = text(payload.cellphoneNo);
+  // Store the canonical, separator-free form the DB CHECK
+  // (residents_cellphone_no_format) and the rest of the app expect, so a number
+  // entered as "0917 123 4567" persists as "09171234567".
+  const cellphoneNo = cellphoneNoRaw ? normalizePhone(cellphoneNoRaw) : '';
 
   const errors = [];
 
@@ -754,6 +760,14 @@ export const createResident = async ({
 
   if (!barangay) {
     errors.push('Barangay is required.');
+  }
+
+  // Contact number is OPTIONAL, but when supplied it must be a valid PH mobile.
+  // Previously this was unchecked here, so a number the DB CHECK constraint
+  // rejects (residents_cellphone_no_format) surfaced as an opaque 500 "Could
+  // not create resident" instead of a clear, correctable field error.
+  if (cellphoneNoRaw && !isPhonePH(cellphoneNoRaw)) {
+    errors.push('Contact number must be a valid PH mobile number (e.g. 0917 123 4567).');
   }
 
   if (errors.length) {
@@ -914,9 +928,7 @@ export const createResident = async ({
         permanentAddress: text(
           payload.permanentAddress,
         ),
-        cellphoneNo: text(
-          payload.cellphoneNo,
-        ),
+        cellphoneNo,
         identityNo: text(
           payload.identityNo,
         ),
@@ -982,9 +994,7 @@ export const createResident = async ({
     permanentAddress: text(
       payload.permanentAddress,
     ),
-    cellphoneNo: text(
-      payload.cellphoneNo,
-    ),
+    cellphoneNo,
     identityNo: text(
       payload.identityNo,
     ),
@@ -1067,6 +1077,88 @@ export const getResident = async ({
   };
 };
 
+/**
+ * Invite + link a Supabase Auth login account for an EXISTING resident record.
+ *
+ * This is the authorized staff action behind "Create login account" in the
+ * Resident Directory. It is deliberately narrow and never rebuilds identity:
+ *
+ *   - the caller must hold the account-creation permission (route-enforced) and
+ *     a create-capable role, and must be within the resident's barangay scope;
+ *   - the resident must not already be linked (one resident ↔ one account — the
+ *     DB partial unique index `residents_auth_user_id_unique` backs this);
+ *   - a brand-new Auth user is invited by email and linked via
+ *     `residents.auth_user_id` — the Resident ID, health record number, and all
+ *     medical history are preserved untouched;
+ *   - the account starts Pending Activation and the resident's
+ *     `verification_status` is NEVER changed here (login ≠ verification).
+ */
+export const createResidentLoginAccount = async ({ id, email, user } = {}) => {
+  if (!isCreateRole(user)) {
+    throw ApiError.forbidden('Your role is not permitted to create resident login accounts.');
+  }
+
+  const residentId = String(id ?? '').trim();
+  if (!residentId) {
+    throw ApiError.badRequest('A resident id is required.');
+  }
+
+  const resident = await repository.getResident(residentId);
+  if (!resident) {
+    throw ApiError.notFound('Resident record not found');
+  }
+
+  assertWithinScope(user, resident);
+
+  if (resident.authUserId) {
+    throw ApiError.conflict('This resident already has a linked login account.');
+  }
+
+  const normalizedEmail = String(email ?? '').trim().toLowerCase();
+  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw ApiError.unprocessable('Please correct the highlighted fields.', [
+      'A valid email is required to create a resident login account.',
+    ]);
+  }
+
+  const fullName = [resident.firstName, resident.middleName, resident.lastName, resident.suffix]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const account = await createResidentAuthUser({ email: normalizedEmail, fullName });
+
+  // Link the EXISTING record to the new account. If the link cannot be written
+  // (e.g. the resident was linked concurrently and the unique index rejects it),
+  // roll back the orphaned auth user so a failed attempt leaves no dangling
+  // account, and surface a clear conflict.
+  let linked;
+  try {
+    linked = await repository.updateResident(residentId, {
+      authUserId: account.authUserId,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    try {
+      await getServiceClient().auth.admin.deleteUser(account.authUserId);
+    } catch {
+      // best effort: leave the orphaned auth record for admin review
+    }
+    throw ApiError.conflict(
+      'The login account could not be linked to this resident. It may already be linked. Please refresh and try again.',
+    );
+  }
+
+  await attachAccountStatus([linked]);
+
+  return {
+    ...linked,
+    authUserId: account.authUserId,
+    accountInvited: true,
+  };
+};
+
 export const updateResident = async ({
   id,
   patch = {},
@@ -1134,11 +1226,21 @@ export const updateResident = async ({
       '',
   ).trim();
 
-  updates.cellphoneNo = String(
+  const cellphoneNoInput = String(
     patch.cellphoneNo ??
       existing.cellphoneNo ??
       '',
   ).trim();
+  // Validate before writing so an invalid number returns a clear 422 instead of
+  // the database CHECK (residents_cellphone_no_format) surfacing as a 500. Store
+  // the canonical separator-free form the DB and the app expect.
+  if (cellphoneNoInput && !isPhonePH(cellphoneNoInput)) {
+    throw ApiError.unprocessable(
+      'Please correct the highlighted fields.',
+      ['Contact number must be a valid PH mobile number (e.g. 0917 123 4567).'],
+    );
+  }
+  updates.cellphoneNo = cellphoneNoInput ? normalizePhone(cellphoneNoInput) : '';
 
   updates.philhealthNo = String(
     patch.philhealthNo ??

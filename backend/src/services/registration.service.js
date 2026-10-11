@@ -22,6 +22,11 @@ const RETRYABLE_STATUSES = Object.freeze(['pending', 'unverified', 'rejected']);
 
 const text = (value) => String(value ?? '').trim();
 
+// Permanent internal Resident ID format (e.g. RES-000123). The lookup/activation
+// endpoints validate against this before touching the database.
+const RESIDENT_ID_PATTERN = /^RES-\d{6}$/;
+const normalizeResidentId = (value) => text(value).toUpperCase();
+
 const toResidentResult = (resident) => ({
   id: resident.id,
   healthRecordNo: resident.healthRecordNo,
@@ -358,4 +363,125 @@ export const activateOwnAccount = async ({ user } = {}) => {
   return { activated: false };
 };
 
-export default { registerResident, activateOwnAccount };
+/**
+ * Existing-resident activation — Step 1 lookup.
+ *
+ * Validates the Resident ID format and reports ONLY an eligibility state. It
+ * intentionally returns NO personal information (name, barangay, DOB, health
+ * record) because the applicant has not yet proven their identity. The states:
+ *   - 'eligible'       : an unlinked record exists and can be activated
+ *   - 'already_linked' : a record exists but already has an account (→ login)
+ * A non-existent / malformed ID throws a 4xx with a non-sensitive message.
+ *
+ * This endpoint is public (the applicant has no account yet) and rate-limited.
+ */
+export const lookupExistingResident = async ({ residentId } = {}) => {
+  const id = normalizeResidentId(residentId);
+  if (!RESIDENT_ID_PATTERN.test(id)) {
+    throw ApiError.unprocessable('Enter a valid Resident ID (for example, RES-000123).');
+  }
+  const target = repository.getResident ? await repository.getResident(id) : null;
+  if (!target) {
+    throw ApiError.notFound(
+      'No resident record was found for that Resident ID. Please check the ID your Health Supervisor gave you.',
+    );
+  }
+  if (target.authUserId) {
+    // A record that already has an account is not activatable again.
+    return { status: 'already_linked' };
+  }
+  return { status: 'eligible' };
+};
+
+/**
+ * Existing-resident activation — final link step.
+ *
+ * Links the authenticated (email-verified) account to the EXISTING resident
+ * record identified by Resident ID, after re-checking identity SERVER-SIDE:
+ *   - the Resident ID must match a real, unlinked record, and
+ *   - the submitted date of birth must match the stored record.
+ * A Resident ID alone is never sufficient. The existing record is the source of
+ * truth: no demographic field, barangay, Health Record Number or history is
+ * modified, and no second resident profile is ever created. The link is atomic
+ * (activate_resident_by_id enforces auth_user_id IS NULL) so concurrent
+ * requests cannot double-link. When the matched record is already approved, the
+ * login account is activated (Account Status → active) without ever changing
+ * the verification status.
+ */
+export const activateExistingResident = async ({ user, residentId, birthDate } = {}) => {
+  if (!SELF_ROLES.includes(user?.role)) {
+    throw ApiError.forbidden('Only a resident account may activate an existing record.');
+  }
+  const id = normalizeResidentId(residentId);
+  if (!RESIDENT_ID_PATTERN.test(id)) {
+    throw ApiError.unprocessable('Enter a valid Resident ID (for example, RES-000123).');
+  }
+  const dob = text(birthDate);
+  if (!dob || !parseDateOnly(dob)) {
+    throw ApiError.unprocessable('Enter the date of birth on your existing record to verify your identity.');
+  }
+
+  // Idempotent recovery: if this account is already linked (e.g. a retry after
+  // a failure between auth creation and linkage), do not create another link.
+  const already = await repository.getResidentByAuthUserId(user.id);
+  if (already) {
+    if (already.id === id) {
+      await activateIfVerified(already, user.id);
+      return { ...toResidentResult(already), alreadyLinked: false };
+    }
+    throw ApiError.conflict('A resident record is already linked to this account.');
+  }
+
+  const target = repository.getResident ? await repository.getResident(id) : null;
+  if (!target) {
+    throw ApiError.notFound('No resident record was found for that Resident ID.');
+  }
+  if (target.authUserId && target.authUserId !== user.id) {
+    throw ApiError.conflict(
+      'This resident record already has an account. Please log in, or use account recovery if you have forgotten your password.',
+    );
+  }
+  if (target.authUserId === user.id) {
+    await activateIfVerified(target, user.id);
+    return { ...toResidentResult(target), alreadyLinked: false };
+  }
+
+  // Identity gate: the Resident ID alone is not enough — the date of birth must
+  // match the stored record. (Email ownership was already proven by the
+  // Supabase OTP that created this authenticated session.)
+  const dobMatches = text(target.birthDate) !== '' && text(target.birthDate) === dob;
+  if (!dobMatches) {
+    throw ApiError.unprocessable('The information provided does not match that resident record. Please check your date of birth.');
+  }
+
+  // Atomic, race-safe link.
+  let linked = null;
+  if (repository.activateResidentById) {
+    linked = await repository.activateResidentById({ authUserId: user.id, residentId: id, birthDate: dob });
+    if (!linked) {
+      // The record changed between the read and the claim. Resolve why.
+      const after = repository.getResident ? await repository.getResident(id) : null;
+      if (after?.authUserId && after.authUserId !== user.id) {
+        throw ApiError.conflict(
+          'This resident record already has an account. Please log in, or use account recovery if you have forgotten your password.',
+        );
+      }
+      throw ApiError.conflict('This resident record could not be activated. Please try again or contact your Health Supervisor.');
+    }
+  } else if (repository.updateResident) {
+    linked = await repository.updateResident(id, { authUserId: user.id, updatedAt: new Date().toISOString() });
+  } else {
+    linked = { ...target, authUserId: user.id };
+  }
+
+  const result = linked || { ...target, authUserId: user.id };
+  await activateIfVerified(result, user.id);
+  try {
+    await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
+  } catch {
+    /* best-effort: do not block linking if confirmation fails */
+  }
+  return { ...toResidentResult(result), alreadyLinked: false };
+};
+
+export default { registerResident, activateOwnAccount, lookupExistingResident, activateExistingResident };

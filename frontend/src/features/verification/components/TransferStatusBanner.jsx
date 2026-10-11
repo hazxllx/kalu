@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BadgeCheck, Clock, FileText, ShieldAlert } from "lucide-react";
+import { ArrowRight, BadgeCheck, Clock, FileText, RotateCcw, ShieldAlert } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import { api } from "@/services/api";
 
@@ -31,6 +32,14 @@ const META = {
     chip: "text-emerald-700 bg-emerald-100",
     message: "Your residency transfer has been approved. Your current barangay has been updated and your existing health record remains associated with your account.",
     Icon: BadgeCheck,
+  },
+  transfer_resubmission: {
+    label: "Corrections Needed",
+    tone: "border-sky-200 bg-sky-50",
+    iconWrap: "border-sky-200 bg-white text-sky-700",
+    chip: "text-sky-700 bg-sky-100",
+    message: "The health office needs corrections before your residency transfer can be approved. Review the instructions below and resubmit your request.",
+    Icon: RotateCcw,
   },
   transfer_rejected: {
     label: "Transfer Rejected",
@@ -106,6 +115,22 @@ export default function TransferStatusBanner() {
               <p className="mt-3 rounded-lg border border-brand-danger/20 bg-white px-3 py-2 text-xs text-brand-ink">
                 <span className="font-semibold">Reason:</span> {transfer.rejectionReason}
               </p>
+            )}
+
+            {transfer.residencyStatus === "transfer_resubmission" && (
+              <div className="mt-3">
+                {transfer.resubmissionInstructions && (
+                  <p className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs text-brand-ink">
+                    <span className="font-semibold">Instructions:</span> {transfer.resubmissionInstructions}
+                  </p>
+                )}
+                <Link
+                  to="/register/transfer"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-sky-700 px-3 py-2 text-xs font-bold text-white hover:bg-sky-800"
+                >
+                  Provide corrections & resubmit <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
             )}
 
             {healthRecords.length > 0 && (

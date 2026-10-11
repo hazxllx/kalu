@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { CalendarClock, ShieldCheck, Stethoscope, Activity } from "lucide-react";
+import { CalendarClock, ShieldCheck, Stethoscope, Activity, CalendarDays, Clock, MapPin, ArrowRight } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
-import { residentsApi, residentFollowUpsApi, referralsApi } from "@/services/api";
+import { residentsApi, residentFollowUpsApi, referralsApi, visitPlansApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
+import { availabilityLine, formatServiceSchedule, formatWeekdays, formatWindow, formatDeadline } from "@/features/health-services/lib/visitPlanFormat";
 
 const timelineColor = {
   green: "bg-brand-green", accent: "bg-brand-accent", blue: "bg-brand-blue",
@@ -33,6 +35,57 @@ const riskTone = (risk) => {
   return "bg-brand-green/10 text-brand-green";
 };
 
+// The resident Health Services directory — the single, backend-driven source of
+// truth for registration. Dashboard cards deep-link here so the resident can see
+// requirements, schedule and deadline, then register.
+const HEALTH_SERVICES_PATH = "/app/resident/health-services";
+
+const STATE_STYLES = {
+  Registered: "bg-brand-blue/10 text-brand-blue",
+  Attended: "bg-brand-green/10 text-brand-green",
+  Missed: "bg-brand-danger/10 text-brand-danger",
+  Cancelled: "bg-slate-100 text-slate-500",
+  Available: "bg-brand-green/10 text-brand-green",
+  Upcoming: "bg-brand-yellow/15 text-[#B07E00]",
+  Closed: "bg-slate-100 text-slate-500",
+};
+
+/**
+ * Derive the resident-facing state of one service from the authoritative backend
+ * fields only. A resident's own plan status wins; otherwise the server's
+ * `availability` result decides open/closed. "Upcoming" is shown when the service
+ * is open but its configured start date is still in the future. Nothing here is
+ * inferred from the service name, and capacity/"Full" is never fabricated (the
+ * visit-plan model tracks no capacity).
+ */
+const deriveServiceState = (svc) => {
+  const planStatus = svc?.plan?.status || null;
+  if (planStatus) {
+    return { label: planStatus, tone: STATE_STYLES[planStatus] || STATE_STYLES.Registered, note: "" };
+  }
+  const avail = availabilityLine(svc);
+  if (avail.open) {
+    const start = svc?.schedule?.startDate;
+    const upcoming = start && start > todayIso();
+    return {
+      label: upcoming ? "Upcoming" : "Available",
+      tone: upcoming ? STATE_STYLES.Upcoming : STATE_STYLES.Available,
+      note: avail.text,
+    };
+  }
+  return { label: "Closed", tone: STATE_STYLES.Closed, note: avail.text };
+};
+
+/** One-line schedule summary from the real configured fields, or "". */
+const scheduleSummary = (svc) => {
+  const dated = formatServiceSchedule(svc?.schedule);
+  if (dated) return dated;
+  const days = formatWeekdays(svc?.weekdays || []);
+  const window = formatWindow(svc?.windowStart, svc?.windowEnd);
+  if (days && window) return `${days} · ${window}`;
+  return days || window || "";
+};
+
 export default function ResidentDashboard() {
   const { user } = useAuth();
 
@@ -40,6 +93,8 @@ export default function ResidentDashboard() {
   const [health, setHealth] = useState(null); // { resident, riskLevel, lastConsultationDate, consultations }
   const [followUps, setFollowUps] = useState([]);
   const [referrals, setReferrals] = useState([]);
+  const [services, setServices] = useState(null); // null = not yet loaded; [] = loaded, none offered
+  const [servicesError, setServicesError] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -50,12 +105,28 @@ export default function ResidentDashboard() {
       residentsApi.myHealthRecords(),
       residentFollowUpsApi.list(),
       referralsApi.list(),
+      // Barangay-scoped, backend-authoritative services directory. Scope,
+      // eligibility and availability are all enforced server-side (and mirrored
+      // by Supabase RLS); the client sends no barangay/resident id.
+      visitPlansApi.directory(),
     ])
-      .then(([healthRes, followUpRes, referralRes]) => {
+      .then(([healthRes, followUpRes, referralRes, servicesRes]) => {
         if (!active) return;
         if (healthRes.status === "fulfilled") setHealth(healthRes.value || null);
         if (followUpRes.status === "fulfilled") setFollowUps(followUpRes.value?.rows || []);
         if (referralRes.status === "fulfilled") setReferrals(referralRes.value?.rows || referralRes.value?.records || []);
+        if (servicesRes.status === "fulfilled") {
+          const facilities = servicesRes.value?.facilities || [];
+          // Flatten the facility groups into a single ordered list, carrying the
+          // resolved facility name onto each service for display.
+          setServices(
+            facilities.flatMap((f) =>
+              (f.services || []).map((svc) => ({ ...svc, facilityName: svc.facilityName || f.name })),
+            ),
+          );
+        } else {
+          setServicesError(true);
+        }
       })
       .finally(() => active && setLoading(false));
     return () => { active = false; };
@@ -148,44 +219,103 @@ export default function ResidentDashboard() {
       </div>
 
       <Card className="mt-6 p-4 sm:p-6">
-        <div className="flex items-center gap-3 mb-4 sm:mb-6">
-          <div className="w-10 h-10 rounded-xl bg-brand-blue/10 flex items-center justify-center">
-            <Activity className="w-5 h-5 text-brand-blue" strokeWidth={1.8} />
+        <div className="flex items-start justify-between gap-3 mb-4 sm:mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-brand-blue/10 flex items-center justify-center">
+              <Activity className="w-5 h-5 text-brand-blue" strokeWidth={1.8} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Ongoing Health Services</h3>
+              <p className="text-sm text-brand-gray">Services available to your barangay</p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-semibold text-brand-ink text-sm sm:text-base">Ongoing Health Services</h3>
-            <p className="text-sm text-brand-gray">Services currently available at the health center</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {[
-            "Medical Consultation",
-            "Dental Services",
-            "Immunization",
-            "Risk Assessment / Visual Acuity / PWD Screening",
-            "Distribution of Hypertension / Diabetic Medication",
-            "Cervical Screening",
-            "Nutrition Operation Timbang",
-            "Nutrition Deworming",
-            "Nutrition Micronutrient Supplement",
-            "TB Program",
-            "Family Planning",
-            "Pre-Natal",
-            "Adolescent Health",
-            "HIV Screening (as scheduled)",
-            "Anti-Rabies Vaccination"
-          ].map((service, i) => (
-            <motion.div
-              key={service}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.03 }}
-              className="rounded-lg border border-brand-border bg-brand-bg p-3 text-sm text-brand-ink hover:border-brand-blue/30 transition-colors"
+          {services && services.length > 0 && (
+            <Link
+              to={HEALTH_SERVICES_PATH}
+              className="hidden sm:inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline shrink-0"
             >
-              {service}
-            </motion.div>
-          ))}
+              View all <ArrowRight className="w-4 h-4" strokeWidth={1.8} />
+            </Link>
+          )}
         </div>
+
+        {loading && (
+          <p className="text-sm text-brand-gray py-6 text-center">Loading available services…</p>
+        )}
+
+        {!loading && servicesError && (
+          <p className="text-sm text-brand-gray py-6 text-center">
+            We couldn't load your health services right now. Please refresh to try again.
+          </p>
+        )}
+
+        {!loading && !servicesError && services && services.length === 0 && (
+          <div className="rounded-lg border border-dashed border-brand-border bg-brand-bg px-5 py-8 text-center">
+            <p className="text-sm font-medium text-brand-ink">
+              No health services are currently available for your barangay.
+            </p>
+            <p className="mt-1 text-sm text-brand-gray">Please check again later for upcoming services.</p>
+          </div>
+        )}
+
+        {!loading && !servicesError && services && services.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {services.map((svc, i) => {
+              const st = deriveServiceState(svc);
+              const schedule = scheduleSummary(svc);
+              const registerBy = formatDeadline(svc?.schedule?.registrationDeadline);
+              return (
+                <motion.div
+                  key={svc.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                >
+                  <Link
+                    to={HEALTH_SERVICES_PATH}
+                    className="group block h-full rounded-lg border border-brand-border bg-brand-bg p-3 transition-colors hover:border-brand-blue/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium text-brand-ink leading-snug line-clamp-2">{svc.name}</p>
+                      <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.tone}`}>
+                        {st.label}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 space-y-1 text-[12px] text-brand-gray">
+                      {svc.category && (
+                        <p className="inline-flex items-center rounded border border-brand-border bg-white px-1.5 py-0.5 text-[11px] font-medium text-brand-gray">
+                          {svc.category}
+                        </p>
+                      )}
+                      {svc.facilityName && (
+                        <p className="flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 shrink-0 text-brand-blue" strokeWidth={1.8} />
+                          <span className="truncate">{svc.facilityName}</span>
+                        </p>
+                      )}
+                      {schedule && (
+                        <p className="flex items-center gap-1.5">
+                          <CalendarDays className="w-3.5 h-3.5 shrink-0 text-brand-blue" strokeWidth={1.8} />
+                          <span className="truncate">{schedule}</span>
+                        </p>
+                      )}
+                      {registerBy && (
+                        <p className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 shrink-0 text-brand-blue" strokeWidth={1.8} />
+                          <span className="truncate">Register by {registerBy}</span>
+                        </p>
+                      )}
+                      {st.note && !schedule && (
+                        <p className="text-slate-400">{st.note}</p>
+                      )}
+                    </div>
+                  </Link>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mt-6">

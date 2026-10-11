@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "test": "node --test test/*.test.js tests/*.test.js",
     "verify:live": "node scripts/verify-live-workflows.mjs",
     "provision:accounts": "node scripts/provision-official-accounts.mjs --apply"
   },
