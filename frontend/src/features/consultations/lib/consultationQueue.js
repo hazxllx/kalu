@@ -72,9 +72,54 @@ export function filterConsultationPatients(patients, { search = "", status = "Al
   });
 }
 
+/**
+ * Case-insensitive match of a check-up row against a free-text query that may
+ * be a patient name, a patient/visit ID, or the recorded reason for visit.
+ * An empty query matches everything. Tolerant of malformed input.
+ *
+ * @param {{patient?: string, id?: string, residentId?: string, reason?: string, triage?: {chiefComplaint?: string}}} patient
+ * @param {string} [query]
+ * @returns {boolean}
+ */
+export function matchesCheckupSearch(patient, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (q === "") return true;
+  const fields = [
+    patient?.patient,
+    patient?.id,
+    patient?.residentId,
+    patient?.reason,
+    patient?.triage?.chiefComplaint,
+  ];
+  return fields.some((f) => String(f ?? "").toLowerCase().includes(q));
+}
+
+/**
+ * True when the row's scheduled visit date falls on the same calendar day as
+ * `now` (defaults to the current date). Reads `visitDate` first, then the
+ * triage date. Tolerant of missing or unparseable dates (returns false).
+ *
+ * @param {{visitDate?: string, triage?: {date?: string}}} patient
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+export function isScheduledToday(patient, now = new Date()) {
+  const raw = patient?.visitDate || patient?.triage?.date || "";
+  if (!raw) return false;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return false;
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
 export default {
   ACTIVE_CONSULT_STATUSES,
   isActiveConsult,
   partitionConsultationQueue,
   filterConsultationPatients,
+  matchesCheckupSearch,
+  isScheduledToday,
 };

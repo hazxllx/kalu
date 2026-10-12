@@ -5,7 +5,6 @@ import PageHeader from "@/components/common/PageHeader";
 import {
   ArrowRight,
   Search,
-  Clock,
   HeartPulse,
   Users,
   Baby,
@@ -23,8 +22,8 @@ import { programFormsApi, maternalApi, tclApi } from "@/services/api";
  * Target Client List workspace — the single entry point reached from
  * Records → TCL. It lists every available official TCL grouped by health
  * program, with a short description, a real record count (when it loads) and an
- * "Open TCL" action into the actual working form. Source-dependent forms with
- * no official workbook yet are shown as awaiting their reference file.
+ * "Open TCL" action into the actual working form. Programs without a working
+ * form yet are shown as not yet available, without any placeholder panel.
  */
 
 // countKey: how to fetch a real record count (null = no count shown).
@@ -36,9 +35,9 @@ const GROUPS = [
       { id: "maternal", name: "Prenatal and Postpartum", icon: HeartPulse, to: "../maternal-tcl", countKey: "maternal", status: "available", requiresRole: "health_supervisor",
         desc: "Pregnant and postpartum mothers — LMP/EDC, prenatal check-ups, immunization, laboratory screening, delivery and postpartum care." },
       { id: "family-planning", name: "Family Planning", icon: Users, status: "unavailable",
-        desc: "Family planning clients, method and follow-up visits.", blocked: "Awaiting the official Family Planning TCL workbook (pp-055-056-FP-TCL)." },
+        desc: "Family planning clients, method and follow-up visits." },
       { id: "child-care", name: "Child Care", icon: Baby, status: "unavailable",
-        desc: "Child-health target client lists (0–11 mos, under-5, 5–9, 10–19, sick child).", blocked: "Awaiting the official Child Care TCL workbook (CC-TCL-FHO)." },
+        desc: "Child-health target client lists (0–11 mos, under-5, 5–9, 10–19, sick child)." },
     ],
   },
   {
@@ -124,12 +123,13 @@ export default function TclWorkspace() {
   return (
     <>
       <PageHeader
+        dense
         crumbs={["Records"]}
         title="Target Client Lists"
         subtitle="Access health program records, register clients, and manage follow-ups."
       />
 
-      <Card className="mb-5 p-4">
+      <Card className="mb-4 p-3">
         <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2">
           <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
           <input
@@ -150,11 +150,11 @@ export default function TclWorkspace() {
           <p className="text-xs text-brand-gray">Try a different program name or clear the search.</p>
         </Card>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {groups.map((group) => (
             <section key={group.title}>
               {/* Uppercase, letter-spaced label with a thin rule across the remaining width. */}
-              <div className="mb-3 flex items-center gap-3">
+              <div className="mb-2.5 flex items-center gap-3">
                 <h2 className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-gray">{group.title}</h2>
                 <span className="h-px flex-1 bg-brand-border" aria-hidden="true" />
               </div>
@@ -164,29 +164,28 @@ export default function TclWorkspace() {
                   const count = it.countKey ? counts[it.countKey] : undefined;
                   const gatedOut = it.requiresRole && role !== it.requiresRole;
                   const unavailable = it.status === "unavailable" || gatedOut;
-                  const blockedMsg = gatedOut
+                  // Gated items keep their short "where to open it" guidance; truly
+                  // unavailable programs just read as not yet available (no workbook
+                  // notice, no placeholder panel).
+                  const note = gatedOut
                     ? "Open from Health Supervisor › Records › M1 · Maternal Record."
-                    : it.blocked;
+                    : "Not yet available";
                   const Icon = it.icon || FileSpreadsheet;
                   return (
-                    <Card key={it.id} className="flex h-full flex-col p-4 transition-colors hover:border-brand-rule">
-                      {/* Icon + status/count badge */}
+                    <Card key={it.id} className="flex h-full flex-col p-3.5 transition-colors hover:border-brand-rule">
+                      {/* Icon + count badge (counts only — no workbook/status badge) */}
                       <div className="flex items-start justify-between gap-3">
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn bg-brand-light text-brand-blue">
                           <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
                         </span>
-                        {unavailable ? (
-                          <span className="inline-flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-2 py-0.5 text-[11px] font-medium text-brand-gray">
-                            Awaiting workbook
-                          </span>
-                        ) : typeof count === "number" ? (
+                        {!unavailable && typeof count === "number" ? (
                           <span
                             className="inline-flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-2 py-0.5 text-[11px] font-medium font-stat text-brand-gray"
                             title={`Saved records ${scopeLabel}`}
                           >
                             {count} record{count === 1 ? "" : "s"}
                           </span>
-                        ) : count === "error" ? (
+                        ) : !unavailable && count === "error" ? (
                           <span className="inline-flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-2 py-0.5 text-[11px] font-medium text-brand-gray">
                             Count unavailable
                           </span>
@@ -194,16 +193,13 @@ export default function TclWorkspace() {
                       </div>
 
                       {/* Title + description */}
-                      <h3 className="mt-3 text-sm font-semibold leading-snug text-brand-ink">{it.name}</h3>
-                      <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-brand-gray">{it.desc}</p>
+                      <h3 className="mt-2.5 text-sm font-semibold leading-snug text-brand-ink">{it.name}</h3>
+                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-brand-gray">{it.desc}</p>
 
-                      {/* Primary action / unavailable note, aligned to the bottom */}
-                      <div className="mt-auto pt-4">
+                      {/* Primary action / not-yet-available note, aligned to the bottom */}
+                      <div className="mt-auto pt-3">
                         {unavailable ? (
-                          <div className="flex items-start gap-1.5 rounded-btn border border-brand-border bg-brand-paper px-2.5 py-1.5 text-[11px] leading-snug text-brand-gray">
-                            <Clock className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                            <span>{blockedMsg}</span>
-                          </div>
+                          <span className="text-[11px] font-medium leading-snug text-brand-gray">{note}</span>
                         ) : (
                           <Link
                             to={it.to}

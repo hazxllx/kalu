@@ -454,6 +454,13 @@ const medicineFromRow = (row) => (row
     dosageForm: row.dosage_form || '',
     category: row.category || '',
     source: row.source || 'local',
+    indication: row.indication || '',
+    safetyNotes: row.safety_notes || '',
+    contraindications: row.contraindications || '',
+    prescriptionRequirement: row.prescription_requirement || 'rx',
+    dosageInstructions: row.dosage_instructions || '',
+    dosageVerifiedBy: row.dosage_verified_by || null,
+    dosageVerifiedAt: row.dosage_verified_at || null,
     active: row.active !== false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -468,6 +475,13 @@ const medicineToRow = (medicine) => {
   if (medicine.dosageForm !== undefined) row.dosage_form = medicine.dosageForm;
   if (medicine.category !== undefined) row.category = medicine.category;
   if (medicine.source !== undefined) row.source = medicine.source;
+  if (medicine.indication !== undefined) row.indication = medicine.indication;
+  if (medicine.safetyNotes !== undefined) row.safety_notes = medicine.safetyNotes;
+  if (medicine.contraindications !== undefined) row.contraindications = medicine.contraindications;
+  if (medicine.prescriptionRequirement !== undefined) row.prescription_requirement = medicine.prescriptionRequirement;
+  if (medicine.dosageInstructions !== undefined) row.dosage_instructions = medicine.dosageInstructions;
+  if (medicine.dosageVerifiedBy !== undefined) row.dosage_verified_by = medicine.dosageVerifiedBy;
+  if (medicine.dosageVerifiedAt !== undefined) row.dosage_verified_at = medicine.dosageVerifiedAt;
   if (medicine.active !== undefined) row.active = medicine.active;
   if (medicine.createdBy !== undefined) row.created_by = medicine.createdBy;
   return row;
@@ -2212,61 +2226,6 @@ export const supabaseRepository = {
       .maybeSingle();
     throwOnError(error, 'Could not update medicine');
     return medicineFromRow(data);
-  },
-
-  async listMedicineAvailability(medicineId) {
-    const supabase = getServiceClient();
-    const { data, error } = await supabase
-      .from('medicine_facility_availability')
-      .select('*, facility:facilities(name, type)')
-      .eq('medicine_id', medicineId);
-    throwOnError(error, 'Could not load medicine availability');
-    return (data || []).map((row) => ({
-      medicineId: row.medicine_id,
-      facilityId: row.facility_id,
-      facility: row.facility?.name || '',
-      facilityType: row.facility?.type || '',
-      available: row.available !== false,
-      note: row.note || '',
-    }));
-  },
-
-  async listMedicineAvailabilityForFacility(facilityId) {
-    const supabase = getServiceClient();
-    const { data, error } = await supabase
-      .from('medicine_facility_availability')
-      .select('*')
-      .eq('facility_id', facilityId);
-    throwOnError(error, 'Could not load facility medicine availability');
-    return (data || []).map((row) => ({
-      medicineId: row.medicine_id,
-      facilityId: row.facility_id,
-      available: row.available !== false,
-      note: row.note || '',
-    }));
-  },
-
-  async upsertMedicineAvailability({ medicineId, facilityId, available, note, updatedBy }) {
-    const supabase = getServiceClient();
-    const { data, error } = await supabase
-      .from('medicine_facility_availability')
-      .upsert({
-        medicine_id: medicineId,
-        facility_id: facilityId,
-        available: Boolean(available),
-        note: note || '',
-        updated_by: updatedBy || null,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'medicine_id,facility_id' })
-      .select('*')
-      .single();
-    throwOnError(error, 'Could not save medicine availability');
-    return {
-      medicineId: data.medicine_id,
-      facilityId: data.facility_id,
-      available: data.available !== false,
-      note: data.note || '',
-    };
   },
 
   async listFacilities({ municipalityId = null } = {}) {

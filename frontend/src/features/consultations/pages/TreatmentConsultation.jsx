@@ -811,7 +811,6 @@ export default function TreatmentConsultation() {
               <MedicineSelector
                 value={formData.medications}
                 onChange={(medications) => setFormData((prev) => ({ ...prev, medications }))}
-                facilityId={user?.facilityId || ""}
               />
             </div>
             <div>

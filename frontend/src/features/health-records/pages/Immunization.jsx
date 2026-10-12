@@ -12,7 +12,9 @@ const VACCINES = [
   "BCG", "Hepatitis B", "Pentavalent (DPT-HepB-Hib)", "OPV", "IPV", "PCV", "MMR", "Measles",
   "Tetanus Toxoid", "COVID-19", "Influenza", "Other",
 ];
+const DOSES = ["1st dose", "2nd dose", "3rd dose", "Booster", "Annual", "Single dose", "Other"];
 const STATUSES = ["Due", "Completed", "Missed"];
+const NOTES_MAX = 500;
 
 const formatDate = (iso) => {
   if (!iso) return "—";
@@ -27,6 +29,30 @@ const inputCls = (error) =>
   `mt-1.5 w-full bg-white border rounded-btn px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue ${
     error ? "border-brand-danger" : "border-brand-border"
   }`;
+const labelCls = "text-sm font-medium text-brand-ink";
+const errorCls = "mt-1 text-xs text-brand-danger";
+const sectionTitleCls = "text-xs font-semibold uppercase tracking-wide text-brand-gray";
+
+/** Compact resident summary (Resident ID · Age · Sex · Barangay). */
+function ResidentSummary({ resident }) {
+  if (!resident) return null;
+  const cells = [
+    ["Resident ID", resident.id],
+    ["Age", resident.age !== undefined && resident.age !== null && resident.age !== "" ? `${resident.age} yrs` : "—"],
+    ["Sex", resident.sex || resident.gender || "—"],
+    ["Barangay", resident.barangay || "—"],
+  ];
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-3 rounded-btn border border-brand-border bg-brand-bg/60 p-3.5 sm:grid-cols-4">
+      {cells.map(([label, value]) => (
+        <div key={label} className="min-w-0">
+          <p className="text-[11px] uppercase tracking-wide text-brand-gray">{label}</p>
+          <p className="mt-0.5 truncate text-sm font-medium text-brand-ink">{value || "—"}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** persisted immunizations row (snake_case) → view shape. */
 const mapRecord = (row) => ({
@@ -64,6 +90,26 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
   };
 
+  // Lock background scroll and close on Escape (matches the shared modal pattern).
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  // Resident shown in the compact summary: the picked one (create) or the one
+  // resolved from the live directory by id (edit).
+  const summaryResident = useMemo(() => {
+    if (!isEdit) return resident;
+    const live = residents.find((r) => r.id === initial.residentId);
+    return live || { id: initial.residentId, name: initial.residentName, barangay: initial.barangay };
+  }, [isEdit, resident, residents, initial]);
+
   const validate = () => {
     const next = {};
     if (!isEdit && !resident) next.resident = "Please select a resident.";
@@ -75,80 +121,113 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className="max-h-[92vh] w-full max-w-lg overflow-y-auto">
-        <div className="p-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">{isEdit ? "Edit Immunization" : "Record Immunization"}</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">Vaccination details for the resident.</p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+      <Card className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-6 py-4">
+          <div>
+            <h3 className="text-lg font-semibold text-brand-ink">{isEdit ? "Edit Immunization" : "Record Immunization"}</h3>
+            <p className="mt-0.5 text-sm text-brand-gray">Vaccination details for the resident.</p>
           </div>
+          <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+        </div>
 
-          <div className="space-y-4">
-            {isEdit ? (
-              <div className="rounded-btn bg-brand-bg px-3.5 py-2.5">
-                <p className="text-[11px] uppercase tracking-wide text-brand-gray">Resident</p>
-                <p className="mt-0.5 text-sm font-medium text-brand-ink">{initial.residentName}</p>
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="space-y-6">
+            {/* Resident Information */}
+            <section>
+              <p className={sectionTitleCls}>Resident Information</p>
+              <div className="mt-3">
+                {isEdit ? (
+                  <div className="rounded-btn border border-brand-border bg-brand-bg/60 px-3.5 py-2.5">
+                    <p className="text-[11px] uppercase tracking-wide text-brand-gray">Resident</p>
+                    <p className="mt-0.5 text-sm font-medium text-brand-ink">{initial.residentName}</p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className={labelCls}>Resident <span className="text-brand-danger">*</span></label>
+                    <div className="mt-1.5">
+                      <ResidentSearchSelect
+                        residents={residents}
+                        value={resident}
+                        onChange={onSelectResident}
+                        placeholder="Search resident by name or ID..."
+                      />
+                    </div>
+                    {errors.resident && <p className={errorCls}>{errors.resident}</p>}
+                  </div>
+                )}
+                <ResidentSummary resident={summaryResident} />
               </div>
-            ) : (
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Resident <span className="text-brand-danger">*</span></label>
-                <div className="mt-1.5">
-                  <ResidentSearchSelect residents={residents} value={resident} onChange={onSelectResident} />
+            </section>
+
+            {/* Vaccination Details */}
+            <section className="border-t border-brand-border pt-5">
+              <p className={sectionTitleCls}>Vaccination Details</p>
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={labelCls}>Vaccine <span className="text-brand-danger">*</span></label>
+                  <select value={form.vaccine} onChange={(e) => set("vaccine")(e.target.value)} className={`${inputCls(errors.vaccine)} cursor-pointer`}>
+                    {VACCINES.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  {errors.vaccine && <p className={errorCls}>{errors.vaccine}</p>}
                 </div>
-                {errors.resident && <p className="mt-1 text-xs text-brand-danger">{errors.resident}</p>}
+                <div>
+                  <label className={labelCls}>Dose</label>
+                  <select value={form.dose} onChange={(e) => set("dose")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    <option value="">Select dose…</option>
+                    {form.dose && !DOSES.includes(form.dose) && <option value={form.dose}>{form.dose}</option>}
+                    {DOSES.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Date Administered{form.status === "Completed" && <span className="text-brand-danger"> *</span>}</label>
+                  <input type="date" value={form.administeredDate} onChange={(e) => set("administeredDate")(e.target.value)} className={inputCls(errors.administeredDate)} />
+                  {errors.administeredDate && <p className={errorCls}>{errors.administeredDate}</p>}
+                </div>
+                <div>
+                  <label className={labelCls}>Next Dose <span className="text-brand-gray">(optional)</span></label>
+                  <input type="date" value={form.nextDose} onChange={(e) => set("nextDose")(e.target.value)} className={inputCls()} />
+                </div>
+                <div>
+                  <label className={labelCls}>Provider</label>
+                  <input type="text" value={form.provider} onChange={(e) => set("provider")(e.target.value)} placeholder="e.g. Midwife" className={inputCls()} />
+                </div>
+                <div>
+                  <label className={labelCls}>Status</label>
+                  <select value={form.status} onChange={(e) => set("status")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                    {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className={labelCls}>Notes <span className="text-brand-gray">(optional)</span></label>
+                    <span className="text-xs text-brand-gray">{(form.notes || "").length}/{NOTES_MAX}</span>
+                  </div>
+                  <textarea
+                    rows={3}
+                    maxLength={NOTES_MAX}
+                    value={form.notes}
+                    onChange={(e) => set("notes")(e.target.value)}
+                    placeholder="Additional information..."
+                    className={`${inputCls()} resize-none`}
+                  />
+                </div>
               </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Vaccine <span className="text-brand-danger">*</span></label>
-                <select value={form.vaccine} onChange={(e) => set("vaccine")(e.target.value)} className={`${inputCls(errors.vaccine)} cursor-pointer`}>
-                  {VACCINES.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Dose</label>
-                <input type="text" value={form.dose} onChange={(e) => set("dose")(e.target.value)} placeholder="e.g. 1st dose" className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Date Administered</label>
-                <input type="date" value={form.administeredDate} onChange={(e) => set("administeredDate")(e.target.value)} className={inputCls(errors.administeredDate)} />
-                {errors.administeredDate && <p className="mt-1 text-xs text-brand-danger">{errors.administeredDate}</p>}
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Next Dose (optional)</label>
-                <input type="date" value={form.nextDose} onChange={(e) => set("nextDose")(e.target.value)} className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Provider</label>
-                <input type="text" value={form.provider} onChange={(e) => set("provider")(e.target.value)} placeholder="e.g. Midwife" className={inputCls()} />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Status</label>
-                <select value={form.status} onChange={(e) => set("status")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                  {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-brand-ink">Notes</label>
-              <textarea rows={3} value={form.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Additional information..." className={`${inputCls()} resize-none`} />
-            </div>
+            </section>
           </div>
+        </div>
 
-          <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
-            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-            <button
-              disabled={saving}
-              onClick={() => { if (validate()) onSave(form); }}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-            >
-              <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : isEdit ? "Save Changes" : "Save Record"}
-            </button>
-          </div>
+        {/* Fixed footer */}
+        <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
+          <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
+          <button
+            disabled={saving}
+            onClick={() => { if (validate()) onSave(form); }}
+            className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+          >
+            <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : isEdit ? "Save Changes" : "Save Record"}
+          </button>
         </div>
       </Card>
     </div>
@@ -186,9 +265,12 @@ export default function Immunization() {
           rows
             .map((r) => ({
               id: r.id,
-              name: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
+              name: r.name || [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
               barangay: r.barangay || "",
-              age: r.birthDate ? new Date().getFullYear() - new Date(r.birthDate).getFullYear() : undefined,
+              sex: r.sex || r.gender || "",
+              age:
+                r.age ??
+                (r.birthDate ? new Date().getFullYear() - new Date(r.birthDate).getFullYear() : undefined),
             }))
             .filter((r) => !assignedBarangay || r.barangay === assignedBarangay)
         );

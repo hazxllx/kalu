@@ -2,10 +2,18 @@
  * Medicine catalog service — generic-first, admin-managed catalog plus the
  * shared normalizer for medications recorded on a consultation.
  *
- * Backs public.medicines (+ public.medicine_facility_availability). Reads are
- * available to active clinical staff (so the consultation form can search);
- * writes are admin-only, deduplicated on the identity triple (generic name +
- * strength + dosage form), validated and audited in health_audit_logs.
+ * Backs public.medicines. Each entry carries generic/brand names, strength,
+ * dosage form, category, intended use/indication, basic safety notes and
+ * contraindications, the prescription requirement (OTC vs prescription-only)
+ * and standard dosage instructions. Reads are available to active clinical
+ * staff (so the consultation form can search by generic OR brand name); writes
+ * are admin-only, deduplicated on the identity triple (generic name + strength
+ * + dosage form), validated and audited in health_audit_logs. There is NO
+ * stock/inventory tracking or availability indicator on medicines.
+ *
+ * Dosage instructions are entered/verified by an authorized System
+ * Administrator; the verifier id and timestamp are recorded on the entry
+ * (dosageVerifiedBy / dosageVerifiedAt) whenever the instructions are set.
  *
  * Medications on a consultation are stored BY VALUE (see consultations.service
  * `toVisit`), so deactivating or editing a catalog entry never alters a
@@ -14,7 +22,7 @@
  */
 import repository from '../repositories/index.js';
 import ApiError from '../utils/apiError.js';
-import { MEDICINE_SOURCES, medicineIdentityKey } from '../config/medicineCatalog.js';
+import { MEDICINE_SOURCES, PRESCRIPTION_REQUIREMENTS, medicineIdentityKey } from '../config/medicineCatalog.js';
 
 const text = (v) => String(v ?? '').trim();
 const clip = (v, max) => text(v).slice(0, max);
@@ -52,6 +60,9 @@ export const normalizeCatalogEntry = (payload = {}) => {
   const errors = [];
   if (!genericName) errors.push('A generic medicine name is required.');
   const source = MEDICINE_SOURCES.includes(text(payload.source)) ? text(payload.source) : 'local';
+  const prescriptionRequirement = PRESCRIPTION_REQUIREMENTS.includes(text(payload.prescriptionRequirement))
+    ? text(payload.prescriptionRequirement)
+    : 'rx';
   if (errors.length) throw ApiError.unprocessable('Please correct the medicine entry.', errors);
   return {
     genericName,
@@ -60,26 +71,20 @@ export const normalizeCatalogEntry = (payload = {}) => {
     dosageForm: clip(payload.dosageForm, 80),
     category: clip(payload.category, 80),
     source,
+    indication: clip(payload.indication, 400),
+    safetyNotes: clip(payload.safetyNotes, 600),
+    contraindications: clip(payload.contraindications, 600),
+    prescriptionRequirement,
+    dosageInstructions: clip(payload.dosageInstructions, 600),
     active: payload.active === undefined ? true : Boolean(payload.active),
   };
 };
 
 export const listMedicines = async ({
-  q = '', source = '', includeInactive = false, facilityId = '', repo = repository,
+  q = '', source = '', includeInactive = false, repo = repository,
 } = {}) => {
   if (typeof repo.listMedicines !== 'function') return [];
-  const rows = await repo.listMedicines({ q: text(q), source: text(source), includeInactive });
-  if (facilityId && typeof repo.listMedicineAvailabilityForFacility === 'function') {
-    const availability = await safe(() => repo.listMedicineAvailabilityForFacility(text(facilityId)), []);
-    const byMedicine = new Map((availability || []).map((a) => [a.medicineId, a]));
-    return rows.map((m) => ({
-      ...m,
-      availability: byMedicine.has(m.id)
-        ? { available: byMedicine.get(m.id).available, note: byMedicine.get(m.id).note }
-        : null,
-    }));
-  }
-  return rows;
+  return repo.listMedicines({ q: text(q), source: text(source), includeInactive });
 };
 
 export const createMedicine = async ({ user, payload = {}, repo = repository } = {}) => {
@@ -93,6 +98,11 @@ export const createMedicine = async ({ user, payload = {}, repo = repository } =
     if (existing) {
       throw ApiError.conflict('A medicine with the same generic name, strength and dosage form already exists.');
     }
+  }
+  // Dosage instructions are verified by the authorized administrator entering them.
+  if (entry.dosageInstructions) {
+    entry.dosageVerifiedBy = user?.id || null;
+    entry.dosageVerifiedAt = new Date().toISOString();
   }
   const saved = await repo.insertMedicine({ ...entry, createdBy: user?.id || null });
   await audit({ user, action: 'MEDICINE_CREATED', entityId: saved.id, previous: null, next: saved });
@@ -115,6 +125,15 @@ export const updateMedicine = async ({ user, id, payload = {}, repo = repository
     if (clash && clash.id !== key) {
       throw ApiError.conflict('Another medicine with the same generic name, strength and dosage form already exists.');
     }
+  }
+  // Re-stamp verification whenever the dosage instructions change (verified by
+  // the authorized administrator making the edit). Clear it when emptied.
+  if (!entry.dosageInstructions) {
+    entry.dosageVerifiedBy = null;
+    entry.dosageVerifiedAt = null;
+  } else if (entry.dosageInstructions !== (before.dosageInstructions || '')) {
+    entry.dosageVerifiedBy = user?.id || null;
+    entry.dosageVerifiedAt = new Date().toISOString();
   }
   const saved = await repo.updateMedicine(key, entry);
   await audit({ user, action: 'MEDICINE_UPDATED', entityId: key, previous: before, next: saved });
@@ -139,37 +158,6 @@ export const setMedicineActive = async ({ user, id, active, repo = repository } 
     next: saved,
   });
   return saved;
-};
-
-export const setAvailability = async ({ user, id, facilityId, available = true, note = '', repo = repository } = {}) => {
-  assertAdmin(user);
-  const key = text(id);
-  const facility = text(facilityId);
-  if (!key || !facility) throw ApiError.unprocessable('A medicine id and facility id are required.');
-  if (typeof repo.upsertMedicineAvailability !== 'function') {
-    throw Object.assign(new Error('Medicine availability storage is not available.'), { statusCode: 503 });
-  }
-  const saved = await repo.upsertMedicineAvailability({
-    medicineId: key,
-    facilityId: facility,
-    available: Boolean(available),
-    note: clip(note, 240),
-    updatedBy: user?.id || null,
-  });
-  await audit({ user, action: 'MEDICINE_AVAILABILITY_UPDATED', entityId: `${key}:${facility}`, previous: null, next: saved });
-  return saved;
-};
-
-export const listAvailability = async ({ id, repo = repository } = {}) => {
-  const key = text(id);
-  if (!key || typeof repo.listMedicineAvailability !== 'function') return [];
-  return repo.listMedicineAvailability(key);
-};
-
-/** Facilities an admin can configure availability against. */
-export const listFacilities = async ({ user, repo = repository } = {}) => {
-  if (typeof repo.listFacilities !== 'function') return [];
-  return repo.listFacilities({ municipalityId: user?.municipalityId || null });
 };
 
 /**
@@ -212,8 +200,5 @@ export default {
   createMedicine,
   updateMedicine,
   setMedicineActive,
-  setAvailability,
-  listAvailability,
-  listFacilities,
   normalizeMedications,
 };

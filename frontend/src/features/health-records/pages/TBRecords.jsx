@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
-import { X, Search, RefreshCw, Activity, User, MapPin, Stethoscope, Plus, CheckCircle2 } from "lucide-react";
+import { X, Search, Activity, User, MapPin, Stethoscope, Plus, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { tclApi, residentsApi } from "@/services/api";
@@ -167,6 +167,24 @@ export default function TBRecords() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Lock background scroll and close the open modal on Escape.
+  const anyModalOpen = showAdd || Boolean(detail);
+  useEffect(() => {
+    if (!anyModalOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (showAdd) setShowAdd(false);
+      else if (detail) setDetail(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [anyModalOpen, showAdd, detail]);
+
   const residentById = useMemo(() => {
     const map = new Map();
     residents.forEach((r) => map.set(r.id, r));
@@ -252,6 +270,16 @@ export default function TBRecords() {
     const errs = {};
     if (!form.residentId) errs.resident = "Please select a resident.";
     if (!form.program) errs.program = "Please select a TB program.";
+    // Prevent enrolling the same resident into the same TB program twice. TB
+    // records live in the shared tcl_entries register with no DB uniqueness on
+    // (resident, program), so this guard is enforced client-side against the
+    // records already loaded for the current scope.
+    if (!errs.resident && !errs.program) {
+      const duplicate = records.some(
+        (r) => r.residentId === form.residentId && r.program === form.program
+      );
+      if (duplicate) errs.program = `This resident is already enrolled in ${form.program}.`;
+    }
     setFormErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setSaving(true);
@@ -292,20 +320,12 @@ export default function TBRecords() {
             : "Residents enrolled in TB monitoring."
         }
         action={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={load}
-              className="inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
-            >
-              <RefreshCw className="h-4 w-4" /> Refresh
-            </button>
-            <button
-              onClick={openAdd}
-              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
-            >
-              <Plus className="h-4 w-4" /> Add TB Record
-            </button>
-          </div>
+          <button
+            onClick={openAdd}
+            className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+          >
+            <Plus className="h-4 w-4" /> Add TB Record
+          </button>
         }
       />
 
@@ -481,124 +501,145 @@ export default function TBRecords() {
       {/* Add TB Record */}
       {showAdd && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-          <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto">
-            <div className="p-6">
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-brand-ink">Add TB Record</h3>
-                  <p className="mt-0.5 text-sm text-brand-gray">Enroll an existing resident into TB monitoring. This links a TB record to the resident; it does not create or modify a resident record.</p>
-                </div>
-                <button onClick={() => setShowAdd(false)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+          <Card className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden">
+            {/* Header */}
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-6 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-brand-ink">Add TB Record</h3>
+                <p className="mt-0.5 text-sm text-brand-gray">Enroll an existing resident into TB monitoring. This links a TB record to the resident; it does not create or modify a resident record.</p>
               </div>
+              <button onClick={() => setShowAdd(false)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+            </div>
 
-              <div className="space-y-4">
-                {/* Resident selection */}
-                <div>
-                  <label className={labelCls}>Resident <span className="text-brand-danger">*</span></label>
-                  {!selectedResident ? (
-                    <>
-                      <div className="mt-1.5 flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2.5 focus-within:border-brand-blue dark:bg-input dark:border-border">
-                        <Search className="h-4 w-4 shrink-0 text-brand-gray" />
-                        <input
-                          value={residentQuery}
-                          onChange={(e) => setResidentQuery(e.target.value)}
-                          placeholder="Search resident by name or ID..."
-                          className="w-full bg-transparent text-sm outline-none"
-                        />
-                      </div>
-                      {formErrors.resident && <p className={errorCls}>{formErrors.resident}</p>}
-                      <div className="mt-2 max-h-44 overflow-y-auto rounded-btn border border-brand-border divide-y divide-brand-border dark:border-border dark:divide-border">
-                        {pickerResidents.map((r) => (
-                          <button
-                            key={r.id}
-                            type="button"
-                            onClick={() => { setForm((p) => ({ ...p, residentId: r.id })); if (formErrors.resident) setFormErrors((p) => ({ ...p, resident: "" })); }}
-                            className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-brand-light dark:hover:bg-hover"
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-medium text-brand-ink">{r.name}</span>
-                              <span className="block text-xs text-brand-gray">
-                                {[r.id, r.age !== "" ? `${r.age} yrs` : null, r.gender, r.barangay].filter(Boolean).join(" · ")}
-                              </span>
-                            </span>
-                          </button>
-                        ))}
-                        {pickerResidents.length === 0 && (
-                          <p className="px-3 py-3 text-sm text-brand-gray">No residents found.</p>
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="space-y-6">
+                {/* Resident Information */}
+                <section>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Resident Information</p>
+                  <div className="mt-3">
+                    <label className={labelCls}>Resident <span className="text-brand-danger">*</span></label>
+                    {!selectedResident ? (
+                      <>
+                        <div className="mt-1.5 flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2.5 focus-within:border-brand-blue dark:bg-input dark:border-border">
+                          <Search className="h-4 w-4 shrink-0 text-brand-gray" />
+                          <input
+                            value={residentQuery}
+                            onChange={(e) => setResidentQuery(e.target.value)}
+                            placeholder="Search resident by name or ID..."
+                            className="w-full bg-transparent text-sm outline-none"
+                          />
+                        </div>
+                        {formErrors.resident && <p className={errorCls}>{formErrors.resident}</p>}
+                        {residentQuery.trim() && (
+                          <div className="mt-2 max-h-44 overflow-y-auto rounded-btn border border-brand-border divide-y divide-brand-border dark:border-border dark:divide-border">
+                            {pickerResidents.map((r) => (
+                              <button
+                                key={r.id}
+                                type="button"
+                                onClick={() => { setForm((p) => ({ ...p, residentId: r.id })); setResidentQuery(""); if (formErrors.resident) setFormErrors((p) => ({ ...p, resident: "" })); }}
+                                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-brand-light dark:hover:bg-hover"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block truncate text-sm font-medium text-brand-ink">{r.name}</span>
+                                  <span className="block text-xs text-brand-gray">
+                                    {[r.id, r.age !== "" ? `${r.age} yrs` : null, r.gender, r.barangay].filter(Boolean).join(" · ")}
+                                  </span>
+                                </span>
+                              </button>
+                            ))}
+                            {pickerResidents.length === 0 && (
+                              <p className="px-3 py-3 text-sm text-brand-gray">No residents found.</p>
+                            )}
+                          </div>
                         )}
+                      </>
+                    ) : (
+                      <div className="mt-1.5 rounded-btn border border-emerald-200 bg-emerald-50/70 p-3.5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="truncate text-sm font-semibold text-brand-ink">{selectedResident.name}</p>
+                          <button onClick={() => { setForm((p) => ({ ...p, residentId: "" })); setResidentQuery(""); }} className="shrink-0 text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">Change</button>
+                        </div>
+                        <div className="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          {[
+                            ["Resident ID", selectedResident.id],
+                            ["Age", selectedResident.age !== "" && selectedResident.age != null ? `${selectedResident.age} yrs` : "—"],
+                            ["Sex", selectedResident.gender || "—"],
+                            ["Barangay", selectedResident.barangay || "—"],
+                          ].map(([label, value]) => (
+                            <div key={label} className="min-w-0">
+                              <p className="text-[11px] uppercase tracking-wide text-brand-gray">{label}</p>
+                              <p className="mt-0.5 truncate text-sm font-medium text-brand-ink">{value || "—"}</p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </>
-                  ) : (
-                    <div className="mt-1.5 flex items-center justify-between gap-3 rounded-btn border border-emerald-200 bg-emerald-50/70 px-3.5 py-2.5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-brand-ink">{selectedResident.name}</p>
-                        <p className="text-xs text-brand-gray">
-                          {[selectedResident.id, selectedResident.age !== "" ? `${selectedResident.age} yrs` : null, selectedResident.gender, selectedResident.barangay].filter(Boolean).join(" · ")}
-                        </p>
-                      </div>
-                      <button onClick={() => setForm((p) => ({ ...p, residentId: "" }))} className="shrink-0 text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">Change</button>
+                    )}
+                  </div>
+                </section>
+
+                {/* TB Record Details */}
+                <section className="border-t border-brand-border pt-5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">TB Record Details</p>
+                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className={labelCls}>TB Program <span className="text-brand-danger">*</span></label>
+                      <select value={form.program} onChange={(e) => { setForm((p) => ({ ...p, program: e.target.value })); if (formErrors.program) setFormErrors((p) => ({ ...p, program: "" })); }} className={`${inputCls(formErrors.program)} cursor-pointer`}>
+                        {TB_PROGRAMS.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      {formErrors.program && <p className={errorCls}>{formErrors.program}</p>}
                     </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className={labelCls}>TB Program <span className="text-brand-danger">*</span></label>
-                    <select value={form.program} onChange={(e) => setForm((p) => ({ ...p, program: e.target.value }))} className={`${inputCls(formErrors.program)} cursor-pointer`}>
-                      {TB_PROGRAMS.map((p) => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                    {formErrors.program && <p className={errorCls}>{formErrors.program}</p>}
+                    <div>
+                      <label className={labelCls}>Assigned BHW / Provider</label>
+                      <input value={form.bhw} onChange={(e) => setForm((p) => ({ ...p, bhw: e.target.value }))} placeholder="e.g. BHW J. Santos" className={inputCls()} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Priority</label>
+                      <select value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))} className={`${inputCls()} cursor-pointer`}>
+                        {TB_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Treatment Status</label>
+                      <select value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} className={`${inputCls()} cursor-pointer`}>
+                        {TB_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Last Visit</label>
+                      <input type="date" value={form.lastVisit} onChange={(e) => setForm((p) => ({ ...p, lastVisit: e.target.value }))} className={inputCls()} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Next Follow-up</label>
+                      <input type="date" value={form.nextVisit} onChange={(e) => setForm((p) => ({ ...p, nextVisit: e.target.value }))} className={inputCls()} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Next Follow-up Time</label>
+                      <input type="time" value={form.nextVisitTime} onChange={(e) => setForm((p) => ({ ...p, nextVisitTime: e.target.value }))} className={inputCls()} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className={labelCls}>Notes / History</label>
+                      <textarea rows={2} value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} className={`${inputCls()} resize-none`} />
+                    </div>
                   </div>
-                  <div>
-                    <label className={labelCls}>Assigned BHW / Provider</label>
-                    <input value={form.bhw} onChange={(e) => setForm((p) => ({ ...p, bhw: e.target.value }))} placeholder="e.g. BHW J. Santos" className={inputCls()} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Priority</label>
-                    <select value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))} className={`${inputCls()} cursor-pointer`}>
-                      {TB_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Treatment Status</label>
-                    <select value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} className={`${inputCls()} cursor-pointer`}>
-                      {TB_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Last Visit</label>
-                    <input type="date" value={form.lastVisit} onChange={(e) => setForm((p) => ({ ...p, lastVisit: e.target.value }))} className={inputCls()} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Next Follow-up</label>
-                    <input type="date" value={form.nextVisit} onChange={(e) => setForm((p) => ({ ...p, nextVisit: e.target.value }))} className={inputCls()} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Next Follow-up Time</label>
-                    <input type="time" value={form.nextVisitTime} onChange={(e) => setForm((p) => ({ ...p, nextVisitTime: e.target.value }))} className={inputCls()} />
-                  </div>
-                </div>
-
-                <div>
-                  <label className={labelCls}>Notes / History</label>
-                  <textarea rows={2} value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} className={`${inputCls()} resize-none`} />
-                </div>
+                </section>
 
                 {submitError && (
                   <div className="rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-3.5 py-2.5 text-sm text-brand-danger">{submitError}</div>
                 )}
-
-                <div className="flex justify-end gap-3 border-t border-brand-border pt-4">
-                  <button onClick={() => setShowAdd(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-                  <button
-                    onClick={saveRecord}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
-                  >
-                    <Plus className="h-4 w-4" /> {saving ? "Saving…" : "Add TB Record"}
-                  </button>
-                </div>
               </div>
+            </div>
+
+            {/* Fixed footer */}
+            <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
+              <button onClick={() => setShowAdd(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
+              <button
+                onClick={saveRecord}
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
+              >
+                <Plus className="h-4 w-4" /> {saving ? "Saving…" : "Add TB Record"}
+              </button>
             </div>
           </Card>
         </div>

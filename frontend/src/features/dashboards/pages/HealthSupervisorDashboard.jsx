@@ -38,6 +38,9 @@ const mapReferral = (row) => ({
   facility: row.destination_facility || "",
   priority: row.priority || "Medium",
   status: row.status || "Pending",
+  // Real creation timestamp for the "Date Added" column (falls back to the
+  // referral date when the row predates created_at tracking).
+  createdAt: row.created_at || row.referral_date || "",
 });
 
 /** persisted follow_ups row → the flat shape the dashboard renders. */
@@ -51,6 +54,8 @@ const mapFollowUp = (row) => ({
   dueDate: row.scheduled_date || "",
   time: row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : "",
   status: row.status || "Scheduled",
+  // Real creation timestamp for the "Date Added" column.
+  createdAt: row.created_at || "",
 });
 
 /** A follow-up is "overdue/attention" when it is still open and due today or earlier. */
@@ -63,15 +68,36 @@ const RISK_TONES = {
   Low: "bg-brand-gray/10 text-brand-gray",
 };
 
-const ATTENTION_TONES = {
-  "HIGH-RISK CASE": "bg-brand-danger/10 text-brand-danger",
-  "PENDING REFERRAL": "bg-brand-gray/10 text-brand-gray",
-  "OVERDUE FOLLOW-UP": "bg-brand-gray/10 text-brand-gray",
-  "FOLLOW-UP DUE": "bg-brand-gray/10 text-brand-gray",
+// Priority/status badge shown in the first table column. Colours follow the
+// shared status language: red for an overdue follow-up, orange for a high-risk
+// case, amber for a follow-up due today, and blue for a pending referral.
+const PRIORITY_BADGES = {
+  "HIGH-RISK CASE": { label: "High Risk", className: "bg-orange-100 text-orange-700" },
+  "OVERDUE FOLLOW-UP": { label: "Overdue", className: "bg-brand-danger/10 text-brand-danger" },
+  "FOLLOW-UP DUE": { label: "Due", className: "bg-amber-100 text-amber-700" },
+  "PENDING REFERRAL": { label: "Pending", className: "bg-brand-blue/10 text-brand-blue" },
 };
 
+// Secondary case description shown under the resident name. Combines the
+// specific detail (reason/purpose) with any supporting context already derived.
 const getCaseReason = (item) => [item.detail, item.extra].filter(Boolean).join(" · ");
-const truncateCaseReason = (reason) => (reason.length > 60 ? `${reason.slice(0, 59)}…` : reason);
+
+// "Date Added" — the record's real creation timestamp rendered as a local date
+// and time. Returns null when no timestamp is available so the cell can show a
+// neutral placeholder instead of a fabricated date.
+const formatCaseDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+};
 
 // Quick filters for the Cases Requiring Attention list. Each maps to the
 // synthetic `kind` tags assigned below so a resident never appears twice and a
@@ -302,8 +328,10 @@ export default function HealthSupervisorDashboard() {
           kind: "HIGH-RISK CASE",
           resident: p.patient,
           barangay: p.barangay || "RHU",
+          caseType: "Check-up",
           detail: p.reason || p.triage?.chiefComplaint || "High-risk check-up case",
           extra: riskOf(p).reason,
+          createdAt: p.visitDate || p.triage?.date || "",
           action: "Review Case",
           residentId: p.id,
         });
@@ -318,8 +346,10 @@ export default function HealthSupervisorDashboard() {
           kind: "HIGH-RISK CASE",
           resident: r.resident,
           barangay: r.barangay || "RHU",
+          caseType: "Referral",
           detail: r.reason,
           extra: `${r.facility || ""} · ${r.status || ""}`,
+          createdAt: r.createdAt || "",
           action: "Review Referral",
         });
       });
@@ -333,8 +363,10 @@ export default function HealthSupervisorDashboard() {
           kind: "PENDING REFERRAL",
           resident: r.resident,
           barangay: r.barangay || "RHU",
+          caseType: "Referral",
           detail: r.reason,
           extra: `${r.facility || ""} · ${r.priority || ""}`,
+          createdAt: r.createdAt || "",
           action: "Review Referral",
         });
       });
@@ -349,8 +381,10 @@ export default function HealthSupervisorDashboard() {
           kind: overdue ? "OVERDUE FOLLOW-UP" : "FOLLOW-UP DUE",
           resident: f.resident,
           barangay: f.barangay || "RHU",
+          caseType: "Follow-up",
           detail: f.purpose,
           extra: `${f.dueDate || ""} · ${f.time || ""}`,
+          createdAt: f.createdAt || "",
           action: "Review",
         });
       });
@@ -371,8 +405,23 @@ export default function HealthSupervisorDashboard() {
     () => cases.filter((item) => matchesAttentionFilter(item, attentionFilter)),
     [cases, attentionFilter],
   );
-  const visibleCaseCount = Math.min(filteredCases.length, 6);
-  const hasMoreCases = filteredCases.length > visibleCaseCount;
+  // Per-filter totals so each control can advertise how many cases it matches.
+  const casesByFilter = useMemo(
+    () =>
+      ATTENTION_FILTERS.reduce((acc, filter) => {
+        acc[filter.id] = cases.filter((item) => matchesAttentionFilter(item, filter.id)).length;
+        return acc;
+      }, {}),
+    [cases],
+  );
+  // Keep rows compact: show a bounded set in-view and route the rest to the
+  // dedicated work queues via the footer link.
+  const MAX_VISIBLE_CASES = 8;
+  const visibleCases = filteredCases.slice(0, MAX_VISIBLE_CASES);
+  const hasMoreCases = filteredCases.length > visibleCases.length;
+  // The attention list depends on both the operational queues and the intake
+  // workflow; it is "loading" until both have resolved for the first time.
+  const casesLoading = (loading || workflowLoading) && cases.length === 0;
 
   const handleCaseAction = (item) => {
     if (item.action === "Review Case") {
@@ -587,93 +636,145 @@ export default function HealthSupervisorDashboard() {
 
       <section aria-labelledby="attention-heading">
         <Card className="!rounded-card overflow-hidden !border-brand-border !bg-brand-paper p-0 !shadow-none">
-          <div className="flex flex-col gap-3 px-4 pb-3 pt-4 sm:flex-row sm:items-start sm:justify-between">
-             <div>
+          <div className="flex flex-col gap-3 px-4 pb-3 pt-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-brand-gold shrink-0" aria-hidden="true" />
                 <h2 id="attention-heading" className="font-heading text-sm font-semibold text-brand-blue">Cases Requiring Attention</h2>
               </div>
               <p className="mt-1 text-xs text-brand-gray">
                 {scope?.level === "barangay"
-                  ? `Cases within ${scope.assignedBarangay} that need supervisory action.`
-                  : "Cases within your authorized coverage that need supervisory action."}
-                {" "}These are current operational cases; the reporting period above applies to the period-scoped analytics.
+                  ? `Cases requiring supervisory review and follow-up within ${scope.assignedBarangay}.`
+                  : "Cases requiring supervisory review and follow-up within your authorized coverage."}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter attention cases">
-              {ATTENTION_FILTERS.map((filter) => (
-                <button
-                  key={filter.id}
-                  type="button"
-                  onClick={() => setAttentionFilter(filter.id)}
-                  aria-pressed={attentionFilter === filter.id}
-                  className={`rounded-sm border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-gray ${
-                    attentionFilter === filter.id
-                      ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
-                      : "border-brand-border bg-brand-paper text-brand-gray hover:border-brand-gray"
-                  }`}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            {filteredCases.length === 0 && (
-              <p className="py-8 text-center text-[13px] text-brand-gray">
-                No cases match this filter. Try another filter or clear the selection.
-              </p>
-            )}
-            {filteredCases.slice(0, 6).map((item, index) => (
-              <div
-                key={item.key}
-                className={`grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 ${
-                  index > 0 ? "border-t border-brand-border" : ""
-                }`}
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className={`shrink-0 rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ATTENTION_TONES[item.kind] || "bg-brand-gray/10 text-brand-gray"}`}>
-                    {item.kind === "HIGH-RISK CASE"
-                      ? "HIGH RISK"
-                      : item.kind === "OVERDUE FOLLOW-UP"
-                        ? "OVERDUE"
-                        : item.kind === "FOLLOW-UP DUE"
-                          ? "DUE"
-                          : "REFERRAL"}
-                  </span>
-                  <p className="shrink-0 text-[13px] font-medium text-brand-ink">{item.resident}</p>
-                  <span className="shrink-0 text-xs text-brand-gray">·</span>
-                  <span className="shrink-0 text-xs text-brand-gray">
-                    {item.barangay === "RHU" && scope?.level === "barangay" ? scope.assignedBarangay : item.barangay}
-                  </span>
-                  <span aria-hidden="true" className="shrink-0 text-xs text-brand-gray">·</span>
-                  <p
-                    title={getCaseReason(item)}
-                    className="min-w-0 flex-1 truncate text-xs text-brand-gray"
+            <div
+              className="flex flex-wrap items-center gap-1.5 lg:justify-end"
+              role="group"
+              aria-label="Filter attention cases"
+            >
+              {ATTENTION_FILTERS.map((filter) => {
+                const active = attentionFilter === filter.id;
+                const count = casesByFilter[filter.id] ?? 0;
+                return (
+                  <button
+                    key={filter.id}
+                    type="button"
+                    onClick={() => setAttentionFilter(filter.id)}
+                    aria-pressed={active}
+                    className={`inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-gray ${
+                      active
+                        ? "border-brand-blue bg-brand-blue text-white"
+                        : "border-brand-border bg-brand-paper text-brand-gray hover:border-brand-gray"
+                    }`}
                   >
-                    {truncateCaseReason(getCaseReason(item))}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleCaseAction(item)}
-                  className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline"
-                >
-                  Review <span aria-hidden="true">→</span>
-                </button>
-              </div>
-            ))}
-            {hasMoreCases && (
-              <div className="border-t border-brand-border px-4 py-2">
-                <button
-                  type="button"
-                  onClick={viewAllCases}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline"
-                >
-                  View all cases <span aria-hidden="true">→</span>
-                </button>
-              </div>
-            )}
+                    {filter.label}
+                    <span
+                      className={`inline-flex min-w-[1.1rem] justify-center rounded-full px-1 text-[10px] font-semibold leading-4 ${
+                        active ? "bg-white/25 text-white" : "bg-brand-light text-brand-gray"
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
+          {casesLoading ? (
+            <p className="px-4 py-10 text-center text-[13px] text-brand-gray">Loading cases…</p>
+          ) : loadError ? (
+            <p className="px-4 py-10 text-center text-[13px] text-brand-gray">
+              Unable to load cases right now. Use the Retry control above to try again.
+            </p>
+          ) : cases.length === 0 ? (
+            <div className="px-4 py-12 text-center">
+              <p className="text-[13px] font-medium text-brand-ink">No cases require attention right now</p>
+              <p className="mx-auto mt-1 max-w-md text-xs text-brand-gray">
+                High-risk cases, overdue follow-ups, and pending referrals within your coverage will appear here as they arise.
+              </p>
+            </div>
+          ) : filteredCases.length === 0 ? (
+            <p className="px-4 py-10 text-center text-[13px] text-brand-gray">
+              No cases match this filter. Select another filter to see more.
+            </p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] border-collapse text-left">
+                  <thead>
+                    <tr className="border-y border-brand-border bg-brand-light text-[10px] uppercase tracking-wide text-brand-gray">
+                      <th scope="col" className="px-4 py-2 font-semibold">Priority</th>
+                      <th scope="col" className="px-4 py-2 font-semibold">Resident / Case</th>
+                      <th scope="col" className="px-4 py-2 font-semibold">Barangay</th>
+                      <th scope="col" className="px-4 py-2 font-semibold">Case Type</th>
+                      <th scope="col" className="px-4 py-2 font-semibold">Date Added</th>
+                      <th scope="col" className="px-4 py-2 text-right font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-brand-border">
+                    {visibleCases.map((item) => {
+                      const badge =
+                        PRIORITY_BADGES[item.kind] || { label: "Review", className: "bg-brand-gray/10 text-brand-gray" };
+                      const barangayLabel =
+                        item.barangay === "RHU" && scope?.level === "barangay"
+                          ? scope.assignedBarangay
+                          : item.barangay || "—";
+                      const reason = getCaseReason(item);
+                      const dateAdded = formatCaseDate(item.createdAt);
+                      return (
+                        <tr key={item.key} className="align-top transition-colors hover:bg-brand-light/50">
+                          <td className="px-4 py-2.5">
+                            <span
+                              className={`inline-flex rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badge.className}`}
+                            >
+                              {badge.label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <p className="text-[13px] font-medium text-brand-ink">{item.resident || "Unknown resident"}</p>
+                            {reason && (
+                              <p title={reason} className="mt-0.5 max-w-[22rem] text-xs text-brand-gray line-clamp-2">
+                                {reason}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-brand-gray">{barangayLabel}</td>
+                          <td className="px-4 py-2.5 text-xs text-brand-gray">{item.caseType || "—"}</td>
+                          <td className="whitespace-nowrap px-4 py-2.5 text-xs text-brand-gray">{dateAdded || "—"}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleCaseAction(item)}
+                              className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-blue transition-colors hover:border-brand-blue hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-gray"
+                            >
+                              Review <span aria-hidden="true">→</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-brand-border px-4 py-2">
+                <p className="text-[11px] text-brand-gray">
+                  Showing {visibleCases.length} of {filteredCases.length}{" "}
+                  {filteredCases.length === 1 ? "case" : "cases"}
+                </p>
+                {hasMoreCases && (
+                  <button
+                    type="button"
+                    onClick={viewAllCases}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline"
+                  >
+                    View all cases <span aria-hidden="true">→</span>
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </Card>
       </section>
 

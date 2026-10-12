@@ -47,16 +47,19 @@ const SourceTag = ({ source }) => {
 /**
  * Searchable Medications / Prescriptions selector with manual entry.
  *
- * - Type to search the admin-managed catalog by generic name, strength or form.
+ * - Type to search the admin-managed catalog by generic OR brand name (e.g.
+ *   "Biogesic" resolves to its generic, paracetamol), strength or form.
  * - Select a result to add it as a removable row, or add a custom (manually
- *   typed) medicine when it is not in the catalog.
+ *   typed) medicine when it is not in the catalog. Selecting a catalog entry
+ *   pre-fills the verified standard dosage instructions, which the prescriber
+ *   can adjust per patient.
  * - Each added medicine records optional dose/route/frequency/duration/quantity
  *   and instructions. Multiple medicines are supported.
  *
  * Custom entries are kept verbatim and never silently replaced by a catalog
  * entry. The value is an array of medication objects owned by the parent form.
  */
-export default function MedicineSelector({ value = [], onChange, facilityId = "" }) {
+export default function MedicineSelector({ value = [], onChange }) {
   const medications = Array.isArray(value) ? value : [];
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -65,7 +68,7 @@ export default function MedicineSelector({ value = [], onChange, facilityId = ""
   const wrapRef = useRef(null);
   const debounceRef = useRef(null);
 
-  // Debounced catalog search.
+  // Debounced catalog search (matches generic name, brand name, strength, form).
   useEffect(() => {
     const term = query.trim();
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -77,13 +80,13 @@ export default function MedicineSelector({ value = [], onChange, facilityId = ""
     setLoading(true);
     debounceRef.current = setTimeout(() => {
       medicinesApi
-        .list({ q: term, ...(facilityId ? { facilityId } : {}) })
+        .list({ q: term })
         .then((res) => setResults(res?.medicines || []))
         .catch(() => setResults([]))
         .finally(() => setLoading(false));
     }, 250);
     return () => debounceRef.current && clearTimeout(debounceRef.current);
-  }, [query, facilityId]);
+  }, [query]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -109,6 +112,8 @@ export default function MedicineSelector({ value = [], onChange, facilityId = ""
         brandName: m.brandName || "",
         strength: m.strength || "",
         dosageForm: m.dosageForm || "",
+        // Pre-fill the verified standard dosage; the prescriber adjusts per patient.
+        instructions: m.dosageInstructions || "",
         custom: false,
         source: m.source || "local",
       })
@@ -153,6 +158,9 @@ export default function MedicineSelector({ value = [], onChange, facilityId = ""
                   <Pill className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
                   <span className="truncate text-sm font-medium text-brand-ink">
                     {m.genericName || "(unnamed medicine)"}
+                    {m.brandName && (
+                      <span className="font-normal text-brand-gray"> ({m.brandName})</span>
+                    )}
                   </span>
                   <SourceTag source={m.custom ? "custom" : m.source} />
                 </div>
@@ -255,8 +263,8 @@ export default function MedicineSelector({ value = [], onChange, facilityId = ""
               setOpen(true);
             }}
             onFocus={() => setOpen(true)}
-            placeholder="Search medicine by generic name, strength, or type..."
-            aria-label="Search medicine by generic name, strength, or type"
+            placeholder="Search medicine by generic or brand name (e.g. paracetamol or Biogesic)..."
+            aria-label="Search medicine by generic or brand name"
             className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70"
           />
         </div>
@@ -273,17 +281,18 @@ export default function MedicineSelector({ value = [], onChange, facilityId = ""
                     <button
                       type="button"
                       onClick={() => addFromCatalog(m)}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-brand-bg"
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-brand-bg"
                     >
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium text-brand-ink">
-                          {m.genericName}
+                          {m.brandName || m.genericName}
                         </span>
                         <span className="block truncate text-xs text-brand-gray">
-                          {[m.strength, m.dosageForm, m.category].filter(Boolean).join(" \u00b7 ")}
+                          {[m.brandName ? m.genericName : null, m.strength, m.dosageForm, m.category]
+                            .filter(Boolean)
+                            .join(" \u00b7 ")}
                         </span>
                       </span>
-                      <SourceTag source={m.source} />
                     </button>
                   </li>
                 ))}

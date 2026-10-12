@@ -454,7 +454,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                     <MedicineSelector
                       value={medications}
                       onChange={setMedications}
-                      facilityId={user?.facilityId || ""}
                     />
                   </div>
                   <div>

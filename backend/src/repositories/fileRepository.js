@@ -555,6 +555,13 @@ export const fileRepository = {
         dosageForm: m.dosageForm || '',
         category: m.category || '',
         source: m.source || 'local',
+        indication: m.indication || '',
+        safetyNotes: m.safetyNotes || '',
+        contraindications: m.contraindications || '',
+        prescriptionRequirement: m.prescriptionRequirement || 'rx',
+        dosageInstructions: m.dosageInstructions || '',
+        dosageVerifiedBy: null,
+        dosageVerifiedAt: null,
         active: true,
         createdBy: null,
         createdAt: now,
@@ -595,6 +602,13 @@ export const fileRepository = {
       dosageForm: medicine.dosageForm || '',
       category: medicine.category || '',
       source: medicine.source || 'local',
+      indication: medicine.indication || '',
+      safetyNotes: medicine.safetyNotes || '',
+      contraindications: medicine.contraindications || '',
+      prescriptionRequirement: medicine.prescriptionRequirement || 'rx',
+      dosageInstructions: medicine.dosageInstructions || '',
+      dosageVerifiedBy: medicine.dosageVerifiedBy ?? null,
+      dosageVerifiedAt: medicine.dosageVerifiedAt ?? null,
       active: medicine.active === undefined ? true : Boolean(medicine.active),
       createdBy: medicine.createdBy ?? null,
       createdAt: now,
@@ -609,27 +623,6 @@ export const fileRepository = {
     if (idx < 0) return null;
     data.medicines[idx] = { ...data.medicines[idx], ...patch, id, updatedAt: new Date().toISOString() };
     return clone(data.medicines[idx]);
-  }),
-
-  listMedicineAvailability: async (medicineId) =>
-    store.medicineAvailability.filter((a) => a.medicineId === medicineId).map((a) => clone(a)),
-
-  listMedicineAvailabilityForFacility: async (facilityId) =>
-    store.medicineAvailability.filter((a) => a.facilityId === facilityId).map((a) => clone(a)),
-
-  upsertMedicineAvailability: async ({ medicineId, facilityId, available, note, updatedBy }) => store.mutate((data) => {
-    const idx = data.medicineAvailability.findIndex((a) => a.medicineId === medicineId && a.facilityId === facilityId);
-    const row = {
-      medicineId,
-      facilityId,
-      available: Boolean(available),
-      note: note || '',
-      updatedBy: updatedBy ?? null,
-      updatedAt: new Date().toISOString(),
-    };
-    if (idx >= 0) data.medicineAvailability[idx] = row;
-    else data.medicineAvailability.push(row);
-    return clone(row);
   }),
 
   // The file (dev) driver has no facilities registry.

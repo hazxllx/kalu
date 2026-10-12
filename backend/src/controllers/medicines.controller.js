@@ -1,16 +1,14 @@
 /**
  * Medicine catalog endpoints.
  *
- *   GET    /medicines                      search catalog (clinical read)
- *   POST   /medicines                      create a catalog entry (admin)
- *   PUT    /medicines/:id                  edit a catalog entry (admin)
- *   PATCH  /medicines/:id/active           activate / deactivate (admin)
- *   GET    /medicines/:id/availability     per-facility availability (read)
- *   PUT    /medicines/:id/availability     set facility availability (admin)
+ *   GET    /medicines              search catalog by generic OR brand (clinical read)
+ *   POST   /medicines              create a catalog entry (admin)
+ *   PUT    /medicines/:id          edit a catalog entry (admin)
+ *   PATCH  /medicines/:id/active   activate / deactivate (admin)
  *
  * Writes are admin-only (route authorize list + service guard) and audited.
  * Catalog reads are available to clinical roles so the consultation form can
- * search when prescribing.
+ * search when prescribing. There is no stock/availability tracking.
  */
 import * as medicines from '../services/medicines.service.js';
 import { sendData } from '../utils/apiResponse.js';
@@ -22,7 +20,6 @@ export const list = async (req, res) => {
     source: req.query.source || '',
     // Only admins may list deactivated entries; clinical reads see active only.
     includeInactive: isAdmin && String(req.query.includeInactive) === 'true',
-    facilityId: req.query.facilityId || '',
   });
   sendData(res, { medicines: rows });
 };
@@ -46,26 +43,4 @@ export const setActive = async (req, res) => {
   sendData(res, { medicine });
 };
 
-export const listAvailability = async (req, res) => {
-  const availability = await medicines.listAvailability({ id: req.params.id });
-  sendData(res, { availability });
-};
-
-export const facilities = async (req, res) => {
-  const rows = await medicines.listFacilities({ user: req.user });
-  sendData(res, { facilities: rows });
-};
-
-export const setAvailability = async (req, res) => {
-  const body = req.body || {};
-  const availability = await medicines.setAvailability({
-    user: req.user,
-    id: req.params.id,
-    facilityId: body.facilityId,
-    available: body.available === undefined ? true : Boolean(body.available),
-    note: body.note || '',
-  });
-  sendData(res, { availability });
-};
-
-export default { list, create, update, setActive, listAvailability, setAvailability, facilities };
+export default { list, create, update, setActive };

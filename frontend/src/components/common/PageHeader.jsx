@@ -30,6 +30,10 @@ import { ChevronRight } from "lucide-react";
  *   - variant: "default" | "report". The "report" variant adds the
  *     "Official Record" chip used by statutory report pages (e.g. the FHSIS
  *     Form M1 consolidated report).
+ *   - dense: an opt-in compact layout that trims the band's vertical padding and
+ *     scales the title down one step. Default false keeps every existing call
+ *     site identical; pages that need more room above the fold (e.g. the TCL
+ *     workspace) can opt in without a separate header component.
  */
 /**
  * @param {{
@@ -39,7 +43,8 @@ import { ChevronRight } from "lucide-react";
  *   subtitle?: string,
  *   action?: import("react").ReactNode,
  *   meta?: import("react").ReactNode,
- *   variant?: "default" | "report"
+ *   variant?: "default" | "report",
+ *   dense?: boolean
  * }} props
  */
 export default function PageHeader({
@@ -50,6 +55,7 @@ export default function PageHeader({
   action = null,
   meta = null,
   variant = "default",
+  dense = false,
 }) {
   const isReport = variant === "report";
   const hasCrumbs = Array.isArray(crumbs) && crumbs.length > 0;
@@ -58,11 +64,11 @@ export default function PageHeader({
   return (
     <section
       aria-label={typeof title === "string" ? `${title} header` : "Page header"}
-      className="mb-6 overflow-hidden rounded-card border border-brand-deep bg-brand-dark text-white shadow-card"
+      className={`${dense ? "mb-4" : "mb-6"} overflow-hidden rounded-card border border-brand-deep bg-brand-dark text-white shadow-card`}
     >
       {/* Hairline gold rule — the official accent token, no gradient. */}
       <div aria-hidden="true" className="h-0.5 w-full bg-brand-gold/70" />
-      <div className="flex flex-col gap-4 px-5 py-6 md:px-7">
+      <div className={`flex flex-col ${dense ? "gap-3 px-5 py-4 md:px-7" : "gap-4 px-5 py-6 md:px-7"}`}>
         {showEyebrowRow && (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
@@ -112,13 +118,13 @@ export default function PageHeader({
             )}
           </div>
         )}
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className={`flex flex-col md:flex-row md:items-end md:justify-between ${dense ? "gap-3" : "gap-4"}`}>
           <div className="min-w-0 flex-1">
-            <h1 className="break-words text-2xl font-semibold tracking-tight text-white md:text-3xl">
+            <h1 className={`break-words font-semibold tracking-tight text-white ${dense ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"}`}>
               {title}
             </h1>
             {subtitle && (
-              <p className="mt-2 max-w-prose break-words text-sm leading-relaxed text-white/70">
+              <p className={`max-w-prose break-words text-sm leading-relaxed text-white/70 ${dense ? "mt-1.5" : "mt-2"}`}>
                 {subtitle}
               </p>
             )}

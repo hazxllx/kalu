@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup } from "@/components/system";
-import { Plus, Search, X, Save, Pencil, Pill, AlertTriangle } from "lucide-react";
+import { Plus, Search, X, Save, Pencil, Pill, ShieldCheck } from "lucide-react";
 import { medicinesApi, bpConfigApi } from "@/services/api";
 import { useToast } from "@/components/ui/use-toast";
 import { DEFAULT_BP_THRESHOLDS } from "@/features/consultations/utils/bpClassification";
@@ -29,6 +29,11 @@ const emptyMedicine = () => ({
   dosageForm: "",
   category: "",
   source: "local",
+  indication: "",
+  safetyNotes: "",
+  contraindications: "",
+  prescriptionRequirement: "rx",
+  dosageInstructions: "",
   active: true,
 });
 
@@ -41,6 +46,29 @@ const SourceBadge = ({ source }) => (
     {source === "yakap" ? "YAKAP" : "Local"}
   </span>
 );
+
+const RxBadge = ({ requirement }) => {
+  const isRx = requirement === "rx";
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+        isRx ? "bg-brand-amber/10 text-brand-amber" : "bg-brand-green/10 text-brand-green"
+      }`}
+      title={isRx ? "Prescription required" : "Over-the-counter"}
+    >
+      {isRx ? "Rx" : "OTC"}
+    </span>
+  );
+};
+
+const formatVerified = (iso) => {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString();
+  } catch {
+    return "";
+  }
+};
 
 export default function MedicineCatalog() {
   const { toast } = useToast();
@@ -87,8 +115,6 @@ export default function MedicineCatalog() {
   const [editing, setEditing] = useState(null); // null => new
   const [form, setForm] = useState(emptyMedicine());
   const [saving, setSaving] = useState(false);
-  const [facilities, setFacilities] = useState([]);
-  const [availability, setAvailability] = useState({}); // facilityId -> { available, note }
 
   const loadMedicines = () => {
     setLoading(true);
@@ -112,8 +138,6 @@ export default function MedicineCatalog() {
   const openNew = () => {
     setEditing(null);
     setForm(emptyMedicine());
-    setFacilities([]);
-    setAvailability({});
     setModalOpen(true);
   };
 
@@ -126,23 +150,14 @@ export default function MedicineCatalog() {
       dosageForm: medicine.dosageForm || "",
       category: medicine.category || "",
       source: medicine.source || "local",
+      indication: medicine.indication || "",
+      safetyNotes: medicine.safetyNotes || "",
+      contraindications: medicine.contraindications || "",
+      prescriptionRequirement: medicine.prescriptionRequirement || "rx",
+      dosageInstructions: medicine.dosageInstructions || "",
       active: medicine.active !== false,
     });
     setModalOpen(true);
-    // Facility availability (best-effort; absent in the dev driver).
-    Promise.all([medicinesApi.facilities(), medicinesApi.listAvailability(medicine.id)])
-      .then(([facRes, availRes]) => {
-        setFacilities(facRes?.facilities || []);
-        const map = {};
-        (availRes?.availability || []).forEach((a) => {
-          map[a.facilityId] = { available: a.available !== false, note: a.note || "" };
-        });
-        setAvailability(map);
-      })
-      .catch(() => {
-        setFacilities([]);
-        setAvailability({});
-      });
   };
 
   const saveMedicine = () => {
@@ -174,23 +189,12 @@ export default function MedicineCatalog() {
       });
   };
 
-  const setFacilityAvailability = (facilityId, available) => {
-    if (!editing) return;
-    const next = { ...availability, [facilityId]: { ...(availability[facilityId] || {}), available } };
-    setAvailability(next);
-    medicinesApi
-      .setAvailability(editing.id, { facilityId, available, note: next[facilityId]?.note || "" })
-      .catch((err) => {
-        toast({ variant: "destructive", title: "Could not update availability", description: err?.message || "Please try again." });
-      });
-  };
-
   return (
     <>
       <PageHeader
         crumbs={["Medicine & Clinical Settings"]}
         title="Medicine & Clinical Settings"
-        subtitle="Manage the medicine catalog, facility availability, and blood-pressure classification thresholds."
+        subtitle="Manage the medicine catalog and blood-pressure classification thresholds."
       />
 
       <div className="space-y-5">
@@ -245,7 +249,7 @@ export default function MedicineCatalog() {
             <div>
               <h3 className="font-semibold text-brand-ink">Medicine Catalog</h3>
               <p className="text-xs text-brand-gray mt-0.5">
-                Generic-first catalog. YAKAP = PhilHealth Advisory 2026-0007; Local = facility catalog (not a guaranteed PhilHealth benefit).
+                Generic-first catalog, searchable by generic or brand name. YAKAP = PhilHealth Advisory 2026-0007; Local = facility catalog (not a guaranteed PhilHealth benefit).
               </p>
             </div>
             <button
@@ -262,7 +266,7 @@ export default function MedicineCatalog() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search generic name, strength, form..."
+                placeholder="Search generic or brand name, strength, form..."
                 className="w-full bg-transparent text-sm outline-none"
               />
             </div>
@@ -274,13 +278,14 @@ export default function MedicineCatalog() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b border-brand-border text-left text-xs uppercase tracking-wide text-brand-gray">
-                  <th className="py-2 pr-3 font-semibold">Generic Name</th>
+                  <th className="py-2 pr-3 font-semibold">Generic / Brand</th>
                   <th className="py-2 pr-3 font-semibold">Strength</th>
                   <th className="py-2 pr-3 font-semibold">Form</th>
                   <th className="py-2 pr-3 font-semibold">Category</th>
+                  <th className="py-2 pr-3 font-semibold">Type</th>
                   <th className="py-2 pr-3 font-semibold">Source</th>
                   <th className="py-2 pr-3 font-semibold">Status</th>
                   <th className="py-2 pr-3 font-semibold text-right">Actions</th>
@@ -299,6 +304,7 @@ export default function MedicineCatalog() {
                     <td className="py-2.5 pr-3 text-brand-gray">{m.strength || "—"}</td>
                     <td className="py-2.5 pr-3 text-brand-gray">{m.dosageForm || "—"}</td>
                     <td className="py-2.5 pr-3 text-brand-gray">{m.category || "—"}</td>
+                    <td className="py-2.5 pr-3"><RxBadge requirement={m.prescriptionRequirement} /></td>
                     <td className="py-2.5 pr-3"><SourceBadge source={m.source} /></td>
                     <td className="py-2.5 pr-3">
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${m.active !== false ? "bg-brand-green/10 text-brand-green" : "bg-slate-100 text-slate-500"}`}>
@@ -345,20 +351,59 @@ export default function MedicineCatalog() {
                 <input value={form.genericName} onChange={(e) => setForm({ ...form, genericName: e.target.value })} className={inputCls} />
               </div>
               <div>
-                <label className="block text-xs text-brand-gray mb-1">Brand name</label>
-                <input value={form.brandName} onChange={(e) => setForm({ ...form, brandName: e.target.value })} className={inputCls} />
+                <label className="block text-xs text-brand-gray mb-1">Brand name(s)</label>
+                <input value={form.brandName} onChange={(e) => setForm({ ...form, brandName: e.target.value })} placeholder="e.g. Biogesic" className={inputCls} />
               </div>
               <div>
-                <label className="block text-xs text-brand-gray mb-1">Strength</label>
+                <label className="block text-xs text-brand-gray mb-1">Strength / concentration</label>
                 <input value={form.strength} onChange={(e) => setForm({ ...form, strength: e.target.value })} placeholder="e.g. 500 mg" className={inputCls} />
               </div>
               <div>
                 <label className="block text-xs text-brand-gray mb-1">Dosage form</label>
-                <input value={form.dosageForm} onChange={(e) => setForm({ ...form, dosageForm: e.target.value })} placeholder="e.g. Tablet" className={inputCls} />
+                <input value={form.dosageForm} onChange={(e) => setForm({ ...form, dosageForm: e.target.value })} placeholder="e.g. Tablet, Syrup" className={inputCls} />
               </div>
               <div>
                 <label className="block text-xs text-brand-gray mb-1">Category</label>
                 <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="e.g. Antibiotic" className={inputCls} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs text-brand-gray mb-1">Intended use / indication</label>
+                <textarea
+                  value={form.indication}
+                  onChange={(e) => setForm({ ...form, indication: e.target.value })}
+                  placeholder="What this medicine is used for"
+                  rows={2}
+                  className={inputCls}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs text-brand-gray mb-1">Basic safety notes</label>
+                <textarea
+                  value={form.safetyNotes}
+                  onChange={(e) => setForm({ ...form, safetyNotes: e.target.value })}
+                  placeholder="e.g. Take with food; may cause drowsiness"
+                  rows={2}
+                  className={inputCls}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs text-brand-gray mb-1">Contraindications</label>
+                <textarea
+                  value={form.contraindications}
+                  onChange={(e) => setForm({ ...form, contraindications: e.target.value })}
+                  placeholder="When this medicine should not be used"
+                  rows={2}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-brand-gray mb-1">Prescription requirement</label>
+                <ButtonSelectGroup
+                  ariaLabel="Prescription requirement"
+                  options={[{ value: "rx", label: "Prescription (Rx)" }, { value: "otc", label: "Over-the-counter" }]}
+                  value={form.prescriptionRequirement}
+                  onChange={(v) => setForm({ ...form, prescriptionRequirement: v })}
+                />
               </div>
               <div>
                 <label className="block text-xs text-brand-gray mb-1">Source</label>
@@ -369,45 +414,27 @@ export default function MedicineCatalog() {
                   onChange={(v) => setForm({ ...form, source: v })}
                 />
               </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs text-brand-gray mb-1">Dosage instructions</label>
+                <textarea
+                  value={form.dosageInstructions}
+                  onChange={(e) => setForm({ ...form, dosageInstructions: e.target.value })}
+                  placeholder="Standard dosage, e.g. Adults: 1 tablet every 6 hours as needed"
+                  rows={2}
+                  className={inputCls}
+                />
+                <p className="mt-1 flex items-start gap-1.5 text-[11px] text-brand-gray">
+                  <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" />
+                  {editing && editing.dosageVerifiedAt
+                    ? `Verified by authorized health personnel on ${formatVerified(editing.dosageVerifiedAt)}. Editing re-stamps verification.`
+                    : "Saving records that these instructions were entered/verified by you as authorized health personnel."}
+                </p>
+              </div>
               <div className="flex items-center gap-2 sm:col-span-2">
                 <input id="med-active" type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
                 <label htmlFor="med-active" className="text-sm text-brand-ink">Active (available for selection in consultations)</label>
               </div>
             </div>
-
-            {/* Facility availability (existing medicines only) */}
-            {editing && facilities.length > 0 && (
-              <div className="mt-4 border-t border-brand-border pt-4">
-                <h4 className="text-sm font-semibold text-brand-ink">Facility availability</h4>
-                <p className="text-xs text-brand-gray mt-0.5 mb-2">
-                  Shown separately from medicine selection — a medicine can still be prescribed where local stock is not flagged.
-                </p>
-                <ul className="space-y-2">
-                  {facilities.map((f) => (
-                    <li key={f.id} className="flex items-center justify-between gap-3 rounded-btn border border-brand-border px-3 py-2">
-                      <span className="text-sm text-brand-ink">
-                        {f.name} {f.type && <span className="text-xs text-brand-gray">({f.type})</span>}
-                      </span>
-                      <label className="flex items-center gap-2 text-xs text-brand-gray">
-                        <input
-                          type="checkbox"
-                          checked={availability[f.id]?.available ?? false}
-                          onChange={(e) => setFacilityAvailability(f.id, e.target.checked)}
-                        />
-                        Available
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {!editing && (
-              <div className="mt-4 flex items-start gap-2 rounded-btn bg-brand-bg px-3 py-2 text-xs text-brand-gray">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-brand-amber" />
-                Save the medicine first, then reopen it to configure per-facility availability.
-              </div>
-            )}
 
             <div className="mt-5 flex items-center justify-end gap-3">
               <button onClick={() => setModalOpen(false)} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">

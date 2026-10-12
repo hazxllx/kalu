@@ -302,6 +302,13 @@ const TclWorkspace = appPage(
     )
 );
 
+const PhnTclSubmissions = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/PhnTclSubmissions'
+    )
+);
+
 const M1Records = appPage(
   () =>
     import(
@@ -837,7 +844,7 @@ const AppRoutes = () => (
           path="record"
           element={<PhnHealthRecords />}
         />
-        <Route path="tcls" element={<TclWorkspace />} />
+        <Route path="tcls" element={<PhnTclSubmissions />} />
         <Route path="tcl-register" element={<TCLS />} />
         <Route path="ncd" element={<NcdRecords />} />
         <Route path="oral-health" element={<OralHealthRecords />} />

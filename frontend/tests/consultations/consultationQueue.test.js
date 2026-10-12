@@ -14,6 +14,8 @@ import {
   isActiveConsult,
   partitionConsultationQueue,
   filterConsultationPatients,
+  matchesCheckupSearch,
+  isScheduledToday,
 } from "../../src/features/consultations/lib/consultationQueue.js";
 
 // Mirrors CHECKUP_STATUS from src/lib/phnWorkflowMap.js (kept as literals here so
@@ -92,4 +94,49 @@ test("6. a custom active-status set is honored (status model stays the single so
   const { active, handled } = partitionConsultationQueue(rows, ["X"]);
   assert.deepEqual(active.map((p) => p.id), ["a"]);
   assert.deepEqual(handled.map((p) => p.id), ["b"]);
+});
+
+test("7. matchesCheckupSearch matches name, id, residentId and reason (case-insensitive)", () => {
+  const row = {
+    patient: "Juan Dela Cruz",
+    id: "VISIT-42",
+    residentId: "RES-900",
+    reason: "Persistent cough",
+    triage: { chiefComplaint: "Fever and chills" },
+  };
+  assert.equal(matchesCheckupSearch(row, ""), true); // empty query matches
+  assert.equal(matchesCheckupSearch(row, "   "), true); // whitespace-only matches
+  assert.equal(matchesCheckupSearch(row, "dela"), true); // name
+  assert.equal(matchesCheckupSearch(row, "visit-42"), true); // visit id, case-insensitive
+  assert.equal(matchesCheckupSearch(row, "res-900"), true); // resident id
+  assert.equal(matchesCheckupSearch(row, "cough"), true); // reason
+  assert.equal(matchesCheckupSearch(row, "chills"), true); // triage chief complaint
+  assert.equal(matchesCheckupSearch(row, "zzz"), false); // no field matches
+});
+
+test("7b. matchesCheckupSearch tolerates malformed rows", () => {
+  assert.equal(matchesCheckupSearch(undefined, "x"), false);
+  assert.equal(matchesCheckupSearch(null, "x"), false);
+  assert.equal(matchesCheckupSearch({}, "x"), false);
+  assert.equal(matchesCheckupSearch(undefined, ""), true); // empty query always matches
+});
+
+test("8. isScheduledToday compares the visit date against the given day only", () => {
+  // Local-time values (no trailing Z) keep this deterministic across host
+  // timezones, since the helper compares local calendar-day components.
+  const now = new Date(2026, 9, 12, 9, 30); // 2026-10-12 09:30 local
+  assert.equal(isScheduledToday({ visitDate: "2026-10-12T08:00:00" }, now), true);
+  assert.equal(isScheduledToday({ visitDate: "2026-10-12T18:45:00" }, now), true);
+  assert.equal(isScheduledToday({ visitDate: "2026-10-11T18:00:00" }, now), false);
+  assert.equal(isScheduledToday({ visitDate: "2026-10-13T06:30:00" }, now), false);
+  // Falls back to the triage date when no visitDate is present.
+  assert.equal(isScheduledToday({ triage: { date: "2026-10-12T12:00:00" } }, now), true);
+});
+
+test("8b. isScheduledToday tolerates missing / invalid dates", () => {
+  const now = new Date(2026, 9, 12, 9, 30);
+  assert.equal(isScheduledToday({}, now), false);
+  assert.equal(isScheduledToday({ visitDate: "" }, now), false);
+  assert.equal(isScheduledToday({ visitDate: "not-a-date" }, now), false);
+  assert.equal(isScheduledToday(undefined, now), false);
 });
