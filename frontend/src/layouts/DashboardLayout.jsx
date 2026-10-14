@@ -8,6 +8,8 @@ import {
   X,
   LogOut,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   User,
   Settings,
   Lock,
@@ -35,10 +37,26 @@ export default function DashboardLayout({ roleKey }) {
   const { user, logout, refreshProfile } = useAuth();
   const { can, matrixLoadState, refreshMatrix } = usePermissions();
 
+  const sidebarPreferenceKey = `kalusagap.sidebar.collapsed.v1:${user?.id || roleKey}`;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(sidebarPreferenceKey) === "true";
+    } catch {
+      return false;
+    }
+  });
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
   const menuRef = useRef(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(sidebarPreferenceKey, String(sidebarCollapsed));
+    } catch {
+      // The sidebar remains usable when browser storage is unavailable.
+    }
+  }, [sidebarCollapsed, sidebarPreferenceKey]);
 
   useEffect(() => {
     const refreshPermissions = () => {
@@ -219,11 +237,14 @@ export default function DashboardLayout({ roleKey }) {
     roleKey === "rhu" ? "app/rhu" : `app/${roleKey}`
   }/profile`;
 
-  const NavList = () => {
+  const NavList = ({ collapsed = false } = {}) => {
     const compact = roleKey === "health_supervisor";
-    const rowSize = compact
+    const rowSize = collapsed
+      ? "min-h-10"
+      : compact
       ? "min-h-9 py-1.5"
       : "min-h-9 py-1.5";
+    const itemPadding = collapsed ? "justify-center px-0" : "gap-2.5 px-3";
 
     const isItemActive = (item) =>
       navItemIsActive(item, location.pathname);
@@ -233,19 +254,22 @@ export default function DashboardLayout({ roleKey }) {
         return (
           <div
             key={it.label}
-            className={`flex ${rowSize} items-center gap-2.5 px-3 rounded-md text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none`}
-            title="Available after account verification"
+            className={`group flex ${rowSize} ${itemPadding} items-center rounded-md text-sm text-slate-400 dark:text-slate-500 cursor-not-allowed select-none`}
+            title={collapsed ? `${it.label} — Available after account verification` : "Available after account verification"}
+            aria-label={collapsed ? `${it.label} — Available after account verification` : undefined}
           >
             <Icon
               name={it.icon}
               className="w-[18px] h-[18px] shrink-0"
               strokeWidth={1.8}
             />
-            <span className="flex-1 truncate">{it.label}</span>
-            <Lock
-              className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 shrink-0"
-              strokeWidth={1.8}
-            />
+            <span className={collapsed ? "sr-only" : "flex-1 truncate"}>{it.label}</span>
+            {!collapsed && (
+              <Lock
+                className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 shrink-0"
+                strokeWidth={1.8}
+              />
+            )}
           </div>
         );
       }
@@ -260,13 +284,15 @@ export default function DashboardLayout({ roleKey }) {
               type="button"
               aria-expanded={Boolean(openGroup)}
               aria-controls={groupId}
+              aria-label={collapsed ? it.label : undefined}
+              title={collapsed ? it.label : undefined}
               onClick={() =>
                 setExpandedGroups((prev) => ({
                   ...prev,
                   [it.label]: !openGroup,
                 }))
               }
-              className={`flex ${rowSize} w-full items-center gap-2.5 px-3 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors`}
+              className={`group flex ${rowSize} w-full ${itemPadding} items-center rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue`}
             >
               <Icon
                 name={it.icon}
@@ -274,13 +300,15 @@ export default function DashboardLayout({ roleKey }) {
                 strokeWidth={1.8}
               />
 
-              <span className="flex-1 text-left truncate">{it.label}</span>
+              <span className={collapsed ? "sr-only" : "flex-1 text-left truncate"}>{it.label}</span>
 
-              <ChevronDown
-                className={`w-4 h-4 shrink-0 transition-transform ${
-                  openGroup ? "rotate-180" : ""
-                }`}
-              />
+              {!collapsed && (
+                <ChevronDown
+                  className={`w-4 h-4 shrink-0 transition-transform ${
+                    openGroup ? "rotate-180" : ""
+                  }`}
+                />
+              )}
             </button>
 
             <AnimatePresence initial={false}>
@@ -290,7 +318,7 @@ export default function DashboardLayout({ roleKey }) {
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   id={groupId}
-                  className={`overflow-hidden pl-3 pt-1 ${compact ? "space-y-0.5" : "space-y-1"}`}
+                  className={`overflow-hidden ${collapsed ? "pt-1" : "pl-3 pt-1"} ${compact ? "space-y-0.5" : "space-y-1"}`}
                 >
                   {it.children.filter((child) => !child.hidden).map((child) =>
                     renderItem(child, depth + 1)
@@ -309,7 +337,9 @@ export default function DashboardLayout({ roleKey }) {
           key={it.path}
           to={`${it.path}${it.search || ""}`}
           onClick={() => setOpen(false)}
-          className={`flex ${rowSize} items-center gap-2.5 px-3 rounded-md text-sm transition-colors ${
+          aria-label={collapsed ? it.label : undefined}
+          title={collapsed ? it.label : undefined}
+          className={`group flex ${rowSize} ${itemPadding} items-center rounded-md text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
             active
               ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
               : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
@@ -320,7 +350,7 @@ export default function DashboardLayout({ roleKey }) {
             className="w-[18px] h-[18px] shrink-0"
             strokeWidth={1.8}
           />
-          <span className="truncate">{it.label}</span>
+          <span className={collapsed ? "sr-only" : "truncate"}>{it.label}</span>
         </Link>
       );
     };
@@ -344,13 +374,13 @@ export default function DashboardLayout({ roleKey }) {
       <div className={compact ? "space-y-0.5" : "space-y-1"}>
         {blocks.map((block, i) => (
           <div key={block.group || `block-${i}`}>
-            {block.group && (
+            {block.group && !collapsed && (
               <p className={`px-3 ${i === 0 ? "pt-1" : "pt-5"} pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 dark:text-slate-500 select-none`}>
                 {block.group}
               </p>
             )}
 
-            <div className={compact ? "space-y-0.5" : "space-y-1"}>
+            <div className={`${compact ? "space-y-0.5" : "space-y-1"} ${collapsed ? "space-y-1" : ""}`}>
               {block.items.filter((item) => !item.hidden).map((item) => renderItem(item))}
             </div>
           </div>
@@ -408,16 +438,16 @@ export default function DashboardLayout({ roleKey }) {
    * The artwork is a square symbol, so the name is spelled out beside it —
    * mirroring the AgencyMark used on the public and auth pages.
    */
-  const SidebarBrand = () => (
+  const SidebarBrand = ({ collapsed = false } = {}) => (
     <div className="flex min-w-0 items-center gap-3">
       <img
         src={LOGO_URL}
         alt=""
         aria-hidden="true"
-        className="h-9 w-auto shrink-0 object-contain"
+        className={`${collapsed ? "h-8 w-8" : "h-9 w-auto"} shrink-0 object-contain`}
       />
 
-      <div className="min-w-0">
+      {!collapsed && <div className="min-w-0">
         <p className="font-display text-[15px] font-bold leading-tight tracking-[0.03em] text-brand-dark dark:text-foreground">
           KALUSAGAP
         </p>
@@ -425,24 +455,38 @@ export default function DashboardLayout({ roleKey }) {
         <p className="mt-0.5 truncate text-[9.5px] font-medium uppercase leading-tight tracking-[0.12em] text-brand-gray dark:text-slate-400">
           Community Health System
         </p>
-      </div>
+      </div>}
     </div>
   );
 
   return (
     <div className="min-h-screen bg-[color:#f5f7fa] dark:bg-background">
-      <aside className="hidden lg:flex fixed left-0 top-0 h-screen max-h-[100dvh] w-72 flex-col bg-white dark:bg-sidebar border-r border-slate-200 dark:border-border">
+      <aside
+        className={`hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : "w-72"}`}
+        data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
+      >
         {/* Brand header — fixed */}
-        <div className="h-20 shrink-0 flex items-center px-5 border-b border-slate-200 dark:border-border">
-          <SidebarBrand />
+        <div className={`h-20 shrink-0 flex items-center border-b border-slate-200 dark:border-border ${sidebarCollapsed ? "justify-center gap-0 px-2" : "justify-between gap-3 px-5"}`}>
+          <div className={sidebarCollapsed ? "flex min-w-0 justify-center" : "min-w-0 flex-1"}>
+            <SidebarBrand collapsed={sidebarCollapsed} />
+          </div>
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:text-slate-300 dark:hover:bg-hover dark:hover:text-foreground ${sidebarCollapsed ? "absolute right-1 top-2 h-7 w-7 bg-white/90 dark:bg-sidebar/90" : ""}`}
+          >
+            {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </button>
         </div>
 
         {/* Scrollable navigation */}
         <nav
           aria-label="Main navigation"
-          className="nav-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3"
+          className={`nav-scroll min-h-0 flex-1 overflow-y-auto py-3 ${sidebarCollapsed ? "overflow-x-visible px-2" : "px-3"}`}
         >
-          <NavList />
+          <NavList collapsed={sidebarCollapsed} />
 
           {/* Bottom padding so the final nav item is always reachable */}
           <div className="h-2" aria-hidden="true" />
@@ -452,13 +496,15 @@ export default function DashboardLayout({ roleKey }) {
         <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
           <button
             onClick={() => logout()}
-                  className="w-full min-h-9 flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+            aria-label={sidebarCollapsed ? "Log out" : undefined}
+            title={sidebarCollapsed ? "Log out" : undefined}
+            className={`w-full min-h-9 flex items-center rounded-md py-1.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-hover dark:hover:text-foreground ${sidebarCollapsed ? "justify-center px-0" : "gap-2.5 px-3"}`}
           >
             <LogOut
               className="w-[18px] h-[18px] shrink-0"
               strokeWidth={1.8}
             />
-            Log out
+            {!sidebarCollapsed && "Log out"}
           </button>
         </div>
       </aside>
@@ -505,7 +551,7 @@ export default function DashboardLayout({ roleKey }) {
               <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
                 <button
                   onClick={() => logout()}
-            className="w-full min-h-9 flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
+                  className="w-full min-h-9 flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
                 >
                   <LogOut
                     className="w-[18px] h-[18px] shrink-0"
@@ -519,7 +565,7 @@ export default function DashboardLayout({ roleKey }) {
         )}
       </AnimatePresence>
 
-      <div className="lg:pl-72">
+      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : "lg:pl-72"}`}>
         <header className="sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 md:px-6">
           <button
             onClick={() => setOpen(true)}
