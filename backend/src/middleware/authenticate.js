@@ -88,11 +88,22 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   }
 
   const sessionUser = profileToSessionUser(profile);
-  if (['health_supervisor', 'bhw'].includes(sessionUser.role)
-    && !isApprovedBarangayName(sessionUser.barangay)) {
-    throw ApiError.forbidden(
-      'Your assigned barangay is no longer approved. Contact an administrator to review your assignment.',
+  if (['health_supervisor', 'bhw'].includes(sessionUser.role)) {
+    const assignment = profile.barangay;
+    const validAssignment = Boolean(
+      sessionUser.barangayId &&
+      sessionUser.municipalityId &&
+      assignment &&
+      assignment.id === sessionUser.barangayId &&
+      assignment.status === 'Active' &&
+      assignment.municipality_id === sessionUser.municipalityId &&
+      isApprovedBarangayName(assignment.name),
     );
+    if (!validAssignment) {
+      throw ApiError.forbidden(
+        'Your account is missing an active approved barangay assignment in its municipality. Contact your administrator to update your profile.',
+      );
+    }
   }
   req.user = {
     id: user.id,

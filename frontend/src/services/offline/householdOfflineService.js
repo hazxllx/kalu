@@ -210,11 +210,52 @@ export const getHouseholdOffline = async ({ ownerId, householdId }) => {
 
 export const listHouseholdsOffline = async ({ ownerId, params = {} }) => {
   if (!ownerId) throw new Error('A signed-in user is required.');
+  const limit = Math.min(Math.max(Number.parseInt(params.limit, 10) || 100, 1), 100);
+  const offset = Math.max(Number.parseInt(params.offset, 10) || 0, 0);
   let households = null;
-  if (isNavigatorOnline()) {
+  let total = null;
+  let local = [];
+  const query = String(params.q || '').trim().toLowerCase();
+  const matchesQuery = (row) => !query ||
+    [row.id, row.headName, row.purok, row.streetAddress, row.collectorName]
+      .some((value) => String(value || '').toLowerCase().includes(query));
+
+  const drafts = await listDrafts(ownerId, 'household');
+  local = drafts
+    .filter((draft) => draft.status !== 'synced' && !draft.serverId)
+    .map((draft) => ({
+      ...draft.data,
+      id: draft.localRef,
+      localId: draft.localId,
+      offline: true,
+      syncStatus: draft.status === 'failed'
+        ? draft.lastError?.code === 'permission_changed'
+          ? 'Sync failed — permission changed'
+          : 'Sync failed — review required'
+        : 'Pending Sync',
+    }))
+    .filter(matchesQuery);
+
+  let networkError = isNavigatorOnline()
+    ? null
+    : new Error('Network unavailable while loading household records.');
+  if (!networkError) {
     try {
-      const result = await householdsApi.list(params);
-      households = result?.rows || [];
+      const localRowsBeforePage = Math.min(limit, Math.max(0, local.length - offset));
+      const requestOffset = Math.max(0, offset - local.length);
+      const requestLimit = Math.max(1, limit - localRowsBeforePage);
+      const result = await householdsApi.list({
+        ...params,
+        limit: requestLimit,
+        offset: requestOffset,
+      });
+      if (!Array.isArray(result?.rows)) {
+        throw new Error('The household service returned an invalid response.');
+      }
+      households = result.rows;
+      total = Number.isFinite(Number(result.total))
+        ? Number(result.total) + local.length
+        : null;
       await Promise.all(households.filter((row) => row?.id).map(async (row) => {
         const cached = await getCachedRecord('household', row.id, ownerId);
         await cacheRecord({
@@ -227,6 +268,7 @@ export const listHouseholdsOffline = async ({ ownerId, params = {} }) => {
       }));
     } catch (error) {
       if (!isNetworkFailure(error)) throw error;
+      networkError = error;
     }
   }
   if (!households) {
@@ -234,26 +276,20 @@ export const listHouseholdsOffline = async ({ ownerId, params = {} }) => {
   }
   const operations = await getDecryptedOperations(ownerId);
   const existing = households.map((row) => mergePendingHouseholdUpdates(row, operations));
-  const drafts = await listDrafts(ownerId, 'household');
-  const local = drafts
-    .filter((draft) => draft.status !== 'synced' && !draft.serverId)
-    .map((draft) => ({
-      ...draft.data,
-      id: draft.localRef,
-      localId: draft.localId,
-      offline: true,
-      syncStatus: draft.status === 'failed'
-        ? draft.lastError?.code === 'permission_changed'
-          ? 'Sync failed — permission changed'
-          : 'Sync failed — review required'
-        : 'Pending Sync',
-    }));
-  const rows = [...local, ...existing];
-  const query = String(params.q || '').trim().toLowerCase();
-  return query
-    ? rows.filter((row) => [row.id, row.headName, row.purok, row.streetAddress]
-      .some((value) => String(value || '').toLowerCase().includes(query)))
-    : rows;
+  const rows = [...local, ...existing].filter(matchesQuery);
+  if (total === null) {
+    total = rows.length;
+    return {
+      rows: rows.slice(offset, offset + limit),
+      total,
+      warning: networkError,
+    };
+  }
+  return {
+    rows: rows.slice(offset, offset + limit),
+    total,
+    warning: networkError,
+  };
 };
 
 export const saveMemberMeasurementsOffline = async ({

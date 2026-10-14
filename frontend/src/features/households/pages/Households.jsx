@@ -48,6 +48,7 @@ import {
   TOILET_LABELS,
   CLASSIFICATIONS,
 } from "../lib/householdOptions";
+import { householdLoadErrorMessage } from "../lib/householdLoadError";
 
 const COLUMNS = [
   { key: "id", label: "Household ID", filter: "text", placeholder: "Filter ID..." },
@@ -72,6 +73,7 @@ const EMPTY_FILTERS = {
   approval: [],
   risk: [],
 };
+const HOUSEHOLD_PAGE_SIZE = 100;
 
 /** Verification badge tones shown for gathered-data review status. */
 const VERIFICATION_TONES = {
@@ -207,6 +209,8 @@ export default function Households() {
   const canViewMemberHealth = can("residents.profile.view");
 
   const [households, setHouseholds] = useState([]);
+  const [householdTotal, setHouseholdTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -229,6 +233,9 @@ export default function Households() {
   const [residentSearching, setResidentSearching] = useState(false);
   const [linkedResidentId, setLinkedResidentId] = useState(null);
   const memberSearchRef = useRef(null);
+  const activeLoadRef = useRef(null);
+  const loadSequenceRef = useRef(0);
+  const searchChangePendingRef = useRef(false);
 
   const showToast = (message) => {
     setToast(message);
@@ -236,44 +243,81 @@ export default function Households() {
   };
 
   /** Load the household list from the API (search term applied server-side). */
-  const load = useCallback(async (searchTerm = "") => {
-    if (!user?.id) return;
+  const load = useCallback(async (searchTerm = "", pageIndex = 0) => {
+    const normalizedTerm = searchTerm.trim();
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+    if (
+      activeLoadRef.current?.ownerId === user.id &&
+      activeLoadRef.current?.searchTerm === normalizedTerm &&
+      activeLoadRef.current?.pageIndex === pageIndex
+    ) {
+      return activeLoadRef.current.promise;
+    }
+
+    const requestId = ++loadSequenceRef.current;
     setLoading(true);
     setLoadError(null);
-    try {
-      const rows = await listHouseholdsOffline({
-        ownerId: user?.id,
-        params: { q: searchTerm, limit: 100 },
-      });
-      setHouseholds(rows);
-    } catch (err) {
-      setHouseholds([]);
-      setLoadError(err?.message || "Could not load households.");
-    } finally {
-      setLoading(false);
-    }
+    const promise = (async () => {
+      try {
+        const result = await listHouseholdsOffline({
+          ownerId: user.id,
+          params: {
+            q: normalizedTerm,
+            limit: HOUSEHOLD_PAGE_SIZE,
+            offset: pageIndex * HOUSEHOLD_PAGE_SIZE,
+          },
+        });
+        if (requestId !== loadSequenceRef.current) return;
+        setHouseholds(result.rows);
+        setHouseholdTotal(result.total);
+        setLoadError(result.warning ? householdLoadErrorMessage(result.warning) : null);
+      } catch (error) {
+        if (requestId !== loadSequenceRef.current) return;
+        setHouseholds([]);
+        setHouseholdTotal(0);
+        setLoadError(householdLoadErrorMessage(error));
+      } finally {
+        if (requestId === loadSequenceRef.current) {
+          activeLoadRef.current = null;
+          setLoading(false);
+        }
+      }
+    })();
+    activeLoadRef.current = {
+      ownerId: user.id,
+      searchTerm: normalizedTerm,
+      pageIndex,
+      promise,
+    };
+    return promise;
   }, [user?.id]);
 
   useEffect(() => {
-    load("");
+    load("", 0);
   }, [load]);
 
   // A queued household can be confirmed while this page remains open. Reload
   // the authorized server list after that confirmation so the temporary local
   // row is replaced by the authoritative record without a browser refresh.
   useEffect(() => {
-    if (lastSyncedAt) load(search.trim());
-    // `search` is intentionally read from the current render when a sync
-    // completes; the separate search effect owns debounced search changes.
+    if (lastSyncedAt) load(search.trim(), page);
+    // `search` and `page` are intentionally read from the current render when
+    // a sync completes; the separate search effect owns debounced search.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSyncedAt, load]);
 
   // Debounced server-side search.
   const debounceRef = useRef(null);
   useEffect(() => {
+    if (!searchChangePendingRef.current) return undefined;
+    searchChangePendingRef.current = false;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      load(search.trim());
+      setPage(0);
+      load(search.trim(), 0);
     }, 350);
     return () => clearTimeout(debounceRef.current);
   }, [search, load]);
@@ -421,7 +465,7 @@ export default function Households() {
       setResidentResults([]);
       const result = await householdsApi.get(detail.id);
       setDetail(result?.household || null);
-      await load(search.trim());
+      await load(search.trim(), page);
       showToast("Household member added.");
     } catch (err) {
       setMemberError(err?.message || "Could not add the household member.");
@@ -440,7 +484,7 @@ export default function Households() {
       await householdsApi.removeMember(detail.id, member.id);
       const result = await householdsApi.get(detail.id);
       setDetail(result?.household || null);
-      await load(search.trim());
+      await load(search.trim(), page);
       showToast("Household member removed.");
     } catch (err) {
       showToast(err?.message || "Could not remove the household member.");
@@ -497,7 +541,11 @@ export default function Households() {
             <Search className="h-4 w-4 text-brand-gray" />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                searchChangePendingRef.current = true;
+                setPage(0);
+                setSearch(e.target.value);
+              }}
               placeholder="Search households, heads, collectors..."
               className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/50"
             />
@@ -505,6 +553,7 @@ export default function Households() {
           <div className="flex items-center gap-3">
             <span className="text-sm text-brand-gray">
               {visible.length} of {households.length} households
+              {householdTotal > households.length && ` · ${householdTotal} total`}
               {activeFilterCount > 0 && ` · ${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""} active`}
             </span>
             {activeFilterCount > 0 && (
@@ -545,7 +594,7 @@ export default function Households() {
           <ErrorState
             title="Unable to load households"
             message={loadError}
-            onRetry={() => load(search.trim())}
+            onRetry={() => load(search.trim(), page)}
           />
         </Card>
       )}
@@ -599,7 +648,7 @@ export default function Households() {
         </Card>
       )}
 
-      {!loadError && !loading && visible.length > 0 && view === "table" && (
+      {!loading && visible.length > 0 && view === "table" && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -693,7 +742,7 @@ export default function Households() {
         </Card>
       )}
 
-      {!loadError && !loading && visible.length > 0 && view === "cards" && (
+      {!loading && visible.length > 0 && view === "cards" && (
         <div className="grid gap-5 md:grid-cols-2">
           {visible.map((raw, i) => {
             const h = renderRow(raw);
@@ -767,6 +816,40 @@ export default function Households() {
             );
           })}
         </div>
+      )}
+
+      {!loading && householdTotal > HOUSEHOLD_PAGE_SIZE && (
+        <Card className="mt-5 flex items-center justify-between gap-3 p-4">
+          <span className="text-sm text-brand-gray">
+            Page {page + 1} of {Math.ceil(householdTotal / HOUSEHOLD_PAGE_SIZE)}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page === 0}
+              onClick={() => {
+                const nextPage = page - 1;
+                setPage(nextPage);
+                load(search.trim(), nextPage);
+              }}
+              className="rounded-btn border border-brand-border px-3 py-1.5 text-sm text-brand-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              disabled={(page + 1) * HOUSEHOLD_PAGE_SIZE >= householdTotal}
+              onClick={() => {
+                const nextPage = page + 1;
+                setPage(nextPage);
+                load(search.trim(), nextPage);
+              }}
+              className="rounded-btn border border-brand-border px-3 py-1.5 text-sm text-brand-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </Card>
       )}
 
       {/* Household detail modal — info + member management */}

@@ -954,7 +954,14 @@ export const supabaseRepository = {
    * `municipalityId` on the caller's municipality; `q` searches id, head,
    * purok, street and collector. Returns { rows, total }.
    */
-  async listHouseholds({ q = '', barangay = null, municipalityId = null, limit = 50, offset = 0 } = {}) {
+  async listHouseholds({
+    q = '',
+    barangay = null,
+    barangayId = null,
+    municipalityId = null,
+    limit = 50,
+    offset = 0,
+  } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.households)
@@ -968,6 +975,7 @@ export const supabaseRepository = {
       );
     }
     if (barangay) query = query.eq('barangay', barangay);
+    if (barangayId) query = query.eq('barangay_id', barangayId);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
     const { data, error, count } = await query;
     throwOnError(error, 'Could not list households');

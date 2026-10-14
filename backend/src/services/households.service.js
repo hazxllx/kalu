@@ -214,16 +214,31 @@ export const searchHouseholdResidents = async ({ user, q = '', repo = repository
 export const listHouseholds = async ({ user, q = '', barangay = '', limit = 50, offset = 0 } = {}) => {
   const scope = assignedBarangay(user);
   const requested = text(barangay);
-  if (scope && requested && requested.toLowerCase() !== scope.toLowerCase()) {
+  const ownBarangayValues = [scope, user?.barangayId]
+    .map((value) => text(value).toLowerCase())
+    .filter(Boolean);
+  if (scope && requested && !ownBarangayValues.includes(requested.toLowerCase())) {
     throw ApiError.forbidden('Your account is assigned to Barangay ' + scope + ' only');
   }
   const parsedLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 100);
   const parsedOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
+  const barangayScoped = ['bhw', 'health_supervisor'].includes(user?.role);
+  if (barangayScoped && (
+    !scope ||
+    !user?.barangayId ||
+    !user?.municipalityId ||
+    !isApprovedBarangayName(scope)
+  )) {
+    throw ApiError.forbidden(
+      'Your account is missing a valid approved barangay assignment. Contact your administrator to update your profile.',
+    );
+  }
   return repository.listHouseholds({
     q: text(q),
     limit: parsedLimit,
     offset: parsedOffset,
-    barangay: scope || requested || null,
+    barangay: barangayScoped ? null : requested || null,
+    barangayId: barangayScoped ? user.barangayId : null,
     municipalityId: user?.municipalityId || null,
   });
 };

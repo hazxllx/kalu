@@ -28,7 +28,7 @@ const PROFILE_SELECT = [
   'contact',
   'created_at',
   'rhu_stations',
-  'barangay:barangays(name)',
+  'barangay:barangays(id,name,status,municipality_id)',
   'municipality:municipalities(name)',
 ].join(',');
 
@@ -95,6 +95,15 @@ export const loadProfile = async (userId) => {
   // row so the account still resolves (role, status and coverage ids intact).
   if (error && isEmbeddedResourceUnavailable(error)) {
     ({ data, error } = await read(PROFILE_BASE_SELECT));
+    if (!error && data?.barangay_id) {
+      const { data: barangay, error: barangayError } = await getServiceClient()
+        .from('barangays')
+        .select('id, name, status, municipality_id')
+        .eq('id', data.barangay_id)
+        .maybeSingle();
+      if (barangayError) return { profile: null, unavailable: false, error: barangayError };
+      data.barangay = barangay;
+    }
   }
 
   // One retry on a transport-level failure so a dropped keep-alive
@@ -103,6 +112,15 @@ export const loadProfile = async (userId) => {
     ({ data, error } = await read(PROFILE_SELECT));
     if (error && isEmbeddedResourceUnavailable(error)) {
       ({ data, error } = await read(PROFILE_BASE_SELECT));
+      if (!error && data?.barangay_id) {
+        const { data: barangay, error: barangayError } = await getServiceClient()
+          .from('barangays')
+          .select('id, name, status, municipality_id')
+          .eq('id', data.barangay_id)
+          .maybeSingle();
+        if (barangayError) return { profile: null, unavailable: false, error: barangayError };
+        data.barangay = barangay;
+      }
     }
   }
 
