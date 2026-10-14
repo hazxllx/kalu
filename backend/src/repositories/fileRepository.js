@@ -10,11 +10,12 @@ import store from './fileStore.js';
 import { residentId, healthRecordNo, submissionId, referralId } from './ids.js';
 import { DEFAULT_RISK_CRITERIA } from '../config/riskConfig.js';
 import { DEFAULT_MEDICINES, medicineIdentityKey } from '../config/medicineCatalog.js';
+import { APPROVED_BARANGAYS } from '../config/barangays.js';
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
-/** Canonical dev barangays (single-municipality file driver). */
-const DEV_BARANGAYS = Object.freeze(['San Isidro', 'San Antonio', 'Old San Roque']);
+/** Approved dev barangays (single-municipality file driver). */
+const DEV_BARANGAYS = APPROVED_BARANGAYS;
 
 const normalizeText = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 

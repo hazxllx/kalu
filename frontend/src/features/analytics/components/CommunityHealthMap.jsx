@@ -1,9 +1,77 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
+import { MapContainer, CircleMarker, Popup, Tooltip, useMap } from "react-leaflet";
+import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
+import { setWorkerUrl } from "maplibre-gl";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "leaflet/dist/leaflet.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { RefreshCw, MapPin, AlertCircle } from "lucide-react";
 
 import { fetchCommunityMap } from "@/services/api/earlyWarningApi";
+
+setWorkerUrl(maplibreWorkerUrl);
+
+const BASEMAP_STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
+const BASEMAP_ATTRIBUTION =
+  '<a href="https://openfreemap.org">OpenFreeMap</a> | <a href="https://www.openmaptiles.org/">© OpenMapTiles</a> | Data from <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>';
+
+function removeBasemapIcons(style) {
+  if (!Array.isArray(style?.layers)) {
+    throw new Error("The basemap style did not contain any map layers.");
+  }
+
+  return {
+    ...style,
+    layers: style.layers
+      .filter((layer) => layer["source-layer"]?.toLowerCase() !== "poi")
+      .map((layer) => {
+        if (layer.type !== "symbol" || !layer.layout) return layer;
+        return {
+          ...layer,
+          layout: Object.fromEntries(
+            Object.entries(layer.layout).filter(([name]) => !name.startsWith("icon-")),
+          ),
+        };
+      }),
+  };
+}
+
+function IconFreeBasemap({ onError }) {
+  const map = useMap();
+
+  useEffect(() => {
+    let active = true;
+    let basemapLayer;
+
+    fetch(BASEMAP_STYLE_URL)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Basemap request failed with HTTP ${response.status}.`);
+        }
+        return response.json();
+      })
+      .then((style) => {
+        if (!active) return;
+        basemapLayer = maplibreGL({
+          style: removeBasemapIcons(style),
+          attributionControl: false,
+        }).addTo(map);
+        map.attributionControl?.addAttribution(BASEMAP_ATTRIBUTION);
+      })
+      .catch((error) => {
+        if (!active) return;
+        onError(error?.message || "Unable to load the geographic basemap.");
+      });
+
+    return () => {
+      active = false;
+      if (basemapLayer) basemapLayer.remove();
+      map.attributionControl?.removeAttribution(BASEMAP_ATTRIBUTION);
+    };
+  }, [map, onError]);
+
+  return null;
+}
 
 /**
  * Community Health Map — real interactive Leaflet map for disease/health
@@ -100,11 +168,15 @@ export default function CommunityHealthMap({
   error: errorProp = null,
   onRetry = null,
   onClearFilters = null,
+  visibleConditions = null,
+  showCountLabels = false,
+  periodLabel = "All records",
 }) {
   const controlled = Array.isArray(barangaysProp);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(!controlled);
   const [error, setError] = useState("");
+  const [basemapError, setBasemapError] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -128,6 +200,30 @@ export default function CommunityHealthMap({
   const plotted = useMemo(() => barangays.filter(hasValidCoordinates), [barangays]);
   const missing = useMemo(() => barangays.filter((b) => !hasValidCoordinates(b)), [barangays]);
   const points = useMemo(() => plotted.map((b) => [b.latitude, b.longitude]), [plotted]);
+  const markerData = useMemo(() => {
+    const selected = Array.isArray(visibleConditions) ? new Set(visibleConditions) : null;
+    const counts = plotted.map((barangay) => ({
+      ...barangay,
+      displayedCaseCount: showCountLabels && selected
+        ? (barangay.conditions || [])
+          .filter((item) => selected.has(item.name))
+          .reduce((total, item) => total + item.value, 0)
+        : barangay.caseCount ?? 0,
+      displayedConditions: showCountLabels && selected
+        ? (barangay.conditions || []).filter((item) => selected.has(item.name))
+        : barangay.conditions || [],
+    }));
+    const maximum = Math.max(0, ...counts.map((item) => item.displayedCaseCount));
+    return counts.map((item) => ({
+      ...item,
+      displayedIntensity: showCountLabels
+        ? maximum > 0 ? item.displayedCaseCount / maximum : 0
+        : item.intensity ?? 0,
+    }));
+  }, [plotted, visibleConditions, showCountLabels]);
+  const visibleMarkers = showCountLabels
+    ? markerData.filter((item) => item.displayedCaseCount > 0)
+    : markerData;
   const centerPoint = hasValidCoordinates({ ...center, hasCoordinates: true })
     ? [Number(center.latitude), Number(center.longitude)]
     : points[0];
@@ -186,9 +282,9 @@ export default function CommunityHealthMap({
   }
 
   const MapContainerCompat = /** @type {any} */ (MapContainer);
-  const TileLayerCompat = /** @type {any} */ (TileLayer);
   const CircleMarkerCompat = /** @type {any} */ (CircleMarker);
   const PopupCompat = /** @type {any} */ (Popup);
+  const TooltipCompat = /** @type {any} */ (Tooltip);
 
   return (
     <div>
@@ -209,28 +305,25 @@ export default function CommunityHealthMap({
           )}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-brand-border">
+        <div className="relative overflow-hidden rounded-xl border border-brand-border">
           <MapContainerCompat
             center={centerPoint}
             zoom={13}
             scrollWheelZoom={false}
             style={{ height: "420px", width: "100%" }}
           >
-            <TileLayerCompat
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+            <IconFreeBasemap onError={setBasemapError} />
             <FitToMarkers points={points} />
             <InvalidateSize />
-            {plotted.map((b) => {
-              const caseCount = b.caseCount ?? 0;
-              const fillColor = intensityColor(b.intensity ?? 0, caseCount);
+            {visibleMarkers.map((b) => {
+              const caseCount = b.displayedCaseCount;
+              const fillColor = intensityColor(b.displayedIntensity, caseCount);
               const isSelected = selectedName && b.name === selectedName;
               return (
                 <CircleMarkerCompat
                   key={b.id}
                   center={[b.latitude, b.longitude]}
-                  radius={isSelected ? 17 : Math.min(22, 10 + Math.sqrt(caseCount))}
+                  radius={Math.min(28, 13 + Math.sqrt(caseCount) * 1.2 + (isSelected ? 3 : 0))}
                   pathOptions={{
                     color: fillColor,
                     fillColor,
@@ -239,10 +332,35 @@ export default function CommunityHealthMap({
                   }}
                   eventHandlers={onSelect ? { click: () => onSelect(b) } : undefined}
                 >
+                  {showCountLabels && <TooltipCompat
+                    permanent
+                    direction="center"
+                    className="health-map-count-tooltip"
+                    opacity={1}
+                  >
+                    <span style={{
+                      color: b.displayedIntensity >= 0.75 ? "#FFFFFF" : "#1F2937",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                    }}>
+                      {caseCount}
+                    </span>
+                  </TooltipCompat>}
                   <PopupCompat>
                     <div className="space-y-0.5">
                       <p className="text-sm font-semibold">{b.name}</p>
                       <p className="text-xs">Total cases: {caseCount}</p>
+                      {showCountLabels && <p className="text-xs">Reporting period: {periodLabel}</p>}
+                      {(b.displayedConditions || b.conditions || []).filter((item) => item.value > 0).length > 0 && (
+                        <ul className="mt-1 border-t border-slate-200 pt-1 text-xs">
+                          {(b.displayedConditions || b.conditions || []).filter((item) => item.value > 0).map((item) => (
+                            <li key={item.name} className="flex justify-between gap-3">
+                              <span>{item.name}</span>
+                              <span className="font-semibold">{item.value}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                       {"activeCases" in b && <p className="text-xs">Active: {b.activeCases}</p>}
                       {"newCases" in b && <p className="text-xs">New (this month): {b.newCases}</p>}
                       {onSelect && (
@@ -260,15 +378,33 @@ export default function CommunityHealthMap({
               );
             })}
           </MapContainerCompat>
+          {basemapError && (
+            <div
+              role="alert"
+              className="absolute bottom-3 left-3 z-[500] rounded-lg border border-amber-300 bg-white/95 px-3 py-2 text-xs text-amber-900 shadow-sm"
+            >
+              Geographic basemap unavailable. Health markers remain visible. {basemapError}
+            </div>
+          )}
+          {showCountLabels && visibleMarkers.length === 0 && (
+            <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center">
+              <p className="rounded-lg border border-brand-border bg-white/95 px-4 py-2 text-sm font-medium text-brand-gray shadow-sm">
+                No cases match the selected filters.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
       {/* Case-intensity legend + any barangays we could not plot (coordinates unavailable). */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-brand-gray">
-        <span className="font-medium text-brand-ink">Case intensity:</span>
+        <span className="font-medium text-brand-ink">Case intensity</span>
+        <span className="text-[11px]">Relative to the busiest barangay in scope; not a clinical risk rating.</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#94A3B8" }} /> No data</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F59E0B" }} /> Lower</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#B91C1C" }} /> Higher</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F6C453" }} /> Lower</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F59E0B" }} /> Moderate</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#EA580C" }} /> Elevated</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#B91C1C" }} /> Highest in scope</span>
       </div>
       {missing.length > 0 && (
         <p className="mt-2 text-xs text-brand-gray">

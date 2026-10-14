@@ -100,7 +100,6 @@ const defaultForm = () => ({
   diagnosis: "",
   recommendation: "",
   remarks: "",
-  issuedAt: todayIso(),
 });
 
 export default function CertificateComposer() {
@@ -239,12 +238,13 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
     findings: form.diagnosis.trim(),
     recommendation: form.recommendation.trim(),
     remarks: form.remarks.trim(),
-    // Print-only field: the official issuance date is stamped by the API when a
-    // reviewer issues the certificate, but the preview shows the chosen date.
-    issuedAt: form.issuedAt,
+    status: "Draft",
+    issuedAt: "",
+    dateIssued: "",
     preparedBy: user?.name || roleLabel,
     preparedByRole: roleLabel,
     medicalOfficer: officerName,
+    signatoryPosition: branding?.signatory?.position || "",
     licenseNumber: "",
   });
 
@@ -378,7 +378,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
         subtitle={
           isRequester
             ? "Initiate a medical certificate request for the PHN / MHO to review and issue."
-            : "Prepare, preview, and print an official medical certificate for the Municipality of Pili."
+            : "Prepare, preview, and submit a medical certificate for authorized review."
         }
         action={
           <Link
@@ -546,14 +546,6 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                   />
                 </Field>
               </div>
-              <Field label="Issuance Date" hint="Stamped automatically when a reviewer issues the certificate.">
-                <input
-                  type="date"
-                  value={form.issuedAt}
-                  onChange={(e) => set("issuedAt")(e.target.value)}
-                  className={inputCls()}
-                />
-              </Field>
             </div>
 
             <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
@@ -582,19 +574,19 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
           <p className="text-center text-xs text-brand-gray">
             {isRequester
               ? "Submitting creates a medical certificate request for the PHN / MHO to review, approve, and issue. You cannot approve or issue certificates."
-              : "Submitting sends the certificate to the PHN / MHO for review and issuance. Preview and print produce a working copy and save it as a Draft — only a PHN or the MHO can approve and issue the official certificate."}
+              : "Submitting sends the certificate for PHN / MHO review. Draft previews are not official; only an authorized reviewer can approve and issue the official certificate."}
           </p>
         </>
       )}
 
       {/* Certificate preview (formal A4 document) */}
       {previewOpen && resident && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
-          <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-card">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-2 sm:p-4">
+          <div className="flex max-h-[96dvh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-card">
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-border">
               <div>
                 <h3 className="text-base font-semibold text-brand-ink">Certificate Preview</h3>
-                <p className="text-xs text-brand-gray">A4 official document — exactly what will be printed.</p>
+                <p className="text-xs text-brand-gray">Draft preview only. This document is not issued or official.</p>
               </div>
               <div className="flex items-center gap-2">
                 {!isRequester && (
@@ -603,7 +595,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                     disabled={saving}
                     className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
                   >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Print Draft
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Print Draft Preview
                   </button>
                 )}
                 <button
@@ -618,8 +610,10 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto bg-slate-100 p-4 dark:bg-background">
-              <MedicalCertificateDocument certificate={buildCertificate()} signatoryName={officerName} branding={branding} />
+            <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-3 dark:bg-background sm:p-5">
+              <div className="flex min-h-full w-max min-w-full justify-center">
+                <MedicalCertificateDocument certificate={buildCertificate()} signatoryName={officerName} branding={branding} />
+              </div>
             </div>
           </div>
         </div>

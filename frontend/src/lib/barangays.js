@@ -1,15 +1,14 @@
+import { APPROVED_BARANGAYS } from "../../../shared/barangays.js";
+
 /**
  * KALUSAGAP barangay runtime registry (frontend cache).
  *
- * IMPORTANT: this module is NOT the source of truth for barangays. The
- * authoritative list lives in the database (public.barangays) and is managed by
- * the Admin "Barangay Management" page. This module is a small runtime cache
- * that the whole frontend reads from, hydrated once at startup (and refreshed
- * after admin changes) by `BarangaysProvider` / `useBarangays`.
+ * The approved names are shared in `shared/barangays.js`; the database
+ * registry supplies their stable ids and coordinates. This module keeps the
+ * approved selector values stable while the provider loads reference records.
  *
- * The three canonical Pili barangays below are kept ONLY as an offline fallback
- * so a selector never renders empty when the database read is briefly
- * unavailable. They are replaced the moment the live list loads.
+ * The approved names are also the offline fallback, so a selector never
+ * renders an unapproved legacy barangay when the database read is unavailable.
  *
  * The exported `BARANGAYS` / `BARANGAY_FILTERS` arrays are mutated IN PLACE (the
  * array identities never change) so every module that imported them — including
@@ -18,12 +17,12 @@
  * re-render when the list changes should use the `useBarangays()` hook.
  */
 
-/** Offline fallback only — the database is the source of truth. */
-export const FALLBACK_BARANGAYS = Object.freeze(["San Isidro", "San Antonio", "Old San Roque"]);
+/** The only barangays the application permits assigning or selecting. */
+export const FALLBACK_BARANGAYS = APPROVED_BARANGAYS;
 
 /**
- * Live barangay name list. Seeded with the fallback, then hydrated from the DB.
- * Mutated in place by `setBarangayNames` so existing imports stay live.
+ * Runtime selection list. Mutated in place by `setBarangayNames` so existing
+ * imports stay live and can never be widened by database rows.
  */
 export const BARANGAYS = [...FALLBACK_BARANGAYS];
 
@@ -39,15 +38,10 @@ const replaceInPlace = (target, next) => {
 };
 
 /**
- * Hydrate the runtime registry from the database list of barangay names.
- * Empty / invalid input falls back to the canonical three so the app never
- * renders an empty barangay selector.
+ * Reassert the canonical selection list and notify reactive consumers.
  */
-export const setBarangayNames = (names) => {
-  const cleaned = Array.isArray(names)
-    ? Array.from(new Set(names.map((n) => (typeof n === "string" ? n.trim() : "")).filter(Boolean)))
-    : [];
-  const next = cleaned.length ? cleaned : [...FALLBACK_BARANGAYS];
+export const setBarangayNames = () => {
+  const next = [...APPROVED_BARANGAYS];
   replaceInPlace(BARANGAYS, next);
   replaceInPlace(BARANGAY_FILTERS, ["All", ...next]);
   subscribers.forEach((fn) => {

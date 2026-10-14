@@ -3,9 +3,8 @@
 --
 -- Applies on top of ALL migrations. Idempotent: safe to re-run.
 --
--- Canonical barangays for the Pili deployment (matching the frontend
--- BARANGAYS constant in frontend/src/lib/barangays.js):
---   San Isidro, San Antonio, Old San Roque
+-- Approved barangays for the Pili deployment (shared in shared/barangays.js):
+--   San Antonio, San Isidro, Old San Roque
 -- Facilities (matching frontend/src/lib/consultationLocations.js):
 --   "RHU" plus one "<Barangay> Barangay Health Center" per barangay.
 -- =============================================================================
@@ -20,7 +19,7 @@ on conflict (name, province) do update
 insert into public.barangays (municipality_id, name, status, health_station_name)
 select m.id, v.name, 'Active', v.name || ' Barangay Health Center'
 from public.municipalities m,
-     (values ('San Isidro'), ('San Antonio'), ('Old San Roque')) as v(name)
+     (values ('San Antonio'), ('San Isidro'), ('Old San Roque')) as v(name)
 where m.name = 'Pili' and m.province = 'Camarines Sur'
 on conflict (municipality_id, name) do nothing;
 
@@ -35,6 +34,7 @@ select b.municipality_id, b.id, b.name || ' Barangay Health Center', 'barangay_h
 from public.barangays b
 join public.municipalities m on m.id = b.municipality_id
 where m.name = 'Pili' and m.province = 'Camarines Sur'
+  and b.status = 'Active'
 on conflict (municipality_id, name) do nothing;
 
 commit;

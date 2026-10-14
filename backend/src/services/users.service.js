@@ -106,10 +106,21 @@ const makeProfileAssignment = async ({ role, municipalityId, barangayId, facilit
     if (!allowResident) {
       throw ApiError.unprocessable('Resident accounts must use the resident registration workflow.');
     }
+    if (!barangayId) {
+      return { municipality_id: municipalityId || null, barangay_id: null, facility_id: null };
+    }
+    const options = await repository.getAccountAssignmentOptions();
+    const barangay = options.barangays.find((item) => item.id === barangayId);
+    if (!barangay) {
+      throw ApiError.unprocessable('Select an approved active barangay for this resident.');
+    }
+    if (municipalityId && municipalityId !== barangay.municipalityId) {
+      throw ApiError.unprocessable('The selected barangay does not belong to the selected municipality.');
+    }
     return {
-      municipality_id: municipalityId || null,
-      barangay_id: barangayId || null,
-      facility_id: facilityId || null,
+      municipality_id: barangay.municipalityId,
+      barangay_id: barangay.id,
+      facility_id: null,
     };
   }
 

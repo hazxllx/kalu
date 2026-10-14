@@ -1,5 +1,6 @@
 import ApiError from '../utils/apiError.js';
 import { getServiceClient } from '../config/supabase.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 
 /**
  * Admin Barangay Management service (admin-only).
@@ -162,6 +163,9 @@ export const getBarangay = async ({ id }) => {
 };
 
 export const createBarangay = async ({ actorId, input }) => {
+  if (!isApprovedBarangayName(input.name) || input.status === 'Inactive') {
+    throw ApiError.unprocessable('Only the approved active barangays may be registered.');
+  }
   const municipality = await assertMunicipalityExists(input.municipalityId);
 
   const insertRow = {
@@ -200,6 +204,18 @@ export const createBarangay = async ({ actorId, input }) => {
 
 export const updateBarangay = async ({ id, actorId, patch }) => {
   const existing = await getRow(id);
+  if (patch.name !== undefined && patch.name !== existing.name) {
+    throw ApiError.unprocessable('Official barangay names cannot be changed.');
+  }
+  if (patch.municipalityId !== undefined && patch.municipalityId !== existing.municipality_id) {
+    throw ApiError.unprocessable('Official barangays cannot be moved to another municipality.');
+  }
+  if (patch.status !== undefined) {
+    const allowedStatus = isApprovedBarangayName(existing.name) ? 'Active' : 'Inactive';
+    if (patch.status !== allowedStatus) {
+      throw ApiError.unprocessable('Only approved barangays can be active; legacy barangays must remain inactive.');
+    }
+  }
 
   // A move to another municipality must still resolve to a real one.
   const targetMunicipalityId = patch.municipalityId || existing.municipality_id;
@@ -283,6 +299,10 @@ export const updateBarangayStatus = async ({ id, actorId, status }) => {
     throw ApiError.badRequest('Status must be either Active or Inactive.');
   }
   const existing = await getRow(id);
+  const allowedStatus = isApprovedBarangayName(existing.name) ? 'Active' : 'Inactive';
+  if (normalized !== allowedStatus) {
+    throw ApiError.unprocessable('Only approved barangays can be active; legacy barangays must remain inactive.');
+  }
   if (existing.status === normalized) {
     return toRecord(existing);
   }

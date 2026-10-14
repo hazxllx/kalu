@@ -285,30 +285,6 @@ export default function MunicipalSubmissions() {
         </Card>
       )}
 
-      {/* Progress */}
-      <Card className="p-5 mb-6">
-        <h3 className="font-semibold text-brand-ink text-sm mb-4">{selectedPeriod} Submission Completion</h3>
-        <div className="space-y-3 max-w-xl">
-          {[
-            { label: "TCL", count: barangayStatus.filter((b) => b.tcl).length, total: barangayStatus.length },
-            { label: "M1", count: barangayStatus.filter((b) => b.m1).length, total: barangayStatus.length },
-          ].map((p) => {
-            const pct = p.total ? Math.round((p.count / p.total) * 100) : 0;
-            return (
-              <div key={p.label}>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-brand-ink">{p.label}</span>
-                  <span className="text-brand-gray">{p.count} / {p.total} barangays · {pct}%</span>
-                </div>
-                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-200">
-                  <div className="h-full rounded-full bg-brand-blue" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
       {/* Tabs + filters */}
       <Card className="overflow-hidden">
         <div className="border-b border-slate-200 px-5 pt-4 flex flex-wrap items-center gap-2">

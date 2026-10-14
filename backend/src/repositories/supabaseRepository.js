@@ -12,6 +12,7 @@
  */
 import { createAuthClient, getServiceClient } from '../config/supabase.js';
 import env from '../config/env.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 
 const TABLES = Object.freeze({
   residents: 'residents',
@@ -1482,7 +1483,7 @@ export const supabaseRepository = {
         id,
         name,
         municipalityId: municipality_id,
-      })),
+      })).filter(({ name }) => isApprovedBarangayName(name)),
       facilities: (facilitiesResult.data || []).map(({ id, name, municipality_id }) => ({
         id,
         name,

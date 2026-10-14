@@ -1,6 +1,7 @@
 import { REQUESTABLE_ROLES } from '../config/staffApprovals.js';
 import { normalizeStations } from '../config/rhuStations.js';
 import { hasControlChars, isStrongPassword, isUuid, isStrictMobile, text, valid, invalid } from './common.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 
 /**
  * Staff account registration + verification request validation.
@@ -64,6 +65,9 @@ export const registerPersonnelValidator = (input = {}) => {
   }
 
   if (barangayId && !isUuid(barangayId)) errors.barangayId = 'The selected barangay is not valid.';
+  if (barangay && !isApprovedBarangayName(barangay)) {
+    errors.barangay = 'Select one of the approved barangays.';
+  }
   if (facilityId && !isUuid(facilityId)) errors.facilityId = 'The selected facility is not valid.';
 
   if (role === 'rhu_personnel') {

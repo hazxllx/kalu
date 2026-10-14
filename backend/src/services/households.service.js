@@ -18,6 +18,7 @@ import repository from '../repositories/index.js';
 import { computeHouseholdRisk, householdFlags } from '../utils/householdRisk.js';
 import { computeBMI } from '../utils/bmi.js';
 import { assignedBarangay } from '../config/scope.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 import { recordHouseholdAudit, emitHouseholdWorkflow } from './householdWorkflow.js';
 
 const READ_ROLES = ['bhw', 'health_supervisor', 'phn'];
@@ -288,7 +289,8 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
     throw ApiError.forbidden('Your account is assigned to Barangay ' + scope + ' only');
   }
   const barangayRow = await repo.findBarangayByName(barangayName, user?.municipalityId || null);
-  if (!barangayRow) {
+  if (!isApprovedBarangayName(barangayName) || !barangayRow
+    || String(barangayRow.status || 'Active').toLowerCase() !== 'active') {
     throw ApiError.unprocessable(`Unknown barangay: ${barangayName}. It must belong to your municipality.`);
   }
   const memberResidentIds = (members || []).map((member) => member.residentId).filter(Boolean);
@@ -593,7 +595,10 @@ export const addHouseholdMember = async ({ id, user, member = {}, repo = reposit
       throw ApiError.conflict('A resident with the same first name, last name, and birthdate already exists. Search for and link that resident instead.');
     }
     const barangay = await repo.findBarangayByName(household.barangay, household.municipalityId);
-    if (!barangay) throw ApiError.unprocessable('The household barangay could not be verified.');
+    if (!isApprovedBarangayName(household.barangay) || !barangay
+      || String(barangay.status || 'Active').toLowerCase() !== 'active') {
+      throw ApiError.unprocessable('The household barangay could not be verified.');
+    }
     const ids = await repo.nextResidentIds();
     resident = await repo.insertResident({
       ...ids,

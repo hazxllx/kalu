@@ -9,13 +9,14 @@
  * Workflow (unchanged from the original design, now actually persisted):
  *
  *   Draft ──> For Review ──> Approved ──> Issued
+ *                 └────────────────────> Issued (approve and issue)
  *                 └──────> Rejected          (terminal)
  *   any non-Issued ──> Cancelled           (terminal)
  *
  *   - PHN / MHO prepare a certificate and submit it for review.
- *   - Only the PHN or the MHO may approve / issue / reject; the role is checked
- *     here, in the route's `authorize(FEATURE_ROLES.certificateReview)`, and in
- *     public.can_review_medical_certificates().
+ *   - Only an in-scope PHN or MHO may approve / issue / reject; the role is
+ *     checked here, in the route's `authorize(FEATURE_ROLES.certificateReview)`,
+ *     and in public.can_review_medical_certificates().
  *
  * SECURITY MODEL (defense in depth, mirroring referrals.service.js):
  *   - every read is filtered to the caller's barangay/municipality scope HERE,
@@ -50,7 +51,7 @@ export const CERT_STATUSES = Object.freeze(Object.values(CERT_STATUS));
 /** Legal transitions. Mirrors the UI's ALLOWED_TRANSITIONS map. */
 export const ALLOWED_TRANSITIONS = Object.freeze({
   [CERT_STATUS.DRAFT]: [CERT_STATUS.FOR_REVIEW, CERT_STATUS.CANCELLED],
-  [CERT_STATUS.FOR_REVIEW]: [CERT_STATUS.APPROVED, CERT_STATUS.REJECTED, CERT_STATUS.CANCELLED],
+  [CERT_STATUS.FOR_REVIEW]: [CERT_STATUS.APPROVED, CERT_STATUS.ISSUED, CERT_STATUS.REJECTED, CERT_STATUS.CANCELLED],
   [CERT_STATUS.APPROVED]: [CERT_STATUS.ISSUED, CERT_STATUS.CANCELLED],
   [CERT_STATUS.ISSUED]: [],
   [CERT_STATUS.REJECTED]: [],
@@ -79,8 +80,12 @@ const RESIDENT_ROLES = new Set([ROLES.RESIDENT, ROLES.RESIDENT_LIMITED]);
 
 const RESIDENT_EMBED =
   'resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date, cellphone_no, current_address, permanent_address, civil_status, auth_user_id, municipality_id)';
-const LOG_SELECT = 'id, action, previous_status, new_status, notes, created_at, actor_id, actor:profiles!actor_id(full_name, email, role)';
+const LOG_SELECT = 'id, action, previous_status, new_status, notes, created_at, actor_id';
+// Keep only the resident relationship in PostgREST's select. Profile attribution
+// is hydrated separately so the register works even while PostgREST's schema
+// cache is missing the certificate -> profiles FK relationships.
 const SELECT = `*, ${RESIDENT_EMBED}`;
+const PROFILE_SELECT = 'id, full_name, email, role';
 
 const text = (v) => String(v ?? '').trim();
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -122,17 +127,24 @@ const toCertificate = (row, audit = []) => {
     findings: row.findings || '',
     dateOfExamination: row.date_of_examination || '',
     medicalOfficer: row.medical_officer || '',
+    signatoryPosition: row.signatory_position || '',
     licenseNumber: row.license_number || '',
     recommendation: row.recommendation || '',
     remarks: row.remarks || '',
     notes: row.notes || '',
     status: row.status,
     dateIssued: row.date_issued || '',
-    issuedAt: row.date_issued ? new Date(row.date_issued).toISOString() : '',
-    preparedBy: row.created_by,
-    preparedByRole: row.created_by_role || '',
+    issuedAt: row.issued_at || (row.date_issued ? new Date(row.date_issued).toISOString() : ''),
+    issuedBy: row.issuer?.full_name || row.issuer?.email || '',
+    reviewer: row.reviewer?.full_name || row.reviewer?.email || '',
+    reviewerRole: row.reviewer?.role || '',
+    reviewedAt: row.reviewed_at || '',
+    reviewRemarks: row.review_remarks || '',
+    preparedBy: row.creator?.full_name || row.creator?.email || row.created_by || '',
+    preparedByRole: row.creator?.role || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    submittedAt: audit.find((entry) => entry.newStatus === CERT_STATUS.FOR_REVIEW)?.at || '',
     audit,
   };
 };
@@ -144,6 +156,34 @@ const toLogEntry = (log) => ({
   at: log.created_at,
   notes: log.notes || '',
 });
+
+const profilesById = async (supabase, ids) => {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (!uniqueIds.length) return new Map();
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select(PROFILE_SELECT)
+    .in('id', uniqueIds);
+  throwOnError(error, 'Could not load certificate attribution');
+  return new Map((data || []).map((profile) => [profile.id, profile]));
+};
+
+const hydrateCertificateProfiles = async (supabase, rows) => {
+  const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
+  const profiles = await profilesById(supabase, list.flatMap((row) => [
+    row.created_by,
+    row.reviewed_by,
+    row.issued_by,
+  ]));
+  const hydrated = list.map((row) => ({
+    ...row,
+    creator: profiles.get(row.created_by) || null,
+    reviewer: profiles.get(row.reviewed_by) || null,
+    issuer: profiles.get(row.issued_by) || null,
+  }));
+  return Array.isArray(rows) ? hydrated : hydrated[0] || null;
+};
 
 /** Resident-facing notification copy — no clinical detail leaks into the feed. */
 const notificationFor = (status) => {
@@ -176,12 +216,8 @@ const writeLog = async (supabase, user, certificateId, action, previousStatus, n
 };
 
 /**
- * Resolve the AUTHORIZED signatory from the database — never from the client.
- *
- * The MHO is the required approval/signatory role for medical documents, so the
- * approving MHO's own profile (full_name / position / license_no) is the
- * authoritative signatory identity. Falls back to the session user's identity
- * only when the profile row cannot be read, and never to a request body value.
+ * Resolve the authenticated PHN/MHO signatory from the database, never from
+ * client-submitted certificate fields.
  */
 const resolveSignatory = async (supabase, user) => {
   if (user?.id) {
@@ -193,14 +229,14 @@ const resolveSignatory = async (supabase, user) => {
     if (!error && data) {
       return {
         fullName: data.full_name || '',
-        position: data.position || 'Municipal Health Officer',
+        position: data.position || (user.role === ROLES.MHO ? 'Municipal Health Officer' : 'Public Health Nurse'),
         licenseNumber: data.license_no || '',
       };
     }
   }
   return {
     fullName: user?.name || '',
-    position: 'Municipal Health Officer',
+    position: user?.role === ROLES.MHO ? 'Municipal Health Officer' : 'Public Health Nurse',
     licenseNumber: '',
   };
 };
@@ -224,8 +260,12 @@ const loadAudit = async (supabase, certificateId) => {
     .select(LOG_SELECT)
     .eq('certificate_id', certificateId)
     .order('created_at', { ascending: true });
-  if (error) return [];
-  return (data || []).map(toLogEntry);
+  throwOnError(error, 'Could not load medical certificate history');
+  const profiles = await profilesById(supabase, (data || []).map((log) => log.actor_id));
+  return (data || []).map((log) => toLogEntry({
+    ...log,
+    actor: profiles.get(log.actor_id) || null,
+  }));
 };
 
 /** The resident a certificate is filed against, with its scope. */
@@ -241,7 +281,7 @@ const residentInScope = async (supabase, user, residentId) => {
   if (!data) throw ApiError.notFound('Resident record not found.');
 
   if (user.role === ROLES.PHN || user.role === ROLES.MHO || user.role === ROLES.RHU_PERSONNEL) {
-    if (user.municipalityId && data.municipality_id && data.municipality_id !== user.municipalityId) {
+    if (!user.municipalityId || !data.municipality_id || data.municipality_id !== user.municipalityId) {
       throw ApiError.notFound('Resident record not found.');
     }
   } else if (user.role === ROLES.HEALTH_SUPERVISOR) {
@@ -305,7 +345,7 @@ export const list = async ({ user, status = null, residentId = null, supabase = 
 
   const { data, error } = await query;
   throwOnError(error, 'Could not load medical certificates');
-  return (data || []).map((row) => toCertificate(row));
+  return (await hydrateCertificateProfiles(supabase, data || [])).map((row) => toCertificate(row));
 };
 
 /** One certificate plus its full decision history. */
@@ -327,7 +367,8 @@ export const getById = async ({ user, id, supabase = getServiceClient() }) => {
     throw ApiError.forbidden('You are not authorized to view medical certificates.');
   }
 
-  return toCertificate(data, await loadAudit(supabase, data.id));
+  const certificate = await hydrateCertificateProfiles(supabase, data);
+  return toCertificate(certificate, await loadAudit(supabase, data.id));
 };
 
 /** MC-YYYY-#### is unique; a lost race retries a few times before failing. */
@@ -362,8 +403,8 @@ const sanitizeWrite = (payload = {}) => {
   }
   // SECURITY: the authorized signatory is NEVER client-supplied. Any
   // medicalOfficer / licenseNumber sent by the client is ignored — the values
-  // are resolved server-side from the profile of the preparer and re-stamped
-  // from the approving MHO's profile at approval/issue time.
+  // are resolved server-side from the authenticated profile and re-stamped by
+  // the authorized reviewer at approval/issue time.
   if (payload.civilStatus !== undefined) row.civil_status = text(payload.civilStatus);
   if (payload.recommendation !== undefined) row.recommendation = text(payload.recommendation);
   if (payload.remarks !== undefined) row.remarks = text(payload.remarks);
@@ -417,7 +458,8 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
     reference: created.reference_no,
     request: isTriageRequest || undefined,
   });
-  return toCertificate(created, await loadAudit(supabase, created.id));
+  const certificate = await hydrateCertificateProfiles(supabase, created);
+  return toCertificate(certificate, await loadAudit(supabase, created.id));
 };
 
 const writableCertificate = async (supabase, user, id) => {
@@ -425,9 +467,7 @@ const writableCertificate = async (supabase, user, id) => {
   throwOnError(error, 'Could not load medical certificate');
   if (!data) throw ApiError.notFound('Medical certificate not found.');
 
-  if (user.role === ROLES.HEALTH_SUPERVISOR) {
-    if (!user.barangayId || data.barangay_id !== user.barangayId) throw ApiError.notFound('Medical certificate not found.');
-  } else if (user.role === ROLES.PHN || user.role === ROLES.MHO) {
+  if (REVIEW_ROLES.has(user?.role)) {
     if (!user.municipalityId || data.municipality_id !== user.municipalityId) {
       throw ApiError.notFound('Medical certificate not found.');
     }
@@ -448,14 +488,23 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
     throw ApiError.unprocessable('Clinical findings are required.');
   }
   if (Object.keys(row).length === 0) {
-    return toCertificate(existing, await loadAudit(supabase, existing.id));
+    const certificate = await hydrateCertificateProfiles(supabase, existing);
+    return toCertificate(certificate, await loadAudit(supabase, existing.id));
   }
 
-  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(SELECT).single();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update(row)
+    .eq('id', id)
+    .eq('status', existing.status)
+    .select(SELECT)
+    .maybeSingle();
+  if (!error && !data) throw ApiError.conflict('The certificate changed while it was being edited. Reload and try again.');
   throwOnError(error, 'Could not update medical certificate');
   await writeLog(supabase, user, id, 'Updated', existing.status, existing.status, 'Certificate details updated');
   await writeAudit(supabase, user, 'MEDICAL_CERTIFICATE_UPDATED', id, data, { reference: data.reference_no });
-  return toCertificate(data, await loadAudit(supabase, data.id));
+  const certificate = await hydrateCertificateProfiles(supabase, data);
+  return toCertificate(certificate, await loadAudit(supabase, data.id));
 };
 
 /**
@@ -472,21 +521,14 @@ export const changeStatus = async ({ user, id, status, notes = '', supabase = ge
   const existing = await writableCertificate(supabase, user, id);
   const current = existing.status;
 
-  if (current === target) return toCertificate(existing, await loadAudit(supabase, existing.id));
+  if (current === target) {
+    const certificate = await hydrateCertificateProfiles(supabase, existing);
+    return toCertificate(certificate, await loadAudit(supabase, existing.id));
+  }
 
   const isDecision = [CERT_STATUS.APPROVED, CERT_STATUS.ISSUED, CERT_STATUS.REJECTED].includes(target);
   if (isDecision && !REVIEW_ROLES.has(user?.role)) {
     throw ApiError.forbidden('Only the PHN or the MHO may approve, issue or reject a medical certificate.');
-  }
-  // BUSINESS RULE: the MHO is the authorized signatory/approver. Approval is the
-  // required MHO step, so only the MHO may move a certificate to Approved — a
-  // PHN preparing/reviewing a certificate can submit it for review or reject it,
-  // but can never mark it MHO-approved. Issuance is only reachable FROM Approved
-  // (see ALLOWED_TRANSITIONS), so a certificate can never be issued without a
-  // real MHO approval on record. No electronic/digital signature is involved;
-  // the approval is recorded as the approving MHO's id + timestamp below.
-  if (target === CERT_STATUS.APPROVED && user?.role !== ROLES.MHO) {
-    throw ApiError.forbidden('Only the Municipal Health Officer may approve a medical certificate.');
   }
   if (!isDecision && !PREPARE_ROLES.has(user?.role)) {
     throw ApiError.forbidden('You are not authorized to change a medical certificate status.');
@@ -501,30 +543,47 @@ export const changeStatus = async ({ user, id, status, notes = '', supabase = ge
   }
 
   const row = { status: target };
-  if (target === CERT_STATUS.ISSUED) row.date_issued = todayIso();
-  if (isDecision) {
+  const decisionAt = new Date().toISOString();
+  if ([CERT_STATUS.APPROVED, CERT_STATUS.REJECTED].includes(target)
+    || (target === CERT_STATUS.ISSUED && current === CERT_STATUS.FOR_REVIEW)) {
     row.reviewed_by = user.id;
-    row.reviewed_at = new Date().toISOString();
+    row.reviewed_at = decisionAt;
     row.review_remarks = text(notes);
   }
+  if (target === CERT_STATUS.ISSUED) {
+    row.date_issued = decisionAt.slice(0, 10);
+    row.issued_at = decisionAt;
+    row.issued_by = user.id;
+  }
 
-  // The authorized signatory is resolved server-side (the approving MHO's own
-  // profile) and stamped onto the certificate. A client can never type an
+  // The authorized signatory is resolved server-side (the approving PHN/MHO's
+  // own profile) and stamped onto the certificate. A client can never type an
   // arbitrary doctor/license into the document — the stored values are the
   // authoritative ones, and they are preserved unchanged once the certificate
   // is approved/issued.
-  if (target === CERT_STATUS.APPROVED || target === CERT_STATUS.ISSUED) {
+  if (target === CERT_STATUS.APPROVED || (target === CERT_STATUS.ISSUED && current === CERT_STATUS.FOR_REVIEW)) {
     const signatory = await resolveSignatory(supabase, user);
     const signatoryName = (signatory.fullName || '').trim();
     const license = (signatory.licenseNumber || '').trim();
     if (signatoryName) row.medical_officer = signatoryName;
     if (signatoryName || license) row.license_number = license;
+    row.signatory_position = signatory.position || '';
   }
 
-  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(SELECT).single();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update(row)
+    .eq('id', id)
+    .eq('status', current)
+    .select(SELECT)
+    .maybeSingle();
+  if (!error && !data) throw ApiError.conflict('The certificate was reviewed by someone else. Reload the register.');
   throwOnError(error, 'Could not update medical certificate status');
 
-  await writeLog(supabase, user, id, target, current, target, text(notes));
+  const historyAction = target === CERT_STATUS.ISSUED && current === CERT_STATUS.FOR_REVIEW
+    ? 'Approved and Issued'
+    : target;
+  await writeLog(supabase, user, id, historyAction, current, target, text(notes));
   await writeAudit(supabase, user, 'MEDICAL_CERTIFICATE_STATUS_CHANGED', id, data, {
     reference: data.reference_no,
     from: current,
@@ -541,7 +600,8 @@ export const changeStatus = async ({ user, id, status, notes = '', supabase = ge
     });
   }
 
-  return toCertificate(data, await loadAudit(supabase, data.id));
+  const certificate = await hydrateCertificateProfiles(supabase, data);
+  return toCertificate(certificate, await loadAudit(supabase, data.id));
 };
 
 /** Convenience wrappers matching the register's decision buttons. */

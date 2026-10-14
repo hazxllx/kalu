@@ -3,6 +3,13 @@
 @tailwind components;
 @tailwind utilities;
 
+.leaflet-tooltip.health-map-count-tooltip {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

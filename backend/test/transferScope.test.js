@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import repository from '../src/repositories/index.js';
 import {
+  getContext,
   planDocumentWrite,
   residencyStatusFrom,
   transferInReviewerScope,
@@ -8,6 +10,37 @@ import {
 } from '../src/services/transfer.service.js';
 
 const request = { from_barangay_id: 'bgy-origin', to_barangay_id: 'bgy-dest' };
+
+test('resident transfer destinations include only other approved active barangays', async (t) => {
+  const originals = {
+    getResidentByAuthUserId: repository.getResidentByAuthUserId,
+    listBarangays: repository.listBarangays,
+    listTransferRequestsByUser: repository.listTransferRequestsByUser,
+  };
+  repository.getResidentByAuthUserId = async () => ({
+    id: 'resident-1',
+    barangayId: 'san-isidro',
+    municipalityId: 'municipality-1',
+  });
+  repository.listBarangays = async () => [
+    { id: 'san-jose', name: 'San Jose', status: 'Active' },
+    { id: 'san-isidro', name: 'San Isidro', status: 'Active' },
+    { id: 'old-san-roque', name: 'Old San Roque', status: 'Active' },
+    { id: 'san-antonio', name: 'San Antonio', status: 'Active' },
+    { id: 'inactive', name: 'San Jose Annex', status: 'Inactive' },
+  ];
+  repository.listTransferRequestsByUser = async () => [];
+  t.after(() => {
+    Object.assign(repository, originals);
+  });
+
+  const context = await getContext({ user: { id: 'user-1', role: 'resident' } });
+
+  assert.deepEqual(context.destinations, [
+    { id: 'old-san-roque', name: 'Old San Roque' },
+    { id: 'san-antonio', name: 'San Antonio' },
+  ]);
+});
 
 // --------------------------------------------------------------------------
 // Reviewer VISIBILITY (list / open) — origin OR destination barangay.

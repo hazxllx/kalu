@@ -130,3 +130,21 @@ test('contact number rejects fewer than 11 digits and non-09 prefixes', () => {
     assert.ok(result.error?.phone, `expected "${bad}" to be rejected`);
   }
 });
+
+test('staff assignments accept only approved barangays', () => {
+  for (const barangay of ['San Antonio', 'San Isidro', 'Old San Roque']) {
+    const result = registerPersonnelValidator({
+      ...base,
+      role: 'bhw',
+      barangay,
+    });
+    assert.equal(result.error, undefined, `${barangay} should be accepted`);
+  }
+
+  const rejected = registerPersonnelValidator({
+    ...base,
+    role: 'bhw',
+    barangay: 'San Jose',
+  });
+  assert.ok(rejected.error?.barangay);
+});

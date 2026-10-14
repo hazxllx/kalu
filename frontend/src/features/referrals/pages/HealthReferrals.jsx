@@ -10,6 +10,7 @@ import { ROLE } from "@/lib/roles";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { referralsApi, residentsApi } from "@/services/api";
 import { downloadReferralPdf } from "@/features/referrals/lib/referralPdf";
+import { shouldShowReferralDownloadAction } from "@/features/referrals/lib/referralTrackingActions";
 import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Trash2, Send, Download } from "lucide-react";
 
 /**
@@ -681,14 +682,16 @@ export default function HealthReferrals() {
                       </button>
                       {!isResident && (
                         <>
-                          <button
-                            onClick={() => handleDownloadPdf(r)}
-                            disabled={exportingId === r.id}
-                            className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors disabled:opacity-50"
-                            title="Download Referral Form (PDF)"
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
+                          {shouldShowReferralDownloadAction(user) && (
+                            <button
+                              onClick={() => handleDownloadPdf(r)}
+                              disabled={exportingId === r.id}
+                              className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors disabled:opacity-50"
+                              title="Download Referral Form (PDF)"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                          )}
                           {canWrite && canAssign && (
                             <button onClick={() => openEdit(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Edit Referral">
                               <Edit2 className="w-4 h-4" />

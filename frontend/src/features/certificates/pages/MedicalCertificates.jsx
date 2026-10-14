@@ -6,7 +6,8 @@ import MedicalCertificateModal, { CertificateStatusBadge } from "@/features/cert
 import { useCertificateMeta, useCertificateRegister } from "@/features/certificates/hooks/useCertificateRegister";
 import { useAuth } from "@/context/AuthContext";
 import { canInitiateCertificate } from "@/lib/rhuStations";
-import { Search, FileText, Plus, X, ChevronRight, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { isMedicalCertificateReviewer } from "@/features/certificates/lib/certificatePermissions";
+import { Search, FileText, Plus, X, ChevronRight, AlertCircle, Loader2 } from "lucide-react";
 
 const formatDate = (iso) => {
   if (!iso) return "—";
@@ -14,10 +15,6 @@ const formatDate = (iso) => {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
-
-/** Roles that may approve / issue / reject a certificate (server enforces too). */
-const REVIEW_ROLES = ["mho", "phn"];
-const EDIT_ROLES = ["mho", "phn"];
 
 /**
  * Medical Certificates register.
@@ -32,9 +29,9 @@ export default function MedicalCertificates() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const meta = useCertificateMeta();
-  const { rows: certificates, loading, error, refresh, setStatus } = useCertificateRegister();
-  const isReviewer = REVIEW_ROLES.includes(user?.role);
-  const canPrepare = EDIT_ROLES.includes(user?.role);
+  const { rows: certificates, loading, error, refresh } = useCertificateRegister();
+  const isReviewer = isMedicalCertificateReviewer(user);
+  const canPrepare = isReviewer;
   // A Triage-station RHU Personnel may initiate a request (but not approve/issue).
   const canInitiate = canPrepare || canInitiateCertificate(user);
   const base = user?.role ? `/app/${user.role}` : "";
@@ -43,7 +40,6 @@ export default function MedicalCertificates() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [selected, setSelected] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
-  const [statusTarget, setStatusTarget] = useState(null); // certificate id
   const [toast, setToast] = useState(null);
 
   const showToast = (msg) => {
@@ -68,19 +64,6 @@ export default function MedicalCertificates() {
   }, [certificates, query, statusFilter]);
 
   const statuses = ["All", ...(meta.statuses || [])];
-
-  /** Persist a status change through the API, then refresh the register. */
-  const handleStatusChange = async (newStatus, remarks) => {
-    const cert = certificates.find((c) => c.id === statusTarget);
-    setStatusTarget(null);
-    if (!cert) return;
-    try {
-      await setStatus(cert.id, newStatus, remarks);
-      showToast(`Certificate ${cert.reference} status changed to ${newStatus}.`);
-    } catch (err) {
-      showToast(err?.message || "The status change could not be saved.");
-    }
-  };
 
   return (
     <>
@@ -166,23 +149,11 @@ export default function MedicalCertificates() {
                     <td className="whitespace-nowrap px-5 py-3 text-brand-gray">{formatDate(c.dateOfExamination)}</td>
                     <td className="px-5 py-3 text-brand-gray">{c.preparedBy}</td>
                     <td className="px-5 py-3">
-                      {isReviewer ? (
-                        <button
-                          type="button"
-                          onClick={() => setStatusTarget(c.id)}
-                          title="Change status"
-                          aria-label={`Change status of certificate ${c.reference}`}
-                          className="rounded-full transition-opacity hover:opacity-75 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
-                        >
-                          <CertificateStatusBadge value={c.status} />
-                        </button>
-                      ) : (
-                        <CertificateStatusBadge value={c.status} />
-                      )}
+                      <CertificateStatusBadge value={c.status} />
                     </td>
                     <td className="px-5 py-3 text-right">
                       <div className="inline-flex items-center justify-end gap-3">
-                        {EDIT_ROLES.includes(user?.role) && ["Draft", "For Review"].includes(c.status) && (
+                        {isReviewer && ["Draft", "For Review"].includes(c.status) && (
                           <button onClick={() => setEditTarget(c.id)} className="text-sm font-medium text-brand-blue hover:underline">Edit</button>
                         )}
                         <button
@@ -220,17 +191,12 @@ export default function MedicalCertificates() {
         if (!cert) return null;
         return (
           <MedicalCertificateModal
-            mode={isReviewer && cert.status === "For Review" ? "review" : "view"}
+            mode={isReviewer && ["For Review", "Approved"].includes(cert.status) ? "review" : "view"}
             certificate={cert}
             currentUser={user?.name || ""}
             currentUserRole={user?.role || ""}
             purposes={meta.purposes}
             onClose={() => setSelected(null)}
-            onRequestStatusChange={
-              isReviewer
-                ? (target) => { setSelected(null); setStatusTarget(target.id); }
-                : undefined
-            }
             onSaved={async (status) => {
               showToast(`Certificate ${cert.reference} marked as ${status}.`);
               await refresh();
@@ -260,162 +226,6 @@ export default function MedicalCertificates() {
         );
       })()}
 
-      {/* Reviewer status change */}
-      {statusTarget && (() => {
-        const cert = certificates.find((c) => c.id === statusTarget);
-        if (!cert) return null;
-        // Only the MHO may approve (the required signatory step). A PHN can
-        // submit for review, reject or cancel, but never mark a certificate
-        // MHO-approved — the backend enforces this too, so hiding the option
-        // keeps the UI honest instead of surfacing a 403.
-        const allowed = (meta.allowedTransitions?.[cert.status] || []).filter(
-          (s) => s !== "Approved" || user?.role === "mho"
-        );
-        return (
-          <StatusChangeModal
-            certificate={cert}
-            allowed={allowed}
-            onClose={() => setStatusTarget(null)}
-            onSave={handleStatusChange}
-          />
-        );
-      })()}
     </>
-  );
-}
-
-/**
- * Change Status modal (reviewer only: PHN / MHO). Shows the certificate
- * context — purpose, patient, examined date, prepared by, current status —
- * plus a new-status dropdown limited to the transitions the API reports as
- * legal and an optional remarks/reason field. Issuing is confirmed separately
- * because it is irreversible.
- */
-function StatusChangeModal({ certificate, allowed, onClose, onSave }) {
-  const [newStatus, setNewStatus] = useState(allowed[0] || "");
-  const [remarks, setRemarks] = useState("");
-  const [showIssueConfirm, setShowIssueConfirm] = useState(false);
-
-  const isUnchanged = !newStatus || newStatus === certificate.status;
-
-  const infoRows = [
-    { label: "Purpose", value: certificate.purpose },
-    { label: "Patient", value: `${certificate.patient} (${certificate.patientId})` },
-    { label: "Examined Date", value: formatDate(certificate.dateOfExamination) },
-    { label: "Prepared By", value: `${certificate.preparedBy}${certificate.preparedByRole ? ` (${certificate.preparedByRole})` : ""}` },
-  ];
-
-  return (
-    <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-md">
-        <Card className="max-h-[92vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="mb-1 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">Change Status</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">{certificate.reference}</p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-
-          {/* Certificate context */}
-          <div className="mt-4 space-y-2.5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-card">
-            {infoRows.map((row) => (
-              <div key={row.label} className="flex items-start justify-between gap-3 text-sm">
-                <p className="shrink-0 text-brand-gray">{row.label}</p>
-                <p className="min-w-0 text-right font-medium text-brand-ink">{row.value || "—"}</p>
-              </div>
-            ))}
-            <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2.5 text-sm dark:border-border">
-              <p className="text-brand-gray">Current Status</p>
-              <CertificateStatusBadge value={certificate.status} />
-            </div>
-          </div>
-
-          {/* New status + remarks */}
-          <div className="mt-4 space-y-4">
-            <div>
-              <label className="text-sm font-medium text-brand-ink">
-                New Status <span className="text-brand-danger">*</span>
-              </label>
-              {allowed.length > 0 ? (
-                <select
-                  value={newStatus}
-                  onChange={(e) => setNewStatus(e.target.value)}
-                  className="mt-1.5 w-full cursor-pointer rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
-                >
-                  {allowed.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              ) : (
-                <p className="mt-1.5 rounded-btn border border-slate-200 bg-brand-bg/60 px-3.5 py-2.5 text-sm text-brand-gray dark:border-border dark:bg-card-nested">
-                  This certificate is final — no further status changes are allowed.
-                </p>
-              )}
-              {newStatus === "Rejected" && (
-                <p className="mt-1 text-xs text-brand-gray">A reason is required to reject a certificate.</p>
-              )}
-            </div>
-            <div>
-              <label className="text-sm font-medium text-brand-ink">
-                Remarks / Reason {newStatus === "Rejected" ? <span className="text-brand-danger">*</span> : null}
-              </label>
-              <textarea
-                rows={3}
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-                placeholder="Optional remarks, or the reason when rejecting..."
-                className="mt-1.5 w-full resize-none rounded-btn border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
-              />
-            </div>
-          </div>
-
-          <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
-            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                // Issuing is irreversible — require confirmation first.
-                if (newStatus === "Issued") setShowIssueConfirm(true);
-                else onSave(newStatus, remarks.trim());
-              }}
-              disabled={isUnchanged || (newStatus === "Rejected" && !remarks.trim())}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <CheckCircle2 className="h-4 w-4" /> Save Changes
-            </button>
-          </div>
-        </div>
-      </Card>
-
-      {/* Issuing confirmation — required before the Issued status is applied. */}
-      {showIssueConfirm && (
-        <div className="absolute inset-0 z-[5] flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-sm">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-brand-ink">Issue this certificate?</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-brand-gray">
-                Issuing makes <span className="font-medium text-brand-ink">{certificate.reference}</span> official and
-                final — its status can no longer be changed.
-              </p>
-              <div className="mt-6 flex justify-end gap-3">
-                <button onClick={() => setShowIssueConfirm(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-                <button
-                  onClick={() => { setShowIssueConfirm(false); onSave("Issued", remarks.trim()); }}
-                  className="rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark"
-                >
-                  Issue Certificate
-                </button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
-      </div>
-    </div>
   );
 }

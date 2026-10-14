@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Map, Users, Stethoscope, Send, ShieldAlert, Activity, ClipboardList, ChevronRight, RefreshCw, AlertTriangle } from "lucide-react";
+import { Map, Users, Stethoscope, Send, ShieldAlert, Activity, RefreshCw, AlertTriangle } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { referralsApi, followUpsApi } from "@/services/api";
@@ -48,7 +47,6 @@ const MAP_PERIODS = [
   { value: "custom", label: "Custom Range" },
   { value: "all", label: "All Records" },
 ];
-
 const resolveMapRange = (period, custom) => {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -101,6 +99,7 @@ export default function MHODashboard() {
     try {
       const result = await fetchCommunityMap({
         condition,
+        distinctResidents: true,
         from: mapRange.from,
         to: mapRange.to,
       });
@@ -182,10 +181,14 @@ export default function MHODashboard() {
   }, []);
 
   const barangays = useMemo(() => map?.barangays || [], [map]);
-
+  const registryScopeComplete = map?.scopeComplete !== false;
   const stats = useMemo(() => {
-    const totalResidents = barangays.reduce((sum, b) => sum + (b.residents || 0), 0);
-    const highRisk = barangays.reduce((sum, b) => sum + (b.highRiskResidents || 0), 0);
+    const totalResidents = registryScopeComplete
+      ? barangays.reduce((sum, b) => sum + (b.residents || 0), 0)
+      : null;
+    const highRisk = registryScopeComplete
+      ? barangays.reduce((sum, b) => sum + (b.highRiskResidents || 0), 0)
+      : null;
     const pendingReferrals = (referrals || []).filter((r) => OPEN_REFERRAL_STATUSES.has(r.status)).length;
     return {
       totalBarangays: barangays.length,
@@ -196,12 +199,13 @@ export default function MHODashboard() {
       overdueFollowUps: (followUps || []).filter(isFollowUpDue).length,
       highRisk,
     };
-  }, [barangays, referrals, followUps, earlyWarning]);
+  }, [barangays, registryScopeComplete, referrals, followUps, earlyWarning]);
 
   const barangayRows = useMemo(() => barangays.map((b) => ({
     name: b.name,
-    residents: b.residents || 0,
-    highRisk: b.highRiskResidents || 0,
+    registryAvailable: b.registryAvailable !== false,
+    residents: b.residents,
+    highRisk: b.highRiskResidents,
     pendingReferrals: (referrals || []).filter((r) => barangayOf(r) === b.name && OPEN_REFERRAL_STATUSES.has(r.status)).length,
     overdueFollowUps: (followUps || []).filter((f) => barangayOf(f) === b.name && isFollowUpDue(f)).length,
   })), [barangays, referrals, followUps]);
@@ -227,10 +231,10 @@ export default function MHODashboard() {
   const statValue = (status, value) => status.loading ? "…" : status.error ? "Unavailable" : value;
   const statCards = [
     { icon: Map, tone: "bg-brand-blue/10 text-brand-blue", label: "Total Barangays", value: statValue(mapStatus, stats.totalBarangays), status: mapStatus },
-    { icon: Users, tone: "bg-brand-accent/10 text-brand-accent", label: "Registered Residents", value: statValue(mapStatus, stats.totalResidents), status: mapStatus },
+    { icon: Users, tone: "bg-brand-accent/10 text-brand-accent", label: "Registered Residents", value: statValue(mapStatus, stats.totalResidents ?? "Unavailable"), status: mapStatus },
     { icon: Stethoscope, tone: "bg-brand-green/10 text-brand-green", label: "Consultations (This Month)", value: statValue(earlyWarningStatus, stats.consultationsThisMonth), status: earlyWarningStatus },
     { icon: Send, tone: "bg-brand-yellow/15 text-[#B07E00]", label: "Total Referrals", value: statValue(referralsStatus, stats.totalReferrals), status: referralsStatus },
-    { icon: ShieldAlert, tone: "bg-brand-danger/10 text-brand-danger", label: "High-Risk Residents", value: statValue(mapStatus, stats.highRisk), status: mapStatus },
+    { icon: ShieldAlert, tone: "bg-brand-danger/10 text-brand-danger", label: "High-Risk Residents", value: statValue(mapStatus, stats.highRisk ?? "Unavailable"), status: mapStatus },
   ];
   const loadErrors = [
     mapStatus.error && "community map",
@@ -240,10 +244,23 @@ export default function MHODashboard() {
     submissionStatus.error && "submission reviews",
   ].filter(Boolean);
   const selectedBarangay = barangays.find((b) => b.name === selectedName) || null;
+  const conditionNames = conditions.length
+    ? conditions
+    : (map?.conditionTotals || []).map((item) => item.name);
   const visibleBarangays = useMemo(
     () => barangayFilter === "All" ? barangays : barangays.filter((b) => b.name === barangayFilter),
     [barangayFilter, barangays],
   );
+  const summaryBarangayNames = barangayFilter === "All" ? barangays.map((item) => item.name) : [barangayFilter];
+  const barangaySummaryRows = summaryBarangayNames.map((name) => {
+    const barangay = barangays.find((item) => item.name.toLowerCase() === name.toLowerCase());
+    return {
+      name,
+      registryAvailable: Boolean(barangay) && barangay.registryAvailable !== false,
+      totalCases: barangay?.caseCount ?? null,
+      topCondition: barangay?.topCondition || null,
+    };
+  });
   const periodLabel = mapRange.from || mapRange.to
     ? formatDateRange(mapRange.from, mapRange.to)
     : "All records";
@@ -301,7 +318,7 @@ export default function MHODashboard() {
                 className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink"
               >
                 <option value="All">All conditions</option>
-                {conditions.map((item) => <option key={item} value={item}>{item}</option>)}
+                {conditionNames.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
             </label>
             <label className="text-xs font-medium text-brand-gray">
@@ -344,7 +361,7 @@ export default function MHODashboard() {
           </div>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(260px,0.75fr)]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(300px,0.75fr)]">
           <CommunityHealthMap
             barangays={visibleBarangays}
             center={map?.center || null}
@@ -353,8 +370,11 @@ export default function MHODashboard() {
             onRetry={loadMap}
             onSelect={(barangay) => setSelectedName(barangay.name)}
             selectedName={selectedName}
+            visibleConditions={conditionNames}
+            showCountLabels
+            periodLabel={periodLabel}
           />
-          <div className="rounded-xl border border-brand-border bg-slate-50 p-3">
+          <div className="hidden">
             <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Relative case intensity</p>
             <div className="mt-3 space-y-2 text-xs text-brand-gray">
               <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ backgroundColor: '#F6C453' }} /> Lower</div>
@@ -371,20 +391,26 @@ export default function MHODashboard() {
               {selectedBarangay ? (
                 <div className="mt-3 border-t border-brand-border pt-3">
                   <p className="text-sm font-semibold text-brand-ink">{selectedBarangay.name}</p>
-                  <p className="mt-1 text-xs text-brand-gray">{selectedBarangay.caseCount || 0} cases · {selectedBarangay.residents || 0} residents</p>
-                  <p className="mt-1 text-xs text-brand-gray">{selectedBarangay.highRiskResidents || 0} high-risk residents</p>
-                  <p className="mt-1 text-xs text-brand-gray">{selectedBarangay.activeCases || 0} active · {selectedBarangay.completedCases || 0} completed</p>
-                  <p className="mt-1 text-xs text-brand-gray">Top condition: {selectedBarangay.topCondition?.name || "No recorded condition"} ({selectedBarangay.topCondition?.value || 0})</p>
-                  {selectedBarangay.lastRecorded && <p className="mt-1 text-xs text-brand-gray">Last recorded: {selectedBarangay.lastRecorded}</p>}
-                  {(selectedBarangay.conditions || []).filter((item) => item.value > 0).length > 0 && (
-                    <ul className="mt-2 space-y-1 border-t border-brand-border pt-2 text-xs text-brand-gray">
-                      {selectedBarangay.conditions.filter((item) => item.value > 0).slice(0, 5).map((item) => (
-                        <li key={item.name} className="flex justify-between gap-2">
-                          <span>{item.name}</span>
-                          <span className="font-semibold text-brand-ink">{item.value}</span>
-                        </li>
-                      ))}
-                    </ul>
+                  {selectedBarangay.registryAvailable === false ? (
+                    <p className="mt-1 text-xs text-brand-danger">Registry data is unavailable; case totals cannot be confirmed.</p>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-xs text-brand-gray">{selectedBarangay.caseCount || 0} cases · {selectedBarangay.residents || 0} residents</p>
+                      <p className="mt-1 text-xs text-brand-gray">{selectedBarangay.highRiskResidents || 0} high-risk residents</p>
+                      <p className="mt-1 text-xs text-brand-gray">{selectedBarangay.activeCases || 0} active · {selectedBarangay.completedCases || 0} completed</p>
+                      <p className="mt-1 text-xs text-brand-gray">Top condition: {selectedBarangay.topCondition?.name || "No recorded condition"} ({selectedBarangay.topCondition?.value || 0})</p>
+                      {selectedBarangay.lastRecorded && <p className="mt-1 text-xs text-brand-gray">Last recorded: {selectedBarangay.lastRecorded}</p>}
+                      {(selectedBarangay.conditions || []).filter((item) => item.value > 0).length > 0 && (
+                        <ul className="mt-2 space-y-1 border-t border-brand-border pt-2 text-xs text-brand-gray">
+                          {selectedBarangay.conditions.filter((item) => item.value > 0).slice(0, 5).map((item) => (
+                            <li key={item.name} className="flex justify-between gap-2">
+                              <span>{item.name}</span>
+                              <span className="font-semibold text-brand-ink">{item.value}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
                   )}
                 </div>
               ) : (
@@ -392,47 +418,50 @@ export default function MHODashboard() {
               )}
             </div>
           </div>
+          <div className="space-y-3">
+            <section className="rounded-xl border border-brand-border bg-white p-3">
+              <h3 className="text-sm font-semibold text-brand-ink">Barangay Summary (This Period)</h3>
+              <div className="mt-2 overflow-hidden">
+                <table className="w-full table-fixed text-xs">
+                  <thead>
+                    <tr className="border-b border-brand-border text-left text-[10px] uppercase tracking-wide text-brand-gray">
+                      <th className="w-[40%] py-2 pr-1 font-semibold">Barangay</th>
+                      <th className="w-[22%] py-2 px-1 text-right font-semibold">Total Cases</th>
+                      <th className="w-[38%] py-2 pl-2 font-semibold">Top Condition</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {barangaySummaryRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="py-3 text-center text-brand-gray">
+                          {mapStatus.loading ? "Loading authorized barangays…" : mapStatus.error ? "Barangay data unavailable." : "No registered barangays in your map scope."}
+                        </td>
+                      </tr>
+                    ) : barangaySummaryRows.map((row) => (
+                      <tr key={row.name} className="border-b border-brand-border last:border-0">
+                        <td className="truncate whitespace-nowrap py-2 pr-1 font-medium text-brand-ink" title={row.name}>{row.name}</td>
+                        <td className="py-2 px-1 text-right text-brand-ink">
+                          {mapStatus.loading ? "…" : mapStatus.error || !row.registryAvailable ? "Unavailable" : row.totalCases}
+                        </td>
+                        <td className="truncate whitespace-nowrap py-2 pl-2 text-brand-gray" title={row.topCondition?.name || "No recorded condition"}>
+                          {mapStatus.loading ? "…" : mapStatus.error || !row.registryAvailable ? "Unavailable" : row.topCondition?.value > 0
+                            ? `${row.topCondition.name} (${row.topCondition.value})`
+                            : "No cases"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-3 border-t border-brand-border pt-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-gray">Selected period</p>
+                <p className="mt-1 text-xs font-medium text-brand-ink">{periodLabel}</p>
+                <p className="mt-0.5 text-[11px] text-brand-gray">Reporting year: {reportingYear}</p>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
-
-      {/* Only persisted review decisions are available; original submission totals have no backend feed yet. */}
-      <Link to="/app/mho/submissions" className="mt-6 mb-6 block rounded-2xl border border-slate-200 bg-white p-4 hover:border-brand-blue/40 transition-colors dark:border-border dark:bg-card">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue">
-            <ClipboardList className="h-5 w-5" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-brand-ink">Submission Status</p>
-            {submissionStatus.loading ? (
-              <p className="mt-1 text-xs text-brand-gray">Loading persisted review decisions…</p>
-            ) : submissionStatus.error ? (
-              <p className="mt-1 text-xs text-brand-danger">{submissionStatus.error}</p>
-            ) : (
-              <>
-                <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-gray">
-                  <span>TCL reviews this period: {tclReviews}</span>
-                  <span>M1 reviews this period: {m1Reviews}</span>
-                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-yellow" /> {pendingReviews} under review</span>
-                  <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-accent" /> {correctionReviews} returned / needs correction</span>
-                </p>
-                <p className="mt-1 text-xs text-brand-gray">
-                  Persisted review decisions for {currentPeriod}; submitted-but-unreviewed totals are not available from the backend.
-                </p>
-              </>
-            )}
-          </div>
-          {submissionStatus.error && (
-            <button
-              type="button"
-              onClick={(event) => { event.preventDefault(); event.stopPropagation(); void loadSubmissionReviews(); }}
-              className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-2.5 py-1.5 text-xs font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue"
-            >
-              <RefreshCw className="h-3 w-3" /> Retry
-            </button>
-          )}
-          <ChevronRight className="h-4 w-4 shrink-0 text-brand-gray" />
-        </div>
-      </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mt-6">
         {/* Barangay breakdown — real municipality-scoped figures. */}
@@ -466,10 +495,10 @@ export default function MHODashboard() {
                   {barangayRows.map((b) => (
                     <tr key={b.name} className="border-b border-brand-border last:border-0">
                       <td className="py-2.5 pr-3 font-medium text-brand-ink">{b.name}</td>
-                      <td className="py-2.5 px-3 text-brand-ink">{b.residents}</td>
-                      <td className="py-2.5 px-3 text-brand-ink">{b.highRisk}</td>
-                      <td className="py-2.5 px-3 text-brand-ink">{referralsStatus.loading ? "…" : referralsStatus.error ? "Unavailable" : b.pendingReferrals}</td>
-                      <td className="py-2.5 pl-3 text-brand-ink">{followUpsStatus.loading ? "…" : followUpsStatus.error ? "Unavailable" : b.overdueFollowUps}</td>
+                      <td className="py-2.5 px-3 text-brand-ink">{b.registryAvailable ? b.residents : "Unavailable"}</td>
+                      <td className="py-2.5 px-3 text-brand-ink">{b.registryAvailable ? b.highRisk : "Unavailable"}</td>
+                      <td className="py-2.5 px-3 text-brand-ink">{!b.registryAvailable ? "Unavailable" : referralsStatus.loading ? "…" : referralsStatus.error ? "Unavailable" : b.pendingReferrals}</td>
+                      <td className="py-2.5 pl-3 text-brand-ink">{!b.registryAvailable ? "Unavailable" : followUpsStatus.loading ? "…" : followUpsStatus.error ? "Unavailable" : b.overdueFollowUps}</td>
                     </tr>
                   ))}
                 </tbody>

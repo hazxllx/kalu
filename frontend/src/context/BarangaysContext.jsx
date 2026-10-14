@@ -3,7 +3,6 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { supabase } from "@/lib/supabase";
 import {
   BARANGAYS,
-  FALLBACK_BARANGAYS,
   setBarangayNames,
   subscribeBarangays,
   getBarangays,
@@ -11,15 +10,11 @@ import {
 } from "@/lib/barangays";
 
 /**
- * BarangaysContext — the single app-wide source of the live barangay list.
+ * BarangaysContext — exposes the approved barangay names and database records.
  *
- * The authoritative data lives in the database (public.barangays). This
- * provider loads the ACTIVE barangays once at startup, hydrates the runtime
- * registry in `@/lib/barangays` (so non-React modules such as the scope helpers
- * stay in sync), and exposes a reactive hook for components that render barangay
- * selectors. A `refresh()` is returned so pages that mutate the registry (the
- * Admin Barangay Management page) can immediately re-propagate the new list
- * everywhere without a manual reload.
+ * The canonical names come from `shared/barangays.js`; the database registry
+ * supplies their stable ids and municipality metadata. A `refresh()` reloads
+ * those records after administrative changes.
  *
  * public.barangays is public-readable (anon + authenticated) via RLS, so this
  * works on the public registration pages too. If the read is unavailable the
@@ -61,7 +56,7 @@ export function BarangaysProvider({ children }) {
   const load = useCallback(async () => {
     if (!supabase) {
       // Supabase not configured: keep the fallback registry, stop loading.
-      setBarangayNames([...FALLBACK_BARANGAYS]);
+      setBarangayNames();
       setLoading(false);
       setError(null);
       return;
@@ -88,9 +83,10 @@ export function BarangaysProvider({ children }) {
         };
       });
       if (!mounted.current) return;
-      setRecords(mapped);
-      // Hydrate the shared runtime registry (notifies the store subscriber above).
-      setBarangayNames(mapped.map((r) => r.name));
+      const approved = mapped.filter((record) => BARANGAYS.includes(record.name));
+      setRecords(approved);
+      // Notify subscribers while keeping selectors on the canonical list.
+      setBarangayNames();
     } catch (err) {
       if (!mounted.current) return;
       setError(err?.message || "Unable to load barangays.");

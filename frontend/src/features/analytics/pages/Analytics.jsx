@@ -112,9 +112,7 @@ export default function Analytics() {
               <YAxis axisLine={false} tickLine={false} tick={tickStyle} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={legendStyle} />
-              <Line type="monotone" dataKey="San Antonio" stroke={CHART_COLORS["San Antonio"]} strokeWidth={2.5} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="San Isidro" stroke={CHART_COLORS["San Isidro"]} strokeWidth={2.5} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="Old San Roque" stroke={CHART_COLORS["Old San Roque"]} strokeWidth={2.5} dot={{ r: 3 }} />
+              {BARANGAYS.map((name) => <Line key={name} type="monotone" dataKey={name} stroke={CHART_COLORS[name]} strokeWidth={2.5} dot={{ r: 3 }} />)}
             </LineChart>
           </ChartCard>
 
@@ -138,9 +136,7 @@ export default function Analytics() {
               <YAxis axisLine={false} tickLine={false} tick={tickStyle} domain={[60, 100]} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={legendStyle} />
-              <Area type="monotone" dataKey="San Antonio" stroke={CHART_COLORS["San Antonio"]} strokeWidth={2} fill="url(#grad-fu-0)" />
-              <Area type="monotone" dataKey="San Isidro" stroke={CHART_COLORS["San Isidro"]} strokeWidth={2} fill="url(#grad-fu-1)" />
-              <Area type="monotone" dataKey="Old San Roque" stroke={CHART_COLORS["Old San Roque"]} strokeWidth={2} fill="url(#grad-fu-2)" />
+              {BARANGAYS.map((name, i) => <Area key={name} type="monotone" dataKey={name} stroke={CHART_COLORS[name]} strokeWidth={2} fill={`url(#grad-fu-${i})`} />)}
             </AreaChart>
           </ChartCard>
 
@@ -179,9 +175,7 @@ export default function Analytics() {
               <YAxis axisLine={false} tickLine={false} tick={tickStyle} domain={[60, 100]} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={legendStyle} />
-              <Area type="monotone" dataKey="San Antonio" stroke={CHART_COLORS["San Antonio"]} strokeWidth={2} fill="url(#grad-mh-0)" />
-              <Area type="monotone" dataKey="San Isidro" stroke={CHART_COLORS["San Isidro"]} strokeWidth={2} fill="url(#grad-mh-1)" />
-              <Area type="monotone" dataKey="Old San Roque" stroke={CHART_COLORS["Old San Roque"]} strokeWidth={2} fill="url(#grad-mh-2)" />
+              {BARANGAYS.map((name, i) => <Area key={name} type="monotone" dataKey={name} stroke={CHART_COLORS[name]} strokeWidth={2} fill={`url(#grad-mh-${i})`} />)}
             </AreaChart>
           </ChartCard>
 
@@ -206,9 +200,7 @@ export default function Analytics() {
               <YAxis axisLine={false} tickLine={false} tick={tickStyle} domain={[60, 100]} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={legendStyle} />
-              <Line type="monotone" dataKey="San Antonio" stroke={CHART_COLORS["San Antonio"]} strokeWidth={2.5} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="San Isidro" stroke={CHART_COLORS["San Isidro"]} strokeWidth={2.5} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="Old San Roque" stroke={CHART_COLORS["Old San Roque"]} strokeWidth={2.5} dot={{ r: 3 }} />
+              {BARANGAYS.map((name) => <Line key={name} type="monotone" dataKey={name} stroke={CHART_COLORS[name]} strokeWidth={2.5} dot={{ r: 3 }} />)}
             </LineChart>
           </ChartCard>
 

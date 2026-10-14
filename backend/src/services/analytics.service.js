@@ -16,6 +16,7 @@ import repository from '../repositories/index.js';
 import { assessVitals, hasAssessableVitals } from '../utils/residentRisk.js';
 import { DEFAULT_RISK_CONFIG } from '../config/riskConfig.js';
 import { getRiskConfig } from './riskConfig.service.js';
+import { APPROVED_BARANGAYS, isApprovedBarangayName } from '../config/barangays.js';
 
 const CONDITION_RULES = [
   { name: 'Tuberculosis', keywords: ['tuberculosis', 'tb', 'ptb', 'koch'] },
@@ -48,6 +49,30 @@ const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 
 const sameBarangay = (resident, barangay) =>
   String(resident?.barangay ?? '').trim().toLowerCase() === String(barangay).trim().toLowerCase();
+
+const isActiveApprovedBarangay = (row) =>
+  isApprovedBarangayName(row?.name) &&
+  String(row?.status ?? 'active').toLowerCase() === 'active';
+
+const barangayScopeRows = (barangays, barangay, municipalityId) => {
+  const activeApproved = barangays.filter(isActiveApprovedBarangay);
+  if (barangay) {
+    const canonicalName = APPROVED_BARANGAYS.find(
+      (name) => name.toLowerCase() === String(barangay).trim().toLowerCase(),
+    );
+    if (!canonicalName) return [];
+    return activeApproved.filter(
+      (row) => String(row.name).trim().toLowerCase() === canonicalName.toLowerCase(),
+    );
+  }
+  if (!municipalityId) return activeApproved;
+
+  return APPROVED_BARANGAYS
+    .map((name) =>
+      activeApproved.find((row) => String(row.name).trim().toLowerCase() === name.toLowerCase()),
+    )
+    .filter(Boolean);
+};
 
 const residentInBarangay = (resident, barangayRow, municipalityId) => {
   const expectedMunicipality = municipalityId || barangayRow.municipality_id || barangayRow.municipalityId;
@@ -281,6 +306,7 @@ export const getCommunityMap = async ({
   barangay = null,
   municipalityId = null,
   condition = null,
+  distinctResidents = false,
   status = null,
   riskLevel = null,
   from = null,
@@ -313,10 +339,9 @@ export const getCommunityMap = async ({
   const fromTs = from ? new Date(from).getTime() : null;
   const toTs = to ? new Date(`${String(to).slice(0, 10)}T23:59:59.999`).getTime() : null;
 
-  // A barangay-scoped supervisor only ever sees their own barangay.
-  const scopedBarangays = barangay
-    ? barangays.filter((b) => String(b.name).trim().toLowerCase() === String(barangay).trim().toLowerCase())
-    : barangays;
+  // Missing approved registry rows are returned as explicitly unavailable
+  // municipality-scope rows, never as fabricated zero-case barangays.
+  const scopedBarangays = barangayScopeRows(barangays, barangay, municipalityId);
 
   const latestVisitByResident = new Map();
   let latestUpdatedTs = null;
@@ -329,12 +354,34 @@ export const getCommunityMap = async ({
   });
 
   const rows = scopedBarangays.map((b) => {
+    if (!b.id) {
+      return {
+        id: null,
+        name: b.name,
+        registryAvailable: false,
+        latitude: null,
+        longitude: null,
+        hasCoordinates: false,
+        residents: null,
+        highRiskResidents: null,
+        caseCount: null,
+        newCases: null,
+        activeCases: null,
+        completedCases: null,
+        conditions: null,
+        topCondition: null,
+        riskCounts: null,
+        statusCounts: null,
+        lastRecorded: null,
+        intensity: null,
+      };
+    }
     const residents = allResidents.filter((r) => residentInBarangay(r, b, municipalityId));
     const residentIds = new Set(residents.map((r) => r.id));
 
     // Matching visits: this barangay's residents, within the date range and (if
     // requested) classified to the selected condition.
-    const matching = visits.filter((v) => {
+    const matchingVisits = visits.filter((v) => {
       if (!residentIds.has(v.residentId)) return false;
       const matches = matchesCommunityMapRecord(
         v,
@@ -351,6 +398,17 @@ export const getCommunityMap = async ({
       }
       return matches;
     });
+    const matching = distinctResidents
+      ? [...matchingVisits.reduce((cases, visit) => {
+        const conditionName = classifyCondition(visit.chiefComplaint);
+        const key = `${visit.residentId}:${conditionName}`;
+        const existing = cases.get(key);
+        const visitDate = String(visit.visitDate || visit.createdAt || '');
+        const existingDate = String(existing?.visitDate || existing?.createdAt || '');
+        if (!existing || visitDate > existingDate) cases.set(key, visit);
+        return cases;
+      }, new Map()).values()]
+      : matchingVisits;
 
     const countsTuberculosis = !status && !riskLevel && (!wantCondition || wantCondition === 'Tuberculosis');
     const activeTbRows = countsTuberculosis
@@ -395,7 +453,12 @@ export const getCommunityMap = async ({
       conditionCounts.set(name, (conditionCounts.get(name) || 0) + 1);
       noteRecordDate(v.visitDate || v.createdAt);
     });
-    const additionalActiveTbCases = [...activeTbResidentIds].filter((id) => !activeVisitResidentIds.has(id));
+    const countedVisitResidents = distinctResidents
+      ? new Set(matching
+        .filter((visit) => classifyCondition(visit.chiefComplaint) === 'Tuberculosis')
+        .map((visit) => visit.residentId))
+      : activeVisitResidentIds;
+    const additionalActiveTbCases = [...activeTbResidentIds].filter((id) => !countedVisitResidents.has(id));
     activeCases += additionalActiveTbCases.length;
     const caseCount = matching.length + additionalActiveTbCases.length;
     newCases += new Set(activeTbRows
@@ -434,6 +497,7 @@ export const getCommunityMap = async ({
     return {
       id: b.id,
       name: b.name,
+      registryAvailable: true,
       latitude: hasCoordinates ? latitude : null,
       longitude: hasCoordinates ? longitude : null,
       hasCoordinates,
@@ -456,15 +520,26 @@ export const getCommunityMap = async ({
 
   const maxCases = rows.reduce((m, r) => Math.max(m, r.caseCount), 0);
   rows.forEach((r) => {
-    r.intensity = maxCases > 0 ? Number((r.caseCount / maxCases).toFixed(3)) : 0;
+    if (r.registryAvailable) r.intensity = maxCases > 0 ? Number((r.caseCount / maxCases).toFixed(3)) : 0;
   });
 
+  const scopeComplete = (!barangay || rows.length > 0) && rows.every((row) => row.registryAvailable);
+  const conditionTotals = CONDITION_NAMES.map((name) => ({
+    name,
+    value: scopeComplete
+      ? rows.reduce(
+        (total, row) => total + (row.conditions.find((item) => item.name === name)?.value || 0),
+        0,
+      )
+      : null,
+  }));
+
   const summary = {
-    totalCases: rows.reduce((s, r) => s + r.caseCount, 0),
-    affectedBarangays: rows.filter((r) => r.caseCount > 0).length,
-    newCases: rows.reduce((s, r) => s + r.newCases, 0),
-    activeCases: rows.reduce((s, r) => s + r.activeCases, 0),
-    completedCases: rows.reduce((s, r) => s + r.completedCases, 0),
+    totalCases: scopeComplete ? rows.reduce((s, r) => s + r.caseCount, 0) : null,
+    affectedBarangays: scopeComplete ? rows.filter((r) => r.caseCount > 0).length : null,
+    newCases: scopeComplete ? rows.reduce((s, r) => s + r.newCases, 0) : null,
+    activeCases: scopeComplete ? rows.reduce((s, r) => s + r.activeCases, 0) : null,
+    completedCases: scopeComplete ? rows.reduce((s, r) => s + r.completedCases, 0) : null,
   };
 
   const centerLatitude = Number(municipality?.latitude);
@@ -487,9 +562,11 @@ export const getCommunityMap = async ({
     status: status || 'All',
     riskLevel: riskLevel || 'All',
     reportingPeriod: { from: from || null, to: to || null },
+    scopeComplete,
     latestUpdatedAt,
     center,
     summary,
+    conditionTotals,
     barangays: rows,
   };
 };
@@ -523,12 +600,12 @@ export const getCommunityMapTrends = async ({
   const fromTs = from ? new Date(from).getTime() : null;
   const toTs = to ? new Date(`${String(to).slice(0, 10)}T23:59:59.999`).getTime() : null;
 
-  const scopedBarangays = barangay
-    ? barangays.filter((b) => String(b.name).trim().toLowerCase() === String(barangay).trim().toLowerCase())
-    : barangays;
+  const scopedBarangays = barangayScopeRows(barangays, barangay, municipalityId);
+  const scopeComplete = (!barangay || scopedBarangays.length > 0) &&
+    scopedBarangays.every((row) => Boolean(row.id));
 
   const residentInScope = new Set(allResidents.filter((resident) =>
-    scopedBarangays.some((barangayRow) => residentInBarangay(resident, barangayRow, municipalityId)),
+    scopedBarangays.some((barangayRow) => barangayRow.id && residentInBarangay(resident, barangayRow, municipalityId)),
   ).map((r) => r.id));
 
   const monthly = MONTH_LABELS.map((label, index) => {
@@ -557,7 +634,7 @@ export const getCommunityMapTrends = async ({
         .map((row) => row.residentId),
     );
     const count = monthVisits.length + [...activeTbResidents].filter((id) => !visitResidents.has(id)).length;
-    return { month: label, cases: count };
+    return { month: label, cases: scopeComplete ? count : null };
   });
 
   return {
@@ -568,6 +645,7 @@ export const getCommunityMapTrends = async ({
     riskLevel: riskLevel || 'All',
     reportingPeriod: { from: from || null, to: to || null },
     year: Number(year),
+    scopeComplete,
     monthly,
   };
 };
@@ -581,12 +659,13 @@ export const getConditionOptions = async () => ({ conditions: CONDITION_NAMES })
  * returned; only valid stored barangay reference coordinates may be mapped.
  */
 export const getHouseholdMap = async ({ barangay = null, municipalityId = null } = {}) => {
-  const [households, visitPage, tclPage, barangays] = await Promise.all([
+  const [households, visitPage, tclPage, allBarangays] = await Promise.all([
     repository.listHouseholdsForMap({ barangay, municipalityId }),
     repository.listVisits({ limit: 5000 }),
     repository.listTclEntries({ limit: 5000 }),
     repository.listBarangays({ municipalityId }),
   ]);
+  const barangays = allBarangays.filter(isActiveApprovedBarangay);
   const visits = visitPage.rows || [];
   const tclEntries = tclPage.rows || [];
 

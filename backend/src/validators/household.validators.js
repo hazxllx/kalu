@@ -7,6 +7,7 @@ import {
   text,
   valid,
 } from './common.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 
 /**
  * Household profiling input validation (shared by create/update/member routes).
@@ -135,6 +136,9 @@ const runHouseholdValidator = (input, { partial }) => {
   setRequired('purok', 'Purok/Zone', 60);
   setRequired('streetAddress', 'Street address / sitio', TEXT_LIMITS.long);
   setRequired('barangay', 'Barangay', TEXT_LIMITS.medium);
+  if (out.barangay && !isApprovedBarangayName(out.barangay)) {
+    errors.barangay = 'Select one of the approved barangays.';
+  }
 
   if (body.contact !== undefined) {
     const contact = text(body.contact);

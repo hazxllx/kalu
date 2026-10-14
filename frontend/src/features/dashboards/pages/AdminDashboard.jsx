@@ -278,7 +278,7 @@ export default function AdminDashboard() {
 
       <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         <Card className="p-4 sm:p-6 lg:col-span-2">
-          <h3 className="mb-4 text-sm font-semibold text-brand-ink sm:text-base">
+          <h3 className="mb-4 text-sm font-medium text-slate-900 sm:text-sm">
             Recent Activity
           </h3>
 

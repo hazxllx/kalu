@@ -22,9 +22,19 @@ Or through the Supabase Dashboard: open **SQL Editor**, run each file in
 `supabase/migrations/` in order, then run `supabase/seed.sql` (it is idempotent
 and safe to re-run).
 
+Before applying migrations to production, review `supabase migration list
+--linked` and inspect every pending migration; `supabase db push` applies all
+pending local migrations, not just the barangay restriction. The barangay
+restriction migration preserves non-approved registry rows as inactive and
+does not delete or reassign resident, household, health, or staff records.
+Audit legacy assignments first and explicitly resolve any that should move to
+an approved barangay before deploying the restriction.
+
 The reference seed creates the municipality of **Pili (Camarines Sur)**, its
-barangays (**San Isidro / San Antonio / Old San Roque**), the RHU, and one
-Barangay Health Center per barangay.
+approved barangays (**San Antonio / San Isidro / Old San Roque**), the RHU, and
+one Barangay Health Center per active barangay. Historical non-approved
+barangay rows are retained as inactive; resident and health records are not
+renamed or deleted.
 
 ## Environment variables
 

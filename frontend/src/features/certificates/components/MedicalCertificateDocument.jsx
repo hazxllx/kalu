@@ -125,7 +125,7 @@ export default function MedicalCertificateDocument({ certificate, signatoryName,
   const ageValue = c.age !== undefined && c.age !== null && c.age !== "" ? String(c.age).trim() : "";
 
   return (
-    <div className="cert-doc" aria-label="Medical Certificate document">
+    <div className="cert-doc relative isolate" aria-label="Medical Certificate document">
       {/* Government header */}
       <header className="cert-header">
         <div className="cert-header-logo cert-header-logo-left">

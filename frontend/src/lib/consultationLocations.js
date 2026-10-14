@@ -1,3 +1,5 @@
+import { BARANGAYS } from "@/lib/barangays";
+
 /**
  * Consultation-location helpers for the RHU → PHN workflow.
  *
@@ -11,12 +13,10 @@
  * back to "RHU".
  */
 
-export const CONSULTATION_LOCATIONS = [
+export const CONSULTATION_LOCATIONS = Object.freeze([
   "RHU",
-  "San Isidro Barangay Health Center",
-  "San Antonio Barangay Health Center",
-  "Old San Roque Barangay Health Center",
-];
+  ...BARANGAYS.map((barangay) => `${barangay} Barangay Health Center`),
+]);
 
 /** Name of the barangay health center for a barangay ("RHU" when no barangay). */
 export const barangayHealthCenter = (barangay) =>

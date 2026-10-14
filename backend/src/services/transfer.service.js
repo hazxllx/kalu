@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import ApiError from '../utils/apiError.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 import repository from '../repositories/index.js';
 import { deleteDocument, getDocumentSignedUrl, uploadTransferDocument } from './storage.service.js';
 import { validateDocumentUpload } from '../validators/documents.validators.js';
@@ -136,7 +137,7 @@ const isEligibleBarangay = (row) => String(row?.status ?? '').toLowerCase() !== 
 
 /** Active barangays the resident may transfer to (current barangay excluded). */
 const eligibleDestinations = (rows, currentBarangayId) => rows
-  .filter((row) => isEligibleBarangay(row))
+  .filter((row) => isEligibleBarangay(row) && isApprovedBarangayName(row.name))
   .filter((row) => row.id !== currentBarangayId)
   .map((row) => ({ id: row.id, name: row.name }));
 

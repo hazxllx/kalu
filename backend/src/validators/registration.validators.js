@@ -14,6 +14,7 @@ import {
   text,
   valid,
 } from './common.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 
 /**
  * Resident self-registration validation (server-authoritative).
@@ -85,6 +86,9 @@ export const registerResidentValidator = (input = {}) => {
   }
 
   const barangay = str(body.barangay, TEXT_LIMITS.medium, 'barangay', 'Barangay', errors);
+  if (barangay && !isApprovedBarangayName(barangay)) {
+    errors.barangay = 'Select one of the approved barangays.';
+  }
 
   // Zone is a controlled value 1..8 (was "Sitio / Purok"). Reject anything else
   // server-side; the frontend dropdown is only a convenience.

@@ -3,6 +3,7 @@ import { getServiceClient } from '../config/supabase.js';
 import { loadActiveProfile, profileToSessionUser } from '../services/profile.service.js';
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 
 /**
  * Authentication middleware.
@@ -87,6 +88,12 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   }
 
   const sessionUser = profileToSessionUser(profile);
+  if (['health_supervisor', 'bhw'].includes(sessionUser.role)
+    && !isApprovedBarangayName(sessionUser.barangay)) {
+    throw ApiError.forbidden(
+      'Your assigned barangay is no longer approved. Contact an administrator to review your assignment.',
+    );
+  }
   req.user = {
     id: user.id,
     email: sessionUser.email,

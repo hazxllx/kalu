@@ -463,6 +463,13 @@ const RolePermissionsPage = appPage(
     )
 );
 
+const RoleAccessManagementPage = appPage(
+  () =>
+    import(
+      '@/features/access-control/pages/RoleAccessManagementPage'
+    )
+);
+
 const RiskInterventionSettings = appPage(
   () =>
     import(
@@ -1262,15 +1269,17 @@ const AppRoutes = () => (
           element={<MedicineCatalog />}
         />
         <Route
-          path="roles"
-          element={
-            <SystemManagementPage variant="roles" />
-          }
+          path="role-access"
+          element={<RoleAccessManagementPage />}
         />
-        {/* Privilege & permission management (admin only). */}
+        {/* Backward-compatible redirects for the former split pages. */}
+        <Route
+          path="roles"
+          element={<Navigate to="/app/admin/role-access" replace />}
+        />
         <Route
           path="permissions"
-          element={<RolePermissionsPage />}
+          element={<Navigate to="/app/admin/role-access" replace />}
         />
         <Route
           path="audit"

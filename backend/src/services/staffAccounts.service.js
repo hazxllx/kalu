@@ -36,6 +36,7 @@ import {
 } from '../config/staffApprovals.js';
 import ApiError from '../utils/apiError.js';
 import { normalizeStations } from '../config/rhuStations.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 import { notifyResident } from './notifications.service.js';
 import { uploadStaffDocument, getDocumentSignedUrl } from './storage.service.js';
 
@@ -357,15 +358,14 @@ const resolveAssignment = async (input) => {
   if (barangayId) {
     const { data: brgy, error } = await supabase
       .from('barangays')
-      .select('id, municipality_id, status')
+      .select('id, name, municipality_id, status')
       .eq('id', barangayId)
       .maybeSingle();
     if (error) throw dbError(error, 'barangay lookup');
     if (!brgy) throw ApiError.badRequest('The selected barangay does not exist.');
-    // Inactive barangays are excluded from NEW staff assignments; existing
-    // assignments and records are untouched.
-    if (brgy.status === 'Inactive') {
-      throw ApiError.badRequest('The selected barangay is inactive and cannot receive new staff assignments.');
+    if (!isApprovedBarangayName(brgy.name)
+      || String(brgy.status || '').toLowerCase() !== 'active') {
+      throw ApiError.badRequest('The selected barangay is not approved for new staff assignments.');
     }
     municipalityId = brgy.municipality_id;
   }

@@ -1,4 +1,5 @@
 import * as analyticsService from '../services/analytics.service.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 import ApiError from '../utils/apiError.js';
 import { sendData } from '../utils/apiResponse.js';
 
@@ -46,13 +47,21 @@ export const getEarlyWarning = async (req, res) => {
  * date filters are applied server-side over real visit records.
  */
 export const getCommunityMap = async (req, res) => {
+  const requestedBarangay = qstr(req, 'barangay');
+  if (requestedBarangay && !isApprovedBarangayName(requestedBarangay)) {
+    throw ApiError.unprocessable('The selected barangay is not supported.');
+  }
   const barangay =
-    req.assignedBarangay || (typeof req.query.barangay === 'string' ? req.query.barangay.trim() : '') || null;
+    req.assignedBarangay || requestedBarangay;
   const status = qstr(req, 'status');
   const riskLevel = qstr(req, 'riskLevel');
   const condition = qstr(req, 'condition');
+  const distinctResidents = qstr(req, 'distinctResidents');
   if (condition && condition !== 'All' && !analyticsService.CONDITION_NAMES.includes(condition)) {
     throw ApiError.unprocessable('The selected health condition is not supported.');
+  }
+  if (distinctResidents && !['true', 'false'].includes(distinctResidents.toLowerCase())) {
+    throw ApiError.unprocessable('The distinct-resident option must be true or false.');
   }
   if (status && !analyticsService.COMMUNITY_MAP_STATUSES.includes(status.toLowerCase())) {
     throw ApiError.unprocessable('The selected case status is not supported.');
@@ -69,6 +78,7 @@ export const getCommunityMap = async (req, res) => {
     barangay,
     municipalityId: req.user?.municipalityId || null,
     condition,
+    distinctResidents: distinctResidents?.toLowerCase() === 'true',
     status: status?.toLowerCase() || null,
     riskLevel: riskLevel || null,
     from,
@@ -84,8 +94,12 @@ export const getCommunityMap = async (req, res) => {
  * exactly like the community map.
  */
 export const getCommunityMapTrends = async (req, res) => {
+  const requestedBarangay = qstr(req, 'barangay');
+  if (requestedBarangay && !isApprovedBarangayName(requestedBarangay)) {
+    throw ApiError.unprocessable('The selected barangay is not supported.');
+  }
   const barangay =
-    req.assignedBarangay || (typeof req.query.barangay === 'string' ? req.query.barangay.trim() : '') || null;
+    req.assignedBarangay || requestedBarangay;
   const yearRaw = qstr(req, 'year');
   const year = yearRaw && /^\d{4}$/.test(yearRaw) ? Number(yearRaw) : new Date().getFullYear();
   const status = qstr(req, 'status');

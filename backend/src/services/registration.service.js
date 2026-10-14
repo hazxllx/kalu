@@ -1,4 +1,5 @@
 import ApiError from '../utils/apiError.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 import repository from '../repositories/index.js';
 import { getServiceClient } from '../config/supabase.js';
 import { validateDocumentUpload } from '../validators/documents.validators.js';
@@ -192,7 +193,8 @@ export const registerResident = async ({ user, payload = {} }) => {
   }
 
   const barangayRow = await repository.findBarangayByName(fields.barangay, user.municipalityId || null);
-  if (!barangayRow) {
+  if (!isApprovedBarangayName(fields.barangay) || !barangayRow
+    || String(barangayRow.status || 'Active').toLowerCase() !== 'active') {
     throw ApiError.unprocessable(`Unknown barangay: ${fields.barangay}. Please select a valid barangay.`);
   }
 

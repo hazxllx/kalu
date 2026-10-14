@@ -67,12 +67,6 @@ import {
 } from "@/utils/validation";
 import { BARANGAYS } from "@/lib/barangays";
 
-// Fallback barangays for the Pili deployment. The live list is loaded from the
-// backend (public.barangays) on mount so this is only a resilience fallback and
-// is never the source of truth. BUG-022: reuse the canonical list instead of a
-// duplicate hardcoded copy.
-const FALLBACK_BARANGAYS = [...BARANGAYS];
-
 // Government ID types selectable in Step 3. Values match the backend
 // `GOVERNMENT_ID_TYPES` in backend/src/validators/documents.validators.js.
 const GOVT_ID_TYPES = [
@@ -233,7 +227,6 @@ export default function NewResidentRegistration() {
   // Live barangay list from the backend (public.barangays for Pili). Falls back
   // to the canonical three if the lookup is unavailable, so the field always
   // works, but the DB is the source of truth.
-  const [barangayList, setBarangayList] = useState(FALLBACK_BARANGAYS);
   /**
    * @typedef {Object} RegistrationErrors
    * @property {string} [confirmPassword]
@@ -274,31 +267,6 @@ export default function NewResidentRegistration() {
     identityPhoto: 0,
   });
   const governmentIdPairSeq = useRef(0);
-
-  // Load the real barangay list for the Municipality of Pili from the backend
-  // (public.barangays is public-readable). This keeps the dropdown data-driven
-  // instead of hard-coded in the component; the fallback list only applies if
-  // the query is unavailable.
-  useEffect(() => {
-    let cancelled = false;
-    if (!supabase) return undefined;
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("barangays")
-          .select("name, status, municipalities!inner(name)")
-          .eq("municipalities.name", "Pili")
-          .eq("status", "Active")
-          .order("name", { ascending: true });
-        if (!cancelled && !error && Array.isArray(data) && data.length) {
-          setBarangayList(data.map((b) => b.name));
-        }
-      } catch {
-        /* keep the fallback list */
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   // Email verification (real Supabase Confirm Signup OTP — no local/fake OTP)
   // emailPhase: "idle" | "sending" | "sent" | "verifying" | "verified"
@@ -881,7 +849,7 @@ export default function NewResidentRegistration() {
   const applicantAge = calcAge(form.dob);
   const isMinorApplicant = applicantAge !== "" && Number(applicantAge) < 18;
   const isAdultApplicant = applicantAge !== "" && Number(applicantAge) >= 18;
-  const filteredBarangays = barangayList.filter((b) => b.toLowerCase().includes(barangayQuery.toLowerCase()));
+  const filteredBarangays = BARANGAYS.filter((b) => b.toLowerCase().includes(barangayQuery.toLowerCase()));
 
   // A successful verifyOtp() stores a real Supabase session in the browser
   // client. If the resident reloads the page mid-registration, restore the

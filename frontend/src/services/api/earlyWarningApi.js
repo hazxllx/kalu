@@ -32,6 +32,7 @@ export const fetchEarlyWarningData = async (barangay) => {
 export const fetchCommunityMap = async ({
   barangay = null,
   condition = null,
+  distinctResidents = false,
   status = null,
   riskLevel = null,
   from = null,
@@ -40,6 +41,7 @@ export const fetchCommunityMap = async ({
   const params = {};
   if (barangay) params.barangay = barangay;
   if (condition && condition !== 'All') params.condition = condition;
+  if (distinctResidents) params.distinctResidents = 'true';
   if (status && status !== 'All') params.status = status;
   if (riskLevel && riskLevel !== 'All') params.riskLevel = riskLevel;
   if (from) params.from = from;

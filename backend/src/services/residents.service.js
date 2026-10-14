@@ -15,6 +15,7 @@
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
 import { getServiceClient } from '../config/supabase.js';
 import env from '../config/env.js';
 import {
@@ -909,15 +910,15 @@ export const createResident = async ({
       user?.municipalityId || null,
     );
 
-  if (!barangayRow) {
+  if (!isApprovedBarangayName(barangay) || !barangayRow) {
     throw ApiError.unprocessable(
       `Unknown barangay: ${barangay}. It must belong to your municipality.`,
     );
   }
 
-  // An inactive barangay is excluded from NEW resident registrations. Existing
-  // residents and their records are never touched by a deactivation.
-  if (String(barangayRow.status || 'Active') === 'Inactive') {
+  // Inactive or unapproved legacy barangays are not valid new assignments.
+  if (!isApprovedBarangayName(barangayRow.name)
+    || String(barangayRow.status || 'Active').toLowerCase() !== 'active') {
     throw ApiError.unprocessable(
       `${barangay} is currently inactive and cannot accept new resident registrations.`,
     );
