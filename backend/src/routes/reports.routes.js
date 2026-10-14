@@ -8,6 +8,7 @@ import {
   createReportValidator,
   reviewReportValidator,
   resubmitReportValidator,
+  submitReportValidator,
   reportIdParamValidator,
 } from '../validators/reports.validators.js';
 import * as controller from '../controllers/reports.controller.js';
@@ -44,6 +45,7 @@ router.get('/meta', ...readers, asyncHandler(controller.meta));
 router.get('/', ...readers, asyncHandler(controller.list));
 router.get('/:id', ...readers, idParam, asyncHandler(controller.get));
 router.post('/', ...senders, validate(createReportValidator), asyncHandler(controller.create));
+router.patch('/:id/submit', ...senders, idParam, validate(submitReportValidator), asyncHandler(controller.submitDraft));
 router.patch('/:id/review', ...reviewers, idParam, validate(reviewReportValidator), asyncHandler(controller.review));
 router.patch('/:id/resubmit', ...senders, idParam, validate(resubmitReportValidator), asyncHandler(controller.resubmit));
 

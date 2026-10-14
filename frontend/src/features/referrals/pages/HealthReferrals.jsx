@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -11,7 +12,7 @@ import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { referralsApi, residentsApi } from "@/services/api";
 import { downloadReferralPdf } from "@/features/referrals/lib/referralPdf";
 import { shouldShowReferralDownloadAction } from "@/features/referrals/lib/referralTrackingActions";
-import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Trash2, Send, Download } from "lucide-react";
+import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Trash2, Download, AlertTriangle, MoreVertical } from "lucide-react";
 
 /**
  * Referral coordination page backed by the real API (`/api/referrals` ->
@@ -361,12 +362,20 @@ export default function HealthReferrals() {
   const [residents, setResidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [residentLoadError, setResidentLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const loadRequest = useRef(0);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [selectedResident, setSelectedResident] = useState(null);
   const [detail, setDetail] = useState(null);
+  const detailDialogRef = useRef(null);
+  const detailCloseButtonRef = useRef(null);
+  const [openActionMenu, setOpenActionMenu] = useState(null);
+  const [actionMenuPosition, setActionMenuPosition] = useState(null);
+  const actionMenuTriggerRef = useRef(null);
+  const actionMenuRef = useRef(null);
   const [statusTarget, setStatusTarget] = useState(null);
   const [newStatus, setNewStatus] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
@@ -400,42 +409,117 @@ export default function HealthReferrals() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    const requestId = ++loadRequest.current;
     setLoading(true);
     setLoadError(null);
-    const requests = isResident
-      ? [referralsApi.list()]
-      : [referralsApi.list(), residentsApi.list({ limit: 200 })];
-    return Promise.all(requests)
-      .then(([referralResult, residentResult]) => {
-        setRecords((referralResult?.rows || []).map(mapRecord));
-        if (!isResident) {
-          const rows = residentResult?.rows || residentResult || [];
-          setResidents(
-            rows
-              .map((r) => ({
-                id: r.id,
-                name: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
-                barangay: r.barangay || "",
-                age: ageFrom(r.birthDate),
-                gender: r.sex,
-              }))
-              .filter((r) => !assignedBarangay || r.barangay === assignedBarangay),
-          );
-        }
-      })
-      .catch((err) => setLoadError(err?.message || "Unable to load referrals. Please try again."))
-      .finally(() => setLoading(false));
+    setResidentLoadError(null);
+    const results = await Promise.allSettled([
+      referralsApi.list(),
+      isResident ? Promise.resolve(null) : residentsApi.list({ limit: 200 }),
+    ]);
+    if (requestId !== loadRequest.current) return;
+
+    const [referralResult, residentResult] = results;
+    if (referralResult.status === "fulfilled" && Array.isArray(referralResult.value?.rows)) {
+      setRecords(referralResult.value.rows.map(mapRecord));
+    } else {
+      setRecords([]);
+      setLoadError(
+        referralResult.status === "rejected"
+          ? referralResult.reason?.message || "Unable to load referrals. Please try again."
+          : "The referrals service returned an invalid response. Please try again.",
+      );
+    }
+
+    if (!isResident) {
+      const rows = residentResult.status === "fulfilled"
+        ? Array.isArray(residentResult.value?.rows)
+          ? residentResult.value.rows
+          : Array.isArray(residentResult.value)
+            ? residentResult.value
+            : null
+        : null;
+      if (rows) {
+        setResidents(
+          rows
+            .map((r) => ({
+              id: r.id,
+              name: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
+              barangay: r.barangay || "",
+              age: ageFrom(r.birthDate),
+              gender: r.sex,
+            }))
+            .filter((r) => !assignedBarangay || r.barangay === assignedBarangay),
+        );
+      } else {
+        setResidents([]);
+        setResidentLoadError(
+          residentResult.status === "rejected"
+            ? residentResult.reason?.message || "Unable to load the resident directory."
+            : "The resident directory returned an invalid response.",
+        );
+      }
+    }
+    setLoading(false);
   }, [assignedBarangay, isResident]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    return () => { loadRequest.current += 1; };
+  }, [load]);
+
+  useEffect(() => {
+    if (!detail) return undefined;
+
+    const previouslyFocused = document.activeElement;
+    detailCloseButtonRef.current?.focus();
+
+    const handleDialogKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setDetail(null);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = detailDialogRef.current?.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleDialogKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleDialogKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, [detail]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return records.filter((r) => {
       if (statusFilter !== "All" && r.status !== statusFilter) return false;
       if (priorityFilter !== "All" && r.priority !== priorityFilter) return false;
-      if (q && !`${r.residentName} ${r.reason} ${r.destinationFacility}`.toLowerCase().includes(q)) return false;
+      if (q && ![
+        r.residentName,
+        r.reason,
+        r.destinationFacility,
+        r.destinationService,
+        r.laboratoryTest,
+        r.referringFacility,
+      ].join(" ").toLowerCase().includes(q)) return false;
       return true;
     });
   }, [records, search, statusFilter, priorityFilter]);
@@ -576,6 +660,80 @@ export default function HealthReferrals() {
     }
   };
 
+  const toggleActionMenu = (event, recordId) => {
+    if (openActionMenu === recordId) {
+      setOpenActionMenu(null);
+      setActionMenuPosition(null);
+      return;
+    }
+    actionMenuTriggerRef.current = event.currentTarget;
+    setActionMenuPosition(null);
+    setOpenActionMenu(recordId);
+  };
+
+  useLayoutEffect(() => {
+    if (!openActionMenu) {
+      setActionMenuPosition(null);
+      return undefined;
+    }
+
+    const updatePosition = () => {
+      const trigger = actionMenuTriggerRef.current;
+      const menu = actionMenuRef.current;
+      if (!trigger || !menu) return;
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const margin = 8;
+      const left = Math.max(
+        margin,
+        Math.min(triggerRect.right - menuRect.width, window.innerWidth - menuRect.width - margin),
+      );
+      const spaceBelow = window.innerHeight - triggerRect.bottom - margin;
+      const spaceAbove = triggerRect.top - margin;
+      const preferredTop = spaceBelow >= menuRect.height || spaceBelow >= spaceAbove
+        ? triggerRect.bottom + 4
+        : triggerRect.top - menuRect.height - 4;
+      const top = Math.max(
+        margin,
+        Math.min(preferredTop, window.innerHeight - menuRect.height - margin),
+      );
+      setActionMenuPosition({ left, top });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    document.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [openActionMenu]);
+
+  useEffect(() => {
+    if (!openActionMenu) return undefined;
+    const onPointerDown = (event) => {
+      if (
+        !actionMenuTriggerRef.current?.contains(event.target) &&
+        !actionMenuRef.current?.contains(event.target)
+      ) {
+        setOpenActionMenu(null);
+      }
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setOpenActionMenu(null);
+        actionMenuTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openActionMenu]);
+
   const columns = isResident
     ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Stage", ""]
     : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Stage", "Actions"];
@@ -607,6 +765,26 @@ export default function HealthReferrals() {
         <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
           <Check className="h-4 w-4 text-brand-green" />
           <span className="text-sm">{toast}</span>
+        </div>
+      )}
+
+      {(loadError || residentLoadError) && (
+        <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm">
+          <div className="flex items-start gap-2 text-brand-danger">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              {loadError || residentLoadError}
+              {loadError && residentLoadError ? ` ${residentLoadError}` : ""}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="rounded-btn border border-brand-danger/40 px-3 py-1.5 font-medium text-brand-danger hover:bg-brand-danger/10 disabled:opacity-60"
+          >
+            {loading ? "Retrying..." : "Retry"}
+          </button>
         </div>
       )}
 
@@ -675,40 +853,18 @@ export default function HealthReferrals() {
                       <StatusBadge value={r.status} />
                     )}
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => setDetail(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="View Details">
-                        <Eye className="w-4 h-4" />
+                  <td className="px-2 py-2">
+                    <div className="flex items-center justify-center">
+                      <button
+                        type="button"
+                        onClick={(event) => toggleActionMenu(event, r.id)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-brand-blue transition-colors hover:bg-brand-light hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+                        aria-label={`Actions for ${r.residentName}`}
+                        aria-haspopup="menu"
+                        aria-expanded={openActionMenu === r.id}
+                      >
+                        <MoreVertical className="h-4 w-4" aria-hidden="true" />
                       </button>
-                      {!isResident && (
-                        <>
-                          {shouldShowReferralDownloadAction(user) && (
-                            <button
-                              onClick={() => handleDownloadPdf(r)}
-                              disabled={exportingId === r.id}
-                              className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors disabled:opacity-50"
-                              title="Download Referral Form (PDF)"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canWrite && canAssign && (
-                            <button onClick={() => openEdit(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Edit Referral">
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canWrite && canChangeStatus && r.status !== "Completed" && r.status !== "Cancelled" && (
-                            <button onClick={() => openStatus(r)} className="p-1.5 text-brand-blue hover:bg-brand-light rounded transition-colors" title="Update Status">
-                              <RefreshCw className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canWrite && canReject && (
-                            <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-brand-danger hover:bg-brand-danger/10 rounded transition-colors" title="Delete Referral">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </>
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -731,98 +887,186 @@ export default function HealthReferrals() {
         </div>
       </Card>
 
+      {openActionMenu && typeof document !== "undefined" && createPortal(
+        (() => {
+          const record = filtered.find((item) => item.id === openActionMenu);
+          if (!record) return null;
+
+          const menuItemClass = "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg focus-visible:bg-brand-bg focus-visible:outline-none";
+          const closeMenu = () => {
+            setOpenActionMenu(null);
+            setActionMenuPosition(null);
+          };
+          const selectAction = (action) => {
+            closeMenu();
+            action();
+          };
+
+          return (
+            <div
+              ref={actionMenuRef}
+              role="menu"
+              aria-label={`Actions for ${record.residentName}`}
+              className="fixed z-[90] max-h-[calc(100vh-1rem)] w-48 overflow-y-auto rounded-lg border border-brand-border bg-white py-1 shadow-lg"
+              style={{
+                left: actionMenuPosition?.left ?? 0,
+                top: actionMenuPosition?.top ?? 0,
+                visibility: actionMenuPosition ? "visible" : "hidden",
+              }}
+            >
+              <button type="button" role="menuitem" onClick={() => selectAction(() => setDetail(record))} className={menuItemClass}>
+                <Eye className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
+                View Details
+              </button>
+              {!isResident && shouldShowReferralDownloadAction(user) && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={exportingId === record.id}
+                  onClick={() => selectAction(() => handleDownloadPdf(record))}
+                  className={`${menuItemClass} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  <Download className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
+                  Download / Print
+                </button>
+              )}
+              {!isResident && canWrite && canAssign && (
+                <button type="button" role="menuitem" onClick={() => selectAction(() => openEdit(record))} className={menuItemClass}>
+                  <Edit2 className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
+                  Edit
+                </button>
+              )}
+              {!isResident && canWrite && canChangeStatus && record.status !== "Completed" && record.status !== "Cancelled" && (
+                <button type="button" role="menuitem" onClick={() => selectAction(() => openStatus(record))} className={menuItemClass}>
+                  <RefreshCw className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
+                  Update Stage
+                </button>
+              )}
+              {!isResident && canWrite && canReject && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => selectAction(() => setDeleteTarget(record))}
+                  className={`${menuItemClass} text-brand-danger hover:bg-brand-danger/5 focus-visible:bg-brand-danger/5`}
+                >
+                  <Trash2 className="h-4 w-4 shrink-0 text-brand-danger" aria-hidden="true" />
+                  Delete
+                </button>
+              )}
+            </div>
+          );
+        })(),
+        document.body,
+      )}
+
       {/* Detail modal */}
       {detail && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-          <Card className="max-h-[92vh] w-full max-w-lg overflow-y-auto">
-            <div className="p-6">
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-light text-brand-blue"><Send className="h-5 w-5" /></div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-brand-ink">{detail.residentName}</h3>
-                    <p className="mt-0.5 text-sm text-brand-gray">{detail.destinationFacility}{detail.barangay ? ` · ${detail.barangay}` : ""}</p>
-                  </div>
-                </div>
-                <button onClick={() => setDetail(null)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+        <div
+          ref={detailDialogRef}
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2 sm:p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setDetail(null);
+          }}
+        >
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="referral-detail-title"
+            aria-describedby="referral-detail-description"
+            className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden"
+          >
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-brand-border px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">Referral details</p>
+                <h3 id="referral-detail-title" className="mt-0.5 truncate text-base font-semibold text-brand-ink sm:text-lg">{detail.residentName}</h3>
+                <p id="referral-detail-description" className="mt-0.5 truncate text-xs text-brand-gray">
+                  {detail.destinationFacility}{detail.barangay ? ` · ${detail.barangay}` : ""}
+                </p>
               </div>
-              <div className="mb-3 flex items-center gap-2 flex-wrap">
+              <button
+                ref={detailCloseButtonRef}
+                type="button"
+                onClick={() => setDetail(null)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+                aria-label="Close referral details"
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+              <div className="flex flex-wrap items-center gap-2">
                 {detail.stage && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-blue">
+                  <span className="inline-flex items-center rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-blue">
                     {detail.stage.label}
                   </span>
                 )}
                 <StatusBadge value={detail.status} />
+                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${PRIORITY_COLORS[detail.priority] || ""}`}>
+                  {detail.priority} priority
+                </span>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                {[
-                  ["Referral Date", formatDate(detail.referralDate)],
-                  ["Scheduled", detail.scheduledAt ? new Date(detail.scheduledAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "—"],
-                  ["Priority", detail.priority],
-                  ["Destination Service", detail.destinationService || "—"],
-                  ["Referring Facility", detail.referringFacility || "—"],
-                  ["Completed", formatDate(detail.completedAt)],
-                  ["Lab Test Required", detail.laboratoryTestRequired ? "Yes" : "No"],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-btn bg-brand-bg px-3.5 py-2.5">
-                    <p className="text-[11px] uppercase tracking-wide text-brand-gray">{label}</p>
-                    <p className="mt-0.5 text-sm font-medium text-brand-ink">{value}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
-                <p className="text-[11px] uppercase tracking-wide text-brand-gray">Reason</p>
-                <p className="mt-0.5 text-sm text-brand-ink">{detail.reason || "—"}</p>
-              </div>
-              {detail.chiefComplaints && (
-                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Chief Complaints</p>
-                  <p className="mt-0.5 text-sm text-brand-ink">{detail.chiefComplaints}</p>
-                </div>
-              )}
-              {detail.medicalHistory && (
-                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Medical History</p>
-                  <p className="mt-0.5 text-sm text-brand-ink">{detail.medicalHistory}</p>
-                </div>
-              )}
-              {detail.physicalExamFindings && (
-                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Physical Examination Findings</p>
-                  <p className="mt-0.5 text-sm text-brand-ink">{detail.physicalExamFindings}</p>
-                </div>
-              )}
-              {detail.impression && (
-                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Impression / Working Diagnosis</p>
-                  <p className="mt-0.5 text-sm text-brand-ink">{detail.impression}</p>
-                </div>
-              )}
-              <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
-                <p className="text-[11px] uppercase tracking-wide text-brand-gray">Notes</p>
-                <p className="mt-0.5 text-sm text-brand-ink">{detail.notes || "No notes recorded."}</p>
-              </div>
-              {detail.laboratoryTestRequired && (
-                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Laboratory Test</p>
-                  <p className="mt-0.5 text-sm font-medium text-brand-ink">{detail.laboratoryTest || "—"}</p>
-                  {detail.additionalInstructions && (
-                    <p className="mt-1 text-sm text-brand-ink">{detail.additionalInstructions}</p>
-                  )}
-                </div>
-              )}
-              {detail.resolutionNotes && (
-                <div className="mt-3 rounded-btn bg-brand-bg px-3.5 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-brand-gray">Resolution</p>
-                  <p className="mt-0.5 text-sm text-brand-ink">{detail.resolutionNotes}</p>
-                </div>
-              )}
-              <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
-                <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Close</button>
-                {!isResident && (
-                  <button onClick={() => openEdit(detail)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"><Edit2 className="h-4 w-4" /> Edit</button>
+
+              <section aria-labelledby="referral-overview-heading">
+                <h4 id="referral-overview-heading" className="mb-2 text-sm font-semibold text-brand-ink">Referral overview</h4>
+                <dl className="grid grid-cols-1 gap-x-5 gap-y-2.5 rounded-btn border border-brand-border bg-brand-bg/50 p-3 text-sm sm:grid-cols-2">
+                  {[
+                    ["Referral date", formatDate(detail.referralDate)],
+                    ["Scheduled", detail.scheduledAt ? new Date(detail.scheduledAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "—"],
+                    ["Destination", detail.destinationFacility || "—"],
+                    ["Destination service", detail.destinationService || "—"],
+                    ["Referring facility", detail.referringFacility || "—"],
+                    ["Completed", formatDate(detail.completedAt)],
+                    ["Laboratory test required", detail.laboratoryTestRequired ? "Yes" : "No"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="min-w-0">
+                      <dt className="text-[11px] font-medium uppercase tracking-wide text-brand-gray">{label}</dt>
+                      <dd className="mt-0.5 break-words font-medium text-brand-ink">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+
+              <section aria-labelledby="referral-clinical-heading" className="space-y-2">
+                <h4 id="referral-clinical-heading" className="text-sm font-semibold text-brand-ink">Clinical information</h4>
+                <DetailField label="Reason for referral" value={detail.reason || "—"} />
+                {detail.chiefComplaints && <DetailField label="Chief complaints" value={detail.chiefComplaints} />}
+                {detail.medicalHistory && <DetailField label="Medical history" value={detail.medicalHistory} />}
+                {detail.physicalExamFindings && <DetailField label="Physical examination findings" value={detail.physicalExamFindings} />}
+                {detail.impression && <DetailField label="Impression / working diagnosis" value={detail.impression} />}
+                {detail.laboratoryTestRequired && (
+                  <DetailField
+                    label="Laboratory test"
+                    value={[detail.laboratoryTest || "—", detail.additionalInstructions].filter(Boolean).join("\n")}
+                  />
                 )}
-              </div>
+              </section>
+
+              <section aria-labelledby="referral-notes-heading" className="space-y-2">
+                <h4 id="referral-notes-heading" className="text-sm font-semibold text-brand-ink">Notes and resolution</h4>
+                <DetailField label="Notes" value={detail.notes || "No notes recorded."} />
+                {detail.resolutionNotes && <DetailField label="Resolution" value={detail.resolutionNotes} />}
+              </section>
+            </div>
+
+            <div className="flex shrink-0 justify-end gap-2 border-t border-brand-border px-4 py-3 sm:px-5">
+              <button
+                type="button"
+                onClick={() => setDetail(null)}
+                className="rounded-btn px-3 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+              >
+                Close
+              </button>
+              {!isResident && canAssign && (
+                <button
+                  type="button"
+                  onClick={() => openEdit(detail)}
+                  className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 focus-visible:ring-offset-2"
+                >
+                  <Edit2 className="h-4 w-4" /> Edit
+                </button>
+              )}
             </div>
           </Card>
         </div>
@@ -901,5 +1145,14 @@ export default function HealthReferrals() {
         </div>
       )}
     </>
+  );
+}
+
+function DetailField({ label, value }) {
+  return (
+    <div className="min-w-0 rounded-btn border border-brand-border px-3 py-2">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-brand-gray">{label}</p>
+      <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-brand-ink">{value}</p>
+    </div>
   );
 }

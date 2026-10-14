@@ -13,6 +13,7 @@ export const create = async (req, res) => sendCreated(res, { record: await servi
   user: req.user,
   kind: req.params.kind,
   payload: req.body?.record || req.body || {},
+  idempotencyKey: req.idempotencyKey || null,
 }) });
 export const update = async (req, res) => sendData(res, { record: await service.update({
   user: req.user,

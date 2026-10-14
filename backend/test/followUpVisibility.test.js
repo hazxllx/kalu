@@ -9,6 +9,7 @@ const makeFollowUps = (count) => Array.from({ length: count }, (_, index) => ({
   resident_id: 'resident-1',
   scheduled_date: `2026-01-${String((index % 28) + 1).padStart(2, '0')}`,
   scheduled_time: '09:00:00',
+  location: index === 0 ? 'RHU' : `Barangay Health Station ${index + 1}`,
   status: 'Scheduled',
   created_at: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
 }));
@@ -63,6 +64,8 @@ test('staff follow-up listing pages past 200 records and retains supervisor scop
 
   assert.equal(result.length, 405);
   assert.equal(result[0].id, rows[0].id);
+  assert.equal(result[0].location, 'RHU');
+  assert.equal(result[1].location, 'Barangay Health Station 2');
   assert.equal(result.at(-1).id, rows.at(-1).id);
   assert.deepEqual(supabase.ranges.map(({ from, to }) => [from, to]), [[0, 199], [200, 399], [400, 599]]);
   assert(supabase.equalityFilters.some(({ table, column, value }) =>

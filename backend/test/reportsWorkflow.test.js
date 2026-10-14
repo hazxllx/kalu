@@ -13,9 +13,15 @@ import {
   list,
   review,
   resubmit,
+  submitDraft,
   resolveRecipientRole,
 } from '../src/services/reports.service.js';
-import { createReportValidator, reviewReportValidator, resubmitReportValidator } from '../src/validators/reports.validators.js';
+import {
+  createReportValidator,
+  reviewReportValidator,
+  resubmitReportValidator,
+  submitReportValidator,
+} from '../src/validators/reports.validators.js';
 import { FEATURE_ROLES, ROLES } from '../src/config/roles.js';
 
 const migrationPath = fileURLToPath(new URL(
@@ -29,6 +35,10 @@ const snapshotMigrationPath = fileURLToPath(new URL(
 ));
 const reportHistoryMigrationPath = fileURLToPath(new URL(
   '../../supabase/migrations/20261028000000_report_review_history.sql',
+  import.meta.url,
+));
+const reportFacilityMigrationPath = fileURLToPath(new URL(
+  '../../supabase/migrations/20261029000000_report_drafts_and_rhu_facility_scope.sql',
   import.meta.url,
 ));
 
@@ -49,6 +59,38 @@ test('report routes include RHU recipients without allowing RHU submissions', ()
   assert.throws(() => resolveRecipientRole('rhu_personnel'), /not authorized to submit reports/);
 });
 
+test('RHU incoming reports and report details are bound to the assigned facility', async () => {
+  const report = {
+    id: 'r1', report_type: 'Follow-up Report', report_period: '2026-09', title: 'Follow-up Report',
+    created_by: 'hs-1', sender_role: 'health_supervisor', recipient_role: 'rhu_personnel',
+    recipient_facility_id: 'facility-1', municipality_id: 'm1', barangay_id: 'b1',
+    status: 'Submitted', submitted_at: '2026-09-30T00:00:00Z', created_at: '2026-09-30T00:00:00Z',
+  };
+  const incomingStub = listQueryStub([report]);
+  await list({
+    user: { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'm1', facilityId: 'facility-1' },
+    box: 'incoming',
+    supabase: incomingStub,
+  });
+  assert.equal(incomingStub.calls.eq.recipient_facility_id, 'facility-1');
+
+  const detailStub = {
+    from() { return this; },
+    select() { return this; },
+    eq() { return this; },
+    order() { return this; },
+    maybeSingle: async () => ({ data: report, error: null }),
+  };
+  await assert.rejects(
+    () => getById({
+      user: { id: 'rhu-other', role: 'rhu_personnel', municipalityId: 'm1', facilityId: 'facility-2' },
+      id: 'r1',
+      supabase: detailStub,
+    }),
+    (error) => error.statusCode === 404,
+  );
+});
+
 test('duplicate submitted reports are rejected before persistence', async () => {
   const supabase = duplicateQuery({ id: 'existing-report' });
   await assert.rejects(
@@ -62,12 +104,76 @@ test('duplicate submitted reports are rejected before persistence', async () => 
   );
 });
 
+test('a generated report is saved as a draft and only submitDraft marks it submitted', async () => {
+  const supabase = createStub();
+  const draft = await create({
+    user: { id: 'hs-1', role: 'health_supervisor', municipalityId: 'm1', barangayId: 'b1' },
+    payload: {
+      reportType: 'Follow-up Report',
+      reportPeriod: '2026-09',
+      title: 'Follow-up Report',
+      status: 'Draft',
+      content: SAMPLE_CONTENT,
+    },
+    supabase,
+  });
+  assert.equal(draft.status, 'Draft');
+  assert.equal(supabase._state.inserted.submitted_at, null);
+  assert.equal(supabase._state.inserted.recipient_facility_id, 'facility-1');
+
+  const state = {
+    row: {
+      ...supabase._state.inserted,
+      id: 'draft-1',
+      created_at: '2026-09-30T00:00:00.000Z',
+      updated_at: '2026-09-30T00:00:00.000Z',
+      sender: { full_name: 'Health Supervisor' },
+    },
+    update: null,
+  };
+  const updateClient = {
+    from() {
+      const chain = {
+        select() { return chain; },
+        update(value) { state.update = value; return chain; },
+        eq() { return chain; },
+        in() { return chain; },
+        maybeSingle: async () => ({
+          data: state.update ? { ...state.row, ...state.update } : state.row,
+          error: null,
+        }),
+        then(resolve) { return Promise.resolve({ data: [{ id: 'rhu-1' }], error: null }).then(resolve); },
+      };
+      return chain;
+    },
+  };
+  const submitted = await submitDraft({
+    user: { id: 'hs-1', role: 'health_supervisor', municipalityId: 'm1', barangayId: 'b1' },
+    id: 'draft-1',
+    supabase: updateClient,
+  });
+  assert.equal(state.update.status, 'Submitted');
+  assert.ok(state.update.submitted_at);
+  assert.equal(submitted.status, 'Submitted');
+  assert.deepEqual(submitted.content, SAMPLE_CONTENT);
+});
+
 test('report recipient migration includes RHU RLS access and duplicate protection', () => {
   const sql = fs.readFileSync(migrationPath, 'utf8');
   assert.match(sql, /profile_role\(\) = 'rhu_personnel'/);
   assert.match(sql, /recipient_role = 'rhu_personnel'/);
   assert.match(sql, /reports_submitted_duplicate_idx/);
   assert.match(sql, /where status <> 'Draft'/);
+});
+
+test('report facility migration scopes RHU reads, inserts, updates, and review history', () => {
+  const sql = fs.readFileSync(reportFacilityMigrationPath, 'utf8');
+  assert.match(sql, /recipient_facility_id uuid/);
+  assert.match(sql, /recipient_facility_id = public\.profile_facility_id\(\)/);
+  assert.match(sql, /content is not null/);
+  assert.match(sql, /old\.status in \('Draft', 'Needs Revision'\)/);
+  assert.match(sql, /new\.status = 'Submitted'/);
+  assert.match(sql, /only personnel at the addressed RHU may review this report/);
 });
 
 /**
@@ -154,7 +260,11 @@ const createStub = () => {
         return { data: null, error: null };
       },
       then(resolve) {
-        const data = table === 'profiles' ? [] : [];
+        const data = table === 'profiles'
+          ? [{ id: 'rhu-1' }]
+          : table === 'facilities'
+            ? [{ id: 'facility-1', municipality_id: 'm1', barangay_id: 'b1' }]
+            : [];
         return Promise.resolve({ data, error: null }).then(resolve);
       },
     };
@@ -167,6 +277,7 @@ const SAMPLE_CONTENT = {
   schemaVersion: 1,
   reportType: 'Follow-up Report',
   reportPeriod: '2026-09',
+  generatedAt: '2026-09-30T00:00:00.000Z',
   summary: { total: 2, byStatus: { Completed: 1, Pending: 1 }, periodFiltered: true },
   columns: [{ label: 'Resident', badge: false }, { label: 'Status', badge: true }],
   rows: [['Juan Dela Cruz', 'Completed'], ['Maria Santos', 'Pending']],
@@ -184,6 +295,7 @@ test('submitting a report persists the content snapshot atomically with the row'
   assert.deepEqual(supabase._state.inserted.content, SAMPLE_CONTENT);
   assert.equal(supabase._state.inserted.content_schema_version, REPORT_CONTENT_SCHEMA_VERSION);
   assert.equal(supabase._state.inserted.status, 'Submitted');
+  assert.equal(supabase._state.inserted.recipient_facility_id, 'facility-1');
   // The persisted snapshot is returned to the caller and flagged present.
   assert.deepEqual(result.content, SAMPLE_CONTENT);
   assert.equal(result.hasContent, true);
@@ -207,6 +319,7 @@ test('getById requests the content column while list does not', async () => {
   const detail = {
     id: 'r1', report_type: 'Follow-up Report', report_period: '2026-09', created_by: 'hs-1',
     sender_role: 'health_supervisor', recipient_role: 'rhu_personnel', status: 'Submitted',
+    recipient_facility_id: 'facility-1',
     municipality_id: 'm1', barangay_id: 'b1', content: SAMPLE_CONTENT, content_schema_version: 1,
   };
   const detailStub = () => {
@@ -228,7 +341,7 @@ test('getById requests the content column while list does not', async () => {
 
   const g = detailStub();
   const record = await getById({
-    user: { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'm1', barangayId: null },
+    user: { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'm1', facilityId: 'facility-1', barangayId: null },
     id: 'r1',
     supabase: g,
   });
@@ -237,7 +350,7 @@ test('getById requests the content column while list does not', async () => {
   assert.equal(record.hasContent, true);
 
   const l = detailStub();
-  await list({ user: { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'm1', barangayId: null }, box: 'incoming', supabase: l });
+  await list({ user: { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'm1', facilityId: 'facility-1', barangayId: null }, box: 'incoming', supabase: l });
   assert.ok(l.state.selects.every((c) => !/,\s*content\b/.test(c)), 'list select must not include the content snapshot');
 });
 
@@ -265,22 +378,42 @@ test('a legacy report row with no snapshot reports content unavailable', async (
 });
 
 test('createReportValidator accepts an object snapshot and rejects bad shapes/sizes', () => {
-  const ok = createReportValidator({ reportType: 'Follow-up Report', content: SAMPLE_CONTENT });
+  const ok = createReportValidator({
+    reportType: 'Follow-up Report',
+    reportPeriod: '2026-09',
+    content: SAMPLE_CONTENT,
+  });
   assert.ok(ok.value, 'a valid payload returns { value }');
   assert.deepEqual(ok.value.content, SAMPLE_CONTENT);
 
-  const arrayContent = createReportValidator({ reportType: 'Follow-up Report', content: [1, 2, 3] });
+  const arrayContent = createReportValidator({
+    reportType: 'Follow-up Report',
+    reportPeriod: '2026-09',
+    content: [1, 2, 3],
+  });
   assert.ok(arrayContent.error, 'an array snapshot is rejected');
   assert.ok(arrayContent.error.content);
 
-  const oversized = createReportValidator({ reportType: 'Follow-up Report', content: { blob: 'x'.repeat(1_000_001) } });
+  const oversized = createReportValidator({
+    reportType: 'Follow-up Report',
+    reportPeriod: '2026-09',
+    content: { blob: 'x'.repeat(1_000_001) },
+  });
   assert.ok(oversized.error, 'an oversized snapshot is rejected');
   assert.ok(oversized.error.content);
 
-  // Content is optional: a submission with no snapshot is still valid.
-  const noContent = createReportValidator({ reportType: 'Follow-up Report' });
-  assert.ok(noContent.value);
-  assert.equal(noContent.value.content, undefined);
+  const noContent = createReportValidator({ reportType: 'Follow-up Report', reportPeriod: '2026-09' });
+  assert.ok(noContent.error);
+  assert.ok(noContent.error.content);
+
+  const invalidSummary = createReportValidator({
+    reportType: 'Follow-up Report',
+    reportPeriod: '2026-09',
+    content: { ...SAMPLE_CONTENT, summary: { ...SAMPLE_CONTENT.summary, total: 3 } },
+  });
+  assert.ok(invalidSummary.error?.content);
+  assert.ok(submitReportValidator({}).value);
+  assert.ok(submitReportValidator({ status: 'Reviewed' }).error);
 });
 
 test('RHU Personnel are authorized to use the reports feature (as recipients)', () => {
@@ -301,9 +434,9 @@ test('the snapshot migration adds immutable content columns', () => {
 
 test('report status transitions require receipt before decision and keep terminal states final', () => {
   assert.deepEqual(REPORT_TRANSITIONS.Submitted, ['Received']);
+  assert.deepEqual(REPORT_TRANSITIONS.Draft, ['Submitted']);
   assert.deepEqual(REPORT_TRANSITIONS.Received, ['Reviewed', 'Needs Revision', 'Rejected']);
-  assert.deepEqual(REPORT_TRANSITIONS.Draft, []);
-  assert.deepEqual(REPORT_TRANSITIONS['Needs Revision'], []);
+  assert.deepEqual(REPORT_TRANSITIONS['Needs Revision'], ['Submitted']);
   assert.deepEqual(REPORT_TRANSITIONS.Reviewed, []);
   assert.deepEqual(REPORT_TRANSITIONS.Rejected, []);
 });
@@ -410,7 +543,11 @@ test('sender can resubmit a report marked Needs Revision with a new snapshot', a
     return chain;
   };
   const supabase = { from: make };
-  const nextContent = { schemaVersion: 1, summary: { total: 3 } };
+  const nextContent = {
+    ...SAMPLE_CONTENT,
+    summary: { ...SAMPLE_CONTENT.summary, total: 3 },
+    rows: [...SAMPLE_CONTENT.rows, ['Pedro Reyes', 'Pending']],
+  };
   const result = await resubmit({
     user: { id: 'hs-1', role: ROLES.HEALTH_SUPERVISOR, municipalityId: 'm1', barangayId: 'b1' },
     id: 'r1',

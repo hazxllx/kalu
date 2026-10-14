@@ -132,7 +132,8 @@ export const listReadyOperations = async (ownerId, now = Date.now()) => {
     if (op.status === OUTBOX_STATUS.PENDING) return true;
     if (
       op.status === OUTBOX_STATUS.FAILED &&
-      op.attempts < op.maxAttempts &&
+      (op.lastError?.retryable === true ||
+        (op.lastError?.retryable === undefined && op.attempts < op.maxAttempts)) &&
       (op.nextAttemptAt || 0) <= now
     ) {
       return true;
@@ -195,8 +196,7 @@ export const markConflict = async (opId, errorInfo) => {
 
 export const requeueOperation = async (opId) => {
   const op = await db.outbox.get(opId);
-  if (!op) return false;
-  if (op.status === OUTBOX_STATUS.SYNCED) return false;
+  if (!op || op.status !== OUTBOX_STATUS.FAILED) return false;
   await updateOperation(opId, {
     status: OUTBOX_STATUS.PENDING,
     nextAttemptAt: Date.now(),

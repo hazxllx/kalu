@@ -11,6 +11,11 @@ import {
 } from 'lucide-react';
 
 import { retryAll } from '@/services/offline/syncEngine';
+import {
+  OFFLINE_DB_READY_EVENT,
+  OFFLINE_DB_UPGRADE_BLOCKED_EVENT,
+  isOfflineDbUpgradeBlocked,
+} from '@/services/offline/db';
 import { applyServiceWorkerUpdate, subscribeToUpdate } from '@/lib/pwa';
 import { useSyncStatus } from '@/hooks/useSyncStatus';
 
@@ -55,9 +60,21 @@ const OfflineStatusIndicator = () => {
   const [open, setOpen] = useState(false);
   const [updateReady, setUpdateReady] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [upgradeBlocked, setUpgradeBlocked] = useState(isOfflineDbUpgradeBlocked);
   const ref = useRef(null);
 
   useEffect(() => subscribeToUpdate(() => setUpdateReady(true)), []);
+
+  useEffect(() => {
+    const onBlocked = () => setUpgradeBlocked(true);
+    const onReady = () => setUpgradeBlocked(false);
+    window.addEventListener(OFFLINE_DB_UPGRADE_BLOCKED_EVENT, onBlocked);
+    window.addEventListener(OFFLINE_DB_READY_EVENT, onReady);
+    return () => {
+      window.removeEventListener(OFFLINE_DB_UPGRADE_BLOCKED_EVENT, onBlocked);
+      window.removeEventListener(OFFLINE_DB_READY_EVENT, onReady);
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (event) => {
@@ -67,23 +84,36 @@ const OfflineStatusIndicator = () => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const { counts = {}, failed = [], conflicts = [], syncing, progress, online, lastSyncedAt } = status;
+  const {
+    counts = {},
+    failed = [],
+    conflicts = [],
+    syncing,
+    progress,
+    online,
+    lastSyncedAt,
+    serverAvailable,
+    lastError,
+  } = status;
   const attention = (counts.pending || 0) + (counts.failed || 0) + (counts.conflict || 0) + (counts.offlineDraft || 0);
   const hasProblems = (counts.failed || 0) + (counts.conflict || 0) > 0;
 
   const connectionLabel = online ? 'Online' : 'Offline';
   const summary = useMemo(() => {
+    if (upgradeBlocked) return 'Close other tabs to finish device storage upgrade';
     if (syncing) {
       const total = progress?.total || 0;
       return total ? `Syncing ${progress?.processed || 0}/${total}` : 'Syncing...';
     }
     if (!online) return 'Working offline';
+    if (lastError?.code === 'auth') return 'Sign in again to synchronize';
+    if (serverAvailable === false) return 'Backend unavailable — retrying automatically';
     if (counts.offlineDraft > 0) {
       return `${counts.offlineDraft} offline draft${counts.offlineDraft === 1 ? '' : 's'} need review`;
     }
     if (attention > 0) return `${attention} change${attention === 1 ? '' : 's'} pending`;
     return 'Synced successfully';
-  }, [syncing, progress, online, attention, counts.offlineDraft]);
+  }, [syncing, progress, online, attention, counts.offlineDraft, upgradeBlocked, serverAvailable, lastError]);
 
   const handleRetry = async () => {
     setRetrying(true);
@@ -112,6 +142,7 @@ const OfflineStatusIndicator = () => {
           <WifiOff className="h-5 w-5 text-amber-600" strokeWidth={1.8} />
         )}
         {syncing && <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />}
+        {upgradeBlocked && <AlertTriangle className="h-4 w-4 text-amber-600" />}
         <span className="hidden text-xs font-medium text-slate-600 dark:text-slate-300 lg:inline">
           {connectionLabel}
         </span>
@@ -152,6 +183,28 @@ const OfflineStatusIndicator = () => {
               </div>
             )}
           </div>
+
+          {serverAvailable === false && (
+            <p className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
+              The device is online, but the backend could not be reached. Saved changes remain
+              queued and will retry automatically.
+            </p>
+          )}
+          {lastError?.code === 'auth' && (
+            <p className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
+              {lastError.message}
+            </p>
+          )}
+
+          {upgradeBlocked && (
+            <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                Device storage is waiting for another KALUSAGAP tab to close before it can
+                finish the upgrade. Close the other tab; your saved offline data will be kept.
+              </p>
+            </div>
+          )}
 
           {updateReady && (
             <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">

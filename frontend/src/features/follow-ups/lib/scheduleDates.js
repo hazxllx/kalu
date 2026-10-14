@@ -32,6 +32,61 @@ export const followUpDisplayStatus = (status, scheduledDate, now = new Date()) =
   return "Scheduled";
 };
 
+const FOLLOW_UP_TERMINAL_STATUSES = new Set(["Completed", "Cancelled", "Rejected", "Missed"]);
+const FOLLOW_UP_SCHEDULE_STATUSES = new Set(["Scheduled", "Today", "Upcoming"]);
+
+/** Derive the management-list status from the stored schedule date, not its create-time label. */
+export const followUpManagementStatus = (status, scheduledDate, now = new Date(), residentDecision = null) => {
+  if (residentDecision === "rejected") return "Rejected";
+  const current = String(status || "Scheduled");
+  if (FOLLOW_UP_TERMINAL_STATUSES.has(current) || !FOLLOW_UP_SCHEDULE_STATUSES.has(current)) {
+    return current;
+  }
+  const due = String(scheduledDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return current;
+  const today = manilaDateKey(now);
+  if (due === today) return "Today";
+  if (due > today) return "Upcoming";
+  return "Scheduled";
+};
+
+/** Summary counts use the same Manila date and persisted lifecycle statuses as the list. */
+export const summarizeFollowUps = (rows = [], now = new Date()) => {
+  const today = manilaDateKey(now);
+  const nextWeek = new Date(`${today}T00:00:00.000Z`);
+  nextWeek.setUTCDate(nextWeek.getUTCDate() + 7);
+  const lastUpcomingDate = nextWeek.toISOString().slice(0, 10);
+  return {
+    total: rows.length,
+    today: rows.filter((row) =>
+      !FOLLOW_UP_TERMINAL_STATUSES.has(String(row.status || "")) &&
+      followUpManagementStatus(row.status, row.scheduledDateRaw || row.scheduled_date, now) === "Today"
+    ).length,
+    upcoming: rows.filter((row) => {
+      const date = String(row.scheduledDateRaw || row.scheduled_date || "").slice(0, 10);
+      return FOLLOW_UP_SCHEDULE_STATUSES.has(String(row.status || "")) &&
+        date > today &&
+        date <= lastUpcomingDate;
+    }).length,
+    completed: rows.filter((row) => row.status === "Completed").length,
+  };
+};
+
+export const filterFollowUps = (rows = [], { search = "", status = "All", priority = "All" } = {}) => {
+  const query = String(search).trim().toLowerCase();
+  return rows.filter((row) => {
+    const matchesSearch = !query || [
+      row.resident,
+      row.purpose,
+      row.assignedMidwife,
+      row.location,
+    ].some((value) => String(value || "").toLowerCase().includes(query));
+    return matchesSearch &&
+      (status === "All" || row.status === status) &&
+      (priority === "All" || row.priority === priority);
+  });
+};
+
 export const isCalendarVisibleFollowUp = (schedule) =>
   !schedule?.requiresResidentResponse || schedule.confirmationStatus === "Confirmed";
 

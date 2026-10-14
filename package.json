@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "KALUSAGAP — Community Health Risk Monitoring and Early Intervention System",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "install:all": "npm install --prefix frontend && npm install --prefix backend",
     "dev": "npm run dev --prefix frontend",

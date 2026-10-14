@@ -60,6 +60,10 @@ export function normalizeTypedDate(raw) {
  * @param {string} [props.placeholder] placeholder label shown when empty
  * @param {boolean} [props.disabled] disables field interaction
  * @param {string} [props.id] input/button id
+ * @param {string} [props.ariaDescribedby] ID of the field's validation description
+ * @param {boolean} [props.ariaInvalid] whether the date value is invalid
+ * @param {(event: React.FocusEvent<HTMLInputElement>) => void} [props.onBlur] blur handler for the typeable input
+ * @param {(raw: string) => void} [props.onInvalidInput] receives incomplete or malformed typed input
  * @param {string} [props.className] extra classes for wrapper
  * @param {boolean} [props.typeable] also allow typing the date directly (the
  *   calendar is still available via the trailing button). The field accepts
@@ -74,6 +78,10 @@ export default function DatePicker({
   disabled = false,
   error = false,
   id,
+  ariaDescribedby = undefined,
+  ariaInvalid = undefined,
+  onBlur = undefined,
+  onInvalidInput = undefined,
   className = "",
   typeable = false,
 }) {
@@ -174,7 +182,9 @@ export default function DatePicker({
       onChange("");
       return;
     }
-    onChange(normalizeTypedDate(raw));
+    const normalized = normalizeTypedDate(raw);
+    if (normalized) onChange(normalized);
+    else onInvalidInput?.(raw);
   };
 
   const todayDisabled =
@@ -193,12 +203,15 @@ export default function DatePicker({
         >
           <input
             id={id}
+            aria-describedby={ariaDescribedby}
+            aria-invalid={ariaInvalid}
             type="text"
             inputMode="numeric"
             autoComplete="bday"
             disabled={disabled}
             value={typed}
             onChange={onType}
+            onBlur={onBlur}
             placeholder="YYYY-MM-DD"
             aria-label={placeholder}
             className="w-full bg-transparent text-brand-ink outline-none placeholder:text-slate-400"
@@ -220,6 +233,8 @@ export default function DatePicker({
           ref={triggerRef}
           type="button"
           id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           disabled={disabled}
           onClick={() => setOpen((o) => !o)}
           aria-haspopup="dialog"

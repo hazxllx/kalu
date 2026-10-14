@@ -129,10 +129,19 @@ export const summarizeOperations = (ops) => {
   return { counts, failed, conflicts };
 };
 
+export const earliestRetryAt = (ops) => {
+  const retries = ops
+    .filter((op) => op.status === SYNC_STATE.FAILED && op.lastError?.retryable === true)
+    .map((op) => op.nextAttemptAt)
+    .filter(Number.isFinite);
+  return retries.length ? Math.min(...retries) : null;
+};
+
 export default {
   SYNC_STATE,
   computeBackoffMs,
   orderOperations,
   dependenciesSatisfied,
   summarizeOperations,
+  earliestRetryAt,
 };

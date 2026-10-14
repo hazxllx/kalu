@@ -31,6 +31,11 @@ export const create = async (req, res) => {
   sendCreated(res, { record });
 };
 
+export const submitDraft = async (req, res) => {
+  const record = await service.submitDraft({ user: req.user, id: req.params.id });
+  sendData(res, { record });
+};
+
 export const review = async (req, res) => {
   const record = await service.review({
     user: req.user,
@@ -50,4 +55,4 @@ export const resubmit = async (req, res) => {
   sendData(res, { record });
 };
 
-export default { meta, list, get, create, review, resubmit };
+export default { meta, list, get, create, submitDraft, review, resubmit };

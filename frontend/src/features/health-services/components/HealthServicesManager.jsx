@@ -7,6 +7,7 @@ import { healthServicesApi } from "@/services/api";
 import FacilityField from "./FacilityField";
 import TimePicker from "./TimePicker";
 import DateField from "./DateField";
+import { filterHealthServices } from "../lib/filterHealthServices";
 import {
   Plus, X, CheckCircle2, RefreshCw, Search, Users, MapPin, Building2, Activity, UserPlus, UserMinus,
   ClipboardList, UserCheck, UserX, CalendarDays, MoreVertical, Pencil, Trash2, Power, AlertTriangle,
@@ -81,7 +82,20 @@ const STATUS_BADGE = {
   [STATUS.INACTIVE]: "bg-brand-gold/15 text-brand-amber",
 };
 
-const STATUS_FILTERS = ["All", STATUS.ACTIVE, STATUS.UPCOMING, STATUS.COMPLETED, STATUS.INACTIVE];
+const CATEGORY_FILTERS = [
+  ["All", "All Categories"],
+  ["Maternal", "Maternal Services"],
+  ["TCLS", "TCLS"],
+  ["Immunization", "Immunization"],
+  ["Family Planning", "Family Planning"],
+];
+const STATUS_FILTERS = [
+  ["All", "All Statuses"],
+  [STATUS.ACTIVE, STATUS.ACTIVE],
+  [STATUS.UPCOMING, STATUS.UPCOMING],
+  [STATUS.COMPLETED, STATUS.COMPLETED],
+  [STATUS.INACTIVE, STATUS.INACTIVE],
+];
 
 const inputCls = (error) =>
   `mt-1.5 w-full rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${
@@ -254,22 +268,13 @@ export default function HealthServicesManager({ subtitle }) {
     return { total, active, upcoming };
   }, [services]);
 
-  // Categories that actually occur in the data, for compact category chips.
-  const availableCategories = useMemo(() => {
-    const present = new Set(services.map((s) => s.category || "Other"));
-    const ordered = [...new Set([...CATEGORY_ORDER, ...categories])].filter((c) => present.has(c));
-    return ordered;
-  }, [services, categories]);
-
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return services.filter((s) => {
-      if (q && !(s.name.toLowerCase().includes(q) || (s.category || "").toLowerCase().includes(q)
-        || (CATEGORY_LABELS[s.category] || "").toLowerCase().includes(q))) return false;
-      if (categoryFilter !== "All" && (s.category || "Other") !== categoryFilter) return false;
-      if (statusFilter !== "All" && deriveStatus(s) !== statusFilter) return false;
-      return true;
-    });
+    return filterHealthServices(
+      services,
+      { search, category: categoryFilter, status: statusFilter },
+      deriveStatus,
+      CATEGORY_LABELS,
+    );
   }, [services, search, categoryFilter, statusFilter]);
 
   // Defensive dedupe by stable account id (the backend already excludes QA/test
@@ -601,7 +606,7 @@ export default function HealthServicesManager({ subtitle }) {
     }
   };
 
-  const hasFiltersActive = search.trim() || categoryFilter !== "All" || statusFilter !== "All";
+  const hasFiltersActive = Boolean(search.trim() || categoryFilter !== "All" || statusFilter !== "All");
   const clearFilters = () => { setSearch(""); setCategoryFilter("All"); setStatusFilter("All"); };
 
   return (
@@ -634,43 +639,69 @@ export default function HealthServicesManager({ subtitle }) {
         <SummaryCard icon={CalendarClock} label="Upcoming services" value={summary.upcoming} tone="text-brand-blue" loading={loading} />
       </div>
 
-      {/* Search + Refresh */}
-      <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 dark:border-border dark:bg-input sm:max-w-md sm:flex-1">
+      {/* Search, filters, and refresh */}
+      <Card className="mb-4 p-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(10rem,0.58fr)_minmax(10rem,0.58fr)_auto] lg:items-end">
+          <div className="flex h-10 min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input sm:col-span-2 lg:col-span-1">
             <Search className="h-4 w-4 text-brand-gray" />
             <input
+              type="search"
+              aria-label="Search health services"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search service or category..."
-              className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
+              className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
             />
           </div>
+
+          <label htmlFor="health-service-category" className="min-w-0 text-xs font-medium text-brand-gray">
+            Category
+            <select
+              id="health-service-category"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="mt-1 block h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-normal text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 dark:border-border dark:bg-input dark:text-foreground"
+            >
+              {CATEGORY_FILTERS.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label htmlFor="health-service-status" className="min-w-0 text-xs font-medium text-brand-gray">
+            Status
+            <select
+              id="health-service-status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="mt-1 block h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-normal text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 dark:border-border dark:bg-input dark:text-foreground"
+            >
+              {STATUS_FILTERS.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
           <button
+            type="button"
             onClick={loadServices}
-            className="inline-flex items-center justify-center gap-2 rounded-btn border border-brand-border px-3 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue sm:col-span-2 sm:justify-self-end lg:col-span-1"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
           </button>
         </div>
 
-        {/* Category + status filter chips */}
-        <div className="mt-3 flex flex-col gap-2.5 border-t border-brand-border pt-3 dark:border-border">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-brand-gray">Category</span>
-            <FilterChip active={categoryFilter === "All"} onClick={() => setCategoryFilter("All")}>All</FilterChip>
-            {availableCategories.map((c) => (
-              <FilterChip key={c} active={categoryFilter === c} onClick={() => setCategoryFilter(c)}>
-                {CATEGORY_LABELS[c] || c}
-              </FilterChip>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-brand-gray">Status</span>
-            {STATUS_FILTERS.map((s) => (
-              <FilterChip key={s} active={statusFilter === s} onClick={() => setStatusFilter(s)}>{s}</FilterChip>
-            ))}
-          </div>
+        <div className="mt-2 flex items-center justify-between gap-3 border-t border-brand-border pt-2 dark:border-border">
+          <p className="text-xs text-brand-gray" aria-live="polite" aria-atomic="true">
+            Showing {filtered.length} of {services.length} service{services.length === 1 ? "" : "s"}
+          </p>
+          {hasFiltersActive && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="shrink-0 text-xs font-medium text-brand-blue underline-offset-2 hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       </Card>
 
@@ -699,9 +730,6 @@ export default function HealthServicesManager({ subtitle }) {
         </Card>
       ) : (
         <>
-          <p className="mb-3 text-xs text-brand-gray">
-            Showing {filtered.length} of {services.length} service{services.length === 1 ? "" : "s"}
-          </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((s) => {
               const status = deriveStatus(s);
@@ -1130,24 +1158,6 @@ function SummaryCard({ icon: Icon, label, value, tone, loading }) {
         <p className={`text-2xl font-semibold leading-tight ${tone}`}>{loading ? "—" : value}</p>
       </div>
     </Card>
-  );
-}
-
-/** Compact filter chip (category / status). */
-function FilterChip({ active, onClick, children }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-        active
-          ? "bg-brand-blue text-white"
-          : "border border-brand-border bg-white text-brand-gray hover:border-brand-blue hover:text-brand-blue dark:bg-input dark:border-border"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 

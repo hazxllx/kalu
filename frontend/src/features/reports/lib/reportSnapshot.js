@@ -90,7 +90,16 @@ export const REPORT_COLUMNS = {
     { label: "Next Dose", get: (r) => fmtDate(r.next_dose) },
     { label: "Status", get: (r) => r.status || "—", badge: true },
   ],
+  "Health Services": [
+    { label: "Service", get: (r) => r.service?.name || r.service_name || "—" },
+    { label: "Resident", get: (r) => residentName(r) || "—" },
+    { label: "Scheduled", get: (r) => fmtDate(r.scheduled_date) },
+    { label: "Status", get: (r) => r.status || "—", badge: true },
+  ],
 };
+
+REPORT_COLUMNS["Follow-ups"] = REPORT_COLUMNS["Follow-up Report"];
+REPORT_COLUMNS.Referrals = REPORT_COLUMNS["Referral Report"];
 
 /** Fallback columns for any record-list type without a specific mapping. */
 export const GENERIC_COLUMNS = [

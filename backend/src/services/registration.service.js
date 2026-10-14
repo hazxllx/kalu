@@ -5,8 +5,12 @@ import { getServiceClient } from '../config/supabase.js';
 import { validateDocumentUpload } from '../validators/documents.validators.js';
 import {
   ageFromDateOnly,
+  CIVIL_STATUSES,
+  hasControlChars,
   isFutureDateOnly,
+  isValidPersonName,
   isStrictMobile,
+  NAME_SUFFIXES,
   parseDateOnly,
   toZone,
 } from '../validators/common.js';
@@ -68,16 +72,32 @@ const activateIfVerified = async (resident, authUserId) => {
 const validate = (payload) => {
   const errors = [];
   const firstName = text(payload.firstName);
+  const middleName = text(payload.middleName);
   const lastName = text(payload.lastName);
+  const suffix = text(payload.suffix);
   const birthDate = text(payload.birthDate);
   const sex = text(payload.sex);
+  const civilStatus = text(payload.civilStatus);
   const barangay = text(payload.barangay);
   const identityNo = text(payload.identityNo);
   const cellphoneNo = text(payload.cellphoneNo);
   const zone = toZone(payload.zone);
 
   if (!firstName) errors.push('First name is required.');
+  else if (firstName.length > 80) errors.push('First name is too long (max 80 characters).');
+  else if (hasControlChars(firstName) || !isValidPersonName(firstName)) {
+    errors.push('First name can contain letters, spaces, hyphens, apostrophes, and periods only.');
+  }
+  if (middleName && middleName.length > 80) errors.push('Middle name is too long (max 80 characters).');
+  else if (middleName && (hasControlChars(middleName) || !isValidPersonName(middleName))) {
+    errors.push('Middle name can contain letters, spaces, hyphens, apostrophes, and periods only.');
+  }
   if (!lastName) errors.push('Last name is required.');
+  else if (lastName.length > 80) errors.push('Last name is too long (max 80 characters).');
+  else if (hasControlChars(lastName) || !isValidPersonName(lastName)) {
+    errors.push('Last name can contain letters, spaces, hyphens, apostrophes, and periods only.');
+  }
+  if (suffix && !NAME_SUFFIXES.includes(suffix)) errors.push('Select a valid suffix.');
   if (!birthDate) errors.push('Date of birth is required.');
   else {
     const age = ageFromDateOnly(birthDate);
@@ -101,6 +121,8 @@ const validate = (payload) => {
   }
   if (!sex) errors.push('Sex is required.');
   else if (!['Male', 'Female'].includes(sex)) errors.push('Sex must be "Male" or "Female".');
+  if (!civilStatus) errors.push('Civil status is required.');
+  else if (!CIVIL_STATUSES.includes(civilStatus)) errors.push('Select a valid civil status.');
   if (!barangay) errors.push('Barangay is required.');
   // Server-authoritative mobile + zone checks (the request validator already
   // ran, but the service never trusts the caller and re-enforces both here).
@@ -115,9 +137,12 @@ const validate = (payload) => {
 
   return {
     firstName,
+    middleName,
     lastName,
+    suffix,
     birthDate,
     sex,
+    civilStatus,
     barangay,
     identityNo,
     cellphoneNo,
@@ -214,7 +239,7 @@ export const registerResident = async ({ user, payload = {} }) => {
     duplicate = await repository.findResidentByIdentity({
       lastName: fields.lastName,
       firstName: fields.firstName,
-      middleName: text(payload.middleName),
+      middleName: fields.middleName,
       birthDate: fields.birthDate,
       ...(fields.minorVerificationMethod ? {
         minorVerificationMethod: fields.minorVerificationMethod,
@@ -304,13 +329,13 @@ export const registerResident = async ({ user, payload = {} }) => {
     ...ids,
     authUserId: user.id,
     firstName: fields.firstName,
-    middleName: text(payload.middleName),
+    middleName: fields.middleName,
     lastName: fields.lastName,
-    suffix: text(payload.suffix),
+    suffix: fields.suffix,
     birthDate: fields.birthDate,
     birthPlace: text(payload.birthPlace),
     sex: fields.sex,
-    civilStatus: text(payload.civilStatus),
+    civilStatus: fields.civilStatus,
     religion: text(payload.religion),
     employmentStatus: text(payload.employmentStatus),
     is4PsMember: Boolean(payload.is4PsMember),

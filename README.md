@@ -59,7 +59,7 @@ verification, not a separate staff role.
 
 - **Frontend:** React 18, JavaScript, Vite, Tailwind CSS, React Router, React
   Query, Recharts, React Leaflet, and Lucide React
-- **Backend:** Node.js 18+, JavaScript ES modules, Express, Multer, Nodemailer,
+- **Backend:** Node.js 22+, JavaScript ES modules, Express, Multer, Nodemailer,
   and the Supabase JavaScript client
 - **Database and identity:** Supabase Auth and PostgreSQL, with versioned SQL
   migrations and Row Level Security policies
@@ -82,7 +82,7 @@ Frontend feature modules call backend endpoints through shared API clients.
 
 ### Requirements
 
-- Node.js 18 or newer
+- Node.js 22 or newer (the locked Supabase client dependencies require Node 22+)
 - npm
 - A Supabase project for authentication and database-backed workflows
 - Supabase CLI for linking a project and applying migrations
@@ -152,8 +152,9 @@ supabase migration list --linked
 supabase db push
 ```
 
-The CLI applies files in `supabase/migrations/` in version order and then the
-reference data in `supabase/seed.sql`. Do not remove or reorder migration
+`supabase db push` applies files in `supabase/migrations/` in version order; it
+does not apply `supabase/seed.sql`. The seed file is for local database resets
+and must not be run against production. Do not remove or reorder migration
 history. The database and migration guide is in
 [docs/database/README.md](docs/database/README.md); the manual resident-verification
 workflow is documented in
@@ -216,9 +217,8 @@ JavaScript, so it reports type-inference notices rather than gating the build.
 ## Deployment
 
 The frontend is a static Vite single-page application. `vercel.json` configures
-a Vercel deployment that installs and builds the frontend, serves
-`frontend/dist`, and rewrites all routes to `index.html` for client-side
-routing. Set the `VITE_` environment variables in the hosting project settings.
+Vercel to install the frontend from its lockfile, build it, serve
+`frontend/dist`, and rewrite client-side routes to `index.html`.
 
 The Express API in `backend/` is a separate Node.js service and is deployed and
 scaled independently of the frontend. Set the frontend `VITE_API_URL` to the
@@ -227,15 +227,79 @@ deployed API origin **including `/api`** (for example,
 `/api`, including `/api/auth/me` and `/api/roles/permissions`. The frontend also
 normalizes a bare API origin by appending `/api`, but including the mount in the
 deployment setting makes the contract explicit. Set the backend's `CLIENT_URL`
-to the deployed frontend origin so CORS permits it. For the current production
-deployment, use `VITE_API_URL=https://kalusagap.onrender.com/api` in Vercel and
-`CLIENT_URL=https://kalu-zeta.vercel.app` in Render. That API URL is also the
-frontend's production fallback if the hosting variable is absent; explicitly
-setting it in Vercel remains recommended, and any configured value overrides
-the fallback. The Supabase project provides authentication and the PostgreSQL
-database for both. Configure Render's `TRUST_PROXY` to match its documented
-proxy topology; do not trust all forwarded addresses unless the complete proxy
-chain is controlled and sanitizes client-supplied forwarding headers.
+to the deployed frontend origin so CORS permits it. For the current deployment,
+configure the hosting dashboards as follows. These settings are instructions
+only; this repository change does not update either live service.
+
+### Vercel
+
+- Set the project root to the repository root and use Node.js 22.x.
+- The checked-in `vercel.json` runs `npm ci --prefix frontend`,
+  `npm run build --prefix frontend`, serves `frontend/dist`, and keeps SPA
+  route rewrites.
+- Set these variables for the **Production** environment:
+
+  ```env
+  VITE_API_URL=https://kalusagap.onrender.com/api
+  VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+  VITE_SUPABASE_ANON_KEY=<public-anon-key>
+  ```
+
+  `VITE_API_URL` has a code fallback to the Render API, but setting it
+  explicitly avoids an accidental build against an unintended API. Supabase
+  URL and anon key must belong to the same project as Render. The anon key is
+  public; **never** set `SUPABASE_SERVICE_ROLE_KEY` or any database credential
+  in Vercel or a `VITE_` variable. A production Vite build now fails early if
+  either Supabase value is missing. Use separate non-production credentials
+  for Preview deployments if previews are enabled.
+
+### Render
+
+- Create/use a Node web service with repository root as its root directory,
+  Node.js 22.x, build command `npm ci --prefix backend`, and start command
+  `npm run start --prefix backend`.
+- Set the health-check path to `/api/health`. Render supplies `PORT`; do not
+  hard-code a production port.
+- Set these runtime variables:
+
+  ```env
+  NODE_ENV=production
+  CLIENT_URL=https://kalu-zeta.vercel.app
+  TRUST_PROXY=1
+  SUPABASE_URL=https://<project-ref>.supabase.co
+  SUPABASE_ANON_KEY=<public-anon-key>
+  SUPABASE_SERVICE_ROLE_KEY=<server-only-service-role-key>
+  ```
+
+  `TRUST_PROXY=1` trusts the single Render edge proxy hop so Express can use
+  the client IP for rate limits. Do not use `true` or a larger hop count unless
+  the full proxy chain is verified and strips client-supplied forwarding
+  headers. Add `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` if the
+  transfer-OTP email workflow is configured.
+
+### Supabase dashboard and database
+
+- In **Authentication → URL Configuration**, set the Site URL to
+  `https://kalu-zeta.vercel.app` and allow the exact redirect URLs
+  `https://kalu-zeta.vercel.app` and
+  `https://kalu-zeta.vercel.app/reset-password`. Add any separately deployed
+  custom frontend domain explicitly.
+- Use the same Supabase project URL and matching anon/service-role keys across
+  the two services. Store the service-role key only as a Render secret.
+- Before rollout, review `supabase migration list --linked` against the
+  intended project and back up/review pending SQL. Applying migrations with
+  `supabase db push` changes the remote database; do that only with explicit
+  authorization and the project's approved change procedure. No production
+  migration or data operation is performed by these deployment instructions.
+
+After setting dashboard values, trigger deployments and verify Vercel's
+production build, `https://kalusagap.onrender.com/api/health`, browser sign-in,
+role-scoped pages, CORS requests, and the approved database workflows. The
+health endpoint only confirms the API process is responding; it does not prove
+that Supabase connectivity, migrations, credentials, or user workflows are
+healthy. The API URL also has a frontend production fallback, but explicitly
+setting it in Vercel is recommended. Do not treat a cold-start response or a
+successful health check as an end-to-end verification.
 
 ## Scope and Limitations
 

@@ -60,9 +60,11 @@ export default function ButtonSelectGroup({
   value,
   onChange,
   ariaLabel,
-  name,
+  name = undefined,
   disabled = false,
   error = false,
+  id = undefined,
+  ariaDescribedby = undefined,
   variant = "default",
   className = "",
 }) {
@@ -88,7 +90,10 @@ export default function ButtonSelectGroup({
   return (
     <div
       role="radiogroup"
+      id={id}
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedby}
+      aria-invalid={error || undefined}
       onKeyDown={onKeyDown}
       className={`mt-1.5 flex flex-wrap gap-2 ${className}`}
     >

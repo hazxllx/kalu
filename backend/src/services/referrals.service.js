@@ -40,6 +40,7 @@ const RESIDENT_ROLES = new Set(['resident', 'resident-limited']);
 
 const VALID_STATUSES = ['Pending', 'Accepted', 'In Progress', 'Completed', 'Cancelled'];
 const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
+const REFERRAL_PAGE_SIZE = 200;
 
 /**
  * The resident columns every referral response embeds.
@@ -162,13 +163,18 @@ const ENCOUNTER_SELECT = [
 const attachStages = async (supabase, rows) => {
   const ids = (rows || []).map((r) => r.id).filter(Boolean);
   if (!ids.length) return rows || [];
-  const { data: visits } = await supabase
-    .from('visits')
-    .select('id, referral_id, status, completed_at, created_at')
-    .in('referral_id', ids)
-    .order('created_at', { ascending: false });
+  const visits = [];
+  for (let offset = 0; offset < ids.length; offset += REFERRAL_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('visits')
+      .select('id, referral_id, status, completed_at, created_at')
+      .in('referral_id', ids.slice(offset, offset + REFERRAL_PAGE_SIZE))
+      .order('created_at', { ascending: false });
+    throwOnError(error, 'Could not load referral stages');
+    visits.push(...(data || []));
+  }
   const newestByReferral = new Map();
-  for (const v of visits || []) {
+  for (const v of visits) {
     if (!newestByReferral.has(v.referral_id)) newestByReferral.set(v.referral_id, v);
   }
   return rows.map((r) => ({ ...r, stage: deriveStage(r, newestByReferral.get(r.id) || null) }));
@@ -184,6 +190,11 @@ const linkedEncounter = async (supabase, referralId) => {
     .limit(1)
     .maybeSingle();
   return data || null;
+};
+
+const withCurrentStage = async (supabase, referral) => {
+  const encounter = await linkedEncounter(supabase, referral.id);
+  return { ...referral, stage: deriveStage(referral, encounter) };
 };
 
 /**
@@ -214,7 +225,11 @@ export const list = async ({ user, residentId = null, status = null, supabase = 
   if (user?.role === 'rhu_personnel' && !canTriage(user)) {
     throw ApiError.forbidden('Incoming referrals are available to RHU Triage personnel only.');
   }
-  let query = supabase.from(TABLE).select(REFERRAL_SELECT).order('created_at', { ascending: false }).limit(200);
+  let query = supabase
+    .from(TABLE)
+    .select(REFERRAL_SELECT)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false });
 
   if (RESIDENT_ROLES.has(user?.role)) {
     const mine = await ownResident(supabase, user);
@@ -233,9 +248,13 @@ export const list = async ({ user, residentId = null, status = null, supabase = 
   }
 
   if (status) query = query.eq('status', status);
-  const { data, error } = await query;
-  throwOnError(error, 'Could not load referrals');
-  const rows = data || [];
+  const rows = [];
+  for (let offset = 0; ; offset += REFERRAL_PAGE_SIZE) {
+    const { data, error } = await query.range(offset, offset + REFERRAL_PAGE_SIZE - 1);
+    throwOnError(error, 'Could not load referrals');
+    rows.push(...(data || []));
+    if (!data || data.length < REFERRAL_PAGE_SIZE) break;
+  }
   return attachStages(supabase, rows);
 };
 
@@ -312,7 +331,7 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   throwOnError(error, 'Could not create referral');
   await audit(supabase, user, 'REFERRAL_CREATED', data.id, resident);
   await notifyResident(supabase, resident, 'created', data);
-  return data;
+  return withCurrentStage(supabase, data);
 };
 
 /** Load an existing referral and confirm it is in the writer's scope. */
@@ -345,7 +364,7 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
   const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(REFERRAL_SELECT).single();
   throwOnError(error, 'Could not update referral');
   await audit(supabase, user, 'REFERRAL_UPDATED', id, resident);
-  return data;
+  return withCurrentStage(supabase, data);
 };
 
 export const updateStatus = async ({ user, id, status, resolutionNotes, supabase = getServiceClient() }) => {
@@ -366,7 +385,7 @@ export const updateStatus = async ({ user, id, status, resolutionNotes, supabase
     else if (status === 'Completed') await notifyResident(supabase, resident, 'completed', data);
     else if (status === 'Cancelled') await notifyResident(supabase, resident, 'cancelled', data);
   }
-  return data;
+  return withCurrentStage(supabase, data);
 };
 
 export const remove = async ({ user, id, supabase = getServiceClient() }) => {

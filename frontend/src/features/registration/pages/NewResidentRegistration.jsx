@@ -63,6 +63,7 @@ import {
   strictMobile as validateStrictMobile,
   zone as validateZone,
   required,
+  personName,
   validateFields,
 } from "@/utils/validation";
 import { BARANGAYS } from "@/lib/barangays";
@@ -247,6 +248,7 @@ export default function NewResidentRegistration() {
    * @property {string} [identityPhoto]
    * @property {string} [residentId]
    * @property {string} [firstName]
+   * @property {string} [middleName]
    * @property {string} [lastName]
    * @property {string} [suffix]
    * @property {string} [sex]
@@ -623,7 +625,7 @@ export default function NewResidentRegistration() {
     }
     setErrors((previous) => ({
       ...previous,
-      dob: "",
+      dob: validatePersonalValue("dob", value),
       governmentIdFront: "",
       governmentIdBack: "",
       identityPhoto: "",
@@ -851,6 +853,27 @@ export default function NewResidentRegistration() {
   const isAdultApplicant = applicantAge !== "" && Number(applicantAge) >= 18;
   const filteredBarangays = BARANGAYS.filter((b) => b.toLowerCase().includes(barangayQuery.toLowerCase()));
 
+  const personalRules = {
+    firstName: (value) => personName(value, { label: "First name" }),
+    middleName: (value) => personName(value, { label: "Middle name", isRequired: false }),
+    lastName: (value) => personName(value, { label: "Last name" }),
+    suffix: (value) => (value ? enumValue(value, NAME_SUFFIXES, { label: "suffix" }) : ""),
+    dob: (value) => dateOfBirth(value, { label: "Date of birth" }),
+    sex: (value) => enumValue(value, SEX_OPTIONS, { label: "sex" }),
+    civilStatus: (value) => enumValue(value, CIVIL_STATUSES, { label: "civil status" }),
+  };
+  const validatePersonalValue = (key, value) => personalRules[key]?.(value) || "";
+  const updatePersonalField = (key, value, trim = false) => {
+    const nextValue = trim && typeof value === "string" ? value.trim() : value;
+    setForm((previous) => ({ ...previous, [key]: nextValue }));
+    const message = validatePersonalValue(key, nextValue);
+    setErrors((previous) => ({ ...previous, [key]: message }));
+  };
+  const personalChange = (key) => (event) => {
+    updatePersonalField(key, event?.target ? event.target.value : event);
+  };
+  const personalBlur = (key) => () => updatePersonalField(key, form[key], true);
+
   // A successful verifyOtp() stores a real Supabase session in the browser
   // client. If the resident reloads the page mid-registration, restore the
   // verified state from that session (matched by email) instead of forcing a
@@ -875,12 +898,13 @@ export default function NewResidentRegistration() {
     let errs = {};
     if (s === 1) {
       errs = validateFields(form, {
-        firstName: (v) => required(v, "First name"),
-        lastName: (v) => required(v, "Last name"),
-        suffix: (v) => (v ? enumValue(v, NAME_SUFFIXES, { label: "suffix" }) : ""),
-        dob: (v) => dateOfBirth(v, { label: "Date of birth" }),
-        sex: (v) => enumValue(v, SEX_OPTIONS, { label: "sex" }),
-        civilStatus: (v) => enumValue(v, CIVIL_STATUSES, { label: "civil status" }),
+        firstName: personalRules.firstName,
+        middleName: personalRules.middleName,
+        lastName: personalRules.lastName,
+        suffix: personalRules.suffix,
+        dob: personalRules.dob,
+        sex: personalRules.sex,
+        civilStatus: personalRules.civilStatus,
       });
     }
     if (s === 2) {
@@ -935,6 +959,26 @@ export default function NewResidentRegistration() {
       if (!form.agreeReview) errs.agreeReview = "Please confirm your information for review to continue";
     }
     setErrors(errs);
+    if (s === 1 && Object.keys(errs).length) {
+      const fieldIds = {
+        firstName: "resident-first-name",
+        middleName: "resident-middle-name",
+        lastName: "resident-last-name",
+        suffix: "resident-suffix",
+        dob: "resident-birth-date",
+        sex: "resident-sex",
+        civilStatus: "resident-civil-status",
+      };
+      const firstInvalid = fieldIds[Object.keys(errs)[0]];
+      window.requestAnimationFrame(() => {
+        const field = document.getElementById(firstInvalid);
+        const focusTarget = field?.querySelector('[role="radio"]') || field;
+        if (focusTarget instanceof HTMLElement) {
+          focusTarget.scrollIntoView?.({ behavior: "smooth", block: "center" });
+          focusTarget.focus();
+        }
+      });
+    }
     return Object.keys(errs).length === 0;
   };
 
@@ -1277,19 +1321,53 @@ export default function NewResidentRegistration() {
                     </span>
                   </label>
                 </div>
-                <Field label="First Name" required error={errors.firstName}>
-                  <input type="text" placeholder="Juan" value={form.firstName} onChange={set("firstName")} className={inputCls(errors.firstName)} />
+                <Field id="resident-first-name" label="First Name" required error={errors.firstName}>
+                  <input
+                    id="resident-first-name"
+                    type="text"
+                    placeholder="Juan"
+                    value={form.firstName}
+                    onChange={personalChange("firstName")}
+                    onBlur={personalBlur("firstName")}
+                    aria-invalid={Boolean(errors.firstName)}
+                    aria-describedby={errors.firstName ? "resident-first-name-error" : undefined}
+                    className={inputCls(errors.firstName)}
+                  />
                 </Field>
-                <Field label="Middle Name" optional>
-                  <input type="text" placeholder="Reyes" value={form.middleName} onChange={set("middleName")} className={inputCls()} />
+                <Field id="resident-middle-name" label="Middle Name" optional error={errors.middleName}>
+                  <input
+                    id="resident-middle-name"
+                    type="text"
+                    placeholder="Reyes"
+                    value={form.middleName}
+                    onChange={personalChange("middleName")}
+                    onBlur={personalBlur("middleName")}
+                    aria-invalid={Boolean(errors.middleName)}
+                    aria-describedby={errors.middleName ? "resident-middle-name-error" : undefined}
+                    className={inputCls(errors.middleName)}
+                  />
                 </Field>
-                <Field label="Last Name" required error={errors.lastName}>
-                  <input type="text" placeholder="Dela Cruz" value={form.lastName} onChange={set("lastName")} className={inputCls(errors.lastName)} />
+                <Field id="resident-last-name" label="Last Name" required error={errors.lastName}>
+                  <input
+                    id="resident-last-name"
+                    type="text"
+                    placeholder="Dela Cruz"
+                    value={form.lastName}
+                    onChange={personalChange("lastName")}
+                    onBlur={personalBlur("lastName")}
+                    aria-invalid={Boolean(errors.lastName)}
+                    aria-describedby={errors.lastName ? "resident-last-name-error" : undefined}
+                    className={inputCls(errors.lastName)}
+                  />
                 </Field>
-                <Field label="Suffix" optional error={errors.suffix}>
+                <Field id="resident-suffix" label="Suffix" optional error={errors.suffix}>
                   <select
+                    id="resident-suffix"
                     value={form.suffix}
-                    onChange={set("suffix")}
+                    onChange={personalChange("suffix")}
+                    onBlur={personalBlur("suffix")}
+                    aria-invalid={Boolean(errors.suffix)}
+                    aria-describedby={errors.suffix ? "resident-suffix-error" : undefined}
                     className={`${inputCls(errors.suffix)} cursor-pointer`}
                   >
                     <option value="">None</option>
@@ -1298,23 +1376,47 @@ export default function NewResidentRegistration() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Birth Date" required error={errors.dob}>
+                <Field id="resident-birth-date" label="Birth Date" required error={errors.dob}>
                   <DatePicker
+                    id="resident-birth-date"
                     value={form.dob}
                     typeable
                     max={new Date().toISOString().slice(0, 10)}
                     error={Boolean(errors.dob)}
+                    ariaInvalid={Boolean(errors.dob)}
+                    ariaDescribedby={errors.dob ? "resident-birth-date-error" : undefined}
                     placeholder="Select birth date..."
                     onChange={setDateOfBirth}
+                    onInvalidInput={setDateOfBirth}
+                    onBlur={personalBlur("dob")}
                   />
                 </Field>
                 <Field label="Age" hint="Calculated automatically from the date of birth.">
                   <input type="text" value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" className={`${inputCls()} cursor-not-allowed text-slate-500`} />
                 </Field>
-                <Field label="Sex" required error={errors.sex}>
-                  <ButtonSelectGroup ariaLabel="Sex" variant="registration" options={["Male", "Female"]} value={form.sex} onChange={set("sex")} error={Boolean(errors.sex)} />
+                <Field id="resident-sex" label="Sex" required error={errors.sex}>
+                  <ButtonSelectGroup
+                    id="resident-sex"
+                    ariaLabel="Sex"
+                    ariaDescribedby={errors.sex ? "resident-sex-error" : undefined}
+                    variant="registration"
+                    options={["Male", "Female"]}
+                    value={form.sex}
+                    onChange={personalChange("sex")}
+                    error={Boolean(errors.sex)}
+                  />
                 </Field>
-                <SelectField label="Civil Status" required error={errors.civilStatus} value={form.civilStatus} onChange={set("civilStatus")}>
+                <SelectField
+                  id="resident-civil-status"
+                  label="Civil Status"
+                  required
+                  error={errors.civilStatus}
+                  value={form.civilStatus}
+                  onChange={personalChange("civilStatus")}
+                  onBlur={personalBlur("civilStatus")}
+                  aria-invalid={Boolean(errors.civilStatus)}
+                  aria-describedby={errors.civilStatus ? "resident-civil-status-error" : undefined}
+                >
                   <option value="">Select status</option>
                   <option value="Single">Single</option>
                   <option value="Married">Married</option>

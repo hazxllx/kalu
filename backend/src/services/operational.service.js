@@ -73,6 +73,10 @@ export const assertFollowUpTransition = (existing = {}, nextStatus, { today = ma
     throw ApiError.conflict(`This follow-up is ${current} and can no longer change status.`);
   }
 
+  if (current === 'Missed' && target === 'Ongoing') {
+    throw ApiError.conflict('A missed follow-up must be rescheduled before it can be marked Ongoing.');
+  }
+
   if (target === 'Completed') {
     if (COMPLETE_BLOCKERS.has(current)) {
       throw ApiError.conflict(`A ${current} follow-up cannot be marked Completed.`);
@@ -84,6 +88,18 @@ export const assertFollowUpTransition = (existing = {}, nextStatus, { today = ma
     if (sched && sched > today) {
       throw ApiError.unprocessable(
         `This follow-up is scheduled for ${sched}; it cannot be marked Completed before then (today is ${today}).`,
+      );
+    }
+  }
+
+  if (target === 'Missed') {
+    if (!['Scheduled', 'Today', 'Upcoming', 'Ongoing'].includes(current)) {
+      throw ApiError.conflict(`A ${current} follow-up cannot be marked Missed.`);
+    }
+    const sched = text(existing.scheduled_date);
+    if (sched && sched > today) {
+      throw ApiError.unprocessable(
+        `This follow-up is scheduled for ${sched}; it cannot be marked Missed before then (today is ${today}).`,
       );
     }
   }
@@ -310,7 +326,21 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
   return data || [];
 };
 
-export const create = async ({ user, kind, payload = {}, supabase = getServiceClient() }) => {
+const findFollowUpByOperationKey = async ({ supabase, idempotencyKey, user, resident }) => {
+  const { data, error } = await supabase
+    .from('follow_ups')
+    .select(selectFor('followups'))
+    .eq('client_operation_key', idempotencyKey)
+    .maybeSingle();
+  throwOnError(error, 'Could not verify the follow-up operation');
+  if (!data) return null;
+  if (data.created_by !== user.id || data.resident_id !== resident.id) {
+    throw ApiError.conflict('This Idempotency-Key belongs to another follow-up operation.');
+  }
+  return withScheduleState(data);
+};
+
+export const create = async ({ user, kind, payload = {}, idempotencyKey = null, supabase = getServiceClient() }) => {
   const normalizedKind = normalizeKind(kind);
   assertStaff(user);
   const table = TABLES[normalizedKind] || TABLES[kind];
@@ -320,6 +350,13 @@ export const create = async ({ user, kind, payload = {}, supabase = getServiceCl
   delete row.residentId;
   delete row.consultationId;
   delete row.id;
+  delete row.client_operation_key;
+
+  if (normalizedKind === 'followups' && idempotencyKey) {
+    const existing = await findFollowUpByOperationKey({ supabase, idempotencyKey, user, resident });
+    if (existing) return existing;
+    row.client_operation_key = idempotencyKey;
+  }
 
   if (normalizedKind === 'maternalvisits') {
     const maternalCaseId = text(row.maternal_case_id || row.maternalCaseId || row.maternal_record_id || row.maternalRecordId);
@@ -387,6 +424,10 @@ export const create = async ({ user, kind, payload = {}, supabase = getServiceCl
     }
   }
   const { data, error } = await supabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
+  if (error?.code === '23505' && normalizedKind === 'followups' && idempotencyKey) {
+    const existing = await findFollowUpByOperationKey({ supabase, idempotencyKey, user, resident });
+    if (existing) return existing;
+  }
   throwOnError(error, `Could not create ${normalizedKind}`);
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
   await notifyResident(supabase, resident, normalizedKind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);

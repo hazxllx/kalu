@@ -30,29 +30,41 @@ export const getLastSyncedAt = (ownerId = null) => readMeta(lastSyncedKey(ownerI
  */
 export const acquireLock = async (workerId, ttlMs = 30_000) => {
   const now = Date.now();
-  const existing = await readMeta(META_KEYS.LOCK, null);
-  if (existing && existing.owner && existing.expiresAt > now && existing.owner !== workerId) {
-    return null;
-  }
-  await writeMeta(META_KEYS.LOCK, { owner: workerId, expiresAt: now + ttlMs });
-  // Re-read to detect a race where two workers wrote concurrently — last write
-  // wins, so only the confirmed owner proceeds.
-  const confirmed = await readMeta(META_KEYS.LOCK, null);
-  return confirmed && confirmed.owner === workerId ? workerId : null;
+  return db.transaction('rw', db.syncMeta, async () => {
+    const existing = await db.syncMeta.get(META_KEYS.LOCK);
+    if (existing?.value?.owner && existing.value.expiresAt > now && existing.value.owner !== workerId) {
+      return null;
+    }
+    await db.syncMeta.put({
+      key: META_KEYS.LOCK,
+      value: { owner: workerId, expiresAt: now + ttlMs },
+      updatedAt: now,
+    });
+    return workerId;
+  });
 };
 
 export const renewLock = async (workerId, ttlMs = 30_000) => {
-  const existing = await readMeta(META_KEYS.LOCK, null);
-  if (!existing || existing.owner !== workerId) return false;
-  await writeMeta(META_KEYS.LOCK, { owner: workerId, expiresAt: Date.now() + ttlMs });
-  return true;
+  const now = Date.now();
+  return db.transaction('rw', db.syncMeta, async () => {
+    const row = await db.syncMeta.get(META_KEYS.LOCK);
+    if (!row?.value || row.value.owner !== workerId) return false;
+    await db.syncMeta.put({
+      key: META_KEYS.LOCK,
+      value: { owner: workerId, expiresAt: now + ttlMs },
+      updatedAt: now,
+    });
+    return true;
+  });
 };
 
 export const releaseLock = async (workerId) => {
-  const existing = await readMeta(META_KEYS.LOCK, null);
-  if (existing && existing.owner === workerId) {
-    await writeMeta(META_KEYS.LOCK, null);
-  }
+  await db.transaction('rw', db.syncMeta, async () => {
+    const existing = await db.syncMeta.get(META_KEYS.LOCK);
+    if (existing?.value?.owner === workerId) {
+      await db.syncMeta.put({ key: META_KEYS.LOCK, value: null, updatedAt: Date.now() });
+    }
+  });
 };
 
 export default {

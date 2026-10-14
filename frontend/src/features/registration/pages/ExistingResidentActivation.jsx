@@ -70,6 +70,7 @@ export default function ExistingResidentActivation({ onBack }) {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [residentIdError, setResidentIdError] = useState("");
   const [alreadyLinked, setAlreadyLinked] = useState(false);
   // Resend cooldown + delivery feedback for Step 2. Supabase Auth enforces a
   // 60s send interval (smtp_max_frequency); mirror it client-side so a Resend
@@ -78,6 +79,7 @@ export default function ExistingResidentActivation({ onBack }) {
   const [sendNotice, setSendNotice] = useState("");
   const [emailDuplicate, setEmailDuplicate] = useState(false);
   const sessionRef = useRef(null);
+  const residentIdInputRef = useRef(null);
   const tempPasswordRef = useRef("");
   const sendInFlightRef = useRef(false);
 
@@ -92,6 +94,10 @@ export default function ExistingResidentActivation({ onBack }) {
   const normalizedId = residentId.trim().toUpperCase();
   const idValid = RESIDENT_ID_PATTERN.test(normalizedId);
   const strong = useMemo(() => isStrongPassword(password), [password]);
+  const focusResidentId = () => {
+    residentIdInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    residentIdInputRef.current?.focus();
+  };
 
   // Changing the email invalidates any code already sent to the old address and
   // clears a prior duplicate flag, so the resident can correct a typo and retry.
@@ -111,9 +117,17 @@ export default function ExistingResidentActivation({ onBack }) {
   // --- Step 1: look up the existing record -------------------------------
   const lookup = async () => {
     setError("");
+    setResidentIdError("");
     setAlreadyLinked(false);
+    if (!normalizedId) {
+      setResidentIdError("Resident ID is required.");
+      focusResidentId();
+      return;
+    }
     if (!idValid) {
-      return setError("Enter a valid Resident ID (for example, RES-000123).");
+      setResidentIdError("Enter a valid Resident ID (for example, RES-000123).");
+      focusResidentId();
+      return;
     }
     setBusy(true);
     try {
@@ -122,10 +136,14 @@ export default function ExistingResidentActivation({ onBack }) {
         setAlreadyLinked(true);
         return;
       }
+      if (result?.status !== "eligible") {
+        throw new Error("We could not retrieve the existing record. Please try again.");
+      }
       // Eligible — proceed to identity verification.
       setStep(2);
     } catch (err) {
-      setError(message(err));
+      setResidentIdError(err?.message || "We could not retrieve the existing record. Please try again.");
+      focusResidentId();
     } finally {
       setBusy(false);
     }
@@ -322,14 +340,27 @@ export default function ExistingResidentActivation({ onBack }) {
                   title="Enter your Resident ID"
                   subtitle="Enter the Resident ID provided by your Health Supervisor to retrieve your existing record."
                 />
-                <Field label="Resident ID" required>
+                <Field id="existing-resident-id" label="Resident ID" required error={residentIdError}>
                   <input
+                    id="existing-resident-id"
+                    ref={residentIdInputRef}
                     type="text"
                     placeholder="e.g. RES-000123"
                     value={residentId}
-                    onChange={(e) => { setResidentId(e.target.value); setAlreadyLinked(false); }}
+                    onChange={(e) => {
+                      setResidentId(e.target.value);
+                      setResidentIdError("");
+                      setAlreadyLinked(false);
+                    }}
+                    onBlur={() => setResidentIdError(
+                      !normalizedId
+                        ? "Resident ID is required."
+                        : (idValid ? "" : "Enter a valid Resident ID (for example, RES-000123).")
+                    )}
                     onKeyDown={(e) => { if (e.key === "Enter") lookup(); }}
-                    className={inputCls(false)}
+                    aria-invalid={Boolean(residentIdError)}
+                    aria-describedby={residentIdError ? "existing-resident-id-error" : undefined}
+                    className={inputCls(residentIdError)}
                     autoComplete="off"
                   />
                 </Field>
@@ -467,7 +498,7 @@ export default function ExistingResidentActivation({ onBack }) {
             )}
 
             {step === 1 && (
-              <button type="button" onClick={lookup} disabled={busy || !idValid} className={btnPrimary}>
+              <button type="button" onClick={lookup} disabled={busy} className={btnPrimary}>
                 {busy && <Loader2 className="h-4 w-4 animate-spin" />}Continue <ArrowRight className="h-4 w-4" />
               </button>
             )}

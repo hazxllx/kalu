@@ -72,7 +72,8 @@ export const runSyncPass = async ({
     const isReady = (op) =>
       op.status === OUTBOX_STATUS.PENDING ||
       (op.status === OUTBOX_STATUS.FAILED &&
-        op.attempts < op.maxAttempts &&
+        (op.lastError?.retryable === true ||
+          (op.lastError?.retryable === undefined && op.attempts < op.maxAttempts)) &&
         (op.nextAttemptAt || 0) <= now());
 
     const ready = allOps.filter(isReady);

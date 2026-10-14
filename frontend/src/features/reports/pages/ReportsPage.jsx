@@ -15,18 +15,18 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { monthlyConsultations, comparisonMonthlyConsultations } from "@/services/local/dashboardData";
-import { reportsApi, referralsApi, followUpsApi, maternalApi, immunizationsApi } from "@/services/api";
+import { reportsApi, referralsApi, followUpsApi, maternalApi, immunizationsApi, healthServicesApi } from "@/services/api";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import IncomingReports from "@/features/reports/components/IncomingReports";
 import ReportSnapshotView from "@/features/reports/components/ReportSnapshotView";
 import {
   REPORT_COLUMNS,
   GENERIC_COLUMNS,
-  recordDate,
   recordStatusTone,
   buildReportContent,
   hasSnapshot,
 } from "@/features/reports/lib/reportSnapshot";
+import { summarizeRecords } from "@/features/reports/lib/reportGeneration";
 
 const REPORTS = [];
 
@@ -72,34 +72,6 @@ const monthWindow = (period) => {
   return { from: `${period}-01`, to: `${period}-${String(lastDay).padStart(2, "0")}` };
 };
 
-/** Normalize an API response (array | {records} | {rows} | {data}) to an array. */
-const toRecordArray = (res) => {
-  if (Array.isArray(res)) return res;
-  return res?.records || res?.rows || res?.data || [];
-};
-
-/**
- * Build a summary from real records. When any record carries a date and a month
- * window is given, totals are narrowed to that month; otherwise the full scoped
- * set is counted and `periodFiltered` is false so the UI can say so. The scoped
- * `records` are retained so the full-report preview can render the actual rows
- * that back the totals (same dataset, same filter — never re-fetched wider).
- */
-const summarizeRecords = (res, window) => {
-  const list = toRecordArray(res);
-  const anyDated = list.some((r) => recordDate(r));
-  const scoped = anyDated && window ? list.filter((r) => {
-    const d = recordDate(r);
-    return d && d >= window.from && d <= window.to;
-  }) : list;
-  const byStatus = {};
-  for (const r of scoped) {
-    const s = r?.status ? String(r.status) : "Unspecified";
-    byStatus[s] = (byStatus[s] || 0) + 1;
-  }
-  return { total: scoped.length, byStatus, periodFiltered: Boolean(anyDated && window), records: scoped };
-};
-
 /** The authenticated, scope-enforced source fetcher for a report type, or null. */
 const sourceForType = (type, window) => {
   switch (type) {
@@ -113,6 +85,8 @@ const sourceForType = (type, window) => {
       return () => maternalApi.list();
     case "Immunization Report":
       return () => immunizationsApi.list();
+    case "Health Services":
+      return () => healthServicesApi.listAttendance(window ? { from: window.from, to: window.to } : undefined);
     default:
       return null;
   }
@@ -177,6 +151,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const [detailContent, setDetailContent] = useState(/** @type {any} */ (null));
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [submitError, setSubmitError] = useState("");
   const [formErrors, setFormErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [toast, setToast] = useState(null);
   const [reportForm, setReportForm] = useState(() => ({
@@ -267,8 +242,8 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     return () => { active = false; };
   }, [detailReport]);
 
-  const showToast = (message) => {
-    setToast(message);
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
@@ -319,19 +294,15 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     const fetcher = sourceForType(type, window);
 
     setGenerating(true);
+    setSubmitError("");
     try {
       let summary = null;
       let note = "";
-      if (fetcher) {
-        const res = await fetcher();
-        summary = summarizeRecords(res, window);
-        if (!summary.periodFiltered) {
-          note = "These records do not carry a per-record date, so the totals reflect all records currently in your scope rather than only the selected month.";
-        }
-      } else {
-        note = "A detailed data summary is not available for this report type yet. It will be submitted as a reporting record for the selected period.";
-      }
-      setPreview({
+      if (!fetcher) throw new Error("This report type has no connected source data and cannot be generated or submitted yet.");
+      const res = await fetcher();
+      summary = summarizeRecords(res, window);
+      note = summary.note;
+      const generatedPreview = {
         name,
         type,
         period,
@@ -341,7 +312,19 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         note,
         records: summary?.records || [],
         generatedAt: new Date(),
-      });
+      };
+      if (!revisionTarget?.id) {
+        const saved = await reportsApi.create({
+          reportType: type,
+          reportPeriod: period,
+          title: name,
+          status: "Draft",
+          content: buildReportContent(generatedPreview),
+        });
+        if (!saved?.record?.id) throw new Error("The report draft was not saved. Please try generating it again.");
+        generatedPreview.draftId = saved.record.id;
+      }
+      setPreview(generatedPreview);
       setShowPreview(true);
     } catch (err) {
       setFormErrors((prev) => ({ ...prev, general: err?.message || "Could not generate the report from source data." }));
@@ -355,25 +338,20 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const submitPreview = async () => {
     if (!canSubmitReports || submitting || !preview) return;
     setSubmitting(true);
+    setSubmitError("");
     try {
       const content = buildReportContent(preview);
       if (revisionTarget?.id) {
         await reportsApi.resubmit(revisionTarget.id, { content });
+      } else if (preview.draftId) {
+        await reportsApi.submit(preview.draftId);
       } else {
-        await reportsApi.create({
-        reportType: preview.type,
-        reportPeriod: preview.period || "",
-        title: preview.name || "",
-        // Persist the EXACT reviewed report as an immutable snapshot so the
-        // recipient (and this sender later) sees what was submitted, not a
-        // reconstruction from live records.
-          content,
-        });
+        throw new Error("The reviewed report draft is missing. Generate the report again before submitting.");
       }
     } catch (err) {
       // Honest failure — the report is NOT marked submitted and the preview
       // stays open so the user can retry or go back.
-      showToast(err?.message || "The report could not be submitted. Please try again.");
+      setSubmitError(err?.message || "The report could not be submitted. Please try again.");
       setSubmitting(false);
       return;
     }
@@ -385,6 +363,23 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     setReportForm({ reportType: "", period: "", barangay: phnDefaultBarangay(user, coverage) });
     showToast(revisionTarget ? "Revised report submitted successfully." : "Report submitted successfully.");
     // Re-sync from the backend so the new row (server id/status/timestamps) shows.
+    await loadOutgoing();
+  };
+
+  const submitStoredDraft = async () => {
+    if (!canSubmitReports || submitting || detailReport?.status !== "Draft" || !detailReport?.id) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      await reportsApi.submit(detailReport.id);
+    } catch (err) {
+      setSubmitError(err?.message || "The draft could not be submitted. Please try again.");
+      setSubmitting(false);
+      return;
+    }
+    setSubmitting(false);
+    setDetailReport(null);
+    showToast("Report submitted successfully.");
     await loadOutgoing();
   };
 
@@ -480,9 +475,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-4 right-4 bg-brand-ink text-white px-4 py-3 rounded-btn shadow-lg flex items-center gap-2 z-50 animate-in slide-in-from-bottom-2">
-          <CheckCircle2 className="w-4 h-4 text-brand-green" />
-          <span className="text-sm">{toast}</span>
+        <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-btn shadow-lg flex items-center gap-2 z-50 animate-in slide-in-from-bottom-2 ${toast.type === "error" ? "bg-brand-danger text-white" : "bg-brand-ink text-white"}`}>
+          <CheckCircle2 className={`w-4 h-4 ${toast.type === "error" ? "text-white" : "text-brand-green"}`} />
+          <span className="text-sm">{toast.message}</span>
         </div>
       )}
 
@@ -652,7 +647,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   {scopedReports.slice(0, 4).map((r) => (
                     <button
                       key={r.id}
-                      onClick={() => setDetailReport(r)}
+                      onClick={() => { setSubmitError(""); setDetailReport(r); }}
                       className="flex w-full items-center justify-between gap-3 py-2.5 text-left transition-colors hover:bg-brand-bg/50"
                     >
                       <div className="min-w-0">
@@ -758,10 +753,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   <td className="px-4 py-3">
                     <div className="flex flex-col gap-1">
                       <button
-                        onClick={() => setDetailReport(report)}
+                        onClick={() => { setSubmitError(""); setDetailReport(report); }}
                         className="flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
                       >
-                        <Eye className="w-4 h-4" /> View
+                        <Eye className="w-4 h-4" /> {report.status === "Draft" ? "Review draft" : "View"}
                       </button>
                       {(report.status === "Submitted to RHU" || report.status === "Submitted to MHO" || report.status === "Submitted") && (
                         <span className="flex items-center gap-1 text-xs text-brand-green">
@@ -894,6 +889,11 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                 )}
               </div>
 
+              {submitError && (
+                <p role="alert" className="mt-4 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3 py-2 text-sm text-brand-danger">
+                  {submitError}
+                </p>
+              )}
               <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-brand-border pt-4">
                 <button
                   onClick={backToEdit}
@@ -1053,7 +1053,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   <h3 className="text-lg font-semibold text-brand-ink">{detailReport.name}</h3>
                   <p className="mt-0.5 text-sm text-brand-gray">{detailReport.type}{detailReport.period ? ` · ${detailReport.period}` : ""}</p>
                 </div>
-                <button onClick={() => setDetailReport(null)} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
+                <button onClick={() => !submitting && setDetailReport(null)} disabled={submitting} className="text-brand-gray hover:text-brand-ink disabled:opacity-60" aria-label="Close">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1114,8 +1114,18 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                     Prepare revision
                   </button>
                 )}
+                {canSubmitReports && detailReport.status === "Draft" && (
+                  <button
+                    onClick={submitStoredDraft}
+                    disabled={submitting || detailLoading || !hasSnapshot(detailContent?.content)}
+                    className="mr-auto rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {submitting ? "Submitting…" : `Submit to ${submitTarget}`}
+                  </button>
+                )}
                 <button
-                  onClick={() => setDetailReport(null)}
+                  onClick={() => !submitting && setDetailReport(null)}
+                  disabled={submitting}
                   className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
                 >
                   Close

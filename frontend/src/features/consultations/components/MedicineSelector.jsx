@@ -23,13 +23,6 @@ const emptyMedication = (overrides = {}) => ({
 });
 
 const SourceTag = ({ source }) => {
-  if (source === "yakap") {
-    return (
-      <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold text-brand-blue">
-        YAKAP
-      </span>
-    );
-  }
   if (source === "custom") {
     return (
       <span className="rounded-full bg-brand-amber/10 px-2 py-0.5 text-[10px] font-semibold text-brand-amber">

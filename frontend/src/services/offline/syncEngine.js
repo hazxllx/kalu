@@ -1,9 +1,8 @@
 import { isNavigatorOnline, subscribeConnectivity } from './connectivity.js';
 import { lastSyncedKey, readMeta } from './meta.js';
-import { getSyncHandler } from './handlers.js';
 import { runSyncPass } from './syncRunner.js';
 import { listOperations, requeueOperation } from './outbox.js';
-import { summarizeOperations } from './syncCore.js';
+import { earliestRetryAt, summarizeOperations } from './syncCore.js';
 import { getOfflineDraftCount } from './drafts.js';
 
 /**
@@ -24,6 +23,7 @@ import { getOfflineDraftCount } from './drafts.js';
 const defaultState = () => ({
   initialized: false,
   online: isNavigatorOnline(),
+  serverAvailable: null,
   syncing: false,
   ownerId: null,
   lastSyncedAt: null,
@@ -40,10 +40,13 @@ const listeners = new Set();
 let running = false;
 let queued = false;
 let debounceTimer = null;
+let retryTimer = null;
 let stopConnectivity = null;
 let visibilityHandler = null;
 /** @type {(() => string | null) | null} */
 let ownerResolver = null;
+/** @type {((entity: string, opType: string) => Function | null) | null} */
+let handlerResolver = null;
 
 const emit = () => {
   listeners.forEach((listener) => {
@@ -68,8 +71,9 @@ export const subscribe = (listener) => {
 };
 
 /** Wire the engine to the authenticated session's user id resolver. */
-export const configureSyncEngine = ({ getOwnerId }) => {
+export const configureSyncEngine = ({ getOwnerId, getHandler = null }) => {
   ownerResolver = getOwnerId;
+  handlerResolver = getHandler;
 };
 
 const currentOwner = () => {
@@ -135,20 +139,34 @@ export const requestSync = async (reason = 'manual') => {
   running = true;
   setState({ syncing: true, online: true, ownerId, lastError: null, progress: { processed: 0, total: 0 } });
   try {
+    const getHandler = handlerResolver || (await import('./handlers.js')).getSyncHandler;
     const result = await runSyncPass({
       ownerId,
-      getHandler: getSyncHandler,
+      getHandler,
       onProgress: ({ processed, total }) => setState({ progress: { processed, total } }),
     });
-    setState({ lastResult: { ...result, reason } });
+    const serverAvailable = result.stoppedReason === 'network'
+      ? false
+      : result.attempted > 0
+        ? true
+        : state.serverAvailable;
+    const lastError = result.stoppedReason === 'network'
+      ? { code: 'network', message: 'The backend is not reachable. Changes remain saved on this device and will retry automatically.' }
+      : result.stoppedReason === 'auth'
+        ? { code: 'auth', message: 'Your session expired. Sign in again before synchronizing.' }
+        : result.stoppedReason
+          ? state.lastError
+          : null;
+    setState({ lastResult: { ...result, reason }, serverAvailable, lastError });
     return result;
   } catch (error) {
-    setState({ lastError: { message: error?.message || 'Synchronization failed.' } });
+    setState({ lastError: { code: 'unknown', message: error?.message || 'Synchronization failed.' } });
     return { failed: 0, error };
   } finally {
     running = false;
     setState({ syncing: false, progress: null });
     await refreshSyncState();
+    scheduleRetryForPending(ownerId);
     if (queued) {
       queued = false;
       // Another request arrived mid-run; process it now.
@@ -163,7 +181,7 @@ export const retryAll = async () => {
   if (!ownerId) return state;
   const ops = await listOperations(ownerId);
   for (const op of ops) {
-    if (op.status === 'failed' || op.status === 'conflict') {
+    if (op.status === 'failed') {
       await requeueOperation(op.opId);
     }
   }
@@ -175,9 +193,40 @@ export const retryAll = async () => {
 export const retryOperation = async (opId) => {
   const ownerId = currentOwner();
   if (!ownerId) return state;
-  await requeueOperation(opId);
+  const requeued = await requeueOperation(opId);
+  if (!requeued) return state;
   await refreshSyncState();
   return requestSync('retry-one');
+};
+
+const scheduleRetryForPending = async (ownerId) => {
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+  if (!ownerId || !isNavigatorOnline()) return;
+
+  try {
+    const ops = await listOperations(ownerId);
+    const nextAttemptAt = earliestRetryAt(ops);
+    if (nextAttemptAt === null) return;
+
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (currentOwner() === ownerId) requestSync('retry-backoff');
+    }, Math.max(0, nextAttemptAt - Date.now()));
+  } catch (error) {
+    setState({ lastError: { code: 'storage', message: error?.message || 'Could not schedule the next synchronization retry.' } });
+  }
+};
+
+const requeueExpiredSessionOperations = async (ownerId) => {
+  const ops = await listOperations(ownerId);
+  for (const op of ops) {
+    if (op.status === 'failed' && op.lastError?.code === 'auth') {
+      await requeueOperation(op.opId);
+    }
+  }
 };
 
 const scheduleSync = (delayMs = 750) => {
@@ -203,10 +252,16 @@ export const startSyncEngine = () => {
   }
   setState({ online: isNavigatorOnline() });
   refreshSyncState()
-    .then(() => {
-      if (currentOwner() && isNavigatorOnline()) scheduleSync(1000);
+    .then(async () => {
+      const ownerId = currentOwner();
+      if (ownerId && isNavigatorOnline()) {
+        await requeueExpiredSessionOperations(ownerId);
+        scheduleSync(1000);
+      }
     })
-    .catch(() => {});
+    .catch((error) => {
+      setState({ lastError: { code: 'storage', message: error?.message || 'Could not prepare synchronization.' } });
+    });
 };
 
 export const stopSyncEngine = () => {
@@ -222,12 +277,17 @@ export const stopSyncEngine = () => {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
 };
 
 /** Reset the in-memory state — used on logout/account switch. */
 export const resetSyncEngine = () => {
   stopSyncEngine();
   ownerResolver = null;
+  handlerResolver = null;
   state = defaultState();
   emit();
 };

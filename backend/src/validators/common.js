@@ -37,6 +37,7 @@ const PH_MOBILE = /^(?:\+63|0)9\d{9}$/;
 const PH_MOBILE_STRICT = /^09\d{9}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PERSON_NAME = /^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+|(?:\.[\p{L}\p{M}]+)*\.?)*$/u;
 
 /** Controlled Zone values for a resident/household address. */
 export const ZONE_VALUES = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8]);
@@ -45,6 +46,7 @@ export const asString = (value) => (value === null || value === undefined ? '' :
 export const text = (value) => asString(value).trim();
 export const isBlank = (value) => text(value) === '';
 export const hasControlChars = (value) => /[\u0000-\u001F\u007F]/.test(asString(value));
+export const isValidPersonName = (value) => PERSON_NAME.test(text(value));
 
 export const hasMaxLength = (value, max) => asString(value).length <= max;
 export const hasMinLength = (value, min) => text(value).length >= min;

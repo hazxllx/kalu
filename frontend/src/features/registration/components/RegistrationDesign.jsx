@@ -34,6 +34,7 @@ export const inputCls = (error) =>
 /** Label + optional flag + inline error, matching the reference form. */
 export function Field({
   label,
+  id = undefined,
   required = false,
   optional = false,
   error = null,
@@ -44,7 +45,7 @@ export function Field({
 }) {
   return (
     <div className={`group ${className}`}>
-      <label className={`${labelCls} transition-colors group-focus-within:text-brand-blue`}>
+      <label htmlFor={id} className={`${labelCls} transition-colors group-focus-within:text-brand-blue`}>
         {label}
         {required && <span className="ml-0.5 font-medium text-brand-danger">*</span>}
         {optional && (
@@ -67,7 +68,7 @@ export function Field({
         <p className="mt-1 text-[11.5px] leading-relaxed text-slate-400">{hint}</p>
       )}
       {error && (
-        <p className="mt-1 flex items-center gap-1 text-[11.5px] font-medium text-brand-danger">
+        <p id={id ? `${id}-error` : undefined} role="alert" className="mt-1 flex items-center gap-1 text-[11.5px] font-medium text-brand-danger">
           <span className="inline-block h-1 w-1 rounded-full bg-brand-danger" aria-hidden="true" />
           {error}
         </p>
@@ -79,6 +80,7 @@ export function Field({
 /** Native select styled exactly like the reference inputs. */
 export function SelectField({
   label,
+  id = undefined,
   required = false,
   optional = false,
   error = null,
@@ -90,6 +92,7 @@ export function SelectField({
   return (
     <Field
       label={label}
+      id={id}
       required={required}
       optional={optional}
       error={error}
@@ -97,7 +100,7 @@ export function SelectField({
       className={className}
     >
       <div className="relative">
-        <select {...props} className={`${inputCls(error)} cursor-pointer appearance-none pr-10`}>
+        <select id={id} {...props} className={`${inputCls(error)} cursor-pointer appearance-none pr-10`}>
           {children}
         </select>
         <ChevronDown

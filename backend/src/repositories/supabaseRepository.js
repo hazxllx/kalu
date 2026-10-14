@@ -661,14 +661,19 @@ const isMissingRpc = (error) => {
 };
 
 /**
- * True when a visit write failed only because the structured consultation
- * columns (`medications` / `bp_classification` / `referral_required`) are not
- * present yet — i.e. the medicine-catalog / BP-threshold migration
- * (20261011120000) has not been applied. Lets the consultation save keep
- * working against a database that has not received that migration; the
- * structured fields are simply not persisted until it is applied.
+ * True when a visit write failed only because optional consultation columns
+ * are not present yet — i.e. the medicine-catalog / BP-threshold migration
+ * (20261011120000) or health-service link migration (20261026000000) has not
+ * been applied. Lets the consultation save keep working against a database
+ * that has not received those migrations.
  */
-const CONSULTATION_EXTRA_COLUMNS = ['medications', 'bp_classification', 'referral_required'];
+const CONSULTATION_EXTRA_COLUMNS = [
+  'medications',
+  'bp_classification',
+  'referral_required',
+  'health_service_id',
+  'health_service_name',
+];
 const isMissingConsultationColumn = (error) => {
   const code = error?.code || error?.details?.code || '';
   const message = error?.message || error?.details?.message || '';
@@ -1660,8 +1665,8 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     const row = visitToRow(visit);
     let { data, error } = await supabase.from(TABLES.visits).insert(row).select().single();
-    // Gracefully degrade when the structured consultation columns are not
-    // present yet (migration 20261011120000 not applied): retry without them.
+    // Gracefully degrade when optional consultation columns are not present
+    // yet: retry without them so older database schemas can still save visits.
     if (error && isMissingConsultationColumn(error)) {
       ({ data, error } = await supabase.from(TABLES.visits).insert(stripConsultationExtras(row)).select().single());
     }
@@ -1742,8 +1747,8 @@ export const supabaseRepository = {
       .select(`*, resident:residents(${SELECT_RESIDENT})`)
       .maybeSingle();
     let { data, error } = await runUpdate(row);
-    // Retry without the structured consultation columns if the migration
-    // (20261011120000) has not been applied on this database.
+    // Retry without optional consultation columns when the database has not
+    // received the migrations that add them yet.
     if (error && isMissingConsultationColumn(error)) {
       ({ data, error } = await runUpdate(stripConsultationExtras(row)));
     }

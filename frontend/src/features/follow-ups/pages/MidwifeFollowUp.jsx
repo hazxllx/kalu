@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+// @ts-nocheck
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
-import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2 } from "lucide-react";
+import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2, MoreVertical } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
@@ -16,7 +18,13 @@ import {
   updateFollowUpOffline,
 } from "@/services/offline/followUpOfflineService";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
-import { manilaDateKey } from "../lib/scheduleDates";
+import {
+  filterFollowUps,
+  followUpManagementStatus,
+  manilaDateKey,
+  summarizeFollowUps,
+} from "../lib/scheduleDates";
+import { followUpActionAvailability } from "../lib/followUpActions";
 
 const FOLLOW_UP_TYPES = [
   "General Check-up",
@@ -92,15 +100,13 @@ const deriveStatus = (isoDate) => {
   return "Scheduled";
 };
 
-const FOLLOW_UPS = [];
-
 /** Map a persisted follow_ups row (snake_case) to the table's view shape. */
 const mapFollowUpRow = (row) => ({
   ...row,
   id: row.id,
   residentId: row.resident_id || row.residentId,
   resident: row.resident ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ") : row.residentName || "Resident",
-  barangay: row.resident?.barangay || "",
+  barangay: row.resident?.barangay || row.barangay || "",
   sex: row.resident?.sex || "",
   contact: row.resident?.cellphone_no || "",
   age: row.resident?.birth_date ? new Date().getFullYear() - new Date(row.resident.birth_date).getFullYear() : "",
@@ -111,14 +117,49 @@ const mapFollowUpRow = (row) => ({
   scheduledTimeRaw: row.scheduled_time || row.time,
   scheduledDate: formatDate(row.scheduled_date || row.date),
   scheduledTime: formatTime(row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : row.time),
-  location: row.location,
+  location: typeof row.location === "string" ? row.location.trim() : "",
   priority: row.priority,
-  status: row.status,
+  status: followUpManagementStatus(
+    row.status,
+    row.scheduled_date || row.date,
+    new Date(),
+    row.resident_decision,
+  ),
   assignedMidwife: row.assigned_provider || row.provider,
   remarks: row.notes || row.instructions,
   offline: row.offline || false,
   syncStatus: row.syncStatus || null,
 });
+
+const mergeFollowUpRecord = (current, record) => {
+  const resident = record.resident && typeof record.resident === "object" ? record.resident : null;
+  const mapped = mapFollowUpRow({
+    ...current,
+    ...record,
+    resident,
+    residentName: record.residentName || current.resident,
+    barangay: resident?.barangay || record.barangay || current.barangay,
+    purpose: record.purpose ?? current.purpose,
+    scheduled_date: record.scheduled_date ?? current.scheduledDateRaw,
+    scheduled_time: record.scheduled_time ?? current.scheduledTimeRaw,
+    location: record.location ?? current.location,
+    priority: record.priority ?? current.priority,
+    status: record.status ?? current.status,
+    assigned_provider: record.assigned_provider ?? current.assignedMidwife,
+    notes: record.notes ?? current.remarks,
+    resident_decision: record.resident_decision ?? current.resident_decision,
+    requires_resident_response: record.requires_resident_response ?? current.requires_resident_response,
+  });
+  return {
+    ...mapped,
+    resident: resident ? mapped.resident || current.resident : current.resident,
+    barangay: resident?.barangay || record.barangay || current.barangay,
+    sex: resident?.sex || current.sex,
+    contact: resident?.cellphone_no || current.contact,
+    age: resident?.birth_date ? mapped.age : current.age,
+    consultation: record.consultation ?? current.consultation,
+  };
+};
 
 const STATUS_COLORS = {
   Scheduled: "bg-brand-blue/10 text-brand-blue",
@@ -128,7 +169,21 @@ const STATUS_COLORS = {
   Upcoming: "bg-brand-gray/10 text-brand-gray",
   Ongoing: "bg-brand-purple/10 text-brand-purple",
   Cancelled: "bg-brand-gray/10 text-brand-gray",
+  Rejected: "bg-brand-danger/10 text-brand-danger",
 };
+
+const CLOSED_FOLLOW_UP_STATUSES = new Set(["Completed", "Cancelled", "Rejected"]);
+const FOLLOW_UP_STATUS_FILTERS = [
+  "All",
+  "Today",
+  "Upcoming",
+  "Scheduled",
+  "Ongoing",
+  "Completed",
+  "Missed",
+  "Cancelled",
+  "Rejected",
+];
 
 const PRIORITY_COLORS = {
   High: "bg-brand-danger/10 text-brand-danger",
@@ -145,12 +200,14 @@ export default function MidwifeFollowUp() {
   const canEditFollowUp = can("followups.edit");
   const canCompleteFollowUp = can("followups.complete");
   const canRecordVisit = canAny(["followups.edit", "followups.complete"]);
+  const canUpdateFollowUpStatus = canEditFollowUp || canCompleteFollowUp;
   // Health Supervisor scope: only their single assigned barangay. Rows,
   // statistics, resident options and personnel options are all limited to it.
   const supervisor = isHealthSupervisor(user);
   const supervisorScope = supervisor ? getSupervisorScope(user) : null;
   const assignedBarangay = supervisorScope && supervisorScope.level === "barangay" ? supervisorScope.assignedBarangay : null;
-  const inScope = (f) => !assignedBarangay || f.barangay === assignedBarangay;
+  const inScope = (f) => !assignedBarangay ||
+    String(f.barangay || "").trim().toLowerCase() === assignedBarangay.toLowerCase();
 
   // A FOLLOW-UP happens within the Health Supervisor's own assigned barangay
   // context, so its venue is their assigned Barangay Health Station (or a Home
@@ -169,7 +226,9 @@ export default function MidwifeFollowUp() {
   const [personnelFromApi, setPersonnelFromApi] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [directoryLoadError, setDirectoryLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const loadRequest = useRef(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
@@ -178,42 +237,84 @@ export default function MidwifeFollowUp() {
   const [showRecordVisitModal, setShowRecordVisitModal] = useState(false);
   const [showUpdateStatusModal, setShowUpdateStatusModal] = useState(false);
   const [showRemarksModal, setShowRemarksModal] = useState(false);
-  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [statusConfirmation, setStatusConfirmation] = useState(null);
   const [selectedFollowUp, setSelectedFollowUp] = useState(null);
+  const [openActionMenu, setOpenActionMenu] = useState(null);
   const [selectedResident, setSelectedResident] = useState(null);
-  const [scheduleForm, setScheduleForm] = useState(() => /** @type {Record<string, any>} */ (emptyScheduleForm("")));
-  const [visitForm, setVisitForm] = useState({ findings: "", treatment: "", advice: "", nextVisitDate: "" });
+  const [scheduleForm, setScheduleForm] = useState(() => emptyScheduleForm(""));
+  const [visitForm, setVisitForm] = useState({
+    visitDate: todayISO(),
+    visitTime: "09:00",
+    condition: "Stable",
+    findings: "",
+    treatment: "",
+    advice: "",
+    nextVisitDate: "",
+  });
+  const statusSubmitting = useRef(false);
   const [remarksDraft, setRemarksDraft] = useState("");
-  const [touched, setTouched] = useState(/** @type {Record<string, boolean>} */ ({}));
+  const [touched, setTouched] = useState({});
   const [toast, setToast] = useState(null);
   const { lastSyncedAt } = useSyncStatus();
 
   const load = React.useCallback(() => {
-    let active = true;
+    const requestId = ++loadRequest.current;
     setLoading(true);
     setLoadError(null);
-    Promise.all([
+    setDirectoryLoadError(null);
+    Promise.allSettled([
       listFollowUpsOffline({ ownerId: user?.id }),
       listFollowUpResidentsOffline({ ownerId: user?.id, params: { limit: 200 } }),
-      healthServicesApi.personnel().catch(() => ({ rows: [] })),
+      healthServicesApi.personnel(),
     ])
       .then(([followUpResult, residentResult, personnelResult]) => {
-        if (!active) return;
-        setFollowUps((followUpResult?.rows || []).map(mapFollowUpRow));
-        setResidentsFromApi(residentResult?.rows || residentResult || []);
-        setPersonnelFromApi(personnelResult?.rows || []);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setLoadError(err?.message || "Unable to load follow-ups. Please try again.");
-      })
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [user?.id]);
+        if (requestId !== loadRequest.current) return;
+        const directoryErrors = [];
+        if (followUpResult.status === "fulfilled") {
+          const followUpRows = Array.isArray(followUpResult.value)
+            ? followUpResult.value
+            : followUpResult.value?.rows || [];
+          const residentRows = residentResult.status === "fulfilled"
+            ? residentResult.value?.rows || residentResult.value || []
+            : [];
+          setFollowUps(followUpRows.map((row) => {
+            const resident = residentRows.find((item) => item.id === (row.resident_id || row.residentId));
+            const residentName = resident
+              ? [resident.firstName, resident.middleName, resident.lastName].filter(Boolean).join(" ")
+              : row.residentName;
+            return mapFollowUpRow({
+              ...row,
+              residentName: row.residentName || residentName,
+              barangay: row.barangay || resident?.barangay || "",
+            });
+          }).filter(inScope));
+        } else {
+          setLoadError(followUpResult.reason?.message || "Unable to load follow-ups. Please try again.");
+        }
 
-  useEffect(() => load(), [load]);
+        if (residentResult.status === "fulfilled") {
+          setResidentsFromApi(residentResult.value?.rows || residentResult.value || []);
+        } else {
+          setResidentsFromApi([]);
+          directoryErrors.push(residentResult.reason?.message || "Unable to load the resident directory.");
+        }
+        if (personnelResult.status === "fulfilled") {
+          setPersonnelFromApi(personnelResult.value?.rows || []);
+        } else {
+          setPersonnelFromApi([]);
+          directoryErrors.push(personnelResult.reason?.message || "Unable to load health personnel.");
+        }
+        setDirectoryLoadError(directoryErrors.length ? directoryErrors.join(" ") : null);
+      })
+      .finally(() => requestId === loadRequest.current && setLoading(false));
+  }, [user?.id, assignedBarangay]);
+
+  useEffect(() => {
+    load();
+    return () => {
+      loadRequest.current += 1;
+    };
+  }, [load]);
   useEffect(() => {
     if (lastSyncedAt) load();
   }, [lastSyncedAt, load]);
@@ -223,13 +324,16 @@ export default function MidwifeFollowUp() {
     setTimeout(() => setToast(null), ms);
   };
 
-  /** Persist a patch to a follow-up and refresh the row from the server result. */
   const persistFollowUp = async (id, patch, successMessage) => {
     setSaving(true);
     try {
       const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: id, record: patch });
-      const updated = mapFollowUpRow(result?.record || result);
-      setFollowUps((prev) => prev.map((f) => (f.id === id ? { ...f, ...updated } : f)));
+      const record = result?.record || result;
+      const updated = mapFollowUpRow(record);
+      setFollowUps((prev) => prev.map((f) => (
+        f.id === id ? mergeFollowUpRecord(f, record) : f
+      )));
+      load();
       if (successMessage) {
         showToast(result?.queued
           ? `${successMessage} Saved on this device; it will sync when a connection is available.`
@@ -286,19 +390,20 @@ export default function MidwifeFollowUp() {
     };
   }, [showScheduleModal]);
 
-  const stats = {
-    total: followUps.length,
-    today: followUps.filter((f) => f.status === "Today").length,
-    upcoming: followUps.filter((f) => f.status === "Upcoming").length,
-    completed: followUps.filter((f) => f.status === "Completed").length,
-  };
+  const stats = useMemo(() => summarizeFollowUps(followUps), [followUps]);
 
-  const filteredFollowUps = followUps.filter((f) => {
-    const matchesSearch = searchQuery === "" || f.resident.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "All" || f.status === statusFilter;
-    const matchesPriority = priorityFilter === "All" || f.priority === priorityFilter;
-    return matchesSearch && matchesStatus && matchesPriority;
-  });
+  const filteredFollowUps = useMemo(() => filterFollowUps(followUps, {
+    search: searchQuery,
+    status: statusFilter,
+    priority: priorityFilter,
+  }), [followUps, searchQuery, statusFilter, priorityFilter]);
+  const filtersActive = Boolean(
+    searchQuery || statusFilter !== "All" || priorityFilter !== "All",
+  );
+  const loadErrorMessage = [
+    loadError ? `Follow-up records: ${loadError}` : null,
+    directoryLoadError ? `Scheduling directory: ${directoryLoadError}` : null,
+  ].filter(Boolean).join(" ");
 
   const handleView = (followUp) => {
     setSelectedFollowUp(followUp);
@@ -310,13 +415,29 @@ export default function MidwifeFollowUp() {
       showToast("You do not have permission to record follow-up visits.");
       return;
     }
+    if (
+      followUp.status === "Pending" ||
+      (followUp.requires_resident_response && followUp.resident_decision !== "approved") ||
+      String(followUp.scheduledDateRaw || "").slice(0, 10) > todayISO()
+    ) {
+      showToast("This follow-up cannot be recorded as a completed visit yet.");
+      return;
+    }
     setSelectedFollowUp(followUp);
-    setVisitForm({ findings: "", treatment: "", advice: "", nextVisitDate: "" });
+    setVisitForm({
+      visitDate: todayISO(),
+      visitTime: "09:00",
+      condition: "Stable",
+      findings: "",
+      treatment: "",
+      advice: "",
+      nextVisitDate: "",
+    });
     setShowRecordVisitModal(true);
   };
 
   const handleUpdateStatus = (followUp) => {
-    if (!canEditFollowUp) {
+    if (!canUpdateFollowUpStatus) {
       showToast("You do not have permission to update follow-up status.");
       return;
     }
@@ -334,28 +455,308 @@ export default function MidwifeFollowUp() {
     setShowRemarksModal(true);
   };
 
+  const handleEditFollowUp = (followUp) => {
+    if (!canEditFollowUp || CLOSED_FOLLOW_UP_STATUSES.has(followUp.status)) {
+      showToast("You do not have permission to edit this follow-up.");
+      return;
+    }
+    const resident = residentOptions.find((item) => item.id === followUp.residentId) || {
+      id: followUp.residentId,
+      name: followUp.resident,
+      age: followUp.age,
+      gender: followUp.sex,
+      barangay: followUp.barangay,
+    };
+    setSelectedFollowUp(followUp);
+    setSelectedResident(resident);
+    setTouched({});
+    setScheduleForm({
+      date: String(followUp.scheduledDateRaw || "").slice(0, 10),
+      time: String(followUp.scheduledTimeRaw || "").slice(0, 5) || "09:00",
+      type: followUp.type || "General Check-up",
+      reason: followUp.purpose || "",
+      location: followUp.location || defaultFollowUpLocation,
+      priority: followUp.priority || "Medium",
+      notes: followUp.remarks || "",
+      personnel: followUp.assignedMidwife || defaultPersonnel,
+    });
+    setShowScheduleModal(true);
+  };
+
   const handleCompleteFollowUp = (followUp) => {
-    if (!canCompleteFollowUp) {
-      showToast("You do not have permission to complete follow-ups.");
+    if (!followUpActionAvailability(followUp, { canComplete: canCompleteFollowUp }).complete) {
+      showToast("This follow-up is not eligible to be completed yet, or you do not have permission.");
       return;
     }
     setSelectedFollowUp(followUp);
-    setShowCompleteConfirm(true);
+    setStatusConfirmation("Completed");
   };
 
-  const confirmComplete = async () => {
-    if (!canCompleteFollowUp) {
-      showToast("You do not have permission to complete follow-ups.");
+  const handleConfirmableStatus = (followUp, nextStatus) => {
+    const actions = followUpActionAvailability(followUp, {
+      canEdit: canEditFollowUp,
+      canComplete: canCompleteFollowUp,
+    });
+    const permitted = nextStatus === "Cancelled" ? actions.cancel : actions.missed;
+    if (!permitted) {
+      showToast(`You do not have permission to mark this follow-up ${nextStatus.toLowerCase()}.`);
       return;
     }
+    setSelectedFollowUp(followUp);
+    setStatusConfirmation(nextStatus);
+  };
+
+  const handleActionClick = (action, followUp) => {
+    setOpenActionMenu(null);
+    switch (action) {
+      case 'view':
+        handleView(followUp);
+        break;
+      case 'edit':
+        handleEditFollowUp(followUp);
+        break;
+      case 'recordVisit':
+        handleRecordVisit(followUp);
+        break;
+      case 'updateStatus':
+        handleUpdateStatus(followUp);
+        break;
+      case 'addRemarks':
+        handleAddRemarks(followUp);
+        break;
+      case 'complete':
+        handleCompleteFollowUp(followUp);
+        break;
+      case 'missed':
+        handleConfirmableStatus(followUp, "Missed");
+        break;
+      case 'cancel':
+        handleConfirmableStatus(followUp, "Cancelled");
+        break;
+      default:
+        break;
+    }
+  };
+
+  const ActionsDropdown = ({ followUp }) => {
+    const isOpen = openActionMenu === followUp.id;
+    const actions = followUpActionAvailability(followUp, {
+      canEdit: canEditFollowUp,
+      canComplete: canCompleteFollowUp,
+      canRecordVisit,
+    });
+    const triggerRef = useRef(null);
+    const menuRef = useRef(null);
+    const [menuPosition, setMenuPosition] = useState(null);
+
+    useLayoutEffect(() => {
+      if (!isOpen) {
+        setMenuPosition(null);
+        return undefined;
+      }
+
+      const updatePosition = () => {
+        const trigger = triggerRef.current;
+        const menu = menuRef.current;
+        if (!trigger || !menu) return;
+
+        const triggerRect = trigger.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        const margin = 8;
+        const left = Math.max(
+          margin,
+          Math.min(triggerRect.right - menuRect.width, window.innerWidth - menuRect.width - margin),
+        );
+        const spaceBelow = window.innerHeight - triggerRect.bottom - margin;
+        const spaceAbove = triggerRect.top - margin;
+        const preferredTop = spaceBelow >= menuRect.height || spaceBelow >= spaceAbove
+          ? triggerRect.bottom + 4
+          : triggerRect.top - menuRect.height - 4;
+        const top = Math.max(
+          margin,
+          Math.min(preferredTop, window.innerHeight - menuRect.height - margin),
+        );
+        setMenuPosition({ left, top });
+      };
+
+      updatePosition();
+      window.addEventListener("resize", updatePosition);
+      document.addEventListener("scroll", updatePosition, true);
+      return () => {
+        window.removeEventListener("resize", updatePosition);
+        document.removeEventListener("scroll", updatePosition, true);
+      };
+    }, [isOpen]);
+
+    useEffect(() => {
+      if (!isOpen) return undefined;
+      const onPointerDown = (event) => {
+        if (
+          !triggerRef.current?.contains(event.target) &&
+          !menuRef.current?.contains(event.target)
+        ) {
+          setOpenActionMenu(null);
+        }
+      };
+      const onKeyDown = (event) => {
+        if (event.key === "Escape") {
+          setOpenActionMenu(null);
+          triggerRef.current?.focus();
+        }
+      };
+      document.addEventListener("pointerdown", onPointerDown);
+      document.addEventListener("keydown", onKeyDown);
+      return () => {
+        document.removeEventListener("pointerdown", onPointerDown);
+        document.removeEventListener("keydown", onKeyDown);
+      };
+    }, [isOpen]);
+
+    return (
+      <>
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => setOpenActionMenu(isOpen ? null : followUp.id)}
+          className="rounded-md border border-transparent p-1.5 text-brand-gray transition-colors hover:border-brand-border hover:bg-brand-bg hover:text-brand-ink focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+          aria-label={`Actions for ${followUp.resident}`}
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+        >
+          <MoreVertical className="w-4 h-4" />
+        </button>
+        {isOpen && typeof document !== "undefined" && createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            className="fixed z-[60] max-h-[calc(100vh-1rem)] w-48 overflow-y-auto rounded-lg border border-brand-border bg-white py-1 shadow-lg"
+            style={{
+              left: menuPosition?.left ?? 0,
+              top: menuPosition?.top ?? 0,
+              visibility: menuPosition ? "visible" : "hidden",
+            }}
+          >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => handleActionClick('view', followUp)}
+                className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+              >
+                View Details
+              </button>
+              {actions.edit && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleActionClick('edit', followUp)}
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                >
+                  Edit / Reschedule
+                </button>
+              )}
+              {actions.complete && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleActionClick('complete', followUp)}
+                  className="w-full px-3 py-2 text-left text-sm text-brand-green transition-colors hover:bg-brand-bg"
+                >
+                  Mark as Completed
+                </button>
+              )}
+              {actions.missed && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleActionClick('missed', followUp)}
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                >
+                  Mark Missed
+                </button>
+              )}
+              {actions.updateStatus && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleActionClick('updateStatus', followUp)}
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                >
+                  Update Status
+                </button>
+              )}
+              {actions.addRemarks && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleActionClick('addRemarks', followUp)}
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                >
+                  Add Remarks
+                </button>
+              )}
+              {actions.recordVisit && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleActionClick('recordVisit', followUp)}
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                >
+                  Record Visit
+                </button>
+              )}
+              {actions.cancel && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleActionClick('cancel', followUp)}
+                  className="w-full px-3 py-2 text-left text-sm text-brand-danger transition-colors hover:bg-brand-danger/5"
+                >
+                  Cancel Follow-up
+                </button>
+              )}
+          </div>,
+          document.body,
+        )}
+      </>
+    );
+  };
+
+  const confirmStatusAction = async () => {
     const target = selectedFollowUp;
-    if (!target) return;
+    const nextStatus = statusConfirmation;
+    if (!target || !nextStatus || statusSubmitting.current || saving) return;
+    if (CLOSED_FOLLOW_UP_STATUSES.has(target.status)) {
+      showToast("This follow-up is already closed.");
+      setStatusConfirmation(null);
+      return;
+    }
+    const actions = followUpActionAvailability(target, {
+      canEdit: canEditFollowUp,
+      canComplete: canCompleteFollowUp,
+    });
+    const eligible = nextStatus === "Cancelled"
+      ? actions.cancel
+      : nextStatus === "Missed"
+        ? actions.missed
+        : actions.complete;
+    if (!eligible) {
+      showToast("This follow-up is not eligible for that action, or you do not have permission.");
+      return;
+    }
+    statusSubmitting.current = true;
     try {
-      await persistFollowUp(target.id, { status: "Completed" }, "Follow-up marked as completed.");
-      setShowCompleteConfirm(false);
+      const successMessage = nextStatus === "Completed"
+        ? "Follow-up marked as completed."
+        : nextStatus === "Missed"
+          ? "Follow-up marked as missed."
+          : "Follow-up cancelled.";
+      await persistFollowUp(target.id, { status: nextStatus }, successMessage);
+      setStatusConfirmation(null);
       setSelectedFollowUp(null);
     } catch {
       /* toast already shown */
+    } finally {
+      statusSubmitting.current = false;
     }
   };
 
@@ -402,8 +803,27 @@ export default function MidwifeFollowUp() {
     }
     const target = selectedFollowUp;
     if (!target) return;
+    if (!visitData?.visitDate || visitData.visitDate > todayISO()) {
+      showToast("Enter a valid visit date that is not in the future.");
+      return;
+    }
+    if (!visitData?.visitTime || !visitData?.findings?.trim()) {
+      showToast("Enter the visit time and findings before saving the visit.");
+      return;
+    }
+    if (visitData.nextVisitDate && isPastDate(visitData.nextVisitDate)) {
+      showToast("The next visit date must be today or a future date.");
+      return;
+    }
     const patch = { status: "Completed" };
-    if (visitData?.notes !== undefined) patch.notes = visitData.notes;
+    const visitNotes = [
+      `Visit recorded: ${formatDate(visitData.visitDate)} at ${formatTime(visitData.visitTime)}`,
+      `Resident condition: ${visitData.condition}`,
+      `Findings: ${visitData.findings.trim()}`,
+      visitData.treatment?.trim() && `Treatment: ${visitData.treatment.trim()}`,
+      visitData.advice?.trim() && `Advice: ${visitData.advice.trim()}`,
+    ].filter(Boolean).join("\n");
+    patch.notes = [target.remarks?.trim(), visitNotes].filter(Boolean).join("\n\n");
     if (visitData?.nextVisitDate) {
       patch.scheduled_date = visitData.nextVisitDate;
       patch.status = "Scheduled";
@@ -496,9 +916,13 @@ export default function MidwifeFollowUp() {
     Boolean(scheduleForm.time) &&
     Boolean(scheduleForm.reason.trim());
 
+  const canSaveSchedule = selectedFollowUp ? canEditFollowUp : canScheduleFollowUp;
+
   const handleSchedule = async () => {
-    if (!canScheduleFollowUp) {
-      showToast("You do not have permission to schedule follow-ups.");
+    if (!canSaveSchedule) {
+      showToast(selectedFollowUp
+        ? "You do not have permission to edit follow-ups."
+        : "You do not have permission to schedule follow-ups.");
       return;
     }
     // Backstop — the primary button is disabled until the form is complete.
@@ -508,6 +932,23 @@ export default function MidwifeFollowUp() {
     }
 
     try {
+      if (selectedFollowUp) {
+        await persistFollowUp(selectedFollowUp.id, {
+          purpose: scheduleForm.reason.trim(),
+          scheduled_date: scheduleForm.date,
+          scheduled_time: scheduleForm.time,
+          location: scheduleForm.location,
+          priority: scheduleForm.priority,
+          status: deriveStatus(scheduleForm.date),
+          assigned_provider: scheduleForm.personnel || defaultPersonnel,
+          notes: scheduleForm.notes.trim(),
+        }, "Follow-up schedule updated successfully.");
+        setShowScheduleModal(false);
+        setSelectedFollowUp(null);
+        setSelectedResident(null);
+        return;
+      }
+
       const result = await createFollowUpOffline({ ownerId: user?.id, record: {
         residentId: selectedResident.id,
         _offlineBarangay: selectedResident.barangay,
@@ -567,13 +1008,27 @@ export default function MidwifeFollowUp() {
         </div>
       )}
 
+      {loadErrorMessage && (
+        <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm">
+          <span className="text-brand-danger">{loadErrorMessage}</span>
+          <button
+            type="button"
+            onClick={() => { void load(); }}
+            disabled={loading}
+            className="rounded-btn border border-brand-danger/40 px-3 py-1.5 font-medium text-brand-danger hover:bg-brand-danger/10 disabled:opacity-60"
+          >
+            {loading ? "Retrying..." : "Retry"}
+          </button>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Total Follow-ups", value: stats.total, subtitle: "Active follow-up records" },
-          { label: "Today's Follow-ups", value: stats.today, subtitle: "Scheduled for today" },
-          { label: "Upcoming", value: stats.upcoming, subtitle: "Next within 7 days" },
-          { label: "Completed", value: stats.completed, subtitle: "Finished this week" },
+          { label: "Total Follow-ups", value: loading || loadError ? "—" : stats.total, subtitle: "All follow-up records" },
+          { label: "Today's Follow-ups", value: loading || loadError ? "—" : stats.today, subtitle: "Scheduled for today" },
+          { label: "Upcoming", value: loading || loadError ? "—" : stats.upcoming, subtitle: "Next 7 days" },
+          { label: "Completed", value: loading || loadError ? "—" : stats.completed, subtitle: "Completed follow-up records" },
         ].map((stat) => (
           <Card key={stat.label} className="p-5">
             <p className="text-sm text-brand-gray">{stat.label}</p>
@@ -596,25 +1051,19 @@ export default function MidwifeFollowUp() {
             />
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1">
-              {["All", "Today", "Upcoming", "Completed", "Missed"].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-3 py-1.5 rounded-btn text-sm font-medium transition-colors ${
-                    statusFilter === status
-                      ? "bg-brand-blue text-white"
-                      : "text-brand-gray hover:bg-brand-bg"
-                  }`}
-                >
-                  {status}
-                </button>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue"
+            >
+              {FOLLOW_UP_STATUS_FILTERS.map((status) => (
+                <option key={status} value={status}>{status}</option>
               ))}
-            </div>
+            </select>
             <select
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
-              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none"
+              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue"
             >
               <option value="All">All Priorities</option>
               <option value="High">High</option>
@@ -626,119 +1075,79 @@ export default function MidwifeFollowUp() {
       </Card>
 
       {/* Follow-up Table */}
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden" aria-busy={loading}>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-brand-bg border-b border-brand-border">
               <tr>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Resident Name</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Purpose</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Assigned Midwife</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Scheduled Date</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Location</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Priority</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Status</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Actions</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Resident</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Purpose</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Assigned</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Scheduled</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5 min-w-[200px]">Location</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Priority</th>
+                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Status</th>
+                <th className="text-right text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredFollowUps.map((f) => (
                 <tr key={f.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-brand-blue text-white flex items-center justify-center text-xs font-semibold">
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-brand-blue text-white flex items-center justify-center text-[10px] font-semibold shrink-0">
                         {f.resident.split(" ").map((n) => n[0]).slice(0, 2).join("")}
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-brand-ink">{f.resident}</p>
-                        <p className="text-xs text-brand-gray">{f.barangay}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-brand-ink truncate">{f.resident}</p>
+                        <p className="text-xs text-brand-gray truncate">{f.barangay}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">
-                    <p>{f.purpose}</p>
+                  <td className="px-3 py-2.5 text-sm text-brand-ink max-w-[150px]">
+                    <p className="truncate" title={f.purpose}>{f.purpose}</p>
                     {f.consultation && (
-                      <p className="mt-1 text-xs text-brand-gray">
+                      <p className="mt-0.5 text-[10px] text-brand-gray truncate">
                         Consultation {f.consultation.id}
                         {f.consultation.visit_date ? ` · ${formatDate(f.consultation.visit_date)}` : ""}
-                        {f.consultation.chief_complaint ? ` · ${f.consultation.chief_complaint}` : ""}
                       </p>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-brand-ink">{f.assignedMidwife}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2.5 text-sm text-brand-ink max-w-[120px] truncate" title={f.assignedMidwife}>{f.assignedMidwife}</td>
+                  <td className="px-3 py-2.5">
                     <div className="text-sm text-brand-ink">{f.scheduledDate}</div>
                     <div className="text-xs text-brand-gray">{f.scheduledTime}</div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-brand-ink flex items-center gap-1">
-                    <MapPin className="w-3 h-3 text-brand-gray" />
-                    {f.location}
+                  <td className="px-3 py-2.5 text-sm text-brand-ink min-w-[200px]">
+                    <div className="flex items-start gap-1.5">
+                      <MapPin className="w-3 h-3 mt-0.5 text-brand-gray shrink-0" />
+                      <span className="min-w-0 whitespace-normal break-words leading-snug">
+                        {f.location || "Not specified"}
+                      </span>
+                    </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${PRIORITY_COLORS[f.priority]}`}>
+                  <td className="px-3 py-2.5">
+                    <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${PRIORITY_COLORS[f.priority]}`}>
                       {f.priority}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[f.status]}`}>
+                  <td className="px-3 py-2.5">
+                    <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${STATUS_COLORS[f.status]}`}>
                       {f.status}
                     </span>
                   </td>
-                  <td className="min-w-[250px] px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="Follow-up actions">
-                      <button
-                        onClick={() => handleView(f)}
-                        className="text-sm font-medium text-brand-blue hover:underline"
-                      >
-                        View
-                      </button>
-                      {f.status !== "Completed" && (canRecordVisit || canEditFollowUp || canCompleteFollowUp) && (
-                        <>
-                          {canRecordVisit && (
-                            <button
-                              onClick={() => handleRecordVisit(f)}
-                              className="text-sm font-medium text-brand-blue hover:underline"
-                            >
-                              Record Visit
-                            </button>
-                          )}
-                          {(canEditFollowUp || canCompleteFollowUp) && (
-                            <>
-                              <button
-                                onClick={() => handleUpdateStatus(f)}
-                                className="text-sm font-medium text-brand-blue hover:underline"
-                              >
-                                Update Status
-                              </button>
-                              <button
-                                onClick={() => handleAddRemarks(f)}
-                                className="text-sm font-medium text-brand-blue hover:underline"
-                              >
-                                Add Remarks
-                              </button>
-                            </>
-                          )}
-                          {canCompleteFollowUp && (
-                            <button
-                              onClick={() => handleCompleteFollowUp(f)}
-                              className="text-sm font-medium text-brand-green hover:underline"
-                            >
-                              Complete
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
+                  <td className="px-3 py-2.5 text-right">
+                    <ActionsDropdown followUp={f} />
                   </td>
                 </tr>
               ))}
-              {filteredFollowUps.length === 0 && (
+              {filteredFollowUps.length === 0 && !loadError && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-brand-gray">
+                  <td colSpan={8} className="px-3 py-10 text-center text-sm text-brand-gray" role={loading ? "status" : undefined}>
                     {loading
                       ? "Loading follow-ups..."
-                      : loadError
-                        ? <span className="text-brand-danger">{loadError}</span>
+                      : filtersActive
+                        ? "No follow-ups match the selected search and filters."
                         : "No follow-ups yet."}
                   </td>
                 </tr>
@@ -754,7 +1163,7 @@ export default function MidwifeFollowUp() {
           <Card
             role="dialog"
             aria-modal="true"
-            aria-label="Schedule Follow-up"
+            aria-label={selectedFollowUp ? "Edit Follow-up Schedule" : "Schedule Follow-up"}
             className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden"
           >
             {/* Fixed header */}
@@ -764,8 +1173,12 @@ export default function MidwifeFollowUp() {
                   <Calendar className="h-5 w-5 text-brand-blue" strokeWidth={1.8} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-brand-ink">Schedule Follow-up</h3>
-                  <p className="text-xs text-brand-gray">Book the next follow-up visit for a resident</p>
+                  <h3 className="text-lg font-semibold text-brand-ink">
+                    {selectedFollowUp ? "Edit / Reschedule Follow-up" : "Schedule Follow-up"}
+                  </h3>
+                  <p className="text-xs text-brand-gray">
+                    {selectedFollowUp ? "Update the scheduled visit details." : "Book the next follow-up visit for a resident"}
+                  </p>
                 </div>
               </div>
               <button
@@ -781,7 +1194,7 @@ export default function MidwifeFollowUp() {
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <div className="space-y-5">
                 {/* RESIDENT */}
-                <section>
+                {!selectedFollowUp && <section>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Resident</p>
                   <div onBlur={() => setTouched((t) => ({ ...t, resident: true }))}>
                     <ResidentSearchSelect
@@ -810,7 +1223,20 @@ export default function MidwifeFollowUp() {
                       </div>
                     </div>
                   )}
-                </section>
+                </section>}
+                {selectedFollowUp && selectedResident && (
+                  <div className="flex items-center gap-3 rounded-btn border border-brand-border bg-brand-bg px-3.5 py-2.5">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-blue text-xs font-semibold text-white">
+                      {selectedResident.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-brand-ink">{selectedResident.name}</p>
+                      <p className="text-xs text-brand-gray">
+                        {selectedResident.id} · {selectedResident.barangay || selectedFollowUp.barangay}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* FOLLOW-UP DETAILS */}
                 <section>
@@ -953,7 +1379,9 @@ export default function MidwifeFollowUp() {
                   {deriveStatus(scheduleForm.date)}
                 </span>
                 <span>
-                  Follow-ups are saved as Scheduled — appearing under Today or Upcoming based on the date.
+                  {selectedFollowUp
+                    ? "Rescheduling restores this follow-up to the scheduled workflow."
+                    : "Follow-ups are saved as Scheduled — appearing under Today or Upcoming based on the date."}
                 </span>
               </p>
             </div>
@@ -961,21 +1389,26 @@ export default function MidwifeFollowUp() {
             {/* Fixed footer */}
             <div className="flex shrink-0 justify-end gap-3 bg-white px-6 py-4">
               <button
-                onClick={() => setShowScheduleModal(false)}
+                onClick={() => {
+                  setShowScheduleModal(false);
+                  setSelectedFollowUp(null);
+                  setSelectedResident(null);
+                }}
+                disabled={saving}
                 className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSchedule}
-                disabled={!canSchedule}
+                disabled={!canSchedule || saving}
                 className={`px-4 py-2 rounded-btn text-sm font-medium transition-colors ${
-                  canSchedule
+                  canSchedule && !saving
                     ? "bg-brand-blue text-white hover:bg-brand-dark"
                     : "cursor-not-allowed bg-brand-blue/50 text-white"
                 }`}
               >
-                Schedule Follow-up
+                {saving ? "Saving..." : selectedFollowUp ? "Save Changes" : "Schedule Follow-up"}
               </button>
             </div>
           </Card>
@@ -1077,6 +1510,9 @@ export default function MidwifeFollowUp() {
                     <label className="text-sm font-medium text-brand-ink block mb-1.5">Visit Date</label>
                     <input
                       type="date"
+                      value={visitForm.visitDate}
+                      max={todayISO()}
+                      onChange={(e) => setVisitForm((v) => ({ ...v, visitDate: e.target.value }))}
                       className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                     />
                   </div>
@@ -1084,13 +1520,19 @@ export default function MidwifeFollowUp() {
                     <label className="text-sm font-medium text-brand-ink block mb-1.5">Visit Time</label>
                     <input
                       type="time"
+                      value={visitForm.visitTime}
+                      onChange={(e) => setVisitForm((v) => ({ ...v, visitTime: e.target.value }))}
                       className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
                     />
                   </div>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">Resident Condition</label>
-                  <select className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue">
+                  <select
+                    value={visitForm.condition}
+                    onChange={(e) => setVisitForm((v) => ({ ...v, condition: e.target.value }))}
+                    className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
+                  >
                     <option>Stable</option>
                     <option>Improving</option>
                     <option>Worsening</option>
@@ -1148,14 +1590,7 @@ export default function MidwifeFollowUp() {
                 <button
                   disabled={saving || (visitForm.nextVisitDate ? !canEditFollowUp : !canCompleteFollowUp)}
                   onClick={() => {
-                    const notes = [
-                      visitForm.findings && `Findings: ${visitForm.findings}`,
-                      visitForm.treatment && `Treatment: ${visitForm.treatment}`,
-                      visitForm.advice && `Advice: ${visitForm.advice}`,
-                    ]
-                      .filter(Boolean)
-                      .join("\n");
-                    handleSaveVisit({ notes: notes || selectedFollowUp.remarks || "", nextVisitDate: visitForm.nextVisitDate });
+                    handleSaveVisit(visitForm);
                   }}
                   className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
                 >
@@ -1169,13 +1604,14 @@ export default function MidwifeFollowUp() {
 
       {/* Update Status Modal */}
       {showUpdateStatusModal && selectedFollowUp && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <Card role="dialog" aria-modal="true" aria-label="Update Follow-up Status" className="w-full max-w-md">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-brand-ink">Update Status</h3>
                 <button
                   onClick={() => setShowUpdateStatusModal(false)}
+                  aria-label="Close dialog"
                   className="text-brand-gray hover:text-brand-ink"
                 >
                   <X className="w-4 h-4" />
@@ -1183,12 +1619,16 @@ export default function MidwifeFollowUp() {
               </div>
               <p className="text-sm text-brand-gray mb-4">Select new status for {selectedFollowUp.resident}'s follow-up:</p>
               <div className="space-y-2">
-                {["Scheduled", "Ongoing", "Missed", "Cancelled"]
-                  .filter((status) => status === "Missed" ? canCompleteFollowUp : canEditFollowUp)
+                {["Scheduled", "Ongoing"]
+                  .filter((status) =>
+                    canEditFollowUp &&
+                    (selectedFollowUp.status !== "Missed" || status === "Scheduled"),
+                  )
                   .map((status) => (
                   <button
                     key={status}
                     onClick={() => handleStatusUpdate(status)}
+                    disabled={saving}
                     className="w-full flex items-center gap-3 border border-brand-border rounded-btn px-4 py-3 text-sm font-medium text-brand-ink hover:border-brand-blue hover:bg-brand-light transition-colors"
                   >
                     <span className={`w-3 h-3 rounded-full ${STATUS_COLORS[status].split(" ")[0]}`} />
@@ -1203,13 +1643,14 @@ export default function MidwifeFollowUp() {
 
       {/* Remarks Modal */}
       {showRemarksModal && selectedFollowUp && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <Card role="dialog" aria-modal="true" aria-label="Add Follow-up Remarks" className="w-full max-w-md">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-brand-ink">Add Remarks</h3>
                 <button
                   onClick={() => setShowRemarksModal(false)}
+                  aria-label="Close dialog"
                   className="text-brand-gray hover:text-brand-ink"
                 >
                   <X className="w-4 h-4" />
@@ -1228,6 +1669,7 @@ export default function MidwifeFollowUp() {
               <div className="flex justify-end gap-3">
                 <button
                   onClick={() => setShowRemarksModal(false)}
+                  disabled={saving}
                   className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
                 >
                   Cancel
@@ -1245,29 +1687,92 @@ export default function MidwifeFollowUp() {
         </div>
       )}
 
-      {/* Complete Confirmation Modal */}
-      {showCompleteConfirm && selectedFollowUp && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-brand-ink mb-4">Complete Follow-up</h3>
-              <p className="text-sm text-brand-gray mb-6">
-                Are you sure you want to mark <span className="font-medium text-brand-ink">{selectedFollowUp.resident}</span>'s follow-up as completed? This action cannot be undone.
-              </p>
-              <div className="flex justify-end gap-3">
+      {statusConfirmation && selectedFollowUp && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="follow-up-status-confirmation-title"
+            className="w-full max-w-md overflow-hidden"
+          >
+            <div className="border-b border-brand-border px-6 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 id="follow-up-status-confirmation-title" className="text-lg font-semibold text-brand-ink">
+                    {statusConfirmation === "Completed"
+                      ? "Complete Follow-up"
+                      : statusConfirmation === "Missed"
+                        ? "Mark Follow-up as Missed"
+                        : "Cancel Follow-up"}
+                  </h3>
+                  <p className="mt-1 text-sm text-brand-gray">{selectedFollowUp.resident}</p>
+                </div>
                 <button
-                  onClick={() => setShowCompleteConfirm(false)}
-                  className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
+                  type="button"
+                  onClick={() => {
+                    if (saving) return;
+                    setStatusConfirmation(null);
+                    setSelectedFollowUp(null);
+                  }}
+                  disabled={saving}
+                  aria-label="Close dialog"
+                  className="rounded-md p-1 text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink disabled:opacity-50"
                 >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmComplete}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors"
-                >
-                  Complete
+                  <X className="h-4 w-4" />
                 </button>
               </div>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div className="rounded-btn border border-brand-border bg-brand-bg/60 p-3">
+                <p className="text-sm font-medium text-brand-ink">{selectedFollowUp.purpose || "Follow-up visit"}</p>
+                <p className="mt-1 text-sm text-brand-gray">
+                  {selectedFollowUp.scheduledDate || "Date not set"}
+                  {selectedFollowUp.scheduledTime ? ` · ${selectedFollowUp.scheduledTime}` : ""}
+                </p>
+                <p className="mt-1 text-xs text-brand-gray">
+                  Current status: {selectedFollowUp.status}
+                  {selectedFollowUp.location ? ` · ${selectedFollowUp.location}` : ""}
+                </p>
+              </div>
+              <p className="text-sm leading-6 text-brand-gray">
+                {statusConfirmation === "Completed"
+                  ? "Confirm that this visit took place. Follow-ups awaiting resident confirmation or scheduled for a future date cannot be completed."
+                  : statusConfirmation === "Missed"
+                    ? "Confirm that this visit was missed. A future or resident-pending follow-up cannot be marked as missed."
+                    : "Are you sure you want to cancel this follow-up? The cancellation will be saved to the follow-up record."}
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-brand-border px-6 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  if (saving) return;
+                  setStatusConfirmation(null);
+                  setSelectedFollowUp(null);
+                }}
+                disabled={saving}
+                className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-50"
+              >
+                Keep Follow-up
+              </button>
+              <button
+                type="button"
+                onClick={confirmStatusAction}
+                disabled={saving}
+                className={`rounded-btn px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  statusConfirmation === "Cancelled"
+                    ? "bg-brand-danger hover:bg-brand-danger/90"
+                    : "bg-brand-blue hover:bg-brand-dark"
+                }`}
+              >
+                {saving
+                  ? "Saving..."
+                  : statusConfirmation === "Completed"
+                    ? "Mark as Completed"
+                    : statusConfirmation === "Missed"
+                      ? "Mark as Missed"
+                      : "Cancel Follow-up"}
+              </button>
             </div>
           </Card>
         </div>

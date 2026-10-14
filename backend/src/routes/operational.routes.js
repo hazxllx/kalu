@@ -19,11 +19,12 @@ const withKind = (kind) => (req, _res, next) => {
   next();
 };
 
-const followUpPermission = (method) => (req) => {
+export const followUpPermission = (method) => (req) => {
   if (req.params.kind !== 'followups') return [];
   if (method === 'GET') return ['followups.view'];
   if (method === 'POST') return ['followups.create'];
-  if (['Completed', 'Missed'].includes(String(req.body?.status || ''))) {
+  const payload = req.body?.record || req.body || {};
+  if (['Completed', 'Missed'].includes(String(payload.status || ''))) {
     return ['followups.complete'];
   }
   return ['followups.edit'];

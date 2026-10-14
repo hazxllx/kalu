@@ -11,7 +11,7 @@
 
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';
-import test, { beforeEach } from 'node:test';
+import test, { afterEach, beforeEach } from 'node:test';
 
 import { db } from '../../src/services/offline/db.js';
 import { resetCachedKey } from '../../src/services/offline/crypto.js';
@@ -26,11 +26,16 @@ import { putDraft, getDraft, listDrafts, DRAFT_STATUS } from '../../src/services
 import { getCachedRecord, cacheRecord } from '../../src/services/offline/records.js';
 import { acquireLock, readMeta, getLastSyncedAt, META_KEYS } from '../../src/services/offline/meta.js';
 import { runSyncPass } from '../../src/services/offline/syncRunner.js';
-import { computeBackoffMs } from '../../src/services/offline/syncCore.js';
+import { computeBackoffMs, earliestRetryAt } from '../../src/services/offline/syncCore.js';
 import { classifySyncError, SYNC_ERROR } from '../../src/services/offline/errors.js';
 import { isQuotaError } from '../../src/services/offline/db.js';
 import { idempotencyKeyFor } from '../../src/services/offline/ids.js';
 import { MUTATION_TIER } from '../../src/services/offline/mutationPolicy.js';
+import {
+  configureSyncEngine,
+  requestSync,
+  resetSyncEngine,
+} from '../../src/services/offline/syncEngine.js';
 
 const OWNER = 'user-aaaa';
 const OTHER_OWNER = 'user-bbbb';
@@ -50,6 +55,7 @@ const resetAll = async () => {
 };
 
 beforeEach(resetAll);
+afterEach(resetSyncEngine);
 
 // A small handler registry: maps entity:opType -> async handler, each tagged
 // SAFE_SYNC like the production handlers. Tests swap the implementations in to
@@ -157,6 +163,56 @@ test('Draft -> Queued -> Syncing -> Synced: success caches the authoritative rec
   assert.ok(await getLastSyncedAt(OWNER));
 });
 
+test('the central engine accepts an injected handler without loading browser API handlers', async () => {
+  const { op } = await seedOperation({ entity: 'followup' });
+  configureSyncEngine({
+    getOwnerId: () => OWNER,
+    getHandler: makeRegistry({
+      'followup:create': async () => ({
+        serverId: 'FU-engine',
+        serverRecord: { id: 'FU-engine', revision: 1 },
+      }),
+    }),
+  });
+
+  const result = await requestSync('test-injected-handler');
+
+  assert.equal(result.synced, 1);
+  assert.equal((await db.outbox.get(op.opId)).status, OUTBOX_STATUS.SYNCED);
+});
+
+test('the active engine retries a transiently failed operation at its persisted retry deadline', async () => {
+  const { op } = await seedOperation({ entity: 'followup' });
+  await db.outbox.update(op.opId, {
+    status: OUTBOX_STATUS.FAILED,
+    attempts: 1,
+    lastError: { code: SYNC_ERROR.NETWORK, retryable: true },
+    nextAttemptAt: Date.now() + 500,
+  });
+  let handlerCalls = 0;
+  configureSyncEngine({
+    getOwnerId: () => OWNER,
+    getHandler: makeRegistry({
+      'followup:create': async () => {
+        handlerCalls += 1;
+        return { serverId: 'FU-retry', serverRecord: { id: 'FU-retry', revision: 1 } };
+      },
+    }),
+  });
+
+  await requestSync('test-backoff-retry');
+  assert.equal(handlerCalls, 0, 'the persisted retry deadline is respected');
+
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if ((await db.outbox.get(op.opId)).status === OUTBOX_STATUS.SYNCED) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  assert.equal(handlerCalls, 1, 'the active engine retried without an online event');
+  assert.equal((await db.outbox.get(op.opId)).status, OUTBOX_STATUS.SYNCED);
+});
+
 test('a lost response does not duplicate: op is retained and retried with the same idempotency key', async () => {
   const { op } = await seedOperation({ entity: 'followup', payload: { note: 'x' } });
   let calls = 0;
@@ -193,6 +249,34 @@ test('a lost response does not duplicate: op is retained and retried with the sa
   const all = await listOperations(OWNER);
   assert.equal(all.length, 1);
   assert.equal(all[0].status, OUTBOX_STATUS.SYNCED);
+});
+
+test('retryable failures keep retrying after the former max-attempt threshold', async () => {
+  const { op } = await seedOperation({ entity: 'followup', payload: { note: 'retry' } });
+  await db.outbox.update(op.opId, { maxAttempts: 1 });
+  let calls = 0;
+  const getHandler = makeRegistry({
+    'followup:create': async () => {
+      calls += 1;
+      if (calls === 1) {
+        const error = new Error('fetch failed');
+        error.name = 'TypeError';
+        throw error;
+      }
+      return { serverId: 'FU-RETRY', serverRecord: { id: 'FU-RETRY' } };
+    },
+  });
+
+  await runSyncPass(basePass({ getHandler, now: () => Date.now() }));
+  const failed = await db.outbox.get(op.opId);
+  assert.equal(failed.status, OUTBOX_STATUS.FAILED);
+  assert.equal(failed.attempts, 1);
+  assert.equal(failed.lastError.retryable, true);
+
+  const retry = await runSyncPass(basePass({ getHandler, now: () => Date.now() + 10_000 }));
+  assert.equal(retry.synced, 1);
+  assert.equal(calls, 2);
+  assert.equal((await db.outbox.get(op.opId)).status, OUTBOX_STATUS.SYNCED);
 });
 
 test('409 conflict parks the op for review and never overwrites server data', async () => {
@@ -330,6 +414,15 @@ test('the single-worker lock prevents a second concurrent pass', async () => {
   assert.equal(lock.owner, 'other-worker');
 });
 
+test('concurrent tabs atomically elect only one sync-lock owner', async () => {
+  const results = await Promise.all([
+    acquireLock('tab-one', 30_000),
+    acquireLock('tab-two', 30_000),
+  ]);
+  assert.equal(results.filter(Boolean).length, 1);
+  assert.ok(['tab-one', 'tab-two'].includes((await readMeta(META_KEYS.LOCK, null)).owner));
+});
+
 test('interrupted (orphaned) syncing op is recovered and completed on the next pass', async () => {
   const { op } = await seedOperation({ entity: 'followup', payload: { note: 'x' } });
   // Simulate a crash mid-upload: a stale `syncing` row older than the staleness window.
@@ -388,6 +481,17 @@ test('computeBackoffMs grows exponentially and stays within the jittered ceiling
     assert.ok(low >= 0);
     assert.ok(high >= low);
   }
+});
+
+test('earliestRetryAt schedules only retryable failures', () => {
+  assert.equal(earliestRetryAt([
+    { status: 'failed', nextAttemptAt: 200, lastError: { retryable: true } },
+    { status: 'failed', nextAttemptAt: 100, lastError: { retryable: false } },
+    { status: 'pending', nextAttemptAt: 50, lastError: { retryable: true } },
+  ]), 200);
+  assert.equal(earliestRetryAt([
+    { status: 'failed', nextAttemptAt: 100, lastError: { retryable: false } },
+  ]), null);
 });
 
 test('classifySyncError maps HTTP/transport failures to the right retry policy', () => {

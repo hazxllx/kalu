@@ -20,6 +20,7 @@ export const TEXT_LIMITS = Object.freeze({
 export const NAME_SUFFIXES = Object.freeze(['', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V']);
 export const SEX_OPTIONS = Object.freeze(['Male', 'Female']);
 export const CIVIL_STATUSES = Object.freeze(['Single', 'Married', 'Widowed', 'Separated']);
+const PERSON_NAME = /^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+|(?:\.[\p{L}\p{M}]+)*\.?)*$/u;
 export const MIN_REJECTION_REASON = 5;
 const PASSWORD_POLICY = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
 
@@ -104,6 +105,17 @@ export const isFiniteNumber = (value) =>
 
 /** Required field. */
 export const required = (value, label) => (isBlank(value) ? `${label} is required.` : '');
+
+/** Person names allow Unicode letters and marks with common separators. */
+export const personName = (value, { label = 'Name', isRequired = true } = {}) => {
+  const normalized = text(value);
+  if (!normalized) return isRequired ? `${label} is required.` : '';
+  if (normalized.length > TEXT_LIMITS.short) return `${label} is too long (max ${TEXT_LIMITS.short} characters).`;
+  if (!PERSON_NAME.test(normalized)) {
+    return `${label} can contain letters, spaces, hyphens, apostrophes, and periods only.`;
+  }
+  return '';
+};
 
 /** Email format (empty allowed unless `isRequired`). */
 export const email = (value, { label = 'Email', isRequired = true } = {}) => {
@@ -233,6 +245,7 @@ export default {
   SEX_OPTIONS,
   CIVIL_STATUSES,
   MIN_REJECTION_REASON,
+  personName,
   isBlank,
   hasControlChars,
   isEmail,

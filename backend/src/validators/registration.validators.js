@@ -7,6 +7,7 @@ import {
   hasControlChars,
   isEmail,
   isFutureDateOnly,
+  isValidPersonName,
   isStrictMobile,
   normalizeEmail,
   toZone,
@@ -40,11 +41,17 @@ export const registerResidentValidator = (input = {}) => {
   const errors = {};
 
   const firstName = str(body.firstName, TEXT_LIMITS.short, 'firstName', 'First name', errors);
-  if (firstName && hasControlChars(firstName)) errors.firstName = 'First name contains invalid characters.';
+  if (firstName && (hasControlChars(firstName) || !isValidPersonName(firstName))) {
+    errors.firstName = 'First name can contain letters, spaces, hyphens, apostrophes, and periods only.';
+  }
   const middleName = str(body.middleName, TEXT_LIMITS.short, 'middleName', 'Middle name', errors, { optional: true });
-  if (middleName && hasControlChars(middleName)) errors.middleName = 'Middle name contains invalid characters.';
+  if (middleName && (hasControlChars(middleName) || !isValidPersonName(middleName))) {
+    errors.middleName = 'Middle name can contain letters, spaces, hyphens, apostrophes, and periods only.';
+  }
   const lastName = str(body.lastName, TEXT_LIMITS.short, 'lastName', 'Last name', errors);
-  if (lastName && hasControlChars(lastName)) errors.lastName = 'Last name contains invalid characters.';
+  if (lastName && (hasControlChars(lastName) || !isValidPersonName(lastName))) {
+    errors.lastName = 'Last name can contain letters, spaces, hyphens, apostrophes, and periods only.';
+  }
   const suffix = text(body.suffix);
   if (suffix && !NAME_SUFFIXES.includes(suffix)) {
     errors.suffix = 'Suffix must be one of Jr., Sr., II, III, IV, or V.';

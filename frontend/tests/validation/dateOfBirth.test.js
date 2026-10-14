@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { dateOfBirth } from '../../src/utils/validation/index.js';
+import { dateOfBirth, personName } from '../../src/utils/validation/index.js';
 
 // Helper to freeze the calendar day "today" (UTC) for stable assertions.
 const fakeNow = { getUTCFullYear: () => 2026, getUTCMonth: () => 9 /* Oct */, getUTCDate: () => 14 };
@@ -82,4 +82,22 @@ test('rejects dates whose computed age exceeds maxAge (default 120)', () => {
 
 test('applies a custom maxAge', () => {
   assert.match(dateOfBirth('2000-01-01', { label: 'Date of birth', maxAge: 10 }), /valid age/i);
+});
+
+test('person names accept Unicode letters and common name punctuation', () => {
+  assert.equal(personName('María-José'), '');
+  assert.equal(personName("O'Neil"), '');
+  assert.equal(personName('A.'), '');
+  assert.equal(personName('  Dela Cruz  '), '');
+});
+
+test('person names reject blank required names and non-name characters', () => {
+  assert.match(personName('   ', { label: 'First name' }), /required/i);
+  assert.match(personName('Anne2'), /letters/i);
+  assert.match(personName(''), /required/i);
+});
+
+test('middle names are optional but validated when provided', () => {
+  assert.equal(personName('   ', { label: 'Middle name', isRequired: false }), '');
+  assert.match(personName('Middle2', { label: 'Middle name', isRequired: false }), /letters/i);
 });

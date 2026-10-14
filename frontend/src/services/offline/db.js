@@ -18,9 +18,142 @@ import Dexie from 'dexie';
  * adding an upgrade function; downgrades are not supported by Dexie/IndexedDB.
  */
 export const OFFLINE_DB_NAME = 'kalusagap-offline';
+export const OFFLINE_DB_UPGRADE_BLOCKED_EVENT = 'kalusagap:offline-db-upgrade-blocked';
+export const OFFLINE_DB_READY_EVENT = 'kalusagap:offline-db-ready';
+let offlineDbUpgradeBlocked = false;
+
+export const isOfflineDbUpgradeBlocked = () => offlineDbUpgradeBlocked;
 
 /** Current local schema version. Bump together with a new `.version(n)` block. */
-export const OFFLINE_DB_VERSION = 4;
+export const OFFLINE_DB_VERSION = 5;
+const OFFLINE_DB_IDB_VERSION = OFFLINE_DB_VERSION * 10;
+
+const RECORDS_KEY_PATH = ['ownerId', 'entity', 'remoteId'];
+
+const ensureIndex = (store, name, keyPath) => {
+  if (store.indexNames.contains(name)) {
+    const existing = store.index(name);
+    if (JSON.stringify(existing.keyPath) === JSON.stringify(keyPath)) return;
+    store.deleteIndex(name);
+  }
+  store.createIndex(name, keyPath, { unique: false });
+};
+
+const migrateRecordRows = (rows) => {
+  const byKey = new Map();
+  for (const row of rows) {
+    if (!row || !row.entity || row.remoteId == null) continue;
+    const ownerId = typeof row.ownerId === 'string' ? row.ownerId : '';
+    const migrated = { ...row, ownerId, remoteId: String(row.remoteId) };
+    const key = JSON.stringify([ownerId, migrated.entity, migrated.remoteId]);
+    const previous = byKey.get(key);
+    if (!previous || (migrated.cachedAt || 0) > (previous.cachedAt || 0)) {
+      byKey.set(key, migrated);
+    }
+  }
+  return Array.from(byKey.values());
+};
+
+/**
+ * Migrate the physical IndexedDB schema before Dexie validates its declared
+ * historical versions. Some deployed v2 databases already have the new
+ * compound key on `records`; Dexie cannot reconcile that with a v2 declaration
+ * that still describes the old key, so its upgrader fails before callbacks run.
+ * A single native versionchange transaction inspects the actual store, copies
+ * cached records, recreates only that store, and leaves drafts/outbox/keys intact.
+ */
+export const prepareOfflineDatabase = async () => {
+  if (typeof indexedDB === 'undefined') return;
+
+  const probe = indexedDB.open(OFFLINE_DB_NAME);
+  const currentVersion = await new Promise((resolve, reject) => {
+    probe.onerror = () => reject(probe.error || new Error('Could not inspect offline storage.'));
+    probe.onblocked = () => reject(new Error('Offline storage inspection is blocked by another browser tab.'));
+    probe.onsuccess = () => {
+      const version = probe.result.version;
+      probe.result.close();
+      resolve(version);
+    };
+  });
+
+  if (currentVersion === OFFLINE_DB_IDB_VERSION) return;
+  if (currentVersion > OFFLINE_DB_IDB_VERSION) {
+    throw new Error(`Offline storage version ${currentVersion} is newer than this application supports.`);
+  }
+
+  const request = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_IDB_VERSION);
+  await new Promise((resolve, reject) => {
+    request.onerror = () => reject(request.error || new Error('Could not migrate offline storage.'));
+    request.onblocked = () => reject(new Error('Offline storage migration is blocked by another browser tab. Close other KALUSAGAP tabs and reload.'));
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      const transaction = request.transaction;
+      const sourceRows = [];
+      const sourceNames = ['records', 'records_backup'].filter((name) =>
+        database.objectStoreNames.contains(name),
+      );
+
+      const requests = sourceNames.map((name) => transaction.objectStore(name).getAll());
+      const finishMigration = () => {
+        const migratedRows = migrateRecordRows(sourceRows.flat());
+
+        for (const name of ['drafts', 'outbox', 'syncMeta', 'keys']) {
+          if (!database.objectStoreNames.contains(name)) {
+            const keyPaths = { drafts: 'localId', outbox: 'opId', syncMeta: 'key', keys: 'id' };
+            database.createObjectStore(name, { keyPath: keyPaths[name] });
+          }
+        }
+
+        if (database.objectStoreNames.contains('records')) database.deleteObjectStore('records');
+        if (database.objectStoreNames.contains('records_backup')) database.deleteObjectStore('records_backup');
+        const records = database.createObjectStore('records', { keyPath: RECORDS_KEY_PATH });
+        for (const name of ['ownerId', 'entity', 'remoteId', 'cachedAt']) {
+          ensureIndex(records, name, name);
+        }
+
+        const drafts = transaction.objectStore('drafts');
+        for (const name of ['entity', 'ownerId', 'status', 'updatedAt']) ensureIndex(drafts, name, name);
+        const outbox = transaction.objectStore('outbox');
+        for (const name of ['entity', 'ownerId', 'status', 'localRecordId', 'nextAttemptAt', 'updatedAt']) {
+          ensureIndex(outbox, name, name);
+        }
+        ensureIndex(outbox, '[ownerId+status]', ['ownerId', 'status']);
+
+        for (const row of migratedRows) records.put(row);
+      };
+
+      if (requests.length === 0) {
+        finishMigration();
+      } else {
+        let completed = 0;
+        requests.forEach((sourceRequest, index) => {
+          sourceRequest.onsuccess = () => {
+            sourceRows[index] = sourceRequest.result;
+            completed += 1;
+            if (completed === requests.length) finishMigration();
+          };
+        });
+      }
+
+    };
+    request.onsuccess = () => {
+      request.result.close();
+      resolve();
+    };
+  }).catch(async (error) => {
+    if (error?.name !== 'VersionError') throw error;
+    const latest = indexedDB.open(OFFLINE_DB_NAME);
+    const latestVersion = await new Promise((resolve, reject) => {
+      latest.onerror = () => reject(latest.error || error);
+      latest.onsuccess = () => {
+        const version = latest.result.version;
+        latest.result.close();
+        resolve(version);
+      };
+    });
+    if (latestVersion !== OFFLINE_DB_IDB_VERSION) throw error;
+  });
+};
 
 /**
  * @typedef {Record<string, unknown> & {
@@ -103,6 +236,11 @@ export const OFFLINE_DB_VERSION = 4;
  * configured store names.
  */
 export class OfflineDatabase extends Dexie {
+  open() {
+    if (this.isOpen()) return super.open();
+    return prepareOfflineDatabase().then(() => super.open());
+  }
+
   /** @type {import('dexie').Table<OfflineDraftRow, string>} */
   drafts;
 
@@ -135,111 +273,26 @@ export class OfflineStorageError extends Error {
 
 export const db = new OfflineDatabase(OFFLINE_DB_NAME);
 
-db.version(1).stores({
-  // Local drafts keyed by a stable client-generated id.
-  drafts: 'localId, entity, ownerId, status, updatedAt',
-  // Synchronization operations. The operation id is the primary key and is also
-  // the idempotency key basis, so retries can never duplicate a record.
-  outbox:
-    'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
-  // Minimal cached reads, keyed by entity + server id.
-  records: '[entity+remoteId], entity, ownerId, cachedAt',
-  // Simple key/value metadata (lastSyncedAt, worker lock, ...).
-  syncMeta: 'key',
-  // Device key material for at-rest encryption.
-  keys: 'id',
+db.on('blocked', () => {
+  offlineDbUpgradeBlocked = true;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(OFFLINE_DB_UPGRADE_BLOCKED_EVENT));
+  }
+});
+db.on('ready', () => {
+  offlineDbUpgradeBlocked = false;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(OFFLINE_DB_READY_EVENT));
+  }
 });
 
-// Migration from v1 to v4: the original direct primary-key change
-// (`[entity+remoteId]` -> `[ownerId+entity+remoteId]`) is unsupported by
-// Dexie/IndexedDB and throws `UpgradeError: Not yet support for changing
-// primary key`. That error blocked the entire PHN check-up queue because the
-// offline DB failed to open and the workflow API surfaced it as a server
-// failure. Dexie can only change a primary key by deleting and recreating the
-// object store. We do that safely in three steps, preserving drafts/outbox
-// and all records via a temporary table so the migration is retry-safe and
-// never discards offline work.
-//
-//  v2: copy existing `records` -> `records_backup` (same new key, deduplicated)
-//  v3: delete the old `records` store (frees the name) while keeping the backup
-//  v4: recreate `records` with the correct owner-scoped key and restore.
-db.version(2)
-  .stores({
-    drafts: 'localId, entity, ownerId, status, updatedAt',
-    outbox:
-      'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
-    records: '[entity+remoteId], entity, ownerId, cachedAt',
-    records_backup: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
-    syncMeta: 'key',
-    keys: 'id',
-  })
-  .upgrade(async (tx) => {
-    const all = await tx.table('records').toArray();
-    if (all.length === 0) return;
-    // Deduplicate on the future compound key; keep newest cachedAt.
-    const byKey = new Map();
-    for (const row of all) {
-      if (!row.ownerId || !row.entity || row.remoteId == null) continue;
-      const key = `${row.ownerId}|${row.entity}|${String(row.remoteId)}`;
-      const prev = byKey.get(key);
-      if (!prev || (row.cachedAt || 0) > (prev.cachedAt || 0)) byKey.set(key, row);
-    }
-    const deduped = Array.from(byKey.values());
-    // Use bulkPut inside the versionchange transaction: atomic, retry-safe.
-    // If this throws the whole IndexedDB version stays at 1 and will retry.
-    await tx.table('records_backup').bulkPut(deduped);
-  });
-
-db.version(3)
-  .stores({
-    drafts: 'localId, entity, ownerId, status, updatedAt',
-    outbox:
-      'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
-    records: null,
-    records_backup: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
-    syncMeta: 'key',
-    keys: 'id',
-  })
-  .upgrade(async (tx) => {
-    // Fresh installs that were created directly at v2 (new schema) skip the
-    // v2 upgrade, so records_backup is empty. Preserve their cached records
-    // before the declarative delete by copying them now.
-    const backupCount = await tx.table('records_backup').count();
-    if (backupCount > 0) return;
-    // `records` still exists in this transaction's scope even though the
-    // declarative schema deletes it afterwards (Dexie keeps old schema for
-    // upgrade). If it has rows, back them up.
-    try {
-      const all = await tx.table('records').toArray();
-      if (all.length > 0) await tx.table('records_backup').bulkPut(all);
-    } catch {
-      // If the store truly does not exist (fresh DB already at v3), ignore.
-    }
-  });
-
-db.version(4)
-  .stores({
+db.version(OFFLINE_DB_VERSION).stores({
     drafts: 'localId, entity, ownerId, status, updatedAt',
     outbox:
       'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
     records: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
-    records_backup: null,
     syncMeta: 'key',
     keys: 'id',
-  })
-  .upgrade(async (tx) => {
-    const backup = await tx.table('records_backup').toArray();
-    if (backup.length > 0) {
-      // Deduplicate again on restore (defensive; retry-safe).
-      const byKey = new Map();
-      for (const row of backup) {
-        if (!row.ownerId || !row.entity || row.remoteId == null) continue;
-        const key = `${row.ownerId}|${row.entity}|${String(row.remoteId)}`;
-        const prev = byKey.get(key);
-        if (!prev || (row.cachedAt || 0) > (prev.cachedAt || 0)) byKey.set(key, row);
-      }
-      await tx.table('records').bulkPut(Array.from(byKey.values()));
-    }
   });
 
 /** True when an error is an IndexedDB storage-quota exhaustion. */
