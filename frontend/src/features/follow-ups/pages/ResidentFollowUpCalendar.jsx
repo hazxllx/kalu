@@ -40,18 +40,33 @@ export default function ResidentFollowUpCalendar() {
   const { user } = useAuth();
   const [schedules, setSchedules] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   const reload = React.useCallback(
-    () => residentFollowUpsApi
-      .list()
-      .then((result) => setSchedules((result?.rows || [])
-        .map(mapToSchedule)
-        .filter(isCalendarVisibleFollowUp)))
-      .catch(() => setSchedules([]))
-      .finally(() => setLoaded(true)),
+    () => {
+      setLoadError(null);
+      return residentFollowUpsApi
+        .list()
+        .then((result) => setSchedules((result?.rows || [])
+          .map(mapToSchedule)
+          .filter(isCalendarVisibleFollowUp)))
+        .catch((error) => setLoadError(error?.message || "Unable to load your follow-up schedule. Please try again."))
+        .finally(() => setLoaded(true));
+    },
     []
   );
   React.useEffect(() => { reload(); }, [reload]);
+  React.useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [reload]);
 
   // Both verified residents and pending (resident-limited) accounts may view and
   // respond to their own follow-ups. The resident-safe API already returns only
@@ -73,10 +88,10 @@ export default function ResidentFollowUpCalendar() {
     );
   }
 
-  return <ResidentCalendarContent schedules={schedules} loaded={loaded} reload={reload} />;
+  return <ResidentCalendarContent schedules={schedules} loaded={loaded} loadError={loadError} reload={reload} />;
 }
 
-function ResidentCalendarContent({ schedules, loaded, reload }) {
+function ResidentCalendarContent({ schedules, loaded, loadError, reload }) {
   const [view, setView] = useState("month");
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState(null); // schedule id (detail modal)
@@ -154,6 +169,30 @@ function ResidentCalendarContent({ schedules, loaded, reload }) {
   const selectedSchedule = selected ? schedules.find((s) => s.id === selected) : null;
 
   /* --------------------------- Empty state --------------------------- */
+  if (loaded && schedules.length === 0 && loadError) {
+    return (
+      <>
+        <PageHeader
+          crumbs={["Follow-ups", "Schedule Calendar"]}
+          title="My Follow-up Calendar"
+          subtitle="Your scheduled follow-up activities from the barangay health team."
+        />
+        <Card className="p-10 text-center">
+          <ShieldAlert className="mx-auto h-12 w-12 text-brand-danger/70" />
+          <p className="mt-4 text-base font-semibold text-brand-ink">Unable to load follow-ups</p>
+          <p className="mx-auto mt-1.5 max-w-md text-sm text-brand-gray">{loadError}</p>
+          <button
+            type="button"
+            onClick={reload}
+            className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+          >
+            Try again
+          </button>
+        </Card>
+      </>
+    );
+  }
+
   if (loaded && schedules.length === 0) {
     return (
       <>
@@ -166,8 +205,8 @@ function ResidentCalendarContent({ schedules, loaded, reload }) {
           <CalendarDays className="mx-auto h-12 w-12 text-brand-gray/50" />
           <p className="mt-4 text-base font-semibold text-brand-ink">No Scheduled Follow-ups Yet</p>
           <p className="mx-auto mt-1.5 max-w-md text-sm text-brand-gray">
-            When the Health Supervisor schedules a follow-up for you, it will appear here with its date,
-            time, location, and instructions.
+            Follow-ups that are ready to be scheduled appear here with their date, time, location, and instructions.
+            Requests that still need your confirmation remain in your Follow-ups list until you respond.
           </p>
         </Card>
       </>
@@ -181,6 +220,14 @@ function ResidentCalendarContent({ schedules, loaded, reload }) {
         title="My Follow-up Calendar"
         subtitle="Your scheduled follow-up activities from the barangay health team."
       />
+      {loadError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span>{loadError} Showing previously loaded follow-ups.</span>
+          <button type="button" onClick={reload} className="font-semibold underline underline-offset-2">
+            Try again
+          </button>
+        </div>
+      )}
 
       {/* Upcoming follow-up summary (reminders) */}
       <Card className="p-5 mb-5">

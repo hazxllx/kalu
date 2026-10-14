@@ -324,6 +324,8 @@ const VISIT_TO_DB = {
   medications: 'medications',
   bpClassification: 'bp_classification',
   referralRequired: 'referral_required',
+  healthServiceId: 'health_service_id',
+  healthServiceName: 'health_service_name',
   submittedAt: 'submitted_at',
   receivedAt: 'received_at',
   reviewedAt: 'reviewed_at',
@@ -672,7 +674,7 @@ const isMissingConsultationColumn = (error) => {
   return (
     code === 'PGRST204' ||
     code === '42703' ||
-    (/medications|bp_classification|referral_required/i.test(message) && /column/i.test(message))
+    (/medications|bp_classification|referral_required|health_service_id|health_service_name/i.test(message) && /column/i.test(message))
   );
 };
 const stripConsultationExtras = (row) => {
@@ -901,7 +903,7 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     let query = supabase
       .from('barangays')
-      .select('id, name, municipality_id, municipality:municipalities(name)')
+      .select('id, name, status, municipality_id, municipality:municipalities(name)')
       .ilike('name', String(name || '').trim())
       .limit(2);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
@@ -912,6 +914,7 @@ export const supabaseRepository = {
     return {
       id: row.id,
       name: row.name,
+      status: row.status || 'Active',
       municipalityId: row.municipality_id,
       municipality: row.municipality?.name || null,
     };
@@ -1670,7 +1673,7 @@ export const supabaseRepository = {
     return { ...visitFromRow(data), resident: residentFromRow(data.resident) };
   },
 
-  async listVisits({ q = '', statuses = null, submittedById = null, residentId = null, limit = 100, offset = 0 } = {}) {
+  async listVisits({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null, limit = 100, offset = 0 } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.visits)
@@ -1680,6 +1683,12 @@ export const supabaseRepository = {
     if (statuses && statuses.length) query = query.in('status', statuses);
     if (submittedById) query = query.eq('recorded_by_id', submittedById);
     if (residentId) query = query.eq('resident_id', residentId);
+    // Server-side date-range filter on the visit date (consultation date).
+    // `visit_date` is a timestamptz; an inclusive upper bound needs the last
+    // instant of the `to` day.
+    if (from) query = query.gte('visit_date', `${from}T00:00:00`);
+    if (to) query = query.lte('visit_date', `${to}T23:59:59.999`);
+    if (serviceId) query = query.eq('health_service_id', serviceId);
     if (q) {
       const term = String(q).trim();
       query = query.or(
@@ -1869,6 +1878,32 @@ export const supabaseRepository = {
     return data;
   },
 
+  async updateTransferRequestForReview(id, patch) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('transfer_requests')
+      .update(patch)
+      .eq('id', id)
+      .in('status', ['pending', 'under_review'])
+      .select(TRANSFER_SAFE_COLUMNS)
+      .maybeSingle();
+    throwOnError(error, 'Could not update transfer request decision');
+    return data || null;
+  },
+
+  async updateTransferRequestForSubmission(id, patch) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('transfer_requests')
+      .update(patch)
+      .eq('id', id)
+      .in('status', ['draft', 'resubmission_required'])
+      .select(TRANSFER_SAFE_COLUMNS)
+      .maybeSingle();
+    throwOnError(error, 'Could not submit transfer request');
+    return data || null;
+  },
+
   async listTransferRequests({ status = null, limit = 100, offset = 0 } = {}) {
     const supabase = getServiceClient();
     let query = supabase.from('transfer_requests').select(TRANSFER_SAFE_COLUMNS, { count: 'exact' })
@@ -1895,6 +1930,17 @@ export const supabaseRepository = {
     }).select('*').single();
     throwOnError(error, 'Could not write transfer audit log');
     return data;
+  },
+
+  async listTransferAuditLogs(transferRequestId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('transfer_request_audit_logs')
+      .select('*')
+      .eq('transfer_request_id', transferRequestId)
+      .order('created_at', { ascending: true });
+    throwOnError(error, 'Could not load transfer request history');
+    return data || [];
   },
 
   async listDocumentsByTransferRequest(transferRequestId) {

@@ -75,6 +75,8 @@ export const mapVisitToPatient = (visit) => {
     barangay: resident.barangay || null,
     residenceBarangay: resident.barangay || null,
     reason: visit.chiefComplaint || "",
+    serviceId: visit.healthServiceId || null,
+    serviceName: visit.healthServiceName || "",
     status,
     visitDate: visit.visitDate || "",
     triage: {
@@ -96,6 +98,7 @@ export const mapVisitToPatient = (visit) => {
       ? {
           assessment: visit.findings || phn.assessment || "",
           healthConcern: phn.assessment || "",
+          healthServiceName: visit.healthServiceName || "",
           clinicalNotes: phn.notes || "",
           recommendations: visit.recommendation || visit.treatmentGiven || "",
           medications: Array.isArray(visit.medications) ? visit.medications : [],

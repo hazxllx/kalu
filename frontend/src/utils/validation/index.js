@@ -17,25 +17,31 @@ export const TEXT_LIMITS = Object.freeze({
   notes: 2000,
 });
 
-export const NAME_SUFFIXES = Object.freeze(['Jr.', 'Sr.', 'II', 'III', 'IV', 'V']);
+export const NAME_SUFFIXES = Object.freeze(['', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V']);
 export const SEX_OPTIONS = Object.freeze(['Male', 'Female']);
 export const CIVIL_STATUSES = Object.freeze(['Single', 'Married', 'Widowed', 'Separated']);
 export const MIN_REJECTION_REASON = 5;
+const PASSWORD_POLICY = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
 
 const PH_MOBILE = /^(?:\+63|0)9\d{9}$/;
 const PH_MOBILE_STRICT = /^09\d{9}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-/** Controlled Zone values for a resident/household address. */
+  /** Controlled Zone values for a resident/household address. */
 export const ZONE_VALUES = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8]);
+
+/** Strict YYYY-MM-DD pattern: exactly 4-digit year, 01..12 month, 01..31 day (calendar validity checked separately). */
+export const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const asString = (value) => (value === null || value === undefined ? '' : String(value));
 export const text = (value) => asString(value).trim();
 export const isBlank = (value) => text(value) === '';
+export const hasControlChars = (value) => /[\u0000-\u001F\u007F]/.test(asString(value));
 
 export const hasMaxLength = (value, max) => asString(value).length <= max;
 export const normalizePhone = (value) => asString(value).replace(/[\s()\-.]/g, '');
 export const isPhonePH = (value) => PH_MOBILE.test(normalizePhone(value));
+export const isStrongPassword = (value) => PASSWORD_POLICY.test(asString(value));
 /**
  * Strict registration mobile: EXACTLY 11 digits, starting 09, no separators or
  * letters. Mirrors backend `isStrictMobile`. Kept separate from `isPhonePH` so
@@ -72,7 +78,7 @@ export const ageFromDate = (value, now = new Date()) => {
 
 const parseDateOnly = (value) => {
   const raw = text(value);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  if (!DATE_ONLY_PATTERN.test(raw)) return null;
   const [year, month, day] = raw.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
@@ -175,23 +181,25 @@ export const rejectionReason = (value, { label = 'reason', min = MIN_REJECTION_R
 };
 
 /** Password strength checks (mirrors registration pages). */
-export const checkPasswordStrength = (pw) => {
+export const checkPasswordStrength = (pw = '') => {
+  const source = asString(pw);
   const checks = [
-    { label: 'At least 8 characters', pass: pw.length >= 8 },
-    { label: 'Uppercase letter', pass: /[A-Z]/.test(pw) },
-    { label: 'Lowercase letter', pass: /[a-z]/.test(pw) },
-    { label: 'Number', pass: /\d/.test(pw) },
-    { label: 'Special character', pass: /[^A-Za-z0-9]/.test(pw) },
+    { label: 'At least 8 characters', pass: source.length >= 8 },
+    { label: 'Uppercase letter', pass: /[A-Z]/.test(source) },
+    { label: 'Lowercase letter', pass: /[a-z]/.test(source) },
+    { label: 'Number', pass: /\d/.test(source) },
+    { label: 'Special character', pass: /[^A-Za-z0-9]/.test(source) },
   ];
   const score = checks.filter((c) => c.pass).length;
   return { checks, score };
 };
 
-/** Validate password meets all requirements (score >= 5). */
+/** Validate password meets all requirements. */
 export const validatePassword = (value, { label = 'Password', isRequired = true } = {}) => {
   if (isBlank(value)) return isRequired ? `${label} is required.` : '';
-  const { score } = checkPasswordStrength(value);
-  if (score < 5) return 'Password must meet all requirements: at least 8 characters, uppercase, lowercase, number, and special character.';
+  if (!isStrongPassword(value)) {
+    return 'Password must meet all requirements: at least 8 characters, uppercase, lowercase, number, and special character.';
+  }
   return '';
 };
 
@@ -226,8 +234,10 @@ export default {
   CIVIL_STATUSES,
   MIN_REJECTION_REASON,
   isBlank,
+  hasControlChars,
   isEmail,
   isPhonePH,
+  isStrongPassword,
   isStrictMobile,
   digitsOnly,
   normalizePhone,

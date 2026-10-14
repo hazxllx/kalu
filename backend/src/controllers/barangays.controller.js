@@ -1,6 +1,9 @@
 /**
  * Admin Barangay Management endpoints (admin-only). Thin controllers: read the
  * request, delegate to the service, return the standard envelope.
+ *
+ * Barangays are status-managed (Active/Inactive); the permanent-delete
+ * controller was removed with the delete endpoint.
  */
 import * as barangaysService from '../services/barangays.service.js';
 import { sendData } from '../utils/apiResponse.js';
@@ -39,12 +42,14 @@ export const updateBarangay = async (req, res) => {
   sendData(res, { barangay });
 };
 
-export const deleteBarangay = async (req, res) => {
-  const result = await barangaysService.deleteBarangay({
+// Dedicated Active/Inactive status change (replaces delete-based management).
+export const updateBarangayStatus = async (req, res) => {
+  const barangay = await barangaysService.updateBarangayStatus({
     id: req.params.id,
     actorId: req.user.id,
+    status: req.body?.status,
   });
-  sendData(res, result);
+  sendData(res, { barangay });
 };
 
 export default {
@@ -53,5 +58,5 @@ export default {
   getBarangay,
   createBarangay,
   updateBarangay,
-  deleteBarangay,
+  updateBarangayStatus,
 };

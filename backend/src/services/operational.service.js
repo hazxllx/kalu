@@ -13,6 +13,7 @@ const TABLES = Object.freeze({
   notifications: 'notifications',
 });
 const STAFF = new Set(['health_supervisor', 'phn', 'mho']);
+const FOLLOW_UP_PAGE_SIZE = 200;
 const text = (v) => String(v ?? '').trim();
 const normalizeKind = (kind) => {
   const candidate = String(kind ?? '').trim().toLowerCase();
@@ -274,7 +275,8 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
     residentId = ownResident.id;
   }
   const select = selectFor(normalizedKind);
-  let query = supabase.from(tableName).select(select).order('created_at', { ascending: false }).limit(200);
+  let query = supabase.from(tableName).select(select).order('created_at', { ascending: false });
+  if (normalizedKind !== 'followups') query = query.limit(FOLLOW_UP_PAGE_SIZE);
   if (user.role === 'health_supervisor') {
     if (!user.barangayId) return [];
     query = query.eq('barangay_id', user.barangayId);
@@ -292,9 +294,19 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
     if (from) query = query.gte('visit_date', from);
     if (to) query = query.lte('visit_date', to);
   }
+  if (normalizedKind === 'followups') {
+    query = query.order('id', { ascending: true });
+    const rows = [];
+    for (let offset = 0; ; offset += FOLLOW_UP_PAGE_SIZE) {
+      const { data, error } = await query.range(offset, offset + FOLLOW_UP_PAGE_SIZE - 1);
+      throwOnError(error, 'Could not load followups');
+      rows.push(...(data || []));
+      if (!data || data.length < FOLLOW_UP_PAGE_SIZE) break;
+    }
+    return rows.map((row) => withScheduleState(row));
+  }
   const { data, error } = await query;
   throwOnError(error, `Could not load ${normalizedKind}`);
-  if (normalizedKind === 'followups') return (data || []).map((row) => withScheduleState(row));
   return data || [];
 };
 

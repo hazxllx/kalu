@@ -97,6 +97,16 @@ export const updateBarangayValidator = (input = {}) => {
   return valid(out);
 };
 
+/**
+ * Status-only change (PATCH /barangays/:id/status). Barangays are managed by
+ * status, not deletion; this is the dedicated endpoint for Active/Inactive.
+ */
+export const updateBarangayStatusValidator = (input = {}) => {
+  const status = normalizeStatus(input?.status);
+  if (!status) return invalid({ status: 'Status must be either Active or Inactive.' });
+  return valid({ status });
+};
+
 export const barangayIdParamValidator = (params = {}) => {
   const id = text(params.id);
   if (!id) return invalid({ id: 'A barangay reference is required.' });
@@ -107,5 +117,6 @@ export const barangayIdParamValidator = (params = {}) => {
 export default {
   createBarangayValidator,
   updateBarangayValidator,
+  updateBarangayStatusValidator,
   barangayIdParamValidator,
 };

@@ -6,17 +6,16 @@ import { getServiceClient } from '../config/supabase.js';
  *
  * The barangay registry (public.barangays) is the authoritative source for
  * every barangay dropdown and barangay-scoped query in KALUSAGAP. This service
- * backs the Admin "Barangay Management" page: list / create / update / delete,
- * with:
+ * backs the Admin "Barangay Management" page: list / create / update with:
  *
  *   - uniqueness enforced per municipality (DB constraint + friendly 409);
  *   - rename propagation to the denormalized `barangay` name columns on
  *     residents and households, so a rename never desynchronizes those rows
  *     (relationships stay keyed on the stable barangay_id);
- *   - safe deletion: a barangay that is referenced by any account, facility,
- *     resident, household or visit cannot be hard-deleted. The admin is told to
- *     deactivate (status = 'Inactive') instead, so no resident account, health
- *     record, household or historical report is ever cascade-deleted;
+ *   - STATUS-based management: every barangay carries an Active/Inactive
+ *     status. Deactivation preserves residents, assignments, records and
+ *     history while hiding the barangay from new selections; there is no
+ *     permanent delete workflow in routine management.
  *   - audit entries in public.health_audit_logs for every mutation.
  *
  * Authorization is enforced at the route (authorize(FEATURE_ROLES.barangays) =>
@@ -29,7 +28,6 @@ const BARANGAY_SELECT =
   + 'municipality_id, created_at, updated_at, municipality:municipalities(id, name, province)';
 
 const PG_UNIQUE_VIOLATION = '23505';
-const PG_FK_VIOLATION = '23503';
 
 const supabase = () => getServiceClient();
 
@@ -270,45 +268,43 @@ export const updateBarangay = async ({ id, actorId, patch }) => {
   return toRecord(data);
 };
 
-export const deleteBarangay = async ({ id, actorId }) => {
+/**
+ * Dedicated Active/Inactive status change for one barangay.
+ *
+ * Status-based management replaces deletion: an inactive barangay is preserved
+ * together with its residents, households, personnel assignments and history,
+ * while being excluded from new selections (the app-wide barangay registry
+ * loads only status='Active' rows). Returns the updated record; the change is
+ * audited and the frontend re-reads it immediately.
+ */
+export const updateBarangayStatus = async ({ id, actorId, status }) => {
+  const normalized = String(status ?? '').trim();
+  if (normalized !== 'Active' && normalized !== 'Inactive') {
+    throw ApiError.badRequest('Status must be either Active or Inactive.');
+  }
   const existing = await getRow(id);
-  const dependencies = await getDependencies(id);
-
-  if (dependencies.total > 0) {
-    const detail = [];
-    if (dependencies.personnel) detail.push(`${dependencies.personnel} personnel account(s)`);
-    if (dependencies.residents) detail.push(`${dependencies.residents} resident(s)`);
-    if (dependencies.households) detail.push(`${dependencies.households} household(s)`);
-    if (dependencies.facilities) detail.push(`${dependencies.facilities} facility/health station(s)`);
-    if (dependencies.visits) detail.push(`${dependencies.visits} visit record(s)`);
-    throw new ApiError(
-      409,
-      `"${existing.name}" is still referenced by ${detail.join(', ')} and cannot be deleted. `
-      + 'Deactivate it instead (set its status to Inactive) to preserve existing records.',
-      { dependencies, canDeactivate: existing.status === 'Active' },
-    );
+  if (existing.status === normalized) {
+    return toRecord(existing);
   }
 
-  const { error } = await supabase().from('barangays').delete().eq('id', id);
-  if (error?.code === PG_FK_VIOLATION) {
-    // Safety net: a reference we did not explicitly count still blocks the
-    // delete at the database. Never cascade.
-    throw ApiError.conflict(
-      `"${existing.name}" is still referenced by other records and cannot be deleted. Deactivate it instead.`,
-    );
-  }
-  throwOnError(error, 'Could not delete the barangay');
+  const { data, error } = await supabase()
+    .from('barangays')
+    .update({ status: normalized })
+    .eq('id', id)
+    .select(BARANGAY_SELECT)
+    .single();
+  throwOnError(error, 'Could not update the barangay status');
 
   await recordAudit({
     actorId,
-    action: 'BARANGAY_DELETED',
+    action: 'BARANGAY_STATUS_CHANGED',
     entityId: id,
-    municipalityId: existing.municipality_id,
-    barangayId: null,
-    metadata: { name: existing.name },
+    municipalityId: data.municipality_id,
+    barangayId: id,
+    metadata: { name: data.name, previousStatus: existing.status, newStatus: data.status },
   });
 
-  return { deleted: true, id };
+  return toRecord(data);
 };
 
 export default {
@@ -317,5 +313,5 @@ export default {
   getBarangay,
   createBarangay,
   updateBarangay,
-  deleteBarangay,
+  updateBarangayStatus,
 };

@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { normalizeApiBaseUrl } from './apiBaseUrl';
+import { resolveApiBaseUrl } from './apiBaseUrl';
 import {
   MUTATION_TIER,
   OfflineActionRequiredError,
@@ -23,7 +23,7 @@ import {
  * empty state when the endpoint supplies no rows — no fabricated data is
  * rendered anywhere in the app.
  */
-const BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
+const BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_URL, import.meta.env.PROD);
 
 /**
  * @typedef {Object} RequestOptions

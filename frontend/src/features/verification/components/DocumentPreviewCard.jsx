@@ -19,7 +19,14 @@ const isImage = (mimeType) => String(mimeType || "").toLowerCase().startsWith("i
  * @param {(id:string) => Promise<string|null>} [onRefreshUrl] optional secure-link refresh
  * @param {React.ReactNode} [footer] optional extra controls rendered under the card
  */
-export default function DocumentPreviewCard({ doc, onEnlarge, onRefreshUrl, footer }) {
+export default function DocumentPreviewCard({
+  doc,
+  onEnlarge,
+  onRefreshUrl,
+  footer,
+  filenameWrap = false,
+  statusClassName = "",
+}) {
   const [url, setUrl] = useState(doc?.url || "");
   const [state, setState] = useState(doc?.url ? "loading" : "error"); // 'loading' | 'loaded' | 'error'
   const [refreshing, setRefreshing] = useState(false);
@@ -103,11 +110,11 @@ export default function DocumentPreviewCard({ doc, onEnlarge, onRefreshUrl, foot
 
         <div className="flex min-w-0 items-center justify-between gap-3 border-t border-slate-200 px-3 py-2.5 dark:border-border">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-brand-ink" title={title}>{title}</p>
+            <p className={`text-sm font-medium text-brand-ink ${filenameWrap ? "break-words" : "truncate"}`} title={title}>{title}</p>
             {doc?.filename && doc.filename !== title && (
-              <p className="truncate text-xs text-brand-gray" title={doc.filename}>{doc.filename}</p>
+              <p className={`text-xs text-brand-gray ${filenameWrap ? "break-all" : "truncate"}`} title={doc.filename}>{doc.filename}</p>
             )}
-            {doc?.statusLabel && <p className="truncate text-[11px] text-brand-gray">{doc.statusLabel}</p>}
+            {doc?.statusLabel && <p className={`text-[11px] ${statusClassName || "text-brand-gray"} ${filenameWrap ? "break-words" : "truncate"}`}>{doc.statusLabel}</p>}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {image && state === "loaded" && (

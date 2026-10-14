@@ -41,6 +41,7 @@ const STATUS_COLORS = {
   "Submitted to RHU": "bg-brand-green/10 text-brand-green",
   "Submitted to MHO": "bg-brand-green/10 text-brand-green",
   Received: "bg-brand-yellow/15 text-[#B07E00]",
+  "Needs Revision": "bg-brand-danger/10 text-brand-danger",
   Reviewed: "bg-brand-green/10 text-brand-green",
   Rejected: "bg-brand-danger/10 text-brand-danger",
 };
@@ -170,6 +171,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const [submitting, setSubmitting] = useState(false);
   // Read-only details of a persisted, submitted report (View action).
   const [detailReport, setDetailReport] = useState(/** @type {any} */ (null));
+  const [revisionTarget, setRevisionTarget] = useState(/** @type {any} */ (null));
   // The persisted snapshot for the opened report, fetched on demand so the
   // sender reviews EXACTLY what was submitted (not a live reconstruction).
   const [detailContent, setDetailContent] = useState(/** @type {any} */ (null));
@@ -210,6 +212,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
           date: row.createdAt ? new Date(row.createdAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "",
           barangay: row.barangay || assignedBarangay || "",
           submittedDate: row.submittedAt ? new Date(row.submittedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "",
+          remarks: row.remarks || "",
           persisted: true,
         }));
         setReports((prev) => {
@@ -353,15 +356,20 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     if (!canSubmitReports || submitting || !preview) return;
     setSubmitting(true);
     try {
-      await reportsApi.create({
+      const content = buildReportContent(preview);
+      if (revisionTarget?.id) {
+        await reportsApi.resubmit(revisionTarget.id, { content });
+      } else {
+        await reportsApi.create({
         reportType: preview.type,
         reportPeriod: preview.period || "",
         title: preview.name || "",
         // Persist the EXACT reviewed report as an immutable snapshot so the
         // recipient (and this sender later) sees what was submitted, not a
         // reconstruction from live records.
-        content: buildReportContent(preview),
-      });
+          content,
+        });
+      }
     } catch (err) {
       // Honest failure — the report is NOT marked submitted and the preview
       // stays open so the user can retry or go back.
@@ -373,8 +381,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     setShowPreview(false);
     setShowFullPreview(false);
     setPreview(null);
+    setRevisionTarget(null);
     setReportForm({ reportType: "", period: "", barangay: phnDefaultBarangay(user, coverage) });
-    showToast("Report submitted successfully.");
+    showToast(revisionTarget ? "Revised report submitted successfully." : "Report submitted successfully.");
     // Re-sync from the backend so the new row (server id/status/timestamps) shows.
     await loadOutgoing();
   };
@@ -443,14 +452,17 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     const countBy = (pred) => scopedReports.filter(pred).length;
     return [
       { label: "Total Reports", value: String(total) },
-      { label: `Submitted to ${submitTarget}`, value: String(countBy((r) => isSubmittedStatus(r.status))) },
-      { label: "Received", value: String(countBy((r) => r.status === "Received")) },
-      { label: "Reviewed", value: String(countBy((r) => r.status === "Reviewed")) },
-      { label: "Returned / Rejected", value: String(countBy((r) => r.status === "Rejected")) },
+      { label: "Pending Review", value: String(countBy((r) => ["Submitted", "Submitted to RHU", "Submitted to MHO", "Received"].includes(r.status))) },
+      { label: "Approved", value: String(countBy((r) => r.status === "Reviewed")) },
+      { label: "Needs Revision", value: String(countBy((r) => r.status === "Needs Revision")) },
+      { label: "Rejected", value: String(countBy((r) => r.status === "Rejected")) },
     ];
   }, [scopedReports, submitTarget]);
-  const displayStatus = (report) =>
-    isPhn && report.status === "Submitted to RHU" ? "Submitted to MHO" : report.status;
+  const displayStatus = (report) => {
+    if (["Submitted", "Submitted to RHU", "Submitted to MHO", "Received"].includes(report.status)) return "Pending Review";
+    if (report.status === "Reviewed") return "Approved";
+    return report.status;
+  };
 
   return (
     <>
@@ -903,7 +915,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                     disabled={submitting}
                     className="flex items-center justify-center gap-2 px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <Send className="w-4 h-4" /> {submitting ? "Submitting…" : `Submit to ${submitTarget}`}
+                    <Send className="w-4 h-4" /> {submitting ? "Submitting…" : revisionTarget ? `Resubmit to ${submitTarget}` : `Submit to ${submitTarget}`}
                   </button>
                 )}
               </div>
@@ -1084,6 +1096,24 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               </div>
 
               <div className="mt-6 flex justify-end">
+                {canSubmitReports && detailReport.status === "Needs Revision" && (
+                  <button
+                    onClick={() => {
+                      setRevisionTarget(detailReport);
+                      setReportForm({
+                        reportType: detailReport.type || "",
+                        period: detailReport.period || "",
+                        barangay: detailReport.barangay || assignedBarangay || phnDefaultBarangay(user, coverage),
+                      });
+                      setFormErrors({});
+                      setDetailReport(null);
+                      showToast("Update the report period's source records, then generate and review the revised snapshot.");
+                    }}
+                    className="mr-auto rounded-btn border border-brand-blue px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-blue/5"
+                  >
+                    Prepare revision
+                  </button>
+                )}
                 <button
                   onClick={() => setDetailReport(null)}
                   className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"

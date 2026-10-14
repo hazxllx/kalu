@@ -9,7 +9,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 /**
  * Role & permission matrix (BUG-011).
  *
- *   GET   /roles/permissions         any authenticated staff (drives UI)
+ *   GET   /roles/permissions         authenticated user (own role; full matrix for admin)
  *   PATCH /roles/:role/permissions   administrators only
  *
  * The authoritative matrix lives in public.role_permissions; writes are

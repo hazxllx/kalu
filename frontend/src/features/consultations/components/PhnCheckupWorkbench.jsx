@@ -5,6 +5,7 @@ import { calculateRiskLevel } from "@/lib/riskRules";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 import { useWorkflowStore } from "@/services/local/workflowStore";
 import { useAuth } from "@/context/AuthContext";
+import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 
@@ -95,6 +96,10 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const [healthConcern, setHealthConcern] = useState("");
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [recommendations, setRecommendations] = useState("");
+  const [healthServiceId, setHealthServiceId] = useState("");
+  const [healthServices, setHealthServices] = useState([]);
+  const [healthServicesLoading, setHealthServicesLoading] = useState(false);
+  const [healthServicesError, setHealthServicesError] = useState("");
   const [medications, setMedications] = useState(/** @type {any[]} */ ([]));
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [justCompleted, setJustCompleted] = useState(false);
@@ -136,6 +141,32 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     }
   }, [checkup]);
 
+  useEffect(() => {
+    setHealthServiceId(patient?.serviceId || patient?.raw?.healthServiceId || "");
+    setHealthServices([]);
+    setHealthServicesError("");
+    if (completed) return undefined;
+
+    let active = true;
+    setHealthServicesLoading(true);
+    phnWorkflowApi
+      .listConsultationHealthServices()
+      .then((rows) => {
+        if (active) setHealthServices(rows);
+      })
+      .catch((error) => {
+        if (active) {
+          setHealthServicesError(error?.message || "Could not load active health services.");
+        }
+      })
+      .finally(() => {
+        if (active) setHealthServicesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [patient?.id, patient?.serviceId, patient?.raw?.healthServiceId, completed]);
+
   // Automatic, rule-based risk level that re-evaluates live as the PHN types.
   const autoRisk = useMemo(
     () =>
@@ -171,6 +202,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
       medications: (Array.isArray(medications) ? medications : []).filter(
         (m) => String(m?.genericName || "").trim(),
       ),
+      healthServiceId: healthServiceId || null,
     };
     setJustCompleted(true);
     onComplete?.(recorded);
@@ -295,6 +327,11 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   <div className="grid grid-cols-2 gap-3">
                     <InfoItem label="Assessment / Findings" value={checkup.assessment} />
                     <InfoItem label="Health Concern" value={checkup.healthConcern} />
+                    <InfoItem
+                      label="Health Service"
+                      value={patient?.serviceName || patient?.raw?.healthServiceName}
+                      fallback="No specific health service"
+                    />
                     <div>
                       <p className="text-xs text-brand-gray mb-1">Risk Level</p>
                       <RiskPill level={checkup.riskLevel || autoRisk.level} />
@@ -370,6 +407,39 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   recommendations for this check-up.
                 </p>
                 <div className="space-y-4">
+                  <div>
+                    <label htmlFor="phn-health-service" className="text-sm font-medium text-brand-ink block mb-1.5">
+                      Health Service
+                    </label>
+                    <select
+                      id="phn-health-service"
+                      value={healthServiceId}
+                      onChange={(event) => setHealthServiceId(event.target.value)}
+                      disabled={healthServicesLoading}
+                      className={inputCls(false)}
+                    >
+                      <option value="">General consultation (no specific service)</option>
+                      {healthServiceId && !healthServices.some((service) => service.id === healthServiceId) && (
+                        <option value={healthServiceId} disabled>
+                          {patient?.serviceName || patient?.raw?.healthServiceName || "Previously selected service"} (inactive or unavailable)
+                        </option>
+                      )}
+                      {healthServices.map((service) => (
+                        <option key={service.id} value={service.id}>
+                          {service.name}{service.category ? ` — ${service.category}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {healthServicesLoading ? (
+                      <p className="mt-1 text-xs text-brand-gray">Loading active health services…</p>
+                    ) : healthServicesError ? (
+                      <p className="mt-1 text-xs text-brand-danger" role="alert">{healthServicesError}</p>
+                    ) : healthServices.length === 0 ? (
+                      <p className="mt-1 text-xs text-brand-gray">No active health services are available in your consultation scope.</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-brand-gray">Optional. Choose the registered service associated with this consultation.</p>
+                    )}
+                  </div>
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
                       <label className="text-sm font-medium text-brand-ink block mb-1.5">

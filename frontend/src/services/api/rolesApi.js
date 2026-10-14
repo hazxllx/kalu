@@ -1,4 +1,5 @@
 import { api } from "./apiClient";
+import { readPermissionMatrix } from "./rolesPermissionsResponse";
 
 /**
  * Role & permission matrix API (BUG-011).
@@ -12,7 +13,7 @@ export const rolesApi = {
   /** Full stored matrix: { [role]: { [permissionId]: granted } }. */
   getMatrix: async () => {
     const payload = await api.get("/roles/permissions");
-    return payload?.matrix || {};
+    return readPermissionMatrix(payload);
   },
   /** Replace one role's overrides (administrators only). */
   updateRolePermissions: (role, permissions) =>

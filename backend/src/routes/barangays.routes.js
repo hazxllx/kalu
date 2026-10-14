@@ -9,6 +9,7 @@ import * as controller from '../controllers/barangays.controller.js';
 import {
   createBarangayValidator,
   updateBarangayValidator,
+  updateBarangayStatusValidator,
   barangayIdParamValidator,
 } from '../validators/barangays.validators.js';
 
@@ -22,12 +23,17 @@ import {
  * read-only barangay dropdowns do NOT use these endpoints — they read
  * public.barangays directly through the Supabase public-read policy.
  *
+ * Barangays are managed by STATUS, not by deletion (permanent delete was
+ * removed): setting a barangay Inactive keeps every resident, household,
+ * personnel assignment and historical record intact while hiding it from new
+ * selections. There is intentionally NO DELETE route here.
+ *
  *   GET    /api/barangays          list (search: ?q; filter: ?municipalityId, ?status)
  *   GET    /api/barangays/options  municipality + status choices for the editor
  *   POST   /api/barangays          create a barangay
  *   GET    /api/barangays/:id      read one barangay + dependency summary
  *   PUT    /api/barangays/:id      update (rename propagates to denormalized names)
- *   DELETE /api/barangays/:id      delete when safe; blocked when referenced
+ *   PATCH  /api/barangays/:id/status   change Active/Inactive status only
  */
 const router = Router();
 
@@ -40,6 +46,6 @@ router.get('/', asyncHandler(controller.listBarangays));
 router.post('/', validate(createBarangayValidator), asyncHandler(controller.createBarangay));
 router.get('/:id', idParam, asyncHandler(controller.getBarangay));
 router.put('/:id', idParam, validate(updateBarangayValidator), asyncHandler(controller.updateBarangay));
-router.delete('/:id', idParam, asyncHandler(controller.deleteBarangay));
+router.patch('/:id/status', idParam, validate(updateBarangayStatusValidator), asyncHandler(controller.updateBarangayStatus));
 
 export default router;

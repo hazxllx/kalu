@@ -8,7 +8,7 @@ import { useBarangays } from "@/context/BarangaysContext";
 import { barangaysApi } from "@/services/api";
 import {
   AlertTriangle, Ban, Building2, CheckCircle2, Filter, Loader2, MapPin, Pencil,
-  Plus, RotateCcw, Search, Trash2, X,
+  Plus, RotateCcw, Search, X,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------------- */
@@ -283,82 +283,64 @@ function BarangayModal({ mode, record, municipalities, onClose, onSaved }) {
 }
 
 /* ------------------------------------------------------------------------- */
-/* Delete confirmation dialog                                                */
+/* Status change confirmation (replaces delete-based management)             */
 /* ------------------------------------------------------------------------- */
 
-function DeleteDialog({ record, onClose, onDeleted, onDeactivated }) {
+function StatusDialog({ record, targetStatus, onClose, onChanged }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
-  const [blocked, setBlocked] = useState(/** @type {null | { message: string, canDeactivate: boolean }} */ (null));
+  const deactivating = targetStatus === "Inactive";
 
-  // Lock background scrolling while the dialog is open and close on Escape.
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (e) => { if (e.key === "Escape" && !busy) onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose, busy]);
-
-  const doDelete = async () => {
-    if (busy) return;
-    setBusy(true);
-    setBlocked(null);
-    try {
-      await barangaysApi.remove(record.id);
-      toast({ title: "Barangay deleted", description: `"${record.name}" has been removed.` });
-      onDeleted();
-    } catch (err) {
-      if (err?.status === 409) {
-        setBlocked({
-          message: err?.message || "This barangay is still referenced by existing records.",
-          canDeactivate: record.status === "Active",
-        });
-      } else {
-        toast({ variant: "destructive", title: "Could not delete barangay", description: err?.message || "Please try again." });
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doDeactivate = async () => {
+  const changeStatus = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      await barangaysApi.update(record.id, { status: "Inactive" });
-      toast({ title: "Barangay deactivated", description: `"${record.name}" is now Inactive and hidden from new selections.` });
-      onDeactivated();
+      await barangaysApi.setStatus(record.id, targetStatus);
+      toast({
+        title: deactivating ? "Barangay deactivated" : "Barangay activated",
+        description:
+          `"${record.name}" is now ${targetStatus}.`
+          + (deactivating
+            ? " It is hidden from new selections; existing residents and records are kept."
+            : " It is available for new selections again."),
+      });
+      onChanged();
     } catch (err) {
-      toast({ variant: "destructive", title: "Could not deactivate barangay", description: err?.message || "Please try again." });
-    } finally {
+      toast({
+        variant: "destructive",
+        title: deactivating ? "Could not deactivate barangay" : "Could not activate barangay",
+        description: err?.message || "Please try again.",
+      });
       setBusy(false);
     }
   };
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={onClose}>
-      <Card role="dialog" aria-modal="true" aria-label="Delete barangay" className="w-full max-w-md" onMouseDown={(e) => e.stopPropagation()}>
+      <Card role="dialog" aria-modal="true" aria-label="Change barangay status" className="w-full max-w-md" onMouseDown={(e) => e.stopPropagation()}>
         <div className="p-6">
           <div className="flex items-start gap-3">
-            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${blocked ? "bg-amber-50 text-amber-600" : "bg-rose-50 text-rose-600"}`}>
-              {blocked ? <AlertTriangle className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
+            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${deactivating ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-700"}`}>
+              {deactivating ? <Ban className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
             </span>
             <div className="min-w-0">
               <h3 className="text-lg font-semibold text-brand-ink">
-                {blocked ? "Cannot delete this barangay" : "Delete barangay"}
+                {deactivating ? "Deactivate barangay" : "Activate barangay"}
               </h3>
-              {blocked ? (
-                <p className="mt-1 text-sm text-brand-gray">{blocked.message}</p>
-              ) : (
-                <p className="mt-1 text-sm text-brand-gray">
-                  Are you sure you want to permanently delete <span className="font-medium text-brand-ink">Brgy. {record.name}</span>?
-                  This cannot be undone. Barangays with existing residents, households, personnel or records cannot be deleted.
-                </p>
-              )}
+              <p className="mt-1 text-sm text-brand-gray">
+                {deactivating ? (
+                  <>
+                    Set <span className="font-medium text-brand-ink">Brgy. {record.name}</span> to Inactive?
+                    It will be hidden from new registrations and assignments, while all of its residents,
+                    households, personnel and historical records are kept exactly as they are.
+                  </>
+                ) : (
+                  <>
+                    Set <span className="font-medium text-brand-ink">Brgy. {record.name}</span> to Active?
+                    It will be selectable again for new registrations and assignments. Existing records are unchanged.
+                  </>
+                )}
+              </p>
             </div>
           </div>
 
@@ -366,33 +348,22 @@ function DeleteDialog({ record, onClose, onDeleted, onDeactivated }) {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg"
+              disabled={busy}
+              className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60"
             >
-              {blocked ? "Close" : "Cancel"}
+              Cancel
             </button>
-            {blocked ? (
-              blocked.canDeactivate && (
-                <button
-                  type="button"
-                  onClick={doDeactivate}
-                  disabled={busy}
-                  className="inline-flex items-center gap-2 rounded-btn bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
-                >
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
-                  Deactivate instead
-                </button>
-              )
-            ) : (
-              <button
-                type="button"
-                onClick={doDelete}
-                disabled={busy}
-                className="inline-flex items-center gap-2 rounded-btn bg-brand-danger px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
-              >
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                Delete
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={changeStatus}
+              disabled={busy}
+              className={`inline-flex items-center gap-2 rounded-btn px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-60 ${
+                deactivating ? "bg-amber-500 hover:bg-amber-600" : "bg-brand-blue hover:bg-brand-dark"
+              }`}
+            >
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+              {deactivating ? "Deactivate" : "Activate"}
+            </button>
           </div>
         </div>
       </Card>
@@ -422,7 +393,8 @@ export default function BarangayManagement() {
   const [statusFilter, setStatusFilter] = useState("");
 
   const [modal, setModal] = useState(/** @type {null | { mode: "add"|"edit", record?: any }} */ (null));
-  const [deleteTarget, setDeleteTarget] = useState(/** @type {any} */ (null));
+  // Status management replaces deletion: confirm before flipping Active/Inactive.
+  const [statusTarget, setStatusTarget] = useState(/** @type {null | { record: any, status: "Active"|"Inactive" }} */ (null));
 
   const requestSeq = useRef(0);
 
@@ -471,7 +443,7 @@ export default function BarangayManagement() {
   // barangay registry so every dropdown picks the change up immediately.
   const afterMutation = useCallback(() => {
     setModal(null);
-    setDeleteTarget(null);
+    setStatusTarget(null);
     load();
     refreshBarangayRegistry();
   }, [load, refreshBarangayRegistry]);
@@ -495,7 +467,7 @@ export default function BarangayManagement() {
       <PageHeader
         crumbs={["Admin", "Barangay Management"]}
         title="Barangay Management"
-        subtitle="Create, edit, and manage the barangays used across KALUSAGAP. Changes apply everywhere a barangay is selected."
+        subtitle="Create and manage the barangays used across KALUSAGAP. Barangays are kept in the registry and managed by Active/Inactive status — existing records are never removed."
         action={
           canManage ? (
             <button
@@ -666,13 +638,25 @@ export default function BarangayManagement() {
                       >
                         <Pencil className="h-3.5 w-3.5" /> Edit
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(b)}
-                        className="inline-flex items-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-brand-danger transition-colors hover:border-brand-danger hover:bg-brand-danger/5"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" /> Delete
-                      </button>
+                      {canManage && (
+                        b.status === "Active" ? (
+                          <button
+                            type="button"
+                            onClick={() => setStatusTarget({ record: b, status: "Inactive" })}
+                            className="inline-flex items-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:border-amber-400 hover:bg-amber-50"
+                          >
+                            <Ban className="h-3.5 w-3.5" /> Deactivate
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setStatusTarget({ record: b, status: "Active" })}
+                            className="inline-flex items-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:border-emerald-400 hover:bg-emerald-50"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Activate
+                          </button>
+                        )
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -713,9 +697,17 @@ export default function BarangayManagement() {
                 <button type="button" onClick={() => setModal({ mode: "edit", record: b })} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-2 text-xs font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
                   <Pencil className="h-3.5 w-3.5" /> Edit
                 </button>
-                <button type="button" onClick={() => setDeleteTarget(b)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-2 text-xs font-medium text-brand-danger hover:border-brand-danger hover:bg-brand-danger/5">
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </button>
+                {canManage && (
+                  b.status === "Active" ? (
+                    <button type="button" onClick={() => setStatusTarget({ record: b, status: "Inactive" })} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-2 text-xs font-medium text-amber-700 hover:border-amber-400 hover:bg-amber-50">
+                      <Ban className="h-3.5 w-3.5" /> Deactivate
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setStatusTarget({ record: b, status: "Active" })} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-slate-200 px-2.5 py-2 text-xs font-medium text-emerald-700 hover:border-emerald-400 hover:bg-emerald-50">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Activate
+                    </button>
+                  )
+                )}
               </div>
             </Card>
           ))
@@ -732,12 +724,12 @@ export default function BarangayManagement() {
         />
       )}
 
-      {deleteTarget && (
-        <DeleteDialog
-          record={deleteTarget}
-          onClose={() => setDeleteTarget(null)}
-          onDeleted={afterMutation}
-          onDeactivated={afterMutation}
+      {statusTarget && (
+        <StatusDialog
+          record={statusTarget.record}
+          targetStatus={statusTarget.status}
+          onClose={() => setStatusTarget(null)}
+          onChanged={afterMutation}
         />
       )}
     </>

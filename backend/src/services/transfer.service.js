@@ -435,12 +435,13 @@ export const submit = async ({ user, requestId }) => {
     throw ApiError.unprocessable('Upload a supporting document before submitting your transfer request.');
   }
   const wasResubmission = request.status === 'resubmission_required';
-  const updated = await repository.updateTransferRequest(request.id, {
+  const updated = await repository.updateTransferRequestForSubmission(request.id, {
     status: 'pending',
     submitted_at: new Date().toISOString(),
     // A fresh submission clears any prior resubmission instructions.
     resubmission_instructions: '',
   });
+  if (!updated) throw ApiError.conflict('This transfer request has already changed and must be reloaded.');
   await audit(request.id, user.id, wasResubmission ? 'transfer_request_resubmitted' : 'transfer_request_submitted');
   // Best-effort resident notification (never rolls back the submission).
   await notifyResident({
@@ -456,7 +457,11 @@ export const submit = async ({ user, requestId }) => {
   // Notify the authorized RECEIVING Health Supervisor(s) only AFTER the request
   // is persisted. Dedup-safe: at most one submission notice per supervisor per
   // request, so an HTTP retry / double-click never duplicates it.
-  await notifyReceivingSupervisors({ toBarangayId, requestId: request.id });
+  await notifyReceivingSupervisors({
+    toBarangayId,
+    requestId: request.id,
+    resubmitted: wasResubmission,
+  });
   return { id: updated.id, status: updated.status, submittedAt: field(updated, 'submitted_at', 'submittedAt') };
 };
 
@@ -467,7 +472,7 @@ export const submit = async ({ user, requestId }) => {
  * surfaced to the authorized receiving supervisor(s). Best-effort and
  * idempotent per (recipient, request).
  */
-const notifyReceivingSupervisors = async ({ toBarangayId, requestId }) => {
+const notifyReceivingSupervisors = async ({ toBarangayId, requestId, resubmitted = false }) => {
   if (!toBarangayId) return;
   let recipients = [];
   try {
@@ -476,15 +481,20 @@ const notifyReceivingSupervisors = async ({ toBarangayId, requestId }) => {
     console.error(`transfer: could not resolve receiving supervisors: ${err.message}`);
     return;
   }
-  await Promise.all(recipients.map((recipientAuthUserId) => notifyResidentOnce({
-    recipientAuthUserId,
-    category: 'information',
-    title: 'Incoming resident transfer request',
-    // No clinical detail — the review page carries the particulars.
-    message: 'A resident has requested a transfer into your barangay. Open the Resident Transfer Requests queue to review it.',
-    relatedType: 'transfer_request',
-    relatedId: requestId,
-  })));
+  await Promise.all(recipients.map((recipientAuthUserId) => {
+    const notification = {
+      recipientAuthUserId,
+      category: resubmitted ? 'reminder' : 'information',
+      title: resubmitted ? 'Resident transfer request resubmitted' : 'Incoming resident transfer request',
+      // No clinical detail — the review page carries the particulars.
+      message: resubmitted
+        ? 'A resident has corrected and resubmitted a transfer request. Open the Resident Transfer Requests queue to review it.'
+        : 'A resident has requested a transfer into your barangay. Open the Resident Transfer Requests queue to review it.',
+      relatedType: resubmitted ? 'transfer_request_resubmitted' : 'transfer_request',
+      relatedId: requestId,
+    };
+    return resubmitted ? notifyResident(notification) : notifyResidentOnce(notification);
+  }));
 };
 
 /** Resident withdraws their own open request, freeing them to submit a new one. */
@@ -603,7 +613,18 @@ export const getForReview = async ({ user, requestId }) => {
     ? await repository.getResident(field(request, 'resident_id', 'residentId'))
     : null;
   const { byId } = await barangayIndex(resident?.municipalityId || user?.municipalityId);
-  const documents = await repository.listDocumentsByTransferRequest(requestId);
+  const [documents, auditLogs] = await Promise.all([
+    repository.listDocumentsByTransferRequest(requestId),
+    repository.listTransferAuditLogs(requestId),
+  ]);
+  const actorIds = [...new Set(auditLogs.map((log) => field(log, 'actor_id', 'actorId')).filter(Boolean))];
+  const actors = new Map();
+  if (typeof repository.getProfileById === 'function') {
+    await Promise.all(actorIds.map(async (id) => {
+      const profile = await repository.getProfileById(id);
+      if (profile) actors.set(id, profile.fullName || profile.name || '');
+    }));
+  }
   return {
     request: shapeRequest(request, byId),
     resident: resident ? residentView(resident, byId) : null,
@@ -611,9 +632,17 @@ export const getForReview = async ({ user, requestId }) => {
       id: doc.id,
       documentType: doc.documentType,
       fileName: doc.fileName,
+      mimeType: doc.mimeType,
       verificationStatus: doc.verificationStatus,
+      rejectionReason: doc.rejectionReason || '',
       url: await getDocumentSignedUrl(doc.storagePath),
     }))),
+    decisionHistory: auditLogs.map((log) => ({
+      action: log.action,
+      actorName: actors.get(field(log, 'actor_id', 'actorId')) || 'Reviewer',
+      createdAt: field(log, 'created_at', 'createdAt'),
+      metadata: log.metadata || {},
+    })),
   };
 };
 
@@ -641,6 +670,16 @@ export const approve = async ({ user, requestId }) => {
     throw ApiError.forbidden('Only the receiving barangay\u2019s authorized health supervisor may approve this transfer.');
   }
 
+  const documents = await repository.listDocumentsByTransferRequest(requestId);
+  const hasReviewableProof = documents.some((document) => (
+    document.documentType === SUPPORTING_TYPE
+      && document.verificationStatus === 'pending'
+      && document.storagePath
+  ));
+  if (!hasReviewableProof) {
+    throw ApiError.conflict('A valid proof-of-address document must be available before this transfer can be approved.');
+  }
+
   const result = await repository.approveTransferRequest({ requestId, reviewerId: user.id });
   if (!result) throw ApiError.conflict('This transfer request cannot be approved.');
   await audit(requestId, user.id, 'transfer_request_approved', { residentId });
@@ -661,7 +700,9 @@ export const approve = async ({ user, requestId }) => {
 
 export const reject = async ({ user, requestId, reason }) => {
   assertReviewer(user);
-  if (!String(reason || '').trim()) throw ApiError.badRequest('A rejection reason is required.');
+  const cleanReason = String(reason || '').trim();
+  if (cleanReason.length < 5) throw ApiError.badRequest('A meaningful rejection reason of at least 5 characters is required.');
+  if (cleanReason.length > 1000) throw ApiError.badRequest('The rejection reason must be 1000 characters or fewer.');
   const request = await repository.getTransferRequest(requestId);
   if (!request) throw ApiError.notFound('Transfer request not found.');
   // BUG-005: a reviewer may only see/act on a request in their visible scope.
@@ -672,13 +713,14 @@ export const reject = async ({ user, requestId, reason }) => {
   if (!REVIEW_OPEN_STATUSES.has(request.status)) {
     throw ApiError.conflict('This transfer request is no longer awaiting review.');
   }
-  const updated = await repository.updateTransferRequest(requestId, {
+  const updated = await repository.updateTransferRequestForReview(requestId, {
     status: 'rejected',
-    rejection_reason: String(reason || '').trim(),
+    rejection_reason: cleanReason,
     reviewed_by: user.id,
     reviewed_at: new Date().toISOString(),
   });
-  await audit(requestId, user.id, 'transfer_request_rejected');
+  if (!updated) throw ApiError.conflict('This transfer request is no longer awaiting review.');
+  await audit(requestId, user.id, 'transfer_request_rejected', { reason: cleanReason });
   // The resident's current barangay and health records are unchanged; notify them.
   const residentId = field(request, 'resident_id', 'residentId');
   const resident = residentId ? await repository.getResident(residentId) : null;
@@ -687,7 +729,7 @@ export const reject = async ({ user, requestId, reason }) => {
       recipientAuthUserId: resident.authUserId,
       category: 'alert',
       title: 'Residency transfer rejected',
-      message: `Your residency transfer request was rejected. Reason: ${String(reason || '').trim()}. Your current barangay and health records are unchanged.`,
+      message: `Your residency transfer request was rejected. Reason: ${cleanReason}. Your current barangay and health records are unchanged.`,
       relatedType: 'transfer_request',
       relatedId: requestId,
     });
@@ -706,7 +748,8 @@ export const reject = async ({ user, requestId, reason }) => {
 export const requestResubmission = async ({ user, requestId, instructions }) => {
   assertReviewer(user);
   const clean = String(instructions || '').trim();
-  if (!clean) throw ApiError.badRequest('Resubmission instructions are required.');
+  if (clean.length < 5) throw ApiError.badRequest('Meaningful resubmission instructions of at least 5 characters are required.');
+  if (clean.length > 1000) throw ApiError.badRequest('Resubmission instructions must be 1000 characters or fewer.');
   const request = await repository.getTransferRequest(requestId);
   if (!request) throw ApiError.notFound('Transfer request not found.');
   if (!transferInReviewerScope(user, request)) throw ApiError.notFound('Transfer request not found.');
@@ -716,13 +759,14 @@ export const requestResubmission = async ({ user, requestId, instructions }) => 
   if (!REVIEW_OPEN_STATUSES.has(request.status)) {
     throw ApiError.conflict('This transfer request is no longer awaiting review.');
   }
-  const updated = await repository.updateTransferRequest(requestId, {
+  const updated = await repository.updateTransferRequestForReview(requestId, {
     status: 'resubmission_required',
-    resubmission_instructions: clean.slice(0, 1000),
+    resubmission_instructions: clean,
     reviewed_by: user.id,
     reviewed_at: new Date().toISOString(),
   });
-  await audit(requestId, user.id, 'transfer_request_resubmission_requested', { instructions: clean.slice(0, 1000) });
+  if (!updated) throw ApiError.conflict('This transfer request is no longer awaiting review.');
+  await audit(requestId, user.id, 'transfer_request_resubmission_requested', { instructions: clean });
   const residentId = field(request, 'resident_id', 'residentId');
   const resident = residentId ? await repository.getResident(residentId) : null;
   if (resident?.authUserId) {

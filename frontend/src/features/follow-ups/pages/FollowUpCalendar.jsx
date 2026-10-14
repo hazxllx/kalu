@@ -11,7 +11,7 @@ import {
 } from "@/services/offline/followUpOfflineService";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
 import { DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
-import { dayLabel, groupByDay, monthLabel, toKey, weekLabel } from "../lib/scheduleDates";
+import { dayLabel, groupByDay, manilaDateKey, monthLabel, weekLabel } from "../lib/scheduleDates";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, X, Search, ShieldAlert, Pencil, Ban, CheckCircle2, Clock,
 } from "lucide-react";
@@ -27,7 +27,7 @@ import {
 
 /* ------------------------------ Constants -------------------------------- */
 
-const CALENDAR_STATUSES = ["Scheduled", "Ongoing", "Completed", "Missed", "Cancelled"];
+const CALENDAR_STATUSES = ["Pending", "Scheduled", "Today", "Upcoming", "Ongoing", "Completed", "Missed", "Cancelled"];
 const PROVIDERS = ["Midwife", "Nurse", "BHW", "Physician", "Health Supervisor"];
 const LOCATIONS = ["Barangay Health Station", "RHU", "Home Visit", "Other"];
 
@@ -88,7 +88,7 @@ const EMPTY_FORM = () => ({
   residentName: "",
   residentId: "",
   purpose: "General Check-up",
-  date: toKey(new Date()),
+  date: manilaDateKey(),
   time: "09:00",
   location: LOCATIONS[0],
   provider: PROVIDERS[0],
@@ -326,6 +326,18 @@ function FollowUpCalendarContent({ user }) {
     if (lastSyncedAt) load();
   }, [lastSyncedAt, load]);
 
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [load]);
+
   /** Filtered schedules (search + status + provider). */
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -369,7 +381,9 @@ function FollowUpCalendarContent({ user }) {
       const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: id, record: patch });
       const mapped = mapRowToSchedule(result?.record || result);
       setSchedules((prev) => prev.map((s) => (s.id === id ? { ...s, ...mapped } : s)));
-      showToast(message);
+      showToast(result?.queued
+        ? `${message} Saved on this device; it will sync when a connection is available.`
+        : message);
       return mapped;
     } catch (err) {
       showToast(err?.message || "Could not save changes.");
@@ -395,7 +409,9 @@ function FollowUpCalendarContent({ user }) {
         }});
         const mapped = mapRowToSchedule(result?.record || result);
         setSchedules((prev) => prev.map((s) => (s.id === formTarget.id ? { ...s, ...mapped } : s)));
-        showToast("Follow-up schedule updated.");
+        showToast(result?.queued
+          ? "Schedule update saved on this device; it will sync when a connection is available."
+          : "Follow-up schedule updated.");
       } else {
         const result = await createFollowUpOffline({ ownerId: user?.id, record: {
           residentId: form.residentId,
@@ -412,7 +428,9 @@ function FollowUpCalendarContent({ user }) {
         }});
         const mapped = mapRowToSchedule(result?.record || result);
         setSchedules((prev) => [mapped, ...prev]);
-        showToast("Follow-up schedule added.");
+        showToast(result?.queued
+          ? "Follow-up saved on this device; it will sync when a connection is available and may not yet be visible to the resident or other staff."
+          : "Follow-up schedule added.");
         setCursor(new Date(`${form.date}T00:00:00`));
       }
       setFormTarget(null);

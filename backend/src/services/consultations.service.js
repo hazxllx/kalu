@@ -13,6 +13,51 @@ import { classifyBloodPressure as classifyBpWithThresholds } from '../config/bpT
 const STAFF_ROLES = new Set(['health_supervisor', 'phn']);
 const text = (value) => String(value ?? '').trim();
 
+/** Consultation statuses the list endpoint can filter by (visits workflow). */
+export const CONSULTATION_STATUSES = Object.freeze([
+  'draft',
+  'submitted',
+  'received',
+  'in_review',
+  'referred',
+  'completed',
+]);
+
+/** Validate + normalize the consultation list filter parameters. */
+export const parseListFilters = ({ from, to, serviceId, status } = {}) => {
+  const dateIsDateOnly = (v) =>
+    typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00`));
+  const filters = {};
+  const errors = [];
+  if (from !== undefined && from !== null && String(from).trim() !== '') {
+    if (!dateIsDateOnly(from)) errors.push('The start date must be a valid date (YYYY-MM-DD).');
+    else filters.from = String(from).trim();
+  }
+  if (to !== undefined && to !== null && String(to).trim() !== '') {
+    if (!dateIsDateOnly(to)) errors.push('The end date must be a valid date (YYYY-MM-DD).');
+    else filters.to = String(to).trim();
+  }
+  if (filters.from && filters.to && filters.from > filters.to) {
+    errors.push('The end date cannot be before the start date.');
+  }
+  if (serviceId !== undefined && serviceId !== null && String(serviceId).trim() !== '') {
+    const id = String(serviceId).trim();
+    // health_services.id is a uuid; an invalid id can never match a row, so
+    // reject it before the query instead of silently returning everything.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      errors.push('The selected health service is not valid.');
+    } else {
+      filters.serviceId = id;
+    }
+  }
+  if (status !== undefined && status !== null && String(status).trim() !== '') {
+    const match = CONSULTATION_STATUSES.find((s) => s === String(status).trim().toLowerCase());
+    if (!match) errors.push('The selected consultation status is not valid.');
+    else filters.statuses = [match];
+  }
+  return { filters, errors };
+};
+
 /** Interpret the various truthy encodings the "Referral Required" field uses. */
 const referralIsRequired = (payload = {}) => {
   const raw = String(payload.referralRequired ?? '').trim().toLowerCase();
@@ -173,6 +218,85 @@ const assertResidentEligibleForConsultation = async (resident, repo = repository
   }
 };
 
+/**
+ * Resolve + validate the health service selected on a consultation.
+ *
+ * The selector is populated from real public.health_services records; the
+ * backend re-validates the id against the database on every save (a direct API
+ * call cannot link an invented service). Rules:
+ *   - empty / absent -> null (a general consultation without a service);
+ *   - unknown id     -> 422 with a field error;
+ *   - inactive service on a NEW consultation -> 422 ("no longer offered");
+ *   - inactive service on an EDIT    -> allowed, so an existing association is
+ *     preserved rather than forced to be cleared;
+ *   - the service must be in the caller's scope (same municipality; barangay
+ *     services also visible to the assigned barangay or assignee).
+ *
+ * Returns { id, name } for persistence (name snapshot keeps historical
+ * consultations correct if the catalog entry is renamed later).
+ */
+export const resolveConsultationService = async ({
+  user,
+  serviceId,
+  existingServiceId = null,
+  supabase = getServiceClient(),
+}) => {
+  const id = text(serviceId);
+  if (!id) return { id: null, name: '' };
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  if (!isUuid) {
+    throw ApiError.unprocessable('Please correct the consultation fields shown below.', {
+      serviceId: 'The selected health service is not valid.',
+    });
+  }
+  const { data: service, error } = await supabase
+    .from('health_services')
+    .select('id, name, active, municipality_id, barangay_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    throw new ApiError(502, `Could not verify the selected health service: ${error.message}`);
+  }
+  if (!service) {
+    throw ApiError.unprocessable('Please correct the consultation fields shown below.', {
+      serviceId: 'The selected health service no longer exists. Remove the selection and try again.',
+    });
+  }
+  // Scope: the service must be visible to the caller (same municipality, and a
+  // barangay service additionally in their barangay / assigned to them).
+  if (user?.role !== 'admin') {
+    if (service.municipality_id && user?.municipalityId && service.municipality_id !== user.municipalityId) {
+      throw ApiError.unprocessable('Please correct the consultation fields shown below.', {
+        serviceId: 'The selected health service is outside your assigned area.',
+      });
+    }
+    if (service.barangay_id && user?.barangayId && service.barangay_id !== user.barangayId) {
+      // Assigned personnel keep access to their assigned service regardless of
+      // barangay scope (mirrors healthServices.serviceVisibleTo).
+      const { data: assignment } = await supabase
+        .from('health_service_assignments')
+        .select('id')
+        .eq('service_id', service.id)
+        .eq('personnel_id', user.id)
+        .eq('active', true)
+        .maybeSingle();
+      if (!assignment) {
+        throw ApiError.unprocessable('Please correct the consultation fields shown below.', {
+          serviceId: 'The selected health service is outside your assigned area.',
+        });
+      }
+    }
+  }
+  // An inactive service cannot be newly selected, but an existing association
+  // on the same consultation is preserved (historical validity).
+  if (service.active === false && id !== text(existingServiceId)) {
+    throw ApiError.unprocessable('Please correct the consultation fields shown below.', {
+      serviceId: `"${service.name}" is no longer offered. Select an active health service.`,
+    });
+  }
+  return { id: service.id, name: service.name || '' };
+};
+
 export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
   residentId,
   recordedById: user.id,
@@ -187,6 +311,10 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
   findings: [text(payload.findings), text(payload.diagnosis)].filter(Boolean).join('\nDiagnosis: '),
   treatmentGiven: [text(payload.treatmentGiven), text(payload.medicationPrescribed)].filter(Boolean).join('\nMedication: '),
   recommendation: [text(payload.adviceGiven), payload.nextVisitDate ? `Next visit: ${payload.nextVisitDate}` : ''].filter(Boolean).join('\n'),
+  // The health service provided during this consultation (FK + name snapshot,
+  // validated by resolveConsultationService before the row is written).
+  healthServiceId: extra.healthServiceId ?? null,
+  healthServiceName: extra.healthServiceName ?? '',
   // Structured, non-lossy prescription storage (by value, so a later catalog
   // change never alters an already-recorded consultation).
   medications: normalizeMedications(payload.medications),
@@ -290,6 +418,10 @@ export const fromVisit = async (visit, supabase = getServiceClient()) => {
     },
     consultationDate: visit.visitDate ? String(visit.visitDate).slice(0, 10) : '',
     consultationTime: visit.visitDate?.includes('T') ? String(visit.visitDate).slice(11, 16) : '',
+    // Health service provided (id + name snapshot recorded at save time, so a
+    // later rename/deactivation in the catalog never changes history).
+    serviceId: visit.healthServiceId || null,
+    serviceName: visit.healthServiceName || '',
     chiefComplaint: visit.chiefComplaint || '',
     findings: findingsText,
     diagnosis: text(diagnosis),
@@ -505,16 +637,24 @@ const notifyResidentOfConsultation = async ({ resident = null, residentId = null
   }
 };
 
-export const list = async ({ user, q = '', repo = repository, supabase = getServiceClient() }) => {
+export const list = async ({ user, q = '', filters = {}, repo = repository, supabase = getServiceClient() }) => {
   if (user?.role === 'resident') {
     const resident = await repo.getResidentByAuthUserId(user.id);
     if (!resident) return { rows: [], total: 0 };
-    const result = await repo.listVisits({ q: text(q), residentId: resident.id, limit: 200 });
+    // The resident id comes from the authenticated session (auth user id ->
+    // residents.auth_user_id), never from a request parameter, so a resident can
+    // only ever list their OWN consultations no matter what ids they send.
+    const result = await repo.listVisits({
+      q: text(q),
+      residentId: resident.id,
+      ...filters,
+      limit: 200,
+    });
     return { rows: await Promise.all(result.rows.map((v) => fromVisit(v, supabase))), total: result.total };
   }
 
   assertStaff(user);
-  const result = await repo.listVisits({ q: text(q), limit: 200 });
+  const result = await repo.listVisits({ q: text(q), ...filters, limit: 200 });
   const filtered = [];
   for (const visit of result.rows) {
     try { assertResidentScope(user, visit.resident); filtered.push(visit); } catch {}
@@ -555,9 +695,13 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   const { errors: followUpErrors, normalized } = validateFollowUp(payload);
   if (followUpErrors.length) throw ApiError.unprocessable('Please correct the consultation fields shown below.', { nextVisitDate: followUpErrors.join(' ') });
   const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate };
+  // Validate the selected health service against the database (new consultation:
+  // an inactive service is rejected; the association must be a real, in-scope
+  // service row — never a free-text name).
+  const healthService = await resolveConsultationService({ user, serviceId: payload.serviceId ?? payload.service_id, supabase });
   const ids = await repository.nextSubmissionId();
   const bpClassification = await classifyWithConfig(cleanPayload.bloodPressure);
-  const visit = await repository.insertVisit({ id: ids.id, ...toVisit(cleanPayload, user, resident.id, { bpClassification }) });
+  const visit = await repository.insertVisit({ id: ids.id, ...toVisit(cleanPayload, user, resident.id, { bpClassification, ...healthService }) });
   await syncConsultationFollowUp({ user, visit, payload: cleanPayload, supabase });
   // Recorded health data changed -> recompute + persist the resident's risk
   // (backend-authoritative; best-effort so a save is never blocked by it).
@@ -579,8 +723,17 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
     throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
   }
   const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate, residentId: visit.residentId };
+  // Validate the (possibly changed) health service. `existingServiceId` keeps an
+  // association with a since-deactivated service valid when the editor leaves it
+  // untouched, while a NEWLY selected inactive service is rejected.
+  const healthService = await resolveConsultationService({
+    user,
+    serviceId: payload.serviceId ?? payload.service_id,
+    existingServiceId: visit.healthServiceId,
+    supabase,
+  });
   const bpClassification = await classifyWithConfig(cleanPayload.bloodPressure);
-  const updated = await repository.updateVisit(id, toVisit(cleanPayload, user, visit.residentId, { bpClassification }));
+  const updated = await repository.updateVisit(id, toVisit(cleanPayload, user, visit.residentId, { bpClassification, ...healthService }));
   await syncConsultationFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
   // Recorded health data changed -> recompute + persist the resident's risk.
   await persistResidentRisk({ residentId: visit.residentId });

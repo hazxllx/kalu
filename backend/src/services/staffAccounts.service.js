@@ -357,11 +357,16 @@ const resolveAssignment = async (input) => {
   if (barangayId) {
     const { data: brgy, error } = await supabase
       .from('barangays')
-      .select('id, municipality_id')
+      .select('id, municipality_id, status')
       .eq('id', barangayId)
       .maybeSingle();
     if (error) throw dbError(error, 'barangay lookup');
     if (!brgy) throw ApiError.badRequest('The selected barangay does not exist.');
+    // Inactive barangays are excluded from NEW staff assignments; existing
+    // assignments and records are untouched.
+    if (brgy.status === 'Inactive') {
+      throw ApiError.badRequest('The selected barangay is inactive and cannot receive new staff assignments.');
+    }
     municipalityId = brgy.municipality_id;
   }
 

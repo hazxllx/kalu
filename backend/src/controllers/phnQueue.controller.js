@@ -13,6 +13,11 @@ export const listQueue = async (req, res) => {
   sendData(res, { submissions: rows });
 };
 
+export const listConsultationHealthServices = async (req, res) => {
+  const services = await phnQueueService.listConsultationHealthServices({ user: req.user });
+  sendData(res, { services });
+};
+
 export const getSubmission = async (req, res) => {
   const submission = await phnQueueService.viewSubmission({ id: req.params.id, user: req.user });
   sendData(res, { submission });
@@ -82,6 +87,7 @@ export const syncReferral = async (req, res) => {
 
 export default {
   listQueue,
+  listConsultationHealthServices,
   getSubmission,
   updateSubmission,
   receiveSubmission,

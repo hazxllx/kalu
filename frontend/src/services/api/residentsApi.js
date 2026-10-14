@@ -26,7 +26,9 @@ export const residentsApi = {
   updateMine: (payload) => api.patch('/residents/me', payload),
   // Resident self-service: own health record (basic profile + own completed
   // consultations). Identity is resolved from the session; no id is sent.
-  myHealthRecords: () => api.get('/residents/me/health-records'),
+  // Consultation-history filters (from/to date, serviceId, type, status) are
+  // applied server-side to the caller's own records.
+  myHealthRecords: (params) => api.get('/residents/me/health-records', { params }),
 };
 
 export default residentsApi;

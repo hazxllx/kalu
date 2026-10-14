@@ -114,12 +114,13 @@ router.use('/users', usersRoutes);
 
 // Admin Barangay Management (admin-only) — the database-backed barangay
 // registry (public.barangays) is the single source of truth for every barangay
-// dropdown and barangay-scoped query. Create/edit/deactivate/delete with
-// safe-delete dependency checks and rename propagation to denormalized names.
+// dropdown and barangay-scoped query. Create/edit with Active/Inactive status
+// management (no delete) and rename propagation to denormalized names.
 router.use('/barangays', barangaysRoutes);
 
 // Role & permission matrix (BUG-011) — authoritative access-control config in
-// public.role_permissions. Read by any staff (drives UI), written by admins.
+// public.role_permissions. Users read their own role; admins manage the full
+// matrix.
 router.use('/roles', rolesRoutes);
 
 // Resident risk assessment configuration — authoritative criteria + thresholds

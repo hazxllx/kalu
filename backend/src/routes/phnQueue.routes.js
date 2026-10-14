@@ -47,6 +47,12 @@ const referralEditors = authorize(FEATURE_ROLES.phnProcessing, {
 });
 
 processing.get('/submissions', queueReaders, consultationStation, asyncHandler(phnQueueController.listQueue));
+processing.get(
+  '/consultation-services',
+  consultationConductors,
+  consultationStation,
+  asyncHandler(phnQueueController.listConsultationHealthServices),
+);
 processing.put('/submissions/:id', findingsWriters, consultationStation, asyncHandler(phnQueueController.updateSubmission));
 processing.post('/submissions/:id/receive', consultationConductors, consultationStation, asyncHandler(phnQueueController.receiveSubmission));
 processing.post('/submissions/:id/review', consultationConductors, consultationStation, asyncHandler(phnQueueController.markInReview));

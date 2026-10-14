@@ -24,35 +24,49 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const loadRows = useCallback(async () => {
+    return source === "intake"
+      ? phnWorkflowApi.listMyIntakeOffline(ownerId)
+      : phnWorkflowApi.listQueueOffline(ownerId);
+  }, [source, ownerId]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const rows =
-        source === "intake"
-          ? await phnWorkflowApi.listMyIntakeOffline(ownerId)
-          : await phnWorkflowApi.listQueueOffline(ownerId);
+      const rows = await loadRows();
       setPatients(rows);
     } catch (e) {
-      setError(e?.message || "Unable to load the patient workflow.");
+      // Classify so a local IndexedDB/storage failure is not misreported as a
+      // server error. Network failures remain retryable; storage failures are
+      // surfaced with a storage-specific message so the queue can be retried
+      // without masking the root cause.
+      const info = classifySyncError(e);
+      const msg =
+        info.code === SYNC_ERROR.STORAGE
+          ? e?.message || "Device storage error. Try reloading; pending work is preserved."
+          : e?.message || "Unable to load the patient workflow.";
+      setError(msg);
       setPatients([]);
     } finally {
       setLoading(false);
     }
-  }, [source, ownerId]);
+  }, [loadRows]);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const rows =
-          source === "intake"
-            ? await phnWorkflowApi.listMyIntakeOffline(ownerId)
-            : await phnWorkflowApi.listQueueOffline(ownerId);
+        const rows = await loadRows();
         if (active) setPatients(rows);
       } catch (e) {
         if (active) {
-          setError(e?.message || "Unable to load the patient workflow.");
+          const info = classifySyncError(e);
+          const msg =
+            info.code === SYNC_ERROR.STORAGE
+              ? e?.message || "Device storage error. Try reloading; pending work is preserved."
+              : e?.message || "Unable to load the patient workflow.";
+          setError(msg);
           setPatients([]);
         }
       } finally {
@@ -62,7 +76,7 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
     return () => {
       active = false;
     };
-  }, [source, ownerId]);
+  }, [loadRows]);
 
   const sendToPhnQueue = useCallback(async (payload) => {
     try {

@@ -61,7 +61,7 @@ const destinationFor = (notification, role) => {
   // Transfer Requests queue, pre-opening the specific request; a resident is
   // taken to their dashboard, where the transfer status banner shows the
   // decision and any resubmission instructions (no sensitive detail in-feed).
-  if (notification.relatedType === "transfer_request") {
+  if (["transfer_request", "transfer_request_resubmitted"].includes(notification.relatedType)) {
     const id = notification.relatedId ? `?request=${encodeURIComponent(notification.relatedId)}` : "";
     if (["health_supervisor", "phn", "mho", "admin"].includes(role)) {
       return `/app/${role}/transfer-requests${id}`;
@@ -73,7 +73,7 @@ const destinationFor = (notification, role) => {
 
 /** Short, role-aware label for a notification's deep-link action button. */
 const actionLabelFor = (notification, role) => {
-  if (notification?.relatedType === "transfer_request") {
+  if (["transfer_request", "transfer_request_resubmitted"].includes(notification?.relatedType)) {
     return role === "resident" ? "View transfer status" : "Open transfer request";
   }
   return "View My Health Records";

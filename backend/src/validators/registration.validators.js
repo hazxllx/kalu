@@ -4,6 +4,7 @@ import {
   SEX_OPTIONS,
   TEXT_LIMITS,
   ageFromDateOnly,
+  hasControlChars,
   isEmail,
   isFutureDateOnly,
   isStrictMobile,
@@ -38,8 +39,11 @@ export const registerResidentValidator = (input = {}) => {
   const errors = {};
 
   const firstName = str(body.firstName, TEXT_LIMITS.short, 'firstName', 'First name', errors);
+  if (firstName && hasControlChars(firstName)) errors.firstName = 'First name contains invalid characters.';
   const middleName = str(body.middleName, TEXT_LIMITS.short, 'middleName', 'Middle name', errors, { optional: true });
+  if (middleName && hasControlChars(middleName)) errors.middleName = 'Middle name contains invalid characters.';
   const lastName = str(body.lastName, TEXT_LIMITS.short, 'lastName', 'Last name', errors);
+  if (lastName && hasControlChars(lastName)) errors.lastName = 'Last name contains invalid characters.';
   const suffix = text(body.suffix);
   if (suffix && !NAME_SUFFIXES.includes(suffix)) {
     errors.suffix = 'Suffix must be one of Jr., Sr., II, III, IV, or V.';

@@ -3,7 +3,7 @@
  *
  * The authoritative access-control configuration lives in PostgreSQL
  * (public.role_permissions), NOT in the browser. This service reads the matrix
- * for any authenticated staff member (it drives UI affordances) and lets ONLY
+ * for the signed-in user's role (admins can read the full matrix) and lets ONLY
  * an administrator change it. Every change is written to the health audit log.
  *
  * FEATURE_ROLES and RLS remain the coarse server-side security boundary.
@@ -46,7 +46,10 @@ const throwOnError = (error, message) => {
  */
 export const getPermissionMatrix = async ({ user, supabase = getServiceClient() }) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
-  const { data, error } = await supabase.from(TABLE).select('role, permission_id, granted');
+  const permissionRole = user.role === ROLES.RESIDENT_LIMITED ? ROLES.RESIDENT : user.role;
+  let query = supabase.from(TABLE).select('role, permission_id, granted');
+  if (user.role !== ROLES.ADMIN) query = query.eq('role', permissionRole);
+  const { data, error } = await query;
   throwOnError(error, 'Could not load the permission matrix');
   const matrix = {};
   for (const row of data || []) {

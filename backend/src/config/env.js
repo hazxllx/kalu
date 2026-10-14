@@ -11,8 +11,7 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 if (isProduction) {
   const missing = [];
-  if (!clientUrlValue) missing.push('CLIENT_URL');
-  if (!corsOriginValue) missing.push('CORS_ORIGIN');
+  if (!clientUrlValue && !corsOriginValue) missing.push('CLIENT_URL or CORS_ORIGIN');
   if (!supabaseUrl) missing.push('SUPABASE_URL');
   if (!supabaseAnonKey) missing.push('SUPABASE_ANON_KEY');
   if (!supabaseServiceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
@@ -23,9 +22,26 @@ if (isProduction) {
   }
 }
 
-const configuredClientUrls = isProduction
-  ? `${clientUrlValue},${corsOriginValue}`
-  : clientUrlValue || corsOriginValue || 'http://localhost:5173';
+const configuredClientUrls = [
+  ...new Set(
+    [
+      clientUrlValue,
+      corsOriginValue,
+      ...(isProduction ? [] : ['http://localhost:5173', 'http://127.0.0.1:5173']),
+    ]
+      .flatMap((value) => value.split(','))
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+      .map((origin) => new URL(origin).origin),
+  ),
+];
+
+const parseTrustProxy = (value) => {
+  if (!value || value === 'false' || value === '0') return false;
+  if (value === 'true') return true;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+};
 
 /**
  * Single source of truth for backend configuration.
@@ -41,15 +57,19 @@ const configuredClientUrls = isProduction
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 5000,
+  requestBodyLimit: process.env.REQUEST_BODY_LIMIT || '1mb',
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY || 'loopback'),
+  apiRateLimitWindowMs: Number(process.env.API_RATE_LIMIT_WINDOW_MS) || 60_000,
+  apiRateLimitMaxRequests: Number(process.env.API_RATE_LIMIT_MAX_REQUESTS) || 120,
+  authRateLimitWindowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  authRateLimitMaxRequests: Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS) || 10,
 
   // Browser origins allowed to call this API. Comma-separated so a staging or
   // preview URL can be added without a code change. `CLIENT_URL` is the
-  // canonical name; `CORS_ORIGIN` is accepted as a fallback alias.
-  clientUrls: configuredClientUrls
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)
-    .map((origin) => new URL(origin).origin),
+  // canonical name; `CORS_ORIGIN` is accepted as a fallback alias. Development
+  // always permits both loopback hostnames because browsers treat them as
+  // distinct origins even though they resolve to the same machine.
+  clientUrls: configuredClientUrls,
 
   // --- Supabase (server side) ------------------------------------------------
   // The service-role key bypasses Row Level Security, so it lives ONLY here on

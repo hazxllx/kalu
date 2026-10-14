@@ -23,6 +23,7 @@ export const NAME_SUFFIXES = Object.freeze(['', 'Jr.', 'Sr.', 'II', 'III', 'IV',
 export const SEX_OPTIONS = Object.freeze(['Male', 'Female']);
 export const CIVIL_STATUSES = Object.freeze(['Single', 'Married', 'Widowed', 'Separated']);
 export const MIN_REJECTION_REASON = 5;
+const PASSWORD_POLICY = /^(?=.*[A-Za-z])(?=.*[0-9]).{8,}$/;
 
 /** PH mobile number: 09XXXXXXXXX or +639XXXXXXXXX (spaces/dashes tolerated). */
 const PH_MOBILE = /^(?:\+63|0)9\d{9}$/;
@@ -43,16 +44,18 @@ export const ZONE_VALUES = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8]);
 export const asString = (value) => (value === null || value === undefined ? '' : String(value));
 export const text = (value) => asString(value).trim();
 export const isBlank = (value) => text(value) === '';
+export const hasControlChars = (value) => /[\u0000-\u001F\u007F]/.test(asString(value));
 
 export const hasMaxLength = (value, max) => asString(value).length <= max;
 export const hasMinLength = (value, min) => text(value).length >= min;
+export const isStrongPassword = (value) => PASSWORD_POLICY.test(asString(value));
 
 export const normalizePhone = (value) => asString(value).replace(/[\s()\-.]/g, '');
 export const normalizeEmail = (value) => text(value).toLowerCase();
 export const isPhonePH = (value) => PH_MOBILE.test(normalizePhone(value));
 /**
  * Strict mobile check for registration: the raw value must be EXACTLY 11
- * numeric digits starting 09 — no spaces, dashes, letters or +63 prefix. The
+ * numeric digits starting 09 â€” no spaces, dashes, letters or +63 prefix. The
  * value is NOT normalised first: separators or letters cause rejection.
  */
 export const isStrictMobile = (value) => PH_MOBILE_STRICT.test(asString(value));
@@ -77,10 +80,13 @@ export const parseDate = (value) => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
+/** Strict YYYY-MM-DD validator: 4-digit year, 01..12 month, valid calendar day. */
+export const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 /** Parse a date-only value as a UTC calendar date, rejecting rollover dates. */
 export const parseDateOnly = (value) => {
   const raw = text(value);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  if (!DATE_ONLY_PATTERN.test(raw)) return null;
   const [year, month, day] = raw.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
@@ -183,6 +189,8 @@ export default {
   rejectionReasonError,
   addError,
   hasErrors,
+  hasControlChars,
+  isStrongPassword,
   invalid,
   valid,
 };

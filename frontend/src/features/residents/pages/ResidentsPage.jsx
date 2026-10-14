@@ -15,7 +15,7 @@ import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { residentsApi } from "@/services/api";
 import { useBarangays } from "@/context/BarangaysContext";
-import { dateOfBirth, isPhonePH, normalizePhone } from "@/utils/validation";
+import { dateOfBirth, isStrictMobile } from "@/utils/validation";
 
 const CIVIL_STATUS_OPTIONS = ["Single", "Married", "Widowed", "Separated"];
 const SEX_OPTIONS = ["Female", "Male"];
@@ -246,9 +246,21 @@ function Select({ label, value, onChange, options = [], placeholder = "", error 
 }
 
 /**
- * @param {{label: string, value: string, onChange: (value: string) => void, placeholder?: string, error?: string, type?: string, optional?: boolean, readOnly?: boolean}} props
+ * @param {{label: string, value: string, onChange: (value: string) => void, placeholder?: string, error?: string, type?: string, optional?: boolean, readOnly?: boolean, maxLength?: number, pattern?: string, autoComplete?: string}} props
  */
-function Field({ label, value, onChange, placeholder = "", error = "", type = "text", optional = false, readOnly = false }) {
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder = "",
+  error = "",
+  type = "text",
+  optional = false,
+  readOnly = false,
+  maxLength,
+  pattern,
+  autoComplete,
+}) {
   return (
     <div>
       <label className={labelClass}>{label}</label>
@@ -257,6 +269,9 @@ function Field({ label, value, onChange, placeholder = "", error = "", type = "t
         value={value}
         placeholder={placeholder}
         readOnly={readOnly}
+        maxLength={maxLength}
+        pattern={pattern}
+        autoComplete={autoComplete}
         onChange={(e) => onChange(e.target.value)}
         className={`${inputClass(error)} ${readOnly ? "bg-brand-bg text-brand-gray cursor-not-allowed" : ""}`}
       />
@@ -284,10 +299,19 @@ const initialFromUser = (user) => {
 export default function ResidentsPage() {
   /** @type {{user: {id?: string, role?: string, assignedBarangay?: string|null, barangay?: string|null}|null}} */
   const { user } = useAuth();
-  const { can } = usePermissions();
-  const canCreate = can("residents.create");
-  const canCreateLoginAccount = can("accounts.create");
-  const canEditPermission = can("residents.edit");
+  const { can, matrixLoadState } = usePermissions();
+  /** @type {(permissionId: string) => boolean} */
+  const canFn = can;
+  const canCreate = canFn("residents.create");
+  const canCreateLoginAccount = canFn("accounts.create");
+  // Show the Yes/No choice whenever the user may add a resident. The actual
+  // account-creation capability is gated separately on the Yes button; this
+  // keeps the two permissions distinct — a Health Supervisor who may add
+  // residents but whose accounts.create was revoked still sees the choice and
+  // can add residents (No), and only Yes is blocked.
+  const showLoginAccountOption = canCreate;
+  const canEditPermission = canFn("residents.edit");
+  const canCreateLoginAccountForResident = canCreateLoginAccount;
 
   const [residents, setResidents] = useState(/** @type {ResidentRecord[]} */ ([]));
   const [loading, setLoading] = useState(true);
@@ -494,15 +518,37 @@ export default function ResidentsPage() {
     const errs = /** @type {ValidationErrors} */ ({});
     if (!form.firstName.trim()) errs.firstName = "First name is required";
     if (!form.lastName.trim()) errs.lastName = "Last name is required";
-    const dobError = dateOfBirth(form.dob, { label: "Date of birth" });
-    if (dobError) errs.dob = dobError;
+    // Date of birth is validated strictly: the raw input must be a valid YYYY-MM-DD
+    // calendar date (five-digit years like 20000 fail the 4-digit parse), must not
+    // be a future date, and must be within the documented 0..120 age range.
+    // Age is always derived from this field and never trusted from the client.
+    if (!form.dob || !/^\d{4}-\d{2}-\d{2}$/.test(form.dob)) {
+      // Let the shared helper produce the user-facing message, but ensure a raw
+      // value that does not even look like YYYY-MM-DD is not mistakenly treated
+      // as "auto-filled" by a loose browser parse.
+      const dobError = dateOfBirth(form.dob, { label: "Date of birth" });
+      if (dobError) errs.dob = dobError;
+      else errs.dob = "Date of birth is required.";
+    } else {
+      const dobError = dateOfBirth(form.dob, { label: "Date of birth" });
+      if (dobError) errs.dob = dobError;
+      else {
+        const computed = calcAge(form.dob);
+        if (form.dob && !computed) {
+          // calcAge returns "" for out-of-range or impossible dates that still
+          // passed the format check (e.g. capped age > 120 or future-date edge).
+          errs.dob = "Date of birth is not a valid age.";
+        } else if (form.age && computed && form.age !== computed) {
+          errs.dob = "Age does not match the date of birth.";
+        }
+      }
+    }
     if (!form.gender) errs.gender = "Sex is required";
     if (!form.barangay) errs.barangay = "Barangay is required";
-    // Contact is optional, but when present it must be a valid PH mobile — the
-    // same rule the backend and the database CHECK enforce. A looser rule here
-    // let numbers through that the database then rejected, failing the save.
-    if (form.contact.trim() && !isPhonePH(form.contact)) {
-      errs.contact = "Enter a valid PH mobile number (e.g. 0917 123 4567)";
+    // Contact is optional; when supplied, require the exact local format used
+    // by resident registration and enforced by the backend.
+    if (form.contact && !isStrictMobile(form.contact)) {
+      errs.contact = "Enter exactly 11 digits starting with 09, with no spaces or symbols.";
     }
     // An email is required only when a login account is being created.
     if (form.createAccount) {
@@ -515,11 +561,22 @@ export default function ResidentsPage() {
 
   const handleSubmit = async () => {
     if (!canCreate) return;
+    // Guard: a Health Supervisor whose accounts.create is revoked must not
+    // submit a login-account request even if the UI state was toggled before
+    // the permission changed. Surface a clear field error instead of a 403.
+    if (form.createAccount && !canCreateLoginAccount) {
+      setErrors((p) => ({ ...p, email: "Your role is not permitted to create login accounts." }));
+      return;
+    }
     const errs = validate();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
       return;
     }
+    // Age is always derived from the validated birth date (UTC). Recompute
+    // here so a stale form.age can never be persisted.
+    const canonicalAge = calcAge(form.dob);
+    setForm((p) => ({ ...p, age: canonicalAge || "" }));
     setSubmitting(true);
     setFormError(null);
     try {
@@ -532,7 +589,7 @@ export default function ResidentsPage() {
         sex: form.gender,
         civilStatus: form.civilStatus,
         barangay: form.barangay,
-        cellphoneNo: normalizePhone(form.contact.trim()),
+        cellphoneNo: form.contact,
         currentAddress: composeAddress(form),
         permanentAddress: composeAddress(form),
       });
@@ -587,7 +644,7 @@ export default function ResidentsPage() {
     const errs = /** @type {ValidationErrors} */ ({});
     if (!editForm.barangay) errs.barangay = "Barangay is required.";
     else if (!allowedBarangays.includes(editForm.barangay)) errs.barangay = "You can only edit residents within your assigned barangay.";
-    if (editForm.contact && !isPhonePH(editForm.contact)) errs.contact = "Enter a valid PH mobile number (e.g. 0917 123 4567).";
+    if (editForm.contact && !isStrictMobile(editForm.contact)) errs.contact = "Enter exactly 11 digits starting with 09, with no spaces or symbols.";
     return errs;
   };
 
@@ -604,7 +661,7 @@ export default function ResidentsPage() {
     try {
       await residentsApi.update(editTarget.id, {
         resident: {
-          cellphoneNo: normalizePhone(editForm.contact.trim()),
+          cellphoneNo: editForm.contact,
           barangay: editForm.barangay,
           civilStatus: editForm.civilStatus,
           currentAddress: editForm.currentAddress.trim(),
@@ -636,6 +693,21 @@ export default function ResidentsPage() {
   const onDobChange = (value) => {
     setForm((p) => ({ ...p, dob: value, age: calcAge(value) || "" }));
     if (errors.dob) setErrors((p) => ({ ...p, dob: "" }));
+  };
+
+  /** @param {string} value */
+  const onContactChange = (value) => {
+    // Strip non-digit characters
+    const digitsOnly = value.replace(/\D/g, '');
+    // Enforce maximum 11 digits
+    const truncated = digitsOnly.slice(0, 11);
+    setForm((p) => ({ ...p, contact: truncated }));
+    setErrors((p) => ({
+      ...p,
+      contact: truncated && !isStrictMobile(truncated)
+        ? "Enter exactly 11 digits starting with 09, with no spaces or symbols."
+        : "",
+    }));
   };
 
   /** @param {keyof ResidentForm} key */
@@ -821,12 +893,12 @@ export default function ResidentsPage() {
 
                 <div>
                   <label className={labelClass}>Sex</label>
-                  <ButtonSelectGroup ariaLabel="Sex" options={SEX_OPTIONS} value={form.gender} onChange={set("gender")} error={Boolean(errors.gender)} />
+                  <ButtonSelectGroup name="sex" ariaLabel="Sex" options={SEX_OPTIONS} value={form.gender} onChange={set("gender")} error={Boolean(errors.gender)} />
                   {errors.gender && <p className={errorClass}>{errors.gender}</p>}
                 </div>
                 <Select label="Civil Status" value={form.civilStatus} onChange={set("civilStatus")} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
 
-                <Field label="Contact Number" value={form.contact} onChange={set("contact")} placeholder="e.g. 0917 123 4567" error={errors.contact} optional />
+                <Field label="Contact Number" value={form.contact} onChange={onContactChange} placeholder="e.g. 09171234567" error={errors.contact} optional maxLength={11} />
                 <SearchableSelect
                   label="Barangay"
                   required
@@ -847,7 +919,7 @@ export default function ResidentsPage() {
                   requires an account; the health worker chooses whether to
                   create one. When Yes, the account is created in Pending
                   Activation and the resident sets their own password later. */}
-              {canCreateLoginAccount && (
+              {showLoginAccountOption && (
                 <div className="mt-5 rounded-2xl border border-slate-200 bg-brand-bg/40 p-4">
                   <p className="text-sm font-medium text-brand-ink">Create Resident Login Account?</p>
                   <p className="mt-0.5 text-xs text-brand-gray">
@@ -866,8 +938,13 @@ export default function ResidentsPage() {
                     <button
                       type="button"
                       onClick={() => set("createAccount")(true)}
+                      disabled={!canCreateLoginAccountForResident}
                       className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
-                        form.createAccount ? "bg-brand-blue text-white" : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                        form.createAccount
+                          ? "bg-brand-blue text-white"
+                          : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                      } disabled:cursor-not-allowed disabled:opacity-50 ${
+                        !canCreateLoginAccountForResident ? "hover:bg-white" : ""
                       }`}
                     >
                       Yes
@@ -1019,7 +1096,7 @@ export default function ResidentsPage() {
                           value={linkEmail}
                           placeholder="e.g. resident@example.com"
                           onChange={(e) => { setLinkEmail(e.target.value); if (linkError) setLinkError(null); }}
-                          className={inputClass(linkError)}
+                          className={inputClass(linkError || "")}
                         />
                         {linkError && <p className={errorClass}>{linkError}</p>}
                         <p className="mt-1 text-[11px] leading-snug text-brand-gray">
@@ -1154,7 +1231,7 @@ export default function ResidentsPage() {
                   <Field label="Full Name" value={editTarget.name || ""} onChange={() => {}} placeholder="" readOnly optional />
                   <p className="mt-1 text-xs text-brand-gray">Identity corrections go through an administrator.</p>
                 </div>
-                <Field label="Contact Number" value={editForm.contact} onChange={(v) => { setEditForm((p) => ({ ...p, contact: v })); if (editErrors.contact) setEditErrors((p) => ({ ...p, contact: "" })); }} placeholder="e.g. 0917 123 4567" error={editErrors.contact} optional />
+                <Field label="Contact Number" value={editForm.contact} onChange={(v) => { const digitsOnly = v.replace(/\D/g, ''); const truncated = digitsOnly.slice(0, 11); setEditForm((p) => ({ ...p, contact: truncated })); if (editErrors.contact) setEditErrors((p) => ({ ...p, contact: "" })); }} placeholder="e.g. 09171234567" error={editErrors.contact} optional maxLength={11} />
                 <Select label="Civil Status" value={editForm.civilStatus} onChange={(v) => setEditForm((p) => ({ ...p, civilStatus: v }))} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
                 <SearchableSelect
                   label="Barangay"

@@ -9,7 +9,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { consultationsApi, residentsApi, bpConfigApi } from "@/services/api";
+import { consultationsApi, residentsApi, healthServicesApi } from "@/services/api";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 import { classifyBloodPressure as classifyBp } from "@/features/consultations/utils/bpClassification";
 import {
@@ -158,6 +158,8 @@ const emptyForm = () => ({
   followUpRequired: "No",
   nextVisitDate: "",
   referralRequired: "No",
+  serviceId: "",
+  serviceName: "",
   remarks: "",
 });
 
@@ -256,10 +258,11 @@ export default function TreatmentConsultation() {
   const [formData, setFormData] = useState(emptyForm());
   const [errors, setErrors] = useState(/** @type {FormErrors} */ ({}));
   const [toast, setToast] = useState(null);
-  // Admin-configured blood-pressure thresholds + labels. Falls back to the
-  // documented defaults in the classifier when unavailable, so classification
-  // always works even if this read fails.
-  const [bpConfig, setBpConfig] = useState(null);
+  // Active Health Services catalog records for the service selector. An
+  // existing inactive association is shown separately as a disabled option.
+  const [healthServices, setHealthServices] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [servicesError, setServicesError] = useState("");
 
   // Read-only BMI, recomputed immediately whenever height or weight changes.
   const bmiDisplay = useMemo(
@@ -267,8 +270,8 @@ export default function TreatmentConsultation() {
     [formData.height, formData.weight],
   );
   const bloodPressureCategory = useMemo(
-    () => classifyBp(formData.bloodPressure, bpConfig?.thresholds || null, bpConfig?.labels || null),
-    [formData.bloodPressure, bpConfig],
+    () => classifyBp(formData.bloodPressure),
+    [formData.bloodPressure],
   );
 
   const load = useCallback(() => {
@@ -312,13 +315,29 @@ export default function TreatmentConsultation() {
     refreshDrafts();
   }, [refreshDrafts]);
 
-  // Load the active BP thresholds once (best-effort; defaults apply on failure).
+  // Load the real health services catalog for the consultation form selector.
+  // Never mocked/hardcoded: options come from /api/health-services (the caller's
+  // server-enforced scope).
   useEffect(() => {
     let active = true;
-    bpConfigApi
-      .get()
-      .then((cfg) => { if (active) setBpConfig(cfg || null); })
-      .catch(() => { if (active) setBpConfig(null); });
+    setServicesLoading(true);
+    setServicesError("");
+    healthServicesApi
+      .list()
+      .then((res) => {
+        if (!active) return;
+        const rows = Array.isArray(res) ? res : res?.rows || res?.records || [];
+        setHealthServices(rows.filter((service) => service.active !== false));
+      })
+      .catch((err) => {
+        if (active) {
+          setHealthServices([]);
+          setServicesError(err?.message || "Could not load active health services.");
+        }
+      })
+      .finally(() => {
+        if (active) setServicesLoading(false);
+      });
     return () => { active = false; };
   }, []);
 
@@ -371,6 +390,8 @@ export default function TreatmentConsultation() {
       followUpRequired: record.followUpRequired || "No",
       nextVisitDate: record.nextVisitDate || "",
       referralRequired: record.referralRequired || "No",
+      serviceId: record.serviceId || "",
+      serviceName: record.serviceName || "",
       remarks: record.remarks || "",
     });
     setErrors({});
@@ -554,6 +575,7 @@ export default function TreatmentConsultation() {
   const columns = [
     { key: "resident", label: "Resident" },
     { key: "date", label: "Consultation Date" },
+    { key: "service", label: "Health Service" },
     { key: "chiefComplaint", label: "Reason / Chief Complaint" },
     { key: "diagnosis", label: "Diagnosis" },
     { key: "followUp", label: "Follow-up" },
@@ -686,6 +708,42 @@ export default function TreatmentConsultation() {
                 className={inputCls()}
               />
             </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="consult-service" className="text-xs text-brand-gray mb-1 block">Health Service Provided</label>
+              <select
+                id="consult-service"
+                value={formData.serviceId}
+                onChange={(e) => {
+                  setFormData({ ...formData, serviceId: e.target.value });
+                  if (errors.serviceId) setErrors((prev) => ({ ...prev, serviceId: "" }));
+                }}
+                className={inputCls(errors.serviceId)}
+                disabled={servicesLoading}
+              >
+                <option value="">General consultation (no specific service)</option>
+                  {formData.serviceId && !healthServices.some((s) => s.id === formData.serviceId) && (
+                    <option value={formData.serviceId} disabled>
+                      {formData.serviceName || "Previously selected health service"} (inactive or unavailable)
+                  </option>
+                  )}
+                  {healthServices.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}{s.category ? ` — ${s.category}` : ""}
+                    </option>
+                  ))}
+                </select>
+                {servicesLoading ? (
+                  <p className="mt-1 text-xs text-brand-gray">Loading health services…</p>
+                ) : servicesError ? (
+                  <p className="mt-1 text-xs text-brand-danger" role="alert">{servicesError}</p>
+                ) : errors.serviceId ? (
+                  <p className="mt-1 text-xs text-brand-danger">{errors.serviceId}</p>
+                ) : healthServices.length === 0 ? (
+                  <p className="mt-1 text-xs text-brand-gray">No active health services are available. General consultations can be saved without a service.</p>
+                ) : (
+                <p className="mt-1 text-xs text-brand-gray">Select the registered health service this consultation belongs to.</p>
+              )}
+            </div>
           </div>
           <div className="mb-3">
             <p className="text-xs text-brand-gray mb-1">Chief Complaint <span className="text-brand-danger">*</span></p>
@@ -704,20 +762,36 @@ export default function TreatmentConsultation() {
         <div className="mb-5">
           <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Vital Signs</h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-3">
-            <div>
-              <p className="text-xs text-brand-gray mb-1">Blood Pressure (mmHg)</p>
-              <input type="text" placeholder="e.g. 120/80" value={formData.bloodPressure} onChange={(e) => setFormData({ ...formData, bloodPressure: e.target.value })} className={inputCls(errors.bloodPressure)} />
-              {errors.bloodPressure && <p className="mt-1 text-xs text-brand-danger">{errors.bloodPressure}</p>}
+            <div className="min-w-0">
+              <label htmlFor="vital-blood-pressure" className="mb-1.5 block text-xs font-medium text-slate-600">Blood Pressure (mmHg)</label>
+              <div className="flex w-full min-w-0 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+                <input
+                  id="vital-blood-pressure"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="120/80"
+                  value={formData.bloodPressure}
+                  onChange={(e) => setFormData({ ...formData, bloodPressure: e.target.value })}
+                  aria-invalid={Boolean(errors.bloodPressure)}
+                  className="min-w-0 flex-1 bg-transparent text-sm font-medium text-slate-900 outline-none placeholder:text-slate-400"
+                />
+              </div>
               {bloodPressureCategory && (
-                <span className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${bloodPressureCategory.tone}`}>
-                  Classification: {bloodPressureCategory.label}
-                  {bloodPressureCategory.emergency && (
-                    <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold tracking-wide">
-                      EMERGENCY
-                    </span>
+                <div className="mt-1 flex min-w-0 items-start">
+                  <span
+                    className={`inline-flex max-w-full shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight ${bloodPressureCategory.badgeClassName}`}
+                    aria-label={`Blood pressure category: ${bloodPressureCategory.category}`}
+                  >
+                    {bloodPressureCategory.category}
+                  </span>
+                  {bloodPressureCategory.code === "crisis" && (
+                    <p className="ml-2 min-w-0 flex-1 text-[11px] leading-4 text-red-800" role="alert" aria-live="assertive">
+                      {bloodPressureCategory.message}
+                    </p>
                   )}
-                </span>
+                </div>
               )}
+              {errors.bloodPressure && <p className="mt-1 text-xs text-brand-danger">{errors.bloodPressure}</p>}
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Temperature (°C)</p>
@@ -765,20 +839,6 @@ export default function TreatmentConsultation() {
               {errors.oxygenSaturation && <p className="mt-1 text-xs text-brand-danger">{errors.oxygenSaturation}</p>}
             </div>
           </div>
-          {bloodPressureCategory?.emergency && (
-            <div className="mt-3 flex items-start gap-2 rounded-btn border border-brand-danger/40 bg-red-50/70 px-3 py-2.5" role="alert" aria-live="assertive">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-brand-danger" aria-hidden="true" />
-              <div className="text-xs text-brand-danger">
-                <p className="font-semibold">Blood pressure is in the crisis range ({bloodPressureCategory.systolic}/{bloodPressureCategory.diastolic} mmHg).</p>
-                <p className="mt-0.5 text-brand-danger/90">
-                  Repeat the measurement after a few minutes and assess the resident promptly. If the repeat reading
-                  stays severely elevated, or there is chest pain, difficulty breathing, weakness, confusion or other
-                  emergency symptoms, follow emergency referral procedures immediately. This screening result does not
-                  prescribe or recommend any medication.
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Clinical Assessment */}
@@ -1028,6 +1088,17 @@ export default function TreatmentConsultation() {
                     </div>
                   );
                 if (key === "date") return <span className="text-brand-ink">{formatDate(row.consultationDate)}</span>;
+                if (key === "service") {
+                  const service = healthServices.find((s) => s.id === row.serviceId);
+                  const label = row.serviceName || service?.name || "";
+                  return label ? (
+                    <span className="inline-flex max-w-[180px] items-center truncate rounded-full bg-brand-light px-2.5 py-1 text-xs font-medium text-brand-blue" title={label}>
+                      {label}
+                    </span>
+                  ) : (
+                    <span className="text-brand-gray">—</span>
+                  );
+                }
                 if (key === "chiefComplaint") return <span className="text-brand-ink">{row.chiefComplaint || "—"}</span>;
                 if (key === "diagnosis") return <span className="text-brand-gray">{row.diagnosis || "—"}</span>;
                 if (key === "followUp")

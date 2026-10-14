@@ -18,6 +18,15 @@ import {
 } from "@/services/api/earlyWarningApi";
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const CASE_STATUSES = [
+  ["draft", "Draft"],
+  ["submitted", "Submitted"],
+  ["received", "Received"],
+  ["in_review", "In Review"],
+  ["referred", "Referred"],
+  ["completed", "Completed"],
+];
+const RISK_LEVELS = ["High", "Moderate", "Low", "Unassessed"];
 
 const DATE_PRESETS = [
   { id: "today", label: "Today" },
@@ -68,10 +77,10 @@ function resolveRange(preset, custom) {
  * Serves MHO, PHN (both municipality-wide over the Municipality of Pili) and
  * Health Supervisor (their assigned barangay ONLY). The geographic scope is
  * always resolved by the backend from the authenticated session; this page
- * only sends filters (condition / date / an optional drill-down barangay that a
- * municipality-wide caller is allowed to view). A Health Supervisor cannot
- * select another barangay — the selector is locked to their assignment and the
- * server rejects any other value.
+ * only sends condition, risk, supported status and date filters (plus an
+ * optional drill-down barangay for municipality-wide callers). A Health
+ * Supervisor cannot select another barangay — the selector is locked to their
+ * assignment and the server rejects any other value.
  */
 export default function CommunityMonitoring() {
   const { user } = useAuth();
@@ -84,7 +93,8 @@ export default function CommunityMonitoring() {
   const [preset, setPreset] = useState("year");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [barangayFilter, setBarangayFilter] = useState("All"); // municipality-wide only
-  const [showHouseholds, setShowHouseholds] = useState(false); // household marker layer toggle
+  const [caseStatus, setCaseStatus] = useState("All");
+  const [riskLevel, setRiskLevel] = useState("All");
 
   const [mapData, setMapData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -115,13 +125,15 @@ export default function CommunityMonitoring() {
     return fetchCommunityMap({
       barangay: drillBarangay,
       condition,
+      status: caseStatus,
+      riskLevel,
       from: range.from,
       to: range.to,
     })
       .then((res) => setMapData(res))
       .catch(() => setError("Unable to load community health data."))
       .finally(() => setLoading(false));
-  }, [drillBarangay, condition, range.from, range.to]);
+  }, [drillBarangay, condition, caseStatus, riskLevel, range.from, range.to]);
 
   useEffect(() => { loadMap(); }, [loadMap]);
 
@@ -145,6 +157,8 @@ export default function CommunityMonitoring() {
 
   const filtersDirty =
     condition !== "All" ||
+    caseStatus !== "All" ||
+    riskLevel !== "All" ||
     preset !== "year" ||
     Boolean(custom.from) ||
     Boolean(custom.to) ||
@@ -152,6 +166,8 @@ export default function CommunityMonitoring() {
 
   const resetFilters = useCallback(() => {
     setCondition("All");
+    setCaseStatus("All");
+    setRiskLevel("All");
     setPreset("year");
     setCustom({ from: "", to: "" });
     setBarangayFilter("All");
@@ -163,17 +179,23 @@ export default function CommunityMonitoring() {
     fetchCommunityMapTrends({
       barangay: isBarangayScoped ? null : barangayName || drillBarangay,
       condition,
+      status: caseStatus,
+      riskLevel,
+      from: range.from,
+      to: range.to,
       year: new Date(range.to || Date.now()).getFullYear(),
     })
       .then((res) => setTrends(res))
       .catch(() => setTrends(null))
       .finally(() => setTrendsLoading(false));
-  }, [isBarangayScoped, drillBarangay, condition, range.to]);
+  }, [isBarangayScoped, drillBarangay, condition, caseStatus, riskLevel, range.from, range.to]);
 
-  // Auto-load trends for a barangay-scoped supervisor (single barangay focus).
+  // Keep the trend panel aligned with the same filters as the map.
   useEffect(() => {
-    if (isBarangayScoped) loadTrends(assignedBarangay);
-  }, [isBarangayScoped, assignedBarangay, loadTrends]);
+    const activeBarangay = isBarangayScoped ? assignedBarangay : selectedRow?.name;
+    if (activeBarangay) loadTrends(activeBarangay);
+    else setTrends(null);
+  }, [isBarangayScoped, assignedBarangay, selectedRow?.name, loadTrends]);
 
   // Readable range for card subtitles, e.g. "Jan 1, 2026 – Sep 27, 2026".
   const periodLabel = range.from || range.to ? formatDateRange(range.from, range.to) : "All records";
@@ -213,7 +235,7 @@ export default function CommunityMonitoring() {
 
       {/* Filters */}
       <Card className="mb-6 p-5">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           {!isBarangayScoped && (
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Barangay</label>
@@ -245,6 +267,30 @@ export default function CommunityMonitoring() {
           </div>
 
           <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Case Status</label>
+            <select
+              value={caseStatus}
+              onChange={(e) => setCaseStatus(e.target.value)}
+              className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue"
+            >
+              <option value="All">All supported statuses</option>
+              {CASE_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Recorded Risk Level</label>
+            <select
+              value={riskLevel}
+              onChange={(e) => setRiskLevel(e.target.value)}
+              className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue"
+            >
+              <option value="All">All risk levels</option>
+              {RISK_LEVELS.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </div>
+
+          <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Date Range</label>
             <select
               value={preset}
@@ -262,12 +308,12 @@ export default function CommunityMonitoring() {
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">From</label>
-              <input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))}
+              <input type="date" max={custom.to || undefined} value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))}
                 className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue" />
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">To</label>
-              <input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))}
+              <input type="date" min={custom.from || undefined} value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))}
                 className="h-10 w-full rounded-btn border border-slate-200 bg-white px-3 text-sm outline-none focus:border-brand-blue" />
             </div>
           </div>
@@ -277,7 +323,14 @@ export default function CommunityMonitoring() {
           <p className="text-xs text-brand-gray">
             Showing <span className="font-semibold text-brand-ink">{condition === "All" ? "all conditions" : condition}</span>
             {" · "}
+            <span className="font-semibold text-brand-ink">{caseStatus === "All" ? "all supported statuses" : CASE_STATUSES.find(([value]) => value === caseStatus)?.[1]}</span>
+            {" · "}
+            <span className="font-semibold text-brand-ink">{riskLevel === "All" ? "all risk levels" : riskLevel}</span>
+            {" · "}
             <span className="font-semibold text-brand-ink">{periodLabel}</span>
+            {mapData?.latestUpdatedAt && (
+              <>{" · "}Updated <span className="font-semibold text-brand-ink">{formatLongDate(mapData.latestUpdatedAt)}</span></>
+            )}
           </p>
           <button
             type="button"
@@ -296,19 +349,8 @@ export default function CommunityMonitoring() {
           <Card className="p-5">
             <CardHeader
               title="Health Heatmap"
-              subtitle={`${condition === "All" ? "All conditions" : condition} · ${periodLabel}`}
+              subtitle={`${condition === "All" ? "All conditions" : condition} · ${caseStatus === "All" ? "All statuses" : CASE_STATUSES.find(([value]) => value === caseStatus)?.[1]} · ${riskLevel === "All" ? "All risk levels" : riskLevel} · ${periodLabel}`}
             />
-            <div className="pt-3">
-              <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-brand-ink">
-                <input
-                  type="checkbox"
-                  checked={showHouseholds}
-                  onChange={(e) => setShowHouseholds(e.target.checked)}
-                  className="h-4 w-4 accent-brand-blue"
-                />
-                Show household markers (active cases)
-              </label>
-            </div>
             <div className="pt-4">
               <CommunityHealthMap
                 barangays={barangays}
@@ -317,10 +359,8 @@ export default function CommunityMonitoring() {
                 error={error}
                 onRetry={loadMap}
                 onClearFilters={filtersDirty ? resetFilters : null}
-                onSelect={(b) => { setSelected(b); if (!isBarangayScoped) loadTrends(b.name); }}
+                onSelect={(b) => setSelected(b)}
                 selectedName={selectedRow?.name || (isBarangayScoped ? assignedBarangay : null)}
-                showHouseholds={showHouseholds}
-                householdBarangay={isBarangayScoped ? assignedBarangay : drillBarangay}
               />
             </div>
           </Card>
@@ -393,6 +433,9 @@ function BarangayDetail({ row, periodLabel, showTrendsButton, onViewTrends }) {
   const conditions = (row.conditions || []).filter((c) => Number(c.value) > 0);
   const hasConditions = conditions.length > 0;
   const lastRecorded = row.lastRecorded ? formatLongDate(row.lastRecorded) : null;
+  const riskCounts = Object.entries(row.riskCounts || {}).filter(([, value]) => Number(value) > 0);
+  const statusCounts = Object.entries(row.statusCounts || {}).filter(([, value]) => Number(value) > 0);
+  const statusLabels = Object.fromEntries(CASE_STATUSES);
 
   return (
     <div className="space-y-4 text-sm">
@@ -422,6 +465,28 @@ function BarangayDetail({ row, periodLabel, showTrendsButton, onViewTrends }) {
         <span className="text-slate-500">Last recorded</span>
         <span className="font-semibold text-slate-900">{lastRecorded || "—"}</span>
       </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+          <p className="mb-2 text-xs font-medium text-slate-500">Visit risk level</p>
+          {riskCounts.length ? riskCounts.map(([level, count]) => (
+            <p key={level} className="flex justify-between gap-2 text-xs text-brand-ink">
+              <span>{level}</span><span className="font-semibold">{count}</span>
+            </p>
+          )) : <p className="text-xs text-slate-500">No matching records</p>}
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+          <p className="mb-2 text-xs font-medium text-slate-500">Consultation status</p>
+          {statusCounts.length ? statusCounts.map(([status, count]) => (
+            <p key={status} className="flex justify-between gap-2 text-xs text-brand-ink">
+              <span>{statusLabels[status] || status}</span><span className="font-semibold">{count}</span>
+            </p>
+          )) : <p className="text-xs text-slate-500">No matching records</p>}
+        </div>
+      </div>
+      <p className="text-[11px] leading-relaxed text-slate-500">
+        Risk and workflow breakdowns reflect consultation records. When Status and Risk are both set to All, active tuberculosis program entries may contribute to totals for All Conditions or Tuberculosis; those program rows have no comparable consultation status or visit vitals.
+      </p>
 
       <div>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Health conditions</p>

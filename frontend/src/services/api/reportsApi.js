@@ -14,6 +14,8 @@ export const reportsApi = {
   create: (payload) => api.post('/reports', payload),
   // Recipient marks Received / Reviewed / Rejected.
   review: (id, payload) => api.patch(`/reports/${id}/review`, payload),
+  // Sender replaces the persisted snapshot after a report is returned.
+  resubmit: (id, payload) => api.patch(`/reports/${id}/resubmit`, payload),
 };
 
 export default reportsApi;

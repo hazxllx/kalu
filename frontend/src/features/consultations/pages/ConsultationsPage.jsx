@@ -116,6 +116,7 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
                   </div>
                   <div className="mt-3 grid sm:grid-cols-2 gap-3 text-sm text-brand-gray">
                     <p className="flex items-center gap-2"><CalendarClock className="w-4 h-4 text-brand-blue" /> Reason: {item.chiefComplaint || "—"}</p>
+                    <p className="flex items-center gap-2"><Stethoscope className="w-4 h-4 text-brand-blue" /> Health Service: {item.serviceName || "General consultation (no specific service)"}</p>
                     <p className="flex items-center gap-2"><ClipboardList className="w-4 h-4 text-brand-blue" /> Diagnosis: {item.diagnosis || "—"}</p>
                     <p className="flex items-center gap-2"><Building2 className="w-4 h-4 text-brand-blue" /> RHU Station: {item.facilityName || item.resident?.barangay || "—"}</p>
                     <p className="flex items-center gap-2"><User className="w-4 h-4 text-brand-blue" /> Assigned RHU Personnel: {item.attendingPersonnel?.fullName || "—"}</p>

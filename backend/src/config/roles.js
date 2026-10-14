@@ -121,7 +121,7 @@ export const FEATURE_ROLES = Object.freeze({
   // are the routed RECIPIENTS of Health Supervisor reports, so they are
   // included here for read/review access ONLY — they can open and acknowledge
   // their incoming queue but can never originate a report.
-  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
+  reports: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
 
   // Health services catalog. Managed (create/assign) by PHN, MHO and the
   // barangay-scoped Health Supervisor. Read by staff who can be assigned a

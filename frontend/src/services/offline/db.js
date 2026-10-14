@@ -20,7 +20,7 @@ import Dexie from 'dexie';
 export const OFFLINE_DB_NAME = 'kalusagap-offline';
 
 /** Current local schema version. Bump together with a new `.version(n)` block. */
-export const OFFLINE_DB_VERSION = 2;
+export const OFFLINE_DB_VERSION = 4;
 
 export class OfflineStorageError extends Error {
   /**
@@ -53,22 +53,96 @@ db.version(1).stores({
   keys: 'id',
 });
 
-// Include the authenticated owner in the cache key.  The previous schema
-// keyed cached records only by entity and server id, so one account could
-// overwrite another account's cached copy before the owner check ran.
+// Migration from v1 to v4: the original direct primary-key change
+// (`[entity+remoteId]` -> `[ownerId+entity+remoteId]`) is unsupported by
+// Dexie/IndexedDB and throws `UpgradeError: Not yet support for changing
+// primary key`. That error blocked the entire PHN check-up queue because the
+// offline DB failed to open and the workflow API surfaced it as a server
+// failure. Dexie can only change a primary key by deleting and recreating the
+// object store. We do that safely in three steps, preserving drafts/outbox
+// and all records via a temporary table so the migration is retry-safe and
+// never discards offline work.
+//
+//  v2: copy existing `records` -> `records_backup` (same new key, deduplicated)
+//  v3: delete the old `records` store (frees the name) while keeping the backup
+//  v4: recreate `records` with the correct owner-scoped key and restore.
 db.version(2)
   .stores({
     drafts: 'localId, entity, ownerId, status, updatedAt',
     outbox:
       'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
-    records: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
+    records: '[entity+remoteId], entity, ownerId, cachedAt',
+    records_backup: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
     syncMeta: 'key',
     keys: 'id',
   })
   .upgrade(async (tx) => {
-    const records = await tx.table('records').toArray();
-    await tx.table('records').clear();
-    await Promise.all(records.map((record) => tx.table('records').put(record)));
+    const all = await tx.table('records').toArray();
+    if (all.length === 0) return;
+    // Deduplicate on the future compound key; keep newest cachedAt.
+    const byKey = new Map();
+    for (const row of all) {
+      if (!row.ownerId || !row.entity || row.remoteId == null) continue;
+      const key = `${row.ownerId}|${row.entity}|${String(row.remoteId)}`;
+      const prev = byKey.get(key);
+      if (!prev || (row.cachedAt || 0) > (prev.cachedAt || 0)) byKey.set(key, row);
+    }
+    const deduped = Array.from(byKey.values());
+    // Use bulkPut inside the versionchange transaction: atomic, retry-safe.
+    // If this throws the whole IndexedDB version stays at 1 and will retry.
+    await tx.table('records_backup').bulkPut(deduped);
+  });
+
+db.version(3)
+  .stores({
+    drafts: 'localId, entity, ownerId, status, updatedAt',
+    outbox:
+      'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
+    records: null,
+    records_backup: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
+    syncMeta: 'key',
+    keys: 'id',
+  })
+  .upgrade(async (tx) => {
+    // Fresh installs that were created directly at v2 (new schema) skip the
+    // v2 upgrade, so records_backup is empty. Preserve their cached records
+    // before the declarative delete by copying them now.
+    const backupCount = await tx.table('records_backup').count();
+    if (backupCount > 0) return;
+    // `records` still exists in this transaction's scope even though the
+    // declarative schema deletes it afterwards (Dexie keeps old schema for
+    // upgrade). If it has rows, back them up.
+    try {
+      const all = await tx.table('records').toArray();
+      if (all.length > 0) await tx.table('records_backup').bulkPut(all);
+    } catch {
+      // If the store truly does not exist (fresh DB already at v3), ignore.
+    }
+  });
+
+db.version(4)
+  .stores({
+    drafts: 'localId, entity, ownerId, status, updatedAt',
+    outbox:
+      'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
+    records: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
+    records_backup: null,
+    syncMeta: 'key',
+    keys: 'id',
+  })
+  .upgrade(async (tx) => {
+    const backup = await tx.table('records_backup').toArray();
+    if (backup.length > 0) {
+      // Deduplicate again on restore (defensive; retry-safe).
+      const byKey = new Map();
+      for (const row of backup) {
+        if (!row.ownerId || !row.entity || row.remoteId == null) continue;
+        const key = `${row.ownerId}|${row.entity}|${String(row.remoteId)}`;
+        const prev = byKey.get(key);
+        if (!prev || (row.cachedAt || 0) > (prev.cachedAt || 0)) byKey.set(key, row);
+      }
+      await tx.table('records').bulkPut(Array.from(byKey.values()));
+    }
   });
 
 /** True when an error is an IndexedDB storage-quota exhaustion. */
@@ -107,6 +181,14 @@ export const safeWrite = async (fn) => {
 export const openOfflineDb = async () => {
   if (!db.isOpen()) await db.open();
   return db;
+};
+
+/** True when an error is the Dexie primary-key migration failure. */
+export const isUpgradeError = (error) => {
+  if (!error) return false;
+  const name = String(error.name || '');
+  const msg = String(error.message || error);
+  return /UpgradeError/i.test(name) || /Not yet support for changing primary key/i.test(msg);
 };
 
 /**

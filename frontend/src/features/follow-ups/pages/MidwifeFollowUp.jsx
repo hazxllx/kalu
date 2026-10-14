@@ -16,6 +16,7 @@ import {
   updateFollowUpOffline,
 } from "@/services/offline/followUpOfflineService";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
+import { manilaDateKey } from "../lib/scheduleDates";
 
 const FOLLOW_UP_TYPES = [
   "General Check-up",
@@ -30,7 +31,7 @@ const FOLLOW_UP_TYPES = [
 const FOLLOW_UP_LOCATIONS = ["Barangay Health Station", "RHU", "Home Visit", "Other"];
 
 const emptyScheduleForm = (personnel) => ({
-  date: new Date().toISOString().slice(0, 10),
+  date: manilaDateKey(),
   time: "09:00",
   type: "General Check-up",
   reason: "",
@@ -63,12 +64,10 @@ const isPastDate = (isoDate) => {
   if (!isoDate) return false;
   const d = new Date(`${isoDate}T00:00:00`);
   if (Number.isNaN(d.getTime())) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return d.getTime() < today.getTime();
+  return isoDate < todayISO();
 };
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => manilaDateKey();
 
 const formatTime = (hhmm) => {
   const [h, m] = String(hhmm || "").split(":");
@@ -86,12 +85,10 @@ const formatTime = (hhmm) => {
  */
 const deriveStatus = (isoDate) => {
   if (!isoDate) return "Scheduled";
-  const d = new Date(`${isoDate}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return "Scheduled";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (d.getTime() === today.getTime()) return "Today";
-  if (d.getTime() > today.getTime()) return "Upcoming";
+  if (Number.isNaN(new Date(`${isoDate}T00:00:00`).getTime())) return "Scheduled";
+  const today = todayISO();
+  if (isoDate === today) return "Today";
+  if (isoDate > today) return "Upcoming";
   return "Scheduled";
 };
 
@@ -233,7 +230,11 @@ export default function MidwifeFollowUp() {
       const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: id, record: patch });
       const updated = mapFollowUpRow(result?.record || result);
       setFollowUps((prev) => prev.map((f) => (f.id === id ? { ...f, ...updated } : f)));
-      if (successMessage) showToast(successMessage);
+      if (successMessage) {
+        showToast(result?.queued
+          ? `${successMessage} Saved on this device; it will sync when a connection is available.`
+          : successMessage);
+      }
       return updated;
     } catch (err) {
       showToast(err?.message || "Could not save changes.", 4000);
@@ -529,7 +530,9 @@ export default function MidwifeFollowUp() {
       };
       setFollowUps((current) => [newFollowUp, ...current]);
       setShowScheduleModal(false);
-      setToast(`Follow-up scheduled successfully for ${newFollowUp.resident} on ${newFollowUp.scheduledDate}.`);
+      setToast(result?.queued
+        ? `Follow-up saved on this device for ${newFollowUp.resident} on ${newFollowUp.scheduledDate}. It will sync when a connection is available and may not yet be visible to the resident or other staff.`
+        : `Follow-up scheduled successfully for ${newFollowUp.resident} on ${newFollowUp.scheduledDate}.`);
     } catch (err) {
       setToast(err?.message || "Could not schedule follow-up.");
     }

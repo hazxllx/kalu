@@ -41,4 +41,13 @@ export const review = async (req, res) => {
   sendData(res, { record });
 };
 
-export default { meta, list, get, create, review };
+export const resubmit = async (req, res) => {
+  const record = await service.resubmit({
+    user: req.user,
+    id: req.params.id,
+    content: req.body?.content,
+  });
+  sendData(res, { record });
+};
+
+export default { meta, list, get, create, review, resubmit };

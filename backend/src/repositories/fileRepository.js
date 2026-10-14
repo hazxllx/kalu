@@ -268,13 +268,16 @@ export const fileRepository = {
     return attachResidentToVisit(clone(found), residentsById);
   },
 
-  listVisits: async ({ q = '', statuses = null, submittedById = null, residentId = null, limit = 100, offset = 0 } = {}) => {
+  listVisits: async ({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null, limit = 100, offset = 0 } = {}) => {
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
     let rows = store.visits.map((v) => attachResidentToVisit(clone(v), residentsById));
 
     if (statuses && statuses.length) rows = rows.filter((v) => statuses.includes(v.status));
     if (submittedById) rows = rows.filter((v) => v.recordedById === submittedById);
     if (residentId) rows = rows.filter((v) => v.residentId === residentId);
+    if (from) rows = rows.filter((v) => String(v.visitDate || '').slice(0, 10) >= from);
+    if (to) rows = rows.filter((v) => String(v.visitDate || '').slice(0, 10) <= to);
+    if (serviceId) rows = rows.filter((v) => v.healthServiceId === serviceId);
     if (q) {
       const query = normalizeText(q);
       rows = rows.filter(
@@ -429,6 +432,18 @@ export const fileRepository = {
     Object.assign(row, patch, { updatedAt: new Date().toISOString() });
     return clone(row);
   }),
+  updateTransferRequestForReview: async (id, patch) => store.mutate((data) => {
+    const row = data.transferRequests.find((item) => item.id === id);
+    if (!row || !['pending', 'under_review'].includes(row.status)) return null;
+    Object.assign(row, patch, { updatedAt: new Date().toISOString() });
+    return clone(row);
+  }),
+  updateTransferRequestForSubmission: async (id, patch) => store.mutate((data) => {
+    const row = data.transferRequests.find((item) => item.id === id);
+    if (!row || !['draft', 'resubmission_required'].includes(row.status)) return null;
+    Object.assign(row, patch, { updatedAt: new Date().toISOString() });
+    return clone(row);
+  }),
   listTransferRequests: async ({ status = null, limit = 100, offset = 0 } = {}) => {
     let rows = store.transferRequests.slice();
     if (status) rows = rows.filter((row) => row.status === status);
@@ -463,6 +478,11 @@ export const fileRepository = {
     data.transferRequestAuditLogs.push(row);
     return clone(row);
   }),
+  listTransferAuditLogs: async (transferRequestId) => clone(
+    store.transferRequestAuditLogs
+      .filter((row) => row.transferRequestId === transferRequestId)
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))),
+  ),
   listDocumentsByTransferRequest: async () => [],
   deleteDocument: async () => true,
   // Dev driver has no staff profiles; the receiving-supervisor notification is a

@@ -9,7 +9,12 @@ import { invalid, isUuid, text, valid } from './common.js';
  */
 
 const LIMITS = { short: 120, notes: 2000, content: 1_000_000 };
-const RECIPIENT_DECISIONS = [REPORT_STATUS.RECEIVED, REPORT_STATUS.REVIEWED, REPORT_STATUS.REJECTED];
+const RECIPIENT_DECISIONS = [
+  REPORT_STATUS.RECEIVED,
+  REPORT_STATUS.REVIEWED,
+  REPORT_STATUS.NEEDS_REVISION,
+  REPORT_STATUS.REJECTED,
+];
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
@@ -61,11 +66,26 @@ export const reviewReportValidator = (input = {}) => {
   const status = text(input?.status);
   if (!RECIPIENT_DECISIONS.includes(status)) errors.status = 'Select a valid report review status.';
   const remarks = text(input?.remarks).slice(0, LIMITS.notes);
-  if (status === REPORT_STATUS.REJECTED && !remarks) {
-    errors.remarks = 'Please provide a reason for rejecting this report.';
+  if ([REPORT_STATUS.NEEDS_REVISION, REPORT_STATUS.REJECTED].includes(status) && !remarks) {
+    errors.remarks = 'Please explain the revisions needed or why this report is rejected.';
   }
   if (Object.keys(errors).length) return invalid(errors);
   return valid({ status, remarks });
+};
+
+export const resubmitReportValidator = (input = {}) => {
+  const content = input?.content;
+  if (!isPlainObject(content)) return invalid({ content: 'The revised report content must be an object.' });
+  let bytes = Number.POSITIVE_INFINITY;
+  try {
+    bytes = JSON.stringify(content).length;
+  } catch {
+    bytes = Number.POSITIVE_INFINITY;
+  }
+  if (!Number.isFinite(bytes) || bytes > LIMITS.content) {
+    return invalid({ content: 'The report content is too large to submit.' });
+  }
+  return valid({ content });
 };
 
 export const reportIdParamValidator = (params = {}) => {
@@ -75,4 +95,4 @@ export const reportIdParamValidator = (params = {}) => {
   return valid({ ...params, id });
 };
 
-export default { createReportValidator, reviewReportValidator, reportIdParamValidator };
+export default { createReportValidator, reviewReportValidator, resubmitReportValidator, reportIdParamValidator };

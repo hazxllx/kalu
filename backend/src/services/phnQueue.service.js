@@ -25,6 +25,7 @@ import { canConsult } from '../config/rhuStations.js';
 import { validateVitals } from './intake.service.js';
 import { normalizeMedications } from './medicines.service.js';
 import { markCompletedFromVisit } from './referrals.service.js';
+import { getServiceClient } from '../config/supabase.js';
 
 const isPHN = (user) => user?.role === 'phn';
 
@@ -153,6 +154,9 @@ export const normalizePhnVisit = (visit = {}) => {
   if (visit.findings !== undefined) patch.findings = pickText(visit.findings);
   if (visit.treatmentGiven !== undefined) patch.treatmentGiven = pickText(visit.treatmentGiven);
   if (visit.recommendation !== undefined) patch.recommendation = pickText(visit.recommendation);
+  if (visit.healthServiceId !== undefined || visit.health_service_id !== undefined) {
+    patch.healthServiceId = pickText(visit.healthServiceId ?? visit.health_service_id) || null;
+  }
   // Structured prescriptions (visits.medications JSONB). Normalized with the
   // same catalogue-aware helper the Health-Supervisor consultation uses, so the
   // PHN check-up persists prescriptions identically. Only written when the
@@ -171,9 +175,64 @@ export const normalizePhnVisit = (visit = {}) => {
   return patch;
 };
 
-export const updateSubmissionForPhn = async ({ id, patch = {}, user }) => {
+const consultationServiceVisibleTo = (user, service) => {
+  if (!service || service.active === false || service.municipality_id !== user.municipalityId) return false;
+  if (user.role === 'phn') return true;
+  if (user.role === 'rhu_personnel') {
+    return (!service.facility_id || service.facility_id === user.facilityId)
+      && !service.barangay_id;
+  }
+  if (user.role === 'health_supervisor') {
+    return !service.barangay_id || service.barangay_id === user.barangayId;
+  }
+  return false;
+};
+
+/**
+ * Active service choices for the shared consultation workbench only.
+ * Callers must already be authenticated and assigned consultation access;
+ * RHU Personnel additionally see only RHU-wide or their assigned facility's
+ * services. This deliberately does not grant access to the general catalog API.
+ */
+export const listConsultationHealthServices = async ({ user, supabase = getServiceClient() }) => {
   assertCanProcessConsultation(user);
-  const submission = await repository.getVisit(id);
+  if (!user.municipalityId) {
+    throw ApiError.forbidden('Your account has no municipality assignment for consultation services.');
+  }
+  const { data, error } = await supabase
+    .from('health_services')
+    .select('id, name, category, active, municipality_id, facility_id, barangay_id')
+    .eq('municipality_id', user.municipalityId)
+    .eq('active', true)
+    .order('name', { ascending: true });
+  if (error) {
+    throw new ApiError(502, `Could not load consultation health services: ${error.message}`);
+  }
+  return (data || [])
+    .filter((service) => consultationServiceVisibleTo(user, service))
+    .map(({ id, name, category, active }) => ({ id, name, category: category || 'Other', active }));
+};
+
+const resolveConsultationHealthService = async ({ user, serviceId, supabase }) => {
+  const services = await listConsultationHealthServices({ user, supabase });
+  const service = services.find((row) => row.id === serviceId);
+  if (!service) {
+    throw ApiError.unprocessable('Please select an active health service available to your consultation area.', {
+      healthServiceId: 'The selected health service is inactive, unavailable, or outside your authorized scope.',
+    });
+  }
+  return service;
+};
+
+export const updateSubmissionForPhn = async ({
+  id,
+  patch = {},
+  user,
+  repo = repository,
+  supabase = getServiceClient(),
+}) => {
+  assertCanProcessConsultation(user);
+  const submission = await repo.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   assertSubmissionScope(user, submission);
   if (!PHN_EDITABLE_STATUSES.includes(submission.status)) {
@@ -181,17 +240,38 @@ export const updateSubmissionForPhn = async ({ id, patch = {}, user }) => {
   }
 
   const normalized = normalizePhnVisit(patch);
+  if (normalized.healthServiceId !== undefined) {
+    if (!normalized.healthServiceId) {
+      normalized.healthServiceName = '';
+    } else if (normalized.healthServiceId === submission.healthServiceId) {
+      // Preserve the historical name snapshot for a service that was later
+      // deactivated or renamed; an unchanged association remains valid.
+      normalized.healthServiceName = submission.healthServiceName || '';
+    } else {
+      const service = await resolveConsultationHealthService({
+        user,
+        serviceId: normalized.healthServiceId,
+        supabase,
+      });
+      normalized.healthServiceName = service.name;
+    }
+  }
   // Stamp the consultation personnel label from the authenticated user whenever
   // PHN/consultation clinical fields are recorded — the performer is the signed-in
   // account, never a client-submitted name.
   if (normalized.phn) {
     normalized.phn.personnel = user.name || user.email || '';
   }
-  const vitals = { ...(submission.vitals || {}), ...(normalized.vitals || {}) };
+  const vitals = {
+    heightCm: null,
+    weightKg: null,
+    ...(submission.vitals || {}),
+    ...(normalized.vitals || {}),
+  };
   const errors = validateVitals(vitals);
   if (errors.length) throw ApiError.badRequest('Invalid vital signs.', errors);
 
-  const updated = await repository.updateVisit(id, normalized);
+  const updated = await repo.updateVisit(id, normalized);
   return updated;
 };
 
@@ -403,6 +483,7 @@ export const getReferralByVisitId = async ({ visitId, user }) => {
 
 export default {
   listQueue,
+  listConsultationHealthServices,
   viewSubmission,
   updateSubmissionForPhn,
   receiveSubmission,

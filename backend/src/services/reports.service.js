@@ -28,16 +28,28 @@ import ApiError from '../utils/apiError.js';
 import { notifyResident } from './notifications.service.js';
 
 const TABLE = 'reports';
+const HISTORY_TABLE = 'report_status_history';
 
 export const REPORT_STATUS = Object.freeze({
   DRAFT: 'Draft',
   SUBMITTED: 'Submitted',
   RECEIVED: 'Received',
   REVIEWED: 'Reviewed',
+  NEEDS_REVISION: 'Needs Revision',
   REJECTED: 'Rejected',
 });
 
 export const REPORT_STATUSES = Object.freeze(Object.values(REPORT_STATUS));
+
+/** Recipient actions follow an explicit, monotonic workflow. */
+export const REPORT_TRANSITIONS = Object.freeze({
+  [REPORT_STATUS.SUBMITTED]: [REPORT_STATUS.RECEIVED],
+  [REPORT_STATUS.RECEIVED]: [REPORT_STATUS.REVIEWED, REPORT_STATUS.NEEDS_REVISION, REPORT_STATUS.REJECTED],
+  [REPORT_STATUS.NEEDS_REVISION]: [],
+  [REPORT_STATUS.DRAFT]: [],
+  [REPORT_STATUS.REVIEWED]: [],
+  [REPORT_STATUS.REJECTED]: [],
+});
 
 /**
  * Current report-content snapshot schema version. The frontend stamps the same
@@ -67,7 +79,12 @@ export const REPORT_RECIPIENT_ROLES = Object.freeze([
 ]);
 
 /** Statuses a recipient may set when acting on a received report. */
-const RECIPIENT_DECISIONS = new Set([REPORT_STATUS.RECEIVED, REPORT_STATUS.REVIEWED, REPORT_STATUS.REJECTED]);
+const RECIPIENT_DECISIONS = new Set([
+  REPORT_STATUS.RECEIVED,
+  REPORT_STATUS.REVIEWED,
+  REPORT_STATUS.NEEDS_REVISION,
+  REPORT_STATUS.REJECTED,
+]);
 
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
@@ -137,8 +154,19 @@ const toReport = (row) => {
           hasContent: row.content != null,
         }
       : {}),
+    ...(Array.isArray(row.history) ? { history: row.history.map(toHistoryEntry) } : {}),
   };
 };
+
+const toHistoryEntry = (row) => ({
+  action: row.action || '',
+  previousStatus: row.previous_status || '',
+  status: row.new_status || '',
+  explanation: row.explanation || '',
+  actorName: row.actor?.full_name || row.actor?.email || '',
+  actorRole: row.actor?.role || '',
+  at: row.created_at || '',
+});
 
 const SENDER_EMBED = 'sender:profiles!created_by(full_name, email, role)';
 const REVIEWER_EMBED = 'reviewer:profiles!reviewed_by(full_name, email, role)';
@@ -185,6 +213,7 @@ export const list = async ({ user, box = 'incoming', status = null, supabase = g
       if (!user.barangayId) return [];
       query = query.eq('barangay_id', user.barangayId);
     }
+    query = query.neq('created_by', user.id);
     // A submitted report is delivered; drafts never leave the sender.
     query = query.neq('status', REPORT_STATUS.DRAFT);
   }
@@ -214,7 +243,13 @@ export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   const { data, error } = await supabase.from(TABLE).select(DETAIL_SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load report');
   if (!data || !inScope(user, data)) throw ApiError.notFound('Report not found.');
-  return toReport(data);
+  const { data: history, error: historyError } = await supabase
+    .from(HISTORY_TABLE)
+    .select('id, action, previous_status, new_status, explanation, created_at, actor:profiles!actor_id(full_name, email, role)')
+    .eq('report_id', id)
+    .order('created_at', { ascending: true });
+  throwOnError(historyError, 'Could not load report history');
+  return toReport({ ...data, history: history || [] });
 };
 
 /** Auth-user ids for the routed recipient or its authorized operational observers. */
@@ -310,8 +345,9 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
 };
 
 /**
- * Recipient acts on a report (Received / Reviewed / Rejected). Only the routed
- * recipient within scope may do this; the sender cannot review their own.
+ * The routed recipient acts on a report, following the explicit transition
+ * graph. PHN/MHO oversight of RHU reports is read-only; only the addressed
+ * recipient may acknowledge or decide.
  */
 export const review = async ({ user, id, status, remarks = '', supabase = getServiceClient() }) => {
   assertStaff(user);
@@ -325,14 +361,16 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
 
   // Only the routed recipient (not the sender) may review.
   const isRecipient =
-    (existing.recipient_role === user.role ||
-      (existing.recipient_role === ROLES.RHU_PERSONNEL && [ROLES.PHN, ROLES.MHO].includes(user.role))) &&
+    existing.created_by !== user.id &&
+    existing.recipient_role === user.role &&
     Boolean(user.municipalityId && existing.municipality_id === user.municipalityId) &&
     (user.role !== ROLES.HEALTH_SUPERVISOR || existing.barangay_id === user.barangayId);
-  if (!isRecipient) throw ApiError.forbidden('Only the report recipient may review this report.');
-  if (existing.status === REPORT_STATUS.DRAFT) throw ApiError.conflict('This report has not been submitted yet.');
-  if (target === REPORT_STATUS.REJECTED && !text(remarks)) {
-    throw ApiError.unprocessable('A reason is required to reject a report.');
+  if (!isRecipient) throw ApiError.forbidden('Only the addressed report recipient may review this report.');
+  if (!(REPORT_TRANSITIONS[existing.status] || []).includes(target)) {
+    throw ApiError.conflict(`A ${existing.status} report cannot be moved to ${target}.`);
+  }
+  if ([REPORT_STATUS.NEEDS_REVISION, REPORT_STATUS.REJECTED].includes(target) && !text(remarks)) {
+    throw ApiError.unprocessable('An explanation is required when requesting revisions or rejecting a report.');
   }
 
   const row = {
@@ -347,7 +385,7 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
   // Notify the sender that their report advanced.
   await notifyResident({
     recipientAuthUserId: existing.created_by,
-    category: target === REPORT_STATUS.REJECTED ? 'alert' : 'information',
+    category: [REPORT_STATUS.NEEDS_REVISION, REPORT_STATUS.REJECTED].includes(target) ? 'alert' : 'information',
     title: `Report ${target.toLowerCase()}`,
     message: `Your ${existing.report_type} was marked ${target.toLowerCase()}.`,
     relatedType: TABLE,
@@ -357,14 +395,78 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
   return toReport(data);
 };
 
+/** Sender replaces a report marked Needs Revision and submits that same record. */
+export const resubmit = async ({ user, id, content, supabase = getServiceClient() }) => {
+  assertStaff(user);
+  if (!isPlainObject(content)) throw ApiError.unprocessable('The revised report content must be an object.');
+  let bytes;
+  try {
+    bytes = Buffer.byteLength(JSON.stringify(content), 'utf8');
+  } catch {
+    bytes = REPORT_CONTENT_MAX_BYTES + 1;
+  }
+  if (bytes > REPORT_CONTENT_MAX_BYTES) {
+    throw ApiError.unprocessable('The report content is too large to submit.');
+  }
+
+  const { data: existing, error: readError } = await supabase
+    .from(TABLE)
+    .select(DETAIL_SELECT)
+    .eq('id', id)
+    .maybeSingle();
+  throwOnError(readError, 'Could not load report');
+  if (!existing || existing.created_by !== user.id) throw ApiError.notFound('Report not found.');
+  if (existing.status !== REPORT_STATUS.NEEDS_REVISION) {
+    throw ApiError.conflict('Only a report marked Needs Revision can be resubmitted.');
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({
+      content,
+      content_schema_version: REPORT_CONTENT_SCHEMA_VERSION,
+      status: REPORT_STATUS.SUBMITTED,
+      remarks: '',
+      submitted_at: now,
+      reviewed_by: null,
+      reviewed_at: null,
+    })
+    .eq('id', id)
+    .select(DETAIL_SELECT)
+    .single();
+  throwOnError(error, 'Could not resubmit report');
+
+  const recipients = await recipientAuthUserIds(supabase, {
+    recipientRole: existing.recipient_role,
+    municipalityId: existing.municipality_id,
+    barangayId: existing.barangay_id,
+  });
+  await Promise.all(
+    recipients.map((recipientId) =>
+      notifyResident({
+        recipientAuthUserId: recipientId,
+        category: 'information',
+        title: 'Report resubmitted',
+        message: `A revised ${existing.report_type}${existing.report_period ? ` for ${existing.report_period}` : ''} was submitted.`,
+        relatedType: TABLE,
+        relatedId: id,
+      }),
+    ),
+  );
+  return toReport(data);
+};
+
 export const meta = () => ({
   statuses: REPORT_STATUSES,
+  transitions: REPORT_TRANSITIONS,
   routes: REPORT_ROUTES,
 });
 
 export default {
   REPORT_STATUS,
   REPORT_STATUSES,
+  REPORT_TRANSITIONS,
   REPORT_ROUTES,
   REPORT_RECIPIENT_ROLES,
   REPORT_CONTENT_SCHEMA_VERSION,
@@ -375,5 +477,6 @@ export default {
   getById,
   create,
   review,
+  resubmit,
   meta,
 };

@@ -300,7 +300,94 @@ export const toResidentRecord = (visit = {}) => {
  * can only ever read their OWN completed consultations. Returns basic profile
  * plus the resident-safe consultation history.
  */
-export const getOwnHealthRecords = async ({ user } = {}) => {
+/**
+ * Validate the resident Consultation History filter parameters server-side.
+ * Everything the resident page filters on is applied by THIS service against
+ * the caller's own records — the frontend filter UI is a convenience, never an
+ * access-control boundary.
+ *
+ *   from / to   inclusive YYYY-MM-DD date range on the consultation date;
+ *               `to` may not precede `from`
+ *   serviceId   health_services uuid the consultation was recorded under
+ *   type        consultation type = the health-service category vocabulary
+ *               (Maternal / TCLS / Immunization / Family Planning / Consultation
+ *               / Other) — matched on the linked service's category
+ *   status      visits workflow status ('completed' is the default view)
+ */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const isValidDateOnly = (v) => DATE_ONLY.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00`));
+
+export const parseConsultationFilters = ({ from, to, serviceId, type, status } = {}) => {
+  const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
+  const filters = {};
+  const errors = [];
+  if (has(from)) {
+    if (!isValidDateOnly(from)) errors.push('The start date must be a valid date.');
+    else filters.from = String(from).trim();
+  }
+  if (has(to)) {
+    if (!isValidDateOnly(to)) errors.push('The end date must be a valid date.');
+    else filters.to = String(to).trim();
+  }
+  if (filters.from && filters.to && filters.from > filters.to) {
+    errors.push('The end date cannot be before the start date.');
+  }
+  if (has(serviceId)) {
+    const id = String(serviceId).trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      errors.push('The selected health service is not valid.');
+    } else {
+      filters.serviceId = id;
+    }
+  }
+  if (has(type)) filters.type = String(type).trim();
+  if (has(status)) {
+    const value = String(status).trim().toLowerCase();
+    if (!['draft', 'submitted', 'received', 'in_review', 'referred', 'completed'].includes(value)) {
+      errors.push('The selected consultation status is not valid.');
+    } else {
+      filters.statuses = [value];
+    }
+  } else {
+    filters.statuses = ['completed'];
+  }
+  return { filters, errors };
+};
+
+/** Services in the caller's municipality (for the Consultation History filter). */
+const listActiveServices = async ({ municipalityId, supabase }) => {
+  if (!municipalityId) return [];
+  const { data, error } = await supabase
+    .from('health_services')
+    .select('id, name, category, active, barangay_id')
+    .eq('municipality_id', municipalityId)
+    .order('name', { ascending: true });
+  if (error) return [];
+  return (data || []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    category: row.category || 'Other',
+    active: row.active !== false,
+    barangayId: row.barangay_id || null,
+  }));
+};
+
+/**
+ * Apply the parsed filters to the resident's OWN completed consultations.
+ * Date range, service id and status are pushed down to the repository (server
+ * side, over the session-derived resident id). The consultation TYPE is matched
+ * on the linked service's category, so both need the service join in memory.
+ */
+export const applyConsultationFilters = (consultations, filters = {}) => {
+  let rows = consultations;
+  if (filters.type) {
+    const wanted = filters.type.toLowerCase();
+    rows = rows.filter((c) => String(c.serviceCategory || '').toLowerCase() === wanted);
+  }
+  return rows;
+};
+
+export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
   if (!SELF_ROLES.includes(user?.role)) {
     throw ApiError.forbidden(
       'Only a resident may view their own health record.',
@@ -317,17 +404,40 @@ export const getOwnHealthRecords = async ({ user } = {}) => {
     };
   }
 
+  const supabase = getServiceClient();
+
   const result = await repository.listVisits({
     residentId: resident.id,
-    statuses: ['completed'],
-    limit: 100,
+    from: filters.from || null,
+    to: filters.to || null,
+    serviceId: filters.serviceId || null,
+    statuses: filters.statuses || ['completed'],
+    limit: 500,
   });
 
+  // Enrich each of the resident's own consultations with the linked health
+  // service (name + category) so the page can display and filter by type.
+  // Best-effort: the plain record is still returned if the lookup fails.
+  const serviceRows = await listActiveServices({ municipalityId: resident.municipalityId, supabase }).catch(() => []);
+  const servicesById = new Map(serviceRows.map((s) => [s.id, s]));
+
   const consultations = (result.rows || [])
-    .map(toResidentRecord)
+    .map((visit) => {
+      const record = toResidentRecord(visit);
+      const linked = visit.healthServiceId ? servicesById.get(visit.healthServiceId) : null;
+      // Prefer the snapshot recorded with the consultation (stays correct even
+      // if the catalog entry is later renamed/deactivated); fall back to the
+      // live catalog row when the visit predates the snapshot column.
+      record.serviceId = visit.healthServiceId || null;
+      record.serviceName = visit.healthServiceName || linked?.name || '';
+      record.serviceCategory = linked?.category || '';
+      return record;
+    })
     .sort((a, b) =>
       String(b.date).localeCompare(String(a.date)),
     );
+
+  const filteredConsultations = applyConsultationFilters(consultations, filters);
 
   // Health risk level for the resident dashboard. It reuses the SAME
   // KALUSAGAP risk heuristic used by the staff analytics (riskFromVitals) —
@@ -383,7 +493,8 @@ export const getOwnHealthRecords = async ({ user } = {}) => {
 
     riskLevel,
     lastConsultationDate,
-    consultations,
+    consultations: filteredConsultations,
+    total: filteredConsultations.length,
   };
 };
 
@@ -801,6 +912,14 @@ export const createResident = async ({
   if (!barangayRow) {
     throw ApiError.unprocessable(
       `Unknown barangay: ${barangay}. It must belong to your municipality.`,
+    );
+  }
+
+  // An inactive barangay is excluded from NEW resident registrations. Existing
+  // residents and their records are never touched by a deactivation.
+  if (String(barangayRow.status || 'Active') === 'Inactive') {
+    throw ApiError.unprocessable(
+      `${barangay} is currently inactive and cannot accept new resident registrations.`,
     );
   }
 

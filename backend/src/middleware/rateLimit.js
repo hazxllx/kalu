@@ -1,44 +1,56 @@
-import ApiError from '../utils/apiError.js';
+import rateLimitLib from 'express-rate-limit';
 
-/**
- * Minimal in-memory fixed-window rate limiter.
- *
- * Used to protect expensive / abuse-prone endpoints (identity verification
- * session creation, public registration). It is intentionally dependency-free
- * and per-process: behind multiple instances it is a soft limit only. When the
- * deployment grows, replace it with a shared store (e.g. Redis) without
- * changing the call sites.
- */
-const buckets = new Map();
-let lastPrune = Date.now();
-
-const prune = (now, windowMs) => {
-  if (now - lastPrune < windowMs) return;
-  for (const [key, entry] of buckets) {
-    if (now - entry.start >= windowMs) buckets.delete(key);
+const normalizeKeyPart = (value) => {
+  if (value === undefined || value === null) return 'anonymous';
+  if (typeof value === 'string') {
+    const normalized = value.trim().replace(/[\u0000-\u001F\u007F]/g, '');
+    return normalized || 'anonymous';
   }
-  lastPrune = now;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
 };
 
-const rateLimit = ({ windowMs = 60_000, max = 30, keyFn = null, message } = {}) => {
-  return (req, res, next) => {
-    const key = keyFn ? keyFn(req) : req.user?.id || req.ip || 'anonymous';
-    const now = Date.now();
-    prune(now, windowMs);
+const getClientIdentifier = (req) => {
+  if (req.user?.id) return `user:${normalizeKeyPart(req.user.id)}`;
 
-    const entry = buckets.get(key);
-    if (!entry || now - entry.start >= windowMs) {
-      buckets.set(key, { start: now, count: 1 });
-      return next();
-    }
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const forwardedValue = Array.isArray(forwardedFor)
+    ? forwardedFor[0]
+    : typeof forwardedFor === 'string'
+      ? forwardedFor.split(',')[0].trim()
+      : '';
 
-    entry.count += 1;
-    if (entry.count > max) {
-      res.set('Retry-After', String(Math.ceil((entry.start + windowMs - now) / 1000)));
-      return next(new ApiError(429, message || 'Too many requests. Please try again later.'));
-    }
-    return next();
-  };
+  const ipCandidate = forwardedValue || req.ip || 'unknown';
+  return `ip:${normalizeKeyPart(ipCandidate)}`;
 };
+
+const rateLimit = ({
+  windowMs = 60_000,
+  max = 30,
+  keyFn = null,
+  message = 'Too many requests. Please try again later.',
+} = {}) => rateLimitLib({
+  windowMs,
+  max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const customKey = keyFn ? keyFn(req) : getClientIdentifier(req);
+    return normalizeKeyPart(customKey);
+  },
+  handler: (req, res) => {
+    const retryAfter = Math.max(
+      1,
+      Math.ceil((req.rateLimit.resetTime - Date.now()) / 1000),
+    );
+    res.set('Retry-After', String(retryAfter));
+    res.status(429).json({
+      error: {
+        message,
+        retryAfter,
+      },
+    });
+  },
+});
 
 export default rateLimit;

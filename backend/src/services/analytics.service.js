@@ -30,10 +30,19 @@ const CONDITION_RULES = [
 ];
 
 /** Names of the health conditions the map/filters recognise. */
-export const CONDITION_NAMES = Object.freeze(CONDITION_RULES.map((r) => r.name));
+export const CONDITION_NAMES = Object.freeze([...CONDITION_RULES.map((r) => r.name), 'Others']);
 
 /** Completed / resolved visit statuses vs. still-active ones. */
 const COMPLETED_STATUSES = new Set(['completed']);
+export const COMMUNITY_MAP_STATUSES = Object.freeze([
+  'draft',
+  'submitted',
+  'received',
+  'in_review',
+  'referred',
+  'completed',
+]);
+export const COMMUNITY_MAP_RISK_LEVELS = Object.freeze(['High', 'Moderate', 'Low', 'Unassessed']);
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -228,8 +237,11 @@ export const getEarlyWarning = async ({ barangay = null, municipalityId = null }
  * no verified coordinate is returned with null lat/lng and is simply not plotted.
  *
  * Optional filters (all applied HERE, server-side, over real records):
- *   - `condition`: one of CONDITION_NAMES (or 'All'/null) — restricts the case
- *     counts to visits whose chief complaint classifies to that condition.
+ *   - `condition`: one of CONDITION_NAMES (or 'All'/null) — restricts cases to
+ *     visits whose chief complaint classifies to that condition.
+ *   - `status`: one of the persisted consultation workflow statuses.
+ *   - `riskLevel`: a classification from recorded vitals, or Unassessed when
+ *     the visit contains no assessable vital measurement.
  *   - `from` / `to`: ISO date strings bounding `visitDate` (inclusive). When
  *     omitted, all recorded visits are considered.
  *
@@ -250,10 +262,27 @@ const inDateRange = (isoDate, fromTs, toTs) => {
   return true;
 };
 
+export const communityMapRecordRisk = (visit, config = DEFAULT_RISK_CONFIG) =>
+  riskFromVitals(visit?.vitals, config) || 'Unassessed';
+
+export const matchesCommunityMapRecord = (
+  visit,
+  { condition = null, status = null, riskLevel = null, fromTs = null, toTs = null } = {},
+  config = DEFAULT_RISK_CONFIG,
+) => {
+  if (!inDateRange(visit?.visitDate || visit?.createdAt, fromTs, toTs)) return false;
+  if (condition && condition !== 'All' && classifyCondition(visit?.chiefComplaint) !== condition) return false;
+  if (status && String(visit?.status || '').toLowerCase() !== status) return false;
+  if (riskLevel && communityMapRecordRisk(visit, config) !== riskLevel) return false;
+  return true;
+};
+
 export const getCommunityMap = async ({
   barangay = null,
   municipalityId = null,
   condition = null,
+  status = null,
+  riskLevel = null,
   from = null,
   to = null,
 } = {}) => {
@@ -282,7 +311,7 @@ export const getCommunityMap = async ({
 
   const wantCondition = condition && condition !== 'All' ? String(condition) : null;
   const fromTs = from ? new Date(from).getTime() : null;
-  const toTs = to ? new Date(`${String(to).slice(0, 10)}T23:59:59`).getTime() : null;
+  const toTs = to ? new Date(`${String(to).slice(0, 10)}T23:59:59.999`).getTime() : null;
 
   // A barangay-scoped supervisor only ever sees their own barangay.
   const scopedBarangays = barangay
@@ -290,6 +319,8 @@ export const getCommunityMap = async ({
     : barangays;
 
   const latestVisitByResident = new Map();
+  let latestUpdatedTs = null;
+  let latestUpdatedAt = null;
   visits.forEach((v) => {
     const current = latestVisitByResident.get(v.residentId);
     if (!current || String(v.visitDate || v.createdAt) > String(current.visitDate || current.createdAt)) {
@@ -305,12 +336,23 @@ export const getCommunityMap = async ({
     // requested) classified to the selected condition.
     const matching = visits.filter((v) => {
       if (!residentIds.has(v.residentId)) return false;
-      if (!inDateRange(v.visitDate || v.createdAt, fromTs, toTs)) return false;
-      if (wantCondition && classifyCondition(v.chiefComplaint) !== wantCondition) return false;
-      return true;
+      const matches = matchesCommunityMapRecord(
+        v,
+        { condition: wantCondition, status, riskLevel, fromTs, toTs },
+        riskConfig,
+      );
+      if (matches) {
+        const updatedAt = v.updatedAt || v.createdAt || v.visitDate;
+        const updatedTs = updatedAt ? new Date(updatedAt).getTime() : Number.NaN;
+        if (!Number.isNaN(updatedTs) && (latestUpdatedTs === null || updatedTs > latestUpdatedTs)) {
+          latestUpdatedTs = updatedTs;
+          latestUpdatedAt = updatedAt;
+        }
+      }
+      return matches;
     });
 
-    const countsTuberculosis = !wantCondition || wantCondition === 'Tuberculosis';
+    const countsTuberculosis = !status && !riskLevel && (!wantCondition || wantCondition === 'Tuberculosis');
     const activeTbRows = countsTuberculosis
       ? tclEntries
         .filter((row) => residentIds.has(row.residentId) && isTbProgram(row.program) && String(row.status).toLowerCase() === 'active')
@@ -326,6 +368,8 @@ export const getCommunityMap = async ({
     // from exactly the same classified visit records as the case counts and
     // Health Trends (classifyCondition) — never a second data source.
     const conditionCounts = new Map();
+    const riskCounts = new Map(COMMUNITY_MAP_RISK_LEVELS.map((level) => [level, 0]));
+    const statusCounts = new Map(COMMUNITY_MAP_STATUSES.map((value) => [value, 0]));
     let lastRecordedTs = null;
     let lastRecorded = null;
     const noteRecordDate = (value) => {
@@ -337,7 +381,11 @@ export const getCommunityMap = async ({
       }
     };
     matching.forEach((v) => {
-      if (COMPLETED_STATUSES.has(String(v.status || '').toLowerCase())) completedCases += 1;
+      const normalizedStatus = String(v.status || '').toLowerCase();
+      const normalizedRisk = communityMapRecordRisk(v, riskConfig);
+      riskCounts.set(normalizedRisk, (riskCounts.get(normalizedRisk) || 0) + 1);
+      if (statusCounts.has(normalizedStatus)) statusCounts.set(normalizedStatus, statusCounts.get(normalizedStatus) + 1);
+      if (COMPLETED_STATUSES.has(normalizedStatus)) completedCases += 1;
       else {
         activeCases += 1;
         activeVisitResidentIds.add(v.residentId);
@@ -399,6 +447,8 @@ export const getCommunityMap = async ({
       // recent recorded date, for the Barangay Details card. All DB-derived.
       conditions,
       topCondition,
+      riskCounts: Object.fromEntries(riskCounts),
+      statusCounts: Object.fromEntries(statusCounts),
       lastRecorded,
       intensity: 0, // filled in below relative to the busiest barangay
     };
@@ -434,7 +484,10 @@ export const getCommunityMap = async ({
   return {
     scope: barangay ? 'barangay' : 'municipality',
     condition: wantCondition || 'All',
+    status: status || 'All',
+    riskLevel: riskLevel || 'All',
     reportingPeriod: { from: from || null, to: to || null },
+    latestUpdatedAt,
     center,
     summary,
     barangays: rows,
@@ -451,17 +504,24 @@ export const getCommunityMapTrends = async ({
   barangay = null,
   municipalityId = null,
   condition = null,
+  status = null,
+  riskLevel = null,
+  from = null,
+  to = null,
   year = new Date().getFullYear(),
 } = {}) => {
-  const [barangays, visitPage, tclPage, allResidents] = await Promise.all([
+  const [barangays, visitPage, tclPage, allResidents, riskConfig] = await Promise.all([
     repository.listBarangays({ municipalityId }),
     repository.listVisits({ limit: 5000 }),
     repository.listTclEntries({ limit: 5000 }),
     repository.searchResidents({ q: '', limit: 5000 }),
+    getRiskConfig({ repo: repository }),
   ]);
   const visits = visitPage.rows;
   const tclEntries = tclPage.rows || [];
   const wantCondition = condition && condition !== 'All' ? String(condition) : null;
+  const fromTs = from ? new Date(from).getTime() : null;
+  const toTs = to ? new Date(`${String(to).slice(0, 10)}T23:59:59.999`).getTime() : null;
 
   const scopedBarangays = barangay
     ? barangays.filter((b) => String(b.name).trim().toLowerCase() === String(barangay).trim().toLowerCase())
@@ -477,16 +537,22 @@ export const getCommunityMapTrends = async ({
       const d = new Date(v.visitDate || v.createdAt);
       if (Number.isNaN(d.getTime())) return false;
       if (d.getFullYear() !== Number(year) || d.getMonth() !== index) return false;
-      if (wantCondition && classifyCondition(v.chiefComplaint) !== wantCondition) return false;
-      return true;
+      return matchesCommunityMapRecord(
+        v,
+        { condition: wantCondition, status, riskLevel, fromTs, toTs },
+        riskConfig,
+      );
     });
     const visitResidents = new Set(monthVisits.map((visit) => visit.residentId));
     const activeTbResidents = new Set(
-      (!wantCondition || wantCondition === 'Tuberculosis' ? tclEntries : [])
+      (!status && !riskLevel && (!wantCondition || wantCondition === 'Tuberculosis') ? tclEntries : [])
         .filter((row) => residentInScope.has(row.residentId) && isTbProgram(row.program) && String(row.status).toLowerCase() === 'active')
         .filter((row) => {
           const d = new Date(row.createdAt || row.lastVisit);
-          return !Number.isNaN(d.getTime()) && d.getFullYear() === Number(year) && d.getMonth() === index;
+          return !Number.isNaN(d.getTime()) &&
+            d.getFullYear() === Number(year) &&
+            d.getMonth() === index &&
+            inDateRange(row.createdAt || row.lastVisit, fromTs, toTs);
         })
         .map((row) => row.residentId),
     );
@@ -498,6 +564,9 @@ export const getCommunityMapTrends = async ({
     scope: barangay ? 'barangay' : 'municipality',
     barangay: barangay || null,
     condition: wantCondition || 'All',
+    status: status || 'All',
+    riskLevel: riskLevel || 'All',
+    reportingPeriod: { from: from || null, to: to || null },
     year: Number(year),
     monthly,
   };
@@ -507,26 +576,16 @@ export const getCommunityMapTrends = async ({
 export const getConditionOptions = async () => ({ conditions: CONDITION_NAMES });
 
 /**
- * Household map markers (clustered per family) for the Community Health Map.
- *
- * RULE 7 (cluster per family): ONE marker per household, never one per member.
- * RULE 9 (pinpoint active cases): a household is flagged active when any of its
- * linked residents has a non-completed visit (or an active TB program entry).
- * RULE 10 (never fabricate coordinates): only households with valid stored
- * latitude/longitude are plotted; households without coordinates are returned
- * separately (unplotted) so the UI can account for them without a fake pin.
- * RULE 11 (privacy): the marker exposes ONLY household-level data — household
- * number, barangay, risk status, member count and whether there is an active
- * case. NO resident identity or clinical detail is ever placed on the map.
- *
- * Scope comes from the authenticated session (barangay / municipalityId), never
- * a client id, exactly like getCommunityMap.
+ * Privacy-preserving household totals aggregated at the barangay reference
+ * point. Household GPS coordinates and row identifiers are deliberately never
+ * returned; only valid stored barangay reference coordinates may be mapped.
  */
 export const getHouseholdMap = async ({ barangay = null, municipalityId = null } = {}) => {
-  const [households, visitPage, tclPage] = await Promise.all([
+  const [households, visitPage, tclPage, barangays] = await Promise.all([
     repository.listHouseholdsForMap({ barangay, municipalityId }),
     repository.listVisits({ limit: 5000 }),
     repository.listTclEntries({ limit: 5000 }),
+    repository.listBarangays({ municipalityId }),
   ]);
   const visits = visitPage.rows || [];
   const tclEntries = tclPage.rows || [];
@@ -544,55 +603,67 @@ export const getHouseholdMap = async ({ barangay = null, municipalityId = null }
       .map((row) => row.residentId),
   );
 
-  const markers = [];
-  const unplotted = [];
-
+  const householdTotals = new Map();
   households.forEach((hh) => {
     const activeResidentIds = hh.residentIds.filter(
       (id) => activeVisitResidentIds.has(id) || activeTbResidentIds.has(id),
     );
-    const activeCases = activeResidentIds.length;
-    const latitude = Number(hh.latitude);
-    const longitude = Number(hh.longitude);
+    const key = hh.barangayId || String(hh.barangay || '').trim().toLowerCase();
+    const total = householdTotals.get(key) || {
+      barangayId: hh.barangayId || null,
+      barangay: hh.barangay || '',
+      householdCount: 0,
+      memberCount: 0,
+      activeHouseholds: 0,
+    };
+    total.householdCount += 1;
+    total.memberCount += Number(hh.memberCount) || 0;
+    if (activeResidentIds.length) total.activeHouseholds += 1;
+    householdTotals.set(key, total);
+  });
+
+  const locations = [];
+  let unplottedBarangays = 0;
+  for (const [key, total] of householdTotals) {
+    const row = barangays.find((item) =>
+      (total.barangayId && String(item.id) === String(total.barangayId)) ||
+      (!total.barangayId && String(item.name).trim().toLowerCase() === String(total.barangay).trim().toLowerCase()),
+    );
+    const latitude = Number(row?.latitude);
+    const longitude = Number(row?.longitude);
     const hasCoordinates =
-      hh.latitude != null &&
-      hh.longitude != null &&
+      row?.latitude != null &&
+      row?.longitude != null &&
       Number.isFinite(latitude) &&
       Number.isFinite(longitude) &&
       latitude >= -90 &&
       latitude <= 90 &&
       longitude >= -180 &&
       longitude <= 180;
-
-    // Household-level marker payload ONLY (no resident identity, no diagnosis).
-    const marker = {
-      id: hh.id,
-      householdNo: hh.id,
-      barangay: hh.barangay,
-      purok: hh.purok,
-      memberCount: hh.memberCount,
-      riskLevel: hh.riskLevel || 'Low',
-      activeCases,
-      hasActiveCase: activeCases > 0,
-      hasCoordinates,
-      latitude: hasCoordinates ? latitude : null,
-      longitude: hasCoordinates ? longitude : null,
-    };
-
-    if (hasCoordinates) markers.push(marker);
-    else unplotted.push(marker);
-  });
+    if (!hasCoordinates) {
+      unplottedBarangays += 1;
+      continue;
+    }
+    locations.push({
+      barangay: row.name,
+      householdCount: total.householdCount,
+      memberCount: total.memberCount,
+      activeHouseholds: total.activeHouseholds,
+      hasCoordinates: true,
+      latitude,
+      longitude,
+    });
+  }
 
   return {
     scope: barangay ? 'barangay' : 'municipality',
     summary: {
       households: households.length,
-      plotted: markers.length,
-      unplotted: unplotted.length,
-      activeCaseHouseholds: [...markers, ...unplotted].filter((m) => m.hasActiveCase).length,
+      plotted: locations.length,
+      unplotted: unplottedBarangays,
+      activeCaseHouseholds: [...householdTotals.values()].reduce((sum, row) => sum + row.activeHouseholds, 0),
     },
-    households: markers,
-    unplotted,
+    locations,
   };
 };
 

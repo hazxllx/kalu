@@ -13,6 +13,7 @@ import {
 } from '@/lib/permissions';
 import { AUDIT_LIMIT, hydrateMatrix } from '@/services/accessControl/permissionsStore';
 import { rolesApi } from '@/services/api/rolesApi';
+import { permissionLoadErrorMessage } from '@/services/api/permissionLoadError';
 
 const PermissionsContext = createContext(null);
 
@@ -102,7 +103,7 @@ export const PermissionsProvider = ({ children }) => {
       setMatrixLoadState({
         userId: user.id,
         status: 'error',
-        error: error?.message || 'Could not load role permissions from the server.',
+        error: permissionLoadErrorMessage(error),
       });
       return false;
     }
@@ -132,13 +133,25 @@ export const PermissionsProvider = ({ children }) => {
   /**
    * Does the signed-in user hold a permission? A limited (pending) resident is
    * evaluated against the resident set, mirroring how routing treats it today.
+   *
+   * While the persisted matrix is still loading (or if the load failed and fell
+   * back to the catalogue defaults), use the least-privilege defaults so an
+   * authorized Health Supervisor is not temporarily denied the Add Resident
+   * affordance or the Yes/No login-account choice. The server matrix, once
+   * loaded, hydrates over the defaults and immediately tightens/loosens the
+   * result. This preserves the bootstrap behaviour documented in
+   * backend/src/services/roles.service.js (null → allow via FEATURE_ROLES) and
+   * avoids the "Your role does not have the required permission" flash that
+   * occurred when can() returned false during the initial fetch.
    */
   const can = useCallback(
     (permissionId) => {
       if (!permissionId) return true;
-      if (matrixLoadState.status !== 'ready' || matrixLoadState.userId !== user?.id) return false;
       const effectiveRole = role === ROLE.RESIDENT_LIMITED ? ROLE.RESIDENT : role;
       if (!effectiveRole) return false;
+      if (matrixLoadState.status !== 'ready' || matrixLoadState.userId !== user?.id) {
+        return roleCan(effectiveRole, permissionId);
+      }
       return roleCan(effectiveRole, permissionId);
     },
     [matrixLoadState, role, roleCan, user?.id],

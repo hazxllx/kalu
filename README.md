@@ -125,6 +125,11 @@ SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
+The development API permits both `http://localhost:5173` and
+`http://127.0.0.1:5173`; browsers treat those hostnames as different origins.
+In production, set `CLIENT_URL` to the deployed frontend origin. `CORS_ORIGIN`
+is an optional alias/additional-origin setting, not a second required variable.
+
 Optional backend variables support a local JSON data directory for development
 without Supabase; the full, annotated templates are in
 [frontend/.env.example](frontend/.env.example) and
@@ -223,8 +228,11 @@ normalizes a bare API origin by appending `/api`, but including the mount in the
 deployment setting makes the contract explicit. Set the backend's `CLIENT_URL`
 to the deployed frontend origin so CORS permits it. For the current production
 deployment, use `VITE_API_URL=https://kalusagap.onrender.com/api` in Vercel and
-`CLIENT_URL=https://kalu-zeta.vercel.app` in Render. The Supabase project
-provides authentication and the PostgreSQL database for both.
+`CLIENT_URL=https://kalu-zeta.vercel.app` in Render. That API URL is also the
+frontend's production fallback if the hosting variable is absent; explicitly
+setting it in Vercel remains recommended, and any configured value overrides
+the fallback. The Supabase project provides authentication and the PostgreSQL
+database for both.
 
 ## Scope and Limitations
 

@@ -3,6 +3,7 @@
  */
 import * as residentsService from '../services/residents.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
+import ApiError from '../utils/apiError.js';
 
 export const listResidents = async (req, res) => {
   // Verified-only directory: `?verified=true` (or `?status=approved|verified`).
@@ -66,8 +67,20 @@ export const updateMyProfile = async (req, res) => {
 
 // Resident self-service: read own health record (basic profile + own completed
 // consultations). Resident is derived from the session; no id is accepted.
+// Filter parameters (date range / service / type / status) are validated in the
+// service and applied SERVER-SIDE to the caller's own records.
 export const getMyHealthRecords = async (req, res) => {
-  const data = await residentsService.getOwnHealthRecords({ user: req.user });
+  const { filters, errors } = residentsService.parseConsultationFilters({
+    from: req.query.from,
+    to: req.query.to,
+    serviceId: req.query.serviceId ?? req.query.service_id,
+    type: req.query.type,
+    status: req.query.status,
+  });
+  if (errors.length) {
+    throw ApiError.unprocessable('Please correct the consultation filters.', errors);
+  }
+  const data = await residentsService.getOwnHealthRecords({ user: req.user, filters });
   sendData(res, data);
 };
 

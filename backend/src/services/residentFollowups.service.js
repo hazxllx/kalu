@@ -16,6 +16,7 @@ import ApiError from '../utils/apiError.js';
  */
 
 const text = (v) => String(v ?? '').trim();
+const FOLLOW_UP_PAGE_SIZE = 200;
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
 };
@@ -88,14 +89,20 @@ const ownFollowUp = async (supabase, resident, id) => {
 
 export const listOwn = async ({ user, supabase = getServiceClient() }) => {
   const resident = await ownResident(supabase, user);
-  const { data, error } = await supabase
+  const query = supabase
     .from('follow_ups')
     .select(`*, ${CONSULTATION_EMBED}`)
     .eq('resident_id', resident.id)
     .order('scheduled_date', { ascending: true })
-    .limit(200);
-  throwOnError(error, 'Could not load your follow-ups');
-  return (data || []).map(toSafe);
+    .order('id', { ascending: true });
+  const rows = [];
+  for (let offset = 0; ; offset += FOLLOW_UP_PAGE_SIZE) {
+    const { data, error } = await query.range(offset, offset + FOLLOW_UP_PAGE_SIZE - 1);
+    throwOnError(error, 'Could not load your follow-ups');
+    rows.push(...(data || []));
+    if (!data || data.length < FOLLOW_UP_PAGE_SIZE) break;
+  }
+  return rows.map(toSafe);
 };
 
 export const getOwn = async ({ user, id, supabase = getServiceClient() }) => {

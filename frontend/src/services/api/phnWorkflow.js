@@ -14,6 +14,15 @@ import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
  * (municipality/barangay), ownership and role rules are enforced server-side.
  */
 export const phnWorkflowApi = {
+  /** Active health-service options visible to the consultation station only. */
+  listConsultationHealthServices: async () => {
+    const payload = await api.get("/phn/consultation-services");
+    if (!Array.isArray(payload?.services)) {
+      throw new Error("The consultation health-service response was invalid.");
+    }
+    return payload.services;
+  },
+
   /** PHN queue — every submission routed to the PHN (municipality-scoped). */
   listQueue: async () => {
     const payload = await api.get("/phn/submissions");
@@ -22,23 +31,47 @@ export const phnWorkflowApi = {
   listQueueOffline: async (ownerId) => {
     if (!ownerId) throw new Error("A signed-in user is required.");
     let patients = null;
+    let networkError = null;
     try {
       patients = await phnWorkflowApi.listQueue();
-      await Promise.all(patients.map((patient) =>
-        cacheRecord({
-          entity: "phnQueueVisit",
-          remoteId: patient.id,
-          ownerId,
-          data: patient,
-        }),
-      ));
     } catch (error) {
       if (classifySyncError(error).code !== SYNC_ERROR.NETWORK) throw error;
+      networkError = error;
     }
-    if (!patients) {
-      patients = (await listCachedRecords(ownerId, "phnQueueVisit")).map((row) => row.data);
+    if (patients) {
+      // Best-effort cache: a storage/migration failure must never hide the
+      // successfully fetched queue or turn it into a spurious server error.
+      try {
+        await Promise.all(
+          patients.map((patient) =>
+            cacheRecord({
+              entity: "phnQueueVisit",
+              remoteId: patient.id,
+              ownerId,
+              data: patient,
+            }),
+          ),
+        );
+      } catch (cacheError) {
+        console.warn("[phnWorkflow] cache write failed, returning live data", cacheError);
+      }
+      return patients;
     }
-    return patients;
+    // Network failure — fall back to cached data; a cache read failure is
+    // surfaced as a storage error, not a server error, and never masks the
+    // original network cause when the cache is empty.
+    try {
+      const cached = await listCachedRecords(ownerId, "phnQueueVisit");
+      const rows = cached.map((row) => row.data);
+      if (rows.length > 0) return rows;
+      throw networkError || new Error("No cached PHN queue available offline.");
+    } catch (cacheError) {
+      if (networkError && cacheError === networkError) throw networkError;
+      // If cache read itself failed (e.g. storage/migration error), surface it
+      // distinctly so the UI does not misreport it as a server failure.
+      console.warn("[phnWorkflow] cache read failed", cacheError);
+      throw cacheError?.code ? cacheError : networkError || cacheError;
+    }
   },
 
   /** The caller's own intake submissions (RHU personnel / BHW view). */
@@ -50,21 +83,50 @@ export const phnWorkflowApi = {
   listMyIntakeOffline: async (ownerId) => {
     if (!ownerId) throw new Error("A signed-in user is required.");
     let patients = null;
+    let networkError = null;
     try {
       patients = await phnWorkflowApi.listMyIntake();
-      await Promise.all(patients.map((patient) =>
-        cacheRecord({
-          entity: "rhuIntakeVisit",
-          remoteId: patient.id,
-          ownerId,
-          data: patient,
-        }),
-      ));
     } catch (error) {
       if (classifySyncError(error).code !== SYNC_ERROR.NETWORK) throw error;
+      networkError = error;
     }
-    if (!patients) {
-      patients = (await listCachedRecords(ownerId, "rhuIntakeVisit")).map((row) => row.data);
+    if (patients) {
+      try {
+        await Promise.all(
+          patients.map((patient) =>
+            cacheRecord({
+              entity: "rhuIntakeVisit",
+              remoteId: patient.id,
+              ownerId,
+              data: patient,
+            }),
+          ),
+        );
+      } catch (cacheError) {
+        console.warn("[phnWorkflow] cache write failed, returning live data", cacheError);
+      }
+      const drafts = await listDrafts(ownerId, "rhuTriage");
+      return [
+        ...drafts
+          .filter((draft) => draft.status !== "synced")
+          .map((draft) => ({
+            ...draft.data,
+            id: draft.localId,
+            status: "Saved Offline",
+            offline: true,
+            syncStatus: "Saved Offline",
+          })),
+        ...patients,
+      ];
+    }
+    // Offline path: cached rows + local drafts. Cache failures are isolated.
+    let cached = [];
+    try {
+      cached = (await listCachedRecords(ownerId, "rhuIntakeVisit")).map((row) => row.data);
+    } catch (cacheError) {
+      console.warn("[phnWorkflow] cache read failed", cacheError);
+      if (!networkError) throw cacheError;
+      cached = [];
     }
     const drafts = await listDrafts(ownerId, "rhuTriage");
     return [
@@ -75,7 +137,7 @@ export const phnWorkflowApi = {
         offline: true,
         syncStatus: "Saved Offline",
       })),
-      ...patients,
+      ...cached,
     ];
   },
 

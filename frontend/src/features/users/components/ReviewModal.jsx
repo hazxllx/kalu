@@ -33,6 +33,7 @@ export default function ReviewModal({
   busy = false,
   initialFocusRef,
   ariaLabel,
+  footer,
   children,
 }) {
   const stateRef = useRef({ busy, closeGuard, onClose });
@@ -118,7 +119,12 @@ export default function ReviewModal({
         </div>
 
         {/* Single scrollable body */}
-        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">{children}</div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">{children}</div>
+        {footer && (
+          <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 dark:border-border dark:bg-card sm:px-5">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

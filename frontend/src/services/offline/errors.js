@@ -42,6 +42,18 @@ export const classifySyncError = (error) => {
   const name = error?.name || '';
   const message = String(error?.message || '');
 
+  // IndexedDB / Dexie storage & migration failures must not be treated as
+  // server or network errors; they need a storage-specific retry/message.
+  if (/UpgradeError/i.test(name) || /Not yet support for changing primary key/i.test(message)) {
+    return { code: SYNC_ERROR.STORAGE, status, retryable: false, message: message || 'Device storage migration failed. Reload to retry.' };
+  }
+  if (name === 'OpenFailedError' || /VersionError|AbortError/i.test(name)) {
+    // Dexie wraps upgrade failures as OpenFailedError; surface as storage.
+    if (/Upgrade|primary key|version/i.test(message)) {
+      return { code: SYNC_ERROR.STORAGE, status, retryable: false, message: message || 'Device storage error.' };
+    }
+  }
+
   if (error?.code === SYNC_ERROR.MALFORMED || name === 'MalformedOperationError') {
     return { code: SYNC_ERROR.MALFORMED, status, retryable: false, message: message || 'The queued change is malformed.' };
   }

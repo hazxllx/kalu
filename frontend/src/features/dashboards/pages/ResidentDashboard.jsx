@@ -8,6 +8,7 @@ import TransferStatusBanner from "@/features/verification/components/TransferSta
 import { residentsApi, residentFollowUpsApi, referralsApi, visitPlansApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { availabilityLine, formatServiceSchedule, formatWeekdays, formatWindow, formatDeadline } from "@/features/health-services/lib/visitPlanFormat";
+import { manilaDateKey } from "@/features/follow-ups/lib/scheduleDates";
 
 const timelineColor = {
   green: "bg-brand-green", accent: "bg-brand-accent", blue: "bg-brand-blue",
@@ -21,7 +22,7 @@ const formatLongDate = (iso) => {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 };
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => manilaDateKey();
 
 // Statuses that represent an approved / confirmed upcoming follow-up. A pending,
 // rejected or cancelled follow-up is not shown as "upcoming".
@@ -92,9 +93,30 @@ export default function ResidentDashboard() {
   const [loading, setLoading] = useState(true);
   const [health, setHealth] = useState(null); // { resident, riskLevel, lastConsultationDate, consultations }
   const [followUps, setFollowUps] = useState([]);
+  const [followUpsError, setFollowUpsError] = useState("");
   const [referrals, setReferrals] = useState([]);
   const [services, setServices] = useState(null); // null = not yet loaded; [] = loaded, none offered
   const [servicesError, setServicesError] = useState(false);
+
+  const loadFollowUps = React.useCallback(() => {
+    setFollowUpsError("");
+    return residentFollowUpsApi.list()
+      .then((result) => setFollowUps(result?.rows || []))
+      .catch((error) => setFollowUpsError(error?.message || "Unable to load follow-ups."));
+  }, []);
+
+  useEffect(() => {
+    loadFollowUps();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") loadFollowUps();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadFollowUps]);
 
   useEffect(() => {
     let active = true;
@@ -103,17 +125,15 @@ export default function ResidentDashboard() {
     // blank the whole dashboard, so they are settled individually.
     Promise.allSettled([
       residentsApi.myHealthRecords(),
-      residentFollowUpsApi.list(),
       referralsApi.list(),
       // Barangay-scoped, backend-authoritative services directory. Scope,
       // eligibility and availability are all enforced server-side (and mirrored
       // by Supabase RLS); the client sends no barangay/resident id.
       visitPlansApi.directory(),
     ])
-      .then(([healthRes, followUpRes, referralRes, servicesRes]) => {
+      .then(([healthRes, referralRes, servicesRes]) => {
         if (!active) return;
         if (healthRes.status === "fulfilled") setHealth(healthRes.value || null);
-        if (followUpRes.status === "fulfilled") setFollowUps(followUpRes.value?.rows || []);
         if (referralRes.status === "fulfilled") setReferrals(referralRes.value?.rows || referralRes.value?.records || []);
         if (servicesRes.status === "fulfilled") {
           const facilities = servicesRes.value?.facilities || [];
@@ -151,8 +171,12 @@ export default function ResidentDashboard() {
       icon: CalendarClock,
       tone: "bg-brand-accent/10 text-brand-accent",
       label: "Upcoming Follow-up",
-      main: upcomingFollowUp ? formatLongDate(upcomingFollowUp.scheduledDate) : "No upcoming follow-up",
-      sub: upcomingFollowUp
+      main: upcomingFollowUp
+        ? formatLongDate(upcomingFollowUp.scheduledDate)
+        : followUpsError ? "Unable to load follow-ups" : "No upcoming follow-up",
+      sub: followUpsError
+        ? `${followUpsError} The follow-up status may be out of date.`
+        : upcomingFollowUp
         ? [upcomingFollowUp.location, upcomingFollowUp.status ? `Status: ${upcomingFollowUp.status}` : null].filter(Boolean).join(" · ")
         : "",
     },

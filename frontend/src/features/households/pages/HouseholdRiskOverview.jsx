@@ -12,7 +12,8 @@ import { useBarangays } from "@/context/BarangaysContext";
 import { formatShortDate } from "@/lib/dateUtils";
 import { FollowUpModal } from "../components/RiskActionModals";
 import {
-  Search, Home, ShieldCheck, AlertTriangle, PhoneCall, X, ChevronRight, Users, MapPin, RefreshCw,
+  Search, ShieldCheck, AlertTriangle, PhoneCall, X, ChevronRight, Users, MapPin, RefreshCw,
+  Download, ClipboardCheck, Eye, Activity,
 } from "lucide-react";
 
 const levelTone = {
@@ -88,6 +89,15 @@ export default function HouseholdRiskOverview() {
   const [followUpFilter, setFollowUpFilter] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState({
+    query: "",
+    barangayFilter: "All",
+    levelFilter: "all",
+    indicatorFilter: "all",
+    followUpFilter: "all",
+    startDate: "",
+    endDate: "",
+  });
   const [followUpFor, setFollowUpFor] = useState(null);
   const [toast, setToast] = useState(null);
 
@@ -103,22 +113,22 @@ export default function HouseholdRiskOverview() {
   }, [clusters]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = appliedFilters.query.trim().toLowerCase();
     return clusters.filter((h) => {
-      if (barangayFilter !== "All" && h.barangay !== barangayFilter) return false;
-      if (levelFilter !== "all" && h.risk?.level !== levelFilter) return false;
-      if (followUpFilter !== "all") {
+      if (appliedFilters.barangayFilter !== "All" && h.barangay !== appliedFilters.barangayFilter) return false;
+      if (appliedFilters.levelFilter !== "all" && h.risk?.level !== appliedFilters.levelFilter) return false;
+      if (appliedFilters.followUpFilter !== "all") {
         const status = String(h.workflowStatus || "").toLowerCase();
-        if (followUpFilter === "required" && !["follow-up scheduled", "intervention initiated", "monitoring"].some((s) => status.includes(s.split(" ")[0]))) return false;
-        if (followUpFilter === "scheduled" && status !== "follow-up scheduled") return false;
-        if (followUpFilter === "overdue" && !status.includes("overdue")) return false;
-        if (followUpFilter === "resolved" && status !== "resolved") return false;
+        if (appliedFilters.followUpFilter === "required" && !["follow-up scheduled", "intervention initiated", "monitoring"].some((s) => status.includes(s.split(" ")[0]))) return false;
+        if (appliedFilters.followUpFilter === "scheduled" && status !== "follow-up scheduled") return false;
+        if (appliedFilters.followUpFilter === "overdue" && !status.includes("overdue")) return false;
+        if (appliedFilters.followUpFilter === "resolved" && status !== "resolved") return false;
       }
-      if (indicatorFilter !== "all" && !(h.risk?.indicators || []).some((i) => i.key === indicatorFilter)) return false;
-      if (startDate || endDate) {
+      if (appliedFilters.indicatorFilter !== "all" && !(h.risk?.indicators || []).some((i) => i.key === appliedFilters.indicatorFilter)) return false;
+      if (appliedFilters.startDate || appliedFilters.endDate) {
         const last = h.lastHouseholdVisit || h.lastAssessment || "";
-        if (last && startDate && last < startDate) return false;
-        if (last && endDate && last > endDate) return false;
+        if (last && appliedFilters.startDate && last < appliedFilters.startDate) return false;
+        if (last && appliedFilters.endDate && last > appliedFilters.endDate) return false;
       }
       if (q) {
         const hay = `${h.head} ${h.id} ${h.barangay} ${h.surname || ""}`.toLowerCase();
@@ -126,7 +136,7 @@ export default function HouseholdRiskOverview() {
       }
       return true;
     });
-  }, [clusters, query, barangayFilter, levelFilter, indicatorFilter, followUpFilter, startDate, endDate]);
+  }, [clusters, appliedFilters]);
 
   const counts = useMemo(() => {
     const c = { total: clusters.length, priority: 0, intervention: 0, monitor: 0, stable: 0 };
@@ -162,30 +172,79 @@ export default function HouseholdRiskOverview() {
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
   }, [clusters]);
 
-  const priorityList = useMemo(
-    () =>
-      clusters
-        .filter((h) => h.risk?.level === RISK_LEVELS.PRIORITY || h.risk?.level === RISK_LEVELS.INTERVENTION)
-        .sort((a, b) => (b.risk?.score || 0) - (a.risk?.score || 0)),
-    [clusters]
+  const visiblePriorityList = useMemo(
+    () => filtered
+      .filter((h) => h.risk?.level === RISK_LEVELS.PRIORITY || h.risk?.level === RISK_LEVELS.INTERVENTION)
+      .sort((a, b) => (b.risk?.score || 0) - (a.risk?.score || 0)),
+    [filtered]
   );
+  const latestDataDate = useMemo(() => {
+    const dates = clusters
+      .flatMap((h) => [h.lastHouseholdVisit, h.lastAssessment])
+      .filter(Boolean)
+      .map(String)
+      .sort();
+    return dates.length ? formatDate(dates[dates.length - 1]) : "No date available";
+  }, [clusters]);
 
   const maxIndicatorCount = indicatorBreakdown.length ? indicatorBreakdown[0][1] : 1;
 
-  const clearFilters = () => {    setQuery("");
+  const applyFilters = () => setAppliedFilters({
+    query,
+    barangayFilter,
+    levelFilter,
+    indicatorFilter,
+    followUpFilter,
+    startDate,
+    endDate,
+  });
+
+  const clearFilters = () => {
+    setQuery("");
     setBarangayFilter("All");
     setLevelFilter("all");
     setIndicatorFilter("all");
     setFollowUpFilter("all");
     setStartDate("");
     setEndDate("");
+    setAppliedFilters({
+      query: "",
+      barangayFilter: "All",
+      levelFilter: "all",
+      indicatorFilter: "all",
+      followUpFilter: "all",
+      startDate: "",
+      endDate: "",
+    });
+  };
+
+  const exportReport = () => {
+    const columns = ["Household ID", "Head of Household", "Barangay", "Risk Level", "Key Indicators", "Follow-up", "Last Visit"];
+    const rows = filtered.map((h) => [
+      h.id,
+      h.head,
+      h.barangay,
+      RISK_LEVEL_LABELS[h.risk?.level || RISK_LEVELS.STABLE],
+      (h.risk?.indicators || []).map((indicator) => indicator.label).join("; "),
+      h.workflowStatus || "",
+      h.lastHouseholdVisit || "",
+    ]);
+    const csv = [columns, ...rows]
+      .map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `household-risk-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // ------------------------------- States ---------------------------------
   if (phase === "loading") {
     return (
       <>
-        <PageHeader crumbs={["Households Risk Overview"]} title="Household Risk Overview" subtitle="Identify households with multiple health-risk indicators and prioritize early intervention across the municipality." />
+        <PageHeader crumbs={["Household Risk Monitoring"]} title="Household Risk Monitoring" subtitle="Overview of household risks, key indicators, and follow-up status." dense />
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />
@@ -204,7 +263,7 @@ export default function HouseholdRiskOverview() {
   if (phase === "error") {
     return (
       <>
-        <PageHeader crumbs={["Households Risk Overview"]} title="Household Risk Overview" subtitle="Identify households with multiple health-risk indicators and prioritize early intervention across the municipality." />
+        <PageHeader crumbs={["Household Risk Monitoring"]} title="Household Risk Monitoring" subtitle="Overview of household risks, key indicators, and follow-up status." dense />
         <Card className="p-10 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-danger/10">
             <AlertTriangle className="h-7 w-7 text-brand-danger" />
@@ -226,61 +285,100 @@ export default function HouseholdRiskOverview() {
   return (
     <>
       <PageHeader
-        crumbs={["Households Risk Overview"]}
-        title="Household Risk Overview"
-        subtitle="Identify households with multiple health-risk indicators and prioritize early intervention across the municipality."
+        dense
+        crumbs={["Household Risk Monitoring"]}
+        title="Household Risk Monitoring"
+        subtitle="Overview of household risks, key indicators, and follow-up status."
+        meta={<span className="text-xs text-white/75">Latest data: <strong className="font-medium text-white">{latestDataDate}</strong></span>}
         action={
-          <Link
-            to={earlyWarningPath()}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue dark:border-border dark:bg-card dark:text-slate-300"
-          >
-            <AlertTriangle className="h-3.5 w-3.5" /> Early Intervention
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={exportReport}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-btn bg-white px-4 py-2 text-sm font-semibold text-brand-blue transition hover:bg-brand-bg"
+            >
+              <Download className="h-4 w-4" /> Export Report
+            </button>
+            <Link
+              to={earlyWarningPath()}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-btn border border-white/25 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10"
+            >
+              <AlertTriangle className="h-4 w-4" /> Early Intervention
+            </Link>
+          </div>
         }
       />
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5 mb-6">
-        <Card className="flex h-full flex-col justify-between p-4">
-          <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-brand-gray">
-            <span className="flex h-5 w-5 items-center justify-center rounded-md bg-brand-blue/10 text-brand-blue"><Users className="h-3.5 w-3.5" /></span>
-            Total Households
-          </p>
-          <p className="mt-3 text-2xl font-stat font-bold tracking-tight text-brand-ink">{counts.total}</p>
-        </Card>
+      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {[
-          { level: RISK_LEVELS.PRIORITY, label: "Priority Review" },
-          { level: RISK_LEVELS.INTERVENTION, label: "Needs Intervention" },
-          { level: RISK_LEVELS.MONITOR, label: "Monitor" },
-          { level: RISK_LEVELS.STABLE, label: "Stable" },
-        ].map((c) => (
-          <button
-            key={c.level}
-            onClick={() => setLevelFilter(levelFilter === c.level ? "all" : c.level)}
-            className={`flex h-full flex-col justify-between rounded-2xl border p-4 text-left transition-colors ${levelFilter === c.level ? "border-brand-blue bg-brand-light/60" : "border-slate-200 bg-white hover:border-brand-blue/40"}`}
-          >
-            <p className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-brand-gray">
-              <span className={`h-2.5 w-2.5 rounded-full ${levelTone[c.level].dot}`} /> {c.label}
-            </p>
-            <p className="mt-3 text-2xl font-stat font-bold tracking-tight text-brand-ink">{counts[c.level]}</p>
-          </button>
-        ))}
+          { key: "priority", level: RISK_LEVELS.PRIORITY, label: "Priority Review", icon: AlertTriangle, color: "text-rose-700", tint: "bg-rose-50", bar: "bg-rose-600" },
+          { key: "intervention", level: RISK_LEVELS.INTERVENTION, label: "Needs Intervention", icon: ClipboardCheck, color: "text-blue-700", tint: "bg-blue-50", bar: "bg-blue-600" },
+          { key: "monitor", level: RISK_LEVELS.MONITOR, label: "Monitor", icon: Activity, color: "text-amber-700", tint: "bg-amber-50", bar: "bg-amber-500" },
+          { key: "stable", level: RISK_LEVELS.STABLE, label: "Stable", icon: ShieldCheck, color: "text-emerald-700", tint: "bg-emerald-50", bar: "bg-emerald-600" },
+          { key: "total", label: "Total Households", icon: Users, color: "text-brand-blue", tint: "bg-brand-blue/10", bar: "bg-brand-blue" },
+        ].map((stat) => {
+          const Icon = stat.icon;
+          const value = counts[stat.key];
+          const percentage = counts.total ? Math.round((value / counts.total) * 100) : 0;
+          const selected = stat.level && appliedFilters.levelFilter === stat.level;
+          const content = (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-brand-gray">{stat.label}</span>
+                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${stat.tint} ${stat.color}`}>
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                </span>
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-bold tracking-tight text-brand-ink">{value}</span>
+                <span className="text-xs text-brand-gray">{percentage}% of households</span>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                <div className={`h-full rounded-full transition-all ${stat.bar}`} style={{ width: `${percentage}%` }} />
+              </div>
+            </>
+          );
+          return stat.level ? (
+            <button
+              key={stat.key}
+              type="button"
+              aria-pressed={Boolean(selected)}
+              onClick={() => {
+                const nextLevel = selected ? "all" : stat.level;
+                setLevelFilter(nextLevel);
+                setAppliedFilters((current) => ({ ...current, levelFilter: nextLevel }));
+              }}
+              className={`min-h-[116px] rounded-card border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${selected ? "border-brand-blue ring-1 ring-brand-blue/30" : "border-slate-200"}`}
+            >
+              {content}
+            </button>
+          ) : (
+            <Card key={stat.key} className="min-h-[116px] p-4 shadow-sm">
+              {content}
+            </Card>
+          );
+        })}
       </div>
 
       {/* Filters */}
-      <Card className="p-4 mb-6">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
+      <Card className="mb-6 p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-blue/10 text-brand-blue"><Search className="h-3.5 w-3.5" /></span>
+          <h2 className="text-sm font-semibold text-brand-ink">Filter households</h2>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 xl:items-end">
           {/* Search — widest control */}
-          <div className="sm:col-span-2 lg:col-span-4">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Search</label>
+          <div className="sm:col-span-2 xl:col-span-4">
+            <label className="mb-1.5 block text-xs font-medium text-brand-gray">Search household</label>
             <div className="flex h-10 items-center gap-2 rounded-input border border-slate-200 dark:border-border bg-brand-bg/60 dark:bg-input px-3">
               <Search className="h-4 w-4 shrink-0 text-brand-gray dark:text-slate-400" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Household, ID, barangay..." className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Household, household ID, or head of household" className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500" />
             </div>
           </div>
 
-          <div className="lg:col-span-2">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Barangay</label>
+          <div className="xl:col-span-2">
+            <label className="mb-1.5 block text-xs font-medium text-brand-gray">Barangay</label>
             <select value={barangayFilter} onChange={(e) => setBarangayFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
               <option value="All">All Barangays</option>
               {liveBarangays.map((b) => <option key={b} value={b}>{b}</option>)}
@@ -288,16 +386,16 @@ export default function HouseholdRiskOverview() {
             </select>
           </div>
 
-          <div className="lg:col-span-2">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Risk Level</label>
+          <div className="xl:col-span-2">
+            <label className="mb-1.5 block text-xs font-medium text-brand-gray">Risk Level</label>
             <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
               <option value="all">All Risk Levels</option>
               {levelOrder.map((l) => <option key={l} value={l}>{RISK_LEVEL_LABELS[l]}</option>)}
             </select>
           </div>
 
-          <div className="lg:col-span-2">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Indicators</label>
+          <div className="xl:col-span-2">
+            <label className="mb-1.5 block text-xs font-medium text-brand-gray">Indicators</label>
             <select value={indicatorFilter} onChange={(e) => setIndicatorFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
               <option value="all">All Indicators</option>
               {indicatorOptions.map((k) => {
@@ -307,8 +405,8 @@ export default function HouseholdRiskOverview() {
             </select>
           </div>
 
-          <div className="lg:col-span-2">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Follow-up</label>
+          <div className="xl:col-span-2">
+            <label className="mb-1.5 block text-xs font-medium text-brand-gray">Follow-up</label>
             <select value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue">
               <option value="all">All Follow-up</option>
               <option value="required">Required</option>
@@ -319,128 +417,186 @@ export default function HouseholdRiskOverview() {
           </div>
 
           {/* Start + End dates stay together */}
-          <div className="sm:col-span-2 lg:col-span-4">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-brand-gray">Date Range</label>
-            <div className="flex items-center gap-2">
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue" />
+          <div className="sm:col-span-2 xl:col-span-5">
+            <label className="mb-1.5 block text-xs font-medium text-brand-gray">Date range</label>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+              <input aria-label="Start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-10 min-w-0 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-2 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue sm:px-3" />
               <span className="text-xs text-brand-gray">to</span>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-10 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-3 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue" />
+              <input aria-label="End date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-10 min-w-0 w-full rounded-btn border border-slate-200 dark:border-border bg-white dark:bg-input px-2 text-sm outline-none text-brand-ink dark:text-foreground focus:border-brand-blue sm:px-3" />
             </div>
           </div>
 
-          <div className="sm:col-span-2 lg:col-span-3">
-            <label className="mb-1.5 hidden text-xs font-semibold uppercase tracking-wide text-brand-gray lg:block">&nbsp;</label>
-            <button onClick={clearFilters} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 text-sm font-medium text-brand-gray hover:bg-brand-bg">
+          <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:justify-end xl:col-span-7">
+            <button type="button" onClick={clearFilters} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 text-sm font-medium text-brand-gray hover:bg-brand-bg">
               <X className="h-4 w-4" /> Clear Filters
+            </button>
+            <button type="button" onClick={applyFilters} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-btn bg-brand-blue px-4 text-sm font-semibold text-white hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2">
+              Apply Filters
             </button>
           </div>
         </div>
       </Card>
 
-      {/* Empty state */}
-      {noData && (
-        <Card className="mb-6 px-6 py-12 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
-            <ShieldCheck className="h-7 w-7 text-emerald-600" />
-          </div>
-          <h3 className="mt-4 text-lg font-semibold text-brand-ink">No Households Currently Require Intervention</h3>
-          <p className="mx-auto mt-1.5 max-w-md text-sm text-brand-gray">
-            Based on the current monitoring rules, no household risk clusters requiring intervention have been identified in the available records. This is a good outcome.
-          </p>
-          <a href="/app/bhw/households" className="mt-5 inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-dark">
-            <Home className="h-4 w-4" /> View All Households
-          </a>
-        </Card>
-      )}
-
       {/* Priority households */}
-      <Card className="p-5 mb-6">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <h3 className="text-base font-semibold text-brand-ink">Priority Households</h3>
-          <span className="text-xs text-brand-gray">{priorityList.length} households</span>
+      <Card className="mb-6 overflow-hidden border-slate-200 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-700">
+                <AlertTriangle className="h-4 w-4" />
+              </span>
+              <h2 className="text-lg font-semibold text-brand-ink">Priority Households</h2>
+            </div>
+            <p className="mt-1 text-sm text-brand-gray">Households requiring the most immediate follow-up.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+              {visiblePriorityList.length} {visiblePriorityList.length === 1 ? "household" : "households"}
+            </span>
+            <button
+              type="button"
+              onClick={() => document.getElementById("all-households")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              className="inline-flex min-h-9 items-center gap-1 rounded-btn px-2.5 text-sm font-semibold text-brand-blue hover:bg-brand-blue/5"
+            >
+              View All <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-        {priorityList.length === 0 ? (
-          <p className="py-6 text-center text-sm text-brand-gray">
-            {noData ? "No household risk data has been recorded yet." : "No households currently require immediate review."}
-          </p>
+        {visiblePriorityList.length === 0 ? (
+          <div className="flex items-center gap-4 px-5 py-6">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+              <ShieldCheck className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-brand-ink">No households currently require immediate review.</p>
+              <p className="mt-1 text-sm text-brand-gray">
+                {noData ? "Household risk records will appear here when available." : "Households meeting the priority or intervention criteria will appear here."}
+              </p>
+            </div>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {priorityList.map((h) => {
-              const tone = levelTone[h.risk.level] || levelTone[RISK_LEVELS.STABLE];
-              return (
-                <div key={h.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-brand-ink">{h.head} Household</p>
-                      <p className="text-xs text-brand-gray">{h.id} · Barangay {h.barangay}</p>
-                    </div>
-                    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${tone.chip}`}>
-                      <span className={`h-2 w-2 rounded-full ${tone.dot}`} /> {RISK_LEVEL_LABELS[h.risk.level]}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                    <div className="rounded-btn bg-brand-bg px-2.5 py-2"><p className="text-brand-gray">Risk Indicators</p><p className="font-semibold text-brand-ink">{h.risk.count}</p></div>
-                    <div className="rounded-btn bg-brand-bg px-2.5 py-2"><p className="text-brand-gray">Last Visit</p><p className="font-semibold text-brand-ink">{daysAgo(h.lastHouseholdVisit)}</p></div>
-                    <div className="rounded-btn bg-brand-bg px-2.5 py-2"><p className="text-brand-gray">Last Assessment</p><p className="font-semibold text-brand-ink">{formatDate(h.lastAssessment)}</p></div>
-                    <div className="rounded-btn bg-brand-bg px-2.5 py-2"><p className="text-brand-gray">Follow-up</p><p className="font-semibold text-brand-ink">{h.workflowStatus || "—"}</p></div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Link to={householdDetailPath(h.id)} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-blue hover:border-brand-blue dark:bg-card">
-                      <Home className="h-3.5 w-3.5" /> View Household
-                    </Link>
-                    <button onClick={() => setFollowUpFor(h.id)} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-green hover:border-brand-green dark:bg-card">
-                      <PhoneCall className="h-3.5 w-3.5" /> Create Follow-up
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  <th className="px-5 py-3 font-medium text-brand-gray">Household ID</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Head of Household</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Barangay</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Risk Level</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Key Indicators</th>
+                  <th className="px-5 py-3 font-medium text-brand-gray">Follow-up</th>
+                  <th className="px-5 py-3 text-right font-medium text-brand-gray">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visiblePriorityList.map((h) => {
+                  const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.STABLE];
+                  const followUp = h.workflowStatus || "Not started";
+                  const followUpTone = followUp.toLowerCase().includes("overdue")
+                    ? "bg-rose-50 text-rose-700"
+                    : followUp.toLowerCase().includes("resolved")
+                      ? "bg-emerald-50 text-emerald-700"
+                      : followUp.toLowerCase().includes("scheduled")
+                        ? "bg-blue-50 text-blue-700"
+                        : "bg-slate-100 text-slate-600";
+                  return (
+                    <tr key={h.id} className="transition-colors hover:bg-slate-50/80">
+                      <td className="whitespace-nowrap px-5 py-3.5 font-medium text-brand-ink">{h.id}</td>
+                      <td className="px-5 py-3.5 font-medium text-brand-ink">{h.head || "—"}</td>
+                      <td className="whitespace-nowrap px-5 py-3.5 text-brand-gray">{h.barangay ? `Barangay ${h.barangay}` : "—"}</td>
+                      <td className="px-5 py-3.5">
+                        <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${tone.chip}`}>
+                          <span className={`h-2 w-2 rounded-full ${tone.dot}`} /> {RISK_LEVEL_LABELS[h.risk?.level || RISK_LEVELS.STABLE]}
+                        </span>
+                      </td>
+                      <td className="max-w-[260px] px-5 py-3.5 text-brand-gray">
+                        <span className="line-clamp-2" title={(h.risk?.indicators || []).map((indicator) => indicator.label).join(", ")}>
+                          {(h.risk?.indicators || []).map((indicator) => indicator.label).join(", ") || "No indicators listed"}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${followUpTone}`}>{followUp}</span>
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-3.5 text-right">
+                        <div className="inline-flex items-center gap-3">
+                          <Link to={householdDetailPath(h.id)} className="inline-flex items-center gap-1 text-sm font-semibold text-brand-blue hover:underline">
+                            <Eye className="h-4 w-4" /> View
+                          </Link>
+                          <button type="button" onClick={() => setFollowUpFor(h.id)} className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-brand-green hover:bg-emerald-50">
+                            <PhoneCall className="h-3.5 w-3.5" /> Follow-up
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
 
       {/* Distribution + Indicator breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Card className="p-5">
-          <h3 className="text-base font-semibold text-brand-ink mb-4">Household Risk Distribution</h3>
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="min-h-[280px] p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-brand-ink">Household Risk Distribution</h2>
+          <p className="mt-1 text-sm text-brand-gray">Household counts across current risk classifications.</p>
           {counts.total === 0 ? (
-            <p className="py-8 text-center text-sm text-brand-gray">No distribution data available.</p>
+            <p className="py-10 text-center text-sm text-brand-gray">No distribution data available.</p>
           ) : (
-            <div className="space-y-3">
-              {levelOrder.map((l) => {
-                const val = counts[l];
-                const pct = counts.total ? Math.round((val / counts.total) * 100) : 0;
-                return (
-                  <div key={l}>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="flex items-center gap-1.5 text-brand-ink">
-                        <span className={`h-2 w-2 rounded-full ${levelTone[l].dot}`} /> {RISK_LEVEL_LABELS[l]}
+            <div className="mt-5 flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
+              <div
+                role="img"
+                aria-label={`Risk distribution for ${counts.total} households`}
+                className="relative h-40 w-40 shrink-0 rounded-full"
+                style={{
+                  background: `conic-gradient(${levelOrder.map((level, index) => {
+                    const start = levelOrder.slice(0, index).reduce((sum, previous) => sum + counts[previous], 0) / counts.total * 100;
+                    const end = start + counts[level] / counts.total * 100;
+                    return `${levelTone[level].bar} ${start}% ${end}%`;
+                  }).join(", ")})`,
+                }}
+              >
+                <div className="absolute inset-3 flex flex-col items-center justify-center rounded-full bg-white">
+                  <span className="text-2xl font-bold text-brand-ink">{counts.total}</span>
+                  <span className="text-xs text-brand-gray">households</span>
+                </div>
+              </div>
+              <div className="w-full max-w-xs space-y-2.5">
+                {levelOrder.map((level) => {
+                  const value = counts[level];
+                  const percentage = Math.round((value / counts.total) * 100);
+                  return (
+                    <div key={level} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="flex min-w-0 items-center gap-2 text-brand-gray">
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${levelTone[level].dot}`} />
+                        <span className="truncate">{RISK_LEVEL_LABELS[level]}</span>
                       </span>
-                      <span className="font-semibold text-brand-ink">{val} · {pct}%</span>
+                      <span className="shrink-0 font-semibold text-brand-ink">{value} <span className="font-normal text-brand-gray">({percentage}%)</span></span>
                     </div>
-                    <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: levelTone[l].bar }} />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           )}
         </Card>
 
-        <Card className="p-5 lg:col-span-2">
-          <h3 className="text-base font-semibold text-brand-ink mb-4">Top Household Risk Indicators</h3>
+        <Card className="min-h-[280px] p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-brand-ink">Top Household Risk Indicators</h2>
+          <p className="mt-1 text-sm text-brand-gray">Most frequently recorded indicators across households.</p>
           {indicatorBreakdown.length === 0 ? (
-            <p className="py-8 text-center text-sm text-brand-gray">No risk indicators recorded yet.</p>
+            <p className="py-10 text-center text-sm text-brand-gray">No risk indicators recorded yet.</p>
           ) : (
-            <div className="space-y-2.5">
+            <div className="mt-5 space-y-3">
               {indicatorBreakdown.map(([label, val]) => (
-                <div key={label} className="flex items-center gap-3 text-sm">
-                  <span className="w-64 min-w-0 truncate text-brand-ink sm:w-72">{label}</span>
-                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-200">
-                    <div className="h-full rounded-full bg-brand-blue" style={{ width: `${Math.max(8, (val / maxIndicatorCount) * 100)}%` }} />
+                <div key={label}>
+                  <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
+                    <span className="min-w-0 truncate text-brand-ink">{label}</span>
+                    <span className="shrink-0 font-semibold text-brand-ink">{val}</span>
                   </div>
-                  <span className="w-8 text-right font-semibold text-brand-ink">{val}</span>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full rounded-full bg-brand-blue" style={{ width: `${(val / maxIndicatorCount) * 100}%` }} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -479,6 +635,7 @@ export default function HouseholdRiskOverview() {
                         // reflect only this barangay.
                         setBarangayFilter(name);
                         setLevelFilter("all");
+                        setAppliedFilters((current) => ({ ...current, barangayFilter: name, levelFilter: "all" }));
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
                       className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
@@ -497,14 +654,21 @@ export default function HouseholdRiskOverview() {
       </Card>
 
       {/* Household table */}
-      <Card className="overflow-hidden">
+      <Card id="all-households" className="scroll-mt-6 overflow-hidden">
         <div className="border-b border-slate-200 px-5 py-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold text-brand-ink">Household Risk List</h3>
           <div className="flex items-center gap-2">
             {barangayFilter !== "All" && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-blue">
                 <MapPin className="h-3 w-3" /> Barangay {barangayFilter}
-                <button onClick={() => setBarangayFilter("All")} aria-label="Clear barangay filter" className="ml-1 text-brand-blue/70 hover:text-brand-blue">
+                <button
+                  onClick={() => {
+                    setBarangayFilter("All");
+                    setAppliedFilters((current) => ({ ...current, barangayFilter: "All" }));
+                  }}
+                  aria-label="Clear barangay filter"
+                  className="ml-1 text-brand-blue/70 hover:text-brand-blue"
+                >
                   <X className="h-3 w-3" />
                 </button>
               </span>

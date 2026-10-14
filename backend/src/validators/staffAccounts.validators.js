@@ -1,6 +1,6 @@
 import { REQUESTABLE_ROLES } from '../config/staffApprovals.js';
 import { normalizeStations } from '../config/rhuStations.js';
-import { isUuid, isStrictMobile, text, valid, invalid } from './common.js';
+import { hasControlChars, isStrongPassword, isUuid, isStrictMobile, text, valid, invalid } from './common.js';
 
 /**
  * Staff account registration + verification request validation.
@@ -44,6 +44,7 @@ export const registerPersonnelValidator = (input = {}) => {
   const rhuStations = normalizeStations(input?.rhuStations);
 
   if (!fullName) errors.fullName = 'Full name is required.';
+  else if (hasControlChars(fullName)) errors.fullName = 'Full name contains invalid characters.';
   if (!email) errors.email = 'Email address is required.';
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) errors.email = 'Enter a valid email address.';
 
@@ -53,9 +54,8 @@ export const registerPersonnelValidator = (input = {}) => {
   }
 
   if (!password) errors.password = 'A password is required.';
-  else if (password.length < 8) errors.password = 'Password must be at least 8 characters.';
-  else if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-    errors.password = 'Password must contain at least one letter and one number.';
+  else if (!isStrongPassword(password)) {
+    errors.password = 'Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character.';
   }
 
   if (!role) errors.role = 'Select the role you are applying for.';

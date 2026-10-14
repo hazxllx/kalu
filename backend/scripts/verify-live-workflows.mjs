@@ -31,6 +31,14 @@ import { createClient } from '@supabase/supabase-js';
 const API = process.env.API_URL || 'http://localhost:5000/api';
 const ANON = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 const SERVICE = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const FOCUS = (() => {
+  const args = process.argv.slice(2);
+  const idx = args.findIndex((arg) => arg === '--focus' || arg.startsWith('--focus='));
+  if (idx === -1) return 'full';
+  if (args[idx] === '--focus') return (args[idx + 1] || 'full').trim().toLowerCase();
+  return args[idx].split('=')[1]?.trim().toLowerCase() || 'full';
+})();
+const isFollowUpFocus = ['followup', 'followups', 'follow-up', 'follow_ups'].includes(FOCUS);
 
 const pass = [];
 const fail = [];
@@ -66,22 +74,44 @@ const reqEnv = (name) => {
   if (!v) { console.error(`Missing ${name} in the environment — required to run live verification.`); process.exit(1); }
   return v;
 };
-const CRED = {
-  admin: ['admin@kalusagap.test', reqEnv('KALUSAGAP_ADMIN_PASSWORD'), 'admin'],
-  mho: ['mho@kalusagap.test', reqEnv('KALUSAGAP_MHO_PASSWORD'), 'mho'],
-  rhu: ['rhu.personnel@kalusagap.test', reqEnv('KALUSAGAP_RHU_PASSWORD'), 'rhu_personnel'],
-  phn: ['phn@kalusagap.test', reqEnv('KALUSAGAP_PHN_PASSWORD'), 'phn'],
-  supervisor: ['supervisor@kalusagap.test', reqEnv('KALUSAGAP_SUPERVISOR_PASSWORD'), 'health_supervisor'],
-};
+const CRED = (() => {
+  const base = {
+    phn: ['phn@kalusagap.test', reqEnv('KALUSAGAP_PHN_PASSWORD'), 'phn'],
+    supervisor: ['supervisor@kalusagap.test', reqEnv('KALUSAGAP_SUPERVISOR_PASSWORD'), 'health_supervisor'],
+  };
+
+  if (isFollowUpFocus) return base;
+
+  return {
+    admin: ['admin@kalusagap.test', reqEnv('KALUSAGAP_ADMIN_PASSWORD'), 'admin'],
+    mho: ['mho@kalusagap.test', reqEnv('KALUSAGAP_MHO_PASSWORD'), 'mho'],
+    rhu: ['rhu.personnel@kalusagap.test', reqEnv('KALUSAGAP_RHU_PASSWORD'), 'rhu_personnel'],
+    ...base,
+  };
+})();
 
 // Ephemeral password for the throwaway QA applicant accounts this script
-// creates; sourced from the environment so no credential is committed.
-const QA_APPLICANT_PASSWORD = reqEnv('KALUSAGAP_QA_APPLICANT_PASSWORD');
+// creates; sourced from the environment so no credential is committed. The
+// focused follow-up mode does not require it because it exercises the authn/
+// authz path without creating a pending applicant.
+const QA_APPLICANT_PASSWORD = isFollowUpFocus
+  ? (process.env.KALUSAGAP_QA_APPLICANT_PASSWORD || '')
+  : reqEnv('KALUSAGAP_QA_APPLICANT_PASSWORD');
 
 const run = async () => {
   const T = {};
   const ROLE = {};
   for (const [k, [e, p, r]] of Object.entries(CRED)) { T[k] = await signIn(e, p); ROLE[k] = r; }
+
+  if (isFollowUpFocus) {
+    const fu = await api(T.phn, '/operational/followups');
+    check('PHN focus mode loads follow-up records', fu.status === 200, `rows=${fu.body?.data?.rows?.length}`);
+    check('focused follow-up rows expose the derived schedule state', (fu.body?.data?.rows || []).every((r) => 'is_overdue' in r && 'is_due_today' in r));
+    const supervisorQueue = await api(T.supervisor, '/operational/followups');
+    check('Health Supervisor focus mode can access the same operational follow-up scope', supervisorQueue.status === 200, `rows=${supervisorQueue.body?.data?.rows?.length}`);
+    console.log('Focused follow-up verification mode enabled; full live verification remains available without --focus.');
+    return;
+  }
 
   const { data: brgyList } = await SERVICE.from('barangays').select('id,name').eq('name', 'San Isidro').single();
   const brgyId = brgyList.id;
