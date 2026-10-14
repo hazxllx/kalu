@@ -1,4 +1,4 @@
-import rateLimitLib from 'express-rate-limit';
+import rateLimitLib, { ipKeyGenerator } from 'express-rate-limit';
 
 const normalizeKeyPart = (value) => {
   if (value === undefined || value === null) return 'anonymous';
@@ -10,18 +10,10 @@ const normalizeKeyPart = (value) => {
   return JSON.stringify(value);
 };
 
-const getClientIdentifier = (req) => {
+export const getClientIdentifier = (req) => {
   if (req.user?.id) return `user:${normalizeKeyPart(req.user.id)}`;
 
-  const forwardedFor = req.headers['x-forwarded-for'];
-  const forwardedValue = Array.isArray(forwardedFor)
-    ? forwardedFor[0]
-    : typeof forwardedFor === 'string'
-      ? forwardedFor.split(',')[0].trim()
-      : '';
-
-  const ipCandidate = forwardedValue || req.ip || 'unknown';
-  return `ip:${normalizeKeyPart(ipCandidate)}`;
+  return `ip:${ipKeyGenerator(req.ip || 'unknown')}`;
 };
 
 const rateLimit = ({

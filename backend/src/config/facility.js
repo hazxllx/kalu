@@ -23,7 +23,7 @@ export const FACILITY = Object.freeze({
  */
 export const RECEIVING_FACILITIES = Object.freeze([
   { name: 'RHU Pili (Main)', address: 'San Isidro (Pob.), Pili, Camarines Sur' },
-  { name: 'RHU Pili – San Jose Health Station', address: 'San Jose, Pili, Camarines Sur' },
+  { name: 'RHU Pili – San Isidro Health Station', address: 'San Isidro, Pili, Camarines Sur' },
   { name: 'RHU Pili – Cadlan Health Station', address: 'Cadlan, Pili, Camarines Sur' },
   { name: 'RHU Pili – Himaao Health Station', address: 'Himaao, Pili, Camarines Sur' },
   { name: 'Bicol Regional Training and Teaching Hospital', address: 'San Agustin, Pili, Camarines Sur' },

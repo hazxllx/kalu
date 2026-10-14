@@ -26,7 +26,7 @@ test('community map supports only consultation workflow statuses and recorded ri
 test('community map API rejects barangays outside the approved deployment scope', async () => {
   await assert.rejects(
     () => getCommunityMapController({
-      query: { barangay: 'San Jose' },
+      query: { barangay: 'Unknown Barangay' },
       assignedBarangay: null,
       user: { municipalityId: 'municipality-1' },
     }, {}),
@@ -227,7 +227,7 @@ test('MHO maps exclude unapproved barangays even when records reference them', a
     { id: 'approved', name: 'San Antonio', municipality_id: 'municipality-1' },
     { id: 'approved-2', name: 'San Isidro', municipality_id: 'municipality-1' },
     { id: 'approved-3', name: 'Old San Roque', municipality_id: 'municipality-1' },
-    { id: 'legacy', name: 'San Jose', municipality_id: 'municipality-1', status: 'Inactive' },
+    { id: 'legacy', name: 'Legacy Barangay', municipality_id: 'municipality-1', status: 'Inactive' },
   ];
   repository.listVisits = async () => ({
     rows: [
@@ -260,7 +260,7 @@ test('MHO maps exclude unapproved barangays even when records reference them', a
 
   assert.equal(result.summary.totalCases, 1);
   assert.deepEqual(result.barangays.map((row) => row.name), ['San Antonio', 'San Isidro', 'Old San Roque']);
-  assert.equal(result.barangays.some((row) => row.name === 'San Jose'), false);
+  assert.equal(result.barangays.some((row) => row.name === 'Legacy Barangay'), false);
 });
 
 test('municipality map returns only registered in-scope approved barangays', async (t) => {
@@ -285,7 +285,7 @@ test('municipality map returns only registered in-scope approved barangays', asy
   const result = await getCommunityMap({ municipalityId: 'municipality-1' });
 
   assert.deepEqual(result.barangays.map((row) => row.name), ['San Antonio', 'San Isidro', 'Old San Roque']);
-  assert.equal(result.barangays.some((row) => row.name === 'San Jose'), false);
+  assert.equal(result.barangays.some((row) => row.name === 'Legacy Barangay'), false);
   assert.equal(result.scopeComplete, true);
   assert.deepEqual(result.barangays.map((row) => row.caseCount), [0, 0, 0]);
   assert.equal(result.summary.totalCases, 0);

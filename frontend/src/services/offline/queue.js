@@ -18,7 +18,7 @@ const nowMs = () => Date.now();
 /**
  * Queue a locally created record.
  *
- * @param {{entity:string, ownerId:string, data:any, dependsOn?:string[], maxAttempts?:number}} input
+ * @param {{entity:string, ownerId:string, data:any, dependsOn?:string[], maxAttempts?:number, mutationType?:'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY', opId?:string}} input
  */
 export const queueCreate = async ({
   entity,
@@ -64,6 +64,8 @@ export const queueCreate = async ({
 /**
  * Queue an update to an existing record (identified by its server id) with the
  * revision the client last saw, enabling server-side optimistic concurrency.
+ *
+ * @param {{entity:string, ownerId:string, serverId:string, data:any, baseRevision?:number|null, dependsOn?:string[], mutationType?:'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY', opId?:string}} input
  */
 export const queueUpdate = async ({
   entity,

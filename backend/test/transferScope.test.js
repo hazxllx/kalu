@@ -23,11 +23,11 @@ test('resident transfer destinations include only other approved active barangay
     municipalityId: 'municipality-1',
   });
   repository.listBarangays = async () => [
-    { id: 'san-jose', name: 'San Jose', status: 'Active' },
+    { id: 'legacy', name: 'Legacy Barangay', status: 'Active' },
     { id: 'san-isidro', name: 'San Isidro', status: 'Active' },
     { id: 'old-san-roque', name: 'Old San Roque', status: 'Active' },
     { id: 'san-antonio', name: 'San Antonio', status: 'Active' },
-    { id: 'inactive', name: 'San Jose Annex', status: 'Inactive' },
+    { id: 'inactive', name: 'Former Barangay', status: 'Inactive' },
   ];
   repository.listTransferRequestsByUser = async () => [];
   t.after(() => {

@@ -14,13 +14,13 @@ const staffInput = {
 };
 
 test('registration, personnel, and household APIs reject unapproved barangays', () => {
-  const resident = registerResidentValidator({ barangay: 'San Jose' });
-  const staff = registerPersonnelValidator({ ...staffInput, barangay: 'San Jose' });
+  const resident = registerResidentValidator({ barangay: 'Unknown Barangay' });
+  const staff = registerPersonnelValidator({ ...staffInput, barangay: 'Unknown Barangay' });
   const household = createHouseholdValidator({
     headName: 'Juan Dela Cruz',
     purok: 'Zone 1',
     streetAddress: 'Purok 1',
-    barangay: 'San Jose',
+    barangay: 'Unknown Barangay',
   });
 
   assert.ok(resident.error?.barangay);

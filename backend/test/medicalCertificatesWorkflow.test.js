@@ -18,14 +18,14 @@ const RESIDENT = {
   first_name: 'Ari',
   middle_name: '',
   last_name: 'Santos',
-  barangay: 'San Jose',
+  barangay: 'San Isidro',
   barangay_id: 'barangay-1',
   municipality_id: 'municipality-1',
   auth_user_id: null,
   sex: 'Female',
   birth_date: '1990-01-01',
   civil_status: 'Single',
-  current_address: 'San Jose',
+  current_address: 'San Isidro',
 };
 
 const userFor = (role, id = `user-${role}`) => ({

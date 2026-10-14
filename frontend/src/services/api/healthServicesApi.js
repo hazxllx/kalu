@@ -10,10 +10,10 @@ import { api } from './apiClient';
  * account via list({ mine: true }).
  */
 export const healthServicesApi = {
-   meta: () => api.get('/health-services/meta'),
-   // params: { mine: true, category }
-   // params: { from, to } for calendar scope
-   // params: { service_id } | { resident_id } | { from, to } for dashboard listing
+  meta: () => api.get('/health-services/meta'),
+  // params: { mine: true, category }
+  // params: { from, to } for calendar scope
+  // params: { service_id } | { resident_id } | { from, to } for dashboard listing
    listAttendance: (params) => api.get('/health-services/attendance', { params }),
   // Municipality-scoped barangays + facilities + categories for the create form.
   reference: () => api.get('/health-services/reference'),
@@ -29,13 +29,10 @@ export const healthServicesApi = {
   // Delete a service. The backend refuses (409) when the service has resident
   // registrations or attendance records, directing the caller to deactivate.
   remove: (id) => api.delete(`/health-services/${id}`),
-  // Edit an existing service in place (never creates a new one).
-  update: (id, payload) => api.patch(`/health-services/${id}`, payload),
   // Activate / deactivate (archive) a service — reversible soft status toggle.
   setActive: (id, active) => api.patch(`/health-services/${id}/active`, { active }),
   // Safe delete: refused by the backend (409) when resident registrations,
   // attendance, or appointments exist — deactivate instead in that case.
-  remove: (id) => api.delete(`/health-services/${id}`),
   assign: (id, personnelId) => api.post(`/health-services/${id}/assign`, { personnelId }),
   unassign: (id, personnelId) => api.delete(`/health-services/${id}/assign/${personnelId}`),
   // Resident registrations (visit plans) for one service, with any recorded

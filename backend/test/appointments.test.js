@@ -59,7 +59,7 @@ const makeSupabase = (resolve, rpc) => {
   };
 };
 
-const resident = { id: 'r1', auth_user_id: 'u1', barangay_id: 'b1', municipality_id: 'm1', barangay: 'San Jose' };
+const resident = { id: 'r1', auth_user_id: 'u1', barangay_id: 'b1', municipality_id: 'm1', barangay: 'San Isidro' };
 const residentUser = { id: 'u1', role: 'resident' };
 const bhwUser = { id: 'bhw1', role: 'bhw', barangayId: 'b1', municipalityId: 'm1', name: 'BHW One' };
 
@@ -120,7 +120,7 @@ test('book persists a pending request and returns the reference', async () => {
   const supabase = makeSupabase(
     (ctx) => {
       if (ctx.table === 'residents') return ok(resident);
-      if (ctx.table === 'appointments' && ctx.single) return ok({ ...inserted, service: { name: 'Prenatal' }, barangay: { name: 'San Jose' } });
+      if (ctx.table === 'appointments' && ctx.single) return ok({ ...inserted, service: { name: 'Prenatal' }, barangay: { name: 'San Isidro' } });
       if (ctx.table === 'health_service_assignments') return ok([]);
       return ok(null);
     },

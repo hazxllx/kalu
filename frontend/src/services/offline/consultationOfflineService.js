@@ -139,14 +139,16 @@ export const submitConsultationDraft = async ({ ownerId, localId, create, online
 
   const draft = await getDraft(localId);
   if (!draft || draft.ownerId !== ownerId) {
-    const error = new Error('This consultation draft is no longer available. It may already be submitted.');
-    error.code = 'draft_not_found';
-    throw error;
+    throw Object.assign(
+      new Error('This consultation draft is no longer available. It may already be submitted.'),
+      { code: 'draft_not_found' },
+    );
   }
   if (draft.status === DRAFT_STATUS.SYNCING) {
-    const error = new Error('This consultation is already being submitted.');
-    error.code = 'draft_in_progress';
-    throw error;
+    throw Object.assign(
+      new Error('This consultation is already being submitted.'),
+      { code: 'draft_in_progress' },
+    );
   }
 
   await markDraftStatus(localId, DRAFT_STATUS.SYNCING);

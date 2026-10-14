@@ -16,6 +16,9 @@ export class OfflineActionRequiredError extends Error {
 
 export const isKnownMutationTier = (tier) => Object.values(MUTATION_TIER).includes(tier);
 
+/**
+ * @param {'SAFE_SYNC' | 'OFFLINE_DRAFT' | 'ONLINE_ONLY'} [tier]
+ */
 export const assertQueueableMutation = (tier = MUTATION_TIER.ONLINE_ONLY) => {
   if (!isKnownMutationTier(tier)) {
     throw new TypeError(`Unknown offline mutation tier: ${tier}`);
@@ -28,6 +31,9 @@ export const assertQueueableMutation = (tier = MUTATION_TIER.ONLINE_ONLY) => {
 export const isBrowserOffline = () =>
   typeof navigator !== 'undefined' && navigator.onLine === false;
 
+/**
+ * @param {'SAFE_SYNC' | 'OFFLINE_DRAFT' | 'ONLINE_ONLY'} [tier]
+ */
 export const requireOnlineForMutation = (tier = MUTATION_TIER.ONLINE_ONLY) => {
   if (isBrowserOffline() && tier === MUTATION_TIER.ONLINE_ONLY) {
     throw new OfflineActionRequiredError();

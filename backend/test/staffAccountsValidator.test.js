@@ -144,7 +144,7 @@ test('staff assignments accept only approved barangays', () => {
   const rejected = registerPersonnelValidator({
     ...base,
     role: 'bhw',
-    barangay: 'San Jose',
+    barangay: 'Unknown Barangay',
   });
   assert.ok(rejected.error?.barangay);
 });

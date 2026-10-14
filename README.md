@@ -120,6 +120,7 @@ Set the matching project URL and server credentials in `backend/.env`:
 PORT=5000
 CLIENT_URL=http://localhost:5173
 NODE_ENV=development
+TRUST_PROXY=loopback
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -232,12 +233,16 @@ deployment, use `VITE_API_URL=https://kalusagap.onrender.com/api` in Vercel and
 frontend's production fallback if the hosting variable is absent; explicitly
 setting it in Vercel remains recommended, and any configured value overrides
 the fallback. The Supabase project provides authentication and the PostgreSQL
-database for both.
+database for both. Configure Render's `TRUST_PROXY` to match its documented
+proxy topology; do not trust all forwarded addresses unless the complete proxy
+chain is controlled and sanitizes client-supplied forwarding headers.
 
 ## Scope and Limitations
 
-- The application is online-only; it requires network access to the backend API
-  and the Supabase project and has no offline mode.
+- Selected workflows support encrypted offline drafts and owner-scoped
+  synchronization in IndexedDB. Authentication, server-authoritative reads,
+  and mutations not explicitly marked safe for offline synchronization still
+  require a network connection; this is not a full offline application.
 - Access is strictly role-scoped and enforced server-side. Frontend route guards
   hide navigation but are not the security boundary.
 - Resident and personnel onboarding is by application plus manual review; there

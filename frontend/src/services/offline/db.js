@@ -22,6 +22,103 @@ export const OFFLINE_DB_NAME = 'kalusagap-offline';
 /** Current local schema version. Bump together with a new `.version(n)` block. */
 export const OFFLINE_DB_VERSION = 4;
 
+/**
+ * @typedef {Record<string, unknown> & {
+ *   localId: string,
+ *   entity: string,
+ *   ownerId: string,
+ *   data: unknown,
+ *   status: string,
+ *   createdAt: number,
+ *   updatedAt: number,
+ *   serverId?: string | null,
+ *   revision?: number | null,
+ *   localRef?: string,
+ *   targetServerId?: string | null,
+ *   lastError?: unknown,
+ *   mutationType?: string
+ * }} OfflineDraftRow
+ */
+
+/**
+ * @typedef {Record<string, unknown> & {
+ *   opId: string,
+ *   entity: string,
+ *   opType: 'create' | 'update',
+ *   mutationType: string,
+ *   ownerId: string,
+ *   localRecordId: string,
+ *   payload: unknown,
+ *   dependsOn: string[],
+ *   idempotencyKey: string,
+ *   status: string,
+ *   attempts: number,
+ *   maxAttempts: number,
+ *   nextAttemptAt: number,
+ *   createdAt: number,
+ *   updatedAt: number,
+ *   targetServerId?: string | null,
+ *   baseRevision?: number | null,
+ *   serverId?: string | null,
+ *   serverRecord?: unknown,
+ *   syncingAt?: number,
+ *   workerId?: string,
+ *   syncedAt?: number | null,
+ *   lastError?: unknown
+ * }} OfflineOutboxRow
+ */
+
+/**
+ * @typedef {Record<string, unknown> & {
+ *   entity: string,
+ *   remoteId: string,
+ *   ownerId: string,
+ *   data: unknown,
+ *   cachedAt: number,
+ *   revision?: number | null
+ * }} OfflineRecordRow
+ */
+
+/**
+ * @typedef {Record<string, unknown> & {
+ *   key: string,
+ *   value: any,
+ *   updatedAt: number
+ * }} OfflineMetaRow
+ */
+
+/**
+ * @typedef {Record<string, unknown> & {
+ *   id: string,
+ *   cryptoKey?: CryptoKey,
+ *   raw?: string,
+ *   kind?: string,
+ *   createdAt?: string
+ * }} OfflineKeyRow
+ */
+
+/**
+ * Dexie creates each declared store property when its schema is registered.
+ * Declare their types here because the base JavaScript type does not know the
+ * configured store names.
+ */
+export class OfflineDatabase extends Dexie {
+  /** @type {import('dexie').Table<OfflineDraftRow, string>} */
+  drafts;
+
+  /** @type {import('dexie').Table<OfflineOutboxRow, string>} */
+  outbox;
+
+  /** @type {import('dexie').Table<OfflineRecordRow, import('dexie').IndexableType>} */
+  records;
+
+  /** @type {import('dexie').Table<OfflineMetaRow, string>} */
+  syncMeta;
+
+  /** @type {import('dexie').Table<OfflineKeyRow, string>} */
+  keys;
+}
+
 export class OfflineStorageError extends Error {
   /**
    * @param {string} code
@@ -36,7 +133,7 @@ export class OfflineStorageError extends Error {
   }
 }
 
-export const db = new Dexie(OFFLINE_DB_NAME);
+export const db = new OfflineDatabase(OFFLINE_DB_NAME);
 
 db.version(1).stores({
   // Local drafts keyed by a stable client-generated id.

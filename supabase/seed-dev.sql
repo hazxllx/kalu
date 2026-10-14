@@ -5,7 +5,7 @@
 --
 -- This seed is for a DEDICATED development/staging Supabase project only. It
 -- creates deliberately synthetic reference data (municipality "Taguig Test",
--- barangay "San Jose") so dev records can never be mistaken for the real
+-- barangay "Test Barangay") so dev records can never be mistaken for the real
 -- Pili deployment data created by supabase/seed.sql.
 --
 -- Idempotent: safe to re-run.
@@ -28,7 +28,7 @@ on conflict (name, province) do update
 
 -- Barangay ------------------------------------------------------------------
 insert into public.barangays (municipality_id, name, status, health_station_name)
-select m.id, 'San Jose', 'Active', 'San Jose Barangay Health Center'
+select m.id, 'Test Barangay', 'Active', 'Test Barangay Health Center'
 from public.municipalities m
 where m.name = 'Taguig Test' and m.province = 'NCR'
 on conflict (municipality_id, name) do nothing;
@@ -41,7 +41,7 @@ where m.name = 'Taguig Test' and m.province = 'NCR'
 on conflict (municipality_id, name) do nothing;
 
 insert into public.facilities (municipality_id, barangay_id, name, type)
-select b.municipality_id, b.id, 'San Jose Barangay Health Center', 'barangay_health_station'
+select b.municipality_id, b.id, 'Test Barangay Health Center', 'barangay_health_station'
 from public.barangays b
 join public.municipalities m on m.id = b.municipality_id
 where m.name = 'Taguig Test' and m.province = 'NCR'
@@ -53,7 +53,7 @@ commit;
 -- Verification (run manually after seeding)
 -- =============================================================================
 -- select id, name, province from public.municipalities where name = 'Taguig Test';
--- select id, name from public.barangays where name = 'San Jose';
+-- select id, name from public.barangays where name = 'Test Barangay';
 -- select id, name, type from public.facilities
 --   where municipality_id = (select id from public.municipalities
 --                            where name='Taguig Test' and province='NCR');

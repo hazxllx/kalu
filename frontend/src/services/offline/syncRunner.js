@@ -31,7 +31,7 @@ import {
  */
 export const runSyncPass = async ({
   ownerId,
-  workerId,
+  workerId = null,
   getHandler,
   now = () => Date.now(),
   random = Math.random,
@@ -172,8 +172,10 @@ export const runSyncPass = async ({
       try {
         const result = await handler(decrypted);
         if (mutationType === MUTATION_TIER.OFFLINE_DRAFT && result?.draft !== true) {
-          const error = new Error('The server did not confirm that this change remains a draft.');
-          error.code = SYNC_ERROR.MALFORMED;
+          const error = Object.assign(
+            new Error('The server did not confirm that this change remains a draft.'),
+            { code: SYNC_ERROR.MALFORMED },
+          );
           throw error;
         }
         const serverId = result?.serverId ?? null;
