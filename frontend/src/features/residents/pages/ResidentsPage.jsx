@@ -14,6 +14,11 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { residentsApi } from "@/services/api";
+import {
+  createResidentOffline,
+  listResidentsOffline,
+  updateResidentOffline,
+} from "@/services/offline/residentOfflineService";
 import { useBarangays } from "@/context/BarangaysContext";
 import { dateOfBirth, isStrictMobile } from "@/utils/validation";
 
@@ -83,6 +88,7 @@ const EMPTY_FORM = {
  * @property {string} [status]
  * @property {string} [healthRecordNo]
  * @property {string} [createdAt]
+ * @property {string} [updatedAt]
  * @property {string} [authUserId]
  * @property {string} [accountStatus]
  * @property {string} [guardianStatus]
@@ -316,6 +322,7 @@ export default function ResidentsPage() {
   const [residents, setResidents] = useState(/** @type {ResidentRecord[]} */ ([]));
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(/** @type {string|null} */ (null));
+  const [loadWarning, setLoadWarning] = useState(/** @type {string|null} */ (null));
 
   const [q, setQ] = useState("");
 
@@ -365,18 +372,23 @@ export default function ResidentsPage() {
   const canEdit =
     (user?.role === "phn" || user?.role === "health_supervisor") && canEditPermission;
 
-  /** Load the directory from the API (search term is applied server-side). */
+  /** Load authorized rows from the API or this account's encrypted local cache. */
   const load = useCallback(
     async (searchTerm = "") => {
       setLoading(true);
       setLoadError(null);
+      setLoadWarning(null);
       try {
         // Verified directory only: the backend returns residents who are
         // individually approved OR belong to a Verified household, scoped to
         // this supervisor's barangay. Pending/unverified residents live in the
         // Resident Verification queue, not here.
-        const result = await residentsApi.list({ q: searchTerm, limit: 100, verified: true });
+        const result = await listResidentsOffline({
+          ownerId: user?.id,
+          params: { q: searchTerm, limit: 100, verified: true },
+        });
         setResidents(result?.rows || []);
+        if (result.warning) setLoadWarning(result.warning.message);
       } catch (err) {
         setResidents([]);
         const error = /** @type {RequestError} */ (err);
@@ -385,7 +397,7 @@ export default function ResidentsPage() {
         setLoading(false);
       }
     },
-    [],
+    [user?.id],
   );
 
   useEffect(() => {
@@ -600,13 +612,18 @@ export default function ResidentsPage() {
         payload.createLoginAccount = true;
         payload.email = form.email.trim();
       }
-      const result = await residentsApi.create({ resident: payload });
+      const result = await createResidentOffline({
+        ownerId: user?.id,
+        payload: { resident: payload },
+      });
       setShowAddModal(false);
       setErrors({});
       const record = result?.resident;
       const accountCreated = Boolean(record?.authUserId);
       showToast(
-        record
+        result.queued
+          ? `${fullNameOf(record)} saved on this device. It will sync when you reconnect.`
+          : record
           ? accountCreated
             ? `${fullNameOf(record)} added. An invitation link was emailed to ${form.email.trim()}.`
             : `${fullNameOf(record)} added to the resident directory.`
@@ -659,23 +676,32 @@ export default function ResidentsPage() {
     setEditSubmitting(true);
     setEditError(null);
     try {
-      await residentsApi.update(editTarget.id, {
-        resident: {
-          cellphoneNo: editForm.contact,
-          barangay: editForm.barangay,
-          civilStatus: editForm.civilStatus,
-          currentAddress: editForm.currentAddress.trim(),
-          philhealthNo: editForm.philhealthNo.trim(),
-          religion: editForm.religion,
-          employmentStatus: editForm.employmentStatus,
-          fatherName: editForm.fatherName.trim(),
-          motherName: editForm.motherName.trim(),
-          birthPlace: editForm.birthPlace.trim(),
+      const result = await updateResidentOffline({
+        ownerId: user?.id,
+        residentId: editTarget.id,
+        baseRevision: editTarget.updatedAt,
+        payload: {
+          resident: {
+            cellphoneNo: editForm.contact,
+            barangay: editForm.barangay,
+            civilStatus: editForm.civilStatus,
+            currentAddress: editForm.currentAddress.trim(),
+            philhealthNo: editForm.philhealthNo.trim(),
+            religion: editForm.religion,
+            employmentStatus: editForm.employmentStatus,
+            fatherName: editForm.fatherName,
+            motherName: editForm.motherName,
+            birthPlace: editForm.birthPlace,
+          },
         },
       });
       setShowEditModal(false);
       setEditTarget(null);
-      showToast("Resident updated successfully.");
+      showToast(
+        result.queued
+          ? "Changes saved on this device. They will sync when you reconnect."
+          : "Resident updated successfully.",
+      );
       await load(q.trim());
     } catch (err) {
       const error = /** @type {RequestError} */ (err);
@@ -758,6 +784,13 @@ export default function ResidentsPage() {
         ) : null}
       />
 
+      {loadWarning && (
+        <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+          {loadWarning}
+          {residents.length > 0 ? " Showing authorized records saved on this device." : ""}
+        </div>
+      )}
+
       <Card className="p-4 mb-5 flex flex-col lg:flex-row gap-3">
         <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 flex-1">
           <Search className="w-4 h-4 text-brand-gray" />
@@ -792,7 +825,9 @@ export default function ResidentsPage() {
             icon={Users}
             title="No residents found"
             description={
-              q.trim()
+              loadWarning
+                ? "No locally cached or queued resident records are available. Reconnect to load this authorized directory."
+                : q.trim()
                 ? `No residents match “${q.trim()}”. Try a different name, health record number, or clear the search.`
                 : "The resident directory is empty. Register the first resident to get started."
             }

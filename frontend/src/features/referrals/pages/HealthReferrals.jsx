@@ -12,6 +12,13 @@ import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { referralsApi, residentsApi } from "@/services/api";
 import { downloadReferralPdf } from "@/features/referrals/lib/referralPdf";
 import { shouldShowReferralDownloadAction } from "@/features/referrals/lib/referralTrackingActions";
+import {
+  localDateKey,
+  localDateTimeToIso,
+  referralDateErrors,
+  referralDateTimeMinimum,
+  toLocalDateTimeInput,
+} from "@/features/referrals/lib/referralDateValidation";
 import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Trash2, Download, AlertTriangle, MoreVertical } from "lucide-react";
 
 /**
@@ -37,7 +44,7 @@ const PRIORITY_COLORS = {
   Low: "bg-brand-green/10 text-brand-green",
 };
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => localDateKey();
 
 const formatDate = (iso) => {
   if (!iso) return "—";
@@ -138,7 +145,7 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
     if (initial) {
       return {
         referralDate: initial.referralDate || todayIso(),
-        scheduledAt: initial.scheduledAt || "",
+        scheduledAt: toLocalDateTimeInput(initial.scheduledAt),
         destinationFacility: initial.destinationFacility || "RHU Pili",
         destinationService: initial.destinationService || "",
         reason: initial.reason || "",
@@ -173,19 +180,32 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
     return EMPTY_FORM();
   }));
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const clock = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(clock);
+  }, []);
+  const buildErrors = (now = new Date()) => ({
+    ...errors,
+    ...referralDateErrors(form, {
+      now,
+      originalScheduledAt: isEdit ? toLocalDateTimeInput(initial.scheduledAt) : null,
+    }),
+    ...(!isEdit && !resident ? { resident: "Please select a resident." } : {}),
+    ...(!form.reason.trim() ? { reason: "Referral reason is required." } : {}),
+    ...(!form.destinationFacility.trim() ? { destinationFacility: "Destination facility is required." } : {}),
+    ...(form.laboratoryTestRequired && !form.laboratoryTest.trim()
+      ? { laboratoryTest: "Laboratory test details are required when laboratory test is marked as required." }
+      : {}),
+  });
+  const liveErrors = buildErrors(now);
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
   };
 
   const validate = () => {
-    const next = {};
-    if (!isEdit && !resident) next.resident = "Please select a resident.";
-    if (!form.reason.trim()) next.reason = "Referral reason is required.";
-    if (!form.destinationFacility.trim()) next.destinationFacility = "Destination facility is required.";
-    if (form.laboratoryTestRequired && !form.laboratoryTest.trim()) {
-      next.laboratoryTest = "Laboratory test details are required when laboratory test is marked as required.";
-    }
+    const next = buildErrors(new Date());
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -214,18 +234,20 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
                 <div className="mt-1.5">
                   <ResidentSearchSelect residents={residents} value={resident} onChange={onSelectResident} />
                 </div>
-                {errors.resident && <p className="mt-1 text-xs text-brand-danger">{errors.resident}</p>}
+                {liveErrors.resident && <p className="mt-1 text-xs text-brand-danger">{liveErrors.resident}</p>}
               </div>
             )}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="text-sm font-medium text-brand-ink">Referral Date</label>
-                <input type="date" value={form.referralDate} onChange={(e) => set("referralDate")(e.target.value)} className={inputCls()} />
+                <input type="date" max={todayIso()} value={form.referralDate} onChange={(e) => set("referralDate")(e.target.value)} className={inputCls(liveErrors.referralDate)} />
+                {liveErrors.referralDate && <p className="mt-1 text-xs text-brand-danger">{liveErrors.referralDate}</p>}
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Scheduled Date &amp; Time</label>
-                <input type="datetime-local" value={form.scheduledAt} onChange={(e) => set("scheduledAt")(e.target.value)} className={inputCls()} />
+                <input type="datetime-local" min={referralDateTimeMinimum()} value={form.scheduledAt} onChange={(e) => set("scheduledAt")(e.target.value)} className={inputCls(liveErrors.scheduledAt)} />
+                {liveErrors.scheduledAt && <p className="mt-1 text-xs text-brand-danger">{liveErrors.scheduledAt}</p>}
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Priority</label>
@@ -235,8 +257,8 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Destination Facility <span className="text-brand-danger">*</span></label>
-                <input type="text" value={form.destinationFacility} onChange={(e) => set("destinationFacility")(e.target.value)} placeholder="e.g. RHU Pili" className={inputCls(errors.destinationFacility)} />
-                {errors.destinationFacility && <p className="mt-1 text-xs text-brand-danger">{errors.destinationFacility}</p>}
+                <input type="text" value={form.destinationFacility} onChange={(e) => set("destinationFacility")(e.target.value)} placeholder="e.g. RHU Pili" className={inputCls(liveErrors.destinationFacility)} />
+                {liveErrors.destinationFacility && <p className="mt-1 text-xs text-brand-danger">{liveErrors.destinationFacility}</p>}
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Destination Service</label>
@@ -250,8 +272,8 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
 
             <div>
               <label className="text-sm font-medium text-brand-ink">Referral Reason <span className="text-brand-danger">*</span></label>
-              <input type="text" value={form.reason} onChange={(e) => set("reason")(e.target.value)} placeholder="Enter reason..." className={inputCls(errors.reason)} />
-              {errors.reason && <p className="mt-1 text-xs text-brand-danger">{errors.reason}</p>}
+              <input type="text" value={form.reason} onChange={(e) => set("reason")(e.target.value)} placeholder="Enter reason..." className={inputCls(liveErrors.reason)} />
+              {liveErrors.reason && <p className="mt-1 text-xs text-brand-danger">{liveErrors.reason}</p>}
             </div>
 
             <div>
@@ -278,8 +300,8 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
                 <>
                   <div className="mb-3">
                     <label className="text-sm font-medium text-brand-ink">Laboratory Test <span className="text-brand-danger">*</span></label>
-                    <input type="text" value={form.laboratoryTest} onChange={(e) => set("laboratoryTest")(e.target.value)} placeholder="e.g. Complete Blood Count, Urinalysis, FBS" className={inputCls(errors.laboratoryTest)} />
-                    {errors.laboratoryTest && <p className="mt-1 text-xs text-brand-danger">{errors.laboratoryTest}</p>}
+                    <input type="text" value={form.laboratoryTest} onChange={(e) => set("laboratoryTest")(e.target.value)} placeholder="e.g. Complete Blood Count, Urinalysis, FBS" className={inputCls(liveErrors.laboratoryTest)} />
+                    {liveErrors.laboratoryTest && <p className="mt-1 text-xs text-brand-danger">{liveErrors.laboratoryTest}</p>}
                   </div>
                   <div>
                     <label className="text-sm font-medium text-brand-ink">Additional Instructions</label>
@@ -316,7 +338,7 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
           <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
             <button
-              disabled={saving}
+              disabled={saving || Object.keys(liveErrors).length > 0}
               onClick={() => { if (validate()) onSave(form); }}
               className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
             >
@@ -555,7 +577,8 @@ export default function HealthReferrals() {
 
   const toPayload = (form) => ({
     referral_date: form.referralDate || null,
-    scheduled_at: form.scheduledAt || null,
+    scheduled_at: form.scheduledAt ? localDateTimeToIso(form.scheduledAt) : null,
+    client_time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     destination_facility: form.destinationFacility.trim(),
     destination_service: form.destinationService.trim(),
     reason: form.reason.trim(),

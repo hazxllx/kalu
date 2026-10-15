@@ -1,4 +1,4 @@
-import { api } from './apiClient';
+import { api } from './apiClient.js';
 
 /**
  * Residents API. Thin wrapper over the centralized apiClient so components and
@@ -13,8 +13,8 @@ import { api } from './apiClient';
 export const residentsApi = {
   list: (params) => api.get('/residents', { params }),
   get: (id) => api.get(`/residents/${id}`),
-  create: (payload) => api.post('/residents', payload),
-  update: (id, payload) => api.put(`/residents/${id}`, payload),
+  create: (payload, options) => api.post('/residents', payload, options),
+  update: (id, payload, options) => api.put(`/residents/${id}`, payload, options),
   remove: (id) => api.delete(`/residents/${id}`),
   // Invite + link a login account for an EXISTING resident record. The backend
   // creates the Supabase Auth user, links residents.auth_user_id, and leaves the

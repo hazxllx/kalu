@@ -28,11 +28,23 @@ const unwrap = (result, key) => {
   if (result && typeof result === 'object' && key in result) return result[key];
   return result;
 };
+const requireConfirmedRecord = (record, entity) => {
+  if (!record || typeof record !== 'object' || record.id === undefined || record.id === null) {
+    throw Object.assign(
+      new Error(`The server did not confirm a durable ${entity} record.`),
+      { code: 'malformed' },
+    );
+  }
+  return record;
+};
 const serverPayload = (payload = {}) => {
   const { _offlineBarangay, ...record } = payload;
   return record;
 };
 
+/** @typedef {((op: any) => Promise<{serverId: string|number, serverRecord: Record<string, any>}>) & {mutationType?: string}} SyncHandler */
+
+/** @type {Record<string, Record<string, SyncHandler>>} */
 export const SYNC_HANDLERS = {
   household: {
     async create(op) {
@@ -41,8 +53,8 @@ export const SYNC_HANDLERS = {
         { household: op.payload },
         { ...idempotencyHeaders(op), offlineMutationType: MUTATION_TIER.SAFE_SYNC },
       );
-      const household = unwrap(result, 'household');
-      return { serverId: household?.id ?? null, serverRecord: household ?? null };
+      const household = requireConfirmedRecord(unwrap(result, 'household'), 'household');
+      return { serverId: household.id, serverRecord: household };
     },
     async update(op) {
       const id = op.targetServerId || op.serverId;
@@ -51,8 +63,8 @@ export const SYNC_HANDLERS = {
         headers,
         offlineMutationType: MUTATION_TIER.SAFE_SYNC,
       });
-      const household = unwrap(result, 'household');
-      return { serverId: household?.id ?? id, serverRecord: household ?? null };
+      const household = requireConfirmedRecord(unwrap(result, 'household'), 'household');
+      return { serverId: household.id ?? id, serverRecord: household };
     },
   },
   householdMemberHealth: {
@@ -66,8 +78,8 @@ export const SYNC_HANDLERS = {
           offlineMutationType: MUTATION_TIER.SAFE_SYNC,
         },
       );
-      const profile = unwrap(result, 'profile');
-      return { serverId: memberId, serverRecord: profile ?? null };
+      const profile = requireConfirmedRecord(unwrap(result, 'profile'), 'household member health profile');
+      return { serverId: memberId, serverRecord: profile };
     },
   },
   followup: {
@@ -76,8 +88,8 @@ export const SYNC_HANDLERS = {
         ...idempotencyHeaders(op),
         offlineMutationType: MUTATION_TIER.SAFE_SYNC,
       });
-      const record = unwrap(result, 'record');
-      return { serverId: record?.id ?? null, serverRecord: record ?? null };
+      const record = requireConfirmedRecord(unwrap(result, 'record'), 'follow-up');
+      return { serverId: record.id, serverRecord: record };
     },
     async update(op) {
       const id = op.targetServerId || op.serverId;
@@ -85,8 +97,32 @@ export const SYNC_HANDLERS = {
         ...idempotencyHeaders(op),
         offlineMutationType: MUTATION_TIER.SAFE_SYNC,
       });
-      const record = unwrap(result, 'record');
-      return { serverId: record?.id ?? id, serverRecord: record ?? null };
+      const record = requireConfirmedRecord(unwrap(result, 'record'), 'follow-up');
+      return { serverId: record.id ?? id, serverRecord: record };
+    },
+  },
+  resident: {
+    async create(op) {
+      const result = await api.post(
+        '/residents',
+        { resident: op.payload },
+        { ...idempotencyHeaders(op), offlineMutationType: MUTATION_TIER.SAFE_SYNC },
+      );
+      const resident = requireConfirmedRecord(unwrap(result, 'resident'), 'resident');
+      return { serverId: resident.id, serverRecord: resident };
+    },
+    async update(op) {
+      const id = op.targetServerId || op.serverId;
+      const headers = {
+        ...idempotencyHeaders(op).headers,
+        ...revisionHeaders(op).headers,
+      };
+      const result = await api.put(`/residents/${id}`, { resident: op.payload }, {
+        headers,
+        offlineMutationType: MUTATION_TIER.SAFE_SYNC,
+      });
+      const resident = requireConfirmedRecord(unwrap(result, 'resident'), 'resident');
+      return { serverId: resident.id ?? id, serverRecord: resident };
     },
   },
 };

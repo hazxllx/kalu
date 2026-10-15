@@ -1,4 +1,4 @@
-import { api } from './apiClient';
+import { api } from './apiClient.js';
 
 /**
  * Households API. Thin wrapper over the centralized apiClient.

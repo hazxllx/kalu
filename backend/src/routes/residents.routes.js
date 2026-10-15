@@ -72,6 +72,7 @@ router.post(
 router.put(
   '/:id',
   authorize(['phn', 'health_supervisor'], { permission: 'residents.edit' }),
+  idempotency,
   asyncHandler(residentsController.updateResident),
 );
 

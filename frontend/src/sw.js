@@ -22,6 +22,7 @@ import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { CacheFirst, NetworkOnly, StaleWhileRevalidate } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
+import { isPermissionMatrixRequest } from './services/accessControl/permissionRequestPolicy.js';
 
 // Bump these suffixes to invalidate the corresponding runtime caches. The
 // precache manifest is already content-addressed per build, so only runtime
@@ -55,6 +56,12 @@ const isSupabase = ({ url }) =>
   url.pathname.startsWith('/rest/v1');
 const carriesAuth = ({ request }) => request.headers.has('Authorization');
 
+// Permissions responses are authenticated and user-specific. The page may use
+// its short-lived, owner-bound Dexie snapshot when offline; CacheStorage must
+// never synthesize a permission response. NetworkOnly makes one request and
+// propagates transport/401/403 failures without retrying or returning a
+// success-shaped fallback.
+registerRoute(isPermissionMatrixRequest, new NetworkOnly());
 registerRoute(isApiRequest, new NetworkOnly());
 registerRoute(isSupabase, new NetworkOnly());
 registerRoute(carriesAuth, new NetworkOnly());

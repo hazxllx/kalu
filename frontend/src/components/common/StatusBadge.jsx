@@ -3,6 +3,7 @@ import React from "react";
 const TONES = {
   Low: "bg-emerald-50 text-emerald-700",
   Medium: "bg-amber-50 text-amber-700",
+  Moderate: "bg-amber-50 text-amber-700",
   High: "bg-rose-50 text-rose-700",
   Active: "bg-emerald-50 text-emerald-700",
   Inactive: "bg-slate-100 text-slate-600",

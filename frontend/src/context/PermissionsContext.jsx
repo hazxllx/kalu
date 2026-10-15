@@ -12,10 +12,22 @@ import {
   roleLabel,
 } from '@/lib/permissions';
 import { AUDIT_LIMIT, hydrateMatrix } from '@/services/accessControl/permissionsStore';
+import {
+  PERMISSION_CACHE_TTL_MS,
+  cacheVerifiedPermissions,
+  invalidateAllVerifiedPermissions,
+  invalidateVerifiedPermissions,
+  readVerifiedPermissions,
+} from '@/services/accessControl/permissionCache';
+import { hasValidPermissionSnapshot } from '@/services/accessControl/permissionAccess';
 import { rolesApi } from '@/services/api/rolesApi';
 import { permissionLoadErrorMessage } from '@/services/api/permissionLoadError';
+import { isNavigatorOnline } from '@/services/offline/connectivity.js';
+import { classifySyncError, SYNC_ERROR } from '@/services/offline/errors.js';
 
 const PermissionsContext = createContext(null);
+
+/** @typedef {{userId: string|null, role?: string|null, status: 'loading'|'ready'|'error', source?: string, failureKind?: string, error?: string|null, verifiedAt?: number, expiresAt?: number}} PermissionMatrixLoadState */
 
 /** "Admin enabled 'Approve referral' for Health Supervisor." */
 const actorTitleFor = (actorRole) => (actorRole === ROLE.ADMIN ? 'Admin' : roleLabel(actorRole));
@@ -72,13 +84,17 @@ export const PermissionsProvider = ({ children }) => {
   // Start from the registry defaults, then load the persisted overrides from the
   // API. localStorage is no longer the source of truth.
   const [matrix, setMatrix] = useState(() => hydrateMatrix(null));
-  const [matrixLoadState, setMatrixLoadState] = useState(() => ({
+  const [matrixLoadState, setMatrixLoadState] = useState(/** @type {PermissionMatrixLoadState} */ ({
     userId: user?.id || null,
     status: user?.id ? 'loading' : 'ready',
     error: null,
   }));
   const matrixRequestRef = useRef(0);
+  const matrixRequestInFlightRef = useRef(null);
+  const previousUserIdRef = useRef(user?.id || null);
   const [auditEntries, setAuditEntries] = useState([]);
+  const latestMatrixRef = useRef({ matrix, matrixLoadState });
+  latestMatrixRef.current = { matrix, matrixLoadState };
 
   const refreshMatrix = useCallback(async () => {
     if (!user?.id) {
@@ -86,38 +102,200 @@ export const PermissionsProvider = ({ children }) => {
       setMatrixLoadState({ userId: null, status: 'ready', error: null });
       return false;
     }
-    const requestId = ++matrixRequestRef.current;
-    setMatrixLoadState((current) => (
-      current.userId === user.id && current.status === 'ready'
-        ? current
-        : { userId: user.id, status: 'loading', error: null }
-    ));
-    try {
-      const serverMatrix = await rolesApi.getMatrix();
-      if (requestId !== matrixRequestRef.current) return false;
-      setMatrix(hydrateMatrix(serverMatrix));
-      setMatrixLoadState({ userId: user.id, status: 'ready', error: null });
-      return true;
-    } catch (error) {
-      if (requestId !== matrixRequestRef.current) return false;
+    const effectiveRole = role === ROLE.RESIDENT_LIMITED ? ROLE.RESIDENT : role;
+    if (!effectiveRole) {
+      setMatrix(hydrateMatrix(null));
       setMatrixLoadState({
         userId: user.id,
         status: 'error',
-        error: permissionLoadErrorMessage(error),
+        failureKind: 'profile',
+        error: 'Your account role could not be verified. Reconnect and refresh your profile.',
       });
       return false;
     }
-  }, [user?.id]);
+    const requestKey = `${user.id}:${effectiveRole}`;
+    if (matrixRequestInFlightRef.current?.key === requestKey) {
+      return matrixRequestInFlightRef.current.promise;
+    }
+    const requestId = ++matrixRequestRef.current;
+    const promise = (async () => {
+      let snapshot = null;
+      const { matrix: currentMatrix, matrixLoadState: current } = latestMatrixRef.current;
+      if (
+        current.userId === user.id &&
+        current.status === 'ready' &&
+        current.role === effectiveRole &&
+        current.expiresAt > Date.now()
+      ) {
+        snapshot = {
+          matrix: currentMatrix,
+          verifiedAt: current.verifiedAt,
+          expiresAt: current.expiresAt,
+        };
+      } else {
+        setMatrixLoadState({ userId: user.id, role: effectiveRole, status: 'loading', error: null });
+        try {
+          snapshot = await readVerifiedPermissions({ userId: user.id, role: effectiveRole });
+        } catch (error) {
+          console.error('[kalusagap/permissions] Could not read the local permission cache.', error);
+        }
+      }
+
+      if (requestId !== matrixRequestRef.current) return false;
+      if (snapshot) {
+        setMatrix(hydrateMatrix(snapshot.matrix));
+        setMatrixLoadState({
+          userId: user.id,
+          role: effectiveRole,
+          status: 'ready',
+          source: 'cache',
+          verifiedAt: snapshot.verifiedAt,
+          expiresAt: snapshot.expiresAt,
+          error: null,
+        });
+      }
+
+      if (!isNavigatorOnline()) {
+        if (!snapshot) {
+          setMatrix(hydrateMatrix(null));
+          setMatrixLoadState({
+            userId: user.id,
+            role: effectiveRole,
+            status: 'error',
+            failureKind: 'network',
+            error: 'No unexpired verified permissions are stored on this device. Reconnect to verify access.',
+          });
+        }
+        return Boolean(snapshot);
+      }
+
+      try {
+        const serverMatrix = await rolesApi.getMatrix();
+        if (requestId !== matrixRequestRef.current) return false;
+        const verified = await cacheVerifiedPermissions({
+          userId: user.id,
+          role: effectiveRole,
+          matrix: serverMatrix,
+        }).catch((error) => {
+          console.error('[kalusagap/permissions] Could not persist verified permissions.', error);
+          return null;
+        });
+        setMatrix(hydrateMatrix(serverMatrix));
+        const verifiedAt = verified?.verifiedAt || Date.now();
+        setMatrixLoadState({
+          userId: user.id,
+          role: effectiveRole,
+          status: 'ready',
+          source: 'server',
+          verifiedAt,
+          expiresAt: verified?.expiresAt || verifiedAt + PERMISSION_CACHE_TTL_MS,
+          error: null,
+        });
+        return true;
+      } catch (error) {
+        if (requestId !== matrixRequestRef.current) return false;
+        const status = Number(error?.status || error?.statusCode || 0);
+        if (status === 401 || status === 403) {
+          try {
+            await invalidateVerifiedPermissions(user.id);
+          } catch (cacheError) {
+            console.error('[kalusagap/permissions] Could not invalidate rejected permissions.', cacheError);
+          }
+          setMatrix(hydrateMatrix(null));
+          setMatrixLoadState({
+            userId: user.id,
+            role: effectiveRole,
+            status: 'error',
+            failureKind: status === 401 ? 'auth' : 'forbidden',
+            error: permissionLoadErrorMessage(error),
+          });
+          return false;
+        }
+        const failureKind = classifySyncError(error).code === SYNC_ERROR.NETWORK
+          ? 'network'
+          : status >= 500
+            ? 'service'
+            : 'unknown';
+        if (snapshot && snapshot.expiresAt > Date.now()) {
+          setMatrixLoadState({
+            userId: user.id,
+            role: effectiveRole,
+            status: 'ready',
+            source: 'cache',
+            verifiedAt: snapshot.verifiedAt,
+            expiresAt: snapshot.expiresAt,
+            failureKind,
+            error: permissionLoadErrorMessage(error),
+          });
+          return true;
+        }
+        setMatrix(hydrateMatrix(null));
+        setMatrixLoadState({
+          userId: user.id,
+          role: effectiveRole,
+          status: 'error',
+          failureKind,
+          error: permissionLoadErrorMessage(error),
+        });
+        return false;
+      }
+    })();
+    matrixRequestInFlightRef.current = { key: requestKey, promise };
+    try {
+      return await promise;
+    } finally {
+      if (matrixRequestInFlightRef.current?.promise === promise) {
+        matrixRequestInFlightRef.current = null;
+      }
+    }
+  }, [role, user?.id]);
 
   useEffect(() => {
-    // The permission matrix endpoint is authenticated. Only load it once a user
-    // is signed in; before authentication, use the safe registry defaults so no
-    // unauthenticated request is issued (which would 401).
+    const previousUserId = previousUserIdRef.current;
+    if (previousUserId && previousUserId !== user?.id) {
+      void invalidateVerifiedPermissions(previousUserId).catch((error) => {
+        console.error('[kalusagap/permissions] Could not clear the previous account cache.', error);
+      });
+      setMatrix(hydrateMatrix(null));
+    }
+    previousUserIdRef.current = user?.id || null;
     void refreshMatrix();
     return () => {
       matrixRequestRef.current += 1;
     };
   }, [refreshMatrix]);
+
+  useEffect(() => {
+    const onOnline = () => void refreshMatrix();
+    const onPermissionsInvalidated = (event) => {
+      const invalidatedUserId = event.detail?.userId;
+      if (!user?.id || invalidatedUserId !== user.id) return;
+      matrixRequestRef.current += 1;
+      setMatrix(hydrateMatrix(null));
+      setMatrixLoadState({
+        userId: user.id,
+        role: role === ROLE.RESIDENT_LIMITED ? ROLE.RESIDENT : role,
+        status: 'error',
+        failureKind: event.detail?.status === 401 ? 'auth' : 'forbidden',
+        error: event.detail?.status === 401
+          ? 'Your session has expired. Sign in again before continuing.'
+          : 'Your permissions were rejected. Contact an administrator or retry after reconnecting.',
+      });
+    };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('kalusagap:permissions-invalidated', onPermissionsInvalidated);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('kalusagap:permissions-invalidated', onPermissionsInvalidated);
+    };
+  }, [refreshMatrix, role, user?.id]);
+
+  useEffect(() => {
+    if (matrixLoadState.status !== 'ready' || !matrixLoadState.expiresAt) return undefined;
+    const delay = Math.max(0, matrixLoadState.expiresAt - Date.now());
+    const timer = window.setTimeout(() => void refreshMatrix(), delay);
+    return () => window.clearTimeout(timer);
+  }, [matrixLoadState.expiresAt, matrixLoadState.status, refreshMatrix]);
 
   const permissionsForRole = useCallback(
     (roleId) => matrix[roleId] || defaultPermissionsForRole(roleId),
@@ -149,9 +327,7 @@ export const PermissionsProvider = ({ children }) => {
       if (!permissionId) return true;
       const effectiveRole = role === ROLE.RESIDENT_LIMITED ? ROLE.RESIDENT : role;
       if (!effectiveRole) return false;
-      if (matrixLoadState.status !== 'ready' || matrixLoadState.userId !== user?.id) {
-        return roleCan(effectiveRole, permissionId);
-      }
+      if (!hasValidPermissionSnapshot(matrixLoadState, user?.id, effectiveRole)) return false;
       return roleCan(effectiveRole, permissionId);
     },
     [matrixLoadState, role, roleCan, user?.id],
@@ -191,6 +367,9 @@ export const PermissionsProvider = ({ children }) => {
 
       // Persist to the authoritative store FIRST; only reflect locally on success.
       await rolesApi.updateRolePermissions(roleId, next);
+      await invalidateAllVerifiedPermissions().catch((error) => {
+        console.error('[kalusagap/permissions] Could not invalidate stale permission caches.', error);
+      });
 
       // A matrix fetch started before this save must not overwrite the saved
       // permissions if its response arrives afterwards.

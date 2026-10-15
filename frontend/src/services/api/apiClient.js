@@ -1,10 +1,11 @@
-import { supabase } from '@/lib/supabase';
-import { resolveApiBaseUrl } from './apiBaseUrl';
+import { supabase } from '../../lib/supabase.js';
+import { resolveApiBaseUrl } from './apiBaseUrl.js';
 import {
   MUTATION_TIER,
   OfflineActionRequiredError,
   requireOnlineForMutation,
-} from '@/services/offline/mutationPolicy';
+} from '../offline/mutationPolicy.js';
+import { invalidateVerifiedPermissions } from '../accessControl/permissionCache.js';
 
 /**
  * Centralized HTTP client for the KALUSAGAP backend (see `backend/`).
@@ -23,7 +24,7 @@ import {
  * empty state when the endpoint supplies no rows — no fabricated data is
  * rendered anywhere in the app.
  */
-const BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_URL, import.meta.env.PROD);
+const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.env?.PROD);
 
 /**
  * @typedef {Object} RequestOptions
@@ -49,10 +50,13 @@ class ApiError extends Error {
   }
 }
 
-async function getAccessToken() {
-  if (!supabase) return null;
+async function getAuthIdentity() {
+  if (!supabase) return { token: null, userId: null };
   const { data } = await supabase.auth.getSession();
-  return data?.session?.access_token || null;
+  return {
+    token: data?.session?.access_token || null,
+    userId: data?.session?.user?.id || null,
+  };
 }
 
 /** Build the request URL, serializing `params` into the query string. */
@@ -76,7 +80,7 @@ async function request(
   const mutationType = offlineMutationType || MUTATION_TIER.ONLINE_ONLY;
   if (isMutation) requireOnlineForMutation(mutationType);
 
-  const token = await getAccessToken();
+  const { token, userId } = await getAuthIdentity();
 
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const isJsonBody = body !== undefined && body !== null && !isFormData && typeof body !== 'string' && !(body instanceof URLSearchParams);
@@ -107,6 +111,17 @@ async function request(
   const payload = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
+    if ((response.status === 401 || response.status === 403) && userId) {
+      void invalidateVerifiedPermissions(userId)
+        .catch((error) => console.error('[kalusagap/permissions] Could not clear rejected permissions.', error))
+        .finally(() => {
+          if (typeof window !== 'undefined' && !path.endsWith('/roles/permissions')) {
+            window.dispatchEvent(new CustomEvent('kalusagap:permissions-invalidated', {
+              detail: { userId, status: response.status },
+            }));
+          }
+        });
+    }
     const message =
       (isJson && (payload?.error?.message || payload?.message)) ||
       `Request failed with status ${response.status}`;
@@ -116,11 +131,12 @@ async function request(
   return isJson && payload && 'data' in payload ? payload.data : payload;
 }
 
+/** @param {RequestOptions} options */
 export const postFormData = async (path, formData, options = {}) => {
   requireOnlineForMutation(options.offlineMutationType || MUTATION_TIER.ONLINE_ONLY);
   const requestOptions = { ...options };
   delete requestOptions.offlineMutationType;
-  const token = await getAccessToken();
+  const { token, userId } = await getAuthIdentity();
   let response;
   try {
     response = await fetch(buildUrl(path, options.params), {
@@ -142,6 +158,17 @@ export const postFormData = async (path, formData, options = {}) => {
   const payload = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
+    if ((response.status === 401 || response.status === 403) && userId) {
+      void invalidateVerifiedPermissions(userId)
+        .catch((error) => console.error('[kalusagap/permissions] Could not clear rejected permissions.', error))
+        .finally(() => {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('kalusagap:permissions-invalidated', {
+              detail: { userId, status: response.status },
+            }));
+          }
+        });
+    }
     const message =
       (isJson && (payload?.error?.message || payload?.message)) ||
       `Request failed with status ${response.status}`;

@@ -10,8 +10,8 @@ import { createClient } from '@supabase/supabase-js';
  * If the environment variables are missing, `supabase` is `null` and sign-in
  * is unavailable until the frontend is configured for a Supabase project.
  */
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const url = import.meta.env?.VITE_SUPABASE_URL;
+const anonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY;
 
 export const isSupabaseConfigured = Boolean(url && anonKey);
 

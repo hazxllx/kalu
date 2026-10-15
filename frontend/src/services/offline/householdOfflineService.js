@@ -1,4 +1,4 @@
-import { householdsApi } from '@/services/api';
+import { householdsApi } from '../api/householdsApi.js';
 import { isNavigatorOnline } from './connectivity.js';
 import { classifySyncError, SYNC_ERROR } from './errors.js';
 import { queueCreate, queueUpdate } from './queue.js';
@@ -208,6 +208,7 @@ export const getHouseholdOffline = async ({ ownerId, householdId }) => {
   return mergePendingHouseholdUpdates(household, await getDecryptedOperations(ownerId));
 };
 
+/** @param {{ownerId: string, params?: Record<string, any>}} input */
 export const listHouseholdsOffline = async ({ ownerId, params = {} }) => {
   if (!ownerId) throw new Error('A signed-in user is required.');
   const limit = Math.min(Math.max(Number.parseInt(params.limit, 10) || 100, 1), 100);
@@ -223,17 +224,20 @@ export const listHouseholdsOffline = async ({ ownerId, params = {} }) => {
   const drafts = await listDrafts(ownerId, 'household');
   local = drafts
     .filter((draft) => draft.status !== 'synced' && !draft.serverId)
-    .map((draft) => ({
-      ...draft.data,
-      id: draft.localRef,
-      localId: draft.localId,
-      offline: true,
-      syncStatus: draft.status === 'failed'
-        ? draft.lastError?.code === 'permission_changed'
-          ? 'Sync failed — permission changed'
-          : 'Sync failed — review required'
-        : 'Pending Sync',
-    }))
+    .map((draft) => {
+      const lastError = /** @type {{code?: string}|null|undefined} */ (draft.lastError);
+      return {
+        ...draft.data,
+        id: draft.localRef,
+        localId: draft.localId,
+        offline: true,
+        syncStatus: draft.status === 'failed'
+          ? lastError?.code === 'permission_changed'
+            ? 'Sync failed — permission changed'
+            : 'Sync failed — review required'
+          : 'Pending Sync',
+      };
+    })
     .filter(matchesQuery);
 
   let networkError = isNavigatorOnline()

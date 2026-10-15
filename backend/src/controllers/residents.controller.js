@@ -54,6 +54,7 @@ export const updateResident = async (req, res) => {
     id: req.params.id,
     patch: req.body.resident || {},
     user: req.user,
+    expectedUpdatedAt: req.get('If-Match') || null,
   });
   sendData(res, { resident });
 };

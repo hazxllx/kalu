@@ -30,6 +30,7 @@ import { notificationsApi } from "@/services/api";
 import { onUnreadChanged } from "@/services/notifications/unreadBus";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
+import { hasValidPermissionSnapshot, routePermissionsAllowed } from "@/services/accessControl/permissionAccess";
 
 export default function DashboardLayout({ roleKey }) {
   const role = ROLES[roleKey];
@@ -88,12 +89,22 @@ export default function DashboardLayout({ roleKey }) {
     () => navStationForPath(NAV[roleKey] || [], location.pathname),
     [roleKey, location.pathname]
   );
-  const permissionsReady =
-    matrixLoadState.userId === user?.id && matrixLoadState.status === "ready";
+  const effectiveRole = user?.role === "resident-limited" ? "resident" : user?.role;
+  const permissionsReady = hasValidPermissionSnapshot(
+    matrixLoadState,
+    user?.id,
+    effectiveRole,
+  );
   const routeStationAllowed = stationAllows(user, routeStation);
   const routeAllowed =
     routeStationAllowed &&
-    (!routePermissions || (permissionsReady && routePermissions.some((permission) => can(permission))));
+    routePermissionsAllowed({
+      permissions: routePermissions,
+      state: matrixLoadState,
+      userId: user?.id,
+      role: effectiveRole,
+      can,
+    });
 
   // Keep an expandable submenu (e.g. Records) open while the user is on one
   // of its child pages — including on a direct URL visit — so the active child
@@ -402,34 +413,7 @@ export default function DashboardLayout({ roleKey }) {
     return <Navigate to="/app/resident/dashboard" replace />;
   }
 
-  if (routePermissions && !permissionsReady) {
-    const loadFailed = matrixLoadState.userId === user?.id && matrixLoadState.status === "error";
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-brand-surface px-4">
-        <div className="max-w-md border border-brand-border bg-white p-5 text-center">
-          <p className="text-sm font-medium text-brand-ink">
-            {loadFailed ? "Role permissions could not be verified." : "Loading role permissions…"}
-          </p>
-          <p className="mt-1 text-xs text-brand-gray">
-            {loadFailed
-              ? matrixLoadState.error || "Permission-gated features remain unavailable until permissions can be verified."
-              : "This page will open when access has been checked."}
-          </p>
-          {loadFailed && (
-            <button
-              type="button"
-              onClick={() => void refreshMatrix()}
-              className="mt-4 min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
-            >
-              Retry
-            </button>
-          )}
-        </div>
-      </main>
-    );
-  }
-
-  if (!routeAllowed) {
+  if (!routeStationAllowed || (routePermissions && permissionsReady && !routeAllowed)) {
     return <Navigate to={homeForRole(user?.role || roleKey)} replace />;
   }
 
@@ -720,27 +704,98 @@ export default function DashboardLayout({ roleKey }) {
               role="alert"
             >
               <div>
-                <p className="font-medium">Role permissions could not be loaded.</p>
+                <p className="font-medium">Role permissions are not currently verified.</p>
                 <p className="text-xs text-brand-gray">
-                  {matrixLoadState.error || "Permission-gated features remain unavailable until permissions can be verified."}
+                  {matrixLoadState.failureKind === "auth"
+                    ? "Your session has expired. Sign in again to continue."
+                    : matrixLoadState.failureKind === "forbidden"
+                      ? "Access was denied by the permissions service. Contact an administrator."
+                      : matrixLoadState.error || "Reconnect to verify access to this page."}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => void refreshMatrix()}
-                className="min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
-              >
-                Retry
-              </button>
+              {matrixLoadState.failureKind === "auth" ? (
+                <button
+                  type="button"
+                  onClick={() => void logout()}
+                  className="min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                >
+                  Sign in again
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void refreshMatrix()}
+                  className="min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                >
+                  Retry
+                </button>
+              )}
             </div>
           )}
+          {matrixLoadState.userId === user?.id &&
+            matrixLoadState.status === "ready" &&
+            matrixLoadState.source === "cache" && (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950" role="status">
+                <p>
+                  Using permissions previously verified for this account. They expire at{" "}
+                  {new Date(matrixLoadState.expiresAt).toLocaleTimeString()} and will be refreshed when connected.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void refreshMatrix()}
+                  className="min-h-9 border border-amber-400 px-3 text-xs font-medium hover:bg-amber-100"
+                >
+                  Recheck access
+                </button>
+              </div>
+            )}
           <motion.div
             key={location.pathname}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
           >
-            <Outlet />
+            {routePermissions && !permissionsReady ? (
+              <section
+                className="mx-auto max-w-xl border border-brand-border bg-white p-6 text-center"
+                aria-live="polite"
+              >
+                <h1 className="text-base font-semibold text-brand-ink">
+                  {matrixLoadState.status === "loading"
+                    ? "Checking page access…"
+                    : matrixLoadState.failureKind === "auth"
+                      ? "Your session needs attention"
+                      : matrixLoadState.failureKind === "forbidden"
+                        ? "Access was denied"
+                        : "Reconnect to verify page access"}
+                </h1>
+                <p className="mt-2 text-sm text-brand-gray">
+                  {matrixLoadState.status === "loading"
+                    ? "This page will open after access is verified."
+                    : matrixLoadState.error ||
+                      "No unexpired, previously verified permissions are available on this device. This page remains protected until access can be verified."}
+                </p>
+                {matrixLoadState.failureKind === "auth" ? (
+                  <button
+                    type="button"
+                    onClick={() => void logout()}
+                    className="mt-4 min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface"
+                  >
+                    Sign in again
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void refreshMatrix()}
+                    className="mt-4 min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface"
+                  >
+                    Retry verification
+                  </button>
+                )}
+              </section>
+            ) : (
+              <Outlet />
+            )}
           </motion.div>
         </main>
       </div>

@@ -1283,6 +1283,7 @@ export const updateResident = async ({
   id,
   patch = {},
   user,
+  expectedUpdatedAt = null,
 }) => {
   if (!isEditRole(user)) {
     throw ApiError.forbidden(
@@ -1297,6 +1298,10 @@ export const updateResident = async ({
     throw ApiError.notFound(
       'Resident record not found',
     );
+  }
+
+  if (expectedUpdatedAt && !Number.isFinite(Date.parse(expectedUpdatedAt))) {
+    throw ApiError.badRequest('The resident revision is invalid.');
   }
 
   assertWithinScope(
@@ -1371,10 +1376,17 @@ export const updateResident = async ({
   // Identity keys (name, DOB) are not editable here to avoid silently
   // splitting a resident's health record; corrections go through an admin.
 
-  return repository.updateResident(
+  const updated = await repository.updateResident(
     id,
     updates,
+    { expectedUpdatedAt },
   );
+  if (expectedUpdatedAt && !updated) {
+    const current = await repository.getResident(id);
+    if (!current) throw ApiError.notFound('Resident record not found');
+    throw ApiError.conflict('This resident changed on the server. Reload it before applying the queued changes.');
+  }
+  return updated;
 };
 
 export default {

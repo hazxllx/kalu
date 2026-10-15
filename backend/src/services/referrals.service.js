@@ -41,6 +41,9 @@ const RESIDENT_ROLES = new Set(['resident', 'resident-limited']);
 const VALID_STATUSES = ['Pending', 'Accepted', 'In Progress', 'Completed', 'Cancelled'];
 const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
 const REFERRAL_PAGE_SIZE = 200;
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ZONED_DATE_TIME_PATTERN =
+  /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:[zZ]|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/;
 
 /**
  * The resident columns every referral response embeds.
@@ -58,6 +61,65 @@ const REFERRAL_SELECT = `*, ${RESIDENT_EMBED}`;
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
+};
+
+const isValidDateOnly = (value) => {
+  if (!DATE_ONLY_PATTERN.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+const dateKeyInTimeZone = (date, timeZone) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
+const sameInstant = (left, right) => {
+  const leftTime = typeof left === 'string' && left.trim() ? Date.parse(left) : NaN;
+  const rightTime = typeof right === 'string' && right.trim() ? Date.parse(right) : NaN;
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime === rightTime;
+};
+
+export const assertReferralDates = (payload, { existing = null, now = new Date() } = {}) => {
+  const referralDate = payload.referral_date;
+  const scheduledAt = payload.scheduled_at;
+  const timeZone = text(payload.client_time_zone) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  if (referralDate !== undefined && referralDate !== null && referralDate !== '') {
+    if (!isValidDateOnly(referralDate)) {
+      throw ApiError.unprocessable('Enter a valid referral date.', { field: 'referral_date' });
+    }
+    let today;
+    try {
+      today = dateKeyInTimeZone(now, timeZone);
+    } catch {
+      throw ApiError.unprocessable('Enter a valid local time zone.', { field: 'client_time_zone' });
+    }
+    if (referralDate > today) {
+      throw ApiError.unprocessable('Referral date cannot be later than today.', { field: 'referral_date' });
+    }
+  }
+
+  if (scheduledAt !== undefined && scheduledAt !== null && scheduledAt !== '') {
+    const dateTimeMatch = typeof scheduledAt === 'string' && ZONED_DATE_TIME_PATTERN.exec(scheduledAt);
+    if (
+      !dateTimeMatch ||
+      !isValidDateOnly(dateTimeMatch[1]) ||
+      !Number.isFinite(Date.parse(scheduledAt))
+    ) {
+      throw ApiError.unprocessable('Enter a valid scheduled date and time.', { field: 'scheduled_at' });
+    }
+    if (existing && sameInstant(scheduledAt, existing.scheduled_at)) return;
+    if (Date.parse(scheduledAt) <= now.getTime()) {
+      throw ApiError.unprocessable('Scheduled date and time cannot be in the past.', { field: 'scheduled_at' });
+    }
+  }
 };
 
 const assertWriter = (user) => {
@@ -313,6 +375,7 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   assertWriter(user);
   const resident = await residentInScope(supabase, user, payload.residentId ?? payload.resident_id);
 
+  assertReferralDates(payload);
   const row = sanitizeWrite(payload);
   if (!row.reason) throw ApiError.unprocessable('Referral reason is required.');
   if (!row.destination_facility) throw ApiError.unprocessable('Destination facility is required.');
@@ -348,6 +411,7 @@ const writableReferral = async (supabase, user, id) => {
 
 export const update = async ({ user, id, payload = {}, supabase = getServiceClient() }) => {
   const { existing, resident } = await writableReferral(supabase, user, id);
+  assertReferralDates(payload, { existing });
   const row = sanitizeWrite(payload);
   if (Object.prototype.hasOwnProperty.call(payload, 'reason') && !row.reason) {
     throw ApiError.unprocessable('Referral reason is required.');

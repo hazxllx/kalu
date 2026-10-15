@@ -1277,14 +1277,14 @@ export const supabaseRepository = {
     return residentFromRow(data);
   },
 
-  async updateResident(id, patch) {
+  async updateResident(id, patch, { expectedUpdatedAt = null } = {}) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from(TABLES.residents)
       .update({ ...residentToRow(patch), updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select()
-      .maybeSingle();
+      .eq('id', id);
+    if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt);
+    const { data, error } = await query.select().maybeSingle();
     throwOnError(error, 'Could not update resident');
     return residentFromRow(data);
   },
