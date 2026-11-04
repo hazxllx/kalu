@@ -12,6 +12,9 @@ export const listUsers = async (req, res) => {
     status: req.query.status,
     municipalityId: req.query.municipalityId,
     barangayId: req.query.barangayId,
+    personnelOnly: req.query.personnelOnly,
+    approvalStatus: req.query.approvalStatus,
+    lifecycleState: req.query.lifecycleState,
     limit: req.query.limit,
     offset: req.query.offset,
   });
@@ -22,8 +25,11 @@ export const getAccountOptions = async (_req, res) => {
   sendData(res, await usersService.getAccountOptions());
 };
 
-export const getAccountSummary = async (_req, res) => {
-  sendData(res, await usersService.getAccountSummary());
+export const getAccountSummary = async (req, res) => {
+  sendData(res, await usersService.getAccountSummary({
+    personnelOnly: req.query.personnelOnly,
+    approvalStatus: req.query.approvalStatus,
+  }));
 };
 
 export const createUser = async (req, res) => {
@@ -49,8 +55,17 @@ export const updateUser = async (req, res) => {
 };
 
 export const resetUserAccess = async (req, res) => {
-  await usersService.resetUserAccess({ id: req.params.id, actorId: req.user.id });
-  sendData(res, { sent: true });
+  const result = await usersService.resetUserAccess({ id: req.params.id, actorId: req.user.id, operationId: req.body?.operationId });
+  sendData(res, result);
+};
+
+export const transitionUserLifecycle = async (req, res) => {
+  const user = await usersService.transitionUserLifecycle({ id: req.params.id, actorId: req.user.id, input: req.body });
+  sendData(res, { user });
+};
+
+export const getUserHistory = async (req, res) => {
+  sendData(res, await usersService.getUserHistory({ id: req.params.id }));
 };
 
 export const deleteUser = async (req, res) => {
@@ -70,5 +85,7 @@ export default {
   getUser,
   updateUser,
   resetUserAccess,
+  transitionUserLifecycle,
+  getUserHistory,
   deleteUser,
 };

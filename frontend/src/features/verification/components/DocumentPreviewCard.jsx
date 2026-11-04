@@ -14,10 +14,14 @@ const isImage = (mimeType) => String(mimeType || "").toLowerCase().startsWith("i
  * lightbox when clicked. A keyed instance per `doc.url` prevents a previous
  * applicant's cached image from lingering after switching records.
  *
- * @param {{ id:string, title?:string, filename?:string, mimeType?:string, url?:string, statusLabel?:string }} doc
- * @param {(doc:object) => void} [onEnlarge]
- * @param {(id:string) => Promise<string|null>} [onRefreshUrl] optional secure-link refresh
- * @param {React.ReactNode} [footer] optional extra controls rendered under the card
+ * @param {{
+ *   doc: { id:string, title?:string, filename?:string, mimeType?:string, url?:string, statusLabel?:string },
+ *   onEnlarge?: (doc: { id:string, title?:string, filename?:string, mimeType?:string, url?:string, statusLabel?:string }) => void,
+ *   onRefreshUrl?: (id:string) => Promise<string|null>,
+ *   footer?: React.ReactNode,
+ *   filenameWrap?: boolean,
+ *   statusClassName?: string,
+ * }} props
  */
 export default function DocumentPreviewCard({
   doc,

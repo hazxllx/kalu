@@ -26,8 +26,8 @@ export default function StepIndicator4({ current, completed = [] }) {
           const state = isComplete ? "complete" : isActive ? "active" : "pending";
 
           return (
-            <div key={step.num} className="flex flex-1 items-start last:flex-none">
-              <div className="flex w-[52px] flex-col items-center gap-2">
+            <div key={step.num} className="flex min-w-0 flex-1 items-start last:flex-none">
+              <div className="flex min-w-0 w-12 sm:w-[52px] flex-col items-center gap-2">
                 <motion.div
                   initial={false}
                   animate={{
@@ -50,7 +50,7 @@ export default function StepIndicator4({ current, completed = [] }) {
                   )}
                 </motion.div>
                 <span
-                  className={`whitespace-nowrap text-[10px] font-bold uppercase tracking-[0.1em] ${
+                  className={`text-center text-[10px] font-bold uppercase leading-tight tracking-[0.1em] ${
                     isActive
                       ? "text-brand-blue"
                       : isComplete

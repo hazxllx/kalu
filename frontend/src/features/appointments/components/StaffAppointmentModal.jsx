@@ -132,7 +132,7 @@ export default function StaffAppointmentModal({ appointment, onClose, onChanged,
           {mode && (
             <div className="mt-4 space-y-3 rounded-btn border border-brand-border bg-brand-bg px-3.5 py-3">
               {needsDate && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-medium text-brand-ink">{mode === "approve" ? "Confirm date" : "Proposed date"}</label>
                     <div className="mt-1">

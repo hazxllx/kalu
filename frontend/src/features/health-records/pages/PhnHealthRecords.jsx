@@ -419,7 +419,7 @@ export default function PhnHealthRecords() {
         </datalist>
         {errors.resident && <p className="text-xs text-brand-danger mt-1">{errors.resident}</p>}
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className="text-sm font-medium text-brand-ink block mb-1.5">Age <span className="text-brand-danger">*</span></label>
           <input
@@ -465,7 +465,7 @@ export default function PhnHealthRecords() {
           </select>
           {errors.barangay && <p className="text-xs text-brand-danger mt-1">{errors.barangay}</p>}
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className="text-sm font-medium text-brand-ink block mb-1.5">Program <span className="text-brand-danger">*</span></label>
           <select

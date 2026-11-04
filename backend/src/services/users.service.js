@@ -8,13 +8,19 @@
  * the client.
  *
  * Auth owns account identities and credentials; profiles owns application
- * roles, status and scope. Account creation uses Auth invitations, while
- * profile writes and actor-attributed audit records are committed atomically
- * by the database account-lifecycle functions.
+ * roles, status and scope. Managed creation reserves a stable Auth identity
+ * and creates it silently; credentials are chosen only by the account owner.
+ * Approval, activation intent, profile writes, actor-attributed audits and the
+ * email outbox are committed atomically by the account-lifecycle functions.
  */
 import ApiError from '../utils/apiError.js';
-import repository from '../repositories/index.js';
+import repository from '../repositories/supabaseRepository.js';
+import { randomUUID } from 'node:crypto';
 import { ROLES, isValidRole } from '../config/roles.js';
+import { RHU_STATION_VALUES, STATION_ASSIGNED_ROLES, normalizeStations, stationLabel } from '../config/rhuStations.js';
+import { isUuid } from '../validators/common.js';
+import { createUserValidator, updateUserValidator, userQueryValidator, personnelLifecycleValidator } from '../validators/users.validators.js';
+import { getAccountRequestHistory } from './staffAccounts.service.js';
 
 const VALID_STATUSES = Object.freeze(['active', 'pending_verification', 'disabled']);
 
@@ -40,15 +46,27 @@ const parsePositiveInt = (value, fallback) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const validated = (validator, input) => {
+  const result = validator(input);
+  if (result.error) throw ApiError.badRequest('Validation failed', result.error);
+  return result.value;
+};
+
 export const listUsers = async ({
   q = '',
   role = null,
   status = null,
   municipalityId = null,
   barangayId = null,
+  personnelOnly = false,
+  approvalStatus = null,
+  lifecycleState = null,
   limit = 50,
   offset = 0,
 } = {}) => {
+  ({ personnelOnly, approvalStatus, lifecycleState } = validated(userQueryValidator, {
+    personnelOnly, approvalStatus, lifecycleState, municipalityId, barangayId,
+  }));
   const roleFilter = role ? String(role).trim() : null;
   if (roleFilter && !isValidRole(roleFilter)) {
     throw ApiError.badRequest(`Unknown role filter: ${roleFilter}`);
@@ -65,6 +83,9 @@ export const listUsers = async ({
     status: statusFilter,
     municipalityId: municipalityId ? String(municipalityId).trim() : null,
     barangayId: barangayId ? String(barangayId).trim() : null,
+    personnelOnly,
+    approvalStatus,
+    lifecycleState,
     limit: parsedLimit,
     offset: parsedOffset,
   });
@@ -80,6 +101,7 @@ export const getAccountOptions = async () => ({
     { id: ROLES.BHW, name: 'Barangay Health Worker' },
     { id: ROLES.RESIDENT, name: 'Resident' },
   ],
+  rhuStations: RHU_STATION_VALUES.map((id) => ({ id, name: stationLabel(id) })),
   ...(await repository.getAccountAssignmentOptions()),
 });
 
@@ -87,7 +109,7 @@ export const getAccountOptions = async () => ({
  * Real account totals for the admin summary cards (All / Active / Pending
  * verification / Deactivated). Sourced from `public.profiles`, never hardcoded.
  */
-export const getAccountSummary = async () => repository.getAccountSummary();
+export const getAccountSummary = async (filters = {}) => repository.getAccountSummary(validated(userQueryValidator, filters));
 
 export const getUser = async ({ id } = {}) => {
   const user = await repository.getProfileById(id);
@@ -97,7 +119,7 @@ export const getUser = async ({ id } = {}) => {
 
 const normalizeOptionalText = (value) => String(value ?? '').trim();
 
-const makeProfileAssignment = async ({ role, municipalityId, barangayId, facilityId, allowResident }) => {
+export const makeProfileAssignment = async ({ role, municipalityId, barangayId, facilityId, allowResident }) => {
   if (role === ROLES.ADMIN) {
     return { municipality_id: null, barangay_id: null, facility_id: null };
   }
@@ -174,6 +196,21 @@ const makeProfileAssignment = async ({ role, municipalityId, barangayId, facilit
   throw ApiError.unprocessable('The selected role cannot be assigned to an account.');
 };
 
+const makeStationAssignment = (role, input = []) => {
+  if (!Array.isArray(input) || input.some((station) => typeof station !== 'string'
+      || !RHU_STATION_VALUES.includes(station.trim().toLowerCase()))) {
+    throw ApiError.unprocessable('Choose only supported RHU stations.');
+  }
+  const stations = normalizeStations(input);
+  if (role === ROLES.RHU_PERSONNEL && stations.length === 0) {
+    throw ApiError.unprocessable('Assign at least one valid RHU station to RHU Personnel.');
+  }
+  if (!STATION_ASSIGNED_ROLES.includes(role) && stations.length) {
+    throw ApiError.unprocessable('This role cannot hold an RHU station assignment.');
+  }
+  return stations;
+};
+
 const accountStatus = (value, fallback, allowPending = false) => {
   if (value === undefined || value === null || String(value).trim() === '') return fallback;
   const status = String(value).trim();
@@ -185,11 +222,12 @@ const accountStatus = (value, fallback, allowPending = false) => {
 };
 
 export const createUser = async ({ actorId, input = {} } = {}) => {
+  input = validated(createUserValidator, input);
   const email = String(input.email ?? '').trim().toLowerCase();
   const fullName = String(input.fullName ?? input.name ?? '').trim();
   const role = String(input.role ?? '').trim();
   const errors = [];
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Enter a valid email address.');
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Enter a valid email address.');
   if (!fullName || fullName.length > 120) errors.push('Name must be between 1 and 120 characters.');
   if (!ASSIGNABLE_ROLES.includes(role) || role === ROLES.RESIDENT) {
     errors.push('Choose an assignable staff role. Resident accounts must use resident registration.');
@@ -197,6 +235,8 @@ export const createUser = async ({ actorId, input = {} } = {}) => {
   if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
 
   const status = accountStatus(input.status, 'active');
+  const approvalStatus = input.approvalStatus;
+  const activate = input.activate ?? (status === 'active');
   const assignment = await makeProfileAssignment({
     role,
     municipalityId: input.municipalityId ? String(input.municipalityId).trim() : null,
@@ -208,38 +248,32 @@ export const createUser = async ({ actorId, input = {} } = {}) => {
     email,
     full_name: fullName,
     role,
-    status,
+    status: approvalStatus === 'pending' ? 'pending_verification' : 'disabled',
+    approval_status: approvalStatus,
+    activation_requested: activate,
+    rhu_stations: makeStationAssignment(role, input.rhuStations),
     contact: normalizeOptionalText(input.contact),
     position: normalizeOptionalText(input.position),
     license_no: normalizeOptionalText(input.licenseNo),
     ...assignment,
   };
 
-  let id;
-  try {
-    id = await repository.inviteAccount({ email, fullName });
-  } catch (error) {
-    if (/already (?:been )?registered|already exists|user already/i.test(error.message || '')) {
-      throw ApiError.conflict('An account with this email already exists.');
-    }
-    throw error;
+  const operationId = input.operationId;
+  const reservation = await repository.reservePersonnelAccount({ actorId, operationId, profile });
+  if (!reservation?.target_id || !isUuid(reservation.target_id)) {
+    throw new ApiError(503, 'Account reservation could not be confirmed. Retry with the same operation reference.');
   }
-  if (!id) throw new ApiError(502, 'The invitation was not created by Supabase Auth.');
-
-  try {
-    const user = await repository.provisionAccountProfile({ id, actorId, profile });
-    if (!user) throw new ApiError(502, 'The invitation was sent, but its account profile could not be loaded.');
-    return user;
-  } catch (error) {
-    try {
-      await repository.removeUnprovisionedAuthUser(id);
-    } catch {
-      throw new ApiError(500,
-        'The invitation could not be provisioned or safely rolled back. Contact a system administrator before retrying.',
-      );
-    }
-    throw error;
+  if (!reservation.completed) {
+    const createdId = await repository.createManagedAuthAccount({ id: reservation.target_id, email, fullName });
+    if (createdId !== reservation.target_id) throw new ApiError(502, 'Auth did not confirm the reserved account identity.');
   }
+  // The SQL transaction also records approval and queues email. No mail is sent
+  // here, and an uncertain result leaves Auth/reservation recoverable on retry.
+  const user = await repository.createPersonnelAccountProfile({ actorId, operationId, profile });
+  if (!user?.id || user.id !== reservation.target_id) {
+    throw new ApiError(503, 'Account provisioning could not be confirmed. Retry with the same operation reference.');
+  }
+  return (await repository.getProfileById(user.id)) || user;
 };
 
 /**
@@ -254,6 +288,7 @@ export const createUser = async ({ actorId, input = {} } = {}) => {
  *   - email is never modified here (owned by Supabase Auth).
  */
 export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
+  patch = validated(updateUserValidator, patch);
   const existing = await repository.getProfileById(id);
   if (!existing) throw ApiError.notFound('User account not found');
 
@@ -315,7 +350,8 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
       && patch.status === undefined
       && patch.municipalityId === undefined
       && patch.barangayId === undefined
-      && patch.facilityId === undefined) return existing;
+      && patch.facilityId === undefined
+      && patch.rhuStations === undefined) return existing;
 
   let requestedMunicipality = patch.municipalityId === undefined
     ? existing.municipalityId
@@ -332,9 +368,9 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
     if (nextRole === ROLES.ADMIN) requestedMunicipality = null;
   }
   const assignmentChanged = nextRole !== existing.role
-    || patch.municipalityId !== undefined
-    || patch.barangayId !== undefined
-    || patch.facilityId !== undefined;
+    || requestedMunicipality !== existing.municipalityId
+    || requestedBarangay !== existing.barangayId
+    || requestedFacility !== existing.facilityId;
   const assignment = assignmentChanged
     ? await makeProfileAssignment({
       role: nextRole,
@@ -349,24 +385,63 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
       facility_id: existing.facilityId,
     };
   const profile = {
+    email: existing.email,
     full_name: fields.full_name ?? existing.name,
     contact: fields.contact ?? existing.contact,
     position: fields.position ?? existing.position,
     license_no: fields.license_no ?? existing.licenseNo,
     role: nextRole,
     status: nextStatus,
+    rhu_stations: existing.rhuStations ?? [],
     ...assignment,
   };
-  const updated = await repository.updateAdminAccountProfile({ id, actorId, profile });
+  const stationsChanged = patch.rhuStations !== undefined
+    && JSON.stringify(patch.rhuStations) !== JSON.stringify(existing.rhuStations ?? []);
+  if (stationsChanged || nextRole !== existing.role || (assignmentChanged && nextRole === ROLES.RHU_PERSONNEL)) {
+    const requestedStations = patch.rhuStations === undefined
+      ? (STATION_ASSIGNED_ROLES.includes(nextRole) ? existing.rhuStations ?? [] : [])
+      : patch.rhuStations;
+    profile.rhu_stations = makeStationAssignment(nextRole, requestedStations);
+  }
+  if (patch.suspensionReason !== undefined) profile.suspension_reason = normalizeOptionalText(patch.suspensionReason);
+  if (existing.role !== ROLES.RESIDENT && nextStatus === 'active'
+      && nextStatus !== existing.status && existing.approvalStatus !== 'approved') {
+    throw ApiError.conflict('Approve this account before requesting activation.');
+  }
+  const updated = existing.role === ROLES.RESIDENT
+    ? await repository.updateAdminAccountProfile({ id, actorId, profile })
+    : await repository.updatePersonnelAccountProfile({ id, actorId, profile, operationId: patch.operationId ?? randomUUID() });
   if (!updated) throw ApiError.notFound('User account not found');
-  return updated;
+  return (await repository.getProfileById(updated.id)) || updated;
 };
 
-export const resetUserAccess = async ({ id, actorId } = {}) => {
+export const transitionUserLifecycle = async ({ id, actorId, input = {} } = {}) => {
+  if (typeof id !== 'string' || !isUuid(id)) throw ApiError.badRequest('Use a valid account UUID.');
+  const action = validated(personnelLifecycleValidator, input);
+  if (actorId === id && ['approve', 'reject', 'suspend', 'reactivate'].includes(action.action)) {
+    throw ApiError.conflict('You cannot approve or change your own administrator access.');
+  }
+  const user = await repository.transitionPersonnelAccount({ id, actorId, ...action });
+  if (!user) throw ApiError.notFound('User account not found');
+  return (await repository.getProfileById(user.id)) || user;
+};
+
+export const getUserHistory = async ({ id } = {}) => {
+  await getUser({ id });
+  const request = await getAccountRequestHistory({ accountId: id });
+  const history = await repository.getPersonnelAccountHistory({ id, requestId: request?.id });
+  return { ...history, ...(request ? { request } : {}) };
+};
+
+export const resetUserAccess = async ({ id, actorId, operationId } = {}) => {
   const user = await repository.getProfileById(id);
   if (!user) throw ApiError.notFound('User account not found');
+  if (user.setupRequired && user.lifecycleVersion !== null) {
+    const updated = await transitionUserLifecycle({ id, actorId, input: { action: 'invite', operationId: operationId ?? randomUUID() } });
+    return { sent: false, queued: true, user: updated };
+  }
   await repository.sendAccountRecoveryEmail({ user, actorId });
-  return { sent: true };
+  return { requested: true, deliveryStatus: 'unverified' };
 };
 
 /**
@@ -381,13 +456,11 @@ export const resetUserAccess = async ({ id, actorId } = {}) => {
  *   - an explicit email confirmation must match the target (guards against
  *     deleting the wrong account from the UI or a mistaken API call).
  *
- * Consistency: `public.profiles.id` cascades from `auth.users`, so a single
- * successful `deleteAuthAccount` removes BOTH the auth identity and the profile
- * together — there is no partially-deleted state. Dependent resident /
- * consultation / referral / visit / audit rows reference the account with
- * `on delete set null`, so they are PRESERVED (unlinked), never cascade-deleted.
- * The audit record is written only AFTER a confirmed deletion, so a failed
- * deletion can never leave a false "deleted" entry behind.
+ * Health personnel use suspension instead: their historical requests,
+ * documents and assignments have cascading Auth foreign keys. General account
+ * deletion keeps its existing cascade behavior. The database preflight lock
+ * ends before the separate Auth call; it is not a cross-service transaction.
+ * The deletion audit is written only after Auth confirms success.
  */
 export const deleteUser = async ({ id, actorId, confirmEmail } = {}) => {
   const targetId = String(id ?? '').trim();
@@ -395,6 +468,11 @@ export const deleteUser = async ({ id, actorId, confirmEmail } = {}) => {
 
   const existing = await repository.getProfileById(targetId);
   if (!existing) throw ApiError.notFound('User account not found');
+
+  const healthRoles = [ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR, ROLES.RHU_PERSONNEL, ROLES.BHW];
+  if (healthRoles.includes(existing.role)) {
+    throw ApiError.conflict('Health personnel accounts must be suspended, not permanently deleted, so their requests, documents and operational history are preserved.');
+  }
 
   // Fail fast with clear messages before the irreversible step. The database
   // guard RPC re-enforces each of these authoritatively.
@@ -422,6 +500,9 @@ export const deleteUser = async ({ id, actorId, confirmEmail } = {}) => {
   // Authoritative, advisory-locked re-check in the database; returns the snapshot
   // used for the audit record. Raises (mapped to 403/404/409) on any violation.
   const snapshot = await repository.assertAccountDeletable({ id: targetId, actorId });
+  if (healthRoles.includes(snapshot?.role)) {
+    throw ApiError.conflict('This account is now health personnel. Suspend access to preserve its operational history.');
+  }
 
   // Irreversible: removes the Auth identity and (by cascade) the profile. If this
   // throws, nothing was deleted and no audit entry is written — the caller keeps
@@ -466,6 +547,9 @@ export default {
   getUser,
   createUser,
   updateUser,
+  makeProfileAssignment,
+  transitionUserLifecycle,
+  getUserHistory,
   resetUserAccess,
   deleteUser,
 };

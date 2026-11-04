@@ -137,7 +137,7 @@ export default function HouseholdVerificationReviewDrawer({
           {/* Household information */}
           <section>
             <SectionTitle>Household Information</SectionTitle>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <InfoCell icon={Home} label="Household ID" value={household.householdId} />
               <InfoCell icon={User} label="Household Head" value={household.head} />
               <InfoCell icon={MapPin} label="Barangay" value={household.barangay} />
@@ -199,7 +199,7 @@ export default function HouseholdVerificationReviewDrawer({
           {/* Data collection info */}
           <section>
             <SectionTitle>Profiling / Collection</SectionTitle>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <InfoCell icon={User} label="Assigned BHW / Collector" value={household.collector} />
               <InfoCell icon={Home} label="Collected On" value={household.collectedOn} />
               <InfoCell icon={ShieldCheck} label="Risk Level" value={household.riskLevel} />

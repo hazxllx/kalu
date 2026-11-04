@@ -14,6 +14,7 @@ export const SYNC_ERROR = Object.freeze({
   PERMISSION_CHANGED: 'permission_changed',
   VALIDATION: 'validation',
   CONFLICT: 'conflict',
+  DUPLICATE: 'duplicate',
   SERVER: 'server',
   MALFORMED: 'malformed',
   STORAGE: 'storage',
@@ -24,6 +25,7 @@ export const SYNC_ERROR = Object.freeze({
 export const TERMINAL_ERRORS = new Set([
   SYNC_ERROR.VALIDATION,
   SYNC_ERROR.CONFLICT,
+  SYNC_ERROR.DUPLICATE,
   SYNC_ERROR.FORBIDDEN,
   SYNC_ERROR.PERMISSION_CHANGED,
   SYNC_ERROR.MALFORMED,
@@ -32,6 +34,31 @@ export const TERMINAL_ERRORS = new Set([
 /** True when the error is worth retrying with backoff. */
 export const isRetryable = (code) =>
   code === SYNC_ERROR.NETWORK || code === SYNC_ERROR.SERVER || code === SYNC_ERROR.UNKNOWN;
+
+/**
+ * True when a user-triggered retry can plausibly succeed without anyone editing
+ * the record: transient failures, plus an expired session (retry works after the
+ * user signs in again). Validation, duplicate, conflict, permission and malformed
+ * failures need a human decision, so no retry action is offered for them.
+ *
+ * @param {{code?: string, retryable?: boolean} | null | undefined} info
+ */
+export const isRecoverableFailure = (info) =>
+  Boolean(info) && (info.retryable === true || info.code === SYNC_ERROR.AUTH);
+
+const MAX_VALIDATION_MESSAGE = 160;
+
+/** Fixed, record-free wording for outcomes whose server text can carry identifiers. */
+export const DUPLICATE_MESSAGE =
+  'A matching record already exists on the server. Review it before deciding what to do with this offline record.';
+export const STALE_REVISION_MESSAGE =
+  'This record was changed on the server after it was saved on this device. Review the newer version before applying your change.';
+
+/** Machine code the backend attaches to a 409 (see backend ApiError.duplicate/staleRevision). */
+const serverErrorCode = (error) => {
+  const code = error?.payload?.error?.code;
+  return typeof code === 'string' ? code : '';
+};
 
 /**
  * @param {any} error
@@ -72,6 +99,22 @@ export const classifySyncError = (error) => {
     };
   }
   if (status === 409) {
+    const serverCode = serverErrorCode(error);
+    // Duplicate and stale-revision messages from the server can name people or
+    // record numbers, so they are replaced with fixed wording before they are
+    // stored in the outbox or shown in a notification.
+    if (serverCode === 'DUPLICATE_RECORD') {
+      return { code: SYNC_ERROR.DUPLICATE, status, retryable: false, message: DUPLICATE_MESSAGE };
+    }
+    if (serverCode === 'STALE_REVISION') {
+      return {
+        code: SYNC_ERROR.CONFLICT,
+        status,
+        retryable: false,
+        reason: 'stale_revision',
+        message: STALE_REVISION_MESSAGE,
+      };
+    }
     return {
       code: SYNC_ERROR.CONFLICT,
       status,
@@ -84,7 +127,7 @@ export const classifySyncError = (error) => {
       code: SYNC_ERROR.VALIDATION,
       status,
       retryable: false,
-      message: message || 'The server rejected the change.',
+      message: (message || 'The server rejected the change.').slice(0, MAX_VALIDATION_MESSAGE),
     };
   }
   if (status >= 500) {
@@ -108,6 +151,13 @@ export const classifySyncError = (error) => {
  * @property {number} status
  * @property {boolean} retryable
  * @property {string} message
+ * @property {string} [reason]
  */
 
-export default { SYNC_ERROR, classifySyncError, isRetryable, TERMINAL_ERRORS };
+export default {
+  SYNC_ERROR,
+  classifySyncError,
+  isRetryable,
+  isRecoverableFailure,
+  TERMINAL_ERRORS,
+};

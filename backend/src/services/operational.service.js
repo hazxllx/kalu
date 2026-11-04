@@ -340,6 +340,46 @@ const findFollowUpByOperationKey = async ({ supabase, idempotencyKey, user, resi
   return withScheduleState(data);
 };
 
+/** Follow-ups in these statuses never block scheduling an identical one. */
+const DUPLICATE_EXEMPT_FOLLOW_UP_STATUSES = new Set(['Completed', 'Missed', 'Cancelled', 'Rejected']);
+
+/** `9:30`, `09:30:00` and `09:30:00+08` all normalize to `09:30`; blank stays blank. */
+const normalizeScheduledTime = (value) => {
+  const raw = text(value);
+  if (!raw) return '';
+  const match = /^(\d{1,2}):(\d{2})/.exec(raw);
+  return match ? `${match[1].padStart(2, '0')}:${match[2]}` : raw.slice(0, 5).toLowerCase();
+};
+
+/**
+ * Reject a follow-up that duplicates an OPEN one for the same resident, date,
+ * time and purpose. Candidates are fetched with equality filters only and the
+ * remaining rules are applied in JS (case/whitespace-insensitive purpose, time
+ * normalization, status exemption). The message carries no names or ids.
+ */
+const assertNoDuplicateFollowUp = async ({ supabase, residentId, row }) => {
+  const scheduledDate = text(row.scheduled_date);
+  const purpose = text(row.purpose).toLowerCase();
+  if (!scheduledDate || !purpose) return;
+  const { data, error } = await supabase
+    .from('follow_ups')
+    .select('id, purpose, scheduled_time, status')
+    .eq('resident_id', residentId)
+    .eq('scheduled_date', scheduledDate);
+  throwOnError(error, 'Could not check for duplicate follow-ups');
+  const wantedTime = normalizeScheduledTime(row.scheduled_time);
+  const duplicate = (data || []).some((candidate) =>
+    !DUPLICATE_EXEMPT_FOLLOW_UP_STATUSES.has(text(candidate.status))
+    && text(candidate.purpose).toLowerCase() === purpose
+    && normalizeScheduledTime(candidate.scheduled_time) === wantedTime);
+  if (duplicate) {
+    throw ApiError.duplicate('A matching follow-up is already scheduled for this resident at that date and time.');
+  }
+};
+
+/** `"2026-10-20T01:02:03Z"` / `W/"..."` -> bare value. */
+const parseRevisionHeader = (value) => text(value).replace(/^W\//i, '').replace(/^"(.*)"$/s, '$1').trim();
+
 export const create = async ({ user, kind, payload = {}, idempotencyKey = null, supabase = getServiceClient() }) => {
   const normalizedKind = normalizeKind(kind);
   assertStaff(user);
@@ -422,6 +462,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     if (sched && Number.isNaN(Date.parse(sched))) {
       throw ApiError.unprocessable('The scheduled date is invalid.');
     }
+    await assertNoDuplicateFollowUp({ supabase, residentId: resident.id, row });
   }
   const { data, error } = await supabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
   if (error?.code === '23505' && normalizedKind === 'followups' && idempotencyKey) {
@@ -434,7 +475,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   return normalizedKind === 'followups' ? withScheduleState(data) : data;
 };
 
-export const update = async ({ user, kind, id, payload = {}, consultationId = null, supabase = getServiceClient() }) => {
+export const update = async ({ user, kind, id, payload = {}, consultationId = null, expectedUpdatedAt = null, supabase = getServiceClient() }) => {
   const normalizedKind = normalizeKind(kind);
   // Notifications are owned by their recipient (any role), not scoped like the
   // staff operational records. Dispatch BEFORE the table/staff checks: a
@@ -453,6 +494,15 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
   throwOnError(readError, `Could not load ${normalizedKind}`);
   if (!existing) throw ApiError.notFound('Operational record not found.');
   const resident = await residentFor(supabase, user, existing.resident_id);
+  // Optimistic concurrency for follow-ups (offline sync). Only enforced when the
+  // caller sends an If-Match revision, so online flows are unchanged.
+  const revision = normalizedKind === 'followups' ? parseRevisionHeader(expectedUpdatedAt) : '';
+  const staleFollowUpMessage = 'This follow-up changed on the server. Reload it before applying the queued changes.';
+  if (revision) {
+    const expectedMs = Date.parse(revision);
+    if (!Number.isFinite(expectedMs)) throw ApiError.badRequest('The follow-up revision is invalid.');
+    if (expectedMs !== Date.parse(existing.updated_at)) throw ApiError.staleRevision(staleFollowUpMessage);
+  }
   const row = { ...payload };
   delete row.residentId;
   delete row.resident_id;
@@ -505,8 +555,12 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
   if (normalizedKind === 'followups' && Object.prototype.hasOwnProperty.call(payload, 'status')) {
     assertFollowUpTransition(existing, payload.status);
   }
-  const { data, error } = await supabase.from(table).update(row).eq('id', id).select(selectFor(normalizedKind)).single();
+  let updateQuery = supabase.from(table).update(row).eq('id', id);
+  if (revision) updateQuery = updateQuery.eq('updated_at', existing.updated_at);
+  const updateSelect = updateQuery.select(selectFor(normalizedKind));
+  const { data, error } = await (revision ? updateSelect.maybeSingle() : updateSelect.single());
   throwOnError(error, `Could not update ${normalizedKind}`);
+  if (revision && !data) throw ApiError.staleRevision(staleFollowUpMessage);
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_UPDATED`, table, id, resident);
 
   if (normalizedKind === 'followups') {

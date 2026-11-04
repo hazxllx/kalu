@@ -6,7 +6,7 @@ const faqs = [
   {
     question: "Who may use KALUSAGAP?",
     answer:
-      "Bona fide residents of the Municipality of Pili, together with barangay health workers, midwives, rural health unit personnel, municipal health officers, and system administrators. Residents transferring from another barangay or municipality may also enrol.",
+      "Residents of the Municipality of Pili may register here, including residents transferring from another barangay or municipality. Health personnel accounts are created and managed only by the system administrator; there is no public personnel registration form.",
   },
   {
     question: "Is there a fee for registration?",

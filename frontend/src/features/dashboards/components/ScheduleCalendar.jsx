@@ -104,7 +104,7 @@ export default function ScheduleCalendar({ selectedMonth = new Date() }) {
             <CalendarDays className="h-4 w-4 text-brand-blue" />
             <h2 className="font-heading text-sm font-semibold text-brand-ink">Schedule Calendar</h2>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 self-start sm:self-auto">
             <button
               type="button"
               onClick={() => handleMonthStep(-1)}
@@ -113,7 +113,7 @@ export default function ScheduleCalendar({ selectedMonth = new Date() }) {
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <div className="min-w-[140px] text-center text-sm font-semibold text-brand-ink">{monthLabel}</div>
+            <div className="min-w-0 truncate text-center text-sm font-semibold text-brand-ink">{monthLabel}</div>
             <button
               type="button"
               onClick={() => handleMonthStep(1)}

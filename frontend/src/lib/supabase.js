@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { publicSupabaseConfigurationError } from '../../../shared/authConnectivity.js';
 
 /**
  * Browser Supabase client (frontend).
@@ -10,10 +11,11 @@ import { createClient } from '@supabase/supabase-js';
  * If the environment variables are missing, `supabase` is `null` and sign-in
  * is unavailable until the frontend is configured for a Supabase project.
  */
-const url = import.meta.env?.VITE_SUPABASE_URL;
-const anonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY;
+const url = String(import.meta.env?.VITE_SUPABASE_URL || '').trim();
+const anonKey = String(import.meta.env?.VITE_SUPABASE_ANON_KEY || '').trim();
 
-export const isSupabaseConfigured = Boolean(url && anonKey);
+export const supabaseConfigurationError = publicSupabaseConfigurationError(url, anonKey);
+export const isSupabaseConfigured = !supabaseConfigurationError;
 
 export const supabase = isSupabaseConfigured
   ? createClient(url, anonKey, {

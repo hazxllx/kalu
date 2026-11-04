@@ -823,7 +823,7 @@ export default function RiskInterventionSettings() {
 
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-2 border-y border-slate-100 bg-slate-50/50 px-5 py-3 sm:px-6">
-            <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <div className="relative min-w-0 flex-1 sm:min-w-[200px] sm:max-w-xs">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
                 type="search"

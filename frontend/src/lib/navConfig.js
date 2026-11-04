@@ -17,6 +17,14 @@
  * render as expandable navigation groups; child permissions are filtered in
  * the same way as top-level items. Hidden items preserve route permission
  * mappings without appearing in the sidebar.
+ *
+ * An item may declare `tabs` to merge several existing pages into a single
+ * sidebar row. A tab is `{ label, icon, path, activePaths?, permission?,
+ * anyPermissions?, station? }`. Tabs are never rendered as sidebar rows (no
+ * dropdowns); `NavTabsLayout` renders them on the merged page. Every tab keeps
+ * its own route and permission, so deep links and route guards behave exactly
+ * as they did when each page had its own sidebar entry. The item is shown when
+ * at least one tab is permitted, and its link opens the first permitted tab.
  */
 import { canTriage, canConsult, RHU_STATIONS } from "@/lib/rhuStations";
 
@@ -523,6 +531,8 @@ export const NAV = {
     },
   ],
 
+  // Admin navigation has six direct links in visual sections (no dropdowns).
+  // Related pages remain tabs; each tab keeps its original route and permission.
   admin: [
     {
       label: "Dashboard",
@@ -531,64 +541,91 @@ export const NAV = {
       group: "Overview",
     },
     {
-      label: "User Management",
+      id: "user-personnel",
+      label: "Users & Personnel",
       icon: "Users",
       path: "/app/admin/users",
-      permission: "accounts.view",
-      group: "Management",
+      group: "Administration",
+      tabs: [
+        {
+          label: "Users",
+          icon: "Users",
+          path: "/app/admin/users",
+          permission: "accounts.view",
+        },
+        {
+          label: "Health Personnel",
+          icon: "UserCog",
+          path: "/app/admin/personnel",
+          permission: "accounts.view",
+        },
+      ],
     },
     {
-      label: "Barangay Management",
+      id: "barangay-access",
+      label: "Barangays & Access",
       icon: "MapPin",
       path: "/app/admin/barangays",
-      permission: "system.settings.manage",
-      group: "Management",
+      group: "Administration",
+      tabs: [
+        {
+          label: "Barangays",
+          icon: "MapPin",
+          path: "/app/admin/barangays",
+          permission: "system.settings.manage",
+        },
+        {
+          label: "Roles & Access",
+          icon: "KeyRound",
+          path: "/app/admin/role-access",
+          // Former routes redirect here; keep them active for highlighting.
+          activePaths: ["/app/admin/roles", "/app/admin/permissions"],
+          permission: "accounts.roles.manage",
+        },
+      ],
     },
     {
-      label: "Role & Access Management",
-      icon: "KeyRound",
-      path: "/app/admin/role-access",
-      activePaths: ["/app/admin/roles", "/app/admin/permissions"],
-      permission: "accounts.roles.manage",
-      group: "Management",
-    },
-    {
-      label: "Risk & Intervention Settings",
+      id: "health-system",
+      label: "Health & System Settings",
       icon: "ShieldAlert",
       path: "/app/admin/risk-settings",
-      // Keep the former routes active for highlighting so bookmarks that
-      // redirect into the unified page still mark the sidebar item.
-      activePaths: ["/app/admin/risk-assessment", "/app/admin/risk-rules"],
-      permission: "system.settings.manage",
-      group: "Health Configuration",
-    },
-    {
-      label: "Medicine & BP Settings",
-      icon: "Pill",
-      path: "/app/admin/medicines",
-      permission: "system.settings.manage",
-      group: "Health Configuration",
+      group: "Configuration",
+      tabs: [
+        {
+          label: "Risk & Intervention",
+          icon: "ShieldAlert",
+          path: "/app/admin/risk-settings",
+          // Former routes redirect here; keep them active for highlighting.
+          activePaths: ["/app/admin/risk-assessment", "/app/admin/risk-rules"],
+          permission: "system.settings.manage",
+        },
+        {
+          label: "Medicine & BP",
+          icon: "Pill",
+          path: "/app/admin/medicines",
+          permission: "system.settings.manage",
+        },
+        {
+          label: "System Settings",
+          icon: "Settings",
+          path: "/app/admin/settings",
+          permission: "system.settings.manage",
+        },
+      ],
     },
     {
       label: "Audit Trail",
       icon: "ScrollText",
       path: "/app/admin/audit",
       permission: "system.audit.view",
-      group: "System",
+      group: "Monitoring",
     },
     {
-      label: "System Settings",
-      icon: "Settings",
-      path: "/app/admin/settings",
-      permission: "system.settings.manage",
-      group: "System",
-    },
-    {
-      label: "Logs",
+      label: "System Logs",
       icon: "Terminal",
       path: "/app/admin/logs",
       permission: "system.activity.view",
-      group: "System",
+      group: "Monitoring",
     },
   ],
 };
@@ -597,9 +634,11 @@ export const profilePathForRole = (roleKey) =>
   `/app/${roleKey}/profile`;
 
 export const navItemIsActive = (item, pathname) => {
-  const paths = [item.path, ...(item.activePaths || [])].filter(
-    (path) => path && path !== "#",
-  );
+  const paths = [
+    item.path,
+    ...(item.activePaths || []),
+    ...(item.tabs || []).flatMap((tab) => [tab.path, ...(tab.activePaths || [])]),
+  ].filter((path) => path && path !== "#");
 
   return paths.some(
     (path) => pathname === path || pathname.startsWith(`${path}/`),
@@ -622,6 +661,23 @@ export const filterNavByPermission = (items = [], can, user = null) => {
       return visible;
     }
     if (item.station && !stationAllows(user, item.station)) {
+      return visible;
+    }
+
+    if (item.tabs) {
+      const tabs = filterNavByPermission(item.tabs, can, user);
+
+      if (tabs.length === 0) {
+        return visible;
+      }
+
+      // The sidebar link opens the first tab the user may actually view.
+      visible.push({
+        ...item,
+        path: tabs[0].path,
+        tabs,
+      });
+
       return visible;
     }
 
@@ -651,8 +707,11 @@ export const filterNavByPermission = (items = [], can, user = null) => {
  */
 export const navPermissionsForPath = (items = [], pathname) => {
   for (const item of items) {
-    if (item.children) {
-      const childPermissions = navPermissionsForPath(item.children, pathname);
+    if (item.children || item.tabs) {
+      const childPermissions = navPermissionsForPath(
+        item.children || item.tabs,
+        pathname,
+      );
       if (childPermissions) return childPermissions;
     }
 
@@ -672,8 +731,8 @@ export const navPermissionsForPath = (items = [], pathname) => {
  */
 export const navStationForPath = (items = [], pathname) => {
   for (const item of items) {
-    if (item.children) {
-      const childStation = navStationForPath(item.children, pathname);
+    if (item.children || item.tabs) {
+      const childStation = navStationForPath(item.children || item.tabs, pathname);
       if (childStation) return childStation;
     }
     if (navItemIsActive(item, pathname)) {

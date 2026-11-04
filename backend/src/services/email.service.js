@@ -2,18 +2,75 @@ import nodemailer from 'nodemailer';
 import env from '../config/env.js';
 
 let transporter;
+const trackedTransports = new WeakSet();
+const SMTP_ERROR_CODES = new Set([
+  'EAUTH', 'ENOAUTH', 'EOAUTH2', 'EDNS', 'ETLS', 'EREQUIRETLS', 'ECONNECTION',
+  'ESOCKET', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN',
+  'EPIPE', 'EENVELOPE', 'EMESSAGE', 'ESTREAM', 'EPROTOCOL', 'ECONFIG', 'EPROXY',
+]);
 
-const getTransporter = () => {
+export const getEmailTransporter = () => {
   if (!env.smtpHost || !env.smtpUser || !env.smtpPassword || !env.smtpFrom) {
-    throw new Error('Transfer OTP email delivery is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM.');
+    throw Object.assign(new Error('Email delivery is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM.'), {
+      code: 'SMTP_NOT_CONFIGURED',
+    });
   }
   transporter ||= nodemailer.createTransport({
     host: env.smtpHost,
     port: env.smtpPort,
     secure: env.smtpPort === 465,
+    requireTLS: env.smtpPort !== 465,
     auth: { user: env.smtpUser, pass: env.smtpPassword },
+    logger: false,
+    debug: false,
+    connectionTimeout: 30_000,
+    greetingTimeout: 30_000,
+    socketTimeout: 60_000,
   });
   return transporter;
+};
+
+/** Track body consumption without enabling SMTP traffic/body logging. */
+export const sendSmtpMail = async (message, { transport = getEmailTransporter() } = {}) => {
+  const progress = { monitored: false, bodyStarted: false };
+  try {
+    if (typeof transport.use === 'function' && !trackedTransports.has(transport)) {
+      transport.use('stream', (mail, next) => {
+        const tracking = mail.data.personnelSmtpProgress;
+        if (tracking && typeof mail.message?.createReadStream === 'function') {
+          tracking.monitored = true;
+          const createReadStream = mail.message.createReadStream;
+          mail.message.createReadStream = function (...args) {
+            const stream = createReadStream.apply(this, args);
+            // A CONN error can occur during DATA too. Resuming this stream is
+            // the conservative boundary after which a disconnect is ambiguous.
+            if (stream.readableFlowing || stream.readableDidRead) tracking.bodyStarted = true;
+            stream.once('resume', () => { tracking.bodyStarted = true; });
+            return stream;
+          };
+        }
+        next();
+      });
+      trackedTransports.add(transport);
+    }
+    return await transport.sendMail({ ...message, personnelSmtpProgress: progress });
+  } catch (error) {
+    const command = String(error?.command || '').trim().toUpperCase();
+    const smtpPhase = /^(MAIL FROM|RCPT TO)\b/.test(command) ? 'envelope'
+      : /^(AUTH|EHLO|HELO|LHLO|STARTTLS)\b/.test(command) ? 'handshake'
+        : command === 'DATA' ? 'data'
+          : /^(QUIT|RSET)\b/.test(command) ? 'after_send'
+            : 'unknown';
+    const responseCode = Number(error?.responseCode);
+    // Never propagate SMTP error messages/responses: they can contain recipient
+    // addresses, credentials or the generated invitation link.
+    throw Object.assign(new Error('SMTP send failed.'), {
+      code: SMTP_ERROR_CODES.has(error?.code) ? error.code : 'SMTP_ERROR',
+      smtpPhase,
+      responseCode: Number.isInteger(responseCode) && responseCode >= 100 && responseCode <= 599 ? responseCode : null,
+      beforeData: progress.monitored && !progress.bodyStarted,
+    });
+  }
 };
 
 /**
@@ -57,7 +114,7 @@ export const sendTransferOtp = async ({ email, otp }) => {
     </div>
   `;
 
-  await getTransporter().sendMail({
+  await getEmailTransporter().sendMail({
     from: env.smtpFrom,
     to: email,
     subject: 'KALUSAGAP Transfer of Residency Verification Code',
@@ -66,4 +123,4 @@ export const sendTransferOtp = async ({ email, otp }) => {
   });
 };
 
-export default { sendTransferOtp };
+export default { sendTransferOtp, getEmailTransporter, sendSmtpMail };

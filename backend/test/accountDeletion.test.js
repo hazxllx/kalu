@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { deleteUser } from '../src/services/users.service.js';
-import repository from '../src/repositories/index.js';
+import repository from '../src/repositories/supabaseRepository.js';
 
 const migrationPath = fileURLToPath(new URL(
   '../../supabase/migrations/20261012090000_admin_account_deletion.sql',
@@ -34,7 +34,7 @@ const baseProfile = (patch = {}) => ({
   id: TARGET,
   email: 'nurse@example.gov',
   name: 'Nurse Juana',
-  role: 'phn',
+  role: 'resident',
   status: 'active',
   municipalityId: 'muni-1',
   barangayId: null,
@@ -51,6 +51,20 @@ test('deleteUser blocks an administrator from deleting their own account', async
       (error) => error.statusCode === 409 && /your own/i.test(error.message),
     );
   });
+});
+
+test('deleteUser preserves health personnel history by requiring suspension', async () => {
+  for (const role of ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw']) {
+    await withRepository({
+      getProfileById: async () => baseProfile({ role }),
+      deleteAuthAccount: async () => { throw new Error('must not delete health personnel'); },
+    }, async () => {
+      await assert.rejects(
+        () => deleteUser({ id: TARGET, actorId: ADMIN_ACTOR, confirmEmail: 'nurse@example.gov' }),
+        (error) => error.statusCode === 409 && /suspended/i.test(error.message),
+      );
+    });
+  }
 });
 
 test('deleteUser requires a matching email confirmation', async () => {
@@ -85,7 +99,7 @@ test('deleteUser deletes the auth identity and records an audit entry on success
   await withRepository({
     getProfileById: async () => baseProfile(),
     countActiveAdmins: async () => 1,
-    assertAccountDeletable: async (args) => { calls.push(['assert', args]); return { id: TARGET, email: 'nurse@example.gov', full_name: 'Nurse Juana', role: 'phn', status: 'active', municipality_id: 'muni-1', barangay_id: null, facility_id: null }; },
+    assertAccountDeletable: async (args) => { calls.push(['assert', args]); return { id: TARGET, email: 'nurse@example.gov', full_name: 'Nurse Juana', role: 'resident', status: 'active', municipality_id: 'muni-1', barangay_id: null, facility_id: null }; },
     deleteAuthAccount: async (id) => { calls.push(['delete', id]); },
     insertHealthAuditLog: async (log) => { calls.push(['audit', log]); },
   }, async () => {
@@ -112,7 +126,7 @@ test('deleteUser does not write an audit entry or report success if the auth del
   await withRepository({
     getProfileById: async () => baseProfile(),
     countActiveAdmins: async () => 1,
-    assertAccountDeletable: async () => ({ id: TARGET, email: 'nurse@example.gov', role: 'phn', status: 'active' }),
+    assertAccountDeletable: async () => ({ id: TARGET, email: 'nurse@example.gov', role: 'resident', status: 'active' }),
     deleteAuthAccount: async () => { const error = new Error('Supabase Auth is unavailable'); error.statusCode = 502; throw error; },
     insertHealthAuditLog: async (log) => { calls.push(log); },
   }, async () => {

@@ -44,9 +44,15 @@ const errorHandler = (err, req, res, next) => {
   const isFieldErrorMap =
     err.details && typeof err.details === 'object' && !Array.isArray(err.details);
 
+  // Only app-level machine codes (DUPLICATE_RECORD, STALE_REVISION, ...) are
+  // exposed. Database driver codes such as '23505' never match this pattern.
+  const hasPublicCode =
+    typeof err.code === 'string' && /^[A-Z][A-Z0-9_]+$/.test(err.code);
+
   res.status(statusCode).json({
     error: {
       message,
+      ...(hasPublicCode ? { code: err.code } : {}),
       ...(err.details ? { details: err.details } : {}),
       ...(isFieldErrorMap ? { errors: err.details } : {}),
     },

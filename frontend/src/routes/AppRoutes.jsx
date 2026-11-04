@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { Route, Routes, Navigate } from 'react-router-dom';
 import DashboardLayout from '@/layouts/DashboardLayout';
+import NavTabsLayout from '@/layouts/NavTabsLayout';
 import NotFoundPage from '@/pages/NotFoundPage';
 import UnauthorizedPage from '@/pages/UnauthorizedPage';
 import ProtectedRoute from '@/routes/ProtectedRoute';
@@ -72,13 +73,6 @@ const TransferRegistration = publicPage(
   () =>
     import(
       '@/features/registration/pages/TransferRegistration'
-    )
-);
-
-const PersonnelRegistration = publicPage(
-  () =>
-    import(
-      '@/features/registration/pages/PersonnelRegistration'
     )
 );
 
@@ -559,7 +553,7 @@ const AppRoutes = () => (
     />
     <Route
       path="/register/personnel"
-      element={<PersonnelRegistration />}
+      element={<Navigate to="/register" replace />}
     />
     <Route
       path="/registration-success"
@@ -1241,37 +1235,36 @@ const AppRoutes = () => (
           path="profile"
           element={<SettingsPage roleKey="admin" />}
         />
+        {/*
+          Merged sidebar items. Each tab keeps its original route and page;
+          NavTabsLayout only adds the tab strip (see NAV.admin `tabs`).
+        */}
+        {/* User & Personnel Management */}
         <Route
-          path="users"
-          element={<UserManagement />}
-        />
+          element={<NavTabsLayout roleKey="admin" navId="user-personnel" />}
+        >
+          <Route
+            path="users"
+            element={<UserManagement key="users" />}
+          />
+          <Route
+            path="personnel"
+            element={<UserManagement personnelOnly key="personnel" />}
+          />
+        </Route>
+        {/* Barangay & Access Management */}
         <Route
-          path="barangays"
-          element={<BarangayManagement />}
-        />
-        {/* Unified resident risk + early intervention configuration. */}
-        <Route
-          path="risk-settings"
-          element={<RiskInterventionSettings />}
-        />
-        {/* Backward-compatible redirects for the former split pages. */}
-        <Route
-          path="risk-rules"
-          element={<Navigate to="/app/admin/risk-settings" replace />}
-        />
-        <Route
-          path="risk-assessment"
-          element={<Navigate to="/app/admin/risk-settings" replace />}
-        />
-        {/* Medicine catalog + blood-pressure classification configuration. */}
-        <Route
-          path="medicines"
-          element={<MedicineCatalog />}
-        />
-        <Route
-          path="role-access"
-          element={<RoleAccessManagementPage />}
-        />
+          element={<NavTabsLayout roleKey="admin" navId="barangay-access" />}
+        >
+          <Route
+            path="barangays"
+            element={<BarangayManagement />}
+          />
+          <Route
+            path="role-access"
+            element={<RoleAccessManagementPage />}
+          />
+        </Route>
         {/* Backward-compatible redirects for the former split pages. */}
         <Route
           path="roles"
@@ -1281,13 +1274,37 @@ const AppRoutes = () => (
           path="permissions"
           element={<Navigate to="/app/admin/role-access" replace />}
         />
+        {/* Health & System Settings */}
+        <Route
+          element={<NavTabsLayout roleKey="admin" navId="health-system" />}
+        >
+          {/* Unified resident risk + early intervention configuration. */}
+          <Route
+            path="risk-settings"
+            element={<RiskInterventionSettings />}
+          />
+          {/* Medicine catalog + blood-pressure classification configuration. */}
+          <Route
+            path="medicines"
+            element={<MedicineCatalog />}
+          />
+          <Route
+            path="settings"
+            element={<SettingsPage roleKey="admin" />}
+          />
+        </Route>
+        {/* Backward-compatible redirects for the former split pages. */}
+        <Route
+          path="risk-rules"
+          element={<Navigate to="/app/admin/risk-settings" replace />}
+        />
+        <Route
+          path="risk-assessment"
+          element={<Navigate to="/app/admin/risk-settings" replace />}
+        />
         <Route
           path="audit"
           element={<AuditTrail />}
-        />
-        <Route
-          path="settings"
-          element={<SettingsPage roleKey="admin" />}
         />
         <Route
           path="logs"

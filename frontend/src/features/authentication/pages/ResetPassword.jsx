@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
 
@@ -12,20 +12,20 @@ import {
   btnPrimary,
 } from "@/features/registration/components/RegistrationDesign";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { registrationApi } from "@/services/api";
+import { authApi, registrationApi } from "@/services/api";
 import { validatePassword } from "@/utils/validation";
+import { isManagedPersonnelSession, resolvePasswordSetup, saveResetPassword, passwordWasSaved, personnelSetupBlocked, personnelPasswordError } from "../personnelPasswordSetup";
 
 /**
- * Reset Password — set a new password from a Supabase recovery link.
+ * Password reset and personnel invitation setup share this protected route.
  *
  * The recovery email links back to this route with a recovery token in the URL
  * hash. The shared Supabase client is configured with `detectSessionInUrl`, so
  * it parses that hash and fires a `PASSWORD_RECOVERY` auth event, establishing
- * a short-lived recovery session. This page waits for that session before
- * allowing a password change, applies the new password with
- * `supabase.auth.updateUser`, then signs out so the recovery session never
- * leaks into the authenticated app — the user logs in again with the new
- * password. No custom token system is used.
+ * a short-lived recovery session. This page waits for that session before saving.
+ * Personnel setup must save the password and finalize the verified caller's
+ * lifecycle on the server. Ordinary resets retain Supabase's updateUser flow.
+ * Sign out only after the relevant flow confirms success.
  */
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -38,6 +38,40 @@ export default function ResetPassword() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [setupStatus, setSetupStatus] = useState(null);
+  const [completion, setCompletion] = useState(null);
+  const [partialSaved, setPartialSaved] = useState(false);
+  const sessionRef = useRef(null);
+  const inspectedToken = useRef(null);
+  const setupSequence = useRef(0);
+  const setupRequiredRef = useRef(false);
+  const submittingRef = useRef(false);
+  const finishedRef = useRef(false);
+
+  const inspectSession = useCallback(async (session, force = false) => {
+    if (finishedRef.current || submittingRef.current) return;
+    if (!force && inspectedToken.current === session?.access_token) return;
+    const sequence = ++setupSequence.current;
+    inspectedToken.current = session?.access_token;
+    if (session?.user?.id !== sessionRef.current?.user?.id) setupRequiredRef.current = false;
+    sessionRef.current = session;
+    setStatus("checking");
+    setError("");
+    try {
+      const result = await resolvePasswordSetup(session, authApi.personnelSetupStatus, { knownRequired: setupRequiredRef.current });
+      if (sequence !== setupSequence.current || finishedRef.current) return;
+      setSetupStatus(result);
+      setupRequiredRef.current = result.setupRequired;
+      setStatus(personnelSetupBlocked(result) ? "setup_blocked" : "ready");
+    } catch (failure) {
+      if (sequence !== setupSequence.current || finishedRef.current) return;
+      if ([401, 403].includes(failure?.status)) setStatus("invalid");
+      else {
+        setStatus("setup_error");
+        setError("We could not verify your account's password-setup requirements. Setup cannot continue safely until the server confirms approval and activation. Try checking again.");
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
@@ -46,6 +80,8 @@ export default function ResetPassword() {
     }
     let active = true;
     let timer;
+    let sessionTimer;
+    inspectedToken.current = null;
 
     // A recovery link that is expired, already used or otherwise rejected by
     // Supabase redirects back with the error in the URL (implicit flow uses the
@@ -71,47 +107,55 @@ export default function ResetPassword() {
       return undefined;
     }
 
-    const markReady = () => {
-      if (!active) return;
-      setStatus((s) => (s === "done" ? s : "ready"));
-    };
-
     // The PASSWORD_RECOVERY event fires once the recovery link's hash is parsed.
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active) return;
-      if (event === "PASSWORD_RECOVERY" || session) markReady();
+      if (!active || submittingRef.current || finishedRef.current) return;
+      if (session) {
+        clearTimeout(timer);
+        clearTimeout(sessionTimer);
+        // Leave the Auth callback before making an API call that reads its session.
+        sessionTimer = setTimeout(() => { if (active) void inspectSession(session); }, 0);
+      } else if (event === "SIGNED_OUT") {
+        sessionRef.current = null;
+        setupRequiredRef.current = false;
+        setupSequence.current += 1;
+        setStatus("invalid");
+      }
     });
 
     // The event may have already fired before this listener attached; check the
     // current session directly. If none is present yet, allow a brief window for
     // `detectSessionInUrl` to process the hash before declaring the link invalid.
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(({ data, error: sessionError }) => {
       if (!active) return;
-      if (data?.session) markReady();
+      if (sessionError) setStatus("invalid");
+      else if (data?.session) void inspectSession(data.session);
       else {
         timer = setTimeout(() => {
           if (active) setStatus((s) => (s === "checking" ? "invalid" : s));
         }, 1600);
       }
-    });
+    }).catch(() => { if (active) setStatus("invalid"); });
 
     return () => {
       active = false;
       sub?.subscription?.unsubscribe?.();
       clearTimeout(timer);
+      clearTimeout(sessionTimer);
+      setupSequence.current += 1;
     };
-  }, []);
+  }, [inspectSession]);
 
   const submit = async (e) => {
     e.preventDefault();
-    if (submitting) return;
+    if (submittingRef.current || status !== "ready") return;
     setError("");
 
     if (!newPassword || !confirmPassword) {
       setError("Please fill in both password fields.");
       return;
     }
-    const policyError = validatePassword(newPassword, { label: "Password" });
+    const policyError = setupStatus?.setupRequired ? personnelPasswordError(newPassword) : validatePassword(newPassword, { label: "Password" });
     if (policyError) {
       setError(policyError);
       return;
@@ -126,37 +170,65 @@ export default function ResetPassword() {
     }
 
     setSubmitting(true);
+    submittingRef.current = true;
+    let saving = false;
     try {
-      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
-      if (updateError) {
-        const msg = String(updateError.message || "").toLowerCase();
-        if (msg.includes("session") || msg.includes("expired") || msg.includes("jwt")) {
-          setStatus("invalid");
-        } else if (msg.includes("different") || msg.includes("same")) {
-          setError("Your new password must be different from your current password.");
-        } else if (msg.includes("rate") || msg.includes("too many")) {
-          setError("Too many attempts. Please wait a moment and try again.");
-        } else {
-          setError("We couldn't update your password. Please try again.");
-        }
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const session = data?.session;
+      if (!session?.user?.id || session.user.id !== sessionRef.current?.user?.id) {
+        setStatus("invalid");
         return;
       }
-      setStatus("done");
-      // If this was a resident accepting an invitation link, activate the
-      // account now that they have set their own password. The server only
-      // activates a Verified resident whose account is still Pending Activation,
-      // so this is a harmless no-op for an ordinary password reset.
-      try {
-        await registrationApi.activate();
-      } catch {
-        /* best-effort: activation is also recoverable via the verification flow */
+      // Re-check requirements before mutation, including after a token refresh.
+      const verifiedSetup = await resolvePasswordSetup(session, authApi.personnelSetupStatus, { knownRequired: setupRequiredRef.current });
+      setSetupStatus(verifiedSetup);
+      setupRequiredRef.current = verifiedSetup.setupRequired;
+      if (personnelSetupBlocked(verifiedSetup)) {
+        setStatus("setup_blocked");
+        return;
       }
-      // Clear the recovery session so the user is not left signed in via the
-      // recovery link; they must log in again with their new password.
-      await supabase.auth.signOut();
-    } catch {
-      setError("We couldn't update your password. Please try again.");
+      saving = true;
+      const outcome = await saveResetPassword({
+        session,
+        password: newPassword,
+        setupStatus: verifiedSetup,
+        passwordPreviouslySaved: partialSaved,
+        auth: supabase.auth,
+        personnelSetup: authApi.personnelPasswordSetup,
+        activateResident: registrationApi.activate,
+      });
+      finishedRef.current = true;
+      setCompletion(outcome);
+      setPartialSaved(false);
+      setNewPassword("");
+      setConfirmPassword("");
+      setStatus("done");
+      try {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) throw signOutError;
+      } catch {
+        setError("Your password was saved, but automatic sign-out could not be confirmed. Close this reset session before signing in again.");
+      }
+    } catch (failure) {
+      const msg = String(failure?.message || "").toLowerCase();
+      if (passwordWasSaved(failure)) {
+        setPartialSaved(true);
+        setError(`Your password was saved, but account setup or activation is incomplete. ${failure?.message || "The server could not confirm finalization."} You may retry account setup; do not assume sign-in is enabled.`);
+      } else if ([401, 403].includes(failure?.status) || msg.includes("session") || msg.includes("expired") || msg.includes("jwt")) {
+        setStatus("invalid");
+      } else if (!saving && isManagedPersonnelSession(sessionRef.current)) {
+        setStatus("setup_error");
+        setError("We could not verify account setup with the server. No additional password change was attempted; account setup remains unconfirmed. Check again when the service is available.");
+      } else if (msg.includes("different") || msg.includes("same")) {
+        setError("Your new password must be different from your current password.");
+      } else if (msg.includes("rate") || msg.includes("too many")) {
+        setError("Too many attempts. Please wait a moment and try again.");
+      } else {
+        setError(failure?.message || "We couldn't update your password. Please try again.");
+      }
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -168,11 +240,39 @@ export default function ResetPassword() {
         <RegistrationCard>
           <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
             <Loader2 className="h-7 w-7 animate-spin text-brand-blue" />
-            <p className="mt-4 text-[13px] text-slate-500">Verifying your reset link…</p>
+            <p className="mt-4 text-[13px] text-slate-500">Verifying your link and account setup...</p>
           </div>
         </RegistrationCard>
       </RegistrationShell>
     );
+  }
+
+  if (status === "setup_blocked") {
+    return <RegistrationShell footer={null}>
+      <RegistrationCard>
+        <div className="px-6 py-10 text-center sm:px-12 sm:py-12">
+          <AlertTriangle className="mx-auto h-10 w-10 text-brand-danger" />
+          <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">{setupStatus?.suspended ? "Account Access Is Suspended" : setupStatus?.approvalStatus === "rejected" ? "Account Approval Was Rejected" : "Account Approval Is Pending"}</h1>
+          <p role="status" className="mt-4 text-[13px] leading-relaxed text-slate-500">Password setup cannot continue while this account is suspended or unapproved. No password is changed by checking this link. An administrator must review your account before setup or sign-in can proceed.</p>
+          <button type="button" onClick={() => { if (sessionRef.current) void inspectSession(sessionRef.current, true); }} className={`${btnPrimary} mt-6`}>Check account status again</button>
+          <p className="mt-4"><Link to="/login" className="text-sm font-semibold text-brand-blue underline">Back to Login</Link></p>
+        </div>
+      </RegistrationCard>
+    </RegistrationShell>;
+  }
+
+  if (status === "setup_error") {
+    return <RegistrationShell footer={null}>
+      <RegistrationCard>
+        <div className="px-6 py-10 text-center sm:px-12 sm:py-12">
+          <AlertTriangle className="mx-auto h-10 w-10 text-brand-danger" />
+          <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">Account Setup Could Not Be Verified</h1>
+          <p role="alert" className="mt-4 text-[13px] leading-relaxed text-slate-500">{error}</p>
+          <button type="button" onClick={() => { if (sessionRef.current) void inspectSession(sessionRef.current, true); }} className={`${btnPrimary} mt-6`}>Check account setup again</button>
+          <p className="mt-4"><Link to="/login" className="text-sm font-semibold text-brand-blue underline">Back to Login</Link></p>
+        </div>
+      </RegistrationCard>
+    </RegistrationShell>;
   }
 
   /* --------------------------- invalid / expired -------------------------- */
@@ -218,11 +318,12 @@ export default function ResetPassword() {
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-brand-green/10 ring-8 ring-brand-green/5">
               <CheckCircle2 className="h-8 w-8 text-brand-green" strokeWidth={1.8} />
             </div>
-            <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">Password Updated Successfully</h1>
+            <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">{completion?.title}</h1>
             <div className="mx-auto mt-2 h-[3px] w-14 rounded-full bg-brand-gold" aria-hidden="true" />
             <p className="mx-auto mt-4 max-w-md text-[13px] leading-relaxed text-slate-500">
-              Your password has been changed successfully. You can now log in using your new password.
+              {completion?.message}
             </p>
+            {error && <div className="mt-4"><InfoNote tone="danger" icon={AlertTriangle}>{error}</InfoNote></div>}
             <div className="mt-7">
               <button type="button" onClick={() => navigate("/login")} className={btnPrimary}>
                 <ArrowLeft className="h-4 w-4" /> Back to Login
@@ -239,6 +340,7 @@ export default function ResetPassword() {
     <button
       type="button"
       onClick={toggle}
+      disabled={submitting}
       aria-label={shown ? "Hide password" : "Show password"}
       className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-brand-ink"
     >
@@ -259,11 +361,12 @@ export default function ResetPassword() {
       <RegistrationCard>
         <div className="px-5 py-7 sm:px-10 sm:py-9">
           <PageHeading
-            title="Create New Password"
-            subtitle="Enter and confirm your new password below."
+            title={setupStatus?.setupRequired ? "Complete Account Password Setup" : "Create New Password"}
+            subtitle={setupStatus?.setupRequired ? "Set your own password. Sign-in will be enabled only when approval, setup, and administrator activation are confirmed." : "Enter and confirm your new password below."}
           />
 
           <form onSubmit={submit} className="mt-6 space-y-5">
+            {setupStatus?.setupRequired && <InfoNote>{setupStatus.activationRequested === false ? "Your approved account will remain inactive after password setup until an administrator authorizes activation." : "Saving a password alone does not activate your account. The server must confirm that account setup is complete."}</InfoNote>}
             {error && (
               <InfoNote tone="danger" icon={AlertTriangle}>
                 {error}
@@ -277,7 +380,8 @@ export default function ResetPassword() {
                 autoFocus
                 placeholder="Create a new password"
                 value={newPassword}
-                onChange={(e) => { setNewPassword(e.target.value); if (error) setError(""); }}
+                disabled={submitting}
+                onChange={(e) => { setNewPassword(e.target.value); setPartialSaved(false); if (error) setError(""); }}
                 className={`${inputCls()} pr-12`}
               />
             </Field>
@@ -285,7 +389,7 @@ export default function ResetPassword() {
             <Field
               label="Confirm New Password"
               required
-              hint="Minimum 8 characters, with an uppercase letter, a lowercase letter, and a number."
+              hint={setupStatus?.setupRequired ? "8 to 200 characters, with uppercase, lowercase, a number, and a non-whitespace special character." : "Minimum 8 characters, with an uppercase letter, a lowercase letter, and a number."}
               trailing={eyeButton(showConfirm, () => setShowConfirm((v) => !v))}
             >
               <input
@@ -293,7 +397,8 @@ export default function ResetPassword() {
                 autoComplete="new-password"
                 placeholder="Re-enter your new password"
                 value={confirmPassword}
-                onChange={(e) => { setConfirmPassword(e.target.value); if (error) setError(""); }}
+                disabled={submitting}
+                onChange={(e) => { setConfirmPassword(e.target.value); setPartialSaved(false); if (error) setError(""); }}
                 className={`${inputCls()} pr-12`}
               />
             </Field>
@@ -304,7 +409,7 @@ export default function ResetPassword() {
                   <Loader2 className="h-4 w-4 animate-spin" /> Updating...
                 </>
               ) : (
-                "Update Password"
+                 partialSaved ? "Retry Account Setup" : setupStatus?.setupRequired ? "Save Password and Complete Setup" : "Update Password"
               )}
             </button>
 

@@ -1,7 +1,8 @@
 import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured, supabaseConfigurationError } from '@/lib/supabase';
 import { authApi } from '@/services/api';
+import { authFailureMessage } from '../../../shared/authConnectivity.js';
 
 const AuthContext = createContext(null);
 
@@ -289,14 +290,22 @@ export const AuthProvider = ({ children }) => {
     setAuthNotice(null);
 
     if (!isSupabaseConfigured || !supabase) {
-      const message = 'Sign-in is unavailable: Supabase authentication is not configured.';
+      const message = `Sign-in is unavailable. ${supabaseConfigurationError || 'Supabase authentication is not configured.'}`;
       setAuthError({ message });
       throw new Error(message);
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    let result;
+    try {
+      result = await supabase.auth.signInWithPassword({ email, password });
+    } catch (error) {
+      const message = authFailureMessage(error);
+      setAuthError({ message });
+      throw new Error(message);
+    }
+    const { data, error } = result;
     if (error || !data?.session?.user) {
-      const message = error?.message || 'Invalid email or password';
+      const message = authFailureMessage(error);
       setAuthError({ message });
       throw new Error(message);
     }

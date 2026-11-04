@@ -37,4 +37,17 @@ export const logout = async (req, res) => {
   sendData(res, result);
 };
 
-export default { login, me, updateMe, logout };
+const bearerToken = (req) => {
+  const header = req.headers.authorization || '';
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : null;
+};
+
+export const personnelSetupStatus = async (req, res) => {
+  sendData(res, await authService.getPersonnelSetupStatus({ accessToken: bearerToken(req) }));
+};
+
+export const personnelPasswordSetup = async (req, res) => {
+  sendData(res, await authService.setupPersonnelPassword({ accessToken: bearerToken(req), password: req.body.password }));
+};
+
+export default { login, me, updateMe, logout, personnelSetupStatus, personnelPasswordSetup };

@@ -1,6 +1,7 @@
 import app from './app.js';
 import env from './config/env.js';
 import { currentDriverName } from './repositories/index.js';
+import { startPersonnelNotificationWorker } from './services/personnelNotifications.service.js';
 
 /**
  * Process entry point: starts the HTTP listener and shuts down cleanly on
@@ -11,17 +12,26 @@ import { currentDriverName } from './repositories/index.js';
  * every environment serves only genuine records.
  */
 const boot = async () => {
+  let stopNotificationWorker = async () => {};
+  let shuttingDown = false;
   const server = app.listen(env.port, () => {
     console.log(`KALUSAGAP backend running in ${env.nodeEnv} mode`);
     console.log(`Listening on http://localhost:${env.port}`);
     console.log(`Data driver: ${currentDriverName()}`);
     console.log(`Health check:  http://localhost:${env.port}/api/health`);
     console.log(`Allowed origins: ${env.clientUrls.join(', ')}`);
+    if (!shuttingDown) stopNotificationWorker = startPersonnelNotificationWorker();
   });
 
   const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log(`${signal} received, shutting down.`);
-    server.close(() => process.exit(0));
+    const workerStopped = stopNotificationWorker();
+    server.close(async () => {
+      await workerStopped;
+      process.exit(0);
+    });
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));

@@ -121,12 +121,11 @@ export default function Hero() {
               <div className="h-[3px] w-full gov-flag-rule" aria-hidden="true" />
 
               <div className="px-6 py-6">
-                <p className="gov-kicker text-brand-blue">Who may enrol</p>
+                <p className="gov-kicker text-brand-blue">Public resident registration</p>
                 <ul className="mt-4 divide-y divide-brand-border/70">
                   {[
-                    ["Bona fide residents", "Any resident of Pili aged 18 and above."],
+                    ["Bona fide residents", "Residents of Pili registering through the resident verification workflow."],
                     ["Transferees", "Residents relocating from another barangay or municipality."],
-                    ["Health personnel", "BHWs, midwives, RHU staff, and MHO officers."],
                   ].map(([label, copy]) => (
                     <li key={label} className="flex gap-3.5 py-3.5">
                       <span className="mt-[7px] h-1.5 w-1.5 shrink-0 bg-brand-blue" aria-hidden="true" />
@@ -137,6 +136,11 @@ export default function Hero() {
                     </li>
                   ))}
                 </ul>
+
+                <p className="mt-4 text-[12.5px] leading-relaxed text-brand-gray">
+                  Health personnel accounts are created internally by authorized
+                  administrators, not through public registration.
+                </p>
 
                 <div className="mt-5 border-l-[3px] border-brand-gold bg-[#FDF6E3] px-4 py-3.5">
                   <p className="text-[12px] leading-relaxed text-brand-ink/85">

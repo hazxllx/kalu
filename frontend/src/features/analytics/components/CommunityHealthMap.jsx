@@ -305,12 +305,12 @@ export default function CommunityHealthMap({
           )}
         </div>
       ) : (
-        <div className="relative overflow-hidden rounded-xl border border-brand-border">
+        <div className="relative min-w-0 overflow-hidden rounded-xl border border-brand-border">
           <MapContainerCompat
             center={centerPoint}
             zoom={13}
             scrollWheelZoom={false}
-            style={{ height: "420px", width: "100%" }}
+            style={{ height: "300px", width: "100%" }}
           >
             <IconFreeBasemap onError={setBasemapError} />
             <FitToMarkers points={points} />

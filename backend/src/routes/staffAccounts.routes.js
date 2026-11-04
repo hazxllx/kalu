@@ -2,12 +2,10 @@ import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
-import rateLimit from '../middleware/rateLimit.js';
 import validate from '../middleware/validate.js';
-import uploadStaffDocuments from '../middleware/uploadStaffDocuments.js';
+import ApiError from '../utils/apiError.js';
 import { APPROVER_ROLES } from '../config/staffApprovals.js';
 import {
-  registerPersonnelValidator,
   staffAccountDecisionValidator,
   staffAccountIdParamValidator,
 } from '../validators/staffAccounts.validators.js';
@@ -15,17 +13,14 @@ import * as staffAccountsController from '../controllers/staffAccounts.controlle
 import asyncHandler from '../utils/asyncHandler.js';
 
 /**
- * Personnel registration + operational account verification.
- *
- * Public:
- *   POST /register            submit a personnel registration (creates the Auth
- *                             identity at 'pending_verification', never active)
+ * Historical personnel request review. New personnel accounts are created
+ * only through the administrator's /users workflow.
  *
  * Reviewer (PHN / Health Supervisor only — see config/staffApprovals.js):
  *   GET  /queue?status=&q=    the request roles this account is responsible for
  *   GET  /pending-count       navigation badge
  *   GET  /:id                 one request
- *   POST /:id/approve         activate the account
+ *   POST /:id/approve         approve through the atomic lifecycle workflow
  *   POST /:id/reject          reject with a reason
  *   POST /:id/request-resubmission  ask the applicant to correct and resubmit (reason required)
  *
@@ -37,20 +32,16 @@ import asyncHandler from '../utils/asyncHandler.js';
  */
 const router = Router();
 
-const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 10,
-  keyFn: (req) => req.ip || 'anonymous',
-  message: 'Too many registration attempts. Please try again later.',
-});
-
 const reviewer = [
   authenticate,
   authorize(APPROVER_ROLES, { permission: 'accounts.personnel.approve' }),
 ];
 const idParam = validate(staffAccountIdParamValidator, 'params');
 
-router.post('/register', registerLimiter, uploadStaffDocuments, validate(registerPersonnelValidator), asyncHandler(staffAccountsController.register));
+// Deny before multipart parsing, uploads, validation or any Auth operation.
+router.post('/register', (_req, _res, next) => next(ApiError.forbidden(
+  'Public health personnel registration is disabled. Contact a system administrator.',
+)));
 
 // Specific paths before '/:id'.
 router.get('/queue', ...reviewer, asyncHandler(staffAccountsController.listQueue));

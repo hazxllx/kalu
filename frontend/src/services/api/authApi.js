@@ -11,6 +11,12 @@ export const authApi = {
   // Self-service update of the signed-in account's own contact number.
   updateMe: (payload) => api.patch('/auth/me', payload),
   logout: () => api.post('/auth/logout'),
+  personnelSetupStatus: (token) => api.get('/auth/personnel/setup-status', {
+    headers: { Authorization: `Bearer ${token}` },
+  }),
+  personnelPasswordSetup: (password, token) => api.post('/auth/personnel/password-setup', { password }, {
+    headers: { Authorization: `Bearer ${token}` },
+  }),
 };
 
 export default authApi;

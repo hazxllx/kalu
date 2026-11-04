@@ -96,7 +96,7 @@ export const PermissionsProvider = ({ children }) => {
   const latestMatrixRef = useRef({ matrix, matrixLoadState });
   latestMatrixRef.current = { matrix, matrixLoadState };
 
-  const refreshMatrix = useCallback(async () => {
+  const refreshMatrix = useCallback(async ({ forceOnline = false } = {}) => {
     if (!user?.id) {
       setMatrix(hydrateMatrix(null));
       setMatrixLoadState({ userId: null, status: 'ready', error: null });
@@ -114,7 +114,9 @@ export const PermissionsProvider = ({ children }) => {
       return false;
     }
     const requestKey = `${user.id}:${effectiveRole}`;
-    if (matrixRequestInFlightRef.current?.key === requestKey) {
+    const attemptOnline = forceOnline || isNavigatorOnline();
+    if (matrixRequestInFlightRef.current?.key === requestKey &&
+        (!forceOnline || matrixRequestInFlightRef.current.attemptOnline)) {
       return matrixRequestInFlightRef.current.promise;
     }
     const requestId = ++matrixRequestRef.current;
@@ -155,7 +157,7 @@ export const PermissionsProvider = ({ children }) => {
         });
       }
 
-      if (!isNavigatorOnline()) {
+      if (!attemptOnline) {
         if (!snapshot) {
           setMatrix(hydrateMatrix(null));
           setMatrixLoadState({
@@ -166,7 +168,7 @@ export const PermissionsProvider = ({ children }) => {
             error: 'No unexpired verified permissions are stored on this device. Reconnect to verify access.',
           });
         }
-        return Boolean(snapshot);
+        return false;
       }
 
       try {
@@ -180,6 +182,14 @@ export const PermissionsProvider = ({ children }) => {
           console.error('[kalusagap/permissions] Could not persist verified permissions.', error);
           return null;
         });
+        if (requestId !== matrixRequestRef.current) {
+          if (verified) {
+            await invalidateVerifiedPermissions(user.id).catch((error) => {
+              console.error('[kalusagap/permissions] Could not discard a superseded permission cache.', error);
+            });
+          }
+          return false;
+        }
         setMatrix(hydrateMatrix(serverMatrix));
         const verifiedAt = verified?.verifiedAt || Date.now();
         setMatrixLoadState({
@@ -227,7 +237,7 @@ export const PermissionsProvider = ({ children }) => {
             failureKind,
             error: permissionLoadErrorMessage(error),
           });
-          return true;
+          return false;
         }
         setMatrix(hydrateMatrix(null));
         setMatrixLoadState({
@@ -240,7 +250,7 @@ export const PermissionsProvider = ({ children }) => {
         return false;
       }
     })();
-    matrixRequestInFlightRef.current = { key: requestKey, promise };
+    matrixRequestInFlightRef.current = { key: requestKey, promise, attemptOnline };
     try {
       return await promise;
     } finally {

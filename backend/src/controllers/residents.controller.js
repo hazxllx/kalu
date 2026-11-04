@@ -28,6 +28,7 @@ export const createResident = async (req, res) => {
   const resident = await residentsService.createResident({
     payload: req.body?.resident || req.body || {},
     user: req.user,
+    idempotencyKey: req.idempotencyKey || req.headers['idempotency-key'] || null,
   });
   sendCreated(res, { resident });
 };

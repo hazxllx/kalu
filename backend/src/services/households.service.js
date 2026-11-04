@@ -310,7 +310,7 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
   }
   const memberResidentIds = (members || []).map((member) => member.residentId).filter(Boolean);
   if (new Set(memberResidentIds).size !== memberResidentIds.length) {
-    throw ApiError.conflict('A resident can only be added once to this household.');
+    throw ApiError.duplicate('A resident can only be added once to this household.');
   }
   for (const residentId of memberResidentIds) {
     const resident = await repo.getResident(residentId);
@@ -328,7 +328,7 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
     streetAddress,
   });
   if (duplicate) {
-    throw ApiError.conflict(`A household for ${headName} at that address is already registered (${duplicate.id}).`);
+    throw ApiError.duplicate(`A household for ${headName} at that address is already registered (${duplicate.id}).`);
   }
 
   const ids = await repo.nextHouseholdId();
@@ -452,7 +452,7 @@ export const updateHousehold = async ({ id, user, patch = {}, expectedRevision =
   if (usesConcurrency) {
     const currentRevision = Number(household.revision ?? 1);
     if (Number(expectedRevision) !== currentRevision) {
-      throw ApiError.conflict(
+      throw ApiError.staleRevision(
         'This household was updated on another device. Reload it and reapply your changes.',
       );
     }
@@ -565,7 +565,7 @@ export const updateHousehold = async ({ id, user, patch = {}, expectedRevision =
     // With a revision check the write is conditional; zero rows means a
     // concurrent edit slipped in between our read and the write.
     if (usesConcurrency) {
-      throw ApiError.conflict(
+      throw ApiError.staleRevision(
         'This household was updated on another device. Reload it and reapply your changes.',
       );
     }
@@ -607,7 +607,7 @@ export const addHouseholdMember = async ({ id, user, member = {}, repo = reposit
       birthDate: profile.birthDate,
     });
     if (duplicate) {
-      throw ApiError.conflict('A resident with the same first name, last name, and birthdate already exists. Search for and link that resident instead.');
+      throw ApiError.duplicate('A resident with the same first name, last name, and birthdate already exists. Search for and link that resident instead.');
     }
     const barangay = await repo.findBarangayByName(household.barangay, household.municipalityId);
     if (!isApprovedBarangayName(household.barangay) || !barangay
@@ -642,12 +642,12 @@ export const addHouseholdMember = async ({ id, user, member = {}, repo = reposit
     }
     // Duplicate membership check before hitting the unique constraint.
     if ((household.members || []).some((m) => m.residentId === residentId)) {
-      throw ApiError.conflict('That resident is already a member of this household.');
+      throw ApiError.duplicate('That resident is already a member of this household.');
     }
   }
 
   if (residentId && (household.members || []).some((m) => m.residentId === residentId)) {
-    throw ApiError.conflict('That resident is already a member of this household.');
+    throw ApiError.duplicate('That resident is already a member of this household.');
   }
   const created = await repo.addHouseholdMember(household.id, {
     ...newMember,

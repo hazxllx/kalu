@@ -467,7 +467,7 @@ export default function MedicineCatalog() {
 
             {/* Search + filters */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <div className="flex min-w-[200px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 sm:max-w-sm">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 sm:min-w-[200px] sm:max-w-sm">
                 <Search className="h-4 w-4 shrink-0 text-slate-400" />
                 <input
                   value={query}

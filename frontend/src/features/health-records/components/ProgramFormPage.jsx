@@ -151,7 +151,7 @@ export default function ProgramFormPage({ config }) {
       )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex h-10 min-w-[12rem] flex-1 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 focus-within:border-brand-blue">
+        <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 focus-within:border-brand-blue sm:min-w-[12rem]">
           <Search className="h-4 w-4 shrink-0 text-brand-gray" />
           <input value={recordQuery} onChange={(e) => setRecordQuery(e.target.value)} placeholder="Search records" className="w-full bg-transparent text-sm outline-none" />
         </div>

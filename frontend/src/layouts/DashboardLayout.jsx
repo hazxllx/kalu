@@ -30,7 +30,8 @@ import { notificationsApi } from "@/services/api";
 import { onUnreadChanged } from "@/services/notifications/unreadBus";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
-import { hasValidPermissionSnapshot, routePermissionsAllowed } from "@/services/accessControl/permissionAccess";
+import { hasValidPermissionSnapshot, permissionNotice, routePermissionsAllowed } from "@/services/accessControl/permissionAccess";
+import { isNavigatorOnline } from "@/services/offline/connectivity";
 
 export default function DashboardLayout({ roleKey }) {
   const role = ROLES[roleKey];
@@ -50,6 +51,41 @@ export default function DashboardLayout({ roleKey }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
   const menuRef = useRef(null);
+  const [online, setOnline] = useState(isNavigatorOnline);
+  const [recheckFeedback, setRecheckFeedback] = useState(null);
+  const recheckInFlight = useRef(false);
+  const recheckRequestRef = useRef(0);
+
+  useEffect(() => {
+    const updateOnline = () => setOnline(isNavigatorOnline());
+    window.addEventListener("online", updateOnline);
+    window.addEventListener("offline", updateOnline);
+    return () => {
+      window.removeEventListener("online", updateOnline);
+      window.removeEventListener("offline", updateOnline);
+    };
+  }, []);
+
+  useEffect(() => () => { recheckRequestRef.current += 1; }, [user?.id]);
+
+  const recheckAccess = async () => {
+    if (recheckInFlight.current) return;
+    recheckInFlight.current = true;
+    const requestId = ++recheckRequestRef.current;
+    setRecheckFeedback({ userId: user?.id, status: "loading" });
+    try {
+      const verified = await refreshMatrix({ forceOnline: true });
+      if (requestId === recheckRequestRef.current) {
+        setRecheckFeedback({ userId: user?.id, status: verified ? "success" : "failure" });
+      }
+    } catch {
+      if (requestId === recheckRequestRef.current) {
+        setRecheckFeedback({ userId: user?.id, status: "failure" });
+      }
+    } finally {
+      recheckInFlight.current = false;
+    }
+  };
 
   useEffect(() => {
     try {
@@ -79,6 +115,12 @@ export default function DashboardLayout({ roleKey }) {
     () => filterNavByPermission(NAV[roleKey] || [], can, user),
     [roleKey, can, user]
   );
+  // Tab switches inside a merged item (e.g. User & Personnel Management) keep
+  // the tab strip mounted instead of replaying the page transition.
+  const activeItem = items.find((item) => navItemIsActive(item, location.pathname));
+  const pageTransitionKey = activeItem?.tabs
+    ? `tabs:${activeItem.id}`
+    : location.pathname;
   const routePermissions = useMemo(
     () => navPermissionsForPath(NAV[roleKey] || [], location.pathname),
     [roleKey, location.pathname]
@@ -90,6 +132,8 @@ export default function DashboardLayout({ roleKey }) {
     [roleKey, location.pathname]
   );
   const effectiveRole = user?.role === "resident-limited" ? "resident" : user?.role;
+  const notice = permissionNotice(matrixLoadState, user?.id, online);
+  const feedback = recheckFeedback?.userId === user?.id ? recheckFeedback?.status : null;
   const permissionsReady = hasValidPermissionSnapshot(
     matrixLoadState,
     user?.id,
@@ -249,12 +293,13 @@ export default function DashboardLayout({ roleKey }) {
   }/profile`;
 
   const NavList = ({ collapsed = false } = {}) => {
+    const adminNav = roleKey === "admin";
     const compact = roleKey === "health_supervisor";
     const rowSize = collapsed
       ? "min-h-10"
-      : compact
-      ? "min-h-9 py-1.5"
-      : "min-h-9 py-1.5";
+      : adminNav
+        ? "min-h-10 py-2"
+        : "min-h-9 py-1.5";
     const itemPadding = collapsed ? "justify-center px-0" : "gap-2.5 px-3";
 
     const isItemActive = (item) =>
@@ -349,10 +394,13 @@ export default function DashboardLayout({ roleKey }) {
           to={`${it.path}${it.search || ""}`}
           onClick={() => setOpen(false)}
           aria-label={collapsed ? it.label : undefined}
-          title={collapsed ? it.label : undefined}
-          className={`group flex ${rowSize} ${itemPadding} items-center rounded-md text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
+          aria-current={active ? "page" : undefined}
+          title={collapsed || !adminNav ? it.label : undefined}
+          className={`group flex w-full min-w-0 ${rowSize} ${itemPadding} items-center rounded-md text-sm leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
             active
-              ? "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
+              ? adminNav
+                ? "bg-brand-light text-brand-blue font-medium dark:bg-brand-blue/20"
+                : "bg-brand-blue/10 text-brand-blue font-medium dark:bg-brand-blue/15"
               : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground"
           }`}
         >
@@ -361,7 +409,7 @@ export default function DashboardLayout({ roleKey }) {
             className="w-[18px] h-[18px] shrink-0"
             strokeWidth={1.8}
           />
-          <span className={collapsed ? "sr-only" : "truncate"}>{it.label}</span>
+          <span className={collapsed ? "sr-only" : adminNav ? "min-w-0 flex-1 whitespace-normal break-words" : "truncate"}>{it.label}</span>
         </Link>
       );
     };
@@ -382,16 +430,19 @@ export default function DashboardLayout({ roleKey }) {
     }, []);
 
     return (
-      <div className={compact ? "space-y-0.5" : "space-y-1"}>
+      <div className={adminNav ? "space-y-2" : compact ? "space-y-0.5" : "space-y-1"}>
         {blocks.map((block, i) => (
-          <div key={block.group || `block-${i}`}>
+          <div
+            key={block.group || `block-${i}`}
+            className={adminNav && i > 0 ? "border-t border-brand-border/60 pt-2 dark:border-border" : undefined}
+          >
             {block.group && !collapsed && (
-              <p className={`px-3 ${i === 0 ? "pt-1" : "pt-5"} pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 dark:text-slate-500 select-none`}>
+              <p className={`px-3 ${adminNav ? "pb-1 text-[10px] text-brand-gray dark:text-slate-400" : `${i === 0 ? "pt-1" : "pt-5"} pb-1.5 text-[11px] text-slate-500 dark:text-slate-500`} font-semibold uppercase tracking-[0.06em] select-none`}>
                 {block.group}
               </p>
             )}
 
-            <div className={`${compact ? "space-y-0.5" : "space-y-1"} ${collapsed ? "space-y-1" : ""}`}>
+            <div className={`${adminNav || compact ? "space-y-0.5" : "space-y-1"} ${collapsed && !adminNav ? "space-y-1" : ""}`}>
               {block.items.filter((item) => !item.hidden).map((item) => renderItem(item))}
             </div>
           </div>
@@ -423,20 +474,20 @@ export default function DashboardLayout({ roleKey }) {
    * mirroring the AgencyMark used on the public and auth pages.
    */
   const SidebarBrand = ({ collapsed = false } = {}) => (
-    <div className="flex min-w-0 items-center gap-3">
+    <div className={`flex min-w-0 items-center ${roleKey === "admin" ? "gap-2" : "gap-3"}`}>
       <img
         src={LOGO_URL}
         alt=""
         aria-hidden="true"
-        className={`${collapsed ? "h-8 w-8" : "h-9 w-auto"} shrink-0 object-contain`}
+        className={`${collapsed || roleKey === "admin" ? "h-8 w-8" : "h-9 w-auto"} shrink-0 object-contain`}
       />
 
-      {!collapsed && <div className="min-w-0">
+      {!collapsed && <div className={roleKey === "admin" ? "min-w-0 flex-1" : "min-w-0"}>
         <p className="font-display text-[15px] font-bold leading-tight tracking-[0.03em] text-brand-dark dark:text-foreground">
           KALUSAGAP
         </p>
 
-        <p className="mt-0.5 truncate text-[9.5px] font-medium uppercase leading-tight tracking-[0.12em] text-brand-gray dark:text-slate-400">
+        <p className={`mt-0.5 font-medium uppercase leading-tight text-brand-gray dark:text-slate-400 ${roleKey === "admin" ? "text-[10px] tracking-[0.03em]" : "truncate text-[9.5px] tracking-[0.12em]"}`}>
           Community Health System
         </p>
       </div>}
@@ -450,7 +501,7 @@ export default function DashboardLayout({ roleKey }) {
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
       >
         {/* Brand header — fixed */}
-        <div className={`h-20 shrink-0 flex items-center border-b border-slate-200 dark:border-border ${sidebarCollapsed ? "justify-center gap-0 px-2" : "justify-between gap-3 px-5"}`}>
+        <div className={`relative shrink-0 flex items-center border-b border-slate-200 dark:border-border ${roleKey === "admin" ? `h-[72px] ${sidebarCollapsed ? "justify-center px-2 pt-4" : "px-4 pr-11"}` : `h-20 ${sidebarCollapsed ? "justify-center gap-0 px-2" : "justify-between gap-3 px-5"}`}`}>
           <div className={sidebarCollapsed ? "flex min-w-0 justify-center" : "min-w-0 flex-1"}>
             <SidebarBrand collapsed={sidebarCollapsed} />
           </div>
@@ -459,7 +510,7 @@ export default function DashboardLayout({ roleKey }) {
             onClick={() => setSidebarCollapsed((value) => !value)}
             aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:text-slate-300 dark:hover:bg-hover dark:hover:text-foreground ${sidebarCollapsed ? "absolute right-1 top-2 h-7 w-7 bg-white/90 dark:bg-sidebar/90" : ""}`}
+            className={`flex shrink-0 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:text-slate-300 dark:hover:bg-hover dark:hover:text-foreground ${roleKey === "admin" ? "absolute right-1.5 top-1.5 h-6 w-6" : sidebarCollapsed ? "absolute right-1 top-2 h-7 w-7 bg-white/90 dark:bg-sidebar/90" : "h-8 w-8"}`}
           >
             {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </button>
@@ -468,7 +519,7 @@ export default function DashboardLayout({ roleKey }) {
         {/* Scrollable navigation */}
         <nav
           aria-label="Main navigation"
-          className={`nav-scroll min-h-0 flex-1 overflow-y-auto py-3 ${sidebarCollapsed ? "overflow-x-visible px-2" : "px-3"}`}
+          className={`nav-scroll min-h-0 flex-1 overflow-y-auto ${roleKey === "admin" ? "py-2" : "py-3"} ${sidebarCollapsed ? "overflow-x-visible px-2" : "px-3"}`}
         >
           <NavList collapsed={sidebarCollapsed} />
 
@@ -512,7 +563,7 @@ export default function DashboardLayout({ roleKey }) {
               aria-label="Mobile navigation"
               className="fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col bg-white dark:bg-sidebar lg:hidden"
             >
-              <div className="h-20 shrink-0 flex items-center justify-between gap-3 px-5 border-b border-slate-200 dark:border-border">
+              <div className={`shrink-0 flex items-center justify-between border-b border-slate-200 dark:border-border ${roleKey === "admin" ? "h-[72px] gap-2 px-4" : "h-20 gap-3 px-5"}`}>
                 <SidebarBrand />
 
                 <button
@@ -526,7 +577,7 @@ export default function DashboardLayout({ roleKey }) {
 
               <nav
                 aria-label="Main navigation"
-                className="nav-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3"
+                className={`nav-scroll min-h-0 flex-1 overflow-y-auto px-3 ${roleKey === "admin" ? "py-2" : "py-3"}`}
               >
                 <NavList />
                 <div className="h-2" aria-hidden="true" />
@@ -698,22 +749,25 @@ export default function DashboardLayout({ roleKey }) {
         </header>
 
         <main className="mx-auto min-w-0 max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8">
-          {matrixLoadState.userId === user?.id && matrixLoadState.status === "error" && (
+          {notice && (!routePermissions || permissionsReady) && (
             <div
-              className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-brand-danger/30 bg-white px-4 py-3 text-sm text-brand-ink"
-              role="alert"
+              className={`mb-4 flex flex-wrap items-center justify-between gap-3 border px-4 py-2 text-xs ${permissionsReady ? "border-amber-300 bg-amber-50 text-amber-950" : "border-brand-danger/30 bg-white text-brand-ink"}`}
+              role={permissionsReady ? "status" : "alert"}
             >
-              <div>
-                <p className="font-medium">Role permissions are not currently verified.</p>
-                <p className="text-xs text-brand-gray">
-                  {matrixLoadState.failureKind === "auth"
-                    ? "Your session has expired. Sign in again to continue."
-                    : matrixLoadState.failureKind === "forbidden"
-                      ? "Access was denied by the permissions service. Contact an administrator."
-                      : matrixLoadState.error || "Reconnect to verify access to this page."}
-                </p>
-              </div>
-              {matrixLoadState.failureKind === "auth" ? (
+              <p className="text-xs" aria-live="polite">
+                {notice === "auth"
+                  ? "Your session has expired. Sign in again to continue."
+                  : notice === "error"
+                    ? matrixLoadState.failureKind === "forbidden"
+                      ? "Access was denied. Contact an administrator."
+                      : "Access could not be verified. Retry when connected."
+                    : notice === "cached-offline"
+                      ? "Offline. Using previously verified access."
+                      : "Could not confirm access with the server. Using previously verified access."}
+                {feedback === "loading" && " Checking access…"}
+                {feedback === "failure" && " Recheck failed; access was not confirmed."}
+              </p>
+              {notice === "auth" ? (
                 <button
                   type="button"
                   onClick={() => void logout()}
@@ -724,33 +778,23 @@ export default function DashboardLayout({ roleKey }) {
               ) : (
                 <button
                   type="button"
-                  onClick={() => void refreshMatrix()}
-                  className="min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                  onClick={() => void recheckAccess()}
+                  disabled={feedback === "loading"}
+                  className="min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue disabled:opacity-50"
                 >
-                  Retry
+                  {feedback === "loading" ? "Checking…" : "Recheck access"}
                 </button>
               )}
             </div>
           )}
-          {matrixLoadState.userId === user?.id &&
-            matrixLoadState.status === "ready" &&
-            matrixLoadState.source === "cache" && (
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950" role="status">
-                <p>
-                  Using permissions previously verified for this account. They expire at{" "}
-                  {new Date(matrixLoadState.expiresAt).toLocaleTimeString()} and will be refreshed when connected.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void refreshMatrix()}
-                  className="min-h-9 border border-amber-400 px-3 text-xs font-medium hover:bg-amber-100"
-                >
-                  Recheck access
-                </button>
-              </div>
-            )}
+          {!notice && feedback === "success" && matrixLoadState.status === "ready" && matrixLoadState.source === "server" && (
+            <p className="mb-4 text-xs text-brand-green" role="status">Access verified with the server.</p>
+          )}
+          {!notice && feedback === "failure" && matrixLoadState.source !== "server" && (!routePermissions || permissionsReady) && (
+            <p className="mb-4 text-xs text-brand-danger" role="alert">Recheck failed; access was not confirmed.</p>
+          )}
           <motion.div
-            key={location.pathname}
+            key={pageTransitionKey}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
@@ -786,10 +830,11 @@ export default function DashboardLayout({ roleKey }) {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => void refreshMatrix()}
-                    className="mt-4 min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface"
+                    onClick={() => void recheckAccess()}
+                    disabled={feedback === "loading"}
+                    className="mt-4 min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface disabled:opacity-50"
                   >
-                    Retry verification
+                    {feedback === "loading" ? "Checking…" : "Recheck access"}
                   </button>
                 )}
               </section>

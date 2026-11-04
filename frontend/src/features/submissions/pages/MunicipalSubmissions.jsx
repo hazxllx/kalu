@@ -299,7 +299,7 @@ export default function MunicipalSubmissions() {
           ))}
         </div>
         <div className="px-5 py-4 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 rounded-input border border-slate-200 dark:border-border bg-brand-bg/60 dark:bg-input px-3 py-2.5 min-w-[200px] flex-1 sm:flex-none">
+          <div className="flex items-center gap-2 rounded-input border border-slate-200 dark:border-border bg-brand-bg/60 dark:bg-input px-3 py-2.5 min-w-0 flex-1 sm:min-w-[200px] sm:flex-none">
             <Search className="h-4 w-4 shrink-0 text-brand-gray" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search submissions..." className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500" />
           </div>

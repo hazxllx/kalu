@@ -182,7 +182,7 @@ test('household draft survives offline reload and synchronizes only after a conf
   const result = await createHouseholdOffline({
     ownerId: OWNER,
     payload: {
-      barangay: 'San Jose',
+      barangay: 'San Antonio',
       headName: 'Ana Dela Cruz',
       purok: 'Purok 1',
       members: [{ name: 'Ana Dela Cruz' }],
@@ -235,7 +235,7 @@ test('household draft survives offline reload and synchronizes only after a conf
 test('a sync response without a confirmed record leaves the operation failed for review', async () => {
   await createHouseholdOffline({
     ownerId: OWNER,
-    payload: { barangay: 'San Jose', headName: 'Unconfirmed', members: [{}] },
+    payload: { barangay: 'San Antonio', headName: 'Unconfirmed', members: [{}] },
   });
   const [operation] = await listOperations(OWNER);
   setOnline(true);
@@ -260,7 +260,7 @@ test('resident create and permitted demographic edits persist locally without en
       resident: {
         firstName: 'Rosa',
         lastName: 'Santos',
-        barangay: 'San Jose',
+        barangay: 'San Antonio',
         createLoginAccount: false,
       },
     },

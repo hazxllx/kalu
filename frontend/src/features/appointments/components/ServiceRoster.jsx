@@ -236,7 +236,7 @@ export default function ServiceRoster({ appointments = [], services = [], loadin
                 </option>
               ))}
             </select>
-            <div className="relative min-w-[10rem] flex-1">
+            <div className="relative min-w-0 flex-1 sm:min-w-[10rem]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-gray" />
               <input
                 type="text"

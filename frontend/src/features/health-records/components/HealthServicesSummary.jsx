@@ -228,7 +228,7 @@ export default function HealthServicesSummary(props) {
         {stats.map((stat, i) => (
           <div
             key={i}
-            className="flex min-w-[9.5rem] flex-1 flex-col justify-center gap-1 border-r border-brand-border px-5 py-3 last:border-r-0"
+            className="flex min-w-0 flex-1 flex-col justify-center gap-1 border-r border-brand-border px-5 py-3 last:border-r-0 sm:min-w-[9.5rem]"
           >
             <span className="font-stat text-[10px] font-semibold tabular-nums text-brand-gray/60">
               {String(i + 1).padStart(2, "0")}

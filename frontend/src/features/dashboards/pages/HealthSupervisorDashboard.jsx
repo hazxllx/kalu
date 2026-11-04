@@ -605,7 +605,7 @@ export default function HealthSupervisorDashboard() {
               Aggregated case activity for {selectedPeriodLabel} within your authorized coverage.
             </p>
             <div className="mt-3">
-              <div className="[&_.leaflet-container]:!h-[270px] [&>div>div.mt-3]:hidden">
+              <div className="min-w-0 [&_.leaflet-container]:!h-[270px] [&>div>div.mt-3]:hidden">
                 <CommunityHealthMap
                   barangays={communityMapData?.barangays || []}
                   center={communityMapData?.center || null}

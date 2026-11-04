@@ -42,13 +42,13 @@ function normalize(options) {
  */
 const VARIANTS = {
   default: {
-    base: "min-w-[7rem] flex-1 rounded-btn border px-3.5 py-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60",
+    base: "min-w-0 flex-1 rounded-btn border px-3.5 py-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[7rem]",
     selected: "border-brand-blue bg-brand-blue text-white hover:bg-brand-dark",
     unselectedError: "bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light border-brand-danger",
     unselected: "bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light border-brand-border",
   },
   registration: {
-    base: "min-w-[7rem] flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium outline-none transition-all duration-200 focus-visible:ring-4 focus-visible:ring-brand-blue/20 focus-visible:border-brand-blue disabled:cursor-not-allowed disabled:opacity-60",
+    base: "min-w-0 flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium outline-none transition-all duration-200 focus-visible:ring-4 focus-visible:ring-brand-blue/20 focus-visible:border-brand-blue disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[7rem]",
     selected: "border-brand-blue bg-brand-blue text-white shadow-sm hover:bg-brand-dark hover:border-brand-dark",
     unselectedError: "bg-white text-brand-ink hover:border-slate-300 border-brand-danger",
     unselected: "bg-white text-brand-ink hover:border-slate-300 border-slate-200",

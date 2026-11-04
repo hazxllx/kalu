@@ -11,8 +11,10 @@
  * `record_counters` table so records look identical across drivers.
  */
 import { createAuthClient, getServiceClient } from '../config/supabase.js';
+import { randomBytes } from 'node:crypto';
 import env from '../config/env.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
+import ApiError from '../utils/apiError.js';
 
 const TABLES = Object.freeze({
   residents: 'residents',
@@ -301,6 +303,9 @@ const RESIDENT_TO_DB = {
   minorAlternativeReason: 'minor_alternative_reason',
   minorAlternativeReviewedBy: 'minor_alternative_reviewed_by',
   minorAlternativeReviewedAt: 'minor_alternative_reviewed_at',
+  // Offline-sync idempotency key (unique when set). Write-only from the API's
+  // point of view: never selected in embeds and stripped from mapped residents.
+  clientOperationKey: 'client_operation_key',
 };
 
 const DB_TO_RESIDENT = Object.fromEntries(Object.entries(RESIDENT_TO_DB).map(([k, v]) => [v, k]));
@@ -380,7 +385,12 @@ const mapBack = (row, mapping) => {
 };
 
 const residentToRow = (resident) => mapKeys(resident, RESIDENT_TO_DB);
-const residentFromRow = (row) => (row ? mapBack(row, DB_TO_RESIDENT) : null);
+const residentFromRow = (row) => {
+  if (!row) return null;
+  const resident = mapBack(row, DB_TO_RESIDENT);
+  delete resident.clientOperationKey;
+  return resident;
+};
 
 // A plpgsql function declared `RETURNS public.residents` that returns SQL NULL
 // is rendered by PostgREST as a composite object with EVERY column null (not a
@@ -598,6 +608,7 @@ const RESIDENT_OPTIONAL_COLUMNS = new Set([
   'minor_alternative_reason',
   'minor_alternative_reviewed_by',
   'minor_alternative_reviewed_at',
+  'client_operation_key',
 ]);
 const SELECT_RESIDENT = Object.keys(DB_TO_RESIDENT)
   .filter((column) => !RESIDENT_OPTIONAL_COLUMNS.has(column))
@@ -740,10 +751,99 @@ const residentSearchFilter = (term, { includeBarangay = false } = {}) => {
 // material (no password/token columns exist on it), but we still select an
 // explicit allow-list so the API can never leak columns added later.
 const PROFILE_ADMIN_COLUMNS =
-  'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,position,license_no,contact,created_at,updated_at';
-const PROFILE_ADMIN_SELECT =
-  `${PROFILE_ADMIN_COLUMNS},barangay:barangays(name),municipality:municipalities(name),facility:facilities(name)`;
-const PROFILE_ADMIN_BASE_SELECT = PROFILE_ADMIN_COLUMNS;
+  'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations,position,license_no,contact,created_at,updated_at';
+const PERSONNEL_ACCOUNT_COLUMNS =
+  'account_id,approval_status,activation_requested,setup_required,setup_completed_at,suspended_at,suspension_reason,decision_reason,version';
+const PERSONNEL_NOTIFICATION_COLUMNS =
+  'id,account_id,event_type,actor_id,reason,status,attempts,next_attempt_at,last_error_code,provider_message_id,created_at,sent_at';
+const PROFILE_ADMIN_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS},personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS}),notifications:personnel_notification_outbox!account_id(${PERSONNEL_NOTIFICATION_COLUMNS})`;
+const PROFILE_ADMIN_SELECT = `${PROFILE_ADMIN_BASE_SELECT},barangay:barangays(name),municipality:municipalities(name),facility:facilities(name)`;
+
+const throwAccountError = (error, fallback) => {
+  if (!error) return;
+  // Provider details can contain credential payloads. Expose only our messages,
+  // never the raw Auth/SQL response or its details/hint fields.
+  const code = error.code || '';
+  if (code === '42501') throw ApiError.forbidden('You do not have permission to perform this account action.');
+  if (code === 'P0002') throw ApiError.notFound('User account or request not found.');
+  if (code === '23505') throw ApiError.conflict('An account or operation with these details already exists.');
+  if (code === '40001' || code === 'P0001') {
+    throw ApiError.conflict('The account or operation state changed. Refresh the account and retry the same operation.');
+  }
+  if (code === '23514') throw ApiError.conflict('The account state does not allow this action. Refresh the account before retrying.');
+  if (code === '22023' || code === '22P02') {
+    throw ApiError.unprocessable('The requested account action or assignment is not valid.');
+  }
+  throw new ApiError(503, fallback);
+};
+
+const applyAccountFilters = (query, {
+  q, role, status, municipalityId, barangayId, personnelOnly, approvalStatus, lifecycleState,
+} = {}) => {
+  if (personnelOnly) query = query.in('role', ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw']);
+  if (role) query = query.eq('role', role);
+  if (status) query = query.eq('status', status);
+  if (municipalityId) query = query.eq('municipality_id', municipalityId);
+  if (barangayId) query = query.eq('barangay_id', barangayId);
+  if (approvalStatus) query = query.eq('personnel_account.approval_status', approvalStatus);
+  const term = escapeSearchToken(q);
+  if (term) query = query.or(`full_name.ilike.%${term}%,email.ilike.%${term}%`);
+  if (!lifecycleState) return query;
+  if (lifecycleState === 'pending' || lifecycleState === 'rejected') {
+    return query.eq('personnel_account.approval_status', lifecycleState);
+  }
+  query = query.eq('personnel_account.approval_status', 'approved');
+  if (lifecycleState === 'suspended') return query.not('personnel_account.suspended_at', 'is', null);
+  query = query.is('personnel_account.suspended_at', null);
+  if (lifecycleState === 'awaiting_setup') return query.eq('personnel_account.setup_required', true);
+  query = query.eq('personnel_account.setup_required', false);
+  return lifecycleState === 'active' ? query.eq('status', 'active') : query.neq('status', 'active');
+};
+
+const notificationToAdminSummary = (row) => row ? {
+  id: row.id,
+  accountId: row.account_id,
+  eventType: row.event_type,
+  actorId: row.actor_id ?? null,
+  reason: row.reason || '',
+  status: row.status,
+  attempts: row.attempts ?? 0,
+  nextAttemptAt: row.next_attempt_at ?? null,
+  lastErrorCode: row.last_error_code ?? null,
+  providerMessageId: row.provider_message_id ?? null,
+  createdAt: row.created_at ?? null,
+  sentAt: row.sent_at ?? null,
+} : null;
+
+const ACCOUNT_AUDIT_FIELDS = new Set([
+  'email', 'full_name', 'role', 'status', 'position', 'license_no', 'contact',
+  'municipality_id', 'barangay_id', 'facility_id', 'rhu_stations', 'approval_status',
+  'activation_requested', 'setup_required', 'setup_completed_at', 'suspended_at',
+  'suspension_reason', 'decision_reason', 'reason', 'outcome', 'operation_id',
+  'approved_by', 'approved_at', 'rejected_by', 'rejected_at', 'suspended_by',
+  'version', 'event_type', 'notification_id', 'request_id', 'profile_status',
+  'account_id', 'activation_requested_by', 'created_by', 'created_at', 'updated_by', 'updated_at',
+  'attempts', 'performed_by', 'requested_by',
+]);
+const safeAccountAuditMetadata = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (['previous', 'before', 'after', 'old', 'new', 'personnel_account'].includes(key)) result[key] = safeAccountAuditMetadata(item);
+    else if (key === 'actor' && item && typeof item === 'object' && !Array.isArray(item)) {
+      result.actor = Object.fromEntries(['id', 'name', 'role'].filter((field) => typeof item[field] === 'string')
+        .map((field) => [field, item[field]]));
+    }
+    else if (ACCOUNT_AUDIT_FIELDS.has(key) && (item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
+      result[key] = item;
+    } else if (key === 'rhu_stations' && Array.isArray(item)) {
+      result[key] = item.filter((entry) => typeof entry === 'string');
+    } else if (key === 'changed_fields' && Array.isArray(item)) {
+      result[key] = item.filter((entry) => ACCOUNT_AUDIT_FIELDS.has(entry));
+    }
+  }
+  return result;
+};
 
 /** Only the embedded barangay/municipality relationship lookup is unavailable. */
 const isEmbeddedResourceUnavailable = (error) => {
@@ -753,7 +853,10 @@ const isEmbeddedResourceUnavailable = (error) => {
 };
 
 /** Map a profiles row to the curated admin-user shape (no secrets). */
-const profileToAdminUser = (row) => ({
+export const profileToAdminUser = (row) => {
+  const lifecycle = Array.isArray(row.personnel_account) ? row.personnel_account[0] : row.personnel_account;
+  const latestNotification = Array.isArray(row.notifications) ? row.notifications[0] : null;
+  return {
   id: row.id,
   email: row.email,
   name: row.full_name || row.email,
@@ -765,12 +868,25 @@ const profileToAdminUser = (row) => ({
   barangay: row.barangay?.name ?? null,
   facilityId: row.facility_id ?? null,
   facility: row.facility?.name ?? null,
+  // Preserve historical station values in the editor. Authorization normalizes
+  // its own session data; unrelated admin edits must not rewrite this array.
+  rhuStations: Array.isArray(row.rhu_stations) ? [...row.rhu_stations] : [],
+  approvalStatus: lifecycle?.approval_status ?? null,
+  activationRequested: lifecycle?.activation_requested ?? false,
+  setupRequired: lifecycle?.setup_required ?? false,
+  setupCompletedAt: lifecycle?.setup_completed_at ?? null,
+  suspendedAt: lifecycle?.suspended_at ?? null,
+  suspensionReason: lifecycle?.suspension_reason || '',
+  decisionReason: lifecycle?.decision_reason || '',
+  lifecycleVersion: lifecycle?.version ?? null,
+  notification: notificationToAdminSummary(latestNotification),
   position: row.position || '',
   licenseNo: row.license_no || '',
   contact: row.contact || '',
   createdAt: row.created_at ?? null,
   updatedAt: row.updated_at ?? null,
-});
+  };
+};
 
 const counterRpc = async (name) => {
   const supabase = getServiceClient();
@@ -1272,9 +1388,45 @@ export const supabaseRepository = {
 
   async insertResident(resident) {
     const supabase = getServiceClient();
-    const { data, error } = await supabase.from(TABLES.residents).insert(residentToRow(resident)).select().single();
-    throwOnError(error, 'Could not create resident');
+    const row = residentToRow(resident);
+    let { data, error } = await supabase.from(TABLES.residents).insert(row).select().single();
+    if (error && isMissingOfflineColumn(error) && 'client_operation_key' in row) {
+      // Migration not applied yet: retry without the additive operation-key
+      // column so online registration keeps working. Idempotency activates once
+      // the migration is deployed.
+      const { client_operation_key: _omit, ...compat } = row;
+      ({ data, error } = await supabase.from(TABLES.residents).insert(compat).select().single());
+    }
+    if (error) {
+      // Database-enforced idempotency: a replayed create carries the same
+      // client_operation_key, which is unique. Surface it as 23505 so the
+      // service returns the already-created resident instead of failing.
+      if (error.code === '23505' && resident?.clientOperationKey) {
+        const duplicate = new Error('A resident for this operation already exists.');
+        duplicate.code = '23505';
+        duplicate.statusCode = 409;
+        duplicate.details = error;
+        throw duplicate;
+      }
+      throwOnError(error, 'Could not create resident');
+    }
     return residentFromRow(data);
+  },
+
+  /** The resident created by a given offline operation key, or null. */
+  async findResidentByOperationKey(clientOperationKey) {
+    if (!clientOperationKey) return null;
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from(TABLES.residents)
+      .select('*')
+      .eq('client_operation_key', clientOperationKey)
+      .maybeSingle();
+    // Column not migrated yet: behave as "no prior operation" so the online
+    // workflow is unaffected until the migration is applied.
+    if (error && isMissingOfflineColumn(error)) return null;
+    throwOnError(error, 'Could not look up resident by operation key');
+    return data ? residentFromRow(data) : null;
   },
 
   async updateResident(id, patch, { expectedUpdatedAt = null } = {}) {
@@ -1373,43 +1525,45 @@ export const supabaseRepository = {
     status = null,
     municipalityId = null,
     barangayId = null,
+    personnelOnly = false,
+    approvalStatus = null,
+    lifecycleState = null,
     limit = 50,
     offset = 0,
   } = {}) {
     const supabase = getServiceClient();
     const read = (select) => {
+      const columns = approvalStatus || lifecycleState
+        ? select.replace('personnel_accounts!account_id(', 'personnel_accounts!account_id!inner(')
+        : select;
       let query = supabase
         .from(TABLES.profiles)
-        .select(select, { count: 'exact' })
+        .select(columns, { count: 'exact' })
         .order('created_at', { ascending: false })
+        .order('created_at', { referencedTable: 'notifications', ascending: false })
+        .limit(1, { referencedTable: 'notifications' })
         .range(offset, offset + limit - 1);
-      if (role) query = query.eq('role', role);
-      if (status) query = query.eq('status', status);
-      if (municipalityId) query = query.eq('municipality_id', municipalityId);
-      if (barangayId) query = query.eq('barangay_id', barangayId);
-      if (q) {
-        const term = String(q).trim();
-        query = query.or(`full_name.ilike.%${term}%,email.ilike.%${term}%`);
-      }
-      return query;
+      return applyAccountFilters(query, { q, role, status, municipalityId, barangayId, personnelOnly, approvalStatus, lifecycleState });
     };
     let { data, error, count } = await read(PROFILE_ADMIN_SELECT);
     if (error && isEmbeddedResourceUnavailable(error)) {
       ({ data, error, count } = await read(PROFILE_ADMIN_BASE_SELECT));
     }
-    throwOnError(error, 'Could not list user accounts');
+    throwAccountError(error, 'The account service is unavailable. Please try again shortly.');
     return { rows: (data || []).map(profileToAdminUser), total: count ?? (data || []).length };
   },
 
   async getProfileById(id) {
     if (!id) return null;
     const supabase = getServiceClient();
-    const read = (select) => supabase.from(TABLES.profiles).select(select).eq('id', id).maybeSingle();
+    const read = (select) => supabase.from(TABLES.profiles).select(select).eq('id', id)
+      .order('created_at', { referencedTable: 'notifications', ascending: false })
+      .limit(1, { referencedTable: 'notifications' }).maybeSingle();
     let { data, error } = await read(PROFILE_ADMIN_SELECT);
     if (error && isEmbeddedResourceUnavailable(error)) {
       ({ data, error } = await read(PROFILE_ADMIN_BASE_SELECT));
     }
-    throwOnError(error, 'Could not load the user account');
+    throwAccountError(error, 'The account service is unavailable. Please try again shortly.');
     return data ? profileToAdminUser(data) : null;
   },
 
@@ -1435,7 +1589,7 @@ export const supabaseRepository = {
       .eq('status', 'active');
     if (excludeId) query = query.neq('id', excludeId);
     const { count, error } = await query;
-    throwOnError(error, 'Could not count administrator accounts');
+    throwAccountError(error, 'Could not verify active administrator accounts.');
     return count ?? 0;
   },
 
@@ -1445,22 +1599,31 @@ export const supabaseRepository = {
    * `public.profiles`. Returned keys mirror the stored status enum values so the
    * API contract stays aligned with the status filter.
    */
-  async getAccountSummary() {
+  async getAccountSummary(filters = {}) {
     const supabase = getServiceClient();
-    const countWhere = async (apply) => {
-      let query = supabase.from(TABLES.profiles).select('id', { count: 'exact', head: true });
-      query = apply ? apply(query) : query;
+    const countWhere = async (extra = {}) => {
+      const select = filters.approvalStatus || filters.lifecycleState || extra.approvalStatus || extra.lifecycleState
+        ? 'id,personnel_account:personnel_accounts!account_id!inner(approval_status,setup_required,suspended_at)'
+        : 'id';
+      let query = supabase.from(TABLES.profiles).select(select, { count: 'exact', head: true });
+      query = applyAccountFilters(applyAccountFilters(query, filters), extra);
       const { count, error } = await query;
-      throwOnError(error, 'Could not summarise accounts');
+      throwAccountError(error, 'The account summary service is unavailable. Please try again shortly.');
       return count ?? 0;
     };
-    const [total, active, pendingVerification, disabled] = await Promise.all([
-      countWhere(null),
-      countWhere((query) => query.eq('status', 'active')),
-      countWhere((query) => query.eq('status', 'pending_verification')),
-      countWhere((query) => query.eq('status', 'disabled')),
+    const [total, active, pendingVerification, disabled, pendingApproval, approved, rejected, awaitingSetup, approvedInactive, suspended] = await Promise.all([
+      countWhere(),
+      countWhere({ status: 'active' }),
+      countWhere({ status: 'pending_verification' }),
+      countWhere({ status: 'disabled' }),
+      countWhere({ lifecycleState: 'pending' }),
+      countWhere({ approvalStatus: 'approved' }),
+      countWhere({ lifecycleState: 'rejected' }),
+      countWhere({ lifecycleState: 'awaiting_setup' }),
+      countWhere({ lifecycleState: 'approved_inactive' }),
+      countWhere({ lifecycleState: 'suspended' }),
     ]);
-    return { total, active, pending_verification: pendingVerification, disabled };
+    return { total, active, pending_verification: pendingVerification, disabled, pendingApproval, approved, rejected, awaitingSetup, approvedInactive, suspended };
   },
 
   async getAccountAssignmentOptions() {
@@ -1482,9 +1645,9 @@ export const supabaseRepository = {
         .eq('type', 'rhu')
         .order('name'),
     ]);
-    throwOnError(municipalitiesResult.error, 'Could not load municipalities');
-    throwOnError(barangaysResult.error, 'Could not load barangays');
-    throwOnError(facilitiesResult.error, 'Could not load RHU facilities');
+    throwAccountError(municipalitiesResult.error, 'Could not load assignment municipalities.');
+    throwAccountError(barangaysResult.error, 'Could not load assignment barangays.');
+    throwAccountError(facilitiesResult.error, 'Could not load RHU facilities.');
 
     return {
       municipalities: (municipalitiesResult.data || []).map(({ id, name, province }) => ({
@@ -1505,32 +1668,178 @@ export const supabaseRepository = {
     };
   },
 
-  async inviteAccount({ email, fullName }) {
-    const supabase = getServiceClient();
-    const redirectTo = env.clientUrls[0] ? `${env.clientUrls[0]}/reset-password` : undefined;
-    const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
-      data: { full_name: fullName },
-      ...(redirectTo ? { redirectTo } : {}),
+  async reservePersonnelAccount({ actorId, operationId, profile }) {
+    const { data, error } = await getServiceClient().rpc('admin_reserve_personnel_account', {
+      p_actor_id: actorId,
+      p_operation_id: operationId,
+      p_profile: profile,
     });
-    if (error) throw Object.assign(new Error(error.message || 'Could not invite the user'), { details: error });
-    return data?.user?.id ?? null;
+    throwAccountError(error, 'Account reservation could not be confirmed. Retry with the same operation reference.');
+    return Array.isArray(data) ? data[0] : data;
   },
 
-  async provisionAccountProfile({ id, actorId, profile }) {
-    const supabase = getServiceClient();
-    const { data, error } = await supabase.rpc('admin_provision_profile', {
+  async createManagedAuthAccount({ id, email, fullName }) {
+    const admin = getServiceClient().auth.admin;
+    const readReservedUser = async () => {
+      let result;
+      try {
+        result = await admin.getUserById(id);
+      } catch {
+        throw new ApiError(503, 'Auth account creation could not be confirmed. Retry with the same operation reference.');
+      }
+      const { data, error } = result;
+      const notFound = error?.status === 404 || error?.code === 'user_not_found';
+      if (error && !notFound) throw new ApiError(503, 'Auth account lookup is unavailable. Retry with the same operation reference.');
+      const user = data?.user;
+      if (!user) return null;
+      if (user.id !== id || String(user.email || '').trim().toLowerCase() !== email
+          || user.app_metadata?.personnel_managed !== true) {
+        throw ApiError.conflict('An existing Auth account does not match this personnel reservation.');
+      }
+      return user;
+    };
+
+    // A retry recovers ONLY the reserved identity. Never search by email and
+    // adopt another account, or delete Auth after an uncertain SQL outcome.
+    const existing = await readReservedUser();
+    if (existing) return existing.id;
+    let created;
+    try {
+      created = await admin.createUser({
+        id,
+        email,
+        email_confirm: false,
+        // Satisfy strict hosted password policies without exposing credentials.
+        password: `Aa1!${randomBytes(48).toString('base64url')}`,
+        user_metadata: { full_name: fullName },
+        app_metadata: { personnel_managed: true },
+      });
+    } catch {
+      const recovered = await readReservedUser();
+      if (recovered) return recovered.id;
+      throw new ApiError(503, 'Auth account creation could not be confirmed. Retry with the same operation reference.');
+    }
+    if (created.error) {
+      const recovered = await readReservedUser();
+      if (recovered) return recovered.id;
+      if (['email_exists', 'user_already_exists'].includes(created.error.code)
+          || /already (?:been )?registered|already exists|user already/i.test(created.error.message || '')) {
+        throw ApiError.conflict('An account with this email already exists.');
+      }
+      throw new ApiError(503, 'Auth account creation could not be confirmed. Retry with the same operation reference.');
+    }
+    if (!created.data?.user?.id) {
+      throw new ApiError(502, 'Supabase Auth did not return the reserved account identity. The reservation has been preserved.');
+    }
+    if (created.data.user.id !== id || String(created.data.user.email || '').trim().toLowerCase() !== email) {
+      throw ApiError.conflict('The Auth email belongs to an identity outside this personnel reservation.');
+    }
+    return id;
+  },
+
+  async createPersonnelAccountProfile({ actorId, operationId, profile }) {
+    const { data, error } = await getServiceClient().rpc('admin_create_personnel_account', {
+      p_actor_id: actorId,
+      p_operation_id: operationId,
+      p_profile: profile,
+    });
+    throwAccountError(error, 'Account provisioning could not be confirmed. Retry with the same operation reference.');
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.id ? profileToAdminUser(row) : null;
+  },
+
+  async updatePersonnelAccountProfile({ id, actorId, profile, operationId }) {
+    const { data, error } = await getServiceClient().rpc('admin_update_personnel_account', {
       p_target_id: id,
       p_actor_id: actorId,
       p_profile: profile,
+      p_operation_id: operationId,
     });
-    throwOnError(error, 'Could not provision the invited account');
-    return data ? profileToAdminUser(data) : null;
+    throwAccountError(error, 'Account update could not be confirmed. Retry with the same operation reference.');
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.id ? profileToAdminUser(row) : null;
   },
 
-  async removeUnprovisionedAuthUser(id) {
-    const supabase = getServiceClient();
-    const { error } = await supabase.auth.admin.deleteUser(id);
-    throwOnError(error, 'Could not clean up the unprovisioned invitation');
+  async transitionPersonnelAccount({ id, actorId, action, reason, activate, operationId }) {
+    const { data, error } = await getServiceClient().rpc('admin_transition_personnel_account', {
+      p_target_id: id,
+      p_actor_id: actorId,
+      p_action: action,
+      p_reason: reason,
+      p_activate: activate,
+      p_operation_id: operationId,
+    });
+    throwAccountError(error, 'The lifecycle action could not be confirmed. Retry with the same operation reference.');
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.id ? profileToAdminUser(row) : null;
+  },
+
+  async reviewPersonnelAccountRequest({ requestId, actorId, decision, reason }) {
+    const { data, error } = await getServiceClient().rpc('review_personnel_account_request', {
+      p_request_id: requestId,
+      p_actor_id: actorId,
+      p_decision: decision,
+      p_reason: reason,
+    });
+    throwAccountError(error, 'The account request decision could not be confirmed. Refresh the queue and retry.');
+    return Array.isArray(data) ? data[0] : data;
+  },
+
+  async getPersonnelSetupAccount(id) {
+    const { data, error } = await getServiceClient().from(TABLES.profiles)
+      .select(`id,role,status,personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS})`)
+      .eq('id', id).maybeSingle();
+    throwAccountError(error, 'The personnel setup service is unavailable. Please try again shortly.');
+    return data?.id ? profileToAdminUser(data) : null;
+  },
+
+  async completePersonnelAccountSetup(id) {
+    const { data, error } = await getServiceClient().rpc('complete_personnel_account_setup', { p_target_id: id });
+    throwAccountError(error, 'Your password was saved, but account setup could not be confirmed.');
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.id ? profileToAdminUser(row) : null;
+  },
+
+  async getPersonnelAccountHistory({ id, requestId = null }) {
+    const client = getServiceClient();
+    let auditQuery = client.from('health_audit_logs')
+      .select('id,actor_id,action,entity_type,entity_id,metadata,created_at');
+    auditQuery = requestId
+      ? auditQuery.or(`and(entity_type.in.(profiles,personnel_accounts),entity_id.eq.${id}),and(entity_type.eq.staff_account_requests,entity_id.eq.${requestId})`)
+      : auditQuery.in('entity_type', ['profiles', 'personnel_accounts']).eq('entity_id', id);
+    const [auditResult, notificationResult] = await Promise.all([
+      auditQuery.order('created_at', { ascending: false }).limit(100),
+      client.from('personnel_notification_outbox').select(PERSONNEL_NOTIFICATION_COLUMNS)
+        .eq('account_id', id).order('created_at', { ascending: false }).limit(100),
+    ]);
+    throwAccountError(auditResult.error, 'Could not load the account audit history.');
+    throwAccountError(notificationResult.error, 'Could not load the account notification history.');
+    // Audit actor_id references auth.users, not profiles. PostgREST cannot
+    // follow that indirect relationship; resolve the public names in one read.
+    const auditRows = auditResult.data || [];
+    const actorIds = [...new Set(auditRows.map((row) => row.actor_id).filter(Boolean))];
+    const actors = new Map();
+    if (actorIds.length) {
+      const { data, error } = await client.from(TABLES.profiles).select('id,full_name').in('id', actorIds);
+      throwAccountError(error, 'Could not load the account audit actors.');
+      for (const row of data || []) actors.set(row.id, row.full_name);
+    }
+    return {
+      audit: auditRows.map((row) => {
+        const metadata = safeAccountAuditMetadata(row.metadata);
+        return {
+          id: row.id,
+          actorId: row.actor_id ?? metadata.actor?.id ?? null,
+          actorName: metadata.actor?.name ?? actors.get(row.actor_id) ?? null,
+          action: row.action,
+          entityType: row.entity_type,
+          entityId: row.entity_id,
+          metadata,
+          createdAt: row.created_at,
+        };
+      }),
+      notifications: (notificationResult.data || []).map(notificationToAdminSummary),
+    };
   },
 
   /**
@@ -1546,25 +1855,22 @@ export const supabaseRepository = {
       p_target_id: id,
       p_actor_id: actorId,
     });
-    throwOnError(error, 'Could not verify that the account may be deleted');
+    throwAccountError(error, 'Account deletion safety checks could not be confirmed. No deletion has been attempted.');
     return data || null;
   },
 
   /**
    * Permanently delete the Supabase Auth identity. `public.profiles.id` has an
    * `on delete cascade` to `auth.users`, so this single call atomically removes
-   * the profile too and drops the user's Auth sessions/identities (the account
-   * can no longer sign in). Operational, clinical and audit references to the
-   * account are `on delete set null`, so those historical records are preserved.
+   * the profile too and drops Auth sessions/identities. Related-row deletion
+   * follows each table's foreign key. Health personnel are suspension-only in
+   * users.service to preserve their cascading requests/documents/assignments.
    */
   async deleteAuthAccount(id) {
     const supabase = getServiceClient();
     const { error } = await supabase.auth.admin.deleteUser(id);
     if (error) {
-      throw Object.assign(new Error(error.message || 'Could not delete the account'), {
-        statusCode: 502,
-        details: error,
-      });
+      throw new ApiError(502, 'The deletion could not be confirmed. Refresh the account list before retrying.');
     }
   },
 
@@ -1575,7 +1881,7 @@ export const supabaseRepository = {
       p_actor_id: actorId,
       p_profile: profile,
     });
-    throwOnError(error, 'Could not update the user account');
+    throwAccountError(error, 'The account update could not be confirmed. Please refresh the account.');
     return data ? profileToAdminUser(data) : null;
   },
 
@@ -1592,12 +1898,12 @@ export const supabaseRepository = {
       barangay_id: user.barangayId,
       metadata: { email: user.email },
     });
-    throwOnError(auditError, 'Could not record the account access reset request');
+    throwAccountError(auditError, 'Could not record the account access reset request. No recovery request has been sent.');
 
     const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
       ...(redirectTo ? { redirectTo } : {}),
     });
-    if (error) throw Object.assign(new Error(error.message || 'Could not send the recovery email'), { details: error });
+    if (error) throw new ApiError(503, 'The password recovery request could not be confirmed. Please try again shortly.');
   },
 
   // ----- resident verification audit log -----------------------------------

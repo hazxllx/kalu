@@ -109,7 +109,7 @@ export default function TimePicker({ value, onChange, error = false }) {
         <div
           role="dialog"
           aria-label="Select time"
-          className="absolute left-0 top-full z-30 mt-1.5 w-full min-w-[212px] rounded-btn border border-brand-border bg-white p-2.5 shadow-float"
+          className="absolute left-0 top-full z-30 mt-1.5 w-full min-w-0 rounded-btn border border-brand-border bg-white p-2.5 shadow-float sm:min-w-[212px]"
         >
           <div className="grid grid-cols-3 gap-2">
             <div>

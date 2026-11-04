@@ -89,7 +89,7 @@ export default function MedicalCertificates() {
 
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-5 py-4 dark:border-border">
-          <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-input border border-slate-200 bg-brand-bg/60 px-3.5 py-2.5 dark:border-border dark:bg-input sm:max-w-sm">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-input border border-slate-200 bg-brand-bg/60 px-3.5 py-2.5 dark:border-border dark:bg-input sm:min-w-[220px] sm:max-w-sm">
             <Search className="h-4 w-4 shrink-0 text-brand-gray" />
             <input
               value={query}

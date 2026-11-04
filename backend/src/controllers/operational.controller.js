@@ -20,6 +20,7 @@ export const update = async (req, res) => sendData(res, { record: await service.
   kind: req.params.kind,
   id: req.params.id,
   payload: req.body?.record || req.body || {},
+  expectedUpdatedAt: req.get('If-Match') || null,
 }) });
 export const markAllRead = async (req, res) => sendData(res, await service.markAllNotificationsRead({ user: req.user }));
 export const remove = async (req, res) => sendData(res, await service.remove({ user: req.user, kind: req.params.kind, id: req.params.id }));

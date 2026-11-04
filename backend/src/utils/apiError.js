@@ -13,6 +13,15 @@ export default class ApiError extends Error {
     if (details !== undefined) this.details = details;
   }
 
+  /**
+   * Machine-readable conflict code (e.g. `DUPLICATE_RECORD`). Only set by the
+   * factories below; the error handler exposes it to clients.
+   */
+  withCode(code) {
+    this.code = code;
+    return this;
+  }
+
   static badRequest(message = 'Bad request', details) {
     return new ApiError(400, message, details);
   }
@@ -39,6 +48,16 @@ export default class ApiError extends Error {
 
   static conflict(message = 'Resource already exists') {
     return new ApiError(409, message);
+  }
+
+  /** 409 for a record that already exists (offline sync: do not retry). */
+  static duplicate(message = 'A matching record already exists', details) {
+    return new ApiError(409, message, details).withCode('DUPLICATE_RECORD');
+  }
+
+  /** 409 for an optimistic-concurrency failure (record changed on the server). */
+  static staleRevision(message = 'This record changed on the server', details) {
+    return new ApiError(409, message, details).withCode('STALE_REVISION');
   }
 
   static tooManyRequests(message = 'Too many requests') {

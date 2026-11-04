@@ -1501,7 +1501,7 @@ export default function M1Records() {
                   <button onClick={() => setDetail(null)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                 {[
                   ["LMP", detail.lmp || "—"],
                   ["EDD", detail.edd || "—"],
@@ -1519,7 +1519,7 @@ export default function M1Records() {
               {/* Post-partum care & delivery outcome */}
               <div className="mt-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Post-partum Care &amp; Delivery Outcome</p>
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                   {[
                     ["Date of Delivery", detail.deliveryDate || "—"],
                     ["Delivery Outcome", detail.deliveryOutcome || "—"],
@@ -1539,7 +1539,7 @@ export default function M1Records() {
               {/* Post-partum check-ups + supplementation */}
               <div className="mt-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Post-partum Check-ups &amp; Supplementation</p>
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                   {[
                     ["Within 24 hours", detail.ppCheckup24h || "—"],
                     ["On day 3", detail.ppCheckupDay3 || "—"],
@@ -1559,7 +1559,7 @@ export default function M1Records() {
               {/* Health / lifestyle profile */}
               <div className="mt-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray mb-2">Health / Lifestyle Profile</p>
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                   {[
                     ["Smoking History", detail.smokingHistory ? "Yes" : "No"],
                     ["Binge Alcohol Drinker", detail.bingeAlcohol ? "Yes" : "No"],

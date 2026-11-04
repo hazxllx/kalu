@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
-  Building2,
   UserPlus,
   ArrowLeftRight,
   Check,
@@ -45,21 +44,6 @@ const options = [
       { icon: MapPin, label: "Proof of new address within Pili" },
     ],
     note: "Records are consolidated once your previous unit confirms the transfer.",
-  },
-  {
-    key: "official",
-    icon: UserPlus,
-    code: "FORM C",
-    title: "Health personnel account",
-    copy: "For authorized health workers and municipal health personnel. Staff accounts are verified by your operational approving officer.",
-    to: "/register/personnel",
-    cta: "Continue",
-    requirements: [
-      { icon: FileCheck2, label: "Certificate of appointment or service record" },
-      { icon: IdCard, label: "Office-issued identification card" },
-      { icon: Building2, label: "Endorsement from your assigned health unit" },
-    ],
-    note: "Your sign-in unlocks once your request is approved — by the Public Health Nurse for Health Supervisor and RHU Personnel accounts, or by the Health Supervisor for BHW accounts.",
   },
 ];
 
@@ -166,7 +150,7 @@ export default function RegistrationTypeSelection() {
                 Select the applicable registration form
               </h1>
               <p className="mt-1 text-[12.5px] leading-relaxed text-brand-gray">
-                Choose the form that best matches your circumstances.
+                 Resident registration only. Choose the form that best matches your circumstances.
               </p>
 
               {/* Option cards */}

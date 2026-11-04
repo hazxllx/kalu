@@ -356,7 +356,7 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
       aria-modal="true"
       aria-label="Cancel registration"
     >
-      <Card className="w-full max-w-[380px] p-5">
+      <Card className="w-full max-w-[380px] p-4 sm:p-5">
         <h2 className="text-[15px] font-semibold text-brand-ink">Cancel this registration?</h2>
         <p className="mt-1.5 text-[13px] text-brand-gray">
           The health center will be notified.

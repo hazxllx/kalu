@@ -54,7 +54,7 @@ export default function VerificationModal({ open, onClose, data = {} }) {
               {/* Body */}
               <div className="px-6 py-5">
                 {/* Info grid */}
-                <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="grid grid-cols-1 gap-3 mb-6 sm:grid-cols-2">
                   {[
                     { label: "Reference Number", value: data.reference || "—" },
                     { label: "Assigned Barangay", value: data.barangay || "—" },

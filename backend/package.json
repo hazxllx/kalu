@@ -12,6 +12,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "test": "node --test test/*.test.js tests/*.test.js",
+    "check:auth": "node scripts/check-auth-connectivity.mjs",
     "verify:live": "node scripts/verify-live-workflows.mjs",
     "provision:accounts": "node scripts/provision-official-accounts.mjs --apply"
   },
@@ -30,6 +31,7 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.13",
     "nodemon": "3.1.10"
   }
 }

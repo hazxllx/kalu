@@ -9,6 +9,7 @@ import VerificationBadge from "@/features/verification/components/VerificationBa
 import VerificationPagination from "@/features/verification/components/VerificationPagination";
 import { staffAccountsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
+import { legacyApprovalMessage } from "@/features/users/personnelLifecycle";
 import { Search, CheckCircle2, ChevronRight, Loader2, AlertCircle, Inbox } from "lucide-react";
 
 const STATUS_FILTERS = ["pending", "approved", "rejected", "resubmission_required", "all"];
@@ -93,7 +94,8 @@ const stationLabel = (stations) =>
  * `GET /api/staff-accounts/queue`, which returns only the request roles the
  * signed-in reviewer is responsible for, and every decision goes through
  * `POST /api/staff-accounts/:id/approve|reject` so the profile is actually
- * activated (or locked) and a real `health_audit_logs` entry is written.
+   * decided and a real `health_audit_logs` entry is written. Sign-in availability
+   * is reported only from the verified profile state returned by the server.
  *
  *   PHN               approves Health Supervisor and RHU Personnel accounts
  *   Health Supervisor approves BHW and Resident accounts
@@ -224,11 +226,12 @@ export default function StaffAccountApprovals({
 
   /** Apply a decision, then reload so the row shows its real new state. */
   const decide = async (record, decision, reason) => {
+    let result;
     if ((decision === "reject" || decision === "resubmit") && !reason.trim()) {
       throw new Error("A reason is required.");
     }
     if (decision === "approve") {
-      await staffAccountsApi.approve(record.id, reason.trim() ? { remarks: reason.trim() } : {});
+      result = await staffAccountsApi.approve(record.id, reason.trim() ? { remarks: reason.trim() } : {});
     } else if (decision === "resubmit") {
       await staffAccountsApi.requestResubmission(record.id, { reason: reason.trim() });
     } else {
@@ -237,7 +240,7 @@ export default function StaffAccountApprovals({
     setDetailId(null);
     showToast(
       decision === "approve"
-        ? `${record.fullName} approved — the account is now active and can sign in.`
+        ? legacyApprovalMessage(record.fullName, result)
         : decision === "resubmit"
           ? `Resubmission requested from ${record.fullName}.`
           : `${record.fullName} rejected. The account remains locked.`,
@@ -293,7 +296,7 @@ export default function StaffAccountApprovals({
 
       <section className="overflow-hidden rounded-card border border-brand-border bg-white dark:border-border dark:bg-card">
         <div className="flex flex-col gap-2 border-b border-brand-border px-4 py-3 dark:border-border sm:flex-row sm:items-center">
-          <label className="flex h-10 min-w-[200px] flex-1 items-center gap-2 rounded-input border border-brand-border bg-white px-3 dark:border-border dark:bg-input">
+          <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-input border border-brand-border bg-white px-3 dark:border-border dark:bg-input sm:min-w-[200px]">
             <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
             <input
               type="search"
@@ -648,7 +651,7 @@ function RequestReviewModal({ record, bhwOnly = false, onClose, onDecide }) {
             className={DECISION_TEXTAREA_CLASS}
           />
           {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
-          {/* Approve & Activate | Request Resubmission | Reject — the same shared
+          {/* Approve | Request Resubmission | Reject use the same shared
               decision styling and three-column layout as Resident Verification.
               Request Resubmission is backed by
               POST /staff-accounts/:id/request-resubmission. */}
@@ -660,7 +663,7 @@ function RequestReviewModal({ record, bhwOnly = false, onClose, onDecide }) {
                 disabled={Boolean(busy)}
                 loading={busy === "approve"}
               >
-                Approve &amp; Activate
+                Approve
               </DecisionButton>
               <DecisionButton
                 variant="resubmit"

@@ -805,6 +805,33 @@ export const listResidents = async ({
 };
 
 /**
+ * Insert a resident, carrying the offline operation key when present. If the
+ * database's unique operation-key index rejects the insert (a concurrent replay
+ * won the race), return the row that operation already created.
+ */
+const insertResidentIdempotent = async (user, operationKey, row) => {
+  if (!operationKey) return repository.insertResident(row);
+
+  try {
+    return await repository.insertResident({
+      ...row,
+      clientOperationKey: operationKey,
+    });
+  } catch (err) {
+    if (err?.code === '23505') {
+      const existing =
+        await repository.findResidentByOperationKey?.(operationKey);
+
+      if (existing) {
+        assertWithinScope(user, existing);
+        return existing;
+      }
+    }
+    throw err;
+  }
+};
+
+/**
  * Register a new resident record.
  *
  * Identity fields are validated (422), the barangay must exist within the
@@ -814,6 +841,7 @@ export const listResidents = async ({
 export const createResident = async ({
   user,
   payload = {},
+  idempotencyKey = null,
 }) => {
   if (!isCreateRole(user)) {
     throw ApiError.forbidden(
@@ -924,6 +952,22 @@ export const createResident = async ({
     );
   }
 
+  // Idempotent replay (offline sync, response lost after the server committed).
+  // This runs only after role / validation / scope / barangay checks so a replay
+  // can never bypass the caller's CURRENT scope, and before the duplicate guard
+  // because the row we are about to find would otherwise match it.
+  const operationKey = clean(idempotencyKey) || null;
+
+  if (operationKey) {
+    const replayed =
+      await repository.findResidentByOperationKey?.(operationKey);
+
+    if (replayed) {
+      assertWithinScope(user, replayed);
+      return replayed;
+    }
+  }
+
   // Duplicate guard: identical identity in the same barangay is a conflict.
   // The same person moving barangays is a legitimate transfer, not a duplicate.
   const duplicate =
@@ -941,7 +985,7 @@ export const createResident = async ({
     ).toLowerCase() ===
       barangay.toLowerCase()
   ) {
-    throw ApiError.conflict(
+    throw ApiError.duplicate(
       `A resident with the same name and date of birth is already registered in ${barangay} (${duplicate.healthRecordNo || duplicate.id}).`,
     );
   }
@@ -997,7 +1041,7 @@ export const createResident = async ({
       });
 
     const resident =
-      await repository.insertResident({
+      await insertResidentIdempotent(user, operationKey, {
         ...ids,
 
         authUserId:
@@ -1066,7 +1110,7 @@ export const createResident = async ({
     };
   }
 
-  return repository.insertResident({
+  return insertResidentIdempotent(user, operationKey, {
     ...ids,
 
     // Verified on creation — the staff registration in person is the
@@ -1384,7 +1428,7 @@ export const updateResident = async ({
   if (expectedUpdatedAt && !updated) {
     const current = await repository.getResident(id);
     if (!current) throw ApiError.notFound('Resident record not found');
-    throw ApiError.conflict('This resident changed on the server. Reload it before applying the queued changes.');
+    throw ApiError.staleRevision('This resident changed on the server. Reload it before applying the queued changes.');
   }
   return updated;
 };

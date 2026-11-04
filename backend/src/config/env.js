@@ -8,6 +8,7 @@ const corsOriginValue = process.env.CORS_ORIGIN || '';
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const personnelIntervalSeconds = Number(process.env.PERSONNEL_NOTIFICATION_INTERVAL_SECONDS || 60);
 
 if (isProduction) {
   const missing = [];
@@ -70,6 +71,9 @@ const env = {
   // always permits both loopback hostnames because browsers treat them as
   // distinct origins even though they resolve to the same machine.
   clientUrls: configuredClientUrls,
+  // Mail redirects require an explicitly configured canonical CLIENT_URL, not
+  // one of the implicit development CORS origins.
+  clientUrl: clientUrlValue.split(',').map((value) => value.trim()).find(Boolean) || '',
 
   // --- Supabase (server side) ------------------------------------------------
   // The service-role key bypasses Row Level Security, so it lives ONLY here on
@@ -84,6 +88,9 @@ const env = {
   smtpUser: process.env.SMTP_USER || '',
   smtpPassword: process.env.SMTP_PASSWORD || '',
   smtpFrom: process.env.SMTP_FROM || '',
+  personnelNotificationIntervalMs: Math.round(Math.min(3600, Math.max(10,
+    Number.isFinite(personnelIntervalSeconds) ? personnelIntervalSeconds : 60,
+  ))) * 1000,
   otpPepper: process.env.OTP_PEPPER || '',
 
   // --- Local data store ------------------------------------------------------
