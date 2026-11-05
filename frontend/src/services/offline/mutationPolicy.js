@@ -46,6 +46,7 @@ export const SAFE_HOUSEHOLD_UPDATE_FIELDS = Object.freeze([
   'streetAddress',
   'contact',
   'families',
+  'hhStatus',
   'monthlyIncome',
   'respondentLast',
   'respondentFirst',

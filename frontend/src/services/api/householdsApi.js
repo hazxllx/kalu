@@ -16,11 +16,19 @@ import { api } from './apiClient.js';
  */
 export const householdsApi = {
   list: (params) => api.get('/households', { params }),
+  monitoringSummary: () => api.get('/households/monitoring/summary'),
   searchResidents: (q) => api.get('/households/residents/search', { params: { q } }),
   get: (id) => api.get(`/households/${id}`),
+  listVisits: (id) => api.get(`/households/${id}/visits`),
+  createVisit: (id, visit, requestId = visit?.requestId) => api.post(
+    `/households/${id}/visits`,
+    { visit },
+    { headers: requestId ? { 'Idempotency-Key': requestId } : {} },
+  ),
   create: (payload, options) => api.post('/households', payload, options),
   update: (id, payload, options) => api.put(`/households/${id}`, payload, options),
   addMember: (id, member) => api.post(`/households/${id}/members`, { member }),
+  updateMember: (id, memberId, member) => api.put(`/households/${id}/members/${memberId}`, { member }),
   removeMember: (id, memberId) => api.delete(`/households/${id}/members/${memberId}`),
   getMemberHealth: (id, memberId) => api.get(`/households/${id}/members/${memberId}/health`),
   saveMemberHealth: (id, memberId, health, options) =>

@@ -67,6 +67,22 @@ const readOnlyCls =
   "w-full rounded-input border border-brand-border bg-brand-bg px-3.5 py-2.5 text-sm font-semibold text-brand-ink outline-none";
 
 const today = () => new Date().toISOString().slice(0, 10);
+const todayLocal = () => {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
+};
+const newVisitRequestId = () => globalThis.crypto?.randomUUID?.()
+  || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+const residentFullName = (resident = {}) => [
+  resident.firstName,
+  resident.middleName,
+  resident.lastName,
+  resident.suffix,
+].filter(Boolean).join(" ");
 
 const emptyMember = () => ({
   name: "",
@@ -292,14 +308,17 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
                               type="button"
                               onClick={() => {
                                 onChange("residentId", resident.residentId);
-                                onChange("name", `${resident.firstName} ${resident.lastName}`.trim());
+                                onChange("name", residentFullName(resident));
                                 onChange("birthday", resident.birthDate || "");
                                 onChange("age", ageFromBirthday(resident.birthDate || ""));
+                                onChange("sex", SEX_OPTIONS.includes(resident.sex) ? resident.sex : "");
+                                onChange("contact", resident.cellphoneNo || "");
+                                onChange("philhealth", resident.philhealthNo ? "member" : "");
                               }}
                               className="w-full px-3 py-2.5 text-left transition-colors hover:bg-brand-bg"
                             >
                               <span className="block text-sm font-medium text-brand-ink">
-                                {resident.firstName} {resident.lastName}
+                                {residentFullName(resident)}
                               </span>
                               <span className="mt-0.5 block text-xs text-brand-gray">
                                 {resident.birthDate ? formatBirthday(resident.birthDate) : "Birthdate not recorded"}
@@ -590,6 +609,8 @@ export default function AddHouseholdPage() {
   const bhwOptions = bhwOptionsFor(defaultCollector);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [headSearchOpen, setHeadSearchOpen] = useState(false);
+  const [headSearch, setHeadSearch] = useState({ rows: [], loading: false, searched: false, error: "" });
 
   const [openSections, setOpenSections] = useState({
     info: true,
@@ -618,6 +639,8 @@ export default function AddHouseholdPage() {
     hhStatus: "Pending",
     approval: "Not yet approved",
     income: "",
+    initialVisitDate: todayLocal(),
+    initialVisitRequestId: newVisitRequestId(),
     visits: { q1: "", q2: "", q3: "", q4: "" },
     respLast: "",
     respFirst: "",
@@ -642,6 +665,34 @@ export default function AddHouseholdPage() {
   }));
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  useEffect(() => {
+    const query = form.head.trim();
+    if (user?.role !== "bhw" || query.length < 2) {
+      setHeadSearch({ rows: [], loading: false, searched: false, error: "" });
+      return undefined;
+    }
+
+    let active = true;
+    const timeout = setTimeout(() => {
+      setHeadSearch((current) => ({ ...current, loading: true, error: "" }));
+      householdsApi.searchResidents(query)
+        .then((response) => {
+          if (!active) return;
+          const rows = Array.isArray(response) ? response : response?.rows || [];
+          setHeadSearch({ rows, loading: false, searched: true, error: "" });
+        })
+        .catch((error) => {
+          if (!active) return;
+          setHeadSearch({ rows: [], loading: false, searched: true, error: error?.message || "Resident search is unavailable. You can still enter the name." });
+        });
+    }, 300);
+
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [form.head, user?.role]);
 
   const clearError = (key) =>
     setErrors((prev) => {
@@ -759,6 +810,7 @@ export default function AddHouseholdPage() {
     if (incomeErr) next.income = incomeErr;
     const contactErr = validatePhone(form.contact, { isRequired: false, label: "Contact number" });
     if (contactErr) next.contact = contactErr;
+    if (user?.role === "bhw" && !form.initialVisitDate) next.initialVisitDate = "First Visit Date is required.";
 
     if (!form.respLast.trim()) next.respLast = "Last Name is required.";
     if (!form.respFirst.trim()) next.respFirst = "First Name is required.";
@@ -844,7 +896,11 @@ export default function AddHouseholdPage() {
           sanitationAccess: form.sanitationAccess,
           wasteDisposal: form.wasteDisposal,
           wasteSegregation: form.segregation,
-          quarterVisits: form.visits,
+          ...(user?.role === "bhw" ? {
+            initialVisitDate: form.initialVisitDate,
+            initialVisitRequestId: form.initialVisitRequestId,
+            initialVisitReason: "Initial Profiling",
+          } : { quarterVisits: form.visits }),
           collectorName: form.collector,
           members: form.members.map((m) => ({
             name: m.name.trim(),
@@ -865,11 +921,13 @@ export default function AddHouseholdPage() {
       const saved = result?.household;
       const toastMessage = result?.queued
         ? "Saved offline — will sync automatically"
-        : `Household ${saved?.id || ""} added successfully`;
+        : result?.visitWarning
+          ? `Household ${saved?.id || ""} was saved. ${result.visitWarning}`
+          : `Household ${saved?.id || ""} added successfully`;
       if (householdsPath) {
         navigate(householdsPath, {
           replace: true,
-          state: { hhToast: toastMessage },
+          state: { hhToast: toastMessage, hhToastDuration: result?.visitWarning ? 9000 : 3000 },
         });
       }
     } catch (err) {
@@ -971,6 +1029,16 @@ export default function AddHouseholdPage() {
         </div>
       </div>
 
+      {user?.role === "bhw" && householdsPath && (
+        <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-brand-blue/20 bg-brand-light/40 p-4">
+          <div>
+            <p className="text-sm font-semibold text-brand-ink">Returning to a household already on file?</p>
+            <p className="mt-1 text-xs text-brand-gray">Search the existing household and record the next visit there to keep one continuous profile.</p>
+          </div>
+          <Link to={householdsPath} className="rounded-btn border border-brand-blue/30 bg-white px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-light">Find existing household</Link>
+        </Card>
+      )}
+
       {/* Server-side validation / duplicate errors */}
       {saveError && (
         <div role="alert" className="mb-5 flex items-start gap-2.5 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger">
@@ -982,7 +1050,7 @@ export default function AddHouseholdPage() {
       {/* Form body — fills the content area; two columns on md+ */}
       <div className="w-full space-y-5 pb-6">
         {/* 1 — Household Information */}
-        <Section
+          <Section
           id="info"
           index={SECTION_INDEX.info}
           title="Household Information"
@@ -995,13 +1063,79 @@ export default function AddHouseholdPage() {
               <input readOnly value="Auto-generated (e.g. HH-001)" className={readOnlyCls} />
             </Field>
             <Field label="Household Head Name" required error={errors.head}>
-              <input
-                type="text"
-                value={form.head}
-                onChange={(e) => set("head", e.target.value)}
-                placeholder="e.g. Juan Dela Cruz"
-                className={inputCls(errors.head)}
-              />
+              {user?.role === "bhw" ? (
+                <div className="relative">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-gray" />
+                    <input
+                      type="text"
+                      value={form.head}
+                      onFocus={() => setHeadSearchOpen(true)}
+                      onChange={(e) => { set("head", e.target.value); clearError("head"); setHeadSearchOpen(true); }}
+                      onBlur={() => setTimeout(() => setHeadSearchOpen(false), 120)}
+                      placeholder="Search existing residents or enter a name"
+                      autoComplete="off"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={headSearchOpen && form.head.trim().length >= 2}
+                      aria-controls="household-head-results"
+                      className={`${inputCls(errors.head)} pl-9`}
+                    />
+                  </div>
+                  {headSearchOpen && form.head.trim().length >= 2 && (
+                    <div id="household-head-results" role="listbox" className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-brand-border bg-white py-1 shadow-lg">
+                      {headSearch.loading ? (
+                        <p className="px-3 py-2 text-sm text-brand-gray">Searching residents…</p>
+                      ) : headSearch.rows.length ? (
+                        headSearch.rows.map((resident) => {
+                          const name = residentFullName(resident);
+                          return (
+                            <button
+                              key={resident.residentId || name}
+                              type="button"
+                              role="option"
+                              aria-selected={form.head === name}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                const residentZone = String(resident.zone || "").trim();
+                                const matchingPurok = PUROKS.find((purok) =>
+                                  purok.toLowerCase() === residentZone.toLowerCase()
+                                  || purok.toLowerCase() === `purok ${residentZone}`.toLowerCase()
+                                );
+                                setForm((previous) => ({
+                                  ...previous,
+                                  head: name,
+                                  streetAddress: previous.streetAddress || resident.currentAddress || resident.permanentAddress || "",
+                                  contact: previous.contact || resident.cellphoneNo || "",
+                                  purok: previous.purok || matchingPurok || "",
+                                }));
+                                clearError("head");
+                                setHeadSearchOpen(false);
+                              }}
+                              className="block w-full px-3 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg focus-visible:bg-brand-bg focus-visible:outline-none"
+                            >
+                              <span className="block font-medium">{name}</span>
+                              {resident.verificationStatus && <span className="mt-0.5 block text-xs text-brand-gray">{resident.verificationStatus}</span>}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p className="px-3 py-2 text-sm text-brand-gray">
+                          {headSearch.error || (headSearch.searched ? "No matching resident found. You can use the name you entered." : "Keep typing to search. You can also enter a name directly.")}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={form.head}
+                  onChange={(e) => set("head", e.target.value)}
+                  placeholder="e.g. Juan Dela Cruz"
+                  className={inputCls(errors.head)}
+                />
+              )}
             </Field>
             <Field label="Purok/Zone" required error={errors.purok}>
               <select value={form.purok} onChange={(e) => set("purok", e.target.value)} className={`${inputCls(errors.purok)} cursor-pointer`}>
@@ -1123,27 +1257,40 @@ export default function AddHouseholdPage() {
           id="visits"
           index={SECTION_INDEX.visits}
           title="Visit Tracking"
-          subtitle="Quarterly visit dates (optional)."
+          subtitle={user?.role === "bhw" ? "This first profile submission is recorded as First Visit. Later visits continue the same sequence." : "Quarterly visit dates (optional)."}
           open={openSections.visits}
           onToggle={toggleSection}
         >
-          <div className={grid2}>
-            {[
-              { key: "q1", label: "First Quarter Date of Visit" },
-              { key: "q2", label: "Second Quarter Date of Visit" },
-              { key: "q3", label: "Third Quarter Date of Visit" },
-              { key: "q4", label: "Fourth Quarter Date of Visit" },
-            ].map((v) => (
-              <Field key={v.key} label={v.label}>
+          {user?.role === "bhw" ? (
+            <div className="max-w-md">
+              <Field label="First Visit Date" required error={errors.initialVisitDate} hint="Defaults to today. Change it if the household visit happened on another date.">
                 <input
                   type="date"
-                  value={form.visits[v.key]}
-                  onChange={(e) => set("visits", { ...form.visits, [v.key]: e.target.value })}
+                  value={form.initialVisitDate}
+                  onChange={(e) => set("initialVisitDate", e.target.value)}
                   className={inputCls()}
                 />
               </Field>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className={grid2}>
+              {[
+                { key: "q1", label: "First Quarter Date of Visit" },
+                { key: "q2", label: "Second Quarter Date of Visit" },
+                { key: "q3", label: "Third Quarter Date of Visit" },
+                { key: "q4", label: "Fourth Quarter Date of Visit" },
+              ].map((v) => (
+                <Field key={v.key} label={v.label}>
+                  <input
+                    type="date"
+                    value={form.visits[v.key]}
+                    onChange={(e) => set("visits", { ...form.visits, [v.key]: e.target.value })}
+                    className={inputCls()}
+                  />
+                </Field>
+              ))}
+            </div>
+          )}
         </Section>
 
         {/* 5 — HH Head PhilHealth Info */}

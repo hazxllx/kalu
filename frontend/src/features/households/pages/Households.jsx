@@ -74,6 +74,11 @@ const EMPTY_FILTERS = {
   risk: [],
 };
 const HOUSEHOLD_PAGE_SIZE = 100;
+const formatVisitDate = (value) => {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+};
 
 /** Verification badge tones shown for gathered-data review status. */
 const VERIFICATION_TONES = {
@@ -210,6 +215,9 @@ export default function Households() {
 
   const [households, setHouseholds] = useState([]);
   const [householdTotal, setHouseholdTotal] = useState(0);
+  const [zoneSummary, setZoneSummary] = useState(null);
+  const [zoneSummaryError, setZoneSummaryError] = useState("");
+  const [collapsedZones, setCollapsedZones] = useState(() => new Set());
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -299,6 +307,25 @@ export default function Households() {
     load("", 0);
   }, [load]);
 
+  useEffect(() => {
+    if (user?.role !== "bhw") {
+      setZoneSummary(null);
+      return undefined;
+    }
+    let active = true;
+    householdsApi.monitoringSummary()
+      .then((summary) => {
+        if (active) {
+          setZoneSummary(summary);
+          setZoneSummaryError("");
+        }
+      })
+      .catch((error) => {
+        if (active) setZoneSummaryError(error?.message || "Unable to load zone monitoring.");
+      });
+    return () => { active = false; };
+  }, [user?.role, lastSyncedAt]);
+
   // A queued household can be confirmed while this page remains open. Reload
   // the authorized server list after that confirmation so the temporary local
   // row is replaced by the authoritative record without a browser refresh.
@@ -327,7 +354,7 @@ export default function Households() {
     const message = location.state?.hhToast;
     if (!message) return undefined;
     setToast(message);
-    const timer = setTimeout(() => setToast(null), 3000);
+    const timer = setTimeout(() => setToast(null), Number(location.state?.hhToastDuration) || 3000);
     window.history.replaceState({}, "");
     return () => clearTimeout(timer);
   }, [location.state]);
@@ -381,6 +408,22 @@ export default function Households() {
     ) + (search ? 1 : 0);
 
   const hasSearchOrFilters = activeFilterCount > 0;
+
+  const visibleZoneGroups = useMemo(() => {
+    if (user?.role !== "bhw") return [];
+    const groups = new Map();
+    visible.forEach((household) => {
+      const name = household.purok || "Unassigned";
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(household);
+    });
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [user?.role, visible]);
+
+  const monitoredHouseholds = useMemo(() => {
+    const records = zoneSummary?.zones?.flatMap((zone) => zone.households || []) || [];
+    return new Map(records.map((household) => [household.id, household]));
+  }, [zoneSummary]);
 
   /* ----------------------- detail modal (members) ------------------------ */
 
@@ -509,6 +552,69 @@ export default function Households() {
     collector: h.collectorName,
     approval: h.approvalStatus,
   });
+
+  const renderHouseholdRow = (raw) => {
+    const h = renderRow(raw);
+    const monitoring = monitoredHouseholds.get(h.id);
+    const verificationTitle = h.verifiedBy
+      ? `Reviewed by ${h.verifiedBy}${h.verifiedAt ? ", " + new Date(h.verifiedAt).toLocaleDateString() : ""}`
+      : "Not yet reviewed";
+    return (
+      <tr
+        key={h.id}
+        onClick={() => openDetail(h.id)}
+        className="cursor-pointer border-b border-brand-border transition-colors last:border-0 hover:bg-brand-bg/50"
+      >
+        <td className="whitespace-nowrap px-4 py-3 font-semibold text-brand-ink">{h.id}</td>
+        <td className="whitespace-nowrap px-4 py-3 font-medium text-brand-ink">{h.head}</td>
+        <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{h.purok}</td>
+        <td className="px-4 py-3 text-brand-gray">{h.streetAddress}</td>
+        <td className="px-4 py-3"><HHBadge value={h.hhStatus} /></td>
+        <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{h.collector || "—"}</td>
+        <td className="px-4 py-3">
+          <div className="flex flex-col items-start gap-1">
+            <span
+              title={verificationTitle}
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${VERIFICATION_TONES[h.verificationStatus] || VERIFICATION_TONES["Pending Verification"]}`}
+            >
+              <span className="h-2 w-2 rounded-full bg-current opacity-70" />
+              {h.verificationStatus || "Pending Verification"}
+            </span>
+            {h.correctionReason && (
+              <span className="max-w-[16rem] truncate text-[11px] text-brand-gray" title={h.correctionReason}>
+                {h.correctionReason}
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-3"><HHBadge value={h.approval} /></td>
+        <td className="whitespace-nowrap px-4 py-3">
+          <HHBadge value={h.riskLevel || "Low"} label={`${h.riskLevel || "Low"} Risk`} />
+        </td>
+        {user?.role === "bhw" && (
+          <td className="whitespace-nowrap px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-brand-gray">
+                {monitoring?.latestVisitDate
+                  ? `${Number(monitoring.latestVisitNumber) === 1 ? "Initial profile" : `Visit ${monitoring.latestVisitNumber}`} · ${formatVisitDate(monitoring.latestVisitDate)}`
+                  : "No visit recorded"}
+              </span>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openDetail(h.id);
+                }}
+                className="font-medium text-brand-blue hover:underline"
+              >
+                View details
+              </button>
+            </div>
+          </td>
+        )}
+      </tr>
+    );
+  };
 
   return (
     <>
@@ -650,11 +756,28 @@ export default function Households() {
 
       {!loading && visible.length > 0 && view === "table" && (
         <Card className="overflow-hidden">
+          {user?.role === "bhw" && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-border bg-brand-bg/60 px-4 py-3">
+              <div>
+                <h2 className="text-sm font-semibold text-brand-ink">Zone / Purok Monitoring</h2>
+                {zoneSummaryError ? (
+                  <p className="mt-0.5 text-xs text-rose-600">{zoneSummaryError}</p>
+                ) : zoneSummary ? (
+                  <p className="mt-0.5 text-xs text-brand-gray">
+                    {zoneSummary.totalHouseholds} households · {zoneSummary.visitedHouseholds} visited · {zoneSummary.householdsWithoutVisits} without a visit
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-xs text-brand-gray">Loading visit counts…</p>
+                )}
+              </div>
+              <span className="text-xs text-brand-gray">Expand a Purok row to view its households</span>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-brand-border bg-brand-bg text-left">
-                  {COLUMNS.map((c) => (
+                  {[...COLUMNS, ...(user?.role === "bhw" ? [{ key: "visitMonitoring", label: "Visit Monitoring" }] : [])].map((c) => (
                     <th
                       key={c.key}
                       className="whitespace-nowrap px-4 py-3 text-xs font-medium uppercase text-brand-gray"
@@ -679,7 +802,9 @@ export default function Households() {
                         {c.filter && (
                           <ColumnFilter
                             type={c.filter}
-                            options={c.options}
+                            options={c.key === "purok" && zoneSummary?.zones?.length
+                              ? zoneSummary.zones.map((zone) => zone.purok)
+                              : c.options}
                             placeholder={c.placeholder}
                             columnLabel={c.label}
                             value={filters[c.key]}
@@ -692,50 +817,39 @@ export default function Households() {
                 </tr>
               </thead>
               <tbody>
-                {visible.map((raw) => {
-                  const h = renderRow(raw);
-                  const verificationTitle = h.verifiedBy
-                    ? `Reviewed by ${h.verifiedBy}${h.verifiedAt ? ", " + new Date(h.verifiedAt).toLocaleDateString() : ""}`
-                    : "Not yet reviewed";
-                  return (
-                    <tr
-                      key={h.id}
-                      onClick={() => openDetail(h.id)}
-                      className="cursor-pointer border-b border-brand-border transition-colors last:border-0 hover:bg-brand-bg/50"
-                    >
-                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-brand-ink">{h.id}</td>
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-brand-ink">{h.head}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{h.purok}</td>
-                      <td className="px-4 py-3 text-brand-gray">{h.streetAddress}</td>
-                      <td className="px-4 py-3">
-                        <HHBadge value={h.hhStatus} />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{h.collector || "—"}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col items-start gap-1">
-                          <span
-                            title={verificationTitle}
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${VERIFICATION_TONES[h.verificationStatus] || VERIFICATION_TONES["Pending Verification"]}`}
+                {(user?.role === "bhw"
+                  ? visibleZoneGroups.flatMap(([zoneName, rows]) => {
+                    const summary = zoneSummary?.zones?.find((zone) => zone.purok === zoneName);
+                    const collapsed = collapsedZones.has(zoneName);
+                    return [
+                      <tr key={`zone-${zoneName}`} className="border-b border-brand-border bg-brand-bg/70">
+                        <td colSpan={COLUMNS.length + (user?.role === "bhw" ? 1 : 0)} className="px-4 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setCollapsedZones((previous) => {
+                              const next = new Set(previous);
+                              if (next.has(zoneName)) next.delete(zoneName);
+                              else next.add(zoneName);
+                              return next;
+                            })}
+                            aria-expanded={!collapsed}
+                            className="flex w-full items-center justify-between gap-3 text-left"
                           >
-                            <span className="h-2 w-2 rounded-full bg-current opacity-70" />
-                            {h.verificationStatus || "Pending Verification"}
-                          </span>
-                          {h.correctionReason && (
-                            <span className="max-w-[16rem] truncate text-[11px] text-brand-gray" title={h.correctionReason}>
-                              {h.correctionReason}
+                            <span className="flex items-center gap-2 font-semibold text-brand-ink">
+                              <ChevronDown className={`h-4 w-4 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+                              {zoneName}
+                              <span className="font-normal text-brand-gray">{rows.length} shown</span>
                             </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <HHBadge value={h.approval} />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <HHBadge value={h.riskLevel || "Low"} label={`${h.riskLevel || "Low"} Risk`} />
-                      </td>
-                    </tr>
-                  );
-                })}
+                            <span className="text-xs text-brand-gray">
+                              {summary ? `${summary.total} total · ${summary.visited} visited · ${summary.notVisited} no visits` : "Visit totals unavailable"}
+                            </span>
+                          </button>
+                        </td>
+                      </tr>,
+                      ...(!collapsed ? rows.map((raw) => renderHouseholdRow(raw)) : []),
+                    ];
+                  })
+                  : visible.map((raw) => renderHouseholdRow(raw)))}
               </tbody>
             </table>
           </div>
@@ -743,19 +857,42 @@ export default function Households() {
       )}
 
       {!loading && visible.length > 0 && view === "cards" && (
-        <div className="grid gap-5 md:grid-cols-2">
-          {visible.map((raw, i) => {
-            const h = renderRow(raw);
-            const treatment = Array.isArray(h.treatmentMethods) && h.treatmentMethods.length
-              ? h.treatmentMethods.join(", ")
-              : "None";
+        <div className="space-y-6">
+          {user?.role === "bhw" && (
+            <Card className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+              <h2 className="text-sm font-semibold text-brand-ink">Zone / Purok Monitoring</h2>
+              {zoneSummary ? (
+                <p className="text-xs text-brand-gray">
+                  {zoneSummary.totalHouseholds} households · {zoneSummary.visitedHouseholds} visited · {zoneSummary.householdsWithoutVisits} without a visit
+                </p>
+              ) : (
+                <p className="text-xs text-brand-gray">{zoneSummaryError || "Loading visit counts…"}</p>
+              )}
+            </Card>
+          )}
+          {(user?.role === "bhw" ? visibleZoneGroups : [[null, visible]]).map(([zoneName, rows]) => {
+            const summary = zoneName && zoneSummary?.zones?.find((zone) => zone.purok === zoneName);
             return (
-              <motion.div
-                key={h.id}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.06 }}
-              >
+              <section key={zoneName || "all-households"}>
+                {user?.role === "bhw" && (
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-base font-semibold text-brand-ink">{zoneName}</h2>
+                    <p className="text-xs text-brand-gray">
+                      {summary ? `${summary.total} total · ${summary.visited} visited · ${summary.notVisited} no visits` : `${rows.length} households shown`}
+                    </p>
+                  </div>
+                )}
+                <div className="grid gap-5 md:grid-cols-2">
+                  {rows.map((raw, i) => {
+                    const h = renderRow(raw);
+                    const monitoring = monitoredHouseholds.get(h.id);
+                    return (
+                      <motion.div
+                        key={h.id}
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.06 }}
+                      >
                 <Card className="h-full p-6">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -797,6 +934,14 @@ export default function Households() {
                     <p className="flex items-center gap-2 text-brand-gray">
                       <ClipboardList className="h-4 w-4 text-brand-blue" /> {h.collector || "—"}
                     </p>
+                    {user?.role === "bhw" && (
+                      <p className="col-span-2 flex items-center gap-2 text-brand-gray">
+                        <ClipboardList className="h-4 w-4 shrink-0 text-brand-blue" />
+                        {monitoring?.latestVisitDate
+                          ? `${Number(monitoring.latestVisitNumber) === 1 ? "Initial profile" : `Visit ${monitoring.latestVisitNumber}`} · ${formatVisitDate(monitoring.latestVisitDate)}`
+                          : "No visit recorded"}
+                      </p>
+                    )}
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {(h.flags || []).map((c) => (
@@ -811,8 +956,21 @@ export default function Households() {
                   >
                     <Eye className="h-4 w-4" /> View details
                   </button>
+                  {user?.role === "bhw" && !String(h.id).startsWith("LOCAL-") && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`${location.pathname.replace(/\/+$/, "")}/${h.id}`)}
+                      className="ml-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                    >
+                      <ClipboardList className="h-4 w-4" /> Visit history
+                    </button>
+                  )}
                 </Card>
               </motion.div>
+                    );
+                  })}
+                </div>
+              </section>
             );
           })}
         </div>
@@ -884,7 +1042,16 @@ export default function Households() {
                           onClick={editHousehold}
                           className="text-xs font-medium text-brand-blue hover:underline"
                         >
-                          Edit factual details
+                          Edit household profile
+                        </button>
+                      )}
+                      {user?.role === "bhw" && !detail.localId && (
+                        <button
+                          type="button"
+                          onClick={() => navigate(`${location.pathname.replace(/\/+$/, "")}/${detail.id}`)}
+                          className="text-xs font-medium text-brand-blue hover:underline"
+                        >
+                          Visit history &amp; full profile
                         </button>
                       )}
                       <button onClick={closeModal} className="text-brand-gray hover:text-brand-ink" aria-label="Close">

@@ -180,7 +180,11 @@ export default function HouseholdVerifications({
       );
       await load();
     } catch (err) {
-      showToast(err?.message || "Could not save the verification decision.");
+      const details = err?.payload?.error?.details;
+      const detailMessage = Array.isArray(details) && details.length
+        ? ` Missing information: ${details.join(", ")}.`
+        : "";
+      showToast(`${err?.message || "Could not save the verification decision."}${detailMessage}`);
     } finally {
       setSaving(false);
     }

@@ -75,8 +75,12 @@ export const createHouseholdOffline = async ({ ownerId, payload }) => {
           offlineMutationType: MUTATION_TIER.SAFE_SYNC,
         },
       );
-      const household = result?.household ?? result;
-      return { household, queued: false, source: 'server' };
+      return {
+        household: result?.household ?? result,
+        visitWarning: result?.visitWarning || null,
+        queued: false,
+        source: 'server',
+      };
     } catch (error) {
       // Only a transport failure falls back to the local queue. Validation (422),
       // duplicate (409), authorization (403) and every other server answer are

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { householdsApi } from "@/services/api/householdsApi";
@@ -9,7 +10,7 @@ import {
   RISK_LEVELS, RISK_LEVEL_LABELS, householdRiskBasis,
 } from "@/lib/householdRisk";
 import {
-  Home, PhoneCall, UserPlus, ArrowUpRight, RefreshCw, ChevronRight, Users, MapPin, FileText, Activity,
+  Home, PhoneCall, UserPlus, ArrowUpRight, RefreshCw, ChevronRight, Users, MapPin, FileText, Activity, CalendarDays, Plus,
 } from "lucide-react";
 import { FollowUpModal, AssignWorkerModal, EscalateModal } from "../components/RiskActionModals";
 
@@ -27,6 +28,25 @@ const formatDate = (iso) => {
   return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 };
 
+const newVisitRequestId = () => globalThis.crypto?.randomUUID?.()
+  || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+const todayLocal = () => {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
+};
+const VISIT_REASONS = ["Updating Household Information", "Verification", "Follow-up", "Monitoring", "Other"];
+const visitLabel = (number) => {
+  const n = Number(number);
+  const words = { 1: "First Visit", 2: "Second Visit", 3: "Third Visit", 4: "Fourth Visit", 5: "Fifth Visit" };
+  if (words[n]) return words[n];
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+  return `${n}${suffix} Visit`;
+};
+
 /** Information cell used across the risk profile. */
 function InfoCell({ icon: Icon, label, value }) {
   return (
@@ -42,12 +62,19 @@ function InfoCell({ icon: Icon, label, value }) {
 
 export default function HouseholdRiskDetail() {
   const { id } = useParams();
+  const { user } = useAuth();
 
   const [phase, setPhase] = useState("loading"); // loading | ready | error | notfound
   const [loadError, setLoadError] = useState(null);
   const [household, setHousehold] = useState(null);
   const [action, setAction] = useState(null); // followup | assign | escalate
   const [toast, setToast] = useState(null);
+  const [visits, setVisits] = useState([]);
+  const [visitDate, setVisitDate] = useState(todayLocal());
+  const [visitReason, setVisitReason] = useState("Follow-up");
+  const [visitRequestId, setVisitRequestId] = useState(newVisitRequestId());
+  const [savingVisit, setSavingVisit] = useState(false);
+  const [visitError, setVisitError] = useState("");
 
   // Load the real household (server risk classification + members) and merge
   // its persisted risk workflow. Out-of-scope households resolve as 404 (the
@@ -67,7 +94,11 @@ export default function HouseholdRiskDetail() {
         setPhase("notfound");
         return;
       }
-      const workflow = await householdRiskApi.getWorkflow(id).catch(() => null);
+      const [workflow, visitResult] = await Promise.all([
+        householdRiskApi.getWorkflow(id).catch(() => null),
+        user?.role === "bhw" ? householdsApi.listVisits(id) : Promise.resolve({ visits: [] }),
+      ]);
+      setVisits(Array.isArray(visitResult?.visits) ? visitResult.visits : []);
       setHousehold(toRiskCluster(record, workflow));
       setPhase("ready");
     } catch (err) {
@@ -79,7 +110,7 @@ export default function HouseholdRiskDetail() {
       setLoadError(err);
       setPhase("error");
     }
-  }, [id]);
+  }, [id, user?.role]);
 
   useEffect(() => {
     load();
@@ -99,6 +130,24 @@ export default function HouseholdRiskDetail() {
       await load();
     } catch (err) {
       showToast(err?.message || "Could not save the change.");
+    }
+  };
+
+  const saveVisit = async () => {
+    if (!visitDate || savingVisit) return;
+    setSavingVisit(true);
+    setVisitError("");
+    try {
+      await householdsApi.createVisit(id, { visitDate, requestId: visitRequestId, visitReason, updatedSections: [] });
+      setVisitDate(todayLocal());
+      setVisitReason("Follow-up");
+      setVisitRequestId(newVisitRequestId());
+      await load();
+      showToast("Household visit recorded.");
+    } catch (error) {
+      setVisitError(error?.message || "Could not record the household visit. Try again.");
+    } finally {
+      setSavingVisit(false);
     }
   };
 
@@ -205,6 +254,100 @@ export default function HouseholdRiskDetail() {
             <InfoCell icon={FileText} label="Last Assessment" value={formatDate(h.lastAssessment)} />
           </div>
         </Card>
+
+        {user?.role === "bhw" && (
+          <Card className="p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-brand-ink">Visit Tracking</h3>
+                <p className="mt-1 text-sm text-brand-gray">A visit number is assigned for this household after the visit is saved.</p>
+              </div>
+              {visits[0] && (
+                <span className="rounded-full bg-brand-blue/10 px-3 py-1 text-xs font-semibold text-brand-blue">
+                  Latest: {visitLabel(visits[0].visitNumber)}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="w-full max-w-xs text-sm font-medium text-brand-ink">
+                Visit date
+                <input
+                  type="date"
+                  value={visitDate}
+                  onChange={(event) => {
+                    setVisitDate(event.target.value);
+                    setVisitRequestId(newVisitRequestId());
+                  }}
+                  className="mt-1.5 w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue"
+                />
+              </label>
+              <label className="w-full max-w-xs text-sm font-medium text-brand-ink">
+                Visit reason
+                <select
+                  value={visitReason}
+                  onChange={(event) => setVisitReason(event.target.value)}
+                  className="mt-1.5 w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue"
+                >
+                  {VISIT_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={saveVisit}
+                disabled={!visitDate || savingVisit}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Plus className="h-4 w-4" /> {savingVisit ? "Saving…" : "Record Visit"}
+              </button>
+            </div>
+            {visitError && <p role="alert" className="mt-2 text-sm text-red-600">{visitError}</p>}
+
+            <div className="mt-5">
+              {visits.length ? (
+                <ol className="space-y-2">
+                  {visits.map((visit, index) => (
+                    <li key={visit.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 ${index === 0 ? "border-brand-blue/30 bg-brand-blue/5" : "border-brand-border bg-white"}`}>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue">
+                          <CalendarDays className="h-4 w-4" />
+                        </span>
+                        <div>
+                          <p className="text-sm font-semibold text-brand-ink">{visitLabel(visit.visitNumber)}{index === 0 ? " · Most recent" : ""}</p>
+                          <p className="text-sm text-brand-gray">{formatDate(visit.visitDate)}</p>
+                          <p className="text-xs text-brand-gray">{visit.visitReason || "Follow-up"}</p>
+                          {visit.updatedSections?.length > 0 && (
+                            <p className="mt-1 text-xs text-brand-gray">Updated: {visit.updatedSections.join(", ")}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right text-xs text-brand-gray">
+                        {visit.recordedByName && <p>Recorded by {visit.recordedByName}</p>}
+                        {visit.status && <p className="mt-0.5">{visit.status}</p>}
+                      </div>
+                      {visit.profileSnapshot && (
+                        <details className="w-full border-t border-brand-border pt-2">
+                          <summary className="cursor-pointer text-xs font-medium text-brand-blue">View profile saved at this visit</summary>
+                          <div className="mt-2 grid gap-2 text-xs text-brand-gray sm:grid-cols-2">
+                            <p>Head: {visit.profileSnapshot.headName || "—"}</p>
+                            <p>Zone / Purok: {visit.profileSnapshot.purok || "—"}</p>
+                            <p>Address: {visit.profileSnapshot.streetAddress || "—"}</p>
+                            <p>Respondent: {[visit.profileSnapshot.respondentFirst, visit.profileSnapshot.respondentLast].filter(Boolean).join(" ") || "—"}</p>
+                            <p>Water source: {visit.profileSnapshot.waterSource || "—"}</p>
+                            <p>Toilet facility: {visit.profileSnapshot.toiletType || "—"}</p>
+                            <p className="sm:col-span-2">Members: {(visit.profileSnapshot.members || []).map((member) => member.name).filter(Boolean).join(", ") || "—"}</p>
+                          </div>
+                        </details>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="rounded-xl border border-dashed border-brand-border px-4 py-5 text-center text-sm text-brand-gray">No visits recorded yet. The first saved visit will be numbered First Visit.</p>
+              )}
+            </div>
+          </Card>
+        )}
 
         {/* Risk & Early Intervention */}
         <Card className="p-5">
