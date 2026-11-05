@@ -611,6 +611,7 @@ export default function AddHouseholdPage() {
   const [saveError, setSaveError] = useState(null);
   const [headSearchOpen, setHeadSearchOpen] = useState(false);
   const [headSearch, setHeadSearch] = useState({ rows: [], loading: false, searched: false, error: "" });
+  const [headHouseholdSearch, setHeadHouseholdSearch] = useState({ rows: [], loading: false, error: "" });
 
   const [openSections, setOpenSections] = useState({
     info: true,
@@ -692,6 +693,32 @@ export default function AddHouseholdPage() {
       active = false;
       clearTimeout(timeout);
     };
+  }, [form.head, user?.role]);
+
+  useEffect(() => {
+    const query = form.head.trim();
+    if (user?.role !== "bhw" || query.length < 2) {
+      setHeadHouseholdSearch({ rows: [], loading: false, error: "" });
+      return undefined;
+    }
+    let active = true;
+    const timeout = setTimeout(() => {
+      setHeadHouseholdSearch((current) => ({ ...current, loading: true, error: "" }));
+      householdsApi.list({ q: query, limit: 10, offset: 0 })
+        .then((response) => {
+          if (!active) return;
+          const normalizedQuery = query.toLocaleLowerCase();
+          const rows = (response?.rows || []).filter((household) =>
+            String(household.headName || "").toLocaleLowerCase().includes(normalizedQuery)
+          ).slice(0, 5);
+          setHeadHouseholdSearch({ rows, loading: false, error: "" });
+        })
+        .catch((searchError) => {
+          if (!active) return;
+          setHeadHouseholdSearch({ rows: [], loading: false, error: searchError?.message || "Could not check existing household profiles." });
+        });
+    }, 350);
+    return () => { active = false; clearTimeout(timeout); };
   }, [form.head, user?.role]);
 
   const clearError = (key) =>
@@ -793,6 +820,12 @@ export default function AddHouseholdPage() {
         !memberQuery ||
         `${m.name} ${m.relationship} ${m.sex} ${m.classification}`.toLowerCase().includes(memberQuery)
     );
+  const normalizeHouseholdText = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  const duplicateHousehold = headHouseholdSearch.rows.find((household) =>
+    normalizeHouseholdText(household.headName) === normalizeHouseholdText(form.head)
+    && normalizeHouseholdText(household.purok) === normalizeHouseholdText(form.purok)
+    && normalizeHouseholdText(household.streetAddress) === normalizeHouseholdText(form.streetAddress)
+  );
 
   const validate = () => {
     const next = {};
@@ -832,6 +865,11 @@ export default function AddHouseholdPage() {
   const handleSave = async () => {
     if (!canCreateHousehold) {
       setSaveError("You do not have permission to create household profiles.");
+      return;
+    }
+    if (duplicateHousehold) {
+      setSaveError(`This household is already registered as ${duplicateHousehold.id}. Open that profile and record the next visit instead of creating a duplicate.`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
     const { errors: nextErrors, memberErrors: nextMemberErrors } = validate();
@@ -1135,6 +1173,34 @@ export default function AddHouseholdPage() {
                   placeholder="e.g. Juan Dela Cruz"
                   className={inputCls(errors.head)}
                 />
+              )}
+              {user?.role === "bhw" && form.head.trim().length >= 2 && (headHouseholdSearch.loading || headHouseholdSearch.error || headHouseholdSearch.rows.length > 0) && (
+                <div className={`mt-2 rounded-lg border p-3 ${duplicateHousehold ? "border-amber-300 bg-amber-50" : "border-brand-border bg-white"}`}>
+                  {headHouseholdSearch.loading ? (
+                    <p className="text-xs text-brand-gray">Checking existing household profiles…</p>
+                  ) : headHouseholdSearch.error ? (
+                    <p className="text-xs text-brand-gray">{headHouseholdSearch.error}</p>
+                  ) : (
+                    <>
+                      <p className={`text-xs font-semibold ${duplicateHousehold ? "text-amber-800" : "text-brand-ink"}`}>
+                        {duplicateHousehold
+                          ? "This household head is already registered at this Purok and address. Open the existing profile and record the next visit there to avoid a duplicate."
+                          : "Possible existing household profiles for this name. Check these before registering a new household."}
+                      </p>
+                      <div className="mt-2 space-y-2">
+                        {headHouseholdSearch.rows.map((household) => (
+                          <div key={household.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-brand-border bg-white px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-brand-ink">{household.headName} · {household.id}</p>
+                              <p className="truncate text-xs text-brand-gray">{[household.purok, household.streetAddress].filter(Boolean).join(" · ")}</p>
+                            </div>
+                            <Link to={`${householdsPath}/${household.id}`} className="shrink-0 text-xs font-semibold text-brand-blue hover:underline">Open existing profile</Link>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </Field>
             <Field label="Purok/Zone" required error={errors.purok}>
@@ -1761,7 +1827,8 @@ export default function AddHouseholdPage() {
               </Link>
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || Boolean(duplicateHousehold)}
+                title={duplicateHousehold ? `Existing household ${duplicateHousehold.id} found for this head and address.` : undefined}
                 className="inline-flex items-center justify-center rounded-btn bg-brand-blue px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60 sm:py-2.5"
               >
                 {saving ? "Saving…" : "Save Household"}

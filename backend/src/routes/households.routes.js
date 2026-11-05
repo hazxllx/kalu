@@ -31,6 +31,7 @@ import {
   householdMemberValidator,
   householdParamsValidator,
   updateHouseholdValidator,
+  householdVisitValidator,
 } from '../validators/household.validators.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import * as householdsService from '../services/households.service.js';
@@ -58,6 +59,11 @@ router.get(
   authorize(HOUSEHOLD_ROLES, { permission: 'households.view' }),
   asyncHandler(householdsController.listHouseholds),
 );
+router.get(
+  '/monitoring/summary',
+  authorize(HOUSEHOLD_ROLES, { permission: 'households.view' }),
+  asyncHandler(householdsController.getHouseholdMonitoring),
+);
 // Idempotency-Key makes an offline re-upload safe (no duplicate household).
 router.post(
   '/',
@@ -72,6 +78,21 @@ router.get(
   authorize(HOUSEHOLD_ROLES, { anyPermission: ['households.view', 'households.create'] }),
   asyncHandler(householdsController.searchResidents),
 );
+router.get(
+  '/:id/visits',
+  authorize(HOUSEHOLD_ROLES, { permission: 'households.view' }),
+  params,
+  asyncHandler(householdsController.listHouseholdVisits),
+);
+router.post(
+  '/:id/visits',
+  authorize(HOUSEHOLD_ROLES, { permission: 'households.create' }),
+  params,
+  validate(householdVisitValidator),
+  idempotency,
+  asyncHandler(householdsController.recordHouseholdVisit),
+);
+
 router.get(
   '/:id',
   authorize(HOUSEHOLD_ROLES, { permission: 'households.view' }),
@@ -96,6 +117,15 @@ router.post(
   revalidateHouseholdScope,
   idempotency,
   asyncHandler(householdsController.addHouseholdMember),
+);
+router.put(
+  '/:id/members/:memberId',
+  authorize(HOUSEHOLD_ROLES, { permission: 'households.create' }),
+  params,
+  validate(householdMemberValidator),
+  revalidateHouseholdScope,
+  idempotency,
+  asyncHandler(householdsController.updateHouseholdMember),
 );
 router.delete(
   '/:id/members/:memberId',

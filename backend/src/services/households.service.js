@@ -14,6 +14,7 @@
  * (additionally guarded by a database trigger).
  */
 import ApiError from '../utils/apiError.js';
+import { randomUUID } from 'node:crypto';
 import repository from '../repositories/index.js';
 import { computeHouseholdRisk, householdFlags } from '../utils/householdRisk.js';
 import { computeBMI } from '../utils/bmi.js';
@@ -33,6 +34,7 @@ const APPROVAL_STATUSES = ['Not yet approved', 'Approved', 'Needs revision'];
 const WATER_SOURCES = ['level1', 'level2', 'level3', 'unimproved'];
 const TOILET_TYPES = ['ws_own', 'ws_shared', 'open_pit', 'antipolo', 'none'];
 const VERIFICATION_STATUSES = ['Pending Verification', 'Verified', 'Returned for Correction'];
+const HOUSEHOLD_VISIT_REASONS = ['Initial Profiling', 'Updating Household Information', 'Verification', 'Follow-up', 'Monitoring', 'Other'];
 
 const text = (value) => String(value ?? '').trim();
 
@@ -72,7 +74,6 @@ export const missingForVerification = (merged = {}) => {
   if (!text(merged.respondentFirst) && !text(merged.respondentLast)) missing.push('Respondent information');
   if (!WATER_SOURCES.includes(text(merged.waterSource))) missing.push('Water source');
   if (!TOILET_TYPES.includes(text(merged.toiletType))) missing.push('Toilet facility');
-  if (!text(merged.sanitationAccess)) missing.push('Sanitation access');
   if (roster.length < 1) missing.push('At least one household member');
   return missing;
 };
@@ -204,8 +205,16 @@ export const searchHouseholdResidents = async ({ user, q = '', repo = repository
   return rows.map((resident) => ({
     residentId: resident.id,
     firstName: resident.firstName || '',
+    middleName: resident.middleName || '',
     lastName: resident.lastName || '',
+    suffix: resident.suffix || '',
     birthDate: resident.birthDate || '',
+    sex: resident.sex || '',
+    cellphoneNo: resident.cellphoneNo || '',
+    philhealthNo: resident.philhealthNo || '',
+    currentAddress: resident.currentAddress || '',
+    permanentAddress: resident.permanentAddress || '',
+    zone: resident.zone || '',
     verificationStatus: resident.verificationStatus || 'pending',
     verified: resident.verificationStatus === 'approved',
   }));
@@ -243,12 +252,118 @@ export const listHouseholds = async ({ user, q = '', barangay = '', limit = 50, 
   });
 };
 
+export const getHouseholdMonitoring = async ({ user, repo = repository } = {}) => {
+  if (user?.role !== 'bhw') throw ApiError.forbidden('Zone monitoring is available to BHW accounts only.');
+  const barangay = assignedBarangay(user);
+  if (!barangay || !user?.barangayId || !user?.municipalityId || !isApprovedBarangayName(barangay)) {
+    throw ApiError.forbidden('Your account is missing a valid approved barangay assignment.');
+  }
+  const households = await repo.listHouseholdMonitoring({ barangayId: user.barangayId });
+  const groups = new Map();
+  for (const household of households) {
+    const name = text(household.purok) || 'Unassigned';
+    if (!groups.has(name)) groups.set(name, { purok: name, total: 0, visited: 0, notVisited: 0, households: [] });
+    const group = groups.get(name);
+    group.total += 1;
+    if (household.latestVisitNumber) group.visited += 1;
+    else group.notVisited += 1;
+    group.households.push(household);
+  }
+  return {
+    totalHouseholds: households.length,
+    visitedHouseholds: households.filter((household) => household.latestVisitNumber).length,
+    householdsWithoutVisits: households.filter((household) => !household.latestVisitNumber).length,
+    zones: [...groups.values()].sort((a, b) => a.purok.localeCompare(b.purok, undefined, { numeric: true })),
+  };
+};
+
 export const getHousehold = async ({ id, user }) => {
   return getScopedHousehold(id, user);
 };
 
+const recordInitialHouseholdVisit = async ({ householdId, user, payload, idempotencyKey, repo, household }) => {
+  if (user?.role !== 'bhw' || !payload?.initialVisitDate) return null;
+  if (typeof repo.recordHouseholdVisit !== 'function') {
+    throw ApiError.notImplemented('Household visit tracking is not available on this data driver.');
+  }
+  const requestId = payload.initialVisitRequestId
+    || (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey || '')
+      ? idempotencyKey
+      : randomUUID());
+  return repo.recordHouseholdVisit({
+    householdId,
+    visitDate: payload.initialVisitDate,
+    recordedBy: user.id,
+    recordedByName: user.name || user.email || '',
+    requestId,
+    visitReason: payload.initialVisitReason || 'Initial Profiling',
+    updatedSections: ['Household Information', 'Household Details', 'Respondent Information', 'HH Head PhilHealth Information', 'Water Source and Sanitation Details', 'Household Members'],
+    profileSnapshot: household || null,
+  });
+};
+
+const tryRecordInitialHouseholdVisit = async (args) => {
+  try {
+    await recordInitialHouseholdVisit(args);
+    return null;
+  } catch (error) {
+    // Household creation may already be committed. Report that partial result
+    // honestly so the client can leave the form instead of encouraging a second
+    // create attempt that collides with the saved household.
+    console.error('Household saved, but its initial visit could not be recorded:', error?.message || error);
+    return 'The household profile was saved, but its first visit was not recorded. Apply the household visit-history migration, then record the visit from the household profile.';
+  }
+};
+
+export const listHouseholdVisits = async ({ id, user, repo = repository }) => {
+  if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
+  await getScopedHousehold(id, user, repo);
+  return repo.listHouseholdVisits(id);
+};
+
+export const recordHouseholdVisit = async ({ id, user, payload = {}, repo = repository }) => {
+  if (user?.role !== 'bhw') throw ApiError.forbidden('Only a BHW can record a household visit.');
+  const household = await getScopedHousehold(id, user, repo);
+  const date = text(payload.visitDate);
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00.000Z`) : null;
+  if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    throw ApiError.unprocessable('Visit date must be a valid calendar date.');
+  }
+  const requestId = text(payload.requestId);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw ApiError.unprocessable('A valid visit request id is required.');
+  }
+  const visitReason = text(payload.visitReason);
+  if (!HOUSEHOLD_VISIT_REASONS.includes(visitReason)) {
+    throw ApiError.unprocessable('Select a valid reason for this household visit.');
+  }
+  const updatedSections = Array.isArray(payload.updatedSections)
+    ? [...new Set(payload.updatedSections.map(text).filter(Boolean))]
+    : [];
+  const allowedSections = new Set([
+    'Household Information', 'Household Details', 'Respondent Information',
+    'HH Head PhilHealth Information', 'Water Source and Sanitation Details', 'Household Members',
+  ]);
+  if (updatedSections.some((section) => !allowedSections.has(section))) {
+    throw ApiError.unprocessable('One or more updated household sections are invalid.');
+  }
+  return repo.recordHouseholdVisit({
+    householdId: id,
+    visitDate: date,
+    recordedBy: user.id,
+    recordedByName: user.name || user.email || '',
+    requestId,
+    visitReason,
+    updatedSections,
+    profileSnapshot: household,
+  });
+};
+
 export const createHousehold = async ({ user, payload = {}, idempotencyKey = null, repo = repository }) => {
   if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
+  if (user?.role === 'bhw' && (!payload.initialVisitDate || !payload.initialVisitRequestId)) {
+    throw ApiError.unprocessable('A first visit date and request id are required for a BHW household profile.');
+  }
 
   const barangayName = text(payload.barangay);
   const scope = assignedBarangay(user);
@@ -264,7 +379,8 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
     if (existing) {
       const full = await repo.getHousehold(existing.id);
       if (!full || outOfScope(full, user)) throw ApiError.notFound('Household not found');
-      return full;
+      const visitWarning = await tryRecordInitialHouseholdVisit({ householdId: full.id, user, payload, idempotencyKey, repo, household: full });
+      return { household: full, visitWarning };
     }
   }
 
@@ -398,8 +514,9 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
     const atomic = await repo.createHouseholdWithMembers(householdInput, memberInserts);
     if (atomic && atomic.household) {
       const full = await repo.getHousehold(atomic.household.id);
+      const visitWarning = await tryRecordInitialHouseholdVisit({ householdId: full.id, user, payload, idempotencyKey, repo, household: full });
       await recordHouseholdAudit({ user, action: 'HOUSEHOLD_CREATED', household: full });
-      return full;
+      return { household: full, visitWarning };
     }
   }
 
@@ -431,9 +548,10 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
   }
 
   const full = await repo.getHousehold(household.id);
+  const visitWarning = await tryRecordInitialHouseholdVisit({ householdId: full.id, user, payload, idempotencyKey, repo, household: full });
   // Best-effort audit of the creation event (no notification on create).
   await recordHouseholdAudit({ user, action: 'HOUSEHOLD_CREATED', household: full });
-  return full;
+  return { household: full, visitWarning };
 };
 
 export const updateHousehold = async ({ id, user, patch = {}, expectedRevision = null, repo = repository }) => {
@@ -667,6 +785,22 @@ export const removeHouseholdMember = async ({ id, memberId, user }) => {
   return { success: true, household: await repository.getHousehold(household.id) };
 };
 
+export const updateHouseholdMember = async ({ id, memberId, member = {}, user, repo = repository }) => {
+  if (user?.role !== 'bhw') throw ApiError.forbidden('Only a BHW can update household member details.');
+  const household = await getScopedHousehold(id, user, repo);
+  const existing = (household.members || []).find((row) => row.id === memberId);
+  if (!existing) throw ApiError.notFound('Household member not found');
+  const { members, errors } = normalizeMembers([{ ...existing, ...member }]);
+  if (errors.length) throw ApiError.unprocessable('Please correct the member details.', errors);
+  const [normalized] = members;
+  if (normalized.residentId && (household.members || []).some((row) => row.id !== memberId && row.residentId === normalized.residentId)) {
+    throw ApiError.duplicate('That resident is already linked to another member in this household.');
+  }
+  const updated = await repo.updateHouseholdMember(household.id, memberId, normalized);
+  if (!updated) throw ApiError.notFound('Household member not found');
+  return { member: updated, household: await repo.getHousehold(household.id) };
+};
+
 // ---------------------------------------------------------------------------
 // Member health profile (foundation): anthropometrics + server-computed BMI,
 // mortality, trans-out, remarks. Attaches 1:1 to an existing household member;
@@ -756,11 +890,13 @@ export const saveMemberHealth = async ({ id, memberId, user, payload = {} }) => 
 
 export default {
   listHouseholds,
+  getHouseholdMonitoring,
   searchHouseholdResidents,
   getHousehold,
   createHousehold,
   updateHousehold,
   addHouseholdMember,
+  updateHouseholdMember,
   removeHouseholdMember,
   getMemberHealth,
   saveMemberHealth,

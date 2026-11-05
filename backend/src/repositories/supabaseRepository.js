@@ -1109,6 +1109,39 @@ export const supabaseRepository = {
     };
   },
 
+  async listHouseholdMonitoring({ barangayId }) {
+    const supabase = getServiceClient();
+    const pageSize = 500;
+    const data = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const { data: page, error } = await supabase
+        .from(TABLES.households)
+        .select('id, head_name, purok, street_address, created_at, household_visits(visit_number, visit_date)')
+        .eq('barangay_id', barangayId)
+        .order('purok', { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      throwOnError(error, 'Could not load household monitoring summary');
+      data.push(...(page || []));
+      if (!page || page.length < pageSize) break;
+    }
+    return data.map((row) => {
+      const visits = [...(row.household_visits || [])]
+        .sort((a, b) => Number(b.visit_number) - Number(a.visit_number));
+      return {
+        id: row.id,
+        headName: row.head_name || '',
+        purok: row.purok || 'Unassigned',
+        streetAddress: row.street_address || '',
+        // Household profiling itself is the initial BHW visit. Older profiles
+        // created before visit history was enabled still use their registration
+        // date as that first monitoring event.
+        latestVisitNumber: visits[0]?.visit_number ?? (row.created_at ? 1 : null),
+        latestVisitDate: visits[0]?.visit_date ?? row.created_at?.slice(0, 10) ?? null,
+        isInitialProfileVisit: visits.length === 0 && Boolean(row.created_at),
+      };
+    });
+  },
+
   /** Single household (scope checked by the service + RLS), with members. */
   async getHousehold(id) {
     const supabase = getServiceClient();
@@ -1121,6 +1154,59 @@ export const supabaseRepository = {
     if (!data) return null;
     const members = await listHouseholdMembersFor(supabase, id);
     return { ...householdFromRow(data), members };
+  },
+
+  async listHouseholdVisits(householdId) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('household_visits')
+      .select('*')
+      .eq('household_id', householdId)
+      .order('visit_number', { ascending: false });
+    throwOnError(error, 'Could not load household visit history');
+    return (data || []).map((row) => ({
+      id: row.id,
+      householdId: row.household_id,
+      visitNumber: row.visit_number,
+      visitDate: row.visit_date,
+      recordedBy: row.recorded_by,
+      recordedByName: row.recorded_by_name || '',
+      visitReason: row.visit_reason || 'Follow-up',
+      updatedSections: Array.isArray(row.updated_sections) ? row.updated_sections : [],
+      profileSnapshot: row.profile_snapshot || null,
+      status: row.status || null,
+      createdAt: row.created_at,
+    }));
+  },
+
+  async recordHouseholdVisit({ householdId, visitDate, recordedBy, recordedByName, requestId, visitReason, updatedSections = [], profileSnapshot = null }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('record_household_visit', {
+      p_household_id: householdId,
+      p_visit_date: visitDate,
+      p_recorded_by: recordedBy,
+      p_recorded_by_name: recordedByName || '',
+      p_request_id: requestId,
+      p_visit_reason: visitReason || 'Follow-up',
+      p_updated_sections: updatedSections,
+      p_profile_snapshot: profileSnapshot,
+    });
+    throwOnError(error, 'Could not record household visit');
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error('Household visit was not returned after saving');
+    return {
+      id: row.id,
+      householdId: row.household_id,
+      visitNumber: row.visit_number,
+      visitDate: row.visit_date,
+      recordedBy: row.recorded_by,
+      recordedByName: row.recorded_by_name || '',
+      visitReason: row.visit_reason || 'Follow-up',
+      updatedSections: Array.isArray(row.updated_sections) ? row.updated_sections : [],
+      profileSnapshot: row.profile_snapshot || null,
+      status: row.status || null,
+      createdAt: row.created_at,
+    };
   },
 
   /**
@@ -1297,6 +1383,19 @@ export const supabaseRepository = {
       throwOnError(error, 'Could not add household member');
     }
     return memberFromRow(data);
+  },
+
+  async updateHouseholdMember(householdId, memberId, member) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from(TABLES.householdMembers)
+      .update(memberToRow(member))
+      .eq('id', memberId)
+      .eq('household_id', householdId)
+      .select('*')
+      .maybeSingle();
+    throwOnError(error, 'Could not update household member');
+    return data ? memberFromRow(data) : null;
   },
 
   async removeHouseholdMember(householdId, memberId) {

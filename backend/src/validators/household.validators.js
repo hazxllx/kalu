@@ -27,6 +27,8 @@ export const VERIFICATION_STATUSES = Object.freeze(['Pending Verification', 'Ver
 export const WATER_SOURCES = Object.freeze(['level1', 'level2', 'level3', 'unimproved']);
 export const TOILET_TYPES = Object.freeze(['ws_own', 'ws_shared', 'open_pit', 'antipolo', 'none']);
 export const PHILHEALTH_VALUES = Object.freeze(['member', 'non-member']);
+export const HOUSEHOLD_VISIT_REASONS = Object.freeze(['Initial Profiling', 'Updating Household Information', 'Verification', 'Follow-up', 'Monitoring', 'Other']);
+export const HOUSEHOLD_UPDATE_SECTIONS = Object.freeze(['Household Information', 'Household Details', 'Respondent Information', 'HH Head PhilHealth Information', 'Water Source and Sanitation Details', 'Household Members']);
 export const SEX_VALUES = Object.freeze(['Male', 'Female']);
 
 const SAFE_HH_ID = /^[A-Za-z0-9_-]{1,32}$/;
@@ -170,6 +172,50 @@ const runHouseholdValidator = (input, { partial }) => {
     out.monthlyIncome = null;
   }
 
+  for (const [field, label, max] of [
+    ['nhts', 'NHTS status', TEXT_LIMITS.medium],
+    ['ip', 'IP status', TEXT_LIMITS.medium],
+    ['philhealthId', 'PhilHealth ID', TEXT_LIMITS.medium],
+    ['philhealthCategory', 'PhilHealth category', TEXT_LIMITS.medium],
+    ['waterType', 'Water source type', TEXT_LIMITS.medium],
+    ['waterDistance', 'Water source distance', TEXT_LIMITS.medium],
+    ['waterAvailability', 'Water availability', TEXT_LIMITS.medium],
+    ['sanitationAccess', 'Sanitation access', TEXT_LIMITS.medium],
+    ['wasteDisposal', 'Waste disposal', TEXT_LIMITS.medium],
+    ['wasteSegregation', 'Waste segregation', TEXT_LIMITS.medium],
+  ]) {
+    if (body[field] !== undefined) out[field] = optionalText(body[field], max, field, label, errors);
+  }
+
+  for (const field of ['philhealthMember', 'waterTreated']) {
+    if (body[field] !== undefined) {
+      if (typeof body[field] !== 'boolean') errors[field] = `${field} must be true or false.`;
+      else out[field] = body[field];
+    }
+  }
+  if (body.treatmentMethods !== undefined) {
+    if (!Array.isArray(body.treatmentMethods) || body.treatmentMethods.some((method) => typeof method !== 'string' || method.length > TEXT_LIMITS.medium)) {
+      errors.treatmentMethods = 'Treatment methods must be a list of text values.';
+    } else {
+      out.treatmentMethods = [...new Set(body.treatmentMethods.map((method) => text(method)).filter(Boolean))];
+    }
+  }
+  if (body.quarterVisits !== undefined) {
+    if (!body.quarterVisits || typeof body.quarterVisits !== 'object' || Array.isArray(body.quarterVisits)) {
+      errors.quarterVisits = 'Quarter visit tracking must be an object.';
+    } else {
+      const quarterVisits = {};
+      for (const quarter of ['q1', 'q2', 'q3', 'q4']) {
+        const date = text(body.quarterVisits[quarter]);
+        if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00.000Z`)))) {
+          errors[`quarterVisits.${quarter}`] = `${quarter.toUpperCase()} must be a valid date.`;
+        }
+        quarterVisits[quarter] = date;
+      }
+      out.quarterVisits = quarterVisits;
+    }
+  }
+
   if (body.hhStatus !== undefined && body.hhStatus !== '' && !inEnum(body.hhStatus, HH_STATUSES)) {
     errors.hhStatus = 'Invalid household status.';
   } else if (body.hhStatus !== undefined) {
@@ -214,6 +260,21 @@ const runHouseholdValidator = (input, { partial }) => {
   if (body.respondentMaiden !== undefined) out.respondentMaiden = optionalText(body.respondentMaiden, TEXT_LIMITS.medium, 'respondentMaiden', "Respondent mother's maiden name", errors);
   if (body.collectorName !== undefined) out.collectorName = optionalText(body.collectorName, TEXT_LIMITS.medium, 'collectorName', 'Collector name', errors);
 
+  if (!partial && body.initialVisitDate !== undefined) {
+    const value = text(body.initialVisitDate);
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00.000Z`) : null;
+    if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+      errors.initialVisitDate = 'Visit date must be a valid calendar date.';
+    } else {
+      out.initialVisitDate = value;
+    }
+  }
+  if (!partial && body.initialVisitRequestId !== undefined) {
+    const value = text(body.initialVisitRequestId);
+    if (!UUID.test(value)) errors.initialVisitRequestId = 'Visit request id must be a valid UUID.';
+    else out.initialVisitRequestId = value;
+  }
+
   if (body.members !== undefined && body.members !== null) {
     if (!Array.isArray(body.members)) {
       errors.members = 'Members must be a list.';
@@ -237,9 +298,30 @@ export const householdMemberValidator = (input = {}) => {
   return valid({ member });
 };
 
+export const householdVisitValidator = (input = {}) => {
+  const body = input && typeof input.visit === 'object' && input.visit !== null ? input.visit : input || {};
+  const errors = {};
+  const visitDate = text(body.visitDate);
+  const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(visitDate) ? new Date(`${visitDate}T00:00:00.000Z`) : null;
+  if (!parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== visitDate) {
+    errors.visitDate = 'Visit date must be a valid calendar date.';
+  }
+  const requestId = text(body.requestId);
+  if (!UUID.test(requestId)) errors.requestId = 'A valid request id is required.';
+  const visitReason = text(body.visitReason);
+  if (!HOUSEHOLD_VISIT_REASONS.includes(visitReason)) errors.visitReason = 'Select a valid reason for this visit.';
+  const updatedSections = Array.isArray(body.updatedSections) ? body.updatedSections : [];
+  if (updatedSections.some((section) => !HOUSEHOLD_UPDATE_SECTIONS.includes(text(section)))) {
+    errors.updatedSections = 'One or more updated sections are invalid.';
+  }
+  if (Object.keys(errors).length) return invalid(errors);
+  return valid({ visit: { visitDate, requestId, visitReason, updatedSections: [...new Set(updatedSections.map(text))] } });
+};
+
 export default {
   householdParamsValidator,
   createHouseholdValidator,
   updateHouseholdValidator,
   householdMemberValidator,
+  householdVisitValidator,
 };

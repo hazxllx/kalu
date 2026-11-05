@@ -15,6 +15,11 @@ export const listHouseholds = async (req, res) => {
   sendData(res, result);
 };
 
+export const getHouseholdMonitoring = async (req, res) => {
+  const summary = await householdsService.getHouseholdMonitoring({ user: req.user });
+  sendData(res, summary);
+};
+
 export const searchResidents = async (req, res) => {
   const rows = await householdsService.searchHouseholdResidents({
     user: req.user,
@@ -28,15 +33,29 @@ export const getHousehold = async (req, res) => {
   sendData(res, { household });
 };
 
+export const listHouseholdVisits = async (req, res) => {
+  const visits = await householdsService.listHouseholdVisits({ id: req.params.id, user: req.user });
+  sendData(res, { visits });
+};
+
+export const recordHouseholdVisit = async (req, res) => {
+  const visit = await householdsService.recordHouseholdVisit({
+    id: req.params.id,
+    payload: req.body?.visit || req.body || {},
+    user: req.user,
+  });
+  sendCreated(res, { visit });
+};
+
 export const createHousehold = async (req, res) => {
-  const household = await householdsService.createHousehold({
+  const result = await householdsService.createHousehold({
     payload: req.body?.household || req.body || {},
     // Set by the idempotency middleware; makes a replayed offline create return
     // the already-created household instead of a duplicate.
     idempotencyKey: req.idempotencyKey || req.headers['idempotency-key'] || null,
     user: req.user,
   });
-  sendCreated(res, { household });
+  sendCreated(res, result);
 };
 
 export const updateHousehold = async (req, res) => {
@@ -70,6 +89,16 @@ export const removeHouseholdMember = async (req, res) => {
   sendData(res, result);
 };
 
+export const updateHouseholdMember = async (req, res) => {
+  const result = await householdsService.updateHouseholdMember({
+    id: req.params.id,
+    memberId: req.params.memberId,
+    member: req.body?.member || req.body || {},
+    user: req.user,
+  });
+  sendData(res, result);
+};
+
 export const getMemberHealth = async (req, res) => {
   const result = await householdsService.getMemberHealth({
     id: req.params.id,
@@ -91,12 +120,16 @@ export const saveMemberHealth = async (req, res) => {
 
 export default {
   listHouseholds,
+  getHouseholdMonitoring,
   searchResidents,
   getHousehold,
+  listHouseholdVisits,
+  recordHouseholdVisit,
   createHousehold,
   updateHousehold,
   addHouseholdMember,
   removeHouseholdMember,
+  updateHouseholdMember,
   getMemberHealth,
   saveMemberHealth,
 };

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
 import { Card } from "@/components/common/Card";
@@ -8,13 +8,12 @@ import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
 import { useAuth } from "@/context/AuthContext";
 import { householdsApi } from "@/services/api/householdsApi";
-import { bhwDashboard } from "@/services/local/dashboardData";
 import {
   fetchBhwHouseholds,
   householdRiskLevel,
   summarizeHouseholdConcerns,
 } from "../lib/bhwDashboardData";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Plus, Users } from "lucide-react";
 
 function formatDate(value) {
   if (!value) return "";
@@ -24,7 +23,10 @@ function formatDate(value) {
 
 export default function BHWDashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [households, setHouseholds] = useState([]);
+  const [monitoring, setMonitoring] = useState(null);
+  const [monitoringError, setMonitoringError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const requestId = useRef(0);
@@ -36,8 +38,18 @@ export default function BHWDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchBhwHouseholds((params) => householdsApi.list(params));
-      if (currentRequest === requestId.current) setHouseholds(rows);
+      const [rows, summary] = await Promise.all([
+        fetchBhwHouseholds((params) => householdsApi.list(params)),
+        householdsApi.monitoringSummary().catch((summaryError) => {
+          setMonitoringError(summaryError?.message || "Unable to load visit monitoring.");
+          return null;
+        }),
+      ]);
+      if (currentRequest === requestId.current) {
+        setHouseholds(rows);
+        setMonitoring(summary);
+        if (summary) setMonitoringError(null);
+      }
     } catch (loadError) {
       if (currentRequest === requestId.current) {
         setError(loadError?.message || "Unable to load household data. Please try again.");
@@ -62,6 +74,12 @@ export default function BHWDashboard() {
   }, [loadHouseholds]);
 
   const concernSummary = summarizeHouseholdConcerns(households);
+  const highRiskCount = households.filter((household) => householdRiskLevel(household) === "High").length;
+  const recentActivity = useMemo(() => (monitoring?.zones || [])
+    .flatMap((zone) => (zone.households || []).map((household) => ({ ...household, purok: zone.purok })))
+    .filter((household) => household.latestVisitDate)
+    .sort((a, b) => String(b.latestVisitDate).localeCompare(String(a.latestVisitDate)))
+    .slice(0, 5), [monitoring]);
 
   return (
     <>
@@ -70,8 +88,53 @@ export default function BHWDashboard() {
         title={`Good morning, ${firstName || "BHW"}`}
         subtitle={assignedBarangay ? `Here's what needs your attention today in ${assignedBarangay}.` : "Here's what needs your attention today."}
       />
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4 mb-6">
-        {bhwDashboard.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 sm:gap-4">
+        <StatCard icon="Home" label="Households in your barangay" value={loading ? "…" : monitoring?.totalHouseholds ?? households.length} tone="blue" index={0} onClick={() => navigate("/app/bhw/households")} />
+        <StatCard icon="Activity" label="Households with a recorded visit" value={loading ? "…" : monitoring?.visitedHouseholds ?? "—"} tone="green" index={1} onClick={() => navigate("/app/bhw/households")} />
+        <StatCard icon="CalendarDays" label="Households without a visit" value={loading ? "…" : monitoring?.householdsWithoutVisits ?? "—"} tone="yellow" index={2} onClick={() => navigate("/app/bhw/households")} />
+        <StatCard icon="HeartPulse" label="High-risk households" value={loading ? "…" : highRiskCount} tone="danger" index={3} onClick={() => navigate("/app/bhw/households")} />
+      </div>
+
+      <div className="mb-5 flex flex-wrap gap-2">
+        <Link to="/app/bhw/households/new" className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-dark"><Plus className="h-4 w-4" /> Add Household</Link>
+        <Link to="/app/bhw/households" className="inline-flex items-center gap-2 rounded-btn border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-bg"><Users className="h-4 w-4" /> Household List</Link>
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-2">
+        <Card className="p-4 sm:p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div><h3 className="text-sm font-semibold text-brand-ink sm:text-base">Household Activity by Purok / Zone</h3><p className="mt-1 text-xs text-brand-gray">See how many household profiles are in each area and the latest recorded activity.</p></div>
+            <Link to="/app/bhw/households" className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-blue hover:underline">Details <ChevronRight className="h-4 w-4" /></Link>
+          </div>
+          {loading && !monitoring ? <SkeletonList rows={3} /> : monitoringError && !monitoring ? <p className="py-5 text-sm text-brand-danger">{monitoringError}</p> : !monitoring?.zones?.length ? <p className="py-5 text-center text-sm text-brand-gray">No Purok/Zone household data yet.</p> : (
+            <div className="space-y-4">
+              {monitoring.zones.map((zone) => {
+                const latest = [...(zone.households || [])]
+                  .filter((household) => household.latestVisitDate)
+                  .sort((a, b) => String(b.latestVisitDate).localeCompare(String(a.latestVisitDate)))
+                  .slice(0, 2);
+                return <div key={zone.purok} className="rounded-lg border border-brand-border px-3.5 py-3">
+                  <div className="flex items-center justify-between gap-3"><span className="font-medium text-brand-ink">{zone.purok}</span><span className="text-xs text-brand-gray">{zone.total} {zone.total === 1 ? "household" : "households"}</span></div>
+                  {latest.length ? <div className="mt-2 space-y-1.5">
+                    {latest.map((household) => <Link key={household.id} to={`/app/bhw/households/${household.id}`} className="flex items-center justify-between gap-3 text-xs hover:text-brand-blue"><span className="truncate text-brand-gray">{household.headName || `Household ${household.id}`} · {Number(household.latestVisitNumber) === 1 ? "Initial profile" : `Visit ${household.latestVisitNumber}`}</span><span className="shrink-0 text-brand-gray">{formatDate(household.latestVisitDate)}</span></Link>)}
+                  </div> : <p className="mt-2 text-xs text-brand-gray">No visit date recorded yet.</p>}
+                </div>;
+              })}
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-4 sm:p-6">
+          <div className="mb-4 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-brand-ink sm:text-base">Recent Household Activity</h3><Link to="/app/bhw/households" className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-blue hover:underline">View all <ChevronRight className="h-4 w-4" /></Link></div>
+          {loading && !monitoring ? <SkeletonList rows={3} /> : recentActivity.length === 0 ? <p className="py-5 text-center text-sm text-brand-gray">No household visits recorded yet.</p> : (
+            <div className="divide-y divide-brand-border">
+              {recentActivity.map((activity) => <Link key={activity.id} to={`/app/bhw/households/${activity.id}`} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0 hover:bg-brand-bg/40">
+                <span className="min-w-0"><span className="block truncate text-sm font-medium text-brand-ink">{activity.headName || `Household ${activity.id}`}</span><span className="mt-0.5 block text-xs text-brand-gray">{activity.purok} · {Number(activity.latestVisitNumber) === 1 ? "Initial profile" : `Visit ${activity.latestVisitNumber}`}</span></span>
+                <span className="shrink-0 text-xs text-brand-gray">{formatDate(activity.latestVisitDate)} <ChevronRight className="ml-1 inline h-3.5 w-3.5" /></span>
+              </Link>)}
+            </div>
+          )}
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
@@ -95,13 +158,13 @@ export default function BHWDashboard() {
             <p className="text-sm text-brand-gray py-6 text-center">No household profiles yet.</p>
           ) : (
             <div className="space-y-3">
-              {households.slice(0, 4).map((household) => {
+              {[...households].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))).slice(0, 4).map((household) => {
                 const address = household.address ||
                   [household.streetAddress, household.purok || household.zone].filter(Boolean).join(", ");
                 const registered = formatDate(household.createdAt);
                 return (
-                  <div key={household.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2">
-                    <div>
+                  <Link key={household.id} to={`/app/bhw/households/${household.id}`} className="flex flex-col sm:flex-row sm:items-center sm:justify-between border border-brand-border rounded-btn px-4 py-3 gap-2 hover:bg-brand-bg/50">
+                    <div className="min-w-0">
                       <p className="font-medium text-brand-ink text-sm">
                         {household.headName || `Household ${household.id}`}
                       </p>
@@ -110,7 +173,7 @@ export default function BHWDashboard() {
                       </p>
                     </div>
                     <StatusBadge value={householdRiskLevel(household)} />
-                  </div>
+                  </Link>
                 );
               })}
             </div>
