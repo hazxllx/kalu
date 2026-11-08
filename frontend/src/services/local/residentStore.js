@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 import { BARANGAYS } from "@/lib/barangays";
 
@@ -199,3 +200,4 @@ export const residentStore = {
 
 export { PROGRAM_OPTIONS, BARANGAYS };
 export default residentStore;
+registerWorkingSetReset(() => { cache = []; listeners.forEach((listener) => listener()); });

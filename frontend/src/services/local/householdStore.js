@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 import { nextHouseholdId } from "@/features/households/lib/householdOptions";
 
@@ -145,3 +146,4 @@ export const householdStore = {
 };
 
 export default householdStore;
+registerWorkingSetReset(() => { cache = []; listeners.forEach((listener) => listener()); });

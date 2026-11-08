@@ -11,8 +11,8 @@ import { api } from './apiClient.js';
  *   PUT  /residents/:id    permitted demographic corrections
  */
 export const residentsApi = {
-  list: (params) => api.get('/residents', { params }),
-  get: (id) => api.get(`/residents/${id}`),
+  list: (params, options = {}) => api.get('/residents', { ...options, params }),
+  get: (id, options = {}) => api.get(`/residents/${id}`, options),
   create: (payload, options) => api.post('/residents', payload, options),
   update: (id, payload, options) => api.put(`/residents/${id}`, payload, options),
   remove: (id) => api.delete(`/residents/${id}`),
@@ -20,15 +20,15 @@ export const residentsApi = {
   // creates the Supabase Auth user, links residents.auth_user_id, and leaves the
   // account Pending Activation. It never duplicates the resident or changes the
   // verification status.
-  createAccount: (id, payload) => api.post(`/residents/${id}/account`, payload),
+  createAccount: (id, payload, options = {}) => api.post(`/residents/${id}/account`, payload, options),
   // Resident self-service: update own profile (contact number). The resident is
   // derived from the authenticated session server-side; no id is sent.
-  updateMine: (payload) => api.patch('/residents/me', payload),
+  updateMine: (payload, options = {}) => api.patch('/residents/me', payload, options),
   // Resident self-service: own health record (basic profile + own completed
   // consultations). Identity is resolved from the session; no id is sent.
   // Consultation-history filters (from/to date, serviceId, type, status) are
   // applied server-side to the caller's own records.
-  myHealthRecords: (params) => api.get('/residents/me/health-records', { params }),
+  myHealthRecords: (params, options = {}) => api.get('/residents/me/health-records', { ...options, params }),
 };
 
 export default residentsApi;

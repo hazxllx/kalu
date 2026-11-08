@@ -2,7 +2,7 @@ import React from "react";
 
 export function Card({ className = "", children, ...props }) {
   return (
-    <div className={`rounded-2xl border border-slate-200 bg-white shadow-card ${className}`} {...props}>
+    <div className={`ui-card rounded-2xl border border-slate-200 bg-white shadow-card ${className}`} {...props}>
       {children}
     </div>
   );
@@ -17,7 +17,7 @@ export function Card({ className = "", children, ...props }) {
  */
 export function CardHeader({ title, subtitle, action = null, className = "" }) {
   return (
-    <div className={`flex items-start justify-between gap-3 ${className}`}>
+    <div className={`ui-card-header flex items-start justify-between gap-3 ${className}`}>
       <div className="min-w-0">
         <h3 className="text-base font-semibold text-brand-ink">{title}</h3>
         {subtitle && <p className="mt-1 text-xs text-brand-gray">{subtitle}</p>}

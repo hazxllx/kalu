@@ -13,6 +13,7 @@ const TONES = {
   Completed: "bg-emerald-50 text-emerald-700",
   Today: "bg-brand-accent/10 text-brand-accent",
   Missed: "bg-rose-50 text-rose-700",
+  Overdue: "bg-rose-50 text-rose-700",
   Pending: "bg-amber-50 text-amber-700",
   // Appointment lifecycle labels
   Approved: "bg-emerald-50 text-emerald-700",
@@ -36,8 +37,8 @@ const TONES = {
 export default function StatusBadge({ value, className = "" }) {
   const tone = TONES[value] || "bg-slate-100 text-slate-600";
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium font-body ${tone} ${className}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+    <span className={`ui-status-badge inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium font-body ${tone} ${className}`}>
+      <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
       {value}
     </span>
   );

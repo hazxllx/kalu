@@ -817,8 +817,8 @@ const DEFAULT_GRANTS = Object.freeze({
   // to the resident directory — resident records are owned by the barangay
   // Health Supervisor / municipal roles. Their triage flow only ever searches
   // residents as a reference and never opens the directory page.
-  // RHU referral reads are station-gated by the API; writes remain Health
-  // Supervisor / PHN only. The Incoming Referrals screen is Triage-only.
+  // Referral responses are limited to explicitly assigned recipients at their
+  // current facility/station. RHU never gains general referral creation/assignment.
   [ROLE.RHU_PERSONNEL]: [
     'consultation.requests.view',
     'consultation.conduct',
@@ -832,6 +832,10 @@ const DEFAULT_GRANTS = Object.freeze({
     'triage.assessment.update',
     'triage.forward',
     'referrals.view',
+    'referrals.approve',
+    'referrals.reject',
+    'referrals.status.update',
+    'referrals.history.view',
     'services.view',
   ],
 

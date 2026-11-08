@@ -49,11 +49,19 @@ export const getServiceClient = () => {
 /**
  * Per-request client scoped to a single end user's access token. Queries made
  * through it are evaluated under that user's identity, so Supabase RLS applies.
+ *
+ * Uses the ANON key only. Falling back to the service-role key here would make
+ * a "user" client bypass RLS entirely — a latent privilege escalation. If the
+ * anon key is missing, refuse rather than silently elevate.
  */
 export const getUserClient = (accessToken) => {
   assertConfigured();
-  const key = env.supabaseAnonKey || env.supabaseServiceRoleKey;
-  return createClient(env.supabaseUrl, key, {
+  if (!env.supabaseAnonKey) {
+    throw new Error(
+      'SUPABASE_ANON_KEY is required to build a user-scoped Supabase client.',
+    );
+  }
+  return createClient(env.supabaseUrl, env.supabaseAnonKey, {
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -73,8 +81,12 @@ export const getUserClient = (accessToken) => {
  */
 export const createAuthClient = () => {
   assertConfigured();
-  const key = env.supabaseAnonKey || env.supabaseServiceRoleKey;
-  return createClient(env.supabaseUrl, key, {
+  if (!env.supabaseAnonKey) {
+    throw new Error(
+      'SUPABASE_ANON_KEY is required to build an auth (password-grant) Supabase client.',
+    );
+  }
+  return createClient(env.supabaseUrl, env.supabaseAnonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 };

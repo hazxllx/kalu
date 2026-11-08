@@ -232,9 +232,15 @@ const assertStaff = (user) => {
  *   box = 'incoming' -> reports routed TO the caller's role within their scope
  *   box = 'outgoing' -> reports the caller submitted
  */
-export const list = async ({ user, box = 'incoming', status = null, supabase = getServiceClient() }) => {
+export const list = async ({ user, box = 'incoming', status = null, limit = 200, offset = 0, includeTotal = false, supabase = getServiceClient() }) => {
   assertStaff(user);
-  let query = supabase.from(TABLE).select(LIST_SELECT).order('created_at', { ascending: false }).limit(200);
+  const pageLimit = Number(limit);
+  const pageOffset = Number(offset);
+  if (!Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 500 || !Number.isInteger(pageOffset) || pageOffset < 0) {
+    throw ApiError.badRequest('Report pagination requires a limit from 1 to 500 and a non-negative offset.');
+  }
+  const empty = () => includeTotal ? { rows: [], total: 0, limit: pageLimit, offset: pageOffset } : [];
+  let query = supabase.from(TABLE).select(LIST_SELECT, includeTotal ? { count: 'exact' } : undefined).order('created_at', { ascending: false });
 
   if (box === 'outgoing') {
     query = query.eq('created_by', user.id);
@@ -243,14 +249,14 @@ export const list = async ({ user, box = 'incoming', status = null, supabase = g
     const recipientRoles = [user.role];
     if (user.role === ROLES.PHN || user.role === ROLES.MHO) recipientRoles.push(ROLES.RHU_PERSONNEL);
     query = query.in('recipient_role', recipientRoles);
-    if (!user.municipalityId) return [];
+    if (!user.municipalityId) return empty();
     query = query.eq('municipality_id', user.municipalityId);
     if (user.role === ROLES.HEALTH_SUPERVISOR) {
-      if (!user.barangayId) return [];
+      if (!user.barangayId) return empty();
       query = query.eq('barangay_id', user.barangayId);
     }
     if (user.role === ROLES.RHU_PERSONNEL) {
-      if (!user.facilityId) return [];
+      if (!user.facilityId) return empty();
       query = query.eq('recipient_facility_id', user.facilityId);
     }
     query = query.neq('created_by', user.id);
@@ -260,9 +266,11 @@ export const list = async ({ user, box = 'incoming', status = null, supabase = g
 
   if (status) query = query.eq('status', status);
 
-  const { data, error } = await query;
+  query = includeTotal ? query.order('id', { ascending: false }).range(pageOffset, pageOffset + pageLimit - 1) : query.limit(pageLimit);
+  const { data, error, count } = await query;
   throwOnError(error, 'Could not load reports');
-  return (data || []).map(toReport);
+  const rows = (data || []).map(toReport);
+  return includeTotal ? { rows, total: count, limit: pageLimit, offset: pageOffset } : rows;
 };
 
 /** Whether the caller may see a specific report (sender or in-scope recipient). */

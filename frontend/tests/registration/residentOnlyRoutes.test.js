@@ -11,7 +11,9 @@ test("public registration offers only new and transferring residents", () => {
   assert.deepEqual([...chooser.matchAll(/key:\s*"([^"]+)"/g)].map((match) => match[1]), ["resident", "transfer"]);
   assert.match(chooser, /to: "\/register\/new\/step-1"/);
   assert.match(chooser, /to: "\/register\/transfer"/);
-  assert.doesNotMatch(chooser, /\/register\/personnel|Health personnel account|FORM C/);
+  assert.doesNotMatch(chooser, /key:\s*"personnel"|FORM C/);
+  assert.match(chooser, /accounts are provisioned by administrators/);
+  assert.match(chooser, /to="\/register\/personnel"[^>]*>Personnel access process/);
 });
 
 test("Hero notice offers resident-only registration and identifies personnel accounts as internal", () => {
@@ -24,9 +26,14 @@ test("Hero notice offers resident-only registration and identifies personnel acc
   assert.doesNotMatch(hero, /to="\/register\/personnel"/);
 });
 
-test("a bookmarked personnel registration URL redirects without importing the public form", () => {
-  assert.doesNotMatch(routes, /PersonnelRegistration/);
-  assert.match(routes, /path="\/register\/personnel"\s+element=\{<Navigate to="\/register" replace \/>\}/);
+test("a bookmarked personnel URL explains the authorized process without offering self-signup", () => {
+  assert.match(routes, /path="\/register\/personnel"\s+element=\{<PersonnelRegistration \/>\}/);
+  const notice = source('features/registration/pages/PersonnelRegistration.jsx');
+  assert.match(notice, /Accounts Are Administrator-Provisioned/);
+  assert.match(notice, /cannot create an account or choose their own role, barangay or facility/);
+  assert.match(notice, /does not submit an access request, send an invitation or activate an account/);
+  assert.match(notice, /to="\/login"/);
+  assert.doesNotMatch(notice, /<form\b|<input\b|onSubmit|\.signUp\(|staffAccountsApi|registrationApi|fetch\(/);
   assert.match(routes, /path="\/register\/new\/step-1"\s+element=\{<NewResidentRegistration \/>\}/);
   assert.match(routes, /path="\/register\/transfer"\s+element=\{<TransferRegistration \/>\}/);
 });

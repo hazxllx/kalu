@@ -23,7 +23,7 @@ import { usePermissions } from "@/context/PermissionsContext";
 import { householdsApi } from "@/services/api";
 import { createHouseholdOffline } from "@/services/offline/householdOfflineService";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
-import { systemUsers } from "@/services/local/dashboardData";
+import HealthSupervisorPageHeader from "@/features/dashboards/components/HealthSupervisorPageHeader";
 import { maxLength, numeric, phone as validatePhone } from "@/utils/validation";
 import {
   HH_STATUSES,
@@ -46,17 +46,6 @@ import {
   computeHouseholdRisk,
   householdFlags,
 } from "../lib/householdOptions";
-
-const ACTIVE_BHWS = systemUsers
-  .filter((u) => u.role === "BHW" && u.status === "Active")
-  .map((u) => u.name);
-
-function bhwOptionsFor(defaultCollector) {
-  const base = ACTIVE_BHWS.length > 0 ? ACTIVE_BHWS : ["Maria Cruz", "Lourdes Ramos"];
-  return defaultCollector && !base.includes(defaultCollector)
-    ? [defaultCollector, ...base]
-    : base;
-}
 
 const inputCls = (error) =>
   `w-full bg-white border rounded-input px-3.5 py-2.5 text-sm text-brand-ink outline-none transition-colors focus:border-brand-blue ${
@@ -604,9 +593,6 @@ export default function AddHouseholdPage() {
     return idx >= 0 ? `/${parts.slice(0, idx + 1).join("/")}` : null;
   }, [location.pathname]);
 
-  const defaultCollector =
-    user?.role === "bhw" && user?.name ? user.name : ACTIVE_BHWS[0] || "Maria Cruz";
-  const bhwOptions = bhwOptionsFor(defaultCollector);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [headSearchOpen, setHeadSearchOpen] = useState(false);
@@ -636,7 +622,6 @@ export default function AddHouseholdPage() {
     streetAddress: "",
     contact: "",
     families: "1",
-    collector: defaultCollector || (bhwOptions && bhwOptions[0]) || "",
     hhStatus: "Pending",
     approval: "Not yet approved",
     income: "",
@@ -693,7 +678,7 @@ export default function AddHouseholdPage() {
       active = false;
       clearTimeout(timeout);
     };
-  }, [form.head, user?.role]);
+  }, [form.head, user?.role, user?.id]);
 
   useEffect(() => {
     const query = form.head.trim();
@@ -719,7 +704,7 @@ export default function AddHouseholdPage() {
         });
     }, 350);
     return () => { active = false; clearTimeout(timeout); };
-  }, [form.head, user?.role]);
+  }, [form.head, user?.role, user?.id]);
 
   const clearError = (key) =>
     setErrors((prev) => {
@@ -939,7 +924,6 @@ export default function AddHouseholdPage() {
             initialVisitRequestId: form.initialVisitRequestId,
             initialVisitReason: "Initial Profiling",
           } : { quarterVisits: form.visits }),
-          collectorName: form.collector,
           members: form.members.map((m) => ({
             name: m.name.trim(),
             ...(m.residentId ? { residentId: m.residentId } : {}),
@@ -957,6 +941,7 @@ export default function AddHouseholdPage() {
         },
       });
       const saved = result?.household;
+      if (!result?.queued && !saved?.id) throw new Error("The server did not confirm the saved household. Reload the household list before retrying.");
       const toastMessage = result?.queued
         ? "Saved offline — will sync automatically"
         : result?.visitWarning
@@ -1006,6 +991,13 @@ export default function AddHouseholdPage() {
   return (
     <>
       {/* Page header */}
+      {user?.role === "health_supervisor" ? (
+        <HealthSupervisorPageHeader
+          eyebrow="Households"
+          title="Add Household"
+          subtitle="Register a new household and record its basic information."
+        />
+      ) : (
       <div className="mb-6 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-card md:mb-8 md:px-6 md:py-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Desktop: breadcrumb */}
@@ -1043,11 +1035,11 @@ export default function AddHouseholdPage() {
           >
             {isOffline ? (
               <>
-                <AlertTriangle className="h-3.5 w-3.5" /> Saved offline — will sync automatically
+                <AlertTriangle className="h-3.5 w-3.5" /> Offline: saves will be queued for sync
               </>
             ) : (
               <>
-                <CheckCircle2 className="h-3.5 w-3.5" /> Saved directly to the database
+                <CheckCircle2 className="h-3.5 w-3.5" /> Online: saves use the server
               </>
             )}
           </span>
@@ -1066,6 +1058,7 @@ export default function AddHouseholdPage() {
           </div>
         </div>
       </div>
+      )}
 
       {user?.role === "bhw" && householdsPath && (
         <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-brand-blue/20 bg-brand-light/40 p-4">
@@ -1264,12 +1257,8 @@ export default function AddHouseholdPage() {
                 className={inputCls(errors.income)}
               />
             </Field>
-            <Field label="Assigned Data Collector / BHW" hint="Auto-filled with the logged-in user — editable">
-              <select value={form.collector} onChange={(e) => set("collector", e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                {bhwOptions.map((b) => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
+            <Field label="Data Collector" hint="Recorded by the server under your signed-in account">
+              <input readOnly value={user?.name || user?.email || "Account details unavailable"} className={readOnlyCls} />
             </Field>
             <Field label="HH Status">
               <select value={form.hhStatus} onChange={(e) => set("hhStatus", e.target.value)} className={`${inputCls()} cursor-pointer`}>

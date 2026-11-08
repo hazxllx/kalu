@@ -345,7 +345,7 @@ export default function PhnCheckups() {
                 aria-label="Filter by status"
                 className={selectCls}
               >
-                <option value="All">All Statuses</option>
+                <option value="All">All Status</option>
                 {Object.values(CHECKUP_STATUS).map((s) => (
                   <option key={s} value={s}>
                     {s}

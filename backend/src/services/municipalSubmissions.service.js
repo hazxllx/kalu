@@ -41,13 +41,15 @@ const shape = (row) => ({
 });
 
 /** List the persisted review decisions for the caller's municipality. */
-export const listReviews = async ({ user, supabase = getServiceClient() }) => {
+export const listReviews = async ({ user, submissionRef = null, supabase = getServiceClient() }) => {
   if (!user?.municipalityId) return [];
-  const { data, error } = await supabase
+  let query = supabase
     .from(TABLE)
     .select('*')
     .eq('municipality_id', user.municipalityId)
     .order('updated_at', { ascending: false });
+  if (submissionRef) query = query.eq('submission_ref', String(submissionRef));
+  const { data, error } = await query;
   throwOnError(error, 'Could not load submission reviews');
   return (data || []).map(shape);
 };

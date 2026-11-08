@@ -59,6 +59,8 @@ router.use('/auth', authRoutes);
 // Auth account is created client-side by supabase.auth.signUp).
 router.use('/registration', registrationRoutes);
 router.use('/consultations', consultationsRoutes);
+// Compatibility path shares the real visit controller/service and permissions.
+router.use('/health-records', consultationsRoutes);
 router.use('/operational', operationalRoutes);
 
 // Program-specific official TCL / health forms (NCD Parts 1-3, Oral Health,
@@ -67,7 +69,7 @@ router.use('/operational', operationalRoutes);
 router.use('/program-forms', programFormsRoutes);
 
 // Personnel registration + operational account verification.
-//   POST /staff-accounts/register                 public registration
+//   Staff accounts are provisioned through the authorized admin/invite workflow.
 //   GET  /staff-accounts/queue, /:id/approve ...  PHN + Health Supervisor only
 router.use('/staff-accounts', staffAccountsRoutes);
 
@@ -89,8 +91,8 @@ router.use('/resident', residentFollowupsRoutes);
 router.use('/resident', visitPlansRoutes);
 
 // Referral coordination — real Supabase-backed workflow (health_referrals):
-// barangay-scoped create/list/update/status/delete for Health Supervisor / PHN,
-// resident read of their own referrals.
+// scoped sender coordination and current-assignee decisions/history; no hard
+// deletion. Resident reads remain restricted to their own referrals.
 router.use('/referrals', referralsRoutes);
 
 // FHSIS M1 monthly report — barangay-scoped recording + aggregation over the
@@ -148,9 +150,7 @@ router.use('/municipal-submissions', municipalSubmissionsRoutes);
 router.use('/households', householdsRoutes);
 
 // Legacy clinical resources — schema not connected yet (501).
-router.use('/health-records', createResourceRouter('health-records', { readRoles: FEATURE_ROLES.healthRecords }));
 router.use('/assessments', createResourceRouter('assessments', { readRoles: FEATURE_ROLES.assessments }));
-router.use('/consultations', createResourceRouter('consultations', { readRoles: FEATURE_ROLES.consultations }));
 router.use('/triage', createResourceRouter('triage', { readRoles: FEATURE_ROLES.triage }));
 // Follow-ups are served by the real operational router at
 // `/operational/followups` (follow_ups table). No standalone `/follow-ups`

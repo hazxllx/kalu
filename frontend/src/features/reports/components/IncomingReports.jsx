@@ -241,7 +241,7 @@ export default function IncomingReports() {
             {periods.map((period) => <option key={period} value={period}>{period}</option>)}
           </select>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter report status" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm dark:bg-card">
-            <option value="All">All statuses</option>
+            <option value="All">All Status</option>
             {STATUS_ORDER.map((status) => <option key={status} value={status}>{status}</option>)}
           </select>
         </div>

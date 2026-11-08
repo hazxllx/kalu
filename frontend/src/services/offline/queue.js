@@ -1,4 +1,4 @@
-import { db, safeWrite } from './db.js';
+import { assertCurrentOwner, captureOwnerGuard, db, requireEncryptedPayload, safeWrite } from './db.js';
 import { encryptJson } from './crypto.js';
 import { newId, newLocalRef } from './ids.js';
 import { buildOperation, OUTBOX_STATUS } from './outbox.js';
@@ -29,12 +29,15 @@ export const queueCreate = async ({
   mutationType = MUTATION_TIER.ONLINE_ONLY,
   opId,
 }) => {
+  const isOwnerCurrent = captureOwnerGuard(ownerId);
+  assertCurrentOwner(isOwnerCurrent);
   assertQueueableMutation(mutationType);
   if (mutationType !== MUTATION_TIER.SAFE_SYNC) {
     throw new Error('Offline drafts must be saved with queueOfflineDraft and cannot be auto-synchronized.');
   }
   const localId = newId();
-  const encrypted = await encryptJson(data);
+  const encrypted = requireEncryptedPayload(await encryptJson(data));
+  assertCurrentOwner(isOwnerCurrent);
   const op = buildOperation(
     { entity, opType: 'create', ownerId, payload: data, localRecordId: localId, dependsOn, baseRevision: null, maxAttempts, mutationType, opId },
     encrypted,
@@ -54,8 +57,16 @@ export const queueCreate = async ({
   };
   await safeWrite(() =>
     db.transaction('rw', db.drafts, db.outbox, async () => {
-      await db.outbox.put(op);
-      await db.drafts.put(draft);
+      assertCurrentOwner(isOwnerCurrent);
+      for (const dependencyId of op.dependsOn) {
+        const dependency = await db.outbox.get(dependencyId);
+        assertCurrentOwner(isOwnerCurrent);
+        if (dependency && dependency.ownerId !== ownerId) throw new Error('An operation dependency belongs to another owner.');
+      }
+      await db.outbox.add(op);
+      assertCurrentOwner(isOwnerCurrent);
+      await db.drafts.add(draft);
+      assertCurrentOwner(isOwnerCurrent);
     }),
   );
   return { localId, operation: op, draft: { ...draft, data } };
@@ -77,12 +88,16 @@ export const queueUpdate = async ({
   mutationType = MUTATION_TIER.ONLINE_ONLY,
   opId,
 }) => {
+  const isOwnerCurrent = captureOwnerGuard(ownerId);
+  assertCurrentOwner(isOwnerCurrent);
+  if (!serverId) throw new Error('A server record is required for an offline update.');
   assertQueueableMutation(mutationType);
   if (mutationType !== MUTATION_TIER.SAFE_SYNC) {
     throw new Error('Offline drafts must be saved with queueOfflineDraft and cannot be auto-synchronized.');
   }
   const localId = newId();
-  const encrypted = await encryptJson(data);
+  const encrypted = requireEncryptedPayload(await encryptJson(data));
+  assertCurrentOwner(isOwnerCurrent);
   const op = buildOperation(
     { entity, opType: 'update', ownerId, payload: data, localRecordId: localId, dependsOn, baseRevision, targetServerId: serverId, mutationType, opId },
     encrypted,
@@ -103,8 +118,16 @@ export const queueUpdate = async ({
   };
   await safeWrite(() =>
     db.transaction('rw', db.drafts, db.outbox, async () => {
-      await db.outbox.put(op);
-      await db.drafts.put(draft);
+      assertCurrentOwner(isOwnerCurrent);
+      for (const dependencyId of op.dependsOn) {
+        const dependency = await db.outbox.get(dependencyId);
+        assertCurrentOwner(isOwnerCurrent);
+        if (dependency && dependency.ownerId !== ownerId) throw new Error('An operation dependency belongs to another owner.');
+      }
+      await db.outbox.add(op);
+      assertCurrentOwner(isOwnerCurrent);
+      await db.drafts.add(draft);
+      assertCurrentOwner(isOwnerCurrent);
     }),
   );
   return { localId, operation: op, draft: { ...draft, data } };
@@ -116,9 +139,11 @@ export const queueUpdate = async ({
  * workflow; this helper never finalizes the underlying operation.
  */
 export const queueOfflineDraft = async ({ entity, ownerId, data }) => {
-  if (!ownerId) throw new Error('A signed-in user is required to save an offline draft.');
+  const isOwnerCurrent = captureOwnerGuard(ownerId);
+  assertCurrentOwner(isOwnerCurrent);
   const localId = newId();
-  const encrypted = await encryptJson(data);
+  const encrypted = requireEncryptedPayload(await encryptJson(data));
+  assertCurrentOwner(isOwnerCurrent);
   const createdAt = nowMs();
   const draft = {
     localId,
@@ -133,22 +158,32 @@ export const queueOfflineDraft = async ({ entity, ownerId, data }) => {
     createdAt,
     updatedAt: createdAt,
   };
-  await safeWrite(() => db.drafts.put(draft));
+  await safeWrite(() => db.transaction('rw', db.drafts, async () => {
+    assertCurrentOwner(isOwnerCurrent);
+    await db.drafts.add(draft);
+    assertCurrentOwner(isOwnerCurrent);
+  }));
   return { localId, draft: { ...draft, data } };
 };
 
 /** Pending (not yet server-confirmed) drafts for display, newest first. */
 export const listPendingDrafts = async (ownerId, entity = null) => {
+  const isOwnerCurrent = captureOwnerGuard(ownerId);
+  assertCurrentOwner(isOwnerCurrent);
   let rows = await db.drafts.where('ownerId').equals(ownerId).toArray();
+  assertCurrentOwner(isOwnerCurrent);
   if (entity) rows = rows.filter((row) => row.entity === entity);
   return rows
-    .filter((row) => row.status !== DRAFT_STATUS.SYNCED)
+    .filter((row) => row.status !== DRAFT_STATUS.SYNCED && row.status !== DRAFT_STATUS.RESOLVED)
     .sort((a, b) => b.createdAt - a.createdAt);
 };
 
 export const getLocalCounts = async (ownerId) => {
   if (!ownerId) return { pending: 0, failed: 0, conflict: 0, offlineDraft: 0 };
+  const isOwnerCurrent = captureOwnerGuard(ownerId);
+  assertCurrentOwner(isOwnerCurrent);
   const rows = await db.drafts.where('ownerId').equals(ownerId).toArray();
+  assertCurrentOwner(isOwnerCurrent);
   return rows.reduce(
     (acc, row) => {
       if (row.status === DRAFT_STATUS.PENDING) acc.pending += 1;

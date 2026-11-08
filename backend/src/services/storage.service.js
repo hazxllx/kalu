@@ -31,7 +31,10 @@ export const uploadDocument = async ({ file, residentId, documentId }) => {
     throw new Error(`Upload failed: ${error.message}`);
   }
 
-  const { data: urlData } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
+  const { data: urlData, error: urlError } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
+  if (urlError || !urlData?.signedUrl) {
+    throw new Error(`Upload succeeded but the document link could not be created${urlError?.message ? `: ${urlError.message}` : ''}`);
+  }
 
   return {
     storagePath: path,
@@ -60,7 +63,10 @@ export const uploadTransferDocument = async ({ file, transferRequestId, document
     cacheControl: '3600', upsert: false, contentType: file.type,
   });
   if (error) throw new Error(`Upload failed: ${error.message}`);
-  const { data: urlData } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
+  const { data: urlData, error: urlError } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
+  if (urlError || !urlData?.signedUrl) {
+    throw new Error(`Upload succeeded but the transfer document link could not be created${urlError?.message ? `: ${urlError.message}` : ''}`);
+  }
   return { storagePath: path, url: urlData?.signedUrl || null };
 };
 

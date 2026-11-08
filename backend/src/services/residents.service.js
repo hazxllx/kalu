@@ -363,7 +363,9 @@ const listActiveServices = async ({ municipalityId, supabase }) => {
     .select('id, name, category, active, barangay_id')
     .eq('municipality_id', municipalityId)
     .order('name', { ascending: true });
-  if (error) return [];
+  if (error) {
+    throw new ApiError(502, `Could not load health services for consultation filters: ${error.message}`);
+  }
   return (data || []).map((row) => ({
     id: row.id,
     name: row.name,
@@ -691,6 +693,7 @@ export const listResidents = async ({
   limit = 50,
   offset = 0,
   verifiedOnly = false,
+  riskLevel = '',
 } = {}) => {
   const scope = assignedBarangay(user);
   const requested = String(barangay || '').trim();
@@ -724,6 +727,16 @@ export const listResidents = async ({
   const municipalityId =
     user?.municipalityId || null;
 
+  if (riskLevel) {
+    if (riskLevel !== 'High' || verifiedOnly || search) throw ApiError.badRequest('The high-risk list supports riskLevel=High without an additional verification/search filter.');
+    const { getHighRiskResidents } = await import('./residentRisk.service.js');
+    const page = await getHighRiskResidents({ user, barangay: effectiveBarangay, municipalityId,
+      limit: parsedLimit, offset: parsedOffset, includeTotal: true });
+    const rows = page.rows.map((entry) => entry.resident);
+    await attachAccountStatus(rows);
+    return { rows, total: page.total, riskLevel: 'High' };
+  }
+
   if (!verifiedOnly) {
     const base =
       await repository.listResidents({
@@ -740,6 +753,7 @@ export const listResidents = async ({
       ...base,
       rows: await attachRiskToResidents(
         base.rows,
+        { user },
       ),
     };
   }
@@ -794,12 +808,14 @@ export const listResidents = async ({
         String(a.createdAt || ''),
       ),
     )
-    .slice(0, parsedLimit);
+    // Apply the caller's offset for real pagination. Previously this was
+    // `.slice(0, parsedLimit)`, so page 2 returned the same first page.
+    .slice(parsedOffset, parsedOffset + parsedLimit);
 
   await attachAccountStatus(rows);
 
   return {
-    rows: await attachRiskToResidents(rows),
+    rows: await attachRiskToResidents(rows, { user }),
     total: byId.size,
   };
 };
@@ -1176,6 +1192,11 @@ export const createResident = async ({
  *
  * Out-of-scope records read as "not found" so the API never confirms the
  * existence of another barangay's data.
+ *
+ * Municipality-wide staff (MHO / PHN) have no barangay assignment, so a
+ * scope-less check alone would let them read or write residents of ANY
+ * municipality. Mirror `verifications.service.js::assertInScope` and also
+ * enforce the municipality boundary when both sides know it.
  */
 const assertWithinScope = (
   user,
@@ -1183,7 +1204,31 @@ const assertWithinScope = (
 ) => {
   const scope = assignedBarangay(user);
 
-  if (!scope) return;
+  // A same-named barangay in another municipality is never equivalent. The
+  // service-role repository bypasses RLS, so both boundaries belong here too.
+  if (
+    (user?.municipalityId && resident?.municipalityId && String(resident.municipalityId) !== String(user.municipalityId)) ||
+    (repository.driver === 'supabase' && (!user?.municipalityId || !resident?.municipalityId)) ||
+    (scope && user?.barangayId && resident?.barangayId && String(resident.barangayId) !== String(user.barangayId))
+  ) {
+    throw ApiError.notFound('Resident record not found');
+  }
+
+  if (!scope) {
+    // Municipality-wide staff: enforce the municipality when both sides know
+    // it. Without this a PHN in one municipality could read/edit/verify a
+    // resident in another (cross-municipality IDOR).
+    if (
+      user?.municipalityId &&
+      resident?.municipalityId &&
+      resident.municipalityId !== user.municipalityId
+    ) {
+      throw ApiError.notFound(
+        'Resident record not found',
+      );
+    }
+    return;
+  }
 
   if (
     String(
@@ -1233,6 +1278,7 @@ export const getResident = async ({
   const risk =
     await assessResidentById({
       id: resident.id,
+      user,
     });
 
   return {
@@ -1323,10 +1369,25 @@ export const createResidentLoginAccount = async ({ id, email, user } = {}) => {
   };
 };
 
+/** Accept integer versions, and legacy timestamp tokens from already-saved offline work. */
+export const parseResidentPrecondition = (value) => {
+  const token = String(value ?? '').trim().replace(/^W\//, '').replace(/^"(.*)"$/, '$1');
+  if (/^[1-9]\d*$/.test(token)) {
+    const revision = Number(token);
+    if (Number.isSafeInteger(revision) && revision <= 2147483647) {
+      return { expectedRevision: revision };
+    }
+  } else if (/^\d{4}-\d{2}-\d{2}T/.test(token) && Number.isFinite(Date.parse(token))) {
+    return { expectedUpdatedAt: token };
+  }
+  throw ApiError.badRequest('The resident revision is invalid. Reopen the record before editing.');
+};
+
 export const updateResident = async ({
   id,
   patch = {},
   user,
+  expectedRevision = null,
   expectedUpdatedAt = null,
 }) => {
   if (!isEditRole(user)) {
@@ -1344,14 +1405,24 @@ export const updateResident = async ({
     );
   }
 
-  if (expectedUpdatedAt && !Number.isFinite(Date.parse(expectedUpdatedAt))) {
-    throw ApiError.badRequest('The resident revision is invalid.');
-  }
-
   assertWithinScope(
     user,
     existing,
   );
+
+  if (expectedRevision !== null) {
+    const parsed = parseResidentPrecondition(expectedRevision);
+    if (!parsed.expectedRevision) throw ApiError.badRequest('The resident revision must be a positive integer.');
+    expectedRevision = parsed.expectedRevision;
+  }
+  if (expectedUpdatedAt) {
+    const parsed = parseResidentPrecondition(expectedUpdatedAt);
+    if (!parsed.expectedUpdatedAt) throw ApiError.badRequest('The legacy resident revision is invalid.');
+    expectedUpdatedAt = parsed.expectedUpdatedAt;
+  }
+  // Internal callers without a client token still compare-and-swap the version
+  // just read; HTTP edits require a client token at the controller boundary.
+  const writeRevision = expectedRevision ?? (existing.revision ?? 1);
 
   const updates = {};
 
@@ -1381,6 +1452,36 @@ export const updateResident = async ({
         scope +
         ' only',
     );
+  }
+
+  // A municipality-wide caller (MHO / PHN) may reassign a resident, but the new
+  // barangay must exist, be approved, active, and belong to the caller's
+  // municipality. Without this a PHN could silently move a resident into a
+  // nonexistent or another municipality's barangay.
+  if (
+    !scope &&
+    String(patch?.barangay ?? '').trim() &&
+    patch.barangay.trim().toLowerCase() !== String(existing.barangay ?? '').trim().toLowerCase()
+  ) {
+    const barangayRow = await repository.findBarangayByName(
+      patch.barangay.trim(),
+      user?.municipalityId || null,
+    );
+
+    if (!isApprovedBarangayName(patch.barangay.trim()) || !barangayRow) {
+      throw ApiError.unprocessable(
+        `Unknown barangay: ${patch.barangay}. It must belong to your municipality.`,
+      );
+    }
+
+    if (
+      !isApprovedBarangayName(barangayRow.name) ||
+      String(barangayRow.status || 'Active').toLowerCase() !== 'active'
+    ) {
+      throw ApiError.unprocessable(
+        `${patch.barangay} is currently inactive and cannot accept resident records.`,
+      );
+    }
   }
 
   updates.currentAddress = String(
@@ -1423,12 +1524,16 @@ export const updateResident = async ({
   const updated = await repository.updateResident(
     id,
     updates,
-    { expectedUpdatedAt },
+    { expectedRevision: writeRevision, expectedUpdatedAt },
   );
-  if (expectedUpdatedAt && !updated) {
+  if (!updated) {
     const current = await repository.getResident(id);
     if (!current) throw ApiError.notFound('Resident record not found');
-    throw ApiError.staleRevision('This resident changed on the server. Reload it before applying the queued changes.');
+    assertWithinScope(user, current);
+    throw ApiError.staleRevision(
+      'This resident changed on the server. Review the newer version before applying your changes.',
+      { currentRevision: current.revision ?? 1 },
+    );
   }
   return updated;
 };

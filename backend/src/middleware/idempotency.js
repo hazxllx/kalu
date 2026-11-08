@@ -58,11 +58,8 @@ export const stableStringify = (value) => {
 export const requestFingerprint = ({ method = 'GET', path = '', body = null } = {}) =>
   createHash('sha256').update(`${method}\n${path}\n${stableStringify(body)}`).digest('hex');
 
-const persistResponse = (supabase, userId, key, status, body) => {
-  // Fire-and-forget: the client already has its response; we only need the
-  // ledger entry to exist before the client retries (which it does after the
-  // attempt completes and backoff elapses).
-  return supabase
+const persistResponse = async (supabase, userId, key, status, body, claimId = null) => {
+  let query = supabase
     .from('sync_operations')
     .update({
       status: 'completed',
@@ -71,32 +68,34 @@ const persistResponse = (supabase, userId, key, status, body) => {
       updated_at: new Date().toISOString(),
     })
     .eq('user_id', userId)
-    .eq('idempotency_key', key)
-    .then(
-      () => {},
-      () => {},
-    );
+    .eq('idempotency_key', key);
+  if (claimId) query = query.eq('id', claimId).select('id');
+  const result = await query;
+  if (result.error || (claimId && result.data?.length !== 1)) {
+    throw new ApiError(503, 'The operation outcome could not be recorded. Retry the original operation.');
+  }
 };
 
-const releaseClaim = (supabase, userId, key) =>
-  supabase
+const releaseClaim = async (supabase, userId, key, claimId = null) => {
+  let query = supabase
     .from('sync_operations')
     .delete()
     .eq('user_id', userId)
-    .eq('idempotency_key', key)
-    .then(
-      () => {},
-      () => {},
-    );
+    .eq('idempotency_key', key);
+  if (claimId) query = query.eq('id', claimId);
+  const { error } = await query;
+  if (error) throw new ApiError(503, 'The operation claim could not be released. Retry the original operation.');
+};
 
-export const createIdempotencyMiddleware = ({ validateReplay } = {}) =>
+export const createIdempotencyMiddleware = ({ validateReplay, durable = false, getKey = readKey,
+  getClient = getServiceClient, isConfigured = () => env.isSupabaseConfigured } = {}) =>
   asyncHandler(async (req, res, next) => {
-  const key = readKey(req);
+  const key = getKey(req);
   // Make the normalized key available to the controller so the domain write can
   // carry it into the created row (database-enforced deduplication).
   if (key) req.idempotencyKey = key;
   const userId = req.user?.id;
-  if (!key || !userId || !env.isSupabaseConfigured) return next();
+  if (!key || !userId || !isConfigured()) return next();
 
   const fingerprint = requestFingerprint({
     method: req.method,
@@ -104,7 +103,7 @@ export const createIdempotencyMiddleware = ({ validateReplay } = {}) =>
     body: req.body ?? null,
   });
 
-  const supabase = getServiceClient();
+  const supabase = getClient();
   const replay = (row) => {
     if (row?.status === 'completed') {
       res.status(row.response_status || 200).json(row.response_body ?? {});
@@ -126,6 +125,9 @@ export const createIdempotencyMiddleware = ({ validateReplay } = {}) =>
     .eq('user_id', userId)
     .eq('idempotency_key', key)
     .maybeSingle();
+  if (existing.error && durable) {
+    throw new ApiError(503, 'The operation ledger is unavailable. Retry the original operation.');
+  }
 
   if (existing.data) {
     if (!matchesRequest(existing.data)) {
@@ -145,10 +147,13 @@ export const createIdempotencyMiddleware = ({ validateReplay } = {}) =>
       throw new ApiError(425, 'An identical request is still being processed. Retry shortly.');
     }
     // Stale claim from a crashed request — reclaim it.
-    await supabase.from('sync_operations').delete().eq('id', existing.data.id);
+    const released = await supabase.from('sync_operations').delete().eq('id', existing.data.id);
+    if (released.error && durable) {
+      throw new ApiError(503, 'The operation claim could not be recovered. Retry the original operation.');
+    }
   }
 
-  const claim = await supabase.from('sync_operations').insert({
+  let claimQuery = supabase.from('sync_operations').insert({
     user_id: userId,
     idempotency_key: key,
     method: req.method,
@@ -156,6 +161,8 @@ export const createIdempotencyMiddleware = ({ validateReplay } = {}) =>
     request_fingerprint: fingerprint,
     status: 'processing',
   });
+  if (durable) claimQuery = claimQuery.select('id').single();
+  const claim = await claimQuery;
 
   if (claim.error) {
     // Unique violation: another request claimed the key between our read and
@@ -183,20 +190,42 @@ export const createIdempotencyMiddleware = ({ validateReplay } = {}) =>
       }
       throw new ApiError(425, 'An identical request is still being processed. Retry shortly.');
     }
-    // The ledger is a best-effort optimization; never block a legitimate write
-    // because the ledger itself failed.
+    if (durable) {
+      throw new ApiError(503, 'The operation ledger is unavailable. Retry the original operation.');
+    }
+    // Older domain handlers still allow writes when their optional ledger is
+    // unavailable. Durable consultation creates explicitly fail closed.
     return next();
   }
+  const claimId = durable ? claim.data?.id : null;
+  if (durable && !claimId) throw new ApiError(503, 'The operation claim could not be confirmed.');
 
   const originalJson = res.json.bind(res);
   res.json = (body) => {
     const status = res.statusCode || 200;
-    if (status >= 200 && status < 300) {
-      persistResponse(supabase, userId, key, status, body);
-    } else {
-      releaseClaim(supabase, userId, key);
-    }
-    return originalJson(body);
+    let outcomeRecorded = false;
+    return (async () => {
+      if (status >= 200 && status < 300) {
+        // Commit the outcome BEFORE sending success, not after a backoff-sized
+        // race window. Fence durable writes to the exact claim we acquired.
+        await persistResponse(supabase, userId, key, status, body, claimId);
+        outcomeRecorded = true;
+      } else {
+        // A failed clinical request stays a failed response even when releasing
+        // its ledger claim is temporarily unavailable.
+        await releaseClaim(supabase, userId, key, claimId).catch(() => {});
+      }
+      res.json = originalJson;
+      return originalJson(body);
+    })().catch(async () => {
+      res.json = originalJson;
+      if (!outcomeRecorded) await releaseClaim(supabase, userId, key, claimId).catch(() => {});
+      if (res.destroyed || res.headersSent) return res;
+      // Some controllers do not return res.json's promise. Forward the failure
+      // here so neither those handlers nor the error pipeline can send fake 2xx.
+      next(new ApiError(503, 'The operation outcome could not be confirmed. Retry the original operation.'));
+      return res;
+    });
   };
 
   return next();

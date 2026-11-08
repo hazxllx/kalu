@@ -47,6 +47,12 @@ export const formatManilaLongDate = (date = new Date()) => {
   }).format(d);
 };
 
+export const phnDisplayName = (user) => {
+  const structured = [user?.firstName ?? user?.first_name, user?.middleName ?? user?.middle_name, user?.lastName ?? user?.last_name, user?.suffix]
+    .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  return structured || String(user?.fullName || user?.full_name || user?.name || '').trim();
+};
+
 /** True when an ISO timestamp falls on the given Philippine calendar day. */
 export const isManilaToday = (value, today = manilaDateKey()) =>
   Boolean(value) && manilaDateKey(value) === today;
@@ -112,6 +118,7 @@ export const followUpAttentionRank = (row, today = manilaDateKey()) => {
 export const OPEN_REFERRAL_STATUSES = Object.freeze(["pending", "accepted", "in progress"]);
 
 export const isPendingReferral = (row) => OPEN_REFERRAL_STATUSES.includes(lc(row?.status));
+export const isAwaitingReferral = (row) => lc(row?.status) === 'pending';
 
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
 
@@ -200,7 +207,7 @@ export const countBy = (rows, predicate) =>
 export const countFollowUpsDue = (rows, today = manilaDateKey()) =>
   countBy(rows, (row) => followUpNeedsAttention(row, today));
 
-export const countPendingReferrals = (rows) => countBy(rows, isPendingReferral);
+export const countPendingReferrals = (rows) => countBy(rows, isAwaitingReferral);
 
 export const countHighRisk = (rows) => countBy(rows, isHighRiskResident);
 
@@ -208,10 +215,10 @@ export const countHighRisk = (rows) => countBy(rows, isHighRiskResident);
 
 const RISK_LABEL = { high: 0, medium: 1, moderate: 1, low: 2 };
 const patientRiskLevel = (patient = {}) =>
-  lc(patient?.checkup?.riskLevel || patient?.riskLevel || "");
+  lc(patient?.riskLevel || patient?.checkup?.riskLevel || patient?.raw?.riskLevel || "");
 
 export const patientRiskRank = (patient) =>
-  RISK_LABEL[patientRiskLevel(patient)] ?? RISK_LABEL.low;
+  RISK_LABEL[patientRiskLevel(patient)] ?? 3; // unassessed is not a verified Low
 
 /** Order the waiting queue so higher risk is seen first (stable otherwise). */
 export const sortQueueByRisk = (patients = []) =>

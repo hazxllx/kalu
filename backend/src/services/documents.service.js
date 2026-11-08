@@ -718,9 +718,19 @@ export const reviewResidentDocument = async ({ user, residentId, documentId, pat
     throw ApiError.conflict('Student ID verification is only available for minor residents.');
   }
 
+  const result = validation.value ?? validation;
+  const decision = result.verificationStatus;
+  const reason = String(result.rejectionReason ?? '').trim();
+  if (!['approved', 'rejected', 'resubmission_required'].includes(decision)) {
+    throw ApiError.badRequest('A valid verification decision is required.');
+  }
+  if (decision === 'rejected' && !reason) {
+    throw ApiError.badRequest('A rejection reason is required.');
+  }
+
   const updated = await repository.updateDocument(documentId, {
-    verificationStatus: validation.verificationStatus,
-    rejectionReason: validation.rejectionReason,
+    verificationStatus: decision,
+    rejectionReason: reason || null,
     reviewedById: user.id,
     reviewedAt: new Date().toISOString(),
   });

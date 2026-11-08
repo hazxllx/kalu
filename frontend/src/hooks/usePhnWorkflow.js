@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import { useAuth } from "@/context/AuthContext";
 import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
+import { OfflineActionRequiredError, MUTATION_TIER } from "@/services/offline/mutationPolicy";
+import useAuthorizedData from './useAuthorizedData.js';
 
 /**
  * usePhnWorkflow — persistent RHU triage → PHN check-up pipeline (BUG-008).
@@ -20,63 +22,24 @@ import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 export function usePhnWorkflow({ source = "queue" } = {}) {
   const { user } = useAuth();
   const ownerId = user?.id;
-  const [patients, setPatients] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
   const loadRows = useCallback(async () => {
-    return source === "intake"
-      ? phnWorkflowApi.listMyIntakeOffline(ownerId)
-      : phnWorkflowApi.listQueueOffline(ownerId);
-  }, [source, ownerId]);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
     try {
-      const rows = await loadRows();
-      setPatients(rows);
-    } catch (e) {
-      // Classify so a local IndexedDB/storage failure is not misreported as a
-      // server error. Network failures remain retryable; storage failures are
-      // surfaced with a storage-specific message so the queue can be retried
-      // without masking the root cause.
-      const info = classifySyncError(e);
-      const msg =
-        info.code === SYNC_ERROR.STORAGE
-          ? e?.message || "Device storage error. Try reloading; pending work is preserved."
-          : e?.message || "Unable to load the patient workflow.";
-      setError(msg);
-      setPatients([]);
-    } finally {
-      setLoading(false);
+      const rows = await (source === 'intake' ? phnWorkflowApi.listMyIntakeOffline(ownerId) : phnWorkflowApi.listQueueOffline(ownerId));
+      if (!Array.isArray(rows)) throw new Error('The workflow server returned an invalid list.');
+      return rows;
+    } catch (error) {
+      const info = classifySyncError(error);
+      const endpoint = source === 'intake' ? 'GET /intake/visits' : 'GET /phn/submissions';
+      const status = error?.status ? `HTTP ${error.status}` : info.code === SYNC_ERROR.STORAGE ? 'device storage' : 'request failed';
+      const code = error?.payload?.error?.code;
+      throw new Error(`${endpoint} (${status}${code ? `, ${code}` : ''}): ${error?.message || 'The patient workflow is unavailable.'}`);
     }
-  }, [loadRows]);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const rows = await loadRows();
-        if (active) setPatients(rows);
-      } catch (e) {
-        if (active) {
-          const info = classifySyncError(e);
-          const msg =
-            info.code === SYNC_ERROR.STORAGE
-              ? e?.message || "Device storage error. Try reloading; pending work is preserved."
-              : e?.message || "Unable to load the patient workflow.";
-          setError(msg);
-          setPatients([]);
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [loadRows]);
+  }, [source, ownerId]);
+  const workflow = useAuthorizedData(loadRows);
+  const { refresh } = workflow;
+  const patients = workflow.data || [];
+  const loading = workflow.loading;
+  const error = workflow.error;
 
   const sendToPhnQueue = useCallback(async (payload) => {
     try {
@@ -84,7 +47,14 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
       await refresh();
       return false;
     } catch (error) {
-      if (classifySyncError(error).code !== SYNC_ERROR.NETWORK) throw error;
+      // The apiClient turns an offline RHU hand-off into an ONLINE_ONLY error
+      // (and never auto-submits). Treat that boundary — and a genuine network
+      // failure — as the save-offline signal. Validation/auth failures rethrow.
+      const requiresOfflineDraft =
+        error instanceof OfflineActionRequiredError ||
+        error?.code === MUTATION_TIER.ONLINE_ONLY ||
+        classifySyncError(error).code === SYNC_ERROR.NETWORK;
+      if (!requiresOfflineDraft) throw error;
       await phnWorkflowApi.saveTriageDraft(ownerId, payload);
       await refresh();
       return true;

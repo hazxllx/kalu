@@ -43,7 +43,14 @@ const referralCreators = authorize(FEATURE_ROLES.phnProcessing, {
   permission: 'referrals.create',
 });
 const referralEditors = authorize(FEATURE_ROLES.phnProcessing, {
-  permission: 'referrals.status.update',
+  permission: 'referrals.assign',
+});
+const referralSnapshotEditors = authorize(FEATURE_ROLES.phnProcessing, { permission: 'referrals.status.update' });
+const referralStatusEditors = authorize(['phn', 'health_supervisor', 'rhu_personnel'], {
+  permission: (req) => {
+    const status = (req.body?.referral || req.body?.record || req.body || {}).status;
+    return [status === 'Accepted' ? 'referrals.approve' : status === 'Rejected' ? 'referrals.reject' : 'referrals.status.update'];
+  },
 });
 
 processing.get('/submissions', queueReaders, consultationStation, asyncHandler(phnQueueController.listQueue));
@@ -60,11 +67,12 @@ processing.post('/submissions/:id/complete', consultationConductors, consultatio
 // Referrals remain PHN-only.
 processing.post('/submissions/:id/referral', referralCreators, asyncHandler(phnQueueController.createReferral));
 processing.put('/referrals/:id', referralEditors, asyncHandler(phnQueueController.updateReferral));
-processing.post('/referrals/:id/sync', referralEditors, asyncHandler(phnQueueController.syncReferral));
+processing.put('/referrals/:id/status', referralStatusEditors, asyncHandler(phnQueueController.updateReferralStatus));
+processing.post('/referrals/:id/sync', referralSnapshotEditors, asyncHandler(phnQueueController.syncReferral));
 
 const reads = Router();
 reads.use(authenticate);
-const submissionReaders = authorize(FEATURE_ROLES.referralRecords, {
+const submissionReaders = authorize(FEATURE_ROLES.referralRecords.filter((role) => role !== 'rhu_personnel'), {
   anyPermission: ['consultation.requests.view', 'consultation.history.view'],
 });
 const referralReaders = authorize(FEATURE_ROLES.referralRecords, {

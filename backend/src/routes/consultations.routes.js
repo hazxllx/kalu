@@ -5,6 +5,8 @@ import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import { FEATURE_ROLES, ROLES } from '../config/roles.js';
 import * as controller from '../controllers/consultations.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { createIdempotencyMiddleware } from '../middleware/idempotency.js';
+import { consultationOperationKey, validateCreateReplay } from '../services/consultations.service.js';
 
 const router = Router();
 router.use(authenticate, resolveBarangayScope);
@@ -18,7 +20,22 @@ router.get(
 router.post(
   '/',
   authorize(FEATURE_ROLES.consultations, { permission: 'consultation.conduct' }),
+  createIdempotencyMiddleware({
+    durable: true,
+    getKey: (req) => consultationOperationKey(
+      req.body?.consultation || req.body || {},
+      req.headers['idempotency-key'],
+    ),
+    validateReplay: validateCreateReplay,
+  }),
   asyncHandler(controller.create),
+);
+router.get(
+  '/:id',
+  authorize([...FEATURE_ROLES.consultations, ROLES.RESIDENT], {
+    anyPermission: ['consultation.requests.view', 'consultation.history.view'],
+  }),
+  asyncHandler(controller.get),
 );
 router.put(
   '/:id',

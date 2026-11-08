@@ -103,7 +103,7 @@ export default function MedicalCertificates() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none dark:border-border dark:bg-input dark:text-foreground"
           >
-            {statuses.map((s) => <option key={s} value={s}>{s === "All" ? "All Statuses" : s}</option>)}
+            {statuses.map((s) => <option key={s} value={s}>{s === "All" ? "All Status" : s}</option>)}
           </select>
           {statusFilter !== "All" && (
             <button onClick={() => setStatusFilter("All")} className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline">

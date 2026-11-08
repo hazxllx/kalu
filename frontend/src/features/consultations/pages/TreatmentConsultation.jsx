@@ -1,15 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import DataTable from "@/components/tables/DataTable";
+import ErrorState from "@/components/common/ErrorState";
+import StatusBadge from "@/components/common/StatusBadge";
+import RiskBadge from "@/components/common/RiskBadge";
+import useAuthorizedData from "@/hooks/useAuthorizedData";
 import {
-  Search, FileText, Save, X, Plus, CheckCircle2, Users, ChevronLeft, Stethoscope, Calendar, AlertTriangle,
+  Search, FileText, Save, X, Plus, CheckCircle2, Users, ChevronLeft, MoreVertical, Eye, Stethoscope, Calendar, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { consultationsApi, residentsApi, healthServicesApi } from "@/services/api";
+import { api, consultationsApi, residentsApi, healthServicesApi } from "@/services/api";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 import { classifyBloodPressure as classifyBp } from "@/features/consultations/utils/bpClassification";
 import {
@@ -18,8 +22,12 @@ import {
   listConsultationDrafts,
   restoreConsultationDraft,
   deleteConsultationDraft,
+  listConsultationsOffline,
+  listConsultationResidentsOffline,
 } from "@/services/offline/consultationOfflineService";
 import { isNavigatorOnline } from "@/services/offline/connectivity";
+import { captureOwnerGuard } from "@/services/offline/db";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
 
 const inputCls = (error) =>
   `w-full bg-white border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue ${
@@ -138,8 +146,8 @@ const submitErrorMessage = (err) => {
   }
 };
 
-const emptyForm = () => ({
-  consultationDate: new Date().toISOString().split("T")[0],
+const emptyForm = (now = new Date()) => ({
+  consultationDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
   consultationTime: "",
   chiefComplaint: "",
   bloodPressure: "",
@@ -205,6 +213,37 @@ const formatDate = (iso) => {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
+const formatVitalLabel = (key) => ({
+  bp: "Blood Pressure",
+  bloodPressure: "Blood Pressure",
+  temperature: "Temperature",
+  hr: "Pulse Rate",
+  pulseRate: "Pulse Rate",
+  rr: "Respiratory Rate",
+  respiratoryRate: "Respiratory Rate",
+  heightCm: "Height",
+  height: "Height",
+  weightKg: "Weight",
+  weight: "Weight",
+  bmi: "BMI",
+  bmiCategory: "BMI Category",
+  bloodPressureCategory: "Blood Pressure Category",
+  o2sat: "Oxygen Saturation",
+  oxygenSaturation: "Oxygen Saturation",
+}[key] || key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (value) => value.toUpperCase()));
+
+const parseVitals = (value) => {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
 /** Two-letter initials for the resident avatar (local — no external store). */
 const initialsOf = (name) =>
   String(name || "")
@@ -219,30 +258,49 @@ const initialsOf = (name) =>
 export default function TreatmentConsultation() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { can } = usePermissions();
   const canConductConsultation = can("consultation.conduct");
   const canEditConsultation = can("consultation.records.update");
+  const isHealthSupervisor = user?.role === "health_supervisor";
+  const canViewConsultations = can("consultation.requests.view");
+  const focusedId = isHealthSupervisor ? searchParams.get("consultation") : null;
   const [allResidents, setAllResidents] = useState([]);
   const [consultations, setConsultations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [busy, setBusy] = useState(false);
-  // Locally saved consultation drafts (saved offline; require an explicit online
-  // submission). Owner-scoped and persisted in IndexedDB so they survive a
-  // refresh or browser restart. These are NEVER auto-synchronized.
+  // Owner-scoped write-ahead queue. Background reconnect sync uses the same
+  // immutable operation as the first online attempt.
   const ownerId = user?.id || null;
   const [offlineDrafts, setOfflineDrafts] = useState([]);
   const [draftBusyId, setDraftBusyId] = useState(null);
+  const [reviewLocalId, setReviewLocalId] = useState(null);
+  const syncStatus = useSyncStatus();
 
   // Records list view by default. Clicking "+ Add Treatment Consultation"
   // opens the consultation entry form below; saving persists the record to the
-  // session store and returns to the list where the new record appears first.
+  // authorized API/outbox and returns to the records list.
   const [mode, setMode] = useState("list"); // "list" | "form"
   const [editingId, setEditingId] = useState(null);
+  const [detailRecord, setDetailRecord] = useState(null);
+  const [openActionMenu, setOpenActionMenu] = useState(null);
 
   const scope = getSupervisorScope(user);
+  const assignedBarangay = scope?.assignedBarangay;
   const allowedBarangays =
-    scope && scope.level === HS_SCOPE.BARANGAY ? [scope.assignedBarangay] : null;
+    isHealthSupervisor ? scope?.level === HS_SCOPE.BARANGAY ? [assignedBarangay] : [] : null;
+  const loadFocusedRecord = useCallback(async ({ ownerId }) => {
+    if (!focusedId) return null;
+    if (!canViewConsultations || !assignedBarangay) throw new Error("A permitted consultation record and verified barangay assignment are required.");
+    const response = await consultationsApi.get(focusedId, { ownerId });
+    const record = response?.consultation;
+    if (record?.id !== focusedId || record.resident?.barangay !== assignedBarangay) {
+      throw new Error("The selected consultation is unavailable in your assigned barangay.");
+    }
+    return record;
+  }, [focusedId, canViewConsultations, assignedBarangay]);
+  const focusedRecord = useAuthorizedData(loadFocusedRecord);
 
   const residentOptions = useMemo(() => {
     const pool = allowedBarangays
@@ -255,6 +313,12 @@ export default function TreatmentConsultation() {
 
   const [selectedResident, setSelectedResident] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [recordSearch, setRecordSearch] = useState("");
+  const [recordDateFrom, setRecordDateFrom] = useState("");
+  const [recordDateTo, setRecordDateTo] = useState("");
+  const [recordRisk, setRecordRisk] = useState("All");
+  const [recordFollowUp, setRecordFollowUp] = useState("All");
+  const [recordSort, setRecordSort] = useState("newest");
   const [formData, setFormData] = useState(emptyForm());
   const [errors, setErrors] = useState(/** @type {FormErrors} */ ({}));
   const [toast, setToast] = useState(null);
@@ -275,45 +339,82 @@ export default function TreatmentConsultation() {
   );
 
   const load = useCallback(() => {
+    if (!ownerId) return Promise.resolve();
+    const guard = captureOwnerGuard(ownerId);
     setLoading(true);
     setLoadError(null);
+    if (isHealthSupervisor && !assignedBarangay) {
+      setAllResidents([]); setConsultations([]); setLoading(false);
+      setLoadError("A verified barangay assignment is required to view consultations.");
+      return Promise.resolve();
+    }
     // Verified residents only: the selector must offer residents who are
     // individually approved OR verified via their household (the backend's
     // verified directory). Pending/rejected/unverified residents are excluded
     // server-side; the submission endpoint re-checks eligibility as well.
-    return Promise.all([residentsApi.list({ limit: 200, verified: true }), consultationsApi.list()])
-      .then(([residentResult, consultationResult]) => {
-        setAllResidents(residentResult?.rows || residentResult || []);
-        setConsultations(consultationResult?.rows || []);
+    return Promise.all([
+      listConsultationResidentsOffline({ ownerId, fetchList: () => residentsApi.list({ limit: 200, verified: true }) }),
+      listConsultationsOffline({ ownerId, fetchList: () => consultationsApi.list() }),
+    ]).then(([residentRows, consultationRows]) => {
+        if (!guard()) return;
+        setAllResidents(residentRows);
+        setConsultations(consultationRows.filter((row) => !row.offline));
       })
       .catch((err) => {
+        if (!guard()) return;
         // A failed load must surface as an explicit error state — never a
         // silent empty "no consultations" list.
         setLoadError(err?.message || "Could not load consultation records.");
         setConsultations([]);
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { if (guard()) setLoading(false); });
+  }, [ownerId, isHealthSupervisor, assignedBarangay]);
 
   useEffect(() => {
+    setAllResidents([]);
+    setConsultations([]);
+    setOfflineDrafts([]);
+    setReviewLocalId(null);
+    setMode("list");
+    setEditingId(null);
+    setSelectedResident(null);
+    setFormData(emptyForm());
+    setSearchQuery("");
+    setErrors({});
+    setBusy(false);
+    setDraftBusyId(null);
+    setToast(null);
     load();
   }, [load]);
 
-  // Load any locally saved offline drafts for this user (best-effort; the online
-  // records load is independent and must not be blocked by this).
+  useEffect(() => {
+    if (!openActionMenu) return undefined;
+    const close = (event) => {
+      if (!event.target.closest("[data-consultation-actions]")) setOpenActionMenu(null);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [openActionMenu]);
+
+  // Also refresh queue states after automatic synchronization or a rejection.
   const refreshDrafts = useCallback(() => {
     if (!ownerId) {
       setOfflineDrafts([]);
       return Promise.resolve();
     }
+    const guard = captureOwnerGuard(ownerId);
     return listConsultationDrafts(ownerId)
-      .then((rows) => setOfflineDrafts(rows))
-      .catch(() => setOfflineDrafts([]));
+      .then((rows) => { if (guard()) setOfflineDrafts(rows); })
+      .catch(() => { if (guard()) setLoadError("Could not load queued consultations. Clinical information remains on this device."); });
   }, [ownerId]);
 
   useEffect(() => {
     refreshDrafts();
-  }, [refreshDrafts]);
+  }, [refreshDrafts, syncStatus.counts.pending, syncStatus.counts.failed, syncStatus.counts.conflict, syncStatus.syncing]);
+
+  useEffect(() => {
+    if (syncStatus.ownerId === ownerId && syncStatus.lastSyncedAt) load();
+  }, [load, ownerId, syncStatus.ownerId, syncStatus.lastSyncedAt]);
 
   // Load the real health services catalog for the consultation form selector.
   // Never mocked/hardcoded: options come from /api/health-services (the caller's
@@ -347,14 +448,15 @@ export default function TreatmentConsultation() {
       r.barangay.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const showToast = (message) => {
-    setToast(message);
+  const showToast = (message, kind = "success") => {
+    setToast({ message, kind });
     setTimeout(() => setToast(null), 3000);
   };
 
   const startNewConsultation = () => {
     if (!canConductConsultation) return;
     setEditingId(null);
+    setReviewLocalId(null);
     setSelectedResident(null);
     setFormData(emptyForm());
     setErrors({});
@@ -365,13 +467,14 @@ export default function TreatmentConsultation() {
   const openForEdit = (record) => {
     if (!canEditConsultation) return;
     setEditingId(record.id);
+    setReviewLocalId(null);
     setSelectedResident(record.resident || null);
     // Vitals are returned nested under record.vitals (bp/temperature/hr/rr/
     // heightCm/weightKg/o2sat); map them back to the flat form fields so an
     // edited consultation shows its saved vitals instead of blanks.
     const v = record.vitals || {};
     setFormData({
-      consultationDate: record.consultationDate || new Date().toISOString().split("T")[0],
+      consultationDate: record.consultationDate || "",
       consultationTime: record.consultationTime || "",
       chiefComplaint: record.chiefComplaint || "",
       bloodPressure: v.bp ?? record.bloodPressure ?? "",
@@ -403,6 +506,7 @@ export default function TreatmentConsultation() {
   const cancelForm = () => {
     setMode("list");
     setEditingId(null);
+    setReviewLocalId(null);
     setSelectedResident(null);
     setFormData(emptyForm());
     setErrors({});
@@ -425,8 +529,9 @@ export default function TreatmentConsultation() {
   };
 
   const handleSave = () => {
-    if (busy) return; // guard against double submission while a save is in flight
+    if (busy || reviewLocalId) return;
     if (editingId ? !canEditConsultation : !canConductConsultation) return;
+    const guard = captureOwnerGuard(ownerId);
     const nextErrors = validate();
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
@@ -441,7 +546,13 @@ export default function TreatmentConsultation() {
 
     // Shared, status-appropriate error presentation (never fail silently).
     const showSaveError = (err) => {
-      console.error("Consultation save failed:", err?.status, err?.message, err?.payload);
+      if (!guard()) return;
+      // Keep an attempted queue read-only: submitting an edited copy with a new
+      // UUID after response loss could duplicate a visit already on the server.
+      if (err?.localId) {
+        setReviewLocalId(err.localId);
+        refreshDrafts();
+      }
       const serverErrors = err?.payload?.error?.errors;
       if (serverErrors && typeof serverErrors === "object" && !Array.isArray(serverErrors)) {
         const fieldErrors = { ...serverErrors };
@@ -479,25 +590,28 @@ export default function TreatmentConsultation() {
 
     if (editingId) {
       // Updates require an authoritative server round-trip (online only).
-      consultationsApi.update(editingId, payload).then((result) => {
+      consultationsApi.update(editingId, payload, { ownerId }).then((result) => {
+        if (!guard()) return;
         const saved = result?.consultation;
+        if (!saved || saved.id !== editingId || saved.resident?.id !== selectedResident.id) {
+          throw new Error("The server did not confirm the consultation update. Your entered details were retained.");
+        }
         setConsultations((current) => current.map((item) => (item.id === editingId ? saved : item)));
+        if (focusedId === editingId) void focusedRecord.refresh();
         showToast("Consultation updated successfully.");
         cancelForm();
-      }).catch(showSaveError).finally(() => setBusy(false));
+      }).catch(showSaveError).finally(() => { if (guard()) setBusy(false); });
       return;
     }
 
-    // Create is offline-capable: when offline (or the request drops on the
-    // network), it is saved as a local OFFLINE_DRAFT that survives refresh and
-    // restart and is submitted later by an explicit online action. It is never
-    // auto-synchronized, so an unconfirmed consultation is never shown as saved
-    // on the server. Non-network errors (validation/authorization) still surface.
+    // The operation is persisted before HTTP. A lost response uses this same
+    // UUID through the automatic reconnect handler, never a second create.
     saveConsultationOffline({
       ownerId,
       payload,
-      create: (data) => consultationsApi.create(data),
+      create: (data, options) => api.post("/consultations", data, options),
     }).then((res) => {
+      if (!guard()) return;
       if (res.source === "server") {
         const saved = res.record;
         setConsultations((current) => [saved, ...current]);
@@ -511,40 +625,50 @@ export default function TreatmentConsultation() {
       }
       // Saved locally — referral creation needs a server-confirmed visit, so it
       // is deferred until this draft is submitted online.
-      showToast("Saved offline. Submit this consultation when you're back online.");
+      showToast(needsReferral
+        ? "Saved on this device. It will sync automatically on reconnect. Create the referral separately after server confirmation."
+        : "Saved on this device. Awaiting server confirmation; reconnect retries automatically.", "pending");
       refreshDrafts();
       cancelForm();
-    }).catch(showSaveError).finally(() => setBusy(false));
+    }).catch(showSaveError).finally(() => { if (guard()) setBusy(false); });
   };
 
-  // Submit a locally saved draft to the server (explicit, online-only). On
-  // success the only local copy is removed so it cannot become a duplicate.
+  // Optional immediate retry uses the queued operation, not a new submission.
   const handleSubmitDraft = (localId) => {
+    if (!canConductConsultation) return;
     if (draftBusyId) return;
+    const guard = captureOwnerGuard(ownerId);
     if (!isNavigatorOnline()) {
-      showToast("You're offline. Reconnect to submit this consultation.");
+      showToast("You're offline. This consultation will sync automatically when you reconnect.", "pending");
       return;
     }
     setDraftBusyId(localId);
     submitConsultationDraft({
       ownerId,
       localId,
-      create: (data) => consultationsApi.create(data),
+      create: (data, options) => api.post("/consultations", data, options),
     }).then((out) => {
-      if (out?.record) setConsultations((current) => [out.record, ...current]);
-      showToast("Consultation submitted successfully.");
+      if (!guard()) return;
+      if (out.source === "server") {
+        setConsultations((current) => [out.record, ...current.filter((row) => row.id !== out.record.id)]);
+        showToast("Consultation saved successfully.");
+      } else {
+        showToast("Awaiting server confirmation. Clinical information remains queued for automatic retry.", "pending");
+      }
       refreshDrafts();
     }).catch((err) => {
-      console.error("Draft submission failed:", err?.status, err?.message);
-      showToast(submitErrorMessage(err));
+      if (!guard()) return;
+      showToast(submitErrorMessage(err), "error");
       refreshDrafts();
-    }).finally(() => setDraftBusyId(null));
+    }).finally(() => { if (guard()) setDraftBusyId(null); });
   };
 
-  // Load a saved draft back into the form for review/editing before submission.
+  // Review the original clinical data without copying it into a second create.
   const handleEditDraft = (localId) => {
     if (!canConductConsultation) return;
+    const guard = captureOwnerGuard(ownerId);
     restoreConsultationDraft({ ownerId, localId }).then((restored) => {
+      if (!guard()) return;
       if (!restored) {
         refreshDrafts();
         return;
@@ -554,32 +678,79 @@ export default function TreatmentConsultation() {
         residentOptions.find((r) => r.id === data.residentId) ||
         (data.residentId ? { id: data.residentId, name: data.residentId, barangay: "" } : null);
       setEditingId(null);
+      setReviewLocalId(localId);
       setSelectedResident(resident);
       setFormData({ ...emptyForm(), ...data });
-      setErrors({});
+      setErrors(restored.lastError ? { submit: restored.lastError.message } : {});
       setSearchQuery("");
       setMode("form");
       window.scrollTo({ top: 0, behavior: "smooth" });
-    });
+    }).catch((err) => { if (guard()) showToast(submitErrorMessage(err), "error"); });
   };
 
   const handleDiscardDraft = (localId) => {
-    deleteConsultationDraft(localId).then(() => refreshDrafts());
+    if (!canConductConsultation) return;
+    deleteConsultationDraft({ ownerId, localId }).then(() => refreshDrafts())
+      .catch((err) => showToast(submitErrorMessage(err), "error"));
   };
 
   const recordRows = useMemo(
-    () => consultations.map((c) => ({ ...c })),
-    [consultations]
+    () => consultations.filter((record) => !isHealthSupervisor || (assignedBarangay && record.resident?.barangay === assignedBarangay)).map((record) => ({ ...record })),
+    [consultations, isHealthSupervisor, assignedBarangay]
   );
+  const filteredRecordRows = useMemo(() => {
+    const query = recordSearch.trim().toLowerCase();
+    const filtered = recordRows.filter((record) => {
+      const date = String(record.consultationDate || "").slice(0, 10);
+      const risk = record.resident?.riskLevel || record.resident?.risk_level || record.riskLevel || "Not assessed";
+      const searchMatches = !query || [
+        record.resident?.name,
+        record.resident?.id,
+        record.resident?.healthRecordNo,
+        record.resident?.health_record_no,
+        record.healthRecordNo,
+        record.health_record_no,
+        record.id,
+        record.consultationId,
+        record.serviceName,
+        record.consultationDate,
+        record.chiefComplaint,
+        record.diagnosis,
+      ].filter(Boolean).join(" ").toLowerCase().includes(query);
+      const dateMatches = (!recordDateFrom || date >= recordDateFrom) && (!recordDateTo || date <= recordDateTo);
+      const riskMatches = recordRisk === "All" || risk.toLowerCase() === recordRisk.toLowerCase();
+      const followUpMatches = recordFollowUp === "All"
+        || recordFollowUp === "With Follow-up" && record.followUpRequired === "Yes"
+        || recordFollowUp === "Without Follow-up" && record.followUpRequired !== "Yes";
+      return searchMatches && dateMatches && riskMatches && followUpMatches;
+    });
+    return filtered.sort((left, right) => {
+      if (recordSort === "residentAsc" || recordSort === "residentDesc") {
+        const comparison = (left.resident?.name || "").localeCompare(right.resident?.name || "", undefined, { sensitivity: "base" });
+        return recordSort === "residentAsc" ? comparison : -comparison;
+      }
+      const comparison = String(left.consultationDate || "").localeCompare(String(right.consultationDate || ""));
+      return recordSort === "oldest" ? comparison : -comparison;
+    });
+  }, [recordRows, recordSearch, recordDateFrom, recordDateTo, recordRisk, recordFollowUp, recordSort]);
+  const hasRecordFilters = Boolean(recordSearch || recordDateFrom || recordDateTo || recordRisk !== "All" || recordFollowUp !== "All" || recordSort !== "newest");
+  const clearRecordFilters = () => {
+    setRecordSearch("");
+    setRecordDateFrom("");
+    setRecordDateTo("");
+    setRecordRisk("All");
+    setRecordFollowUp("All");
+    setRecordSort("newest");
+  };
+  const displayedRecords = focusedId ? focusedRecord.data ? [focusedRecord.data] : [] : filteredRecordRows;
 
   const columns = [
     { key: "resident", label: "Resident" },
     { key: "date", label: "Consultation Date" },
     { key: "service", label: "Health Service" },
-    { key: "chiefComplaint", label: "Reason / Chief Complaint" },
-    { key: "diagnosis", label: "Diagnosis" },
+    { key: "risk", label: "Risk Level" },
     { key: "followUp", label: "Follow-up" },
-    { key: "actions", label: "" },
+    { key: "actions", label: "Actions" },
   ];
 
   /* ------------------------- Entry form (unchanged style) ------------------------- */
@@ -604,6 +775,7 @@ export default function TreatmentConsultation() {
               <div
                 key={resident.id}
                 onClick={() => {
+                  if (reviewLocalId || editingId) return;
                   setSelectedResident(resident);
                   if (errors.resident) setErrors((prev) => ({ ...prev, resident: "" }));
                 }}
@@ -639,14 +811,22 @@ export default function TreatmentConsultation() {
       <Card className="p-5 lg:col-span-2">
         <div className="flex items-center justify-between gap-3 mb-5">
           <h3 className="font-semibold text-brand-ink">
-            {editingId ? "Edit Treatment Consultation" : "Treatment Consultation Form"}
+            {reviewLocalId ? "Review Queued Consultation" : editingId ? "Edit Treatment Consultation" : "Treatment Consultation Form"}
           </h3>
-          {!editingId && (
+          {!editingId && !reviewLocalId && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-3 py-1 text-xs font-medium text-brand-blue">
               <Plus className="w-3.5 h-3.5" /> New Consultation
             </span>
           )}
         </div>
+
+        {reviewLocalId && (
+          <p className="mb-4 rounded-btn border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Original clinical information is retained read-only. Retries use the same operation UUID; reviewing this record does not create another consultation.
+          </p>
+        )}
+
+        <fieldset disabled={Boolean(reviewLocalId)}>
 
         {/* Resident Information */}
         <div className="mb-5">
@@ -928,6 +1108,8 @@ export default function TreatmentConsultation() {
           </div>
         </div>
 
+        </fieldset>
+
         {/* Buttons */}
         <div className="pt-4 border-t border-brand-border">
           {errors.submit && (
@@ -936,7 +1118,7 @@ export default function TreatmentConsultation() {
             </div>
           )}
           <div className="flex flex-wrap items-center gap-3">
-            <button
+            {!reviewLocalId && <button
               onClick={handleSave}
               disabled={busy}
               aria-busy={busy}
@@ -946,7 +1128,7 @@ export default function TreatmentConsultation() {
               {busy
                 ? (editingId ? "Updating Consultation..." : "Saving Consultation...")
                 : (editingId ? "Update Consultation" : "Save Consultation")}
-            </button>
+            </button>}
             <button
               onClick={cancelForm}
               disabled={busy}
@@ -963,6 +1145,25 @@ export default function TreatmentConsultation() {
   /* ----------------------------- Records list ---------------------------- */
   const renderRecords = () => (
     <>
+      {focusedId && <Card className="mb-4 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h3 className="text-section font-semibold text-brand-ink">Selected Consultation</h3><p className="mt-0.5 break-all text-caption text-brand-gray">Record {focusedId}</p></div>
+          <button type="button" className="supervisor-button" onClick={() => { const next = new URLSearchParams(searchParams); next.delete("consultation"); setSearchParams(next, { replace: true }); }}>Show All Records</button>
+        </div>
+        {focusedRecord.loading ? <p role="status" className="py-4 text-ui text-brand-gray">Loading the selected consultation...</p> : focusedRecord.error ? <ErrorState compact title="Selected consultation unavailable" message={focusedRecord.error} onRetry={focusedRecord.refresh} /> : focusedRecord.data && <>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-brand-border pt-3"><p className="text-ui font-medium text-brand-ink">{focusedRecord.data.resident?.name || "Resident name unavailable"}</p><StatusBadge className="capitalize" value={String(focusedRecord.data.status || "Not recorded").replace(/_/g, " ")} /></div>
+          <dl className="mt-3 grid gap-x-5 gap-y-3 text-ui sm:grid-cols-2">{[
+            ["Consultation Date", formatDate(focusedRecord.data.consultationDate)],
+            ["Health Service", focusedRecord.data.serviceName],
+            ["Chief Complaint", focusedRecord.data.chiefComplaint],
+            ["Diagnosis", focusedRecord.data.diagnosis],
+            ["Recorded Findings", focusedRecord.data.findings],
+            ["Treatment Given", focusedRecord.data.treatmentGiven],
+            ["Advice", focusedRecord.data.adviceGiven],
+            ["Remarks", focusedRecord.data.remarks],
+          ].map(([label, value]) => <div key={label}><dt className="text-caption text-brand-gray">{label}</dt><dd className="mt-0.5 whitespace-pre-wrap break-words text-brand-ink">{value || "Not recorded"}</dd></div>)}</dl>
+        </>}
+      </Card>}
       {/* Summary strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
         <Card className="p-4 flex items-center gap-3">
@@ -999,22 +1200,51 @@ export default function TreatmentConsultation() {
       </div>
 
       <Card className="p-6">
-        <div className="mb-5">
-          <h3 className="font-semibold text-brand-ink">Treatment Consultation Records</h3>
-          <p className="text-xs text-brand-gray mt-0.5">Consultations recorded for residents in your area.</p>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="flex min-w-[15rem] flex-1 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+          <input
+            type="search"
+            value={recordSearch}
+            onChange={(event) => setRecordSearch(event.target.value)}
+            placeholder="Search resident, health record, consultation..."
+            aria-label="Search consultation records"
+            className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray"
+          />
+          </div>
+          <input type="date" value={recordDateFrom} onChange={(event) => setRecordDateFrom(event.target.value)} aria-label="Consultation date from" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue" />
+          <input type="date" value={recordDateTo} onChange={(event) => setRecordDateTo(event.target.value)} aria-label="Consultation date to" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue" />
+          <select value={recordRisk} onChange={(event) => setRecordRisk(event.target.value)} aria-label="Risk level filter" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue">
+            <option value="All">All Risk Levels</option>
+            <option value="High">High</option>
+            <option value="Moderate">Moderate</option>
+            <option value="Low">Low</option>
+            <option value="Not assessed">Not Assessed</option>
+          </select>
+          <select value={recordFollowUp} onChange={(event) => setRecordFollowUp(event.target.value)} aria-label="Follow-up filter" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue">
+            <option value="All">All Follow-up</option>
+            <option value="With Follow-up">With Follow-up</option>
+            <option value="Without Follow-up">Without Follow-up</option>
+          </select>
+          <select value={recordSort} onChange={(event) => setRecordSort(event.target.value)} aria-label="Sort consultation records" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue">
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+            <option value="residentAsc">Resident Name (A-Z)</option>
+            <option value="residentDesc">Resident Name (Z-A)</option>
+          </select>
+          {hasRecordFilters && <button type="button" onClick={clearRecordFilters} className="rounded-btn px-2.5 py-2 text-sm font-medium text-brand-blue hover:bg-brand-light">Clear</button>}
         </div>
-
         {offlineDrafts.length > 0 && (
           <div className="mb-5 rounded-btn border border-amber-300 bg-amber-50/70 p-4">
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
               <p className="text-sm font-semibold text-amber-800">
-                Saved offline — not yet submitted ({offlineDrafts.length})
+                Awaiting server confirmation ({offlineDrafts.length})
               </p>
             </div>
             <p className="text-xs text-amber-700 mb-3">
-              These consultations are stored only on this device and have not been saved to the server.
-              Submit them while online to record them. They are never submitted automatically.
+              Clinical information is retained on this device. Pending consultations sync automatically on reconnect using their original operation UUID.
+              Failed or conflicting records remain available for review; a lost response may already have reached the server.
             </p>
             <ul className="space-y-2">
               {offlineDrafts.map((draft) => (
@@ -1028,8 +1258,10 @@ export default function TreatmentConsultation() {
                       {draft.diagnosis ? ` — ${draft.diagnosis}` : ""}
                     </p>
                     <p className="text-xs text-brand-gray">
-                      {formatDate(draft.consultationDate)} · Resident {draft.residentId || "—"} · Saved Offline
+                      {formatDate(draft.consultationDate)} · Resident {draft.residentId || "—"} · {draft.syncStatus}
                     </p>
+                    {draft.lastError && <p className="mt-1 text-xs text-brand-danger" role="alert">{draft.lastError.message}</p>}
+                    {draft.referralRequired === "Yes" && <p className="mt-1 text-xs text-amber-800">Referral creation remains a separate online action after consultation confirmation.</p>}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <button
@@ -1038,20 +1270,20 @@ export default function TreatmentConsultation() {
                     >
                       Review
                     </button>
-                    <button
+                    {canConductConsultation && draft.queueStatus !== "conflict" && <button
                       onClick={() => handleSubmitDraft(draft.localId)}
-                      disabled={draftBusyId === draft.localId}
+                      disabled={draftBusyId === draft.localId || draft.queueStatus === "syncing"}
                       className="inline-flex items-center gap-1 rounded-btn bg-brand-blue text-white px-3 py-1.5 text-sm font-medium hover:bg-brand-dark transition-colors disabled:opacity-60"
                     >
                       <Save className="w-4 h-4" />
-                      {draftBusyId === draft.localId ? "Submitting..." : "Submit"}
-                    </button>
-                    <button
+                      {draftBusyId === draft.localId ? "Retrying..." : "Retry Sync"}
+                    </button>}
+                    {canConductConsultation && draft.canDiscard && <button
                       onClick={() => handleDiscardDraft(draft.localId)}
                       className="text-brand-danger text-sm font-medium hover:underline"
                     >
                       Discard
-                    </button>
+                    </button>}
                   </div>
                 </li>
               ))}
@@ -1072,8 +1304,12 @@ export default function TreatmentConsultation() {
         ) : (
           <>
             <DataTable
+              className="consultation-records-table"
+              tableClassName="consultation-records-grid"
+              fitContainer
               columns={columns}
-              rows={recordRows}
+              rows={displayedRecords}
+              dense={isHealthSupervisor}
               renderCell={(key, row) => {
                 if (key === "resident")
                   return (
@@ -1099,8 +1335,10 @@ export default function TreatmentConsultation() {
                     <span className="text-brand-gray">—</span>
                   );
                 }
-                if (key === "chiefComplaint") return <span className="text-brand-ink">{row.chiefComplaint || "—"}</span>;
-                if (key === "diagnosis") return <span className="text-brand-gray">{row.diagnosis || "—"}</span>;
+                if (key === "risk") {
+                  const risk = row.resident?.riskLevel || row.resident?.risk_level || row.riskLevel || "Not assessed";
+                  return <RiskBadge level={risk} />;
+                }
                 if (key === "followUp")
                   return row.followUpRequired === "Yes" ? (
                     <span className="inline-flex rounded-full bg-brand-accent/10 text-brand-accent px-2.5 py-1 text-xs font-medium">
@@ -1109,23 +1347,85 @@ export default function TreatmentConsultation() {
                   ) : (
                     <span className="inline-flex rounded-full bg-slate-100 text-slate-600 px-2.5 py-1 text-xs font-medium">No</span>
                   );
-                if (key === "actions" && canEditConsultation)
+                if (key === "actions")
                   return (
-                    <button onClick={() => openForEdit(row)} className="flex items-center gap-1 text-brand-blue text-sm font-medium hover:underline">
-                      <FileText className="w-4 h-4" /> Edit
-                    </button>
+                    <div className="relative flex justify-center" data-consultation-actions>
+                      <button type="button" onClick={() => setOpenActionMenu((current) => current === row.id ? null : row.id)} className="inline-flex h-8 w-8 items-center justify-center rounded-btn text-brand-blue transition-colors hover:bg-brand-light hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" aria-label={`Actions for ${row.resident?.name || "consultation"}`} aria-haspopup="menu" aria-expanded={openActionMenu === row.id}>
+                        <MoreVertical className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      {openActionMenu === row.id && <div role="menu" className="absolute right-0 top-full z-30 mt-1 min-w-[10rem] rounded-btn border border-brand-border bg-white p-1 shadow-lg">
+                        <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); setDetailRecord(row); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-brand-bg"><Eye className="h-4 w-4 text-brand-blue" /> View Details</button>
+                        {canEditConsultation && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openForEdit(row); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-brand-bg"><FileText className="h-4 w-4 text-brand-gray" /> Edit Consultation</button>}
+                      </div>}
+                    </div>
                   );
                 return row[key];
               }}
             />
-            {loading ? (
+            {focusedId ? null : loading ? (
               <p className="py-10 text-center text-sm text-brand-gray">Loading consultations...</p>
-            ) : recordRows.length === 0 ? (
+            ) : filteredRecordRows.length === 0 ? (
               <p className="py-10 text-center text-sm text-brand-gray">No consultations yet. Click "+ Add Treatment Consultation" to record the first one.</p>
             ) : null}
           </>
         )}
       </Card>
+      {detailRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Consultation details">
+          <Card className="max-h-[90vh] w-full max-w-3xl overflow-hidden p-5">
+            <div className="flex items-start justify-between gap-3 border-b border-brand-border pb-3">
+              <div>
+                <h3 className="text-lg font-semibold text-brand-ink">Consultation Details</h3>
+                <p className="mt-0.5 text-sm text-brand-gray">{detailRecord.resident?.name || "Resident"} · {formatDate(detailRecord.consultationDate)}</p>
+              </div>
+              <button type="button" onClick={() => setDetailRecord(null)} className="rounded-btn p-1 text-brand-gray hover:bg-brand-bg" aria-label="Close consultation details"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="max-h-[calc(90vh-5rem)] overflow-y-auto pr-1">
+              {[
+                ["Consultation Information", [
+                  ["Resident Name", detailRecord.resident?.name],
+                  ["Consultation Date", formatDate(detailRecord.consultationDate)],
+                  ["Health Service", detailRecord.serviceName],
+                  ["Chief Complaint", detailRecord.chiefComplaint],
+                ]],
+                ["Clinical Information", [
+                  ["Diagnosis", detailRecord.diagnosis],
+                  ["Risk Level", detailRecord.resident?.riskLevel || detailRecord.resident?.risk_level || detailRecord.riskLevel],
+                  ["Vital Signs", parseVitals(detailRecord.vitals)],
+                ]],
+                ["Treatment and Care", [
+                  ["Treatment", detailRecord.treatmentGiven],
+                  ["Medicines", detailRecord.medicationPrescribed || (detailRecord.medications || []).map((medicine) => medicine.name || medicine).join(", ")],
+                  ["Recommendations", detailRecord.adviceGiven],
+                  ["Follow-up", detailRecord.followUpRequired === "Yes" ? (detailRecord.nextVisitDate ? `Required — ${formatDate(detailRecord.nextVisitDate)}` : "Required") : "Not required"],
+                ]],
+                ["Recording Information", [
+                  ["Recording Personnel", detailRecord.recordedByName || detailRecord.personnelName],
+                ]],
+              ].map(([section, fields]) => (
+                <section key={section} className="mt-4 first:mt-4">
+                  <h4 className="border-b border-brand-border pb-2 text-sm font-semibold text-brand-ink">{section}</h4>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {fields.map(([label, value]) => {
+                      const entries = label === "Vital Signs" && value && typeof value === "object"
+                        ? Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== "")
+                        : [];
+                      return (
+                        <div key={label} className="min-w-0 rounded-btn border border-brand-border bg-brand-bg/30 p-3">
+                          <p className="text-xs font-medium text-brand-gray">{label}</p>
+                          {label === "Vital Signs" ? (
+                            entries.length ? <dl className="mt-2 space-y-1.5">{entries.map(([key, item]) => <div key={key} className="flex flex-wrap justify-between gap-2 text-sm"><dt className="text-brand-gray">{formatVitalLabel(key)}</dt><dd className="font-medium text-brand-ink">{String(item)}{["temperature"].includes(key) ? " °C" : ["heightCm", "height"].includes(key) ? " cm" : ["weightKg", "weight"].includes(key) ? " kg" : ["o2sat", "oxygenSaturation"].includes(key) ? "%" : ""}</dd></div>)}</dl> : <p className="mt-1 text-sm text-brand-gray">Not recorded</p>
+                          ) : <p className="mt-1 whitespace-pre-wrap break-words text-sm text-brand-ink">{value || "Not recorded"}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
     </>
   );
 
@@ -1159,8 +1459,8 @@ export default function TreatmentConsultation() {
       {/* Toast */}
       {toast && (
         <div className="fixed bottom-4 right-4 bg-brand-ink text-white px-4 py-3 rounded-btn shadow-lg flex items-center gap-2 z-50 animate-in slide-in-from-bottom-2">
-          <CheckCircle2 className="w-4 h-4 text-brand-green" />
-          <span className="text-sm">{toast}</span>
+          {toast.kind === "success" ? <CheckCircle2 className="w-4 h-4 text-brand-green" /> : <AlertTriangle className={`w-4 h-4 ${toast.kind === "error" ? "text-red-300" : "text-amber-300"}`} />}
+          <span className="text-sm" role={toast.kind === "error" ? "alert" : "status"}>{toast.message}</span>
         </div>
       )}
 

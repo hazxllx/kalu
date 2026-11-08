@@ -21,6 +21,7 @@ import { computeBMI } from '../utils/bmi.js';
 import { assignedBarangay } from '../config/scope.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
 import { recordHouseholdAudit, emitHouseholdWorkflow } from './householdWorkflow.js';
+import { getServiceClient } from '../config/supabase.js';
 
 const READ_ROLES = ['bhw', 'health_supervisor', 'phn'];
 const WRITE_ROLES = ['bhw', 'health_supervisor', 'phn'];
@@ -37,6 +38,63 @@ const VERIFICATION_STATUSES = ['Pending Verification', 'Verified', 'Returned for
 const HOUSEHOLD_VISIT_REASONS = ['Initial Profiling', 'Updating Household Information', 'Verification', 'Follow-up', 'Monitoring', 'Other'];
 
 const text = (value) => String(value ?? '').trim();
+
+const WORKER_ROLES = ['bhw', 'health_supervisor', 'phn'];
+const WORKER_READER_ROLES = [...READ_ROLES, 'mho'];
+const WORKER_PAGE_SIZE = 200;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Limited assignment directory, not an account-management or contact list. */
+export const listHouseholdWorkers = async ({ user, barangayId = null, supabase = getServiceClient() } = {}) => {
+  if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+  if (!WORKER_READER_ROLES.includes(user.role)) throw ApiError.forbidden();
+  if (!user.municipalityId) return [];
+  const barangayScoped = ['bhw', 'health_supervisor'].includes(user.role);
+  const targetBarangay = text(barangayId) || (barangayScoped ? text(user.barangayId) : null);
+  if (barangayScoped && !user.barangayId) return [];
+  if (barangayScoped && targetBarangay !== user.barangayId) {
+    throw ApiError.forbidden('Workers must be within your assigned barangay.');
+  }
+  if (targetBarangay && !barangayScoped) {
+    const { data, error } = await supabase.from('barangays').select('id')
+      .eq('id', targetBarangay).eq('municipality_id', user.municipalityId).maybeSingle();
+    if (error) throw Object.assign(new Error('Could not verify the worker directory scope.'), { statusCode: 500 });
+    if (!data) throw ApiError.notFound('Barangay not found.');
+  }
+  const seen = new Set();
+  const workers = [];
+  for (let offset = 0; ; offset += WORKER_PAGE_SIZE) {
+    const { data, error } = await supabase.from('profiles')
+      .select('id, full_name, role, barangay_id, municipality_id, status')
+      .eq('municipality_id', user.municipalityId).eq('status', 'active')
+      .in('role', WORKER_ROLES).order('id').range(offset, offset + WORKER_PAGE_SIZE - 1);
+    if (error) throw Object.assign(new Error('Could not load the worker directory.'), { statusCode: 500 });
+    for (const row of data || []) {
+      if (!UUID.test(text(row.id)) || seen.has(row.id) || row.status !== 'active'
+        || row.municipality_id !== user.municipalityId || !WORKER_ROLES.includes(row.role)) continue;
+      // Municipality-based PHNs may coordinate care for any of its barangays.
+      if (targetBarangay && row.barangay_id !== targetBarangay && !(row.role === 'phn' && !row.barangay_id)) continue;
+      seen.add(row.id);
+      workers.push({ id: row.id, name: text(row.full_name), role: row.role, barangayId: row.barangay_id || null });
+    }
+    if (!data || data.length < WORKER_PAGE_SIZE) break;
+  }
+  return workers;
+};
+
+/** Validate the same stable IDs shown by the directory at write time. */
+export const resolveHouseholdWorker = async ({ user, workerId, barangayId = null, supabase = getServiceClient() } = {}) => {
+  if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+  if (!WORKER_READER_ROLES.includes(user.role)) throw ApiError.forbidden();
+  const id = text(workerId);
+  if (!UUID.test(id)) throw ApiError.unprocessable('Select a worker from the authorized directory.');
+  const targetBarangay = text(barangayId) || (['bhw', 'health_supervisor'].includes(user.role) ? text(user.barangayId) : null);
+  if (!targetBarangay) throw ApiError.unprocessable('A recorded barangay assignment is required before assigning a worker.');
+  const workers = await listHouseholdWorkers({ user, barangayId: targetBarangay, supabase });
+  const worker = workers.find((row) => row.id === id);
+  if (!worker) throw ApiError.unprocessable('The selected worker is inactive or outside the assignment scope.');
+  return worker;
+};
 
 /**
  * Parse an optional GPS coordinate. Returns:

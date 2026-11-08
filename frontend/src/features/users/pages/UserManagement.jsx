@@ -1210,7 +1210,7 @@ export default function UserManagement({ personnelOnly = false }) {
             <div className="min-w-0">
               <label htmlFor="filter-status" className="mb-1 block text-xs font-medium text-brand-gray">{personnelOnly ? "Sign-in status" : "Status"}</label>
               <select id="filter-status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0); }} className={selectCls}>
-                <option value="">All statuses</option>
+                <option value="">All Status</option>
                 <option value="active">Active</option>
                 <option value="pending_verification">Pending verification</option>
                 <option value="disabled">{personnelOnly ? "Inactive" : "Deactivated"}</option>

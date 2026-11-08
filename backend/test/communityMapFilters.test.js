@@ -11,6 +11,15 @@ import {
   matchesCommunityMapRecord,
 } from '../src/services/analytics.service.js';
 
+// Exercise the retained pure/file reducer with explicit isolated dependencies.
+// The production RPC branch and actor permissions have separate PostgreSQL tests.
+const localDependencies = () => ({ repo: {
+  ...repository, mode: 'file', driver: 'file',
+  getMunicipality: async () => null,
+  getRiskSettings: async () => null,
+  listRiskCriteria: async () => [],
+} });
+
 test('community map supports only consultation workflow statuses and recorded risk categories', () => {
   assert.deepEqual(COMMUNITY_MAP_STATUSES, [
     'draft',
@@ -129,7 +138,7 @@ test('community map applies filters before producing barangay aggregates', async
     riskLevel: 'High',
     from: '2026-05-14',
     to: '2026-05-14',
-  });
+  }, localDependencies());
 
   assert.equal(result.summary.totalCases, 2);
   assert.equal(result.latestUpdatedAt, '2026-05-14T12:00:00.000Z');
@@ -203,7 +212,7 @@ test('MHO map mode counts one resident-condition case and returns filter-matched
     distinctResidents: true,
     from: '2026-05-14',
     to: '2026-05-17',
-  });
+  }, localDependencies());
 
   assert.equal(result.summary.totalCases, 3);
   assert.equal(result.barangays[0].caseCount, 3);
@@ -256,7 +265,7 @@ test('MHO maps exclude unapproved barangays even when records reference them', a
     Object.assign(repository, originals);
   });
 
-  const result = await getCommunityMap({ municipalityId: 'municipality-1' });
+  const result = await getCommunityMap({ municipalityId: 'municipality-1' }, localDependencies());
 
   assert.equal(result.summary.totalCases, 1);
   assert.deepEqual(result.barangays.map((row) => row.name), ['San Antonio', 'San Isidro', 'Old San Roque']);
@@ -282,7 +291,7 @@ test('municipality map returns only registered in-scope approved barangays', asy
     Object.assign(repository, originals);
   });
 
-  const result = await getCommunityMap({ municipalityId: 'municipality-1' });
+  const result = await getCommunityMap({ municipalityId: 'municipality-1' }, localDependencies());
 
   assert.deepEqual(result.barangays.map((row) => row.name), ['San Antonio', 'San Isidro', 'Old San Roque']);
   assert.equal(result.barangays.some((row) => row.name === 'Legacy Barangay'), false);
@@ -311,7 +320,7 @@ test('registered approved barangays with no cases are returned as verified zeroe
     Object.assign(repository, originals);
   });
 
-  const result = await getCommunityMap({ municipalityId: 'municipality-1' });
+  const result = await getCommunityMap({ municipalityId: 'municipality-1' }, localDependencies());
 
   assert.equal(result.scopeComplete, true);
   assert.deepEqual(result.barangays.map((row) => row.caseCount), [0, 0, 0]);
@@ -346,7 +355,7 @@ test('household map aggregates only at stored barangay reference coordinates', a
     Object.assign(repository, originals);
   });
 
-  const result = await getHouseholdMap({ municipalityId: 'municipality-1' });
+  const result = await getHouseholdMap({ municipalityId: 'municipality-1' }, localDependencies());
 
   assert.deepEqual(result.locations, [{
     barangay: 'San Isidro',

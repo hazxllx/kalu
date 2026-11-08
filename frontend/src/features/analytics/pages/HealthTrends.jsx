@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -6,14 +7,18 @@ import {
 import { TrendingUp, TrendingDown, Activity, Send, MapPin, CalendarDays, ChevronDown } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import RiskOverview from "@/features/analytics/components/RiskOverview";
+import StatCard from "@/components/common/StatCard";
+import EmptyState from "@/components/common/EmptyState";
 import { PageSkeleton } from "@/components/common/Skeleton";
 import ErrorState from "@/components/common/ErrorState";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
+import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { getAssignedBarangay } from "@/lib/barangayScope";
 import { toLocalISODate, formatDateRange } from "@/lib/dateUtils";
-import { resolveEarlyWarningData } from "@/services/local/earlyWarning";
-import { fetchEarlyWarningData, fetchCommunityMap } from "@/services/api/earlyWarningApi";
+import { authorizedViewsApi } from "@/services/api/authorizedViewsApi";
+import useAuthorizedData from "@/hooks/useAuthorizedData";
+import { healthTrendScope, metricValue, lastActivityPeriod, optionalSeries } from "@/lib/legacyAnalytics";
 
 const tooltipStyle = { fontSize: "12px", borderRadius: "8px", border: "1px solid #E5EAF1" };
 
@@ -26,91 +31,21 @@ const SUMMARY_ICONS = [
 
 const CONDITION_PALETTE = ["#0B5CAD", "#2A7DE1", "#F5B400", "#28B463", "#E74C3C", "#5B6472"];
 const RISK_COLORS = { "Low Risk": "#28B463", "Moderate Risk": "#0B5CAD", "High Risk": "#F5B400", Critical: "#E74C3C", Unassessed: "#94A3B8" };
-
-/** Live server figures override the mock values; shape stays the same. */
-const mergeLiveScopedData = (base, live) => ({
-  ...base,
-  consultationTrends: live.consultationTrends?.length ? live.consultationTrends : base.consultationTrends,
-  diseaseDistribution: live.diseaseDistribution?.length
-    ? live.diseaseDistribution.map((d, i) => ({ ...d, color: CONDITION_PALETTE[i % CONDITION_PALETTE.length] }))
-    : base.diseaseDistribution,
-  riskDistribution: live.riskDistribution?.length
-    ? live.riskDistribution.map((d) => ({ ...d, color: RISK_COLORS[d.name] || "#0B5CAD" }))
-    : base.riskDistribution,
-  summary: live.summary
-    ? {
-        consultationsThisMonth: {
-          ...base.summary.consultationsThisMonth,
-          value: String(live.summary.consultationsThisMonth ?? base.summary.consultationsThisMonth.value),
-        },
-        referralsThisMonth: {
-          ...base.summary.referralsThisMonth,
-          value: String(live.summary.referralsThisMonth ?? base.summary.referralsThisMonth.value),
-        },
-        topCondition: {
-          name: live.summary.topCondition || base.summary.topCondition.name,
-          cases: live.summary.topConditionCases != null ? `${live.summary.topConditionCases} cases` : base.summary.topCondition.cases,
-        },
-        highRiskResidents: {
-          ...base.summary.highRiskResidents,
-          value: String(live.summary.highRiskResidents ?? base.summary.highRiskResidents.value),
-        },
-      }
-    : base.summary,
-});
+const SUPERVISOR_RISK_COLORS = { "Low Risk": "#357558", "Moderate Risk": "#A87B24", "High Risk": "#B3202C", Critical: "#871B27", Unassessed: "#94A3B8" };
+const SUPERVISOR_CONDITION_PALETTE = ["#0B4A8F", "#457BA3", "#83A8BC", "#A78234", "#586877", "#C2CED9"];
 
 export default function HealthTrends() {
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const supervisor = user?.role === "health_supervisor";
+  const supervisorScope = getSupervisorScope(user);
+  const canViewAnalytics = can("reports.analytics.view");
   // Barangay scope comes from the signed-in user's assignment — never from a
   // selector, URL or filter the user controls.
-  const assignedBarangay = getAssignedBarangay(user);
+  const assignedBarangay = supervisor ? supervisorScope?.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null : getAssignedBarangay(user);
   const [period, setPeriod] = useState("12m");
-  const [liveData, setLiveData] = useState(null);
-  const [loading, setLoading] = useState(Boolean(assignedBarangay));
-
-  const baseData = useMemo(() => resolveEarlyWarningData(assignedBarangay), [assignedBarangay]);
-
-  // Barangay-scoped callers pull live figures from the API, which enforces
-  // the same assignment on the server. The figures render behind a skeleton
-  // until the request settles; an unavailable API simply leaves the empty
-  // dataset (and the page's empty states) in place.
-  useEffect(() => {
-    if (!assignedBarangay) {
-      setLoading(false);
-      return undefined;
-    }
-    let cancelled = false;
-    fetchEarlyWarningData()
-      .then((payload) => {
-        if (!cancelled && payload) setLiveData(payload);
-      })
-      .catch(() => {
-        /* API unavailable — the empty dataset is shown instead */
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [assignedBarangay]);
-
-  const scopedData = useMemo(
-    () => (assignedBarangay && liveData ? mergeLiveScopedData(baseData, liveData) : baseData),
-    [assignedBarangay, baseData, liveData],
-  );
-
-  /* ------------------------------------------------------------------ */
-  /* Municipality-wide live data (MHO / unassigned).                     */
-  /* The server resolves the municipality scope from the session; this   */
-  /* view sends NO barangay id and cannot widen scope. `early-warning`   */
-  /* supplies the summary, 12-month trend, disease + risk distributions; */
-  /* `community-map` supplies the real per-barangay overview rows.       */
-  /* ------------------------------------------------------------------ */
-  const [muniEW, setMuniEW] = useState(null);
-  const [muniMap, setMuniMap] = useState(null);
-  const [muniLoading, setMuniLoading] = useState(!assignedBarangay);
-  const [muniError, setMuniError] = useState(null);
+  const activityRange = lastActivityPeriod(period === "3m" ? 3 : period === "6m" ? 6 : 12);
+  const activityCaption = formatDateRange(activityRange.from, activityRange.to);
 
   const muniRange = useMemo(() => {
     const now = new Date();
@@ -121,33 +56,37 @@ export default function HealthTrends() {
     return { from: iso(new Date(now.getFullYear(), now.getMonth() - months, now.getDate())), to: iso(now) };
   }, [period]);
 
-  const loadMunicipality = useCallback(() => {
-    setMuniLoading(true);
-    setMuniError(null);
-    let cancelled = false;
-    Promise.all([
-      fetchEarlyWarningData().catch(() => null),
-      fetchCommunityMap({ from: muniRange.from, to: muniRange.to }).catch(() => null),
-    ])
-      .then(([ew, map]) => {
-        if (cancelled) return;
-        setMuniEW(ew);
-        setMuniMap(map);
-        if (!ew && !map) setMuniError("Unable to load municipal health data.");
-      })
-      .finally(() => { if (!cancelled) setMuniLoading(false); });
-    return () => { cancelled = true; };
-  }, [muniRange.from, muniRange.to]);
+  const load = useCallback(async (options) => {
+    if (supervisor && !assignedBarangay) throw new Error("A valid barangay assignment is required to view health trends.");
+    if (supervisor && !canViewAnalytics) throw new Error("Your account is not permitted to view health analytics.");
+    const warningRequest = authorizedViewsApi.earlyWarning({ barangay: assignedBarangay, ...lastActivityPeriod(period === '3m' ? 3 : period === '6m' ? 6 : 12) }, options);
+    if (supervisor) {
+      const ew = await warningRequest;
+      if (ew.scope?.barangay !== assignedBarangay || ew.activity?.rows?.some((row) => row.barangay !== assignedBarangay)) throw new Error("Health trends are outside your assigned barangay.");
+      return { ew, map: null };
+    }
+    const [ew, map] = await Promise.all([
+      warningRequest,
+      authorizedViewsApi.communityMap({ barangay: assignedBarangay, from: muniRange.from, to: muniRange.to }, options),
+    ]);
+    return { ew, map };
+  }, [assignedBarangay, muniRange.from, muniRange.to, period, supervisor, canViewAnalytics]);
+  const resource = useAuthorizedData(load);
+  const muniEW = resource.data?.ew;
+  const muniMap = resource.data?.map;
+  const loading = resource.loading;
+  const muniLoading = resource.loading;
+  const muniError = resource.error;
+  const loadMunicipality = resource.refresh;
+  const base = healthTrendScope(muniEW, period === "3m" ? 3 : period === "6m" ? 6 : 12);
+  const conditionPalette = supervisor ? SUPERVISOR_CONDITION_PALETTE : CONDITION_PALETTE;
+  const riskPalette = supervisor ? SUPERVISOR_RISK_COLORS : RISK_COLORS;
+  const scopedData = base && { ...base, diseaseDistribution: base.diseaseDistribution.map((row, index) => ({ ...row, color: conditionPalette[index % conditionPalette.length] })), riskDistribution: muniEW.riskDistribution.map((row) => ({ ...row, color: riskPalette[row.name] || "#94A3B8" })) };
 
-  useEffect(() => {
-    if (assignedBarangay) return undefined;
-    return loadMunicipality();
-  }, [assignedBarangay, loadMunicipality]);
-
-  const periodSelect = (
-    <div className="flex h-10 max-w-full items-center gap-2 rounded-btn border border-white/25 bg-white/10 px-3 text-white">
-      <CalendarDays className="h-4 w-4 shrink-0 text-brand-goldlight" aria-hidden="true" />
-      <label htmlFor="health-trends-period" className="shrink-0 text-xs font-medium text-white/75">
+const periodSelect = (
+    <div className={supervisor ? "supervisor-input flex max-w-full items-center gap-2" : "flex h-10 max-w-full items-center gap-2 rounded-btn border border-white/25 bg-white/10 px-3 text-white"}>
+      <CalendarDays className={`h-4 w-4 shrink-0 ${supervisor ? "text-brand-gray" : "text-brand-goldlight"}`} aria-hidden="true" />
+      <label htmlFor="health-trends-period" className={`shrink-0 text-xs font-medium ${supervisor ? "text-brand-gray" : "text-white/75"}`}>
         Period
       </label>
       <div className="relative flex min-w-0 items-center">
@@ -156,22 +95,36 @@ export default function HealthTrends() {
           aria-label="Reporting period"
           value={period}
           onChange={(e) => setPeriod(e.target.value)}
-          className="h-9 min-w-0 appearance-none bg-transparent pr-5 text-sm font-medium text-white outline-none focus-visible:ring-2 focus-visible:ring-brand-goldlight/70"
+          className={supervisor ? "h-control min-w-[7.5rem] appearance-none bg-transparent pr-6 text-ui font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30" : "h-9 min-w-0 appearance-none bg-transparent pr-5 text-sm font-medium text-white outline-none focus-visible:ring-2 focus-visible:ring-brand-goldlight/70"}
         >
           <option className="bg-white text-brand-ink" value="3m">Last 3 Months</option>
           <option className="bg-white text-brand-ink" value="6m">Last 6 Months</option>
           <option className="bg-white text-brand-ink" value="12m">Last 12 Months</option>
         </select>
-        <ChevronDown className="pointer-events-none absolute right-0 h-4 w-4 text-white/75" aria-hidden="true" />
+        <ChevronDown className={`pointer-events-none absolute right-0 h-4 w-4 ${supervisor ? "text-brand-gray" : "text-white/75"}`} aria-hidden="true" />
       </div>
     </div>
   );
+
+  if (resource.error) return <><PageHeader crumbs={["Analytics", "Health Trends"]} title="Health Trends" subtitle="Authorized recorded health activity." action={periodSelect} /><Card className="p-5"><ErrorState compact={supervisor} title="Health trends unavailable" message={resource.error} onRetry={resource.refresh} /></Card></>;
+  if (supervisor && !assignedBarangay) return <><PageHeader crumbs={["Health Trends"]} title="Health Trends" subtitle="Barangay assignment required" /><Card><ErrorState compact title="Health trends unavailable" message="No valid barangay assignment is available for this account. Municipal coverage is not available to an unassigned Health Supervisor." /></Card></>;
+  if (assignedBarangay && !scopedData) return <><PageHeader crumbs={["Analytics", "Health Trends"]} title={`Brgy. ${assignedBarangay} Health Trends`} action={periodSelect} /><PageSkeleton /></>;
 
   /* ------------------------------------------------------------------ */
   /* Barangay-scoped view (Health Supervisor assigned to one barangay)   */
   /* ------------------------------------------------------------------ */
   if (assignedBarangay) {
     const s = scopedData;
+    const completionRows = s.followUpCompletion;
+    const completionAvailable = Array.isArray(completionRows) && completionRows.length > 0 && completionRows.every((row) => Number.isSafeInteger(row.numerator) && Number.isSafeInteger(row.denominator) && row.numerator >= 0 && row.numerator <= row.denominator);
+    const serviceEntry = (name) => optionalSeries(muniEW, name, period === "3m" ? 3 : period === "6m" ? 6 : 12, [assignedBarangay])?.find((row) => row.name === assignedBarangay);
+    const enrollment = s.programCompliance?.find((row) => row.name === assignedBarangay);
+    const participation = serviceEntry("programParticipation");
+    const immunizations = serviceEntry("vaccinationCoverage");
+    const childConsultations = serviceEntry("childHealthCoverage");
+    const serviceMonth = enrollment?.month || participation?.month || immunizations?.month;
+    const serviceDate = /^\d{4}-\d{2}$/.test(serviceMonth || "") ? new Date(`${serviceMonth}-01T12:00:00`) : null;
+    const serviceMonthLabel = serviceDate && !Number.isNaN(serviceDate.getTime()) ? serviceDate.toLocaleDateString("en-PH", { month: "long", year: "numeric" }) : "Reporting month unavailable";
     const cards = [
       { ...SUMMARY_ICONS[0], label: "Consultations This Month", value: s.summary.consultationsThisMonth.value, change: s.summary.consultationsThisMonth.change, up: s.summary.consultationsThisMonth.up },
       { ...SUMMARY_ICONS[1], label: "Referrals This Month", value: s.summary.referralsThisMonth.value, change: s.summary.referralsThisMonth.change, up: s.summary.referralsThisMonth.up },
@@ -180,18 +133,18 @@ export default function HealthTrends() {
     ];
 
     return (
-      <>
+      <div className={supervisor ? "supervisor-module" : "contents"}>
         <PageHeader
           crumbs={["Health Trends"]}
           title="Health Trends"
-          subtitle={`Health overview for Barangay ${assignedBarangay}`}
-          action={
-            <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
+          subtitle={`Recorded health activity and risk monitoring for Barangay ${assignedBarangay}`}
+action={
+            <div className="flex w-full flex-wrap items-center gap-2.5 md:w-auto md:flex-nowrap md:justify-end">
               <div
-                className="flex h-10 max-w-full items-center gap-2 rounded-btn border border-white/25 bg-white/10 px-3 text-sm font-medium text-white"
+                className={supervisor ? "supervisor-input flex max-w-full items-center gap-2 text-ui" : "flex h-10 max-w-full items-center gap-2 rounded-btn border border-white/25 bg-white/10 px-3 text-sm font-medium text-white"}
                 title="Your account is assigned to this barangay"
               >
-                <MapPin className="h-4 w-4 shrink-0 text-brand-goldlight" aria-hidden="true" />
+                <MapPin className={`h-4 w-4 shrink-0 ${supervisor ? "text-brand-gray" : "text-brand-goldlight"}`} aria-hidden="true" />
                 <span className="truncate">Barangay {assignedBarangay}</span>
               </div>
               {periodSelect}
@@ -204,7 +157,9 @@ export default function HealthTrends() {
           <PageSkeleton />
         ) : (
         <>
-        <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5">
+        {supervisor ? <div className="supervisor-metric-grid mb-4">
+          {cards.map((card, index) => <StatCard key={card.label} variant="ledger" label={card.label} value={card.value} description={index === 2 ? `${card.change}; all recorded consultations` : card.change} tone={["blue", "yellow", "accent", "danger"][index]} />)}
+        </div> : <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5">
           {cards.map((c) => (
             <div key={c.label} className="rounded-2xl border border-slate-200 bg-white shadow-card p-5">
               <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${c.tone}`}>
@@ -214,85 +169,43 @@ export default function HealthTrends() {
               <div className="mt-1 flex items-baseline gap-2">
                 <p className="text-2xl font-stat font-bold text-brand-ink">{c.value}</p>
                 <span className={`text-xs font-medium ${c.up ? "text-brand-green" : "text-brand-danger"} flex items-center gap-0.5`}>
-                  {c.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />} {c.change}
+                  {c.up !== null && (c.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />)} {c.change}
                 </span>
               </div>
             </div>
           ))}
-        </div>
+        </div>}
+        {supervisor && <p className="mb-4 text-caption text-brand-gray">Monthly activity: {activityCaption}. Headline counts retain their labelled current-month or all-record definitions; the selected period changes the monthly charts.</p>}
 
-        {/* Community Health Risk Overview — assigned barangay only.
-            KALUSAGAP does not use maps; this is a health/risk summary. */}
-        <Card className="p-4 sm:p-6 mt-6">
-          <h3 className="font-semibold text-brand-ink text-sm sm:text-base mb-1">Community Health Risk Overview</h3>
-          <p className="text-xs text-brand-gray mb-4">Barangay {s.barangayOverview.name} — resident risk levels from recorded consultations.</p>
-          {(() => {
-            const riskValue = (name) => Number(s.riskDistribution.find((d) => d.name === name)?.value || 0);
-            const high = riskValue("High Risk");
-            const moderate = riskValue("Moderate Risk");
-            const low = riskValue("Low Risk");
-            const assessed = high + moderate + low;
-            const highPct = assessed > 0 ? Math.round((high / assessed) * 100) : null;
-            return (
-              <div className="grid gap-6 lg:grid-cols-3">
-                <div className="lg:col-span-2 space-y-3">
-                  <RiskOverview
-                    distribution={s.riskDistribution}
-                    emptyMessage="No consultations with vitals have been recorded yet, so no risk levels can be computed for this barangay."
-                  />
-                </div>
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-brand-border bg-brand-light/30 p-4">
-                    <p className="text-[11px] uppercase tracking-wide text-brand-gray">High-Risk Residents</p>
-                    <div className="mt-1 flex items-baseline gap-2">
-                      <p className="text-2xl font-stat font-bold text-brand-ink">{high}</p>
-                      {highPct != null && <span className="text-xs font-medium text-brand-danger">{highPct}% of assessed</span>}
-                    </div>
-                    <p className="mt-2 text-xs text-brand-gray">Residents assessed: {assessed}</p>
-                  </div>
-                  <div className="rounded-lg border border-brand-border bg-brand-light/30 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-brand-ink">{s.barangayOverview.name}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.barangayOverview.tone}`}>{s.barangayOverview.status}</span>
-                    </div>
-                    <p className="mt-2 text-xs text-brand-gray">{s.barangayOverview.residents}</p>
-                    <p className="text-xs text-brand-gray">{s.barangayOverview.consultations}</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </Card>
-
-        {/* Trends + Disease Distribution */}
-        <div className="grid lg:grid-cols-3 gap-5 mt-6">
-          <Card className="lg:col-span-2 p-6">
+{/* Trends + Disease Distribution */}
+        <div className={`grid lg:grid-cols-3 ${supervisor ? "gap-4 mt-4" : "gap-5 mt-6"}`}>
+          <Card className={`lg:col-span-2 ${supervisor ? "p-4" : "p-6"}`}>
             <h3 className="font-semibold text-brand-ink mb-1">Consultation &amp; Referral Trends</h3>
-            <p className="text-xs text-brand-gray mb-4">Monthly count for Barangay {s.barangayOverview.name}</p>
-            <ResponsiveContainer width="100%" height={280}>
+            <p className="text-xs text-brand-gray mb-4">Monthly recorded counts, {activityCaption}. Current month is partial.</p>
+            {s.consultationTrends.some((row) => row.consultations > 0 || row.referrals > 0) ? <ResponsiveContainer width="100%" height={supervisor ? 240 : 280}>
               <LineChart data={s.consultationTrends} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="consultations" name="Consultations" stroke="#0B5CAD" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                <Line type="monotone" dataKey="referrals" name="Referrals" stroke="#F5B400" strokeWidth={2} dot={{ r: 3 }} />
+                <Line isAnimationActive={!supervisor} type="monotone" dataKey="consultations" name="Consultations" stroke={supervisor ? "#0B4A8F" : "#0B5CAD"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                <Line isAnimationActive={!supervisor} type="monotone" dataKey="referrals" name="Referrals" stroke="#F5B400" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer> : <EmptyState compact title="No recorded activity in this period" description="The authorized aggregate contains no consultations or referrals for the selected monthly window." />}
           </Card>
 
-          <Card className="p-6">
-            <h3 className="font-semibold text-brand-ink mb-1">Disease Distribution</h3>
-            <p className="text-xs text-brand-gray mb-4">Top reported conditions</p>
-            <ResponsiveContainer width="100%" height={220}>
+          <Card className={supervisor ? "p-4" : "p-6"}>
+            <h3 className="font-semibold text-brand-ink mb-1">{supervisor ? "Recorded Conditions" : "Disease Distribution"}</h3>
+            <p className="text-xs text-brand-gray mb-4">{supervisor ? "Classified recorded complaints across all available records, not confirmed diagnoses or unique residents." : "Condition counts across all recorded consultations, not unique residents."}</p>
+            {s.diseaseDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={200}>
               <PieChart>
-                <Pie data={s.diseaseDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2}>
+                <Pie isAnimationActive={!supervisor} data={s.diseaseDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2}>
                   {s.diseaseDistribution.map((d) => <Cell key={d.name} fill={d.color} />)}
                 </Pie>
                 <Tooltip contentStyle={tooltipStyle} />
               </PieChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer> : <EmptyState compact title="No recorded conditions" description="No condition counts were returned from authorized consultations." />}
             <div className="space-y-1.5 mt-2">
               {s.diseaseDistribution.map((d) => (
                 <div key={d.name} className="flex items-center gap-2 text-xs">
@@ -309,69 +222,89 @@ export default function HealthTrends() {
         </div>
 
         {/* Maternal + Senior monitoring */}
-        <div className="grid lg:grid-cols-2 gap-5 mt-5">
-          <Card className="p-6">
-            <h3 className="font-semibold text-brand-ink mb-1">Maternal Health Services Trend</h3>
-            <p className="text-xs text-brand-gray mb-4">Monthly prenatal services</p>
-            <ResponsiveContainer width="100%" height={220}>
+        <div className={`grid lg:grid-cols-2 ${supervisor ? "gap-4 mt-4" : "gap-5 mt-5"}`}>
+          <Card className={supervisor ? "p-4" : "p-6"}>
+            <h3 className="font-semibold text-brand-ink mb-1">Recorded Maternal Activity</h3>
+            <p className="text-xs text-brand-gray mb-4">Unique residents with maternal records per month, {activityCaption}.</p>
+            {Array.isArray(s.maternalTrend) && s.maternalTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={200}>
               <LineChart data={s.maternalTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="count" name="Prenatal services" stroke="#0B5CAD" strokeWidth={2} dot={{ r: 3 }} />
+                <Line isAnimationActive={!supervisor} type="monotone" dataKey="count" name="Residents" stroke="#0B4A8F" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer> : <EmptyState compact title={Array.isArray(s.maternalTrend) && s.maternalTrend.every((row) => Number.isFinite(row.count)) ? "No recorded maternal activity" : "Maternal activity unavailable"} description={Array.isArray(s.maternalTrend) && s.maternalTrend.every((row) => Number.isFinite(row.count)) ? "No maternal records were returned for the selected monthly window." : "The aggregate source did not provide complete monthly maternal counts."} />}
           </Card>
 
-          <Card className="p-6">
-            <h3 className="font-semibold text-brand-ink mb-1">Senior Citizen Monitoring Trend</h3>
-            <p className="text-xs text-brand-gray mb-4">Monthly monitoring records</p>
-            <ResponsiveContainer width="100%" height={220}>
+          <Card className={supervisor ? "p-4" : "p-6"}>
+            <h3 className="font-semibold text-brand-ink mb-1">Recorded Senior Consultation Activity</h3>
+            <p className="text-xs text-brand-gray mb-4">Unique residents aged 60 or older at the encounter, {activityCaption}.</p>
+            {Array.isArray(s.seniorTrend) && s.seniorTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={200}>
               <LineChart data={s.seniorTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="count" name="Monitoring records" stroke="#28B463" strokeWidth={2} dot={{ r: 3 }} />
+                <Line isAnimationActive={!supervisor} type="monotone" dataKey="count" name="Residents" stroke="#28B463" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer> : <EmptyState compact title={Array.isArray(s.seniorTrend) && s.seniorTrend.every((row) => Number.isFinite(row.count)) ? "No recorded senior activity" : "Senior activity unavailable"} description={Array.isArray(s.seniorTrend) && s.seniorTrend.every((row) => Number.isFinite(row.count)) ? "No senior consultations were returned for the selected monthly window." : "The aggregate source did not provide complete monthly senior counts."} />}
           </Card>
         </div>
 
         {/* Risk + Program compliance */}
-        <div className="grid lg:grid-cols-2 gap-5 mt-5">
-          <Card className="p-6">
+        <div className={`grid lg:grid-cols-2 ${supervisor ? "gap-4 mt-4" : "gap-5 mt-5"}`}>
+          {supervisor ? <Card className="min-w-0 p-4">
+            <h3 className="text-section font-semibold text-brand-ink">Follow-up Completion</h3>
+            <p className="mb-3 mt-1 text-caption text-brand-gray">Recorded outcomes by scheduled month, {activityCaption}.</p>
+            {completionAvailable && completionRows.some((row) => row.denominator > 0) ? <div className="table-scroll max-h-64 overflow-auto">
+              <table className="ui-table w-full text-left">
+                <caption className="sr-only">Scheduled and completed follow-ups in the selected reporting period</caption>
+                <thead className="sticky top-0 bg-brand-bg"><tr><th scope="col">Month</th><th scope="col" className="text-right">Scheduled</th><th scope="col" className="text-right">Completed</th><th scope="col" className="text-right">Completion</th></tr></thead>
+                <tbody className="divide-y divide-brand-border">{completionRows.map((row) => <tr key={row.month}><td className="whitespace-nowrap">{row.month}</td><td className="text-right font-stat">{row.denominator}</td><td className="text-right font-stat">{row.numerator}</td><td className="text-right font-stat">{Number.isFinite(row.value) ? `${row.value}%` : "Not applicable"}</td></tr>)}</tbody>
+              </table>
+            </div> : <EmptyState compact title={completionAvailable ? "No scheduled follow-ups in this period" : "Follow-up completion unavailable"} description={completionAvailable ? "A completion percentage requires scheduled follow-ups." : "The aggregate source did not provide complete scheduled and completed counts."} />}
+          </Card> : <Card className="p-6">
             <h3 className="font-semibold text-brand-ink mb-1">Risk Classification Distribution</h3>
-            <p className="text-xs text-brand-gray mb-4">Resident risk levels in Barangay {s.barangayOverview.name}</p>
-            <ResponsiveContainer width="100%" height={220}>
+            <p className="text-xs text-brand-gray mb-4">Latest recorded consultation per resident; includes unassessed residents with a consultation.</p>
+            {s.riskDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={200}>
               <PieChart>
-                <Pie data={s.riskDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
+                <Pie isAnimationActive={!supervisor} data={s.riskDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
                   {s.riskDistribution.map((d) => <Cell key={d.name} fill={d.color} />)}
                 </Pie>
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
               </PieChart>
-            </ResponsiveContainer>
-          </Card>
+            </ResponsiveContainer> : <EmptyState compact title="No resident risk distribution" description="No consultation-based resident assessment counts were returned. A risk percentage cannot be calculated." />}
+          </Card>}
 
-          <Card className="p-6">
-            <h3 className="font-semibold text-brand-ink mb-1">Health Program Compliance</h3>
-            <p className="text-xs text-brand-gray mb-4">Program completion percentages</p>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={s.programCompliance} layout="vertical" margin={{ top: 5, right: 10, left: 80, bottom: 0 }}>
+          {supervisor ? <Card className="min-w-0 p-4">
+            <h3 className="text-section font-semibold text-brand-ink">Health Service Activity</h3>
+            <p className="mb-3 mt-1 text-caption text-brand-gray">{serviceMonthLabel} | Recorded counts, not population coverage rates</p>
+            <dl className="divide-y divide-brand-border border-y border-brand-border">{[
+              ["TCL enrolled residents", enrollment?.value],
+              ["TCL recorded participants", participation?.value],
+              ["Immunization records", immunizations?.value],
+              ["Children with recorded consultations", childConsultations?.value],
+            ].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-3 py-2.5 text-ui"><dt className="text-brand-gray">{label}</dt><dd className="shrink-0 font-stat font-semibold text-brand-ink">{metricValue(value)}</dd></div>)}</dl>
+            {can("services.view") && <Link to="/app/health_supervisor/services" className="mt-3 inline-flex text-ui font-medium text-brand-blue hover:underline">View Health Services</Link>}
+          </Card> : <Card className="p-6">
+            <h3 className="font-semibold text-brand-ink mb-1">Recorded TCL Enrollments</h3>
+            <p className="text-xs text-brand-gray mb-4">Recorded enrolled residents in {s.programCompliance?.[0]?.month || "the latest reported month"}; not a compliance percentage.</p>
+            {Array.isArray(s.programCompliance) && s.programCompliance.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={s.programCompliance} layout="vertical" margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
-                <XAxis type="number" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                <YAxis dataKey="program" type="category" tick={{ fontSize: 10, fill: "#5B6472" }} axisLine={false} tickLine={false} width={75} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: "#5B6472" }} axisLine={false} tickLine={false} width={75} />
                 <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#F8FBFF" }} />
-                <Bar dataKey="rate" name="Completion Rate (%)" fill="#0B5CAD" radius={[0, 4, 4, 0]} barSize={20} />
+                <Bar isAnimationActive={!supervisor} dataKey="value" name="Residents" fill="#0B5CAD" radius={[0, 4, 4, 0]} barSize={20} />
               </BarChart>
-            </ResponsiveContainer>
-          </Card>
+            </ResponsiveContainer> : <EmptyState compact title={Array.isArray(s.programCompliance) && s.programCompliance.every((row) => Number.isFinite(row.value)) ? "No recorded TCL enrollments" : "TCL enrollments unavailable"} description={Array.isArray(s.programCompliance) && s.programCompliance.every((row) => Number.isFinite(row.value)) ? "No enrolled residents were returned for the latest reported month." : "The aggregate source did not provide complete enrollment counts."} />}
+          </Card>}
         </div>
         </>
         )}
-      </>
+      </div>
     );
   }
 
@@ -397,10 +330,10 @@ export default function HealthTrends() {
   const riskHaveData = risk.some((r) => (r.value || 0) > 0);
 
   const summaryCards = [
-    { ...SUMMARY_ICONS[0], label: "Consultations This Month", value: sm.consultationsThisMonth ?? 0, sub: "recorded this month" },
-    { ...SUMMARY_ICONS[1], label: "Referrals This Month", value: sm.referralsThisMonth ?? 0, sub: "created this month" },
+    { ...SUMMARY_ICONS[0], label: "Consultations This Month", value: metricValue(sm.consultationsThisMonth), sub: "recorded this month" },
+    { ...SUMMARY_ICONS[1], label: "Referrals This Month", value: metricValue(sm.referralsThisMonth), sub: "created this month" },
     { ...SUMMARY_ICONS[2], label: "Top Condition", value: sm.topCondition || "No recorded condition", sub: `${sm.topConditionCases ?? 0} case${(sm.topConditionCases ?? 0) === 1 ? "" : "s"}` },
-    { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: sm.highRiskResidents ?? 0, sub: "from recorded vitals" },
+    { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: metricValue(sm.highRiskResidents), sub: "from recorded vitals" },
   ];
 
   const barangayStatus = (b) => {

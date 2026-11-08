@@ -20,6 +20,7 @@ export const listResidents = async (req, res) => {
     limit: req.query.limit,
     offset: req.query.offset,
     verifiedOnly,
+    riskLevel: req.query.riskLevel,
   });
   sendData(res, result);
 };
@@ -51,11 +52,15 @@ export const createResidentAccount = async (req, res) => {
 };
 
 export const updateResident = async (req, res) => {
+  const precondition = req.get('If-Match');
+  if (!precondition) {
+    throw new ApiError(428, 'Reopen the resident and include its revision before saving.').withCode('REVISION_REQUIRED');
+  }
   const resident = await residentsService.updateResident({
     id: req.params.id,
     patch: req.body.resident || {},
     user: req.user,
-    expectedUpdatedAt: req.get('If-Match') || null,
+    ...residentsService.parseResidentPrecondition(precondition),
   });
   sendData(res, { resident });
 };

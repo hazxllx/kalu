@@ -91,7 +91,7 @@ const parseNum = (v) => {
  * specific barangay of their municipality (or the whole municipality). Never
  * trusts a barangay outside the caller's coverage.
  */
-export const resolveScope = (user, requestedBarangayId = null) => {
+export const resolveScope = async (user, requestedBarangayId = null, supabase = getServiceClient()) => {
   if (user?.role === 'admin') {
     return { level: 'admin', barangayId: requestedBarangayId || null, municipalityId: user.municipalityId || null };
   }
@@ -105,6 +105,27 @@ export const resolveScope = (user, requestedBarangayId = null) => {
   }
   if (MUNICIPALITY_ROLES.has(user?.role)) {
     if (!user.municipalityId) throw ApiError.forbidden('Your account has no municipality assignment.');
+    if (requestedBarangayId) {
+      // A municipality-scoped caller may only drill into one of its OWN
+      // barangays. `barangays.municipality_id` is authoritative; RLS is never
+      // relied on to enforce this because the service uses service-role reads.
+      let scopeRow;
+      try {
+        scopeRow = await supabase
+          .from('barangays')
+          .select('id, municipality_id, status')
+          .eq('id', requestedBarangayId)
+          .maybeSingle();
+      } catch {
+        throw new ApiError(503, 'Could not verify the requested barangay scope.');
+      }
+      const data = scopeRow?.data;
+      const error = scopeRow?.error;
+      if (error) throw new ApiError(503, 'Could not verify the requested barangay scope.');
+      if (!data || String(data.municipality_id ?? '') !== String(user.municipalityId) || data.status === 'Inactive') {
+        throw ApiError.forbidden('You can only access barangays within your assigned municipality.');
+      }
+    }
     return { level: 'municipality', barangayId: requestedBarangayId || null, municipalityId: user.municipalityId };
   }
   throw ApiError.forbidden('You are not authorized to view M1 reports.');
@@ -322,7 +343,7 @@ export const createRecord = async ({ user, payload = {}, supabase = getServiceCl
   if (household) row.household_id = household.id;
   if (!resident && !household) {
     // Barangay-level event (e.g. ZOD / sanitary permit): set scope from caller.
-    const scope = resolveScope(user, payload.barangayId ?? payload.barangay_id ?? null);
+    const scope = await resolveScope(user, payload.barangayId ?? payload.barangay_id ?? null, supabase);
     if (!scope.barangayId) throw ApiError.unprocessable('A resident, household, or barangay is required.');
     row.barangay_id = scope.barangayId;
   }
@@ -340,7 +361,7 @@ const loadRecordInScope = async (supabase, user, id) => {
   const { data, error } = await supabase.from(RECORDS).select('*').eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load M1 record');
   if (!data) throw ApiError.notFound('M1 record not found.');
-  const scope = resolveScope(user);
+  const scope = await resolveScope(user);
   if (scope.level === 'barangay' && data.barangay_id !== scope.barangayId) throw ApiError.notFound('M1 record not found.');
   if (scope.level === 'municipality' && data.municipality_id !== scope.municipalityId) throw ApiError.notFound('M1 record not found.');
   return data;
@@ -387,7 +408,7 @@ const audit = async (supabase, user, action, entityId, record) => {
 // ---------------------------------------------------------------------------
 
 export const dailyParticipants = async ({ user, date, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   const day = text(date) || new Date().toISOString().slice(0, 10);
 
   // M1 event records for the day.
@@ -639,7 +660,8 @@ const aggregateOverRange = async ({ scope, start, end, year, months, supabase })
     .eq('period_year', year)
     .in('period_month', months);
   remQ = applyScope(remQ, scope);
-  const { data: remarks } = await remQ;
+  const { data: remarks, error: remarksErr } = await remQ;
+  throwOnError(remarksErr, 'Could not load M1 indicator remarks');
   const remarkMap = new Map();
   for (const r of remarks || []) if (!remarkMap.has(r.indicator_code)) remarkMap.set(r.indicator_code, r.remarks);
 
@@ -675,7 +697,7 @@ const aggregateOverRange = async ({ scope, start, end, year, months, supabase })
  * drilldown().
  */
 export const monthlyReport = async ({ user, year, month, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   const { start, end } = monthRange(year, month);
   const { indicators, byCode } = await aggregateOverRange({ scope, start, end, year, months: [month], supabase });
   return { period: { year, month }, scope: { level: scope.level, barangayId: scope.barangayId }, indicators, byCode };
@@ -690,7 +712,7 @@ export const monthlyReport = async ({ user, year, month, barangayId = null, supa
  * resolveScope + applyScope on every query, exactly like monthlyReport.
  */
 export const periodReport = async ({ user, period = 'monthly', year, month = null, quarter = null, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   let range;
   let months;
   let periodObj;
@@ -914,7 +936,7 @@ const computeIndicator = (ind, sets) => {
 // ---------------------------------------------------------------------------
 
 export const annualSummary = async ({ user, year, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   const { start, end } = yearRange(year);
 
   let recQ = supabase
@@ -935,7 +957,8 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
     .eq('status', 'Completed')
     .limit(50000);
   immQ = applyScope(immQ, scope);
-  const { data: imms } = await immQ;
+  const { data: imms, error: immErr } = await immQ;
+  throwOnError(immErr, 'Could not load immunizations');
 
   let mortQ = supabase
     .from('household_member_health_profiles')
@@ -944,18 +967,21 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
     .lte('date_of_death', end)
     .limit(50000);
   mortQ = applyScope(mortQ, scope);
-  const { data: mort } = await mortQ;
+  const { data: mort, error: mortErr } = await mortQ;
+  throwOnError(mortErr, 'Could not load mortality records');
 
   let hhQ = supabase.from('households').select('*').limit(20000);
   hhQ = applyScope(hhQ, scope);
-  const { data: households } = await hhQ;
+  const { data: households, error: hhErr } = await hhQ;
+  throwOnError(hhErr, 'Could not load households');
 
   // Person-level FP roster for annual current-user counts.
   let fmQ = supabase
     .from('household_members')
     .select('id, household_id, resident_id, fp_method, name, birthday, sex, household:households(barangay_id, municipality_id), resident:residents(birth_date, sex)')
     .limit(50000);
-  const { data: householdMembersRaw } = await fmQ;
+  const { data: householdMembersRaw, error: fmErr } = await fmQ;
+  throwOnError(fmErr, 'Could not load household member family-planning records');
   const fpPeople = (householdMembersRaw || [])
     .filter((m) => {
       if (scope.barangayId) return m.household?.barangay_id === scope.barangayId;
@@ -976,11 +1002,13 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
 
   let matQ = supabase.from(MATERNAL).select('*, resident:residents(birth_date, sex)').limit(50000);
   matQ = applyScope(matQ, scope);
-  const { data: maternal } = await matQ;
+  const { data: maternal, error: matErr } = await matQ;
+  throwOnError(matErr, 'Could not load maternal records');
 
   let manQ = supabase.from(MANUAL).select('indicator_code, period_month, age_group, sex, value').eq('period_year', year);
   manQ = applyScope(manQ, scope);
-  const { data: manualRows } = await manQ;
+  const { data: manualRows, error: manErr } = await manQ;
+  throwOnError(manErr, 'Could not load manual M1 entries');
   const manualByIndicator = new Map();
   for (const m of manualRows || []) {
     if (!manualByIndicator.has(m.indicator_code)) manualByIndicator.set(m.indicator_code, []);
@@ -1131,7 +1159,7 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
 // ---------------------------------------------------------------------------
 
 export const drilldown = async ({ user, indicatorCode, year, month = null, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   const ind = getIndicator(indicatorCode);
   if (!ind) throw ApiError.notFound(`Unknown indicator: ${indicatorCode}`);
   const { start, end } = month ? monthRange(year, month) : yearRange(year);
@@ -1245,7 +1273,7 @@ export const drilldown = async ({ user, indicatorCode, year, month = null, baran
 // ---------------------------------------------------------------------------
 
 export const getReportMeta = async ({ user, year, month, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   const targetBarangay = scope.barangayId;
   if (!targetBarangay) throw ApiError.badRequest('A barangay is required for the report header.');
 
@@ -1276,7 +1304,7 @@ export const getReportMeta = async ({ user, year, month, barangayId = null, supa
 
 export const saveReportMeta = async ({ user, year, month, barangayId = null, payload = {}, supabase = getServiceClient() }) => {
   assertWriter(user);
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   const targetBarangay = scope.barangayId;
   if (!targetBarangay) throw ApiError.badRequest('A barangay is required.');
   if (!scopeCoversBarangay(scope, targetBarangay)) throw ApiError.forbidden('Outside your barangay scope.');
@@ -1312,7 +1340,7 @@ const scopeCoversBarangay = (scope, barangayId) => {
 export const saveIndicatorRemarks = async ({ user, year, month, indicatorCode, remarks, barangayId = null, supabase = getServiceClient() }) => {
   assertWriter(user);
   if (!isValidIndicatorCode(indicatorCode)) throw ApiError.unprocessable(`Unknown indicator: ${indicatorCode}`);
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   const targetBarangay = scope.barangayId;
   if (!targetBarangay) throw ApiError.badRequest('A barangay is required.');
   const row = {
@@ -1344,7 +1372,7 @@ const SEX_VALUES = new Set(['', 'Male', 'Female', 'Other']);
  * Entry screen can pre-fill the exact persisted values for editing.
  */
 export const listManualEntries = async ({ user, year, month, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   let q = supabase.from(MANUAL).select('*').eq('period_year', year).eq('period_month', month);
   q = applyScope(q, scope);
   const { data, error } = await q;
@@ -1363,7 +1391,8 @@ export const listManualEntries = async ({ user, year, month, barangayId = null, 
 
   let rq = supabase.from('m1_indicator_remarks').select('indicator_code, remarks').eq('period_year', year).eq('period_month', month);
   rq = applyScope(rq, scope);
-  const { data: rem } = await rq;
+  const { data: rem, error: remErr } = await rq;
+  throwOnError(remErr, 'Could not load M1 indicator remarks');
   const remarks = {};
   for (const r of rem || []) if (remarks[r.indicator_code] === undefined) remarks[r.indicator_code] = r.remarks;
 
@@ -1401,7 +1430,7 @@ export const saveManualEntry = async ({ user, year, month, indicatorCode, values
   if (!Number.isInteger(yr) || yr < 2000 || yr > 2100) throw ApiError.unprocessable('Invalid reporting year.');
   if (!Number.isInteger(mo) || mo < 1 || mo > 12) throw ApiError.unprocessable('Invalid reporting month.');
 
-  const scope = resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId);
   const targetBarangay = scope.barangayId;
   if (!targetBarangay) throw ApiError.badRequest('A barangay is required to record M1 data.');
   if (!scopeCoversBarangay(scope, targetBarangay)) throw ApiError.forbidden('Outside your barangay scope.');

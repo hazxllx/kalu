@@ -1,8 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import StatCard from "@/components/common/StatCard";
+import StatusBadge from "@/components/common/StatusBadge";
+import ErrorState from "@/components/common/ErrorState";
+import EmptyState from "@/components/common/EmptyState";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
+import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { healthServicesApi } from "@/services/api";
 import FacilityField from "./FacilityField";
 import TimePicker from "./TimePicker";
@@ -90,7 +95,7 @@ const CATEGORY_FILTERS = [
   ["Family Planning", "Family Planning"],
 ];
 const STATUS_FILTERS = [
-  ["All", "All Statuses"],
+  ["All", "All Status"],
   [STATUS.ACTIVE, STATUS.ACTIVE],
   [STATUS.UPCOMING, STATUS.UPCOMING],
   [STATUS.COMPLETED, STATUS.COMPLETED],
@@ -177,18 +182,23 @@ const deadlineSummary = (schedule) => {
 export default function HealthServicesManager({ subtitle }) {
   const { user } = useAuth();
   const { can } = usePermissions();
-  const canCreate = can("services.create");
-  const canEdit = can("services.edit");
-  const canDelete = can("services.delete");
-  const canManage = canCreate || canEdit || canDelete;
   const isSupervisor = user?.role === "health_supervisor";
+  const scopeReady = !isSupervisor || getSupervisorScope(user)?.level === HS_SCOPE.BARANGAY;
+  const canCreate = can("services.create") && scopeReady;
+  const canEdit = can("services.edit") && scopeReady;
+  const canDelete = can("services.delete") && scopeReady;
+  const canManage = canCreate || canEdit || canDelete;
 
   const [services, setServices] = useState([]);
-  const [categories, setCategories] = useState(CATEGORY_ORDER);
+  const [categories, setCategories] = useState(isSupervisor ? [] : CATEGORY_ORDER);
   const [barangays, setBarangays] = useState([]);
   const [facilities, setFacilities] = useState([]);
   const [assignedBarangay, setAssignedBarangay] = useState(null);
   const [personnel, setPersonnel] = useState([]);
+  const [referenceState, setReferenceState] = useState({ loading: false, errors: [] });
+  const serviceRequest = useRef(0);
+  const referenceRequest = useRef(0);
+  const registrationRequest = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -201,8 +211,8 @@ export default function HealthServicesManager({ subtitle }) {
   const [editingId, setEditingId] = useState(null); // null => create, else edit
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
-  const [scheduleErrors, setScheduleErrors] = useState({});
-  const [typingErrors, setTypingErrors] = useState({});
+  const [scheduleErrors, setScheduleErrors] = useState(/** @type {Record<string, string>} */ ({}));
+  const [typingErrors, setTypingErrors] = useState(/** @type {Record<string, string>} */ ({}));
   const [form, setForm] = useState(null);
   const [manageTarget, setManageTarget] = useState(null);
   const [busyAssign, setBusyAssign] = useState("");
@@ -221,37 +231,78 @@ export default function HealthServicesManager({ subtitle }) {
   const [regState, setRegState] = useState({ loading: false, error: "", registrations: [], counts: null });
   const [attBusy, setAttBusy] = useState(""); // residentId being updated
 
-  const showToast = (msg) => {
-    setToast(msg);
+  const showToast = (msg, type = "success") => {
+    setToast({ message: msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
   const loadServices = useCallback(() => {
+    const requestId = ++serviceRequest.current;
     setLoading(true);
     setError("");
     return healthServicesApi
       .list()
-      .then((res) => setServices(res?.rows || res?.records || []))
-      .catch((err) => setError(err?.message || "Unable to load health services. Please try again."))
-      .finally(() => setLoading(false));
-  }, []);
+      .then((res) => {
+        if (requestId !== serviceRequest.current) return;
+        const rows = res?.rows || res?.records;
+        if (!Array.isArray(rows)) throw new Error("The health service catalog response was incomplete.");
+        setServices(rows);
+      })
+      .catch((err) => {
+        if (requestId !== serviceRequest.current) return;
+        setServices([]);
+        setError(err?.message || "Unable to load health services. Please try again.");
+      })
+      .finally(() => { if (requestId === serviceRequest.current) setLoading(false); });
+  }, [user?.id]);
 
-  const loadReference = useCallback(() => {
-    // Reference + personnel are for the create/edit/assign forms; a failure
-    // here must not blank the catalog, so they are best-effort.
-    healthServicesApi.meta().then((m) => m?.categories && setCategories(m.categories)).catch(() => {});
-    healthServicesApi.reference().then((r) => {
-      setBarangays(r?.barangays || []);
-      setFacilities(r?.facilities || []);
-      setAssignedBarangay(r?.assignedBarangay || null);
-    }).catch(() => {});
-    healthServicesApi.personnel().then((r) => setPersonnel(r?.rows || [])).catch(() => {});
-  }, []);
+  const loadReference = useCallback(async () => {
+    const requestId = ++referenceRequest.current;
+    setReferenceState({ loading: true, errors: [] });
+    const [meta, reference, people] = await Promise.allSettled([
+      healthServicesApi.meta(), healthServicesApi.reference(), healthServicesApi.personnel(),
+    ]);
+    if (requestId !== referenceRequest.current) return;
+    const errors = [];
+    if (meta.status === "fulfilled" && Array.isArray(meta.value?.categories)) {
+      setCategories(meta.value.categories);
+    } else {
+      if (isSupervisor) setCategories([]);
+      errors.push(`Service categories: ${(meta.status === "rejected" && meta.reason?.message) || "The category source is unavailable."}`);
+    }
+    if (reference.status === "fulfilled" && Array.isArray(reference.value?.barangays) && Array.isArray(reference.value?.facilities)) {
+      setBarangays(reference.value.barangays);
+      setFacilities(reference.value.facilities);
+      setAssignedBarangay(reference.value.assignedBarangay || null);
+    } else {
+      setBarangays([]);
+      setFacilities([]);
+      setAssignedBarangay(null);
+      errors.push(`Facility reference: ${(reference.status === "rejected" && reference.reason?.message) || "The facility source is unavailable."}`);
+    }
+    if (people.status === "fulfilled" && Array.isArray(people.value?.rows)) {
+      setPersonnel(people.value.rows);
+    } else {
+      setPersonnel([]);
+      errors.push(`Personnel directory: ${(people.status === "rejected" && people.reason?.message) || "The personnel source is unavailable."}`);
+    }
+    setReferenceState({ loading: false, errors });
+  }, [user?.id, isSupervisor]);
 
   useEffect(() => {
     loadServices();
     if (canManage) loadReference();
+    return () => { serviceRequest.current += 1; referenceRequest.current += 1; registrationRequest.current += 1; };
   }, [canManage, loadServices, loadReference]);
+  useEffect(() => {
+    setServices([]);
+    setPersonnel([]);
+    setShowForm(false);
+    setManageTarget(null);
+    setRegTarget(null);
+    setDeleteTarget(null);
+    setMenuOpenId(null);
+  }, [user?.id]);
 
   // Summary counts come from ALL real services (not the filtered view), using
   // the derived status rules above.
@@ -422,7 +473,7 @@ export default function HealthServicesManager({ subtitle }) {
       return;
     }
     const schedErrors = validateSchedule(form);
-    setScheduleErrors(schedErrors);
+    setScheduleErrors({ ...schedErrors });
     if (Object.keys(schedErrors).length > 0) {
       setFormError("Please correct the highlighted schedule fields.");
       return;
@@ -474,7 +525,7 @@ export default function HealthServicesManager({ subtitle }) {
       await loadServices();
       showToast(active ? "Service reactivated." : "Service deactivated (archived).");
     } catch (err) {
-      showToast(err?.message || "The service status could not be changed.");
+      showToast(err?.message || "The service status could not be changed.", "error");
     } finally {
       setStatusBusyId("");
     }
@@ -542,7 +593,7 @@ export default function HealthServicesManager({ subtitle }) {
       }
       showToast(isAssigned(service, person.id) ? "Personnel removed from service." : "Personnel assigned to service.");
     } catch (err) {
-      showToast(err?.message || "The assignment could not be updated.");
+      showToast(err?.message || "The assignment could not be updated.", "error");
     } finally {
       setBusyAssign("");
     }
@@ -554,26 +605,30 @@ export default function HealthServicesManager({ subtitle }) {
   };
 
   const loadRegistrations = useCallback((serviceId) => {
-    setRegState((prev) => ({ ...prev, loading: true, error: "" }));
+    const requestId = ++registrationRequest.current;
+    setRegState({ loading: true, error: "", registrations: [], counts: null });
     return healthServicesApi
       .registrations(serviceId)
-      .then((res) =>
+      .then((res) => {
+        if (requestId !== registrationRequest.current) return;
+        if (!Array.isArray(res?.registrations)) throw new Error("The registration roster response was incomplete.");
         setRegState({
           loading: false,
           error: "",
           registrations: res?.registrations || [],
           counts: res?.counts || null,
-        }),
-      )
-      .catch((err) =>
+        });
+      })
+      .catch((err) => {
+        if (requestId !== registrationRequest.current) return;
         setRegState({
           loading: false,
           error: err?.message || "Unable to load registrations. Please try again.",
           registrations: [],
           counts: null,
-        }),
-      );
-  }, []);
+        });
+      });
+  }, [user?.id]);
 
   const openRegistrations = (service) => {
     setRegTarget(service);
@@ -600,7 +655,7 @@ export default function HealthServicesManager({ subtitle }) {
       await loadRegistrations(regTarget.id);
       showToast(status === "attended" ? "Marked as attended." : "Marked as missed.");
     } catch (err) {
-      showToast(err?.message || "The attendance could not be recorded.");
+      showToast(err?.message || "The attendance could not be recorded.", "error");
     } finally {
       setAttBusy("");
     }
@@ -608,9 +663,13 @@ export default function HealthServicesManager({ subtitle }) {
 
   const hasFiltersActive = Boolean(search.trim() || categoryFilter !== "All" || statusFilter !== "All");
   const clearFilters = () => { setSearch(""); setCategoryFilter("All"); setStatusFilter("All"); };
+  const categoryOptions = isSupervisor
+    ? [["All", "All Categories"], ...[...new Set([...categories, ...services.map((service) => service.category).filter(Boolean)])].map((category) => [category, CATEGORY_LABELS[category] || category])]
+    : CATEGORY_FILTERS;
+  const referencesUnavailable = referenceState.loading || referenceState.errors.length > 0;
 
   return (
-    <>
+    <div className={isSupervisor ? "supervisor-module" : "contents"}>
       <PageHeader
         crumbs={["Health Services"]}
         title="Health Services"
@@ -618,7 +677,7 @@ export default function HealthServicesManager({ subtitle }) {
         action={canCreate ? (
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+            className={isSupervisor ? "supervisor-button is-primary" : "flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"}
           >
             <Plus className="h-4 w-4" /> Add Health Service
           </button>
@@ -627,22 +686,34 @@ export default function HealthServicesManager({ subtitle }) {
 
       {toast && (
         <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
-          <CheckCircle2 className="h-4 w-4 text-brand-green" />
-          <span className="text-sm">{toast}</span>
+          {toast.type === "error" ? <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-brand-green" aria-hidden="true" />}
+          <span role={toast.type === "error" ? "alert" : "status"} className="text-sm">{toast.message}</span>
         </div>
       )}
 
       {/* Summary counts — derived from the real catalog + status rules. */}
-      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <SummaryCard icon={Layers} label="Total services" value={summary.total} tone="text-brand-ink" loading={loading} />
-        <SummaryCard icon={ListChecks} label="Active services" value={summary.active} tone="text-brand-green" loading={loading} />
-        <SummaryCard icon={CalendarClock} label="Upcoming services" value={summary.upcoming} tone="text-brand-blue" loading={loading} />
-      </div>
+      {isSupervisor ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard variant="consultation" icon="Layers" label="Catalog Services" value={loading || error ? "Unavailable" : summary.total} description="Authorized visible catalog" tone="blue" />
+        <StatCard variant="consultation" icon="ListChecks" label="Active" value={loading || error ? "Unavailable" : summary.active} description="Active within the stored schedule" tone="green" />
+        <StatCard variant="consultation" icon="CalendarClock" label="Upcoming" value={loading || error ? "Unavailable" : summary.upcoming} description="Active services with a future start" tone="blue" />
+      </div> : <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <SummaryCard icon={Layers} label="Total services" value={summary.total} tone="text-brand-ink" loading={loading || Boolean(error)} />
+        <SummaryCard icon={ListChecks} label="Active services" value={summary.active} tone="text-brand-green" loading={loading || Boolean(error)} />
+        <SummaryCard icon={CalendarClock} label="Upcoming services" value={summary.upcoming} tone="text-brand-blue" loading={loading || Boolean(error)} />
+      </div>}
+
+      {isSupervisor && referenceState.errors.length > 0 && <Card className="mb-4"><ErrorState compact title="Service form references unavailable" message={referenceState.errors.join(" ")} onRetry={loadReference} /></Card>}
 
       {/* Search, filters, and refresh */}
-      <Card className="mb-4 p-3">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(10rem,0.58fr)_minmax(10rem,0.58fr)_auto] lg:items-end">
-          <div className="flex h-10 min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input sm:col-span-2 lg:col-span-1">
+      <Card className={`mb-4 p-3 ${isSupervisor ? "supervisor-toolbar" : ""}`}>
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(10rem,0.58fr)_minmax(10rem,0.58fr)_auto] lg:items-end">
+          {isSupervisor ? <label htmlFor="health-service-search" className="min-w-0 text-caption font-medium text-brand-gray sm:col-span-2 lg:col-span-1">
+            Search Services
+            <div className="supervisor-input mt-1 flex items-center gap-2">
+              <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <input id="health-service-search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Service name or category" className="w-full min-w-0 bg-transparent outline-none" />
+            </div>
+          </label> : <div className="flex h-10 min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input sm:col-span-2 lg:col-span-1">
             <Search className="h-4 w-4 text-brand-gray" />
             <input
               type="search"
@@ -652,7 +723,7 @@ export default function HealthServicesManager({ subtitle }) {
               placeholder="Search service or category..."
               className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
             />
-          </div>
+          </div>}
 
           <label htmlFor="health-service-category" className="min-w-0 text-xs font-medium text-brand-gray">
             Category
@@ -660,9 +731,9 @@ export default function HealthServicesManager({ subtitle }) {
               id="health-service-category"
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="mt-1 block h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-normal text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 dark:border-border dark:bg-input dark:text-foreground"
+              className={isSupervisor ? "supervisor-input mt-1 block w-full" : "mt-1 block h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-normal text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 dark:border-border dark:bg-input dark:text-foreground"}
             >
-              {CATEGORY_FILTERS.map(([value, label]) => (
+              {categoryOptions.map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
@@ -673,7 +744,7 @@ export default function HealthServicesManager({ subtitle }) {
               id="health-service-status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="mt-1 block h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-normal text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 dark:border-border dark:bg-input dark:text-foreground"
+              className={isSupervisor ? "supervisor-input mt-1 block w-full" : "mt-1 block h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-normal text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 dark:border-border dark:bg-input dark:text-foreground"}
             >
               {STATUS_FILTERS.map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
@@ -683,15 +754,16 @@ export default function HealthServicesManager({ subtitle }) {
           <button
             type="button"
             onClick={loadServices}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue sm:col-span-2 sm:justify-self-end lg:col-span-1"
+            disabled={loading}
+            className={isSupervisor ? "supervisor-button" : "inline-flex h-10 items-center justify-center gap-2 rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue sm:col-span-2 sm:justify-self-end lg:col-span-1"}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
           </button>
         </div>
 
-        <div className="mt-2 flex items-center justify-between gap-3 border-t border-brand-border pt-2 dark:border-border">
+        <div className="mt-2 flex w-full items-center justify-between gap-3 border-t border-brand-border pt-2 dark:border-border">
           <p className="text-xs text-brand-gray" aria-live="polite" aria-atomic="true">
-            Showing {filtered.length} of {services.length} service{services.length === 1 ? "" : "s"}
+            {loading ? "Loading the authorized catalog..." : error ? "Catalog unavailable" : `Showing ${filtered.length} of ${services.length} service${services.length === 1 ? "" : "s"}`}
           </p>
           {hasFiltersActive && (
             <button
@@ -706,21 +778,21 @@ export default function HealthServicesManager({ subtitle }) {
       </Card>
 
       {error ? (
-        <Card className="p-10 text-center">
+        isSupervisor ? <Card><ErrorState compact title="Health services unavailable" message={error} onRetry={loadServices} /></Card> : <Card className="p-10 text-center">
           <p className="text-sm font-medium text-brand-danger">{error}</p>
           <button onClick={loadServices} className="mt-3 inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
             <RefreshCw className="h-4 w-4" /> Retry
           </button>
         </Card>
       ) : loading ? (
-        <Card className="p-12 text-center"><p className="text-sm text-brand-gray">Loading health services...</p></Card>
+        <Card aria-busy="true" className={isSupervisor ? "p-5 text-center" : "p-12 text-center"}><p role="status" className="text-sm text-brand-gray">Loading health services...</p></Card>
       ) : services.length === 0 ? (
-        <Card className="p-12 text-center">
+        isSupervisor ? <Card><EmptyState compact icon={Activity} title="No health services available" description="No catalog services are currently visible to this account. Services created or assigned by authorized personnel will appear here." /></Card> : <Card className="p-12 text-center">
           <Activity className="mx-auto mb-3 h-10 w-10 text-brand-gray/50" />
           <p className="text-sm text-brand-gray">No health services available.</p>
         </Card>
       ) : filtered.length === 0 ? (
-        <Card className="p-12 text-center">
+        <Card className={isSupervisor ? "p-5 text-center" : "p-12 text-center"}>
           <p className="text-sm text-brand-gray">No services match your filters.</p>
           {hasFiltersActive && (
             <button onClick={clearFilters} className="mt-3 inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
@@ -730,19 +802,19 @@ export default function HealthServicesManager({ subtitle }) {
         </Card>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className={`grid sm:grid-cols-2 lg:grid-cols-3 ${isSupervisor ? "gap-3" : "gap-4"}`}>
             {filtered.map((s) => {
               const status = deriveStatus(s);
               const personnelList = s.assignedPersonnel || [];
               return (
-                <Card key={s.id} className="flex h-full flex-col p-4">
+                <Card key={s.id} className={`flex h-full flex-col ${isSupervisor ? "p-3" : "p-4"}`}>
                   <div className="mb-2 flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h4 className="truncate font-semibold leading-snug text-brand-ink" title={s.name}>{s.name}</h4>
+                      <h4 className={`${isSupervisor ? "text-section" : "truncate"} font-semibold leading-snug text-brand-ink`} title={s.name}>{s.name}</h4>
                       <p className="mt-0.5 text-xs font-medium text-brand-gray">{CATEGORY_LABELS[s.category] || s.category}</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[status]}`}>{status}</span>
+                      {isSupervisor ? <StatusBadge value={status} /> : <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[status]}`}>{status}</span>}
                       {(canEdit || canDelete) && (
                         <ActionMenu
                           open={menuOpenId === s.id}
@@ -760,7 +832,10 @@ export default function HealthServicesManager({ subtitle }) {
                     </div>
                   </div>
 
-                  <div className="flex-1 space-y-1.5 text-sm text-brand-gray">
+                  {isSupervisor ? <dl className="flex-1 space-y-2 text-ui">
+                    {[ ["Facility", s.facilityMeta?.label || s.facility || "Not recorded"], ["Coverage", s.barangay === null || s.barangay === "" ? "Municipality-wide" : s.barangay || "Not recorded"], ["Schedule", scheduleSummary(s.schedule) || "Not scheduled"], ["Personnel", personnelList.length ? personnelList.map((person) => person.name).filter(Boolean).join(", ") : "Not assigned"] ].map(([label, value]) => <div key={label}><dt className="text-caption text-brand-gray">{label}</dt><dd className="break-words text-brand-ink">{value || "Not recorded"}</dd></div>)}
+                    {deadlineSummary(s.schedule) && <div><dt className="text-caption text-brand-gray">Registration Deadline</dt><dd className="text-brand-ink">{deadlineSummary(s.schedule)}</dd></div>}
+                  </dl> : <div className="flex-1 space-y-1.5 text-sm text-brand-gray">
                     <p className="flex items-start gap-1.5"><Building2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span className="min-w-0">{facilityLabel(s)}</span></p>
                     <p className="flex items-start gap-1.5"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span className="min-w-0">{s.barangay || "Municipality-wide"}</span></p>
                     {scheduleSummary(s.schedule) && (
@@ -777,7 +852,7 @@ export default function HealthServicesManager({ subtitle }) {
                           : personnelList.map((p) => `${p.name}${p.role ? ` (${ROLE_LABELS[p.role] || p.role})` : ""}`).join(", ")}
                       </span>
                     </p>
-                  </div>
+                  </div>}
 
                   <div className="mt-3 flex items-center justify-between gap-2 border-t border-brand-border pt-2.5 dark:border-border">
                     <button
@@ -803,7 +878,7 @@ export default function HealthServicesManager({ subtitle }) {
       {/* Create / Edit service — ONE shared form */}
       {showForm && form && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={editingId ? "Edit Health Service" : "Add Health Service"}>
-          <Card className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden">
+          <Card className={`flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden ${isSupervisor ? "supervisor-modal supervisor-form" : ""}`}>
             {/* Header — stays visible while the body scrolls */}
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-6 py-4 dark:border-border">
               <div className="min-w-0">
@@ -826,6 +901,7 @@ export default function HealthServicesManager({ subtitle }) {
             {/* Single primary scroll area for the form content */}
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <div className="space-y-5">
+                {isSupervisor && referencesUnavailable && <div role={referenceState.errors.length ? "alert" : "status"} className="rounded border border-amber-300 bg-amber-50 p-3 text-ui text-amber-900"><p>{referenceState.loading ? "Loading saved category, facility and personnel references..." : referenceState.errors.join(" ")}</p>{!referenceState.loading && <button type="button" onClick={loadReference} className="supervisor-button mt-2">Retry references</button>}</div>}
                 {/* Service details */}
                 <section className="space-y-4">
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Service details</h4>
@@ -982,7 +1058,7 @@ export default function HealthServicesManager({ subtitle }) {
                       </div>
                     )}
                     <div className="mt-1.5 max-h-52 space-y-1 overflow-y-auto rounded-btn border border-brand-border p-2 dark:border-border">
-                      {eligiblePersonnel.length === 0 ? (
+                      {isSupervisor && referencesUnavailable ? <p className="px-2 py-3 text-ui text-brand-gray">{referenceState.loading ? "Loading personnel references..." : "Personnel choices are unavailable until the reference sources can be reloaded."}</p> : eligiblePersonnel.length === 0 ? (
                         <p className="px-2 py-6 text-center text-sm text-brand-gray">No assignable personnel found.</p>
                       ) : visiblePersonnel.length === 0 ? (
                         <p className="px-2 py-6 text-center text-sm text-brand-gray">No personnel match “{personnelQuery.trim()}”.</p>
@@ -1015,7 +1091,7 @@ export default function HealthServicesManager({ subtitle }) {
               </button>
               <button
                 onClick={saveService}
-                disabled={saving}
+                disabled={saving || (isSupervisor && referencesUnavailable)}
                 className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
               >
                 {editingId
@@ -1030,7 +1106,7 @@ export default function HealthServicesManager({ subtitle }) {
       {/* Manage assignments */}
       {manageTarget && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-          <Card className="max-h-[92vh] w-full max-w-md overflow-y-auto">
+          <Card role="dialog" aria-modal="true" aria-label="Service Personnel Assignments" className={`max-h-[92vh] w-full max-w-md overflow-y-auto ${isSupervisor ? "supervisor-modal" : ""}`}>
             <div className="p-6">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
@@ -1040,7 +1116,7 @@ export default function HealthServicesManager({ subtitle }) {
                 <button onClick={() => setManageTarget(null)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
               </div>
               <div className="space-y-1">
-                {eligiblePersonnel.length === 0 && <p className="py-4 text-center text-sm text-brand-gray">No assignable personnel found.</p>}
+                {isSupervisor && referencesUnavailable ? <div role="status" className="py-3 text-ui text-brand-gray">{referenceState.loading ? "Loading personnel..." : referenceState.errors.join(" ")}{!referenceState.loading && <button type="button" onClick={loadReference} className="supervisor-button mt-2">Retry references</button>}</div> : eligiblePersonnel.length === 0 && <p className="py-4 text-center text-sm text-brand-gray">No assignable personnel found.</p>}
                 {eligiblePersonnel.map((p) => {
                   const assigned = isAssigned(manageTarget, p.id);
                   return (
@@ -1051,7 +1127,7 @@ export default function HealthServicesManager({ subtitle }) {
                       </span>
                       {canEdit && <button
                         onClick={() => toggleAssign(manageTarget, p)}
-                        disabled={busyAssign === p.id}
+                        disabled={busyAssign === p.id || (isSupervisor && referencesUnavailable)}
                         className={`inline-flex shrink-0 items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
                           assigned ? "border border-brand-danger/30 text-brand-danger hover:bg-brand-danger/5" : "bg-brand-blue text-white hover:bg-brand-dark"
                         }`}
@@ -1073,7 +1149,7 @@ export default function HealthServicesManager({ subtitle }) {
       {/* Delete confirmation */}
       {deleteTarget && (
         <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={`Delete ${deleteTarget.name}`}>
-          <Card className="w-full max-w-md overflow-hidden">
+          <Card className={`w-full max-w-md overflow-hidden ${isSupervisor ? "supervisor-modal" : ""}`}>
             <div className="p-6">
               <div className="mb-3 flex items-start gap-3">
                 <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${deleteBlocked ? "bg-brand-gold/15 text-brand-amber" : "bg-brand-danger/10 text-brand-danger"}`}>
@@ -1093,8 +1169,8 @@ export default function HealthServicesManager({ subtitle }) {
                 </div>
               </div>
 
-              {deleteError && !deleteBlocked && (
-                <div className="mb-3 rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-3.5 py-2.5 text-sm text-brand-danger">{deleteError}</div>
+              {deleteError && (
+                <div role="alert" className="mb-3 rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-3.5 py-2.5 text-sm text-brand-danger">{deleteError}</div>
               )}
 
               <div className="mt-4 flex flex-col-reverse gap-2 border-t border-brand-border pt-4 dark:border-border sm:flex-row sm:justify-end sm:gap-3">
@@ -1134,6 +1210,7 @@ export default function HealthServicesManager({ subtitle }) {
       {regTarget && (
         <RegistrationsModal
           service={regTarget}
+          supervisor={isSupervisor}
           state={regState}
           canEdit={canEdit}
           attBusy={attBusy}
@@ -1142,7 +1219,7 @@ export default function HealthServicesManager({ subtitle }) {
           onClose={() => setRegTarget(null)}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -1244,14 +1321,14 @@ const formatDateTime = (iso) => {
  * their registration status and timestamp, with attendance marking. Only active
  * (non-cancelled) registrations can be marked attended/missed.
  */
-function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark, onClose }) {
+function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark, onClose, supervisor = false }) {
   const { loading, error, registrations, counts } = state;
   const active = registrations.filter((r) => r.status !== "Cancelled");
   const cancelled = registrations.filter((r) => r.status === "Cancelled");
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={`Registrations for ${service.name}`}>
-      <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto">
+      <Card className={`max-h-[92vh] w-full max-w-2xl overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
         <div className="p-6">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -1271,7 +1348,7 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
             <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
 
-          {counts && (
+          {counts && !loading && !error && (
             <div className="mb-4 flex flex-wrap gap-2 text-xs">
               <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-medium text-brand-blue">{counts.registered} registered</span>
               <span className="rounded-full bg-brand-green/10 px-2.5 py-1 font-medium text-brand-green">{counts.attended} attended</span>
@@ -1300,7 +1377,7 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
           ) : active.length === 0 ? (
             <div className="py-10 text-center">
               <Users className="mx-auto mb-3 h-10 w-10 text-brand-gray/40" />
-              <p className="text-sm text-brand-gray">No residents have registered for this service yet.</p>
+              <p className="text-sm text-brand-gray">{cancelled.length ? "No active resident registrations. All loaded registrations are cancelled." : "No residents have registered for this service yet."}</p>
             </div>
           ) : (
             <div className="space-y-2">

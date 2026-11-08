@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 /**
  * Treatment Consultation session store (local in-session state only).
@@ -148,3 +149,4 @@ export const consultationStore = {
 
 export { initialsOf };
 export default consultationStore;
+registerWorkingSetReset(() => { cache = []; listeners.forEach((listener) => listener()); });

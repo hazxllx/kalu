@@ -1,18 +1,18 @@
 /**
  * Early Warning analytics service.
  *
- * Computes the Early Warning module payload from the resident / visit /
- * referral records. Barangay scoping is applied HERE, at the data-access
- * layer: a barangay-scoped caller (Health Supervisor assigned to one
- * barangay) receives ONLY their barangay's numbers. The scope always comes
- * from the authenticated session via `resolveBarangayScope` — a caller cannot
- * influence it with filters, URLs or record ids.
+ * Production reads use one PostgreSQL RPC returning only aggregates. Its scope
+ * is derived from the authenticated actor's stored profile, not a municipality
+ * supplied by a client. Row-based helpers are retained only for the explicitly
+ * selected file driver and pure local tests.
  *
  * Condition and risk classification use documented, conservative heuristics
  * over the recorded chief complaints and vitals until the verified FHSIS
  * coding schema is connected.
  */
 import repository from '../repositories/index.js';
+import { getServiceClient } from '../config/supabase.js';
+import ApiError from '../utils/apiError.js';
 import { assessVitals, hasAssessableVitals } from '../utils/residentRisk.js';
 import { DEFAULT_RISK_CONFIG } from '../config/riskConfig.js';
 import { getRiskConfig } from './riskConfig.service.js';
@@ -47,6 +47,76 @@ export const COMMUNITY_MAP_RISK_LEVELS = Object.freeze(['High', 'Moderate', 'Low
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+const aggregateRpc = (name, params) => getServiceClient().rpc(name, params);
+const isLocalRepository = (repo) => (repo.mode ?? repo.driver) === 'file';
+
+const aggregateError = (error) => {
+  if (error?.code === '42501') return ApiError.forbidden(error.message);
+  if (['22023', '22007', '22008', '22P02'].includes(error?.code)) return ApiError.unprocessable(error.message);
+  return Object.assign(new ApiError(503, 'Aggregate analytics could not be loaded.'), { cause: error });
+};
+
+const loadAggregate = async (kind, { actorId, barangay, condition, status, riskLevel, from, to, year, distinctResidents }, rpc) => {
+  if (!actorId) throw ApiError.unauthorized('An authenticated analytics actor is required.');
+  let result;
+  try {
+    result = await rpc('scoped_aggregate_analytics', {
+      p_actor_id: actorId,
+      p_kind: kind,
+      p_barangay: barangay || null,
+      p_condition: condition && condition !== 'All' ? condition : null,
+      p_status: status || null,
+      p_risk_level: riskLevel || null,
+      p_from: from || null,
+      p_to: to || null,
+      p_year: year ?? null,
+      p_distinct_residents: distinctResidents === true,
+    });
+  } catch (error) {
+    throw aggregateError(error);
+  }
+  if (result?.error) throw aggregateError(result.error);
+  const data = result?.data;
+  const arrays = {
+    'early-warning': ['consultationTrends', 'diseaseDistribution', 'riskDistribution'],
+    'community-map': ['barangays', 'conditionTotals'],
+    'community-map-trends': ['monthly'],
+    'household-map': ['locations'],
+  }[kind];
+  if (!data || typeof data !== 'object' || Array.isArray(data) ||
+      !arrays.every((key) => Array.isArray(data[key])) ||
+      (kind !== 'community-map-trends' && (!data.summary || typeof data.summary !== 'object'))) {
+    throw aggregateError(new Error('The aggregate RPC returned an invalid payload.'));
+  }
+  return data;
+};
+
+const reportingCalendar = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+const reportingParts = (value) => {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return null;
+  return Object.fromEntries(reportingCalendar.formatToParts(date).map(({ type, value: part }) => [type, part]));
+};
+const reportingDay = (value) => {
+  const parts = reportingParts(value);
+  return parts ? `${parts.year}-${parts.month}-${parts.day}` : null;
+};
+const dateRangeTimestamps = (from, to) => ({
+  fromTs: from ? Date.parse(`${from}T00:00:00+08:00`) : null,
+  toTs: to ? Date.parse(`${to}T00:00:00+08:00`) + 86_400_000 - 1 : null,
+});
+const isLaterVisit = (visit, current) => {
+  if (!current) return true;
+  for (const field of ['visitDate', 'updatedAt', 'createdAt']) {
+    const a = Date.parse(visit[field] || visit.createdAt || '') || 0;
+    const b = Date.parse(current[field] || current.createdAt || '') || 0;
+    if (a !== b) return a > b;
+  }
+  return String(visit.id || '') > String(current.id || '');
+};
+
 const sameBarangay = (resident, barangay) =>
   String(resident?.barangay ?? '').trim().toLowerCase() === String(barangay).trim().toLowerCase();
 
@@ -55,7 +125,9 @@ const isActiveApprovedBarangay = (row) =>
   String(row?.status ?? 'active').toLowerCase() === 'active';
 
 const barangayScopeRows = (barangays, barangay, municipalityId) => {
-  const activeApproved = barangays.filter(isActiveApprovedBarangay);
+  const activeApproved = barangays.filter((row) => isActiveApprovedBarangay(row) &&
+    (!municipalityId || !(row.municipality_id || row.municipalityId) ||
+      (row.municipality_id || row.municipalityId) === municipalityId));
   if (barangay) {
     const canonicalName = APPROVED_BARANGAYS.find(
       (name) => name.toLowerCase() === String(barangay).trim().toLowerCase(),
@@ -76,7 +148,8 @@ const barangayScopeRows = (barangays, barangay, municipalityId) => {
 
 const residentInBarangay = (resident, barangayRow, municipalityId) => {
   const expectedMunicipality = municipalityId || barangayRow.municipality_id || barangayRow.municipalityId;
-  if (resident?.barangayId && barangayRow.id) return resident.barangayId === barangayRow.id;
+  if (resident?.barangayId && barangayRow.id) return resident.barangayId === barangayRow.id &&
+    (!expectedMunicipality || resident?.municipalityId === expectedMunicipality);
   if (!sameBarangay(resident, barangayRow.name)) return false;
   return !expectedMunicipality || resident?.municipalityId === expectedMunicipality;
 };
@@ -121,29 +194,33 @@ export const riskFromVitals = (vitals, config = DEFAULT_RISK_CONFIG) =>
   hasAssessableVitals(vitals) ? assessVitals(vitals, config).level : null;
 
 const isSameMonth = (isoDate, reference) => {
-  const d = new Date(isoDate);
-  if (Number.isNaN(d.getTime())) return false;
-  return d.getFullYear() === reference.getFullYear() && d.getMonth() === reference.getMonth();
+  const date = reportingParts(isoDate);
+  const now = reportingParts(reference);
+  return Boolean(date && now && date.year === now.year && date.month === now.month);
 };
 
 const lastTwelveMonths = (reference) => {
+  const now = reportingParts(reference);
   const months = [];
   for (let i = 11; i >= 0; i -= 1) {
-    const d = new Date(reference.getFullYear(), reference.getMonth() - i, 1);
-    months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: MONTH_LABELS[d.getMonth()] });
+    const d = new Date(Date.UTC(Number(now.year), Number(now.month) - 1 - i, 1));
+    months.push({ key: `${d.getUTCFullYear()}-${d.getUTCMonth()}`, label: MONTH_LABELS[d.getUTCMonth()] });
   }
   return months;
 };
 
-export const getEarlyWarning = async ({ barangay = null, municipalityId = null } = {}) => {
-  const now = new Date();
+export const getEarlyWarning = async (
+  { actorId = null, barangay = null, municipalityId = null, from = null, to = null, year = null } = {},
+  { repo = repository, rpc = aggregateRpc, now = new Date() } = {},
+) => {
+  if (!isLocalRepository(repo)) return loadAggregate('early-warning', { actorId, barangay, from, to, year }, rpc);
 
   // --- load the source records, then filter to the caller's scope ----------
   const [visitPage, referralPage, allResidents, riskConfig] = await Promise.all([
-    repository.listVisits({ limit: 5000 }),
-    repository.listReferrals({ limit: 5000 }),
-    repository.searchResidents({ q: '', limit: 5000 }),
-    getRiskConfig({ repo: repository }),
+    repo.listVisits({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.listReferrals({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.searchResidents({ q: '', limit: Number.MAX_SAFE_INTEGER }),
+    getRiskConfig({ repo }),
   ]);
   const visits = visitPage.rows;
   const referrals = referralPage.rows;
@@ -160,7 +237,7 @@ export const getEarlyWarning = async ({ barangay = null, municipalityId = null }
   const scopedResidents = allResidents.filter((r) => {
     if (barangay) {
       if (!sameBarangay(r, barangay)) return false;
-      if (municipalityId && r.municipalityId && r.municipalityId !== municipalityId) return false;
+      if (municipalityId && r.municipalityId !== municipalityId) return false;
       return true;
     }
     if (municipalityId) return r.municipalityId === municipalityId;
@@ -192,7 +269,7 @@ export const getEarlyWarning = async ({ barangay = null, municipalityId = null }
   const latestVisitByResident = new Map();
   scopedVisits.forEach((v) => {
     const current = latestVisitByResident.get(v.residentId);
-    if (!current || String(v.visitDate || v.createdAt) > String(current.visitDate || current.createdAt)) {
+    if (isLaterVisit(v, current)) {
       latestVisitByResident.set(v.residentId, v);
     }
   });
@@ -215,12 +292,12 @@ export const getEarlyWarning = async ({ barangay = null, municipalityId = null }
   const months = lastTwelveMonths(now);
   const consultationTrends = months.map(({ key, label }) => {
     const monthVisits = scopedVisits.filter((v) => {
-      const d = new Date(v.visitDate || v.createdAt);
-      return !Number.isNaN(d.getTime()) && `${d.getFullYear()}-${d.getMonth()}` === key;
+      const d = reportingParts(v.visitDate || v.createdAt);
+      return d && `${d.year}-${Number(d.month) - 1}` === key;
     });
     const monthReferrals = scopedReferrals.filter((r) => {
-      const d = new Date(r.createdAt);
-      return !Number.isNaN(d.getTime()) && `${d.getFullYear()}-${d.getMonth()}` === key;
+      const d = reportingParts(r.createdAt);
+      return d && `${d.year}-${Number(d.month) - 1}` === key;
     });
     return { month: label, consultations: monthVisits.length, referrals: monthReferrals.length };
   });
@@ -303,6 +380,7 @@ export const matchesCommunityMapRecord = (
 };
 
 export const getCommunityMap = async ({
+  actorId = null,
   barangay = null,
   municipalityId = null,
   condition = null,
@@ -311,33 +389,34 @@ export const getCommunityMap = async ({
   riskLevel = null,
   from = null,
   to = null,
-} = {}) => {
-  const now = new Date();
+} = {}, { repo = repository, rpc = aggregateRpc, now = new Date() } = {}) => {
+  if (!isLocalRepository(repo)) return loadAggregate('community-map', {
+    actorId, barangay, condition, distinctResidents, status, riskLevel, from, to,
+  }, rpc);
   const [barangays, visitPage, tclPage, allResidents, municipality, riskConfig] = await Promise.all([
-    repository.listBarangays({ municipalityId }),
-    repository.listVisits({ limit: 5000 }),
-    repository.listTclEntries({ limit: 5000 }),
-    repository.searchResidents({ q: '', limit: 5000 }),
+    repo.listBarangays({ municipalityId }),
+    repo.listVisits({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.listTclEntries({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.searchResidents({ q: '', limit: Number.MAX_SAFE_INTEGER }),
     // Best-effort: the centre point is a nicety for framing the map. If the
     // municipalities.latitude/longitude columns are not present yet (migration
     // not applied) or the lookup fails, fall back to null and let the client
     // frame the view from the plotted barangays.
     (async () => {
-      if (typeof repository.getMunicipality !== 'function' || !municipalityId) return null;
+      if (typeof repo.getMunicipality !== 'function' || !municipalityId) return null;
       try {
-        return await repository.getMunicipality(municipalityId);
+        return await repo.getMunicipality(municipalityId);
       } catch {
         return null;
       }
     })(),
-    getRiskConfig({ repo: repository }),
+    getRiskConfig({ repo }),
   ]);
   const visits = visitPage.rows;
   const tclEntries = tclPage.rows || [];
 
   const wantCondition = condition && condition !== 'All' ? String(condition) : null;
-  const fromTs = from ? new Date(from).getTime() : null;
-  const toTs = to ? new Date(`${String(to).slice(0, 10)}T23:59:59.999`).getTime() : null;
+  const { fromTs, toTs } = dateRangeTimestamps(from, to);
 
   // Missing approved registry rows are returned as explicitly unavailable
   // municipality-scope rows, never as fabricated zero-case barangays.
@@ -348,7 +427,7 @@ export const getCommunityMap = async ({
   let latestUpdatedAt = null;
   visits.forEach((v) => {
     const current = latestVisitByResident.get(v.residentId);
-    if (!current || String(v.visitDate || v.createdAt) > String(current.visitDate || current.createdAt)) {
+    if (isLaterVisit(v, current)) {
       latestVisitByResident.set(v.residentId, v);
     }
   });
@@ -398,17 +477,14 @@ export const getCommunityMap = async ({
       }
       return matches;
     });
-    const matching = distinctResidents
-      ? [...matchingVisits.reduce((cases, visit) => {
+    const matching = [...matchingVisits.reduce((cases, visit, index) => {
         const conditionName = classifyCondition(visit.chiefComplaint);
-        const key = `${visit.residentId}:${conditionName}`;
+        const key = distinctResidents || conditionName === 'Tuberculosis'
+          ? `${visit.residentId}:${conditionName}` : `visit:${index}`;
         const existing = cases.get(key);
-        const visitDate = String(visit.visitDate || visit.createdAt || '');
-        const existingDate = String(existing?.visitDate || existing?.createdAt || '');
-        if (!existing || visitDate > existingDate) cases.set(key, visit);
+        if (isLaterVisit(visit, existing)) cases.set(key, visit);
         return cases;
-      }, new Map()).values()]
-      : matchingVisits;
+      }, new Map()).values()];
 
     const countsTuberculosis = !status && !riskLevel && (!wantCondition || wantCondition === 'Tuberculosis');
     const activeTbRows = countsTuberculosis
@@ -421,7 +497,6 @@ export const getCommunityMap = async ({
     let activeCases = 0;
     let completedCases = 0;
     let newCases = 0;
-    const activeVisitResidentIds = new Set();
     // Per-barangay condition distribution + most-recent record date, derived
     // from exactly the same classified visit records as the case counts and
     // Health Trends (classifyCondition) — never a second data source.
@@ -435,29 +510,32 @@ export const getCommunityMap = async ({
       if (Number.isNaN(t)) return;
       if (lastRecordedTs === null || t > lastRecordedTs) {
         lastRecordedTs = t;
-        lastRecorded = typeof value === 'string' ? value.slice(0, 10) : new Date(t).toISOString().slice(0, 10);
+        lastRecorded = reportingDay(value);
       }
     };
     matching.forEach((v) => {
       const normalizedStatus = String(v.status || '').toLowerCase();
-      const normalizedRisk = communityMapRecordRisk(v, riskConfig);
-      riskCounts.set(normalizedRisk, (riskCounts.get(normalizedRisk) || 0) + 1);
       if (statusCounts.has(normalizedStatus)) statusCounts.set(normalizedStatus, statusCounts.get(normalizedStatus) + 1);
       if (COMPLETED_STATUSES.has(normalizedStatus)) completedCases += 1;
       else {
         activeCases += 1;
-        activeVisitResidentIds.add(v.residentId);
       }
       if (isSameMonth(v.visitDate || v.createdAt, now)) newCases += 1;
       const name = classifyCondition(v.chiefComplaint);
       conditionCounts.set(name, (conditionCounts.get(name) || 0) + 1);
       noteRecordDate(v.visitDate || v.createdAt);
     });
-    const countedVisitResidents = distinctResidents
-      ? new Set(matching
-        .filter((visit) => classifyCondition(visit.chiefComplaint) === 'Tuberculosis')
-        .map((visit) => visit.residentId))
-      : activeVisitResidentIds;
+    const latestMatching = new Map();
+    matchingVisits.forEach((visit) => {
+      if (isLaterVisit(visit, latestMatching.get(visit.residentId))) latestMatching.set(visit.residentId, visit);
+    });
+    latestMatching.forEach((visit) => {
+      const level = communityMapRecordRisk(visit, riskConfig);
+      riskCounts.set(level, riskCounts.get(level) + 1);
+    });
+    const countedVisitResidents = new Set(matching
+      .filter((visit) => classifyCondition(visit.chiefComplaint) === 'Tuberculosis')
+      .map((visit) => visit.residentId));
     const additionalActiveTbCases = [...activeTbResidentIds].filter((id) => !countedVisitResidents.has(id));
     activeCases += additionalActiveTbCases.length;
     const caseCount = matching.length + additionalActiveTbCases.length;
@@ -578,6 +656,7 @@ export const getCommunityMap = async ({
  * that single barangay; otherwise it aggregates the caller's whole scope.
  */
 export const getCommunityMapTrends = async ({
+  actorId = null,
   barangay = null,
   municipalityId = null,
   condition = null,
@@ -585,50 +664,68 @@ export const getCommunityMapTrends = async ({
   riskLevel = null,
   from = null,
   to = null,
-  year = new Date().getFullYear(),
-} = {}) => {
+  year = null,
+  distinctResidents = false,
+} = {}, { repo = repository, rpc = aggregateRpc, now = new Date() } = {}) => {
+  if (!isLocalRepository(repo)) return loadAggregate('community-map-trends', {
+    actorId, barangay, condition, status, riskLevel, from, to, year, distinctResidents,
+  }, rpc);
   const [barangays, visitPage, tclPage, allResidents, riskConfig] = await Promise.all([
-    repository.listBarangays({ municipalityId }),
-    repository.listVisits({ limit: 5000 }),
-    repository.listTclEntries({ limit: 5000 }),
-    repository.searchResidents({ q: '', limit: 5000 }),
-    getRiskConfig({ repo: repository }),
+    repo.listBarangays({ municipalityId }),
+    repo.listVisits({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.listTclEntries({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.searchResidents({ q: '', limit: Number.MAX_SAFE_INTEGER }),
+    getRiskConfig({ repo }),
   ]);
-  const visits = visitPage.rows;
-  const tclEntries = tclPage.rows || [];
+  return buildCommunityMapTrends({
+    barangays, visits: visitPage.rows, tclEntries: tclPage.rows || [], residents: allResidents,
+    riskConfig, barangay, municipalityId, condition, status, riskLevel, from, to,
+    year: year ?? Number(reportingParts(now).year), distinctResidents,
+  });
+};
+
+/** Pure file-driver/test counterpart of the production aggregate RPC. */
+export const buildCommunityMapTrends = ({
+  barangays = [], visits = [], tclEntries = [], residents = [], riskConfig = DEFAULT_RISK_CONFIG,
+  barangay = null, municipalityId = null, condition = null, status = null, riskLevel = null,
+  from = null, to = null, year = Number(reportingParts(new Date()).year), distinctResidents = false,
+} = {}) => {
   const wantCondition = condition && condition !== 'All' ? String(condition) : null;
-  const fromTs = from ? new Date(from).getTime() : null;
-  const toTs = to ? new Date(`${String(to).slice(0, 10)}T23:59:59.999`).getTime() : null;
+  const { fromTs, toTs } = dateRangeTimestamps(from, to);
 
   const scopedBarangays = barangayScopeRows(barangays, barangay, municipalityId);
   const scopeComplete = (!barangay || scopedBarangays.length > 0) &&
     scopedBarangays.every((row) => Boolean(row.id));
 
-  const residentInScope = new Set(allResidents.filter((resident) =>
+  const residentInScope = new Set(residents.filter((resident) =>
     scopedBarangays.some((barangayRow) => barangayRow.id && residentInBarangay(resident, barangayRow, municipalityId)),
   ).map((r) => r.id));
 
   const monthly = MONTH_LABELS.map((label, index) => {
-    const monthVisits = visits.filter((v) => {
+    const rawMonthVisits = visits.filter((v) => {
       if (!residentInScope.has(v.residentId)) return false;
-      const d = new Date(v.visitDate || v.createdAt);
-      if (Number.isNaN(d.getTime())) return false;
-      if (d.getFullYear() !== Number(year) || d.getMonth() !== index) return false;
+      const d = reportingParts(v.visitDate || v.createdAt);
+      if (!d || Number(d.year) !== Number(year) || Number(d.month) - 1 !== index) return false;
       return matchesCommunityMapRecord(
         v,
         { condition: wantCondition, status, riskLevel, fromTs, toTs },
         riskConfig,
       );
     });
-    const visitResidents = new Set(monthVisits.map((visit) => visit.residentId));
+    const monthVisits = [...rawMonthVisits.reduce((cases, visit, visitIndex) => {
+      const name = classifyCondition(visit.chiefComplaint);
+      const key = distinctResidents || name === 'Tuberculosis' ? `${visit.residentId}:${name}` : `visit:${visitIndex}`;
+      if (isLaterVisit(visit, cases.get(key))) cases.set(key, visit);
+      return cases;
+    }, new Map()).values()];
+    const visitResidents = new Set(monthVisits.filter((visit) => classifyCondition(visit.chiefComplaint) === 'Tuberculosis')
+      .map((visit) => visit.residentId));
     const activeTbResidents = new Set(
       (!status && !riskLevel && (!wantCondition || wantCondition === 'Tuberculosis') ? tclEntries : [])
         .filter((row) => residentInScope.has(row.residentId) && isTbProgram(row.program) && String(row.status).toLowerCase() === 'active')
         .filter((row) => {
-          const d = new Date(row.createdAt || row.lastVisit);
-          return !Number.isNaN(d.getTime()) &&
-            d.getFullYear() === Number(year) &&
-            d.getMonth() === index &&
+          const d = reportingParts(row.createdAt || row.lastVisit);
+          return d && Number(d.year) === Number(year) && Number(d.month) - 1 === index &&
             inDateRange(row.createdAt || row.lastVisit, fromTs, toTs);
         })
         .map((row) => row.residentId),
@@ -658,12 +755,16 @@ export const getConditionOptions = async () => ({ conditions: CONDITION_NAMES })
  * point. Household GPS coordinates and row identifiers are deliberately never
  * returned; only valid stored barangay reference coordinates may be mapped.
  */
-export const getHouseholdMap = async ({ barangay = null, municipalityId = null } = {}) => {
+export const getHouseholdMap = async (
+  { actorId = null, barangay = null, municipalityId = null } = {},
+  { repo = repository, rpc = aggregateRpc } = {},
+) => {
+  if (!isLocalRepository(repo)) return loadAggregate('household-map', { actorId, barangay }, rpc);
   const [households, visitPage, tclPage, allBarangays] = await Promise.all([
-    repository.listHouseholdsForMap({ barangay, municipalityId }),
-    repository.listVisits({ limit: 5000 }),
-    repository.listTclEntries({ limit: 5000 }),
-    repository.listBarangays({ municipalityId }),
+    repo.listHouseholdsForMap({ barangay, municipalityId, limit: Number.MAX_SAFE_INTEGER }),
+    repo.listVisits({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.listTclEntries({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.listBarangays({ municipalityId }),
   ]);
   const barangays = allBarangays.filter(isActiveApprovedBarangay);
   const visits = visitPage.rows || [];

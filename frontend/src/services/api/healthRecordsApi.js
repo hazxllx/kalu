@@ -1,15 +1,16 @@
-import { api } from './apiClient';
+import { consultationsApi } from './consultationsApi.js';
 
 /**
- * Health records API (role-scoped: Health Supervisor / PHN). Returns 501 until
- * the verified schema is connected.
+ * Retained clinical-record API delegates to canonical PostgreSQL visits. It
+ * shares consultation validation, permissions and idempotency, not a second
+ * local or fabricated record model. Clinical history is not hard-deletable.
  */
 export const healthRecordsApi = {
-  list: (params) => api.get('/health-records', { params }),
-  get: (id) => api.get(`/health-records/${id}`),
-  create: (payload) => api.post('/health-records', payload),
-  update: (id, payload) => api.put(`/health-records/${id}`, payload),
-  remove: (id) => api.delete(`/health-records/${id}`),
+  list: (params, options) => consultationsApi.list(params, options),
+  get: (id, options) => consultationsApi.get(id, options),
+  create: (payload, options) => consultationsApi.create(payload, options),
+  update: (id, payload, options) => consultationsApi.update(id, payload, options),
+  remove: () => Promise.reject(Object.assign(new Error('Clinical records cannot be deleted. Corrections must preserve their history.'), { status: 405 })),
 };
 
 export default healthRecordsApi;

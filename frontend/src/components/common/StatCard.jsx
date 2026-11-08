@@ -1,5 +1,6 @@
-import React from "react";
-import { motion } from "framer-motion";
+import React, { useEffect, useRef, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
+import { Link } from "react-router-dom";
 import Icon from "./Icon";
 
 const TONES = {
@@ -33,7 +34,7 @@ const BAR_TONES = {
  *   - active:    highlights the card when it represents the active filter.
  */
 export default function StatCard({
-  icon,
+  icon = null,
   label,
   value,
   tone = "accent",
@@ -42,8 +43,51 @@ export default function StatCard({
   compact = false,
   indicator = false,
   active = false,
+  variant = "default",
+  description = null,
+  href = null,
+  className = "",
+  animateValue = false,
 }) {
   const interactive = typeof onClick === "function";
+  if (variant === "consultation") {
+    const metricClass = `ui-stat-card flex h-full min-h-[112px] items-center gap-3 rounded-btn border border-brand-border bg-white p-4 shadow-none ${interactive ? "cursor-pointer hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30" : ""} ${className}`;
+    const content = (
+      <>
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${TONES[tone] || TONES.accent}`}>
+          <Icon name={icon} className="h-5 w-5" strokeWidth={1.8} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-medium leading-5 text-brand-gray">{label}</p>
+          <p className={`mt-1 font-stat text-2xl font-extrabold leading-8 tracking-tight ${tone === "danger" ? "text-brand-danger" : tone === "green" ? "text-brand-green" : "text-brand-blue"}`}>{value}</p>
+          {description && <p className="mt-0.5 truncate text-xs leading-4 text-brand-gray" title={description}>{description}</p>}
+        </div>
+      </>
+    );
+    if (interactive) return <button type="button" onClick={onClick} aria-pressed={active} className={metricClass}>{content}</button>;
+    return <div className={metricClass}>{content}</div>;
+  }
+  if (variant === "ledger") {
+    const metricClass = `supervisor-metric ${active ? "is-active" : ""} ${className}`;
+    const numeric = typeof value === "number" || (typeof value === "string" && /^[\d,.]+$/.test(value));
+    const content = (
+      <>
+        <div className="flex items-start justify-between gap-2">
+          <span className="supervisor-metric-label">{label}</span>
+          {(href || interactive) && <Icon name="ArrowUpRight" className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />}
+        </div>
+        <p className="supervisor-metric-value" data-numeric={numeric}>{animateValue ? <MetricValue value={value} /> : value ?? "Unavailable"}</p>
+        {description && <p className="supervisor-metric-description">{description}</p>}
+      </>
+    );
+    if (href) {
+      return <Link to={href} className={metricClass} data-tone={tone}>{content}</Link>;
+    }
+    if (interactive) {
+      return <button type="button" onClick={onClick} aria-pressed={active} className={metricClass} data-tone={tone}>{content}</button>;
+    }
+    return <div className={metricClass} data-tone={tone}>{content}</div>;
+  }
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -64,9 +108,9 @@ export default function StatCard({
             }
           : undefined
       }
-      className={`relative overflow-hidden rounded-2xl border bg-white shadow-card ${compact ? "p-4" : "p-5"} ${
+      className={`ui-stat-card relative overflow-hidden rounded-2xl border bg-white shadow-card ${compact ? "p-4" : "p-5"} ${
         active ? "border-brand-blue ring-1 ring-brand-blue/30" : "border-slate-200"
-      } ${interactive ? "cursor-pointer hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" : ""}`}
+      } ${interactive ? "cursor-pointer hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" : ""} ${className}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div
@@ -87,4 +131,37 @@ export default function StatCard({
       )}
     </motion.div>
   );
+}
+
+function MetricValue({ value }) {
+  const reducedMotion = useReducedMotion();
+  const lastTarget = useRef(null);
+  const current = useRef(0);
+  const [displayed, setDisplayed] = useState(0);
+  const numeric = Number.isSafeInteger(value) && value >= 0;
+
+  useEffect(() => {
+    if (!numeric) return undefined;
+    if (reducedMotion || typeof requestAnimationFrame !== "function" || lastTarget.current === value) {
+      lastTarget.current = value;
+      current.current = value;
+      setDisplayed(value);
+      return undefined;
+    }
+    lastTarget.current = value;
+    const from = current.current;
+    const start = performance.now();
+    let frame;
+    const tick = (now) => {
+      const progress = Math.min(1, (now - start) / 480);
+      current.current = Math.round(from + (value - from) * (1 - (1 - progress) ** 3));
+      setDisplayed(current.current);
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value, numeric, reducedMotion]);
+
+  if (!numeric) return value ?? "Unavailable";
+  return <span aria-label={value.toLocaleString()}><span aria-hidden="true">{(reducedMotion ? value : displayed).toLocaleString()}</span></span>;
 }

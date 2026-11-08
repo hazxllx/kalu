@@ -7,7 +7,7 @@ import * as service from '../services/municipalSubmissions.service.js';
 import { sendData } from '../utils/apiResponse.js';
 
 export const listReviews = async (req, res) => {
-  const reviews = await service.listReviews({ user: req.user });
+  const reviews = await service.listReviews({ user: req.user, submissionRef: req.query.submissionRef });
   sendData(res, { reviews });
 };
 

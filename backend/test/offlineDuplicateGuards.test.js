@@ -291,6 +291,8 @@ const makeExisting = (overrides = {}) => ({
   birthDate: '2000-09-02',
   sex: 'Female',
   barangay: 'San Isidro',
+  municipalityId: userHS.municipalityId,
+  barangayId: userHS.barangayId,
   healthRecordNo: 'HR-001',
   ...overrides,
 });

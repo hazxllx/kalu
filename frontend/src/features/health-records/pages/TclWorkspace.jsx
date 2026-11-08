@@ -6,8 +6,6 @@ import {
   ArrowRight,
   Search,
   HeartPulse,
-  Users,
-  Baby,
   Activity,
   Ribbon,
   Eye,
@@ -34,10 +32,6 @@ const GROUPS = [
     items: [
       { id: "maternal", name: "Prenatal and Postpartum", icon: HeartPulse, to: "../maternal-tcl", countKey: "maternal", status: "available", requiresRole: "health_supervisor",
         desc: "Pregnant and postpartum mothers — LMP/EDC, prenatal check-ups, immunization, laboratory screening, delivery and postpartum care." },
-      { id: "family-planning", name: "Family Planning", icon: Users, status: "unavailable",
-        desc: "Family planning clients, method and follow-up visits." },
-      { id: "child-care", name: "Child Care", icon: Baby, status: "unavailable",
-        desc: "Child-health target client lists (0–11 mos, under-5, 5–9, 10–19, sick child)." },
     ],
   },
   {

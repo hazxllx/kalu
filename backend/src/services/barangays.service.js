@@ -102,9 +102,9 @@ const countBy = async (table, column, value) => {
     .from(table)
     .select('id', { count: 'exact', head: true })
     .eq(column, value);
-  // A missing/inaccessible table should not crash the dependency check; treat
-  // an error conservatively as "unknown" rather than silently zero.
-  if (error) return null;
+  if (error) {
+    throw new ApiError(502, `Could not verify barangay dependencies: ${error.message}`);
+  }
   return count ?? 0;
 };
 

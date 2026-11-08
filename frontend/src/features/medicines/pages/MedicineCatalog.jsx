@@ -498,7 +498,7 @@ export default function MedicineCatalog() {
                 aria-label="Filter by status"
                 className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-600 outline-none focus:border-brand-blue"
               >
-                <option value="">All statuses</option>
+                <option value="">All Status</option>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>

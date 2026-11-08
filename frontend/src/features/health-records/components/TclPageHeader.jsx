@@ -14,7 +14,7 @@ export default function TclPageHeader({ title, subtitle = "", crumb, backTo = ".
   return (
     <section
       aria-label={typeof title === "string" ? `${title} header` : "Page header"}
-      className="mb-6 overflow-hidden rounded-card border border-brand-deep bg-brand-dark text-white shadow-card"
+      className="ui-page-header-hs-tcl mb-6 overflow-hidden rounded-card border border-brand-deep bg-brand-dark text-white shadow-card"
     >
       <div aria-hidden="true" className="h-0.5 w-full bg-brand-gold/70" />
       <div className="flex flex-col gap-4 px-5 py-6 md:px-7">

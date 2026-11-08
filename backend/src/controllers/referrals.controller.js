@@ -8,7 +8,16 @@ import { sendData, sendCreated } from '../utils/apiResponse.js';
  * derives the acting user from the authenticated session (never the body).
  */
 export const list = async (req, res) =>
-  sendData(res, { rows: await service.list({ user: req.user, residentId: req.query.residentId, status: req.query.status }) });
+  sendData(res, { rows: await service.list({ user: req.user, residentId: req.query.residentId, status: req.query.status, box: req.query.box }) });
+
+export const incoming = async (req, res) =>
+  sendData(res, { rows: await service.list({ user: req.user, status: req.query.status, box: 'incoming' }) });
+
+export const recipients = async (req, res) =>
+  sendData(res, { rows: await service.listRecipients({ user: req.user, residentId: req.query.residentId }) });
+
+export const getByVisit = async (req, res) =>
+  sendData(res, { record: await service.getByVisitId({ user: req.user, visitId: req.params.visitId }) });
 
 export const get = async (req, res) =>
   sendData(res, { record: await service.getById({ user: req.user, id: req.params.id }) });
@@ -22,11 +31,11 @@ export const update = async (req, res) =>
 export const updateStatus = async (req, res) => {
   const body = req.body?.record || req.body || {};
   return sendData(res, {
-    record: await service.updateStatus({ user: req.user, id: req.params.id, status: body.status, resolutionNotes: body.resolution_notes }),
+    record: await service.updateStatus({ user: req.user, id: req.params.id, status: body.status, resolutionNotes: body.resolution_notes, version: body.expected_version ?? body.version }),
   });
 };
 
 export const remove = async (req, res) =>
   sendData(res, await service.remove({ user: req.user, id: req.params.id }));
 
-export default { list, get, create, update, updateStatus, remove };
+export default { list, incoming, recipients, getByVisit, get, create, update, updateStatus, remove };

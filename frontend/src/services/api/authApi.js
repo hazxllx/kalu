@@ -7,10 +7,10 @@ import { api } from './apiClient';
  */
 export const authApi = {
   login: (email, password) => api.post('/auth/login', { email, password }),
-  me: () => api.get('/auth/me'),
+  me: (options) => api.get('/auth/me', options),
   // Self-service update of the signed-in account's own contact number.
   updateMe: (payload) => api.patch('/auth/me', payload),
-  logout: () => api.post('/auth/logout'),
+  logout: (options) => api.post('/auth/logout', undefined, options),
   personnelSetupStatus: (token) => api.get('/auth/personnel/setup-status', {
     headers: { Authorization: `Bearer ${token}` },
   }),

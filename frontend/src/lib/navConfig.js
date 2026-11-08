@@ -373,9 +373,15 @@ export const NAV = {
       label: "Monitoring & Reports",
       icon: "TrendingUp",
       group: "Monitoring",
-      children: [
+children: [
         {
-          label: "Early Warning",
+          label: "Schedule Calendar",
+          icon: "CalendarDays",
+          path: "/app/health_supervisor/followup-calendar",
+          anyPermissions: ["followups.view", "services.view"],
+        },
+        {
+          label: "Health Trends",
           icon: "TrendingUp",
           path: "/app/health_supervisor/trends",
           permission: "reports.analytics.view",
@@ -438,7 +444,6 @@ export const NAV = {
       icon: "Inbox",
       path: "/app/rhu_personnel/incoming-referrals",
       permission: "referrals.view",
-      station: "triage",
       group: "Operations",
     },
     {

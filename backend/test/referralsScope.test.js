@@ -15,6 +15,8 @@ const makeReferral = (id, barangayId) => ({
     first_name: 'Test',
     last_name: id,
     barangay: barangayId,
+    barangay_id: barangayId,
+    municipality_id: 'municipality-1',
   },
 });
 
@@ -36,11 +38,11 @@ const referralSupabase = (records, referralError = null) => {
           return query;
         },
         eq(column, value) {
-          context.filters.push((row) => row[column] === value);
+          context.filters.push((row) => column.split('.').reduce((node, key) => node?.[key], row) === value);
           return query;
         },
         in(column, values) {
-          context.filters.push((row) => values.includes(row[column]));
+          context.filters.push((row) => values.includes(column.split('.').reduce((node, key) => node?.[key], row)));
           return query;
         },
         range(from, to) {
@@ -77,15 +79,17 @@ test('Health Supervisor referrals paginate without crossing the assigned baranga
       id: 'supervisor-1',
       role: 'health_supervisor',
       barangayId: 'barangay-1',
+      municipalityId: 'municipality-1',
     },
     supabase,
   });
 
   assert.equal(result.length, 205);
   assert(result.every((row) => row.barangay_id === 'barangay-1'));
-  assert.deepEqual(supabase.ranges, [[0, 199], [200, 399]]);
+  // Scoped history and the separate explicitly-assigned inbox are merged by ID.
+  assert.deepEqual(supabase.ranges, [[0, 199], [200, 399], [0, 199]]);
   assert(supabase.selects.some(({ table, value }) =>
-    table === 'health_referrals' && value.includes('resident:residents(')));
+    table === 'health_referrals' && value.includes('resident:residents!inner(')));
 });
 
 test('referral listing returns an empty collection and surfaces database errors', async () => {
@@ -93,6 +97,7 @@ test('referral listing returns an empty collection and surfaces database errors'
     id: 'supervisor-1',
     role: 'health_supervisor',
     barangayId: 'barangay-1',
+    municipalityId: 'municipality-1',
   };
   assert.deepEqual(
     await listReferrals({ user, supabase: referralSupabase([]) }),

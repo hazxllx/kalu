@@ -16,15 +16,15 @@ const TONES = {
 export default function RiskBadge({ level, className = "" }) {
   if (!level) {
     return (
-      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-500 ${className}`}>
+      <span className={`ui-status-badge inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-500 ${className}`}>
         Not assessed
       </span>
     );
   }
   const tone = TONES[level] || "bg-slate-100 text-slate-600";
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium font-body ${tone} ${className}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+    <span className={`ui-status-badge inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium font-body ${tone} ${className}`}>
+      <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
       {level}
     </span>
   );

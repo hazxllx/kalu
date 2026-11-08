@@ -95,7 +95,7 @@ export default function HouseholdRiskDetail() {
         return;
       }
       const [workflow, visitResult] = await Promise.all([
-        householdRiskApi.getWorkflow(id).catch(() => null),
+        householdRiskApi.getWorkflow(id),
         user?.role === "bhw" ? householdsApi.listVisits(id) : Promise.resolve({ visits: [] }),
       ]);
       setVisits(Array.isArray(visitResult?.visits) ? visitResult.visits : []);
@@ -130,6 +130,7 @@ export default function HouseholdRiskDetail() {
       await load();
     } catch (err) {
       showToast(err?.message || "Could not save the change.");
+      throw err;
     }
   };
 
@@ -433,7 +434,7 @@ export default function HouseholdRiskDetail() {
         <Card className="p-5">
           <div className="flex flex-wrap gap-2">
             <button onClick={() => setAction("followup")} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-              <PhoneCall className="h-4 w-4" /> Create Follow-up
+              <PhoneCall className="h-4 w-4" /> Record Household Follow-up
             </button>
             <button onClick={() => setAction("assign")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
               <UserPlus className="h-4 w-4" /> Assign Health Worker
@@ -452,14 +453,14 @@ export default function HouseholdRiskDetail() {
         <FollowUpModal
           household={h}
           onClose={() => setAction(null)}
-          onSave={(status, notes) => {
+          onSave={async (status, notes) => {
             const followUpCount = (h.followUpCount || 0) + 1;
             const lastFollowUpAt = new Date().toISOString().slice(0, 10);
-            setAction(null);
-            persistWorkflow(
+            await persistWorkflow(
               { workflowStatus: status, followUpCount, lastFollowUpAt, lastNote: notes },
               `Follow-up recorded for the ${h.surname} household.`
             );
+            setAction(null);
           }}
         />
       )}
@@ -467,12 +468,12 @@ export default function HouseholdRiskDetail() {
         <AssignWorkerModal
           household={h}
           onClose={() => setAction(null)}
-          onSave={(worker, role) => {
-            setAction(null);
-            persistWorkflow(
+          onSave={async (worker, role) => {
+            await persistWorkflow(
               { assignedWorker: worker, assignedWorkerRole: role, assignmentAt: new Date().toISOString() },
               `Worker assigned to the ${h.surname} household.`
             );
+            setAction(null);
           }}
         />
       )}
@@ -480,12 +481,12 @@ export default function HouseholdRiskDetail() {
         <EscalateModal
           household={h}
           onClose={() => setAction(null)}
-          onSave={(reason) => {
-            setAction(null);
-            persistWorkflow(
+          onSave={async (reason) => {
+            await persistWorkflow(
               { workflowStatus: "Escalated", escalation: { reason, assignment: "Public Health Nurse", at: new Date().toISOString() } },
               `Case escalated for the ${h.surname} household.`
             );
+            setAction(null);
           }}
         />
       )}

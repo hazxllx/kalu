@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
@@ -9,9 +9,11 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { ROLE } from "@/lib/roles";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { referralsApi, residentsApi } from "@/services/api";
+import { referralsApi } from "@/services/api";
+import { api } from "@/services/api/apiClient";
 import { downloadReferralPdf } from "@/features/referrals/lib/referralPdf";
-import { shouldShowReferralDownloadAction } from "@/features/referrals/lib/referralTrackingActions";
+import { allowedReferralStatuses, canAssignReferral, REFERRAL_STATUSES, referralRecipientLabel, referralRoleLabel, referralRouteKey, selectedReferralRoute, shouldShowReferralDownloadAction } from "@/features/referrals/lib/referralTrackingActions";
+import ReferralHistory from "@/features/referrals/components/ReferralHistory";
 import {
   localDateKey,
   localDateTimeToIso,
@@ -19,24 +21,33 @@ import {
   referralDateTimeMinimum,
   toLocalDateTimeInput,
 } from "@/features/referrals/lib/referralDateValidation";
-import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Trash2, Download, AlertTriangle, MoreVertical } from "lucide-react";
+import { Plus, Eye, Edit2, RefreshCw, X, Search, Check, Download, AlertTriangle, MoreVertical } from "lucide-react";
 
 /**
  * Referral coordination page backed by the real API (`/api/referrals` ->
  * Supabase `health_referrals`).
  *
- * One component, two audiences:
- *   - Health Supervisor: full create / edit / status / delete, scoped by the
- *     backend to their assigned barangay.
- *   - Resident: read-only view of their OWN referrals (the server returns only
- *     referrals linked to the signed-in resident).
+ * Senders route/edit their own in-scope rows. Current individual recipients
+ * decide/progress/complete them. Residents and existing scoped oversight roles
+ * read the same canonical records, including immutable workflow history.
  *
  * No local/mock persistence: every read and write goes through referralsApi,
  * and failures surface as explicit error states rather than empty successes.
  */
 
-const STATUSES = ["Pending", "Accepted", "In Progress", "Completed", "Cancelled"];
+const STATUSES = REFERRAL_STATUSES;
 const PRIORITIES = ["Low", "Medium", "High"];
+const STATUS_FILTERS = ["All", "Pending", "Completed", "Historical"];
+const referralDisplayStatus = (status) => {
+  if (["Pending", "Accepted", "In Progress"].includes(status)) return "Pending";
+  return status || "Pending";
+};
+const referralFilterStatus = (status) => {
+  if (status === "Completed") return "Completed";
+  if (["Pending", "Accepted", "In Progress"].includes(status)) return "Pending";
+  if (["Rejected", "Cancelled"].includes(status)) return "Historical";
+  return "All";
+};
 
 const PRIORITY_COLORS = {
   High: "bg-brand-danger/10 text-brand-danger",
@@ -97,6 +108,18 @@ const mapRecord = (row) => ({
   treatmentVisitId: row.treatment_visit_id || "",
   // Derived progress stage (set by the backend when the row is expanded).
   stage: row.stage || null,
+  recipientPersonnelId: row.recipient_personnel_id || "",
+  recipientFacilityId: row.recipient_facility_id || "",
+  recipientRole: row.recipient_role || "",
+  recipientStation: row.recipient_station || "",
+  recipientName: row.recipient?.full_name || "",
+  senderName: row.sender?.full_name || "",
+  senderId: row.created_by,
+  version: row.version,
+  capabilities: row.capabilities || {},
+  history: row.history || [],
+  encounter: row.encounter || null,
+  legacyReferralIds: (row.legacy_links || []).map((link) => link.legacy_referral_id),
 });
 
 const inputCls = (error) =>
@@ -107,7 +130,11 @@ const inputCls = (error) =>
 const EMPTY_FORM = () => ({
   referralDate: todayIso(),
   scheduledAt: "",
-  destinationFacility: "RHU Pili",
+  destinationFacility: "",
+  recipientPersonnelId: "",
+  recipientFacilityId: "",
+  recipientRole: "",
+  recipientStation: "",
   destinationService: "",
   reason: "",
   priority: "High",
@@ -139,14 +166,19 @@ const draftNotesOf = (d) =>
     .filter(Boolean)
     .join("\n");
 
-function ReferralFormModal({ initial, draft, resident, residents, saving, onClose, onSave, onSelectResident }) {
+function ReferralFormModal({ initial, draft, resident, residents, saving, onClose, onSave, onSelectResident, ownerId }) {
   const isEdit = Boolean(initial);
+  const routingOnly = isEdit && initial.status !== "Pending";
   const [form, setForm] = useState(/** @type {() => Record<string, any>} */ (() => {
     if (initial) {
       return {
         referralDate: initial.referralDate || todayIso(),
         scheduledAt: toLocalDateTimeInput(initial.scheduledAt),
-        destinationFacility: initial.destinationFacility || "RHU Pili",
+        destinationFacility: initial.destinationFacility || "",
+        recipientPersonnelId: initial.recipientPersonnelId || "",
+        recipientFacilityId: initial.recipientFacilityId || "",
+        recipientRole: initial.recipientRole || "",
+        recipientStation: initial.recipientStation || "",
         destinationService: initial.destinationService || "",
         reason: initial.reason || "",
         priority: initial.priority || "High",
@@ -159,6 +191,7 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
         medicalHistory: initial.medicalHistory || "",
         physicalExamFindings: initial.physicalExamFindings || "",
         impression: initial.impression || "",
+        treatmentVisitId: initial.treatmentVisitId || "",
       };
     }
     if (draft) {
@@ -180,25 +213,46 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
     return EMPTY_FORM();
   }));
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
+  const [routes, setRoutes] = useState([]);
+  const [routesLoading, setRoutesLoading] = useState(true);
+  const [routesError, setRoutesError] = useState("");
+  const [routeRetry, setRouteRetry] = useState(0);
+  const residentId = initial?.residentId || resident?.id;
+  useEffect(() => {
+    let active = true;
+    setRoutes([]);
+    setRoutesError("");
+    setRoutesLoading(true);
+    if (!residentId) { setRoutesLoading(false); return () => { active = false; }; }
+    referralsApi.recipients({ residentId }, { ownerId }).then((response) => {
+      if (active) setRoutes(response?.rows || []);
+    }).catch((error) => {
+      if (active) setRoutesError(error?.message || "Could not load authorized recipients.");
+    }).finally(() => { if (active) setRoutesLoading(false); });
+    return () => { active = false; };
+  }, [residentId, ownerId, routeRetry]);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const clock = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(clock);
   }, []);
   const buildErrors = (now = new Date()) => ({
-    ...errors,
-    ...referralDateErrors(form, {
+    ...(!routingOnly ? referralDateErrors(form, {
       now,
       originalScheduledAt: isEdit ? toLocalDateTimeInput(initial.scheduledAt) : null,
-    }),
+    }) : {}),
     ...(!isEdit && !resident ? { resident: "Please select a resident." } : {}),
     ...(!form.reason.trim() ? { reason: "Referral reason is required." } : {}),
-    ...(!form.destinationFacility.trim() ? { destinationFacility: "Destination facility is required." } : {}),
+    ...(!selectedReferralRoute(routes, form) ? { recipient: "Select a current receiving facility, role and recipient." } : {}),
     ...(form.laboratoryTestRequired && !form.laboratoryTest.trim()
       ? { laboratoryTest: "Laboratory test details are required when laboratory test is marked as required." }
       : {}),
   });
   const liveErrors = buildErrors(now);
+  const facilities = [...new Map(routes.map((route) => [route.facility_id, route.facility_name])).entries()];
+  const roles = [...new Set(routes.filter((route) => route.facility_id === form.recipientFacilityId).map((route) => route.role))];
+  const recipients = routes.filter((route) => route.facility_id === form.recipientFacilityId && route.role === form.recipientRole);
+  const chosenRoute = selectedReferralRoute(routes, form);
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
     if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
@@ -216,8 +270,8 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
         <div className="p-6">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold text-brand-ink">{isEdit ? "Edit Referral" : "New Referral"}</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">Refer a resident to the RHU or a higher-level facility.</p>
+              <h3 className="text-lg font-semibold text-brand-ink">{routingOnly ? "Reassign Referral" : isEdit ? "Edit Referral" : "New Referral"}</h3>
+              <p className="mt-0.5 text-sm text-brand-gray">{routingOnly ? "The new recipient must accept again. Clinical details and history are retained." : "Route this referral to an authorized person at a registered receiving facility."}</p>
             </div>
             <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
@@ -238,6 +292,42 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
               </div>
             )}
 
+            <div className="space-y-3 rounded-btn border border-brand-border p-4">
+              <h4 className="text-sm font-semibold text-brand-ink">Receiving Assignment</h4>
+              {routesLoading ? <p className="text-sm text-brand-gray">Loading authorized recipients...</p> : routesError ? (
+                <div role="alert" className="text-sm text-brand-danger">{routesError} <button type="button" onClick={() => setRouteRetry((value) => value + 1)} className="underline">Retry</button></div>
+              ) : routes.length === 0 && residentId ? <p className="text-sm text-brand-gray">No active authorized recipient is configured for this resident. Facility and personnel assignments must be completed first.</p> : null}
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Receiving Facility <span className="text-brand-danger">*</span></label>
+                <select disabled={routesLoading || !residentId} value={form.recipientFacilityId} onChange={(event) => {
+                  const id = event.target.value;
+                  setForm((prior) => ({ ...prior, recipientFacilityId: id, destinationFacility: facilities.find(([key]) => key === id)?.[1] || "", recipientRole: "", recipientPersonnelId: "", recipientStation: "" }));
+                }} className={`${inputCls(liveErrors.recipient)} cursor-pointer`}>
+                  <option value="">Select receiving facility</option>
+                  {facilities.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Receiving Role <span className="text-brand-danger">*</span></label>
+                <select disabled={!form.recipientFacilityId || routesLoading} value={form.recipientRole} onChange={(event) => setForm((prior) => ({ ...prior, recipientRole: event.target.value, recipientPersonnelId: "", recipientStation: "" }))} className={`${inputCls()} cursor-pointer`}>
+                  <option value="">Select role</option>
+                  {roles.map((role) => <option key={role} value={role}>{referralRoleLabel(role)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-brand-ink">Assigned Recipient <span className="text-brand-danger">*</span></label>
+                <select disabled={!form.recipientRole || routesLoading} value={chosenRoute ? referralRouteKey(chosenRoute) : ""} onChange={(event) => {
+                  const route = recipients.find((entry) => referralRouteKey(entry) === event.target.value);
+                  setForm((prior) => ({ ...prior, recipientPersonnelId: route?.id || "", recipientStation: route?.station || "" }));
+                }} className={`${inputCls(liveErrors.recipient)} cursor-pointer`}>
+                  <option value="">Select recipient</option>
+                  {recipients.map((route) => <option key={referralRouteKey(route)} value={referralRouteKey(route)}>{route.name}{route.station ? ` (${route.station})` : ""}</option>)}
+                </select>
+                {liveErrors.recipient && <p className="mt-1 text-xs text-brand-danger">{liveErrors.recipient}</p>}
+              </div>
+            </div>
+
+            <fieldset disabled={routingOnly} className="space-y-4 disabled:opacity-70">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="text-sm font-medium text-brand-ink">Referral Date</label>
@@ -254,11 +344,6 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
                 <select value={form.priority} onChange={(e) => set("priority")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
                   {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-brand-ink">Destination Facility <span className="text-brand-danger">*</span></label>
-                <input type="text" value={form.destinationFacility} onChange={(e) => set("destinationFacility")(e.target.value)} placeholder="e.g. RHU Pili" className={inputCls(liveErrors.destinationFacility)} />
-                {liveErrors.destinationFacility && <p className="mt-1 text-xs text-brand-danger">{liveErrors.destinationFacility}</p>}
               </div>
               <div>
                 <label className="text-sm font-medium text-brand-ink">Destination Service</label>
@@ -333,12 +418,13 @@ function ReferralFormModal({ initial, draft, resident, residents, saving, onClos
                 </div>
               </div>
             </div>
+            </fieldset>
           </div>
 
           <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
             <button
-              disabled={saving || Object.keys(liveErrors).length > 0}
+              disabled={saving || routesLoading || Boolean(routesError) || Object.values(liveErrors).some(Boolean)}
               onClick={() => { if (validate()) onSave(form); }}
               className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
             >
@@ -355,30 +441,19 @@ export default function HealthReferrals() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const isResident = user?.role === ROLE.RESIDENT || user?.role === ROLE.RESIDENT_LIMITED;
+  const isHealthSupervisor = user?.role === ROLE.HEALTH_SUPERVISOR;
+  const canRead = can("referrals.view") || can("referrals.history.view");
   const canCreate = can("referrals.create");
-  const canAssign = can("referrals.assign");
-  const canUpdateStatus = can("referrals.status.update");
-  const canApprove = can("referrals.approve");
-  const canReject = can("referrals.reject");
-  const canChangeStatus = canUpdateStatus || canApprove || canReject;
   const scope = getSupervisorScope(user);
   const assignedBarangay = scope && scope.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
   /**
    * Roles that may raise or edit referrals. The API's WRITE_ROLES are the
    * Health Supervisor and the PHN, so the MHO (municipal monitoring) and the
-   * RHU Personnel (triage) get a read-only view rather than buttons that would
-   * come back as 403.
+    * RHU recipients can act on assigned rows but cannot author/edit referrals.
    */
-  const isReadOnlyRole = user?.role === ROLE.MHO || user?.role === ROLE.RHU_PERSONNEL;
-  const canWrite = !isResident && !isReadOnlyRole;
+  const canWrite = [ROLE.HEALTH_SUPERVISOR, ROLE.PHN].includes(user?.role);
   const isSupervisorOnly = user?.role === ROLE.MHO;
-  const canSetReferralStatus = useCallback((status) => (
-    status === "Accepted"
-      ? canApprove
-      : status === "Cancelled"
-        ? canReject
-        : canUpdateStatus
-  ), [canApprove, canReject, canUpdateStatus]);
+  const canSetReferralStatus = (status, record) => allowedReferralStatuses(record, can).includes(status);
 
   const [records, setRecords] = useState([]);
   const [residents, setResidents] = useState([]);
@@ -392,6 +467,9 @@ export default function HealthReferrals() {
   const [editing, setEditing] = useState(null);
   const [selectedResident, setSelectedResident] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const detailRequest = useRef(0);
   const detailDialogRef = useRef(null);
   const detailCloseButtonRef = useRef(null);
   const [openActionMenu, setOpenActionMenu] = useState(null);
@@ -401,12 +479,12 @@ export default function HealthReferrals() {
   const [statusTarget, setStatusTarget] = useState(null);
   const [newStatus, setNewStatus] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState(null);
   const [exportingId, setExportingId] = useState(null);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
+  const [box, setBox] = useState("all");
   const [toast, setToast] = useState(null);
   // Pre-filled draft from a completed PHN check-up ("Create Referral" on the
   // check-up page navigates here with `state.referralDraft`), so the findings
@@ -414,6 +492,31 @@ export default function HealthReferrals() {
   const [draft, setDraft] = useState(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedReferralId = isHealthSupervisor ? searchParams.get("referral") : null;
+  const requestedStatus = isHealthSupervisor ? searchParams.get("status") : null;
+  const closeDetail = useCallback(() => {
+    detailRequest.current += 1;
+    setDetail(null);
+    setDetailError("");
+    if (isHealthSupervisor && searchParams.has("referral")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("referral");
+      setSearchParams(next, { replace: true });
+    }
+  }, [isHealthSupervisor, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    setRecords([]);
+    setResidents([]);
+    setDetail(null);
+    setFormOpen(false);
+    setStatusTarget(null);
+    setOpenActionMenu(null);
+    setBox(user?.role === ROLE.RHU_PERSONNEL ? "incoming" : "all");
+    detailRequest.current += 1;
+    return () => { detailRequest.current += 1; };
+  }, [user?.id, user?.role]);
 
   useEffect(() => {
     const incoming = location.state?.referralDraft;
@@ -436,9 +539,26 @@ export default function HealthReferrals() {
     setLoading(true);
     setLoadError(null);
     setResidentLoadError(null);
+    if (!user?.id) { setRecords([]); setResidents([]); setLoading(false); return; }
+    if (isHealthSupervisor && !assignedBarangay) {
+      setRecords([]); setResidents([]); setLoading(false);
+      setLoadError("A verified barangay assignment is required to view referrals.");
+      return;
+    }
+    const loadResidents = async () => {
+      const all = [];
+      for (let offset = 0; ; offset += 100) {
+        if (requestId !== loadRequest.current) throw new Error("The referral directory request was superseded.");
+        const response = await api.get('/residents', { params: { limit: 100, offset }, ownerId: user.id });
+        const page = Array.isArray(response?.rows) ? response.rows : Array.isArray(response) ? response : null;
+        if (!page) throw new Error("The resident directory returned an invalid response.");
+        all.push(...page);
+        if (page.length < 100 || (Number.isFinite(response.total) && all.length >= response.total)) return { rows: all };
+      }
+    };
     const results = await Promise.allSettled([
-      referralsApi.list(),
-      isResident ? Promise.resolve(null) : residentsApi.list({ limit: 200 }),
+      referralsApi.list({ box }, { ownerId: user.id }),
+      canWrite && canCreate ? loadResidents() : Promise.resolve(null),
     ]);
     if (requestId !== loadRequest.current) return;
 
@@ -454,7 +574,7 @@ export default function HealthReferrals() {
       );
     }
 
-    if (!isResident) {
+    if (canWrite && canCreate) {
       const rows = residentResult.status === "fulfilled"
         ? Array.isArray(residentResult.value?.rows)
           ? residentResult.value.rows
@@ -482,13 +602,19 @@ export default function HealthReferrals() {
             : "The resident directory returned an invalid response.",
         );
       }
-    }
+    } else setResidents([]);
     setLoading(false);
-  }, [assignedBarangay, isResident]);
+  }, [assignedBarangay, box, canWrite, canCreate, isHealthSupervisor, user?.id, user?.role, user?.municipalityId, user?.barangayId, user?.facilityId]);
 
   useEffect(() => {
     load();
     return () => { loadRequest.current += 1; };
+  }, [load]);
+
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") void load(); };
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
   }, [load]);
 
   useEffect(() => {
@@ -499,7 +625,7 @@ export default function HealthReferrals() {
 
     const handleDialogKeyDown = (event) => {
       if (event.key === "Escape") {
-        setDetail(null);
+        closeDetail();
         return;
       }
       if (event.key !== "Tab") return;
@@ -527,12 +653,16 @@ export default function HealthReferrals() {
       document.removeEventListener("keydown", handleDialogKeyDown);
       previouslyFocused?.focus?.();
     };
-  }, [detail]);
+  }, [detail, closeDetail]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return records.filter((r) => {
-      if (statusFilter !== "All" && r.status !== statusFilter) return false;
+      const statusMatches = statusFilter === "All"
+        || statusFilter === "Completed" && r.status === "Completed"
+        || statusFilter === "Pending" && ["Pending", "Accepted", "In Progress"].includes(r.status)
+        || statusFilter === "Historical" && ["Rejected", "Cancelled"].includes(r.status);
+      if (!statusMatches) return false;
       if (priorityFilter !== "All" && r.priority !== priorityFilter) return false;
       if (q && ![
         r.residentName,
@@ -541,6 +671,8 @@ export default function HealthReferrals() {
         r.destinationService,
         r.laboratoryTest,
         r.referringFacility,
+        r.recipientName,
+        r.senderName,
       ].join(" ").toLowerCase().includes(q)) return false;
       return true;
     });
@@ -554,25 +686,22 @@ export default function HealthReferrals() {
     setFormOpen(true);
   };
   const openEdit = (record) => {
-    if (!canAssign) return;
+    if (!canAssignReferral(record, can)) return;
     setEditing(record);
     setDraft(null);
     setSelectedResident(null);
-    setDetail(null);
+    closeDetail();
     setFormOpen(true);
   };
 
   /**
    * The resident a create will be filed against: the one picked in the modal, or
-   * the one the referral draft was created from (matched by id, then by name —
-   * the check-up page may carry only the resident's name).
+    * the one the referral draft was created from, matched ONLY by stable ID.
    */
   const targetResident =
     selectedResident ||
     (draft
-      ? residents.find((r) => r.id === draft.residentId) ||
-        residents.find((r) => r.name.toLowerCase() === String(draft.resident || "").toLowerCase()) ||
-        null
+      ? residents.find((r) => r.id === draft.residentId) || null
       : null);
 
   const toPayload = (form) => ({
@@ -593,14 +722,22 @@ export default function HealthReferrals() {
     physical_exam_findings: form.physicalExamFindings || "",
     impression: form.impression || "",
     treatment_visit_id: form.treatmentVisitId || null,
+    recipient_personnel_id: form.recipientPersonnelId,
+    recipient_facility_id: form.recipientFacilityId,
+    recipient_role: form.recipientRole,
+    recipient_station: form.recipientStation || null,
   });
 
   const handleSave = async (form) => {
-    if (editing ? !canAssign : !canCreate) return;
+    if (editing ? !canAssignReferral(editing, can) : !canCreate) return;
     setSaving(true);
     try {
       if (editing) {
-        const result = await referralsApi.update(editing.id, toPayload(form));
+        const payload = editing.status === "Pending" ? toPayload(form) : {
+          recipient_personnel_id: form.recipientPersonnelId, recipient_facility_id: form.recipientFacilityId,
+          recipient_role: form.recipientRole, recipient_station: form.recipientStation || null,
+        };
+        const result = await referralsApi.update(editing.id, { ...payload, expected_version: editing.version }, { ownerId: user.id });
         const mapped = mapRecord(result?.record || result);
         setRecords((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...mapped } : r)));
         showToast("Referral updated.");
@@ -609,7 +746,7 @@ export default function HealthReferrals() {
           showToast("Select the resident before saving the referral.");
           return;
         }
-        const result = await referralsApi.create({ residentId: targetResident.id, ...toPayload(form) });
+        const result = await referralsApi.create({ residentId: targetResident.id, ...toPayload(form) }, { ownerId: user.id });
         const mapped = {
           ...mapRecord(result?.record || result),
           residentName: targetResident.name,
@@ -632,23 +769,37 @@ export default function HealthReferrals() {
   };
 
   const openStatus = (record) => {
-    if (!canWrite || !canChangeStatus) return;
+    const allowed = allowedReferralStatuses(record, can);
+    if (!allowed.length) return;
     setStatusTarget(record);
-    setNewStatus(record.status);
-    setResolutionNotes(record.resolutionNotes || "");
+    setNewStatus(allowed[0]);
+    setResolutionNotes("");
   };
 
   const handleStatusSave = async () => {
-    if (!canWrite || !canSetReferralStatus(newStatus) || !statusTarget || !newStatus) return;
+    if (!statusTarget || !canSetReferralStatus(newStatus, statusTarget)) return;
+    if (["Rejected", "Cancelled"].includes(newStatus) && !resolutionNotes.trim()) return;
     setSaving(true);
     try {
-      const result = await referralsApi.updateStatus(statusTarget.id, { status: newStatus, resolution_notes: resolutionNotes });
+      const result = await referralsApi.updateStatus(statusTarget.id, { status: newStatus, resolution_notes: resolutionNotes, expected_version: statusTarget.version }, { ownerId: user.id });
       const mapped = mapRecord(result?.record || result);
       setRecords((prev) => prev.map((r) => (r.id === statusTarget.id ? { ...r, ...mapped } : r)));
       setStatusTarget(null);
+      if (detail?.id === mapped.id) setDetail(mapped);
       showToast("Referral status updated.");
     } catch (err) {
       showToast(err?.message || "Could not update the referral status.");
+      if (err?.status === 409) {
+        try {
+          const fresh = await referralsApi.get(statusTarget.id, { ownerId: user.id });
+          if (fresh?.record) {
+            const mapped = mapRecord(fresh.record);
+            setStatusTarget(mapped);
+            setNewStatus(allowedReferralStatuses(mapped, can)[0] || "");
+            setRecords((previous) => previous.map((row) => row.id === mapped.id ? mapped : row));
+          }
+        } catch { showToast("This assignment changed. Refresh the referrals list before continuing."); }
+      }
     } finally {
       setSaving(false);
     }
@@ -658,8 +809,9 @@ export default function HealthReferrals() {
     if (exportingId) return;
     setExportingId(record.id);
     try {
-      const detail = await referralsApi.get(record.id);
-      const row = detail?.record || detail || record;
+      const detail = await referralsApi.get(record.id, { ownerId: user.id });
+      if (!detail?.record?.id) throw new Error("Could not load the saved referral document.");
+      const row = detail.record;
       await downloadReferralPdf(row, { residents });
     } catch (err) {
       showToast(err?.message || "Could not generate the referral PDF.");
@@ -668,20 +820,33 @@ export default function HealthReferrals() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!canWrite || !canReject || !deleteTarget) return;
-    setSaving(true);
+  const openDetail = useCallback(async (record) => {
+    if (!user?.id || !canRead || (isHealthSupervisor && !assignedBarangay)) return;
+    const requestId = ++detailRequest.current;
+    setDetail(record);
+    setDetailLoading(true);
+    setDetailError("");
     try {
-      await referralsApi.remove(deleteTarget.id);
-      setRecords((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-      setDeleteTarget(null);
-      showToast("Referral deleted.");
-    } catch (err) {
-      showToast(err?.message || "Could not delete the referral.");
-    } finally {
-      setSaving(false);
+      const response = await referralsApi.get(record.id, { ownerId: user.id });
+      if (!response?.record || response.record.id !== record.id || !STATUSES.includes(response.record.status)) throw new Error("The referral detail response is invalid.");
+      if (requestId === detailRequest.current) setDetail(mapRecord(response.record));
+    } catch (error) {
+      if (requestId === detailRequest.current) setDetailError(error?.message || "Could not load referral history.");
+    } finally { if (requestId === detailRequest.current) setDetailLoading(false); }
+  }, [user?.id, canRead, isHealthSupervisor, assignedBarangay]);
+
+  useEffect(() => {
+    if (requestedStatus && STATUSES.includes(requestedStatus)) {
+      setStatusFilter(referralFilterStatus(requestedStatus));
+      setBox("all");
     }
-  };
+  }, [requestedStatus]);
+
+  useEffect(() => {
+    if (!requestedReferralId) return undefined;
+    void openDetail({ id: requestedReferralId });
+    return () => { detailRequest.current += 1; };
+  }, [requestedReferralId, openDetail]);
 
   const toggleActionMenu = (event, recordId) => {
     if (openActionMenu === recordId) {
@@ -758,22 +923,22 @@ export default function HealthReferrals() {
   }, [openActionMenu]);
 
   const columns = isResident
-    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Stage", ""]
-    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Stage", "Actions"];
+    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Status", ""]
+    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Status", "Actions"];
 
   return (
     <>
       <PageHeader
         crumbs={["Referrals"]}
-        title={isResident ? "My Referrals" : isSupervisorOnly ? "Referral Tracking" : "Referrals"}
+        title={isResident ? "My Referrals" : isSupervisorOnly ? "Referral Tracking" : isHealthSupervisor ? "Referral Monitoring" : "Referrals"}
         subtitle={
           isResident
             ? "Referrals your health workers have made for you and their current status."
             : isSupervisorOnly
               ? "Monitor referred residents and track referral progress across the municipality."
               : assignedBarangay
-                ? `Manage resident referrals to RHU and higher-level facilities in Brgy. ${assignedBarangay}.`
-                : "Manage resident referrals to RHU and higher-level healthcare facilities."
+                ? `Track referrals sent from Brgy. ${assignedBarangay} and those assigned to you.`
+                : "Track sent referrals and respond to referrals explicitly assigned to you."
         }
         action={
           canWrite && canCreate ? (
@@ -818,9 +983,8 @@ export default function HealthReferrals() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search resident, reason, facility..." className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray/70" />
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none">
-              <option value="All">All Statuses</option>
-              {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Referral status filter" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm font-medium text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20">
+              {STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === "Historical" ? "Historical (Rejected / Cancelled)" : s === "All" ? "All Status" : s}</option>)}
             </select>
             <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none">
               <option value="All">All Priorities</option>
@@ -831,8 +995,8 @@ export default function HealthReferrals() {
       </Card>
 
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div>
+          <table className={`ui-table w-full referral-monitoring-grid ${isResident ? "referral-monitoring-grid-resident" : "referral-monitoring-grid-supervisor"}`}>
             <thead className="bg-brand-bg border-b border-brand-border">
               <tr>
                 {columns.map((h) => (
@@ -854,6 +1018,7 @@ export default function HealthReferrals() {
                   <td className="px-4 py-3 text-sm text-brand-ink">
                     {r.destinationFacility}
                     {r.destinationService ? <span className="block text-xs text-brand-gray">{r.destinationService}</span> : null}
+                    <span className="mt-1 block text-xs text-brand-gray">{referralRecipientLabel(r)}</span>
                   </td>
                   <td className="px-4 py-3 text-sm text-brand-ink">
                     {r.laboratoryTestRequired ? (
@@ -868,13 +1033,7 @@ export default function HealthReferrals() {
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${PRIORITY_COLORS[r.priority] || ""}`}>{r.priority}</span>
                   </td>
                   <td className="px-4 py-3">
-                    {r.stage ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-brand-blue/10 px-2 py-1 text-xs font-medium text-brand-blue">
-                        {r.stage.label}
-                      </span>
-                    ) : (
-                      <StatusBadge value={r.status} />
-                    )}
+                    <StatusBadge value={referralDisplayStatus(r.status)} />
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex items-center justify-center">
@@ -937,7 +1096,7 @@ export default function HealthReferrals() {
                 visibility: actionMenuPosition ? "visible" : "hidden",
               }}
             >
-              <button type="button" role="menuitem" onClick={() => selectAction(() => setDetail(record))} className={menuItemClass}>
+              <button type="button" role="menuitem" onClick={() => selectAction(() => void openDetail(record))} className={menuItemClass}>
                 <Eye className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
                 View Details
               </button>
@@ -953,27 +1112,16 @@ export default function HealthReferrals() {
                   Download / Print
                 </button>
               )}
-              {!isResident && canWrite && canAssign && (
+              {!isResident && canAssignReferral(record, can) && (
                 <button type="button" role="menuitem" onClick={() => selectAction(() => openEdit(record))} className={menuItemClass}>
                   <Edit2 className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
                   Edit
                 </button>
               )}
-              {!isResident && canWrite && canChangeStatus && record.status !== "Completed" && record.status !== "Cancelled" && (
+              {!isResident && allowedReferralStatuses(record, can).length > 0 && (
                 <button type="button" role="menuitem" onClick={() => selectAction(() => openStatus(record))} className={menuItemClass}>
                   <RefreshCw className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
-                  Update Stage
-                </button>
-              )}
-              {!isResident && canWrite && canReject && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => selectAction(() => setDeleteTarget(record))}
-                  className={`${menuItemClass} text-brand-danger hover:bg-brand-danger/5 focus-visible:bg-brand-danger/5`}
-                >
-                  <Trash2 className="h-4 w-4 shrink-0 text-brand-danger" aria-hidden="true" />
-                  Delete
+                  Update Status
                 </button>
               )}
             </div>
@@ -988,7 +1136,7 @@ export default function HealthReferrals() {
           ref={detailDialogRef}
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2 sm:p-4"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setDetail(null);
+            if (event.target === event.currentTarget) closeDetail();
           }}
         >
           <Card
@@ -996,20 +1144,20 @@ export default function HealthReferrals() {
             aria-modal="true"
             aria-labelledby="referral-detail-title"
             aria-describedby="referral-detail-description"
-            className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden"
+            className={`flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden ${isHealthSupervisor ? "supervisor-modal" : ""}`}
           >
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-brand-border px-4 py-3 sm:px-5">
               <div className="min-w-0">
                 <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">Referral details</p>
-                <h3 id="referral-detail-title" className="mt-0.5 truncate text-base font-semibold text-brand-ink sm:text-lg">{detail.residentName}</h3>
+                <h3 id="referral-detail-title" className="mt-0.5 truncate text-base font-semibold text-brand-ink sm:text-lg">{detail.residentName || "Selected Referral"}</h3>
                 <p id="referral-detail-description" className="mt-0.5 truncate text-xs text-brand-gray">
-                  {detail.destinationFacility}{detail.barangay ? ` · ${detail.barangay}` : ""}
+                  {detail.destinationFacility || `Record ${detail.id}`}{detail.barangay ? ` · ${detail.barangay}` : ""}
                 </p>
               </div>
               <button
                 ref={detailCloseButtonRef}
                 type="button"
-                onClick={() => setDetail(null)}
+                onClick={closeDetail}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
                 aria-label="Close referral details"
                 title="Close"
@@ -1019,6 +1167,9 @@ export default function HealthReferrals() {
             </div>
 
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+              {detailLoading && <p className="text-sm text-brand-gray">Loading current referral and history...</p>}
+              {detailError && <div role="alert"><p className="text-sm text-brand-danger">{detailError}</p><button type="button" onClick={() => openDetail(detail)} className="mt-2 text-sm font-medium text-brand-blue hover:underline">Retry</button></div>}
+              {!detailLoading && !detailError && <>
               <div className="flex flex-wrap items-center gap-2">
                 {detail.stage && (
                   <span className="inline-flex items-center rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-blue">
@@ -1040,6 +1191,9 @@ export default function HealthReferrals() {
                     ["Destination", detail.destinationFacility || "—"],
                     ["Destination service", detail.destinationService || "—"],
                     ["Referring facility", detail.referringFacility || "—"],
+                    ["Sender", detail.senderName || "Historical sender"],
+                    ["Assigned recipient", referralRecipientLabel(detail)],
+                    ["Historical document IDs", detail.legacyReferralIds.join(", ") || "None"],
                     ["Completed", formatDate(detail.completedAt)],
                     ["Laboratory test required", detail.laboratoryTestRequired ? "Yes" : "No"],
                   ].map(([label, value]) => (
@@ -1071,25 +1225,29 @@ export default function HealthReferrals() {
                 <DetailField label="Notes" value={detail.notes || "No notes recorded."} />
                 {detail.resolutionNotes && <DetailField label="Resolution" value={detail.resolutionNotes} />}
               </section>
+              {detail.encounter && <DetailField label="Receiving encounter" value={`${detail.encounter.id}: ${detail.encounter.status}${detail.encounter.completed_at ? ` / completed ${new Date(detail.encounter.completed_at).toLocaleString()}` : ""}`} />}
+              <ReferralHistory history={detail.history} />
+              </>}
             </div>
 
             <div className="flex shrink-0 justify-end gap-2 border-t border-brand-border px-4 py-3 sm:px-5">
               <button
                 type="button"
-                onClick={() => setDetail(null)}
+                onClick={closeDetail}
                 className="rounded-btn px-3 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
               >
                 Close
               </button>
-              {!isResident && canAssign && (
+              {!isResident && !detailLoading && !detailError && canAssignReferral(detail, can) && (
                 <button
                   type="button"
                   onClick={() => openEdit(detail)}
                   className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 focus-visible:ring-offset-2"
                 >
-                  <Edit2 className="h-4 w-4" /> Edit
+                  <Edit2 className="h-4 w-4" /> {detail.status === "Pending" ? "Edit / Assign" : "Reassign"}
                 </button>
               )}
+              {!isResident && !detailLoading && !detailError && allowedReferralStatuses(detail, can).length > 0 && <button type="button" onClick={() => { openStatus(detail); closeDetail(); }} className="rounded-btn bg-brand-blue px-3.5 py-2 text-sm font-medium text-white">Update Status</button>}
             </div>
           </Card>
         </div>
@@ -1103,6 +1261,7 @@ export default function HealthReferrals() {
           resident={targetResident}
           residents={residents}
           saving={saving}
+          ownerId={user?.id}
           onClose={() => { setFormOpen(false); setEditing(null); setSelectedResident(null); setDraft(null); }}
           onSave={handleSave}
           onSelectResident={setSelectedResident}
@@ -1126,47 +1285,24 @@ export default function HealthReferrals() {
                 <div>
                   <label className="text-sm font-medium text-brand-ink block mb-1.5">New Status</label>
                   <select value={newStatus} onChange={(e) => setNewStatus(e.target.value)} className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue">
-                    {STATUSES
-                      .filter((status) => status === statusTarget.status || canSetReferralStatus(status))
+                    {allowedReferralStatuses(statusTarget, can)
                       .map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-brand-ink block mb-1.5">Resolution / Notes</label>
-                  <textarea rows={3} value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} placeholder="Optional notes on this status change..." className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none" />
+                  <label className="text-sm font-medium text-brand-ink block mb-1.5">Resolution / Notes{["Rejected", "Cancelled"].includes(newStatus) ? " (required)" : ""}</label>
+                  <textarea rows={3} required={["Rejected", "Cancelled"].includes(newStatus)} value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} placeholder="Record the reason or progress update..." className="w-full bg-white border border-brand-border rounded-btn px-3 py-2.5 text-sm outline-none focus:border-brand-blue resize-none" />
                 </div>
               </div>
               <div className="mt-6 flex justify-end gap-3">
                 <button onClick={() => setStatusTarget(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-                <button disabled={saving || !canSetReferralStatus(newStatus)} onClick={handleStatusSave} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">Update</button>
+                <button disabled={saving || !canSetReferralStatus(newStatus, statusTarget) || (["Rejected", "Cancelled"].includes(newStatus) && !resolutionNotes.trim())} onClick={handleStatusSave} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">Update</button>
               </div>
             </div>
           </Card>
         </div>
       )}
 
-      {/* Delete confirmation */}
-      {deleteTarget && !isResident && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-md">
-            <div className="p-6">
-              <div className="mb-3 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-danger/10 shrink-0">
-                  <Trash2 className="h-5 w-5 text-brand-danger" />
-                </div>
-                <h3 className="text-lg font-semibold text-brand-ink">Delete this referral?</h3>
-              </div>
-              <p className="text-sm text-brand-gray">
-                Referral for {deleteTarget.residentName}{deleteTarget.barangay ? ` (${deleteTarget.barangay})` : ""} will be removed. This action cannot be undone.
-              </p>
-              <div className="mt-6 flex justify-end gap-3">
-                <button onClick={() => setDeleteTarget(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
-                <button disabled={saving} onClick={handleDelete} className="rounded-btn bg-brand-danger px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60">Delete</button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
     </>
   );
 }

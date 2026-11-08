@@ -11,6 +11,7 @@ import test from "node:test";
 
 import {
   filterOpenReferrals,
+  filterScreenableReferrals,
   submitTriage,
   TRIAGE_MESSAGES,
   CLOSED_REFERRAL_STATUSES,
@@ -140,13 +141,14 @@ test("4b. a refresh failure after success does not surface as a send failure", a
   assert.equal(notify.calls[0][0].ok, true);
 });
 
-test("5. completed/cancelled referrals leave the ACTIVE triage list but are not deleted", () => {
+test("5. completed/cancelled/rejected referrals leave the active inbox but are not deleted", () => {
   const rows = [
     { id: "r1", status: "Pending" },
     { id: "r2", status: "Accepted" },
     { id: "r3", status: "In Progress" },
     { id: "r4", status: "Completed" },
     { id: "r5", status: "Cancelled" },
+    { id: "r6", status: "Rejected" },
   ];
   const open = filterOpenReferrals(rows);
 
@@ -154,9 +156,10 @@ test("5. completed/cancelled referrals leave the ACTIVE triage list but are not 
   assert.deepEqual(open.map((r) => r.id), ["r1", "r2", "r3"]);
   // ...but the source data is untouched (no deletion), so Completed referrals
   // remain available to history and the downstream consultation workflow.
-  assert.equal(rows.length, 5);
+  assert.equal(rows.length, 6);
   assert.ok(rows.some((r) => r.status === "Completed"));
-  assert.deepEqual(CLOSED_REFERRAL_STATUSES, ["Completed", "Cancelled"]);
+  assert.deepEqual(CLOSED_REFERRAL_STATUSES, ["Completed", "Cancelled", "Rejected"]);
+  assert.deepEqual(filterScreenableReferrals(rows).map((row) => row.id), ['r2', 'r3']);
 });
 
 test("5b. filterOpenReferrals tolerates non-array / malformed input", () => {

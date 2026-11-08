@@ -49,7 +49,7 @@ const buildQueuedHousehold = (payload, localRef, localId) => ({
 const getDecryptedOperations = async (ownerId) => {
   const operations = [];
   for (const operation of await listOperations(ownerId)) {
-    operations.push({ ...operation, ...(await getOperation(operation.opId)) });
+    operations.push({ ...operation, ...(await getOperation(operation.opId, ownerId)) });
   }
   return operations;
 };

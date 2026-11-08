@@ -13,11 +13,20 @@ module.exports = {
   			input: '3px',
   			table: '4px'
   		},
-   		maxWidth: {
-   			shell: '1440px',
-   			content: '1240px',
-   			prose: '68ch'
-   		},
+      maxWidth: {
+        shell: '1440px',
+        content: '1240px',
+        prose: '68ch'
+      },
+      fontSize: {
+        caption: ['0.6875rem', '1rem'],
+        ui: ['0.8125rem', '1.25rem'],
+        section: ['0.9375rem', '1.375rem'],
+        metric: ['2rem', '2.25rem']
+      },
+      spacing: {
+        control: '2.25rem'
+      },
    		colors: {
    			background: 'hsl(var(--background))',
    			foreground: 'hsl(var(--foreground))',

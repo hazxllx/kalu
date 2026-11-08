@@ -11,7 +11,6 @@ import { useAuth } from "@/context/AuthContext";
 import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { filterRowsByScope } from "@/lib/phnScope";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
-import { riskOfPatient } from "@/lib/riskRules";
 import {
   countFollowUpsDue,
   countPendingReferrals,
@@ -22,6 +21,7 @@ import {
   mapReferralRow,
   queueCounts,
   sortQueueByRisk,
+  phnDisplayName,
 } from "@/lib/phnDashboard";
 import { usePhnDashboardData } from "@/features/dashboards/hooks/usePhnDashboardData";
 import {
@@ -52,7 +52,9 @@ const KPI_TONES = {
 const RISK_TONES = {
   High: "bg-brand-danger/10 text-brand-danger",
   Medium: "bg-brand-yellow/15 text-[#B07E00]",
+  Moderate: "bg-brand-yellow/15 text-[#B07E00]",
   Low: "bg-brand-green/10 text-brand-green",
+  Unassessed: "bg-brand-gray/10 text-brand-gray",
 };
 
 const FOLLOWUP_STATUS_TONES = {
@@ -89,8 +91,8 @@ const QUICK_ACTIONS = [
 ];
 
 const welcomeFor = (user) => {
-  const first = (user?.name || "").trim().split(" ")[0];
-  return first ? `Welcome, Nurse ${first}` : "Welcome, Nurse";
+  const name = phnDisplayName(user);
+  return name ? `Welcome, ${name}` : "Welcome, Nurse";
 };
 
 /* ------------------------------- Primitives ------------------------------- */
@@ -231,7 +233,7 @@ export default function PHNDashboard() {
   );
   const counts = useMemo(() => queueCounts(scopedPatients), [scopedPatients]);
   const waitingQueue = useMemo(
-    () => sortQueueByRisk(scopedPatients.filter((p) => p.status === CHECKUP_STATUS.WAITING)),
+    () => sortQueueByRisk(scopedPatients.filter((p) => p.status === CHECKUP_STATUS.WAITING || p.status === CHECKUP_STATUS.IN_CHECKUP)),
     [scopedPatients]
   );
 
@@ -272,8 +274,10 @@ export default function PHNDashboard() {
 
   const handleStartCheckup = async (patient) => {
     try {
-      await queue.startCheckup(patient.id);
-      showToast("Check-up started.");
+      if (patient.status === CHECKUP_STATUS.WAITING) {
+        await queue.startCheckup(patient.id);
+        showToast("Check-up started.");
+      }
       navigate("/app/phn/consultations", { state: { openCheckup: patient.id } });
     } catch (err) {
       showToast(err?.message || "Could not start the check-up.");
@@ -288,8 +292,8 @@ export default function PHNDashboard() {
         subtitle="Here are the patients and tasks that need your attention today."
         action={
           <div className="text-left md:text-right">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-gray">Today</p>
-            <p className="text-sm font-medium text-brand-ink">{today}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/75">Today</p>
+            <p className="text-sm font-medium text-white">{today}</p>
           </div>
         }
       />
@@ -300,9 +304,9 @@ export default function PHNDashboard() {
           index={0}
           icon={Users}
           tone="accent"
-          label="Waiting for PHN"
-          value={counts.waiting}
-          hint="Completed triage — ready for consultation"
+          label="PHN Work Queue"
+          value={waitingQueue.length}
+          hint={`${counts.waiting} waiting · ${counts.inCheckup} in check-up`}
           loading={queue.loading}
           error={queue.error}
           onClick={() => navigate("/app/phn/consultations")}
@@ -326,7 +330,7 @@ export default function PHNDashboard() {
           tone="yellow"
           label="Pending Referrals"
           value={pendingReferrals}
-          hint="Pending, accepted or in progress"
+          hint="Assigned to you and awaiting acceptance"
           loading={referrals.loading}
           error={referrals.error}
           onClick={() => navigate("/app/phn/referrals")}
@@ -337,7 +341,7 @@ export default function PHNDashboard() {
           icon={AlertTriangle}
           tone="danger"
           label="High-Risk Cases"
-          value={highRiskRows.length}
+          value={residents.total}
           hint="Requiring PHN review"
           loading={residents.loading}
           error={residents.error}
@@ -354,12 +358,12 @@ export default function PHNDashboard() {
               <h3 className="text-sm font-semibold text-brand-ink sm:text-base">Patients for Check-up (RHU)</h3>
               {!queue.loading && !queue.error && (
                 <span className="rounded-full bg-brand-accent/10 px-2.5 py-0.5 text-xs font-semibold text-brand-accent">
-                  {counts.waiting} waiting
+                  {counts.waiting} waiting · {counts.inCheckup} in check-up
                 </span>
               )}
             </div>
             <p className="mt-0.5 text-xs text-brand-gray">
-              Patients who completed triage and are waiting for PHN consultation, highest risk first.
+              Submitted and ongoing consultations, highest assessed risk first. Completed encounters are excluded.
             </p>
           </div>
           <button
@@ -383,7 +387,7 @@ export default function PHNDashboard() {
         ) : waitingQueue.length === 0 ? (
           <EmptyState
             icon={Users}
-            title="No patients are waiting for check-up"
+            title="No patients require PHN check-up"
             description="Patients appear here as soon as triage hands them off to the PHN."
           />
         ) : (
@@ -403,7 +407,7 @@ export default function PHNDashboard() {
               </thead>
               <tbody>
                 {waitingQueue.map((q) => {
-                  const risk = riskOfPatient(q);
+                  const risk = q.riskLevel || 'Unassessed';
                   return (
                     <tr key={q.id} className="border-b border-brand-border last:border-0 hover:bg-brand-bg/50">
                       <td className="px-4 py-3">
@@ -415,7 +419,7 @@ export default function PHNDashboard() {
                       <td className="px-4 py-3 text-brand-ink">{q.barangay || "RHU"}</td>
                       <td className="px-4 py-3 text-brand-ink">{q.reason || q.triage?.chiefComplaint || "—"}</td>
                       <td className="px-4 py-3">
-                        <Pill value={risk.level} tones={RISK_TONES} />
+                        <Pill value={risk} tones={RISK_TONES} />
                       </td>
                       <td className="px-4 py-3">
                         <Pill value={q.status} tones={{}} />
@@ -426,7 +430,7 @@ export default function PHNDashboard() {
                           onClick={() => handleStartCheckup(q)}
                           className="whitespace-nowrap text-sm font-medium text-brand-blue hover:underline"
                         >
-                          Start Check-up
+                          {q.status === CHECKUP_STATUS.IN_CHECKUP ? 'Continue Check-up' : 'Start Check-up'}
                         </button>
                       </td>
                     </tr>

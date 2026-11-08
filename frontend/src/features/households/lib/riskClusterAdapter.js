@@ -78,6 +78,7 @@ export const toRiskCluster = (household = {}, workflow = null) => {
     head: household.headName || "",
     surname: surnameFrom(household.headName),
     barangay: household.barangay || "",
+    barangayId: household.barangayId || null,
     purok: household.purok || "",
     address: household.address || household.streetAddress || "",
     members: memberCount,
@@ -86,6 +87,7 @@ export const toRiskCluster = (household = {}, workflow = null) => {
     // Persisted workflow (server-side, survives refresh/logout/device).
     workflowStatus: workflow?.workflowStatus || "",
     assignedWorker: workflow?.assignedWorker || "",
+    assignedWorkerId: workflow?.assignedWorkerId || null,
     assignedWorkerRole: workflow?.assignedWorkerRole || "",
     followUpCount: workflow?.followUpCount || 0,
     lastFollowUpAt: toDateOnly(workflow?.lastFollowUpAt),

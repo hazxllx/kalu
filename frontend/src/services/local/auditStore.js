@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 /**
  * Shared frontend audit store (local work set).
@@ -113,6 +114,7 @@ export const auditStore = {
 };
 
 export default auditStore;
+registerWorkingSetReset(() => { cache = []; listeners.forEach((listener) => listener()); });
 
 // Ignore and purge any previously persisted demo events, then persist the
 // empty snapshot so the session starts with no fabricated entries.

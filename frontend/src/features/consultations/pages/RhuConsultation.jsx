@@ -262,7 +262,7 @@ export default function RhuConsultation() {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="flex-1 bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none lg:flex-none"
             >
-              <option value="All">All Statuses</option>
+              <option value="All">All Status</option>
               {Object.values(CHECKUP_STATUS).map((s) => (
                 <option key={s} value={s}>
                   {RHU_STATUS_LABEL[s] || s}

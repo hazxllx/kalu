@@ -6,6 +6,7 @@ import {
   requireOnlineForMutation,
 } from '../offline/mutationPolicy.js';
 import { invalidateVerifiedPermissions } from '../accessControl/permissionCache.js';
+import { captureOwnerGuard, assertCurrentOwner, getOfflineOwnerId } from '../offline/db.js';
 
 /**
  * Centralized HTTP client for the KALUSAGAP backend (see `backend/`).
@@ -35,6 +36,7 @@ const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.en
  * @property {RequestCredentials} [credentials]
  * @property {AbortSignal} [signal]
  * @property {'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY'} [offlineMutationType]
+ * @property {string} [ownerId] Authenticated account whose queued operation this request belongs to.
  */
 
 class ApiError extends Error {
@@ -51,11 +53,13 @@ class ApiError extends Error {
 }
 
 async function getAuthIdentity() {
-  if (!supabase) return { token: null, userId: null };
-  const { data } = await supabase.auth.getSession();
+  if (!supabase) return { token: null, userId: null, expiresAt: null };
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
   return {
     token: data?.session?.access_token || null,
     userId: data?.session?.user?.id || null,
+    expiresAt: data?.session?.expires_at || null,
   };
 }
 
@@ -74,13 +78,22 @@ function buildUrl(path, params) {
  */
 async function request(
   path,
-  { method = 'GET', body, headers = {}, params, offlineMutationType, ...rest } = {},
+  { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, ...rest } = {},
 ) {
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase());
   const mutationType = offlineMutationType || MUTATION_TIER.ONLINE_ONLY;
   if (isMutation) requireOnlineForMutation(mutationType);
 
-  const { token, userId } = await getAuthIdentity();
+  const expectedOwnerId = ownerId === null ? getOfflineOwnerId() : ownerId;
+  const ownerGuard = expectedOwnerId !== null ? captureOwnerGuard(expectedOwnerId) : null;
+  if (ownerGuard) assertCurrentOwner(ownerGuard);
+  const { token, userId, expiresAt } = await getAuthIdentity();
+  if (ownerGuard) {
+    assertCurrentOwner(ownerGuard);
+    if (!token || userId !== expectedOwnerId || (expiresAt && expiresAt * 1000 <= Date.now())) {
+      throw new ApiError('Your session changed or expired. Sign in to the original account before synchronizing.', 401, null);
+    }
+  }
 
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const isJsonBody = body !== undefined && body !== null && !isFormData && typeof body !== 'string' && !(body instanceof URLSearchParams);
@@ -88,6 +101,7 @@ async function request(
 
   let response;
   try {
+    if (ownerGuard) assertCurrentOwner(ownerGuard);
     response = await fetch(buildUrl(path, params), {
       method,
       credentials: 'include',
@@ -100,6 +114,7 @@ async function request(
       ...rest,
     });
   } catch (error) {
+    if (error?.status === 401 || error?.code === 'auth') throw error;
     if (isMutation && mutationType === MUTATION_TIER.ONLINE_ONLY) {
       if (error?.name === 'AbortError') throw error;
       throw new OfflineActionRequiredError();
@@ -109,6 +124,9 @@ async function request(
 
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = isJson ? await response.json() : await response.text();
+  // A late response must never populate the next account's UI/cache after a
+  // sign-out or switch, even when the original request committed successfully.
+  if (ownerGuard) assertCurrentOwner(ownerGuard);
 
   if (!response.ok) {
     if ((response.status === 401 || response.status === 403) && userId) {
@@ -133,49 +151,7 @@ async function request(
 
 /** @param {RequestOptions} options */
 export const postFormData = async (path, formData, options = {}) => {
-  requireOnlineForMutation(options.offlineMutationType || MUTATION_TIER.ONLINE_ONLY);
-  const requestOptions = { ...options };
-  delete requestOptions.offlineMutationType;
-  const { token, userId } = await getAuthIdentity();
-  let response;
-  try {
-    response = await fetch(buildUrl(path, options.params), {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(requestOptions.headers || {}),
-      },
-      body: formData,
-      ...requestOptions,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    throw new OfflineActionRequiredError();
-  }
-
-  const isJson = response.headers.get('content-type')?.includes('application/json');
-  const payload = isJson ? await response.json() : await response.text();
-
-  if (!response.ok) {
-    if ((response.status === 401 || response.status === 403) && userId) {
-      void invalidateVerifiedPermissions(userId)
-        .catch((error) => console.error('[kalusagap/permissions] Could not clear rejected permissions.', error))
-        .finally(() => {
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('kalusagap:permissions-invalidated', {
-              detail: { userId, status: response.status },
-            }));
-          }
-        });
-    }
-    const message =
-      (isJson && (payload?.error?.message || payload?.message)) ||
-      `Request failed with status ${response.status}`;
-    throw new ApiError(message, response.status, payload);
-  }
-
-  return isJson && payload && 'data' in payload ? payload.data : payload;
+  return request(path, { ...options, method: 'POST', body: formData });
 };
 
 export const api = {

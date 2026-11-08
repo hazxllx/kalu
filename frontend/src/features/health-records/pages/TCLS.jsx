@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -6,13 +6,13 @@ import { Card } from "@/components/common/Card";
 import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope, RefreshCw } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { useResidents } from "@/services/local/residentStore";
+import useHouseholdWorkers from "@/hooks/useHouseholdWorkers";
 import { tclApi, residentsApi } from "@/services/api";
+import { normalizeTcl, loadResidentDirectory, workersForResident, tclDateError } from "../lib/tclData";
 import {
   TCL_PROGRAMS,
   TCL_STATUSES,
   TCL_PRIORITIES,
-  ACTIVE_BHWS,
 } from "@/services/local/tclStore";
 
 const categories = ["All", ...TCL_PROGRAMS];
@@ -30,37 +30,6 @@ const formatDate = (iso) => {
   const d = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-};
-
-const todayIso = () => new Date().toISOString().slice(0, 10);
-
-const ageFromBirth = (birthDate) => {
-  if (!birthDate) return "";
-  const d = new Date(birthDate);
-  if (Number.isNaN(d.getTime())) return "";
-  const now = new Date();
-  let age = now.getFullYear() - d.getFullYear();
-  const m = now.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
-  return age >= 0 ? age : "";
-};
-
-/**
- * Normalize a residents API row (firstName/lastName/sex/birthDate) into the
- * shape this page renders (name/age/gender). Local-store residents already have
- * `name`, so pass those through. Without this the name sort below crashed on
- * `undefined.localeCompare`, which is what blanked the whole page.
- */
-const normalizeResident = (r) => {
-  if (!r) return null;
-  const name = r.name || [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" ").trim();
-  return {
-    ...r,
-    name: name || "Unknown resident",
-    age: r.age ?? ageFromBirth(r.birthDate),
-    gender: r.gender || r.sex || "",
-    barangay: r.barangay || "",
-  };
 };
 
 function ModalShell({ title, subtitle, onClose, children }) {
@@ -96,40 +65,43 @@ function ModalShell({ title, subtitle, onClose, children }) {
 
 export default function TCLS() {
   const { user } = useAuth();
-  const localResidents = useResidents();
+  const directory = useHouseholdWorkers();
+  const request = useRef(0);
   const [allTcls, setAllTcls] = useState([]);
-  const [allResidents, setAllResidents] = useState(() => (localResidents || []).map(normalizeResident).filter(Boolean));
+  const [allResidents, setAllResidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [loadedOwner, setLoadedOwner] = useState(null);
 
   const loadData = useCallback(() => {
+    const current = ++request.current;
     setLoading(true);
     setLoadError(null);
-    return Promise.all([tclApi.list(), residentsApi.list({ limit: 200 })])
+    setAllTcls([]);
+    setAllResidents([]);
+    setLoadedOwner(user?.id || null);
+    if (!user?.id) { setLoading(false); return Promise.resolve(); }
+    return Promise.all([tclApi.list(), loadResidentDirectory(residentsApi.list)])
       .then(([tclResult, residentResult]) => {
-        setAllTcls((tclResult?.rows || []).map((row) => ({
-          ...row,
-          residentId: row.resident_id,
-          program: row.program,
-          bhw: row.assigned_bhw,
-          lastVisit: row.last_visit,
-          nextVisit: row.next_visit,
-          nextVisitTime: row.next_visit_time,
-        })));
-        const residentRows = residentResult?.rows || residentResult || [];
-        setAllResidents(residentRows.map(normalizeResident).filter(Boolean));
+        if (current !== request.current) return;
+        if (!Array.isArray(tclResult?.rows)) throw new Error("The TCL response was incomplete.");
+        setAllTcls(tclResult.rows.map(normalizeTcl));
+        setAllResidents(residentResult);
       })
       .catch((err) => {
+        if (current !== request.current) return;
         // A failed load must surface as an explicit error state, never a silent
         // empty "no records found" list.
         setLoadError(err?.message || "Unable to load TCL records.");
         setAllTcls([]);
+        setAllResidents([]);
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { if (current === request.current) setLoading(false); });
+  }, [user?.id]);
 
   useEffect(() => {
     loadData();
+    return () => { request.current += 1; };
   }, [loadData]);
 
   const scope = getSupervisorScope(user);
@@ -137,13 +109,14 @@ export default function TCLS() {
     scope && scope.level === HS_SCOPE.BARANGAY ? [scope.assignedBarangay] : null;
 
   const residentOptions = useMemo(() => {
+    if (loadedOwner !== user?.id) return [];
     const pool = scopedBarangays
       ? allResidents.filter((r) => r.barangay && scopedBarangays.includes(r.barangay))
       : allResidents;
     return pool
       .map((r) => ({ ...r }))
       .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  }, [allResidents, scopedBarangays]);
+  }, [allResidents, scopedBarangays, loadedOwner, user?.id]);
 
   const residentById = useMemo(() => {
     const map = new Map();
@@ -155,12 +128,12 @@ export default function TCLS() {
   // The resident's barangay is resolved from the live registry when possible.
   const scopedTcls = useMemo(
     () =>
-      allTcls.filter((t) => {
+      (loadedOwner === user?.id ? allTcls : []).filter((t) => {
         const live = residentById.get(t.residentId);
         const brgy = live?.barangay || t.resident?.barangay || "";
         return !scopedBarangays || scopedBarangays.includes(brgy);
       }),
-    [allTcls, scopedBarangays, residentById]
+    [allTcls, scopedBarangays, residentById, loadedOwner, user?.id]
   );
 
   const [cat, setCat] = useState("All");
@@ -177,17 +150,29 @@ export default function TCLS() {
     bhw: "",
     priority: "Medium",
     status: "Active",
-    lastVisit: todayIso(),
+    lastVisit: "",
     nextVisit: "",
     nextVisitTime: "",
     notes: "",
   }));
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [submitError, setSubmitError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Schedule form state.
   const [scheduleForm, setScheduleForm] = useState({ nextVisit: "", nextVisitTime: "", lastVisit: "", notes: "" });
   const [scheduleErrors, setScheduleErrors] = useState(/** @type {Record<string, any>} */ ({}));
+
+  useEffect(() => {
+    setShowAdd(false);
+    setShowView(null);
+    setShowSchedule(null);
+    setToast(null);
+    setForm({ residentId: "", program: "", bhw: "", priority: "Medium", status: "Active", lastVisit: "", nextVisit: "", nextVisitTime: "", notes: "" });
+    setScheduleForm({ nextVisit: "", nextVisitTime: "", lastVisit: "", notes: "" });
+    setResidentQuery("");
+    setSubmitError("");
+  }, [user?.id]);
 
   const showToast = (message) => {
     setToast(message);
@@ -201,19 +186,20 @@ export default function TCLS() {
     // age, sex, and barangay always come from the resident record (the stored
     // snapshot is only a fallback if a resident was removed from the registry).
     return filtered.map((t) => {
-      const live = residentOptions.find((r) => r.id === t.residentId);
-      return { ...t, resident: live ? { ...live } : { ...t.resident } };
+      const live = residentById.get(t.residentId);
+      const worker = directory.rows.find((row) => row.id === t.bhwId);
+      return { ...t, resident: live || t.resident, bhw: worker?.name || t.bhw || (t.bhwId ? "Assigned worker unavailable" : "") };
     });
-  }, [scopedTcls, cat, residentOptions]);
+  }, [scopedTcls, cat, residentById, directory.rows]);
 
   const openAdd = () => {
     setForm({
       residentId: "",
       program: "",
-      bhw: ACTIVE_BHWS[0] || "",
+      bhw: "",
       priority: "Medium",
       status: "Active",
-      lastVisit: todayIso(),
+      lastVisit: "",
       nextVisit: "",
       nextVisitTime: "",
       notes: "",
@@ -233,41 +219,74 @@ export default function TCLS() {
   );
 
   const selectedResident = residentOptions.find((r) => r.id === form.residentId) || null;
+  const assignableBhws = workersForResident(directory.rows, selectedResident);
+
+  const applyServerRecord = (result) => {
+    const record = normalizeTcl(result?.record);
+    setAllTcls((current) => [record, ...current.filter((row) => row.id !== record.id)]);
+    return record;
+  };
 
   const saveTcl = async () => {
+    if (saving) return;
     const nextErrors = {};
-    if (!form.residentId) nextErrors.resident = "Please select a resident.";
+    if (!selectedResident) nextErrors.resident = "Please select a resident from the server directory.";
     if (!form.program) nextErrors.program = "Please select a health program.";
-    if (!form.bhw) nextErrors.bhw = "Please assign a BHW.";
+    if (form.bhw && !assignableBhws.some((worker) => worker.id === form.bhw)) nextErrors.bhw = "Select an available BHW for this resident's barangay.";
+    const dateError = tclDateError(form);
+    if (dateError) nextErrors.dates = dateError;
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
+    setSaving(true);
+    setSubmitError("");
+    const current = request.current;
     try {
-      const result = await tclApi.create({ residentId: form.residentId, program: form.program, assigned_bhw: form.bhw, priority: form.priority, status: form.status, last_visit: form.lastVisit || null, next_visit: form.nextVisit || null, next_visit_time: form.nextVisitTime || null, notes: form.notes });
-      setAllTcls((current) => [{ ...result.record, residentId: form.residentId, program: form.program, bhw: form.bhw, lastVisit: form.lastVisit, nextVisit: form.nextVisit, nextVisitTime: form.nextVisitTime }, ...current]);
-    } catch (err) { setSubmitError(err?.message || "Could not save TCL record."); return; }
-    setShowAdd(false);
-    showToast(`${selectedResident.name} added to ${form.program}.`);
+      const result = await tclApi.create({ residentId: form.residentId, program: form.program, assigned_bhw: form.bhw, priority: form.priority, status: form.status, last_visit: form.lastVisit || null, next_visit: form.nextVisit || null, next_visit_time: form.nextVisitTime || null, notes: form.notes }, { ownerId: user?.id });
+      if (current !== request.current) return;
+      const saved = applyServerRecord(result);
+      setShowAdd(false);
+      showToast(`${selectedResident.name || selectedResident.id} added to ${saved.program}.`);
+      await loadData();
+    } catch (err) { if (current === request.current) setSubmitError(err?.message || "Could not save TCL record."); }
+    finally { setSaving(false); }
   };
 
   const saveSchedule = async () => {
+    if (saving) return;
     const nextErrors = {};
     if (!scheduleForm.nextVisit) nextErrors.nextVisit = "Please set the next visit date.";
+    const dateError = tclDateError(scheduleForm);
+    if (dateError) nextErrors.nextVisit = dateError;
     setScheduleErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
+    setSaving(true);
+    setSubmitError("");
+    const current = request.current;
     try {
-      await tclApi.update(showSchedule, { next_visit: scheduleForm.nextVisit, next_visit_time: scheduleForm.nextVisitTime, last_visit: scheduleForm.lastVisit, notes: scheduleForm.notes });
-      setAllTcls((current) => current.map((row) => row.id === showSchedule ? { ...row, nextVisit: scheduleForm.nextVisit, nextVisitTime: scheduleForm.nextVisitTime, lastVisit: scheduleForm.lastVisit, notes: scheduleForm.notes } : row));
-    } catch (err) { setSubmitError(err?.message || "Could not save TCL schedule."); return; }
-    showToast("Visit schedule saved.");
-    setShowSchedule(null);
+      const result = await tclApi.update(showSchedule, { next_visit: scheduleForm.nextVisit, next_visit_time: scheduleForm.nextVisitTime || null, last_visit: scheduleForm.lastVisit || null, notes: scheduleForm.notes }, { ownerId: user?.id });
+      if (current !== request.current) return;
+      applyServerRecord(result);
+      showToast("Visit schedule saved.");
+      setShowSchedule(null);
+      await loadData();
+    } catch (err) { if (current === request.current) setSubmitError(err?.message || "Could not save TCL schedule."); }
+    finally { setSaving(false); }
   };
 
   const changeStatus = async (status) => {
-    if (!showView) return;
-    try { await tclApi.update(showView, { status }); setAllTcls((current) => current.map((row) => row.id === showView ? { ...row, status } : row)); }
-    catch (err) { setSubmitError(err?.message || "Could not update TCL status."); return; }
-    showToast(`Status updated to ${status}.`);
+    if (!showView || saving) return;
+    setSaving(true);
+    setSubmitError("");
+    const current = request.current;
+    try {
+      const result = await tclApi.update(showView, { status }, { ownerId: user?.id });
+      if (current !== request.current) return;
+      const saved = applyServerRecord(result);
+      showToast(`Status updated to ${saved.status}.`);
+      await loadData();
+    } catch (err) { if (current === request.current) setSubmitError(err?.message || "Could not update TCL status."); }
+    finally { setSaving(false); }
   };
 
   const openSchedule = (tcl) => {
@@ -278,6 +297,7 @@ export default function TCLS() {
       notes: tcl.notes || "",
     });
     setScheduleErrors({});
+    setSubmitError("");
     setShowSchedule(tcl.id);
   };
 
@@ -308,6 +328,7 @@ export default function TCLS() {
         action={
           <button
             onClick={openAdd}
+            disabled={loading || Boolean(loadError) || saving}
             className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
           >
             <Plus className="w-4 h-4" /> Add TCL
@@ -428,7 +449,7 @@ export default function TCLS() {
                       key={r.id}
                       type="button"
                       onClick={() => {
-                        setForm({ ...form, residentId: r.id });
+                        setForm({ ...form, residentId: r.id, bhw: "" });
                         if (errors.resident) setErrors((p) => ({ ...p, resident: "" }));
                       }}
                       className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-brand-light transition-colors"
@@ -474,11 +495,12 @@ export default function TCLS() {
                 {errors.program && <p className={errorCls}>{errors.program}</p>}
               </div>
               <div>
-                <label className={labelCls}>Assigned BHW <span className="text-brand-danger">*</span></label>
-                <select value={form.bhw} onChange={(e) => setForm({ ...form, bhw: e.target.value })} className={`${inputCls(errors.bhw)} cursor-pointer`}>
-                  <option value="">Select BHW...</option>
-                  {ACTIVE_BHWS.map((b) => <option key={b} value={b}>{b}</option>)}
+                <label className={labelCls}>Assigned BHW</label>
+                <select value={form.bhw} onChange={(e) => setForm({ ...form, bhw: e.target.value })} disabled={!selectedResident || directory.loading || Boolean(directory.error) || saving} className={`${inputCls(errors.bhw)} cursor-pointer`}>
+                  <option value="">None (assign later)</option>
+                  {assignableBhws.map((worker) => <option key={worker.id} value={worker.id}>{worker.name || "Name not recorded"} · {worker.id.slice(-8)}</option>)}
                 </select>
+                {directory.loading ? <p className="mt-1 text-xs text-brand-gray">Loading authorized BHWs...</p> : directory.error ? <p role="alert" className={errorCls}>{directory.error} <button type="button" onClick={directory.refresh} className="underline">Retry</button>. Enrollment without an assignment is still available.</p> : selectedResident && assignableBhws.length === 0 ? <p className="mt-1 text-xs text-brand-gray">No active BHWs are available for this resident's barangay. You may assign one later.</p> : null}
                 {errors.bhw && <p className={errorCls}>{errors.bhw}</p>}
               </div>
               <div>
@@ -502,6 +524,7 @@ export default function TCLS() {
                 <input type="date" value={form.nextVisit} onChange={(e) => setForm({ ...form, nextVisit: e.target.value })} className={inputCls()} />
               </div>
             </div>
+            {errors.dates && <p className={errorCls}>{errors.dates}</p>}
             <div>
               <label className={labelCls}>Notes / Remarks</label>
               <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className={`${inputCls()} resize-none`} />
@@ -513,8 +536,8 @@ export default function TCLS() {
 
             <div className="flex justify-end gap-3 border-t border-brand-border pt-4">
               <button onClick={closeAdd} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Cancel</button>
-              <button onClick={saveTcl} className="flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors">
-                <Plus className="w-4 h-4" /> Save Target Client
+              <button onClick={saveTcl} disabled={saving} className="flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors disabled:opacity-50">
+                <Plus className="w-4 h-4" /> {saving ? "Saving..." : "Save Target Client"}
               </button>
             </div>
           </div>
@@ -529,6 +552,7 @@ export default function TCLS() {
           onClose={() => setShowView(null)}
         >
           <div className="space-y-5">
+            {submitError && <p role="alert" className="text-sm text-brand-danger">{submitError}</p>}
             {/* Resident information */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
               <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Resident Information</p>
@@ -603,6 +627,7 @@ export default function TCLS() {
                     <button
                       key={s}
                       onClick={() => changeStatus(s)}
+                      disabled={saving}
                       className={`rounded-full px-4 py-2 text-sm font-medium border transition-colors ${
                         active ? "bg-brand-blue text-white border-brand-blue" : "bg-white text-brand-gray border-brand-border hover:border-brand-blue"
                       }`}
@@ -632,6 +657,7 @@ export default function TCLS() {
           onClose={() => setShowSchedule(null)}
         >
           <div className="space-y-4">
+            {submitError && <p role="alert" className="text-sm text-brand-danger">{submitError}</p>}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Next Visit Date <span className="text-brand-danger">*</span></label>
@@ -653,8 +679,8 @@ export default function TCLS() {
             </div>
             <div className="flex justify-end gap-3 border-t border-brand-border pt-4">
               <button onClick={() => setShowSchedule(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">Cancel</button>
-              <button onClick={saveSchedule} className="flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors">
-                <Calendar className="w-4 h-4" /> Save Schedule
+              <button onClick={saveSchedule} disabled={saving} className="flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors disabled:opacity-50">
+                <Calendar className="w-4 h-4" /> {saving ? "Saving..." : "Save Schedule"}
               </button>
             </div>
           </div>

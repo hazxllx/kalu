@@ -336,7 +336,13 @@ export const book = async ({ user, serviceId, date, time, reason = '', supabase 
   if (!inserted) throw ApiError.unprocessable('Could not book the appointment.');
 
   // Re-read with the display embeds, then best-effort notify.
-  const { data: row } = await supabase.from(TABLE).select(BASE_SELECT).eq('id', inserted.id).maybeSingle();
+  const { data: row, error: readError } = await supabase
+    .from(TABLE)
+    .select(BASE_SELECT)
+    .eq('id', inserted.id)
+    .maybeSingle();
+  throwOnError(readError, 'Could not confirm the booked appointment');
+  if (!row) throw new ApiError(503, 'The booked appointment could not be confirmed. Retry the request.');
   const mapped = toAppointment(row || inserted);
 
   await audit(supabase, user, 'APPOINTMENT_REQUESTED', inserted.id, inserted);

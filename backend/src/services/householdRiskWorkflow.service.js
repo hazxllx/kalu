@@ -12,7 +12,7 @@
  */
 import ApiError from '../utils/apiError.js';
 import { getServiceClient } from '../config/supabase.js';
-import { getHousehold } from './households.service.js';
+import { getHousehold, resolveHouseholdWorker } from './households.service.js';
 
 const TABLE = 'household_risk_workflow';
 
@@ -25,7 +25,8 @@ const throwOnError = (error, message) => {
 const shape = (row) => ({
   householdId: row.household_id,
   workflowStatus: row.workflow_status,
-  assignedWorker: row.assigned_worker,
+  assignedWorker: row.assigned_worker_name || row.assigned_worker || '',
+  assignedWorkerId: row.assigned_worker_id || null,
   assignedWorkerRole: row.assigned_worker_role,
   assignmentAt: row.assignment_at,
   escalation: row.escalation || {},
@@ -54,12 +55,25 @@ export const saveWorkflow = async ({ id, user, patch = {}, supabase = getService
   if (!WRITE_ROLES.has(user?.role)) {
     throw ApiError.forbidden('You are not authorized to update the household risk workflow.');
   }
-  await scopeCheck({ id, user }); // 404 if the household is out of scope
-
+  const household = await scopeCheck({ id, user }); // 404 if the household is out of scope
   const row = { household_id: id, updated_by: user.id, updated_at: new Date().toISOString() };
   if (patch.workflowStatus !== undefined) row.workflow_status = String(patch.workflowStatus);
-  if (patch.assignedWorker !== undefined) row.assigned_worker = String(patch.assignedWorker || '');
-  if (patch.assignedWorkerRole !== undefined) row.assigned_worker_role = String(patch.assignedWorkerRole || '');
+  if (patch.assignedWorkerId !== undefined || patch.assignedWorker !== undefined) {
+    const workerId = String(patch.assignedWorkerId ?? patch.assignedWorker ?? '').trim();
+    if (workerId) {
+      if (!household?.barangayId) throw ApiError.unprocessable('Record the household barangay before assigning a worker.');
+      const worker = await resolveHouseholdWorker({ user, workerId, barangayId: household.barangayId, supabase });
+      row.assigned_worker_id = worker.id;
+      row.assigned_worker_name = worker.name;
+      row.assigned_worker = worker.name;
+      row.assigned_worker_role = worker.role;
+    } else {
+      row.assigned_worker_id = null;
+      row.assigned_worker_name = '';
+      row.assigned_worker = '';
+      row.assigned_worker_role = '';
+    }
+  }
   if (patch.assignmentAt !== undefined) row.assignment_at = patch.assignmentAt;
   if (patch.escalation !== undefined) row.escalation = patch.escalation || {};
   if (patch.followUpCount !== undefined) row.follow_up_count = Math.max(0, Number(patch.followUpCount) || 0);

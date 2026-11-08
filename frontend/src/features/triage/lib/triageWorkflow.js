@@ -15,7 +15,7 @@
  * active queue and remains available to history and the downstream consultation
  * workflow.
  */
-export const CLOSED_REFERRAL_STATUSES = Object.freeze(["Completed", "Cancelled"]);
+export const CLOSED_REFERRAL_STATUSES = Object.freeze(["Completed", "Cancelled", "Rejected"]);
 
 /**
  * Return only the referrals that are still open for triage. Input is never
@@ -29,6 +29,10 @@ export function filterOpenReferrals(rows) {
   const list = Array.isArray(rows) ? rows : [];
   return list.filter((r) => !CLOSED_REFERRAL_STATUSES.includes(r?.status));
 }
+
+/** Pending referrals must be accepted before they can open a clinical encounter. */
+export const filterScreenableReferrals = (rows) =>
+  filterOpenReferrals(rows).filter((row) => row.status === 'Accepted' || row.status === 'In Progress');
 
 /**
  * Default user-facing messages for a triage submission. Kept here so the

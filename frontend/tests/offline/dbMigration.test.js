@@ -66,7 +66,7 @@ beforeEach(async () => {
 
 test('fresh IndexedDB installation opens at current version with owner-scoped records key', async () => {
   assert.equal(db.verno, OFFLINE_DB_VERSION);
-  assert.equal(OFFLINE_DB_VERSION, 5);
+  assert.equal(OFFLINE_DB_VERSION, 6);
   assert.ok(db.isOpen());
   assert.deepEqual(db.records.schema.primKey.keyPath, ['ownerId', 'entity', 'remoteId']);
 
@@ -86,7 +86,7 @@ test('automatic Dexie opens prepare mismatched legacy schemas before opening', a
   legacy.version(2).stores({
     drafts: 'localId, entity, ownerId, status, updatedAt',
     outbox: 'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
-    records: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
+    records: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt, lastAccessedAt',
     records_backup: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
     syncMeta: 'key',
     keys: 'id',
@@ -149,13 +149,13 @@ test('upgrade from v1 preserves existing records, drafts and outbox operations',
 
   // Now open the real app DB (v4) — this runs v2->v3->v4 migrations.
   await openMainDb();
-  assert.equal(db.verno, 5);
+  assert.equal(db.verno, 6);
 
   // Records preserved and readable under new owner-scoped key.
-  const a = await getCachedRecord('phnQueueVisit', 'VISIT-10', OWNER);
+  const a = await getCachedRecord('phnQueueVisit', 'VISIT-10', OWNER, { now: () => 1100 });
   assert.ok(a, 'VISIT-10 survived migration');
   assert.equal(a.data.patient, 'OwnerA');
-  const hh = await getCachedRecord('household', 'HH-1', OWNER);
+  const hh = await getCachedRecord('household', 'HH-1', OWNER, { now: () => 1100 });
   assert.ok(hh);
   const unscopedLegacy = await db.records.get(['', 'legacyCache', 'legacy-1']);
   assert.equal(unscopedLegacy.data.plain.preserved, true);
@@ -221,7 +221,7 @@ test('upgrades a v2 database already carrying the compound records key without l
 
   await openMainDb();
 
-  const record = await getCachedRecord('followup', 'FU-2', OWNER);
+  const record = await getCachedRecord('followup', 'FU-2', OWNER, { now: () => 201 });
   assert.equal(record.data.purpose, 'Existing follow-up');
   assert.equal(await db.records.count(), 1);
   assert.equal((await listDrafts(OWNER)).length, 1);
@@ -283,9 +283,9 @@ test('migration deduplicates records on the future compound key, keeping newest 
   v1.close();
 
   await openMainDb();
-  const dup = await getCachedRecord('phnQueueVisit', 'VISIT-DUP', OWNER);
+  const dup = await getCachedRecord('phnQueueVisit', 'VISIT-DUP', OWNER, { now: () => 1000 });
   assert.equal(dup.data.ver, 2, 'newest cachedAt wins on dedup');
-  assert.ok(await getCachedRecord('phnQueueVisit', 'VISIT-OTHER', OWNER));
+  assert.ok(await getCachedRecord('phnQueueVisit', 'VISIT-OTHER', OWNER, { now: () => 1000 }));
 });
 
 test('no duplicate rows created during migration or after reopen', async () => {

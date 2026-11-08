@@ -17,7 +17,10 @@ import { SCHEMAS } from '../config/programFormSchemas.js';
  * municipality scope (defense in depth beyond RLS).
  */
 
-const STAFF = new Set(['health_supervisor', 'phn', 'mho']);
+// The route gate (programForms.routes.js) admits admin in addition to the
+// clinical roles, so the service-level set must match or an admin that passes
+// the route middleware would be rejected here with a misleading 403.
+const STAFF = new Set(['health_supervisor', 'phn', 'mho', 'admin']);
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });

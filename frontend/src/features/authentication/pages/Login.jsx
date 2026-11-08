@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, AlertTriangle, Loader2 } from "lucide-react";
@@ -11,7 +11,7 @@ import { FieldError, ValidationSummary } from "@/components/common/Validation";
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, isSupabaseConfigured, authNotice } = useAuth();
+  const { login, isSupabaseConfigured, authNotice, isSigningIn, isSigningOut, isLoadingAuth, authChecked, isResolvingProfile, isAuthenticated, role } = useAuth();
   const [show, setShow] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,7 +20,15 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
+  const submittingRef = useRef(false);
   const fieldRefs = { email: emailRef, password: passwordRef };
+  const authBusy = isSigningIn || isSigningOut || isLoadingAuth || !authChecked || isResolvingProfile;
+
+  useEffect(() => {
+    if (isAuthenticated && !authBusy && !submittingRef.current) {
+      navigate(landingFor(role, location.state?.from) || homeForRole(role), { replace: true });
+    }
+  }, [isAuthenticated, authBusy, role, location.state?.from, navigate]);
 
   const focusField = (field) => {
     const target = fieldRefs[field]?.current;
@@ -33,7 +41,7 @@ export default function Login() {
   // (prevents a valid account being dropped on /unauthorized after sign-in).
   const submit = async (e) => {
     e.preventDefault();
-    if (submitting) return; // guard against rapid double submission
+    if (submittingRef.current || authBusy) return; // synchronously reject duplicate submissions
 
     const errors = validateFields(
       { email, password },
@@ -50,15 +58,17 @@ export default function Login() {
     }
 
     setError("");
+    submittingRef.current = true;
     setSubmitting(true);
     try {
-      const role = await login({ email, password });
+      const signedInRole = await login({ email, password });
       const from = location.state?.from;
-      navigate(landingFor(role, from) || homeForRole(role), { replace: true });
+      navigate(landingFor(signedInRole, from) || homeForRole(signedInRole), { replace: true });
     } catch (err) {
       // Generic message only: never reveal whether the email exists.
       setError(err.message || "Unable to sign in. Please check your credentials.");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -153,6 +163,7 @@ export default function Login() {
                       ref={emailRef}
                       type="email"
                       autoComplete="email"
+                      disabled={submitting || authBusy}
                       value={email}
                       onChange={(e) => {
                         setEmail(e.target.value);
@@ -182,6 +193,7 @@ export default function Login() {
                       ref={passwordRef}
                       type={show ? "text" : "password"}
                       autoComplete="current-password"
+                      disabled={submitting || authBusy}
                       value={password}
                       onChange={(e) => {
                         setPassword(e.target.value);
@@ -204,11 +216,7 @@ export default function Login() {
                   <FieldError id="login-password-error" error={fieldErrors.password} />
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-brand-gray">
-                    <input type="checkbox" defaultChecked className="h-4 w-4 accent-brand-blue" />
-                    Remember me
-                  </label>
+                <div className="flex items-center justify-end">
                   <Link
                     to="/forgot-password"
                     className="text-[12px] font-medium text-brand-blue underline decoration-brand-rule underline-offset-4 hover:decoration-brand-blue"
@@ -219,13 +227,13 @@ export default function Login() {
 
                 <button
                   type="submit"
-                  disabled={submitting || !isSupabaseConfigured}
+                  disabled={submitting || authBusy || !isSupabaseConfigured}
                   className="group flex w-full items-center justify-center gap-2.5 rounded-lg bg-brand-blue py-3 text-[13px] font-bold uppercase tracking-[0.12em] text-white shadow-sm transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {submitting ? (
+                  {submitting || authBusy ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      Signing in…
+                      {submitting || isSigningIn ? "Signing in…" : "Checking session…"}
                     </>
                   ) : (
                     <>

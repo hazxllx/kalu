@@ -55,6 +55,7 @@ const publicPage = (loader) => {
 };
 
 // Registration
+const PersonnelRegistration = publicPage(() => import('@/features/registration/pages/PersonnelRegistration'));
 const RegistrationTypeSelection = publicPage(
   () =>
     import(
@@ -553,7 +554,7 @@ const AppRoutes = () => (
     />
     <Route
       path="/register/personnel"
-      element={<Navigate to="/register" replace />}
+      element={<PersonnelRegistration />}
     />
     <Route
       path="/registration-success"
@@ -1053,13 +1054,13 @@ const AppRoutes = () => (
           path="households/:id"
           element={<HouseholdRiskDetail />}
         />
-        <Route
+<Route
           path="trends"
           element={<HealthTrends />}
         />
         <Route
           path="barangays"
-          element={<Navigate to="/app/health_supervisor/dashboard" replace />}
+          element={<Navigate to="/app/health_supervisor/trends" replace />}
         />
         <Route
           path="reports"
@@ -1123,7 +1124,7 @@ const AppRoutes = () => (
           element={<RhuConsultation />}
         />
 
-        {/* RHU Incoming Referrals is a triage-station workflow; PHN/HS tracking stays in HealthReferrals. */}
+        {/* The referral inbox is recipient-scoped; only starting triage remains station-gated. */}
         <Route
           path="certificates/new"
           element={<CertificateComposer />}

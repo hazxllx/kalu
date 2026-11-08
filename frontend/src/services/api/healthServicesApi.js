@@ -18,7 +18,7 @@ export const healthServicesApi = {
   // Municipality-scoped barangays + facilities + categories for the create form.
   reference: () => api.get('/health-services/reference'),
   // params: { mine: true, category }
-  list: (params) => api.get('/health-services', { params }),
+  list: (params, options) => api.get('/health-services', { ...options, params }),
   // Assignable personnel in the caller's municipality (managers only).
   personnel: () => api.get('/health-services/personnel'),
   get: (id) => api.get(`/health-services/${id}`),

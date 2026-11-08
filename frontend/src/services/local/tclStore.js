@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 /**
  * Target Client List (TCL) session store.
@@ -157,3 +158,4 @@ export const tclStore = {
 };
 
 export default tclStore;
+registerWorkingSetReset(() => { cache = []; listeners.forEach((listener) => listener()); });

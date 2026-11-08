@@ -28,17 +28,18 @@ const RULE = [110, 110, 110];
 const str = (v) => (v === undefined || v === null ? "" : String(v).trim());
 
 const fullName = (r) =>
-  [r?.first_name, r?.middle_name, r?.last_name, r?.suffix]
+  [r?.first_name || r?.firstName, r?.middle_name || r?.middleName, r?.last_name || r?.lastName, r?.suffix]
     .filter(Boolean)
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
 
-const ageFromBirthDate = (iso) => {
+const ageFromBirthDate = (iso, at = new Date()) => {
   if (!iso) return "";
   const d = new Date(String(iso).slice(0, 10) + "T00:00:00");
   if (Number.isNaN(d.getTime())) return "";
-  const now = new Date();
+  const now = new Date(at);
+  if (Number.isNaN(now.getTime())) return "";
   let age = now.getFullYear() - d.getFullYear();
   const m = now.getMonth() - d.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
@@ -61,23 +62,28 @@ const formatDate = (value) => {
  */
 export function renderReferralPdf(referral, branding = null) {
   if (!referral) return null;
-  const resident = referral.resident || {};
+  const legacy = referral.legacy_links?.[0]?.legacy_snapshot;
+  const snapshot = !referral.snapshot_synced_at && legacy?.patient_snapshot
+    ? legacy.patient_snapshot
+    : referral.patient_snapshot || referral.patientSnapshot;
+  const hasSnapshot = snapshot && Object.keys(snapshot).length > 0;
+  const resident = hasSnapshot ? snapshot : referral.resident || {};
   const patientName = fullName(resident) || str(referral.residentName) || str(referral.patient);
   const referralDate = str(referral.referralDate || referral.referral_date || referral.createdAt || referral.date);
   const scheduledAt = str(referral.scheduledAt || referral.scheduled_at || "");
-  const referralNo = str(referral.referralNo || referral.reference_no || "") || "";
+  const referralNo = str(referral.referralNo || referral.reference_no || referral.legacy_links?.[0]?.legacy_referral_id || referral.id);
   const sex = str(resident.sex || referral.sex || referral.gender);
-  const age = str(ageFromBirthDate(resident.birth_date || resident.birthDate) || referral.age || "");
-  const address = str(resident.current_address || resident.permanent_address || referral.address || resident.barangay || referral.barangay || "");
-  const referringPersonnel = str(referral.referringPersonnel || referral.referring_personnel || referral.referring_facility);
+  const age = str((hasSnapshot ? resident.age ?? ageFromBirthDate(resident.birth_date || resident.birthDate, referralDate || new Date()) : ageFromBirthDate(resident.birth_date || resident.birthDate)) || referral.age || "");
+  const address = str(resident.current_address || resident.currentAddress || resident.permanent_address || resident.permanentAddress || referral.address || resident.barangay || referral.barangay || "");
+  const referringPersonnel = str(referral.sender?.full_name || referral.referringPersonnel || referral.referring_personnel || legacy?.referring_personnel);
   const reason = str(referral.reason);
   const chiefComplaints = str(referral.chiefComplaints || referral.chief_complaints || reason);
   const medicalHistory = str(referral.medicalHistory || referral.medical_history || referral.notes || referral.healthHistory);
   const physicalExamFindings = str(referral.physicalExamFindings || referral.physical_exam_findings || referral.laboratoryTest || referral.laboratory_test || "");
   const impression = str(referral.impression || referral.destinationService || referral.destination_service || referral.impressionText || "");
   const destinationFacility = str(referral.destination_facility || referral.destinationFacility || referral.facility);
-  const laboratoryTest = str(referral.laboratory_test || referral.laboratoryTest);
-  const labRequired = Boolean(referral.laboratory_test_required ?? referral.laboratoryTestRequired);
+  const recipient = (referral.recipient_personnel_id || referral.recipientPersonnelId)
+    ? str(referral.recipient?.full_name || referral.recipientName) : "";
 
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   doc.setProperties({
@@ -196,6 +202,10 @@ export function renderReferralPdf(referral, branding = null) {
   thinRule(dateStart, PAGE_W - MARGIN, y + 5);
   y += 18;
 
+  labeledRule("Receiving facility:", MARGIN, y + 2, destinationFacility);
+  y += 20;
+  if (recipient) { labeledRule("Assigned recipient:", MARGIN, y + 2, recipient); y += 20; }
+
   // Patient information row
   setFont("normal", 10.5);
   doc.text("Name of Patient:", MARGIN, y + 2);
@@ -217,13 +227,15 @@ export function renderReferralPdf(referral, branding = null) {
 
   // --------------------------------------------------- free-writing fields
   const noteField = (label, value, lines) => {
-    ensure(lines * 15 + 24);
+    const content = str(value) ? doc.splitTextToSize(str(value), PAGE_W - 2 * MARGIN - 8) : [];
+    const rows = Math.max(lines, content.length);
+    ensure(Math.min(rows * 15 + 24, PAGE_H - MARGIN - 48));
     setFont("normal", 10.5);
     doc.text(label, MARGIN, y + 2);
     let ty = y + 12;
-    const rows = str(value) ? Math.max(1, lines) : lines;
     for (let i = 0; i < rows; i += 1) {
-      const textValue = str(value) && i === 0 ? str(value) : "";
+      if (ty + 15 > PAGE_H - 48) { doc.addPage(); ty = MARGIN; }
+      const textValue = content[i] || "";
       if (textValue) doc.text(textValue, MARGIN + 4, ty);
       thinRule(MARGIN + 4, PAGE_W - MARGIN, ty + 3);
       ty += 15;
@@ -231,11 +243,11 @@ export function renderReferralPdf(referral, branding = null) {
     y = ty + 4;
   };
 
-  noteField("Chief Complaints:", reason, 2);
-  noteField("Medical History:", notes, 2);
-  noteField("PPE:", labRequired ? laboratoryTest : "", 1);
-  noteField("Impression:", destinationService, 2);
-  noteField("Reason for Referral:", destinationFacility ? `For ${destinationFacility}` : "", 2);
+  noteField("Chief Complaints:", chiefComplaints, 2);
+  noteField("Medical History:", medicalHistory, 2);
+  noteField("PPE:", physicalExamFindings, 1);
+  noteField("Impression:", impression, 2);
+  noteField("Reason for Referral:", reason, 2);
 
   // ------------------------------------------------------------ signature
   ensure(110);

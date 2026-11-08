@@ -31,6 +31,8 @@ const text = (value) => String(value ?? '').trim();
 // endpoints validate against this before touching the database.
 const RESIDENT_ID_PATTERN = /^RES-\d{6}$/;
 const normalizeResidentId = (value) => text(value).toUpperCase();
+const CLAIM_FAILURE_MESSAGE = 'This resident record could not be linked to this account. Check your information or contact your Health Supervisor.';
+const CLAIM_UNAVAILABLE_MESSAGE = 'Resident account linking could not be confirmed. Please try again later.';
 
 const toResidentResult = (resident) => ({
   id: resident.id,
@@ -68,6 +70,45 @@ const activateIfVerified = async (resident, authUserId) => {
     }
   }
 };
+
+// A failed atomic proof is never permission to write an account link directly.
+// A same-owner reread can recover a committed claim whose response was lost.
+const claimWithCurrentProof = async ({ target, authUserId, birthDate, identityNo = null }) => {
+  const claim = identityNo ? repository.claimResidentForAccount : repository.activateResidentById;
+  if (typeof claim !== 'function') throw new ApiError(503, CLAIM_UNAVAILABLE_MESSAGE);
+  let linked;
+  let failure;
+  try {
+    linked = await claim.call(repository, identityNo
+      ? { authUserId, identityNo, birthDate }
+      : { authUserId, residentId: target.id, birthDate });
+  } catch (error) {
+    failure = error;
+  }
+  if (linked) {
+    if (linked.id !== target.id || linked.authUserId !== authUserId) {
+      throw new ApiError(503, CLAIM_UNAVAILABLE_MESSAGE);
+    }
+    return linked;
+  }
+  const current = repository.getResident ? await repository.getResident(target.id) : null;
+  if (current?.id === target.id && current.authUserId === authUserId) return current;
+  const code = failure?.code || failure?.details?.code;
+  if (failure && !['23505', '23514'].includes(code) && failure.statusCode !== 409) {
+    throw new ApiError(503, CLAIM_UNAVAILABLE_MESSAGE);
+  }
+  throw ApiError.conflict(CLAIM_FAILURE_MESSAGE);
+};
+
+const matchesOwnRegistration = (resident, payload) => (
+  normalizeResidentId(payload.residentId) === resident.id ||
+  (text(payload.birthDate) !== '' && text(payload.birthDate) === text(resident.birthDate) && (
+    (text(payload.identityNo) !== '' && text(payload.identityNo) === text(resident.identityNo)) ||
+    (text(payload.firstName) !== '' && text(payload.lastName) !== '' &&
+      text(payload.firstName).toLowerCase() === text(resident.firstName).toLowerCase() &&
+      text(payload.lastName).toLowerCase() === text(resident.lastName).toLowerCase())
+  ))
+);
 
 const validate = (payload) => {
   const errors = [];
@@ -163,7 +204,8 @@ export const registerResident = async ({ user, payload = {} }) => {
     // created by an earlier attempt that failed later in the flow (e.g. during
     // document upload). Return it instead of creating a duplicate or hard 409,
     // so the client can resume the remaining steps.
-    if (RETRYABLE_STATUSES.includes(existing.verificationStatus)) {
+    if (RETRYABLE_STATUSES.includes(existing.verificationStatus) || matchesOwnRegistration(existing, payload)) {
+      await activateIfVerified(existing, user.id);
       return toResidentResult(existing);
     }
     throw ApiError.conflict('A resident record is already linked to this account.');
@@ -178,8 +220,11 @@ export const registerResident = async ({ user, payload = {} }) => {
   // profile instead of creating a second one. Identity is confirmed by Resident
   // ID + date of birth (never name alone, per the duplicate-prevention rule).
   // ---------------------------------------------------------------------------
-  const claimResidentId = text(payload.residentId);
+  const claimResidentId = normalizeResidentId(payload.residentId);
   if (claimResidentId) {
+    if (!RESIDENT_ID_PATTERN.test(claimResidentId)) {
+      throw ApiError.unprocessable('Enter a valid Resident ID (for example, RES-000123).');
+    }
     const target = repository.getResident ? await repository.getResident(claimResidentId) : null;
     if (!target) {
       throw ApiError.unprocessable(
@@ -190,6 +235,7 @@ export const registerResident = async ({ user, payload = {} }) => {
       throw ApiError.conflict('This resident already has an account.');
     }
     if (target.authUserId === user.id) {
+      await activateIfVerified(target, user.id);
       return toResidentResult(target);
     }
     const dobMatches = text(target.birthDate) !== '' && text(target.birthDate) === text(fields.birthDate);
@@ -198,23 +244,18 @@ export const registerResident = async ({ user, payload = {} }) => {
         'The information provided does not match that resident record. Please verify your date of birth.',
       );
     }
-    let linked = repository.updateResident
-      ? await repository.updateResident(target.id, {
-        authUserId: user.id,
-        updatedAt: new Date().toISOString(),
-      })
-      : { ...target, authUserId: user.id };
-    if (repository.updateResident && Object.keys(minorFieldsFor(fields, target)).length) {
-      linked = await repository.updateResident(target.id, minorFieldsFor(fields, target));
+    let linked = await claimWithCurrentProof({ target, authUserId: user.id, birthDate: fields.birthDate });
+    if (repository.updateResident && Object.keys(minorFieldsFor(fields, linked)).length) {
+      linked = await repository.updateResident(linked.id, minorFieldsFor(fields, linked), { expectedUpdatedAt: linked.updatedAt });
+      if (linked?.id !== target.id || linked.authUserId !== user.id) throw ApiError.conflict(CLAIM_FAILURE_MESSAGE);
     }
-    const result = linked || { ...target, authUserId: user.id };
-    await activateIfVerified(result, user.id);
+    await activateIfVerified(linked, user.id);
     try {
       await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
     } catch {
       /* best-effort: do not block linking if confirmation fails */
     }
-    return toResidentResult(result);
+    return toResidentResult(linked);
   }
 
   const barangayRow = await repository.findBarangayByName(fields.barangay, user.municipalityId || null);
@@ -262,16 +303,8 @@ export const registerResident = async ({ user, payload = {} }) => {
       );
     }
     if (duplicate.authUserId === user.id) {
+      await activateIfVerified(duplicate, user.id);
       return toResidentResult(duplicate);
-    }
-
-    const hasClaimMatch = Boolean(
-      fields.identityNo || duplicate.identityNo || duplicate.birthDate || fields.birthDate,
-    );
-    if (!hasClaimMatch) {
-      throw ApiError.conflict(
-        'We found information that may already be associated with an existing KALUSAGAP account. Please sign in or complete the verification process.',
-      );
     }
 
     const isValidAuthUserId = typeof user?.id === 'string' && /^[0-9a-fA-F-]{36}$/.test(user.id.trim());
@@ -281,38 +314,23 @@ export const registerResident = async ({ user, payload = {} }) => {
       );
     }
 
-    // Link the SPECIFIC unlinked record we matched. The atomic claim RPC is
-    // used only when the match was by identity number (it re-checks identity +
-    // DOB and that auth_user_id is still null). Otherwise — the common case
-    // where a staff-created profile has no identity number — we link the found
-    // record directly by its id so we never create a duplicate.
+    // Identity-number and staff-created name/DOB matches both require an atomic
+    // claim. The ID RPC rechecks the specific record and submitted DOB.
     const matchedByIdentity = Boolean(
       fields.identityNo &&
         duplicate.identityNo &&
         String(fields.identityNo).trim() === String(duplicate.identityNo).trim(),
     );
 
-    let claimed = null;
-    if (matchedByIdentity && repository.claimResidentForAccount) {
-      claimed = await repository.claimResidentForAccount({
-        authUserId: user.id,
-        identityNo: fields.identityNo,
-        birthDate: fields.birthDate || duplicate.birthDate || null,
-      });
-    }
-
-    if (!claimed) {
-      claimed = repository.updateResident
-        ? await repository.updateResident(duplicate.id, {
-          authUserId: user.id,
-          updatedAt: new Date().toISOString(),
-        })
-        : { ...duplicate, authUserId: user.id };
-    }
-
-    let linkedResident = claimed || { ...duplicate, authUserId: user.id };
-    if (repository.updateResident && Object.keys(minorFieldsFor(fields, duplicate)).length) {
-      linkedResident = await repository.updateResident(duplicate.id, minorFieldsFor(fields, duplicate));
+    let linkedResident = await claimWithCurrentProof({
+      target: duplicate,
+      authUserId: user.id,
+      birthDate: fields.birthDate,
+      identityNo: matchedByIdentity ? fields.identityNo : null,
+    });
+    if (repository.updateResident && Object.keys(minorFieldsFor(fields, linkedResident)).length) {
+      linkedResident = await repository.updateResident(linkedResident.id, minorFieldsFor(fields, linkedResident), { expectedUpdatedAt: linkedResident.updatedAt });
+      if (linkedResident?.id !== duplicate.id || linkedResident.authUserId !== user.id) throw ApiError.conflict(CLAIM_FAILURE_MESSAGE);
     }
     await activateIfVerified(linkedResident, user.id);
     try {
@@ -325,7 +343,9 @@ export const registerResident = async ({ user, payload = {} }) => {
 
   const ids = await repository.nextResidentIds();
 
-  const resident = await repository.insertResident({
+  let resident;
+  try {
+    resident = await repository.insertResident({
     ...ids,
     authUserId: user.id,
     firstName: fields.firstName,
@@ -356,11 +376,19 @@ export const registerResident = async ({ user, payload = {} }) => {
     submittedForVerificationAt: new Date().toISOString(),
     createdById: user.id,
     createdByRole: user.role,
-  });
+    });
+  } catch (error) {
+    if ((error?.code || error?.details?.code) !== '23505') throw error;
+    const current = await repository.getResidentByAuthUserId(user.id);
+    if (current?.authUserId !== user.id || !matchesOwnRegistration(current, payload)) {
+      throw ApiError.conflict('A resident record could not be created for this account. Check your information or contact your Health Supervisor.');
+    }
+    resident = current;
+    await activateIfVerified(resident, user.id);
+  }
 
-  const supabase = getServiceClient();
   try {
-    await supabase.auth.admin.updateUserById(user.id, { email_confirm: true });
+    await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
   } catch {
     /* best-effort: do not block registration if confirmation fails */
   }
@@ -481,27 +509,7 @@ export const activateExistingResident = async ({ user, residentId, birthDate } =
     throw ApiError.unprocessable('The information provided does not match that resident record. Please check your date of birth.');
   }
 
-  // Atomic, race-safe link.
-  let linked = null;
-  if (repository.activateResidentById) {
-    linked = await repository.activateResidentById({ authUserId: user.id, residentId: id, birthDate: dob });
-    if (!linked) {
-      // The record changed between the read and the claim. Resolve why.
-      const after = repository.getResident ? await repository.getResident(id) : null;
-      if (after?.authUserId && after.authUserId !== user.id) {
-        throw ApiError.conflict(
-          'This resident record already has an account. Please log in, or use account recovery if you have forgotten your password.',
-        );
-      }
-      throw ApiError.conflict('This resident record could not be activated. Please try again or contact your Health Supervisor.');
-    }
-  } else if (repository.updateResident) {
-    linked = await repository.updateResident(id, { authUserId: user.id, updatedAt: new Date().toISOString() });
-  } else {
-    linked = { ...target, authUserId: user.id };
-  }
-
-  const result = linked || { ...target, authUserId: user.id };
+  const result = await claimWithCurrentProof({ target, authUserId: user.id, birthDate: dob });
   await activateIfVerified(result, user.id);
   try {
     await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });

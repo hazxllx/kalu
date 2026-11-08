@@ -1,97 +1,42 @@
 import React from "react";
+import EmptyState from "@/components/common/EmptyState";
+import ErrorState from "@/components/common/ErrorState";
 
-/**
- * Top 3 Health Trends — the Health Supervisor dashboard replacement for the
- * former Community Health Risk Overview.
- *
- * It lists the most frequently recorded conditions for the selected reporting
- * period, ranked 1–3, with the recorded case count. A trend indicator
- * (increasing / decreasing / unchanged) is shown ONLY when a comparable
- * previous period supplied data; otherwise the case count is shown on its own.
- *
- * All figures come from the already-scoped, already-classified analytics
- * response passed in by the dashboard. No condition, count or direction is ever
- * fabricated here.
- */
+/** A labelled count chart derived only from recorded condition totals. */
+export default function TopHealthTrends({ trends = [], loading = false, error = "", onRetry, compact = false }) {
+  if (loading) return <p role="status" className="py-5 text-ui text-brand-gray">Loading recorded conditions...</p>;
+  if (error) return <ErrorState compact title="Health conditions unavailable" message={error} onRetry={onRetry} />;
+  if (!trends.length) return <EmptyState compact title="No classified conditions recorded" description="Condition totals appear when matching complaints are recorded in this reporting period." />;
 
-// Trend text carries its own label so the meaning never depends on colour or an
-// arrow alone (accessibility: status is not communicated by colour only).
-const TREND_LABELS = {
-  increasing: "Increasing",
-  decreasing: "Decreasing",
-  unchanged: "Unchanged",
-};
-
-const TREND_GLYPHS = {
-  increasing: "\u2191",
-  decreasing: "\u2193",
-  unchanged: "\u2192",
-};
-
-const TREND_TONES = {
-  increasing: "text-brand-danger",
-  decreasing: "text-brand-green",
-  unchanged: "text-brand-gray",
-};
-
-function TrendIndicator({ direction }) {
-  if (!direction) return null;
+  const maximum = Math.max(...trends.flatMap((trend) => [trend.value, trend.previousValue || 0]));
+  const comparing = trends.some((trend) => trend.direction !== null);
   return (
-    <span
-      className={`inline-flex items-center gap-1 text-[11px] font-medium ${TREND_TONES[direction] || "text-brand-gray"}`}
-    >
-      <span aria-hidden="true">{TREND_GLYPHS[direction]}</span>
-      {TREND_LABELS[direction]}
-    </span>
+    <div className={compact ? "hs-conditions" : "pt-3"}>
+      <div className={`${compact ? "mb-2" : "mb-3"} flex flex-wrap items-center justify-between gap-2 text-caption text-brand-gray`}>
+        <span>Recorded cases</span>
+        {comparing && <span className="flex items-center gap-3"><span className="inline-flex items-center gap-1"><span className="h-1 w-3 bg-brand-blue" aria-hidden="true" />Current</span><span className="inline-flex items-center gap-1"><span className="h-2 w-px bg-slate-400" aria-hidden="true" />Previous</span></span>}
+      </div>
+      <ol className={compact ? "space-y-2.5" : "space-y-3.5"} aria-label="Most recorded conditions by case count">
+        {trends.map((trend) => (
+          <li key={trend.name} className="min-w-0">
+            <div className="mb-1.5 flex items-baseline justify-between gap-3">
+              <span className="min-w-0 text-ui font-medium text-brand-ink">{trend.name}</span>
+              <span className="flex shrink-0 items-baseline gap-2"><span className="font-stat text-base font-semibold tabular-nums text-brand-ink">{trend.value.toLocaleString()}</span><TrendIndicator trend={trend} /></span>
+            </div>
+            <div className="relative h-1 bg-brand-bg" role="img" aria-label={`${trend.name}: ${trend.value} recorded cases${trend.previousValue !== null ? `, previously ${trend.previousValue}` : ""}`}>
+              <div className="h-1 bg-brand-blue" style={{ width: `${trend.value / maximum * 100}%` }} />
+              {trend.direction && <span aria-hidden="true" className="absolute -top-0.5 h-2 w-px bg-slate-400" style={{ left: `calc(${(trend.previousValue || 0) / maximum * 100}% - 1px)` }} />}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
-export default function TopHealthTrends({
-  trends = [],
-  loading = false,
-  error = "",
-  emptyMessage = "No health trends available for this reporting period.",
-}) {
-  return (
-    <div className="mt-1">
-      {loading ? (
-        <div className="space-y-3" aria-busy="true">
-          {[0, 1, 2].map((row) => (
-            <div key={row} className="animate-pulse space-y-2 border-b border-brand-border pb-3 last:border-b-0 last:pb-0">
-              <div className="h-3 w-2/3 rounded-sm bg-brand-border/70" />
-              <div className="h-2.5 w-1/3 rounded-sm bg-brand-border/50" />
-            </div>
-          ))}
-        </div>
-      ) : error ? (
-        <p className="py-3 text-xs text-brand-gray">{error}</p>
-      ) : trends.length === 0 ? (
-        <p className="py-3 text-xs text-brand-gray">{emptyMessage}</p>
-      ) : (
-        <ol className="divide-y divide-brand-border">
-          {trends.map((trend) => (
-            <li key={trend.name} className="flex items-center gap-3 py-3 first:pt-1 last:pb-1">
-              <span className="w-6 shrink-0 font-stat text-sm font-semibold text-brand-blue">
-                {String(trend.rank).padStart(2, "0")}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-brand-ink" title={trend.name}>
-                  {trend.name}
-                </p>
-              </div>
-              <div className="shrink-0 text-right">
-                <p className="font-stat text-sm font-semibold text-brand-ink">
-                  {trend.value}
-                  <span className="ml-1 text-[11px] font-normal text-brand-gray">
-                    {trend.value === 1 ? "case" : "cases"}
-                  </span>
-                </p>
-                <TrendIndicator direction={trend.direction} />
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  );
+function TrendIndicator({ trend }) {
+  if (!trend.direction || !Number.isFinite(trend.previousValue)) return null;
+  const glyph = trend.direction === "up" ? "+" : trend.direction === "down" ? "-" : "=";
+  const label = `Previous period: ${trend.previousValue.toLocaleString()} recorded cases`;
+  return <span className="inline-flex shrink-0 text-caption leading-none text-brand-gray" title={label} aria-label={label}>{glyph}{Math.abs(trend.value - trend.previousValue)}</span>;
 }

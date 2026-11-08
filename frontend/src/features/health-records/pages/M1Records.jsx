@@ -1381,7 +1381,7 @@ export default function M1Records() {
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue"
                 >
-                  <option value="All">All statuses</option>
+                  <option value="All">All Status</option>
                   {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>

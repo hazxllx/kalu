@@ -27,6 +27,7 @@ const makeSupabase = (resolve) => {
       lte(c, v) { ctx.filters.lte = { c, v }; return chain; },
       order() { return chain; },
       limit() { return chain; },
+      range() { return chain; },
       maybeSingle() { ctx.single = true; return Promise.resolve(resolve(ctx)); },
       single() { ctx.single = true; return Promise.resolve(resolve(ctx)); },
       then(onF, onR) { return Promise.resolve(resolve(ctx)).then(onF, onR); },
@@ -50,10 +51,11 @@ const plans = [
   { id: 'p3', resident_id: 'r3', barangay_id: 'b1', facility_type: 'BHC', planned_date: '2026-01-10', note: '', status: 'Cancelled', created_at: '2026-01-04T09:00:00Z' },
 ];
 const residents = [
-  { id: 'r1', first_name: 'Juana', middle_name: '', last_name: 'Dela Cruz', barangay: 'San Isidro' },
-  { id: 'r2', first_name: 'Pedro', middle_name: 'S', last_name: 'Santos', barangay: 'San Isidro' },
-  { id: 'r3', first_name: 'Maria', middle_name: '', last_name: 'Reyes', barangay: 'San Isidro' },
+  { id: 'r1', first_name: 'Juana', middle_name: '', last_name: 'Dela Cruz', barangay: 'San Isidro', municipality_id: 'm1', barangay_id: 'b1' },
+  { id: 'r2', first_name: 'Pedro', middle_name: 'S', last_name: 'Santos', barangay: 'San Isidro', municipality_id: 'm1', barangay_id: 'b1' },
+  { id: 'r3', first_name: 'Maria', middle_name: '', last_name: 'Reyes', barangay: 'San Isidro', municipality_id: 'm1', barangay_id: 'b1' },
 ];
+const joinedPlans = plans.map((plan) => ({ ...plan, resident: residents.find((resident) => resident.id === plan.resident_id) }));
 const attendance = [
   { id: 'a1', resident_id: 'r1', attendance_status: 'attended', attended_at: '2026-01-12T08:30:00Z', scheduled_date: '2026-01-12' },
 ];
@@ -61,7 +63,7 @@ const attendance = [
 test('listServiceRegistrations returns registered residents with attendance and counts (municipality-wide role)', async () => {
   const supabase = makeSupabase((ctx) => {
     if (ctx.table === 'health_services') return ok(bhcService);
-    if (ctx.table === 'visit_plans') return ok(plans);
+    if (ctx.table === 'visit_plans') return ok(joinedPlans);
     if (ctx.table === 'residents') return ok(residents);
     if (ctx.table === 'health_service_attendance') return ok(attendance);
     return ok(null);
@@ -91,7 +93,7 @@ test('listServiceRegistrations confines a barangay-scoped role to their own bara
     if (ctx.table === 'health_services') return ok(bhcService);
     if (ctx.table === 'visit_plans') {
       planFilters = ctx.filters.eq;
-      return ok(plans);
+      return ok(joinedPlans);
     }
     if (ctx.table === 'residents') return ok(residents);
     if (ctx.table === 'health_service_attendance') return ok(attendance);
@@ -100,7 +102,8 @@ test('listServiceRegistrations confines a barangay-scoped role to their own bara
 
   await listServiceRegistrations({ user: supervisor, serviceId: SERVICE_ID, supabase });
   assert.equal(planFilters.service_id, SERVICE_ID);
-  assert.equal(planFilters.barangay_id, 'b1'); // scoped to the supervisor's own barangay
+  assert.equal(planFilters['resident.municipality_id'], 'm1');
+  assert.equal(planFilters['resident.barangay_id'], 'b1'); // current resident scope, not a plan snapshot
 });
 
 test('listServiceRegistrations rejects a service outside the caller scope with 404', async () => {

@@ -58,6 +58,8 @@ const base64ToBytes = (value) => {
 
 /** @type {CryptoKey | null} */
 let cachedKey = null;
+/** Single-flight guard so concurrent tabs/modules never overwrite each other's key. */
+let keyCreation = null;
 
 const importRawKey = (cryptoObj, raw) =>
   cryptoObj.subtle.importKey('raw', base64ToBytes(raw), { name: 'AES-GCM' }, false, [
@@ -77,51 +79,74 @@ const readKeyMaterial = async (cryptoObj) => {
 /**
  * Create and persist a per-device key.
  *
- * Preferred form: a NON-EXTRACTABLE CryptoKey stored via IndexedDB structured
- * clone — the key material is never persisted as readable bytes. When the
- * environment cannot clone a CryptoKey (e.g. `fake-indexeddb` in unit tests),
- * fall back to exporting raw bytes; this is logged so the degraded mode is
- * visible. The fallback is a test/environment concern, not the browser path.
+ * The key is written via IndexedDB `add` so only the FIRST concurrent creator
+ * wins: a second tab/module that started from the same empty store observes a
+ * durable key already present and reuses it, instead of overwriting the first
+ * tab's key and making its earlier ciphertexts unreadable.
  */
 const createAndStoreKey = async (cryptoObj) => {
-  try {
-    const key = await cryptoObj.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
-      'encrypt',
-      'decrypt',
-    ]);
-    await db.keys.put({
-      id: KEY_RECORD_ID,
-      cryptoKey: key,
-      kind: 'CryptoKey',
-      createdAt: new Date().toISOString(),
-    });
-    return key;
-  } catch {
-    /* fall through to raw */
-  }
-  const bytes = new Uint8Array(32);
-  cryptoObj.getRandomValues(bytes);
-  await db.keys.put({
+  const generated = await cryptoObj.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+  const record = {
     id: KEY_RECORD_ID,
-    raw: bytesToBase64(bytes),
-    kind: 'raw',
+    cryptoKey: generated,
+    kind: 'CryptoKey',
     createdAt: new Date().toISOString(),
-  });
-  return importRawKey(cryptoObj, bytesToBase64(bytes));
+  };
+  try {
+    await db.keys.add(record);
+    return generated;
+  } catch {
+    // A duplicate key was already claimed by another module/tab (or the
+    // environment cannot structured-clone a CryptoKey). Adopt the persisted
+    // winner, falling back to raw bytes only when the environment cannot
+    // store a CryptoKey at all.
+    const existing = await readKeyMaterial(cryptoObj);
+    if (existing) return existing;
+    const bytes = new Uint8Array(32);
+    cryptoObj.getRandomValues(bytes);
+    const rawRecord = {
+      id: KEY_RECORD_ID,
+      raw: bytesToBase64(bytes),
+      kind: 'raw',
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      await db.keys.add(rawRecord);
+      return importRawKey(cryptoObj, bytesToBase64(bytes));
+    } catch {
+      const adopted = await readKeyMaterial(cryptoObj);
+      if (adopted) return adopted;
+      throw new Error('Could not claim the device encryption key.');
+    }
+  }
 };
 
 const getKey = async () => {
   if (cachedKey) return cachedKey;
   const cryptoObj = subtleCrypto();
   if (!cryptoObj) return null;
-  const existing = await readKeyMaterial(cryptoObj);
-  cachedKey = existing || (await createAndStoreKey(cryptoObj));
-  return cachedKey;
+  if (!keyCreation) {
+    keyCreation = (async () => {
+      try {
+        const existing = await readKeyMaterial(cryptoObj);
+        cachedKey = existing || (await createAndStoreKey(cryptoObj));
+        return cachedKey;
+      } finally {
+        keyCreation = null;
+      }
+    })();
+  }
+  return keyCreation;
 };
 
 /** Drop the in-memory key so a purged database cannot keep decrypting. */
 export const resetCachedKey = () => {
   cachedKey = null;
+  keyCreation = null;
 };
 
 /**

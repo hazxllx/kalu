@@ -2,43 +2,33 @@ import React, { createContext, useState, useContext, useEffect, useCallback, use
 
 import { supabase, isSupabaseConfigured, supabaseConfigurationError } from '@/lib/supabase';
 import { authApi } from '@/services/api';
-import { authFailureMessage } from '../../../shared/authConnectivity.js';
+import { authFailureMessage, isAuthNetworkFailure } from '../../../shared/authConnectivity.js';
+import { createAuthOwnerLifecycle } from '@/services/auth/authOwnerLifecycle';
+import { resetLegacyWorkingSets } from '@/services/local/accountWorkingSets';
+import { clearAccountSensitiveCache } from '@/services/offline/records';
+import { setOfflineOwnerResolver } from '@/services/offline/db';
+import { resetSyncEngine } from '@/services/offline/syncEngine';
+import { invalidateVerifiedPermissions } from '@/services/accessControl/permissionCache';
+import {
+  cacheServerVerifiedProfile,
+  invalidateServerVerifiedProfile,
+  readServerVerifiedProfile,
+  readStoredVerifiedProfileScope,
+  verifiedProfileScopeKey,
+} from '@/services/offline/verifiedProfileCache';
 
 const AuthContext = createContext(null);
 
-/**
- * Reads the KALUSAGAP application role from a Supabase user. The role lives in
- * the account (app_metadata/user_metadata) — it is never selected by the user.
- * This is the FALLBACK source; the authoritative role/status/coverage live in
- * the `profiles` table and are resolved through the backend (see below).
- */
-const roleFromSupabaseUser = (user) =>
-  user?.app_metadata?.role || user?.user_metadata?.role || null;
-
+/** Auth identity only. Permissions and coverage require the server profile. */
 const toUser = (supabaseUser) => {
-  const metadata = supabaseUser?.app_metadata || {};
   const userMetadata = supabaseUser?.user_metadata || {};
   return {
     id: supabaseUser.id,
     email: supabaseUser.email,
     name: userMetadata?.name || supabaseUser.email,
-    role: roleFromSupabaseUser(supabaseUser),
-    // Barangay assignment for the barangay-scoped Health Supervisor role.
-    // Comes from the account metadata — never chosen by the user. `barangay`
-    // is kept as a backward compatible alias used by other roles. PHNs are
-    // RHU-based and are never assigned a barangay.
-    assignedBarangay:
-      metadata?.assignedBarangay ||
-      userMetadata?.assignedBarangay ||
-      metadata?.barangay ||
-      userMetadata?.barangay ||
-      null,
-    barangay:
-      metadata?.assignedBarangay ||
-      userMetadata?.assignedBarangay ||
-      metadata?.barangay ||
-      userMetadata?.barangay ||
-      null,
+    role: null,
+    assignedBarangay: null,
+    barangay: null,
   };
 };
 
@@ -51,6 +41,7 @@ const profileToFrontendUser = (profileUser) => ({
   status: profileUser.status ?? null,
   assignedBarangay: profileUser.barangay ?? null,
   barangay: profileUser.barangay ?? null,
+  barangayId: profileUser.barangayId ?? null,
   municipalityId: profileUser.municipalityId ?? null,
   municipality: profileUser.municipality ?? null,
   facilityId: profileUser.facilityId ?? null,
@@ -71,16 +62,15 @@ const profileToFrontendUser = (profileUser) => ({
  * Role, account status and municipality/barangay/facility coverage are read
  * from the `profiles` table on the server — never from the client.
  *
- * Returns the profile user, or null when the backend is unreachable (callers
- * fall back to the Supabase auth metadata). Throws only for account-state
- * rejections (HTTP 403: no profile, disabled or pending activation) — the
- * caller should then end the session. A 503/network failure is NOT an account
- * problem and must never be reported as one.
+ * Returns a verified profile or throws. Metadata never grants an application
+ * role. Only genuine account/session rejection ends authentication; temporary
+ * profile failures retain the SDK session without admitting protected pages.
  */
-const fetchProfileUser = async () => {
-  // apiClient attaches the current Supabase access token automatically.
-  const payload = await authApi.me();
-  return payload?.user || null;
+const fetchProfileUser = async (ownerId, accessToken) => {
+  // Bind cache eligibility to the exact token this server response verified.
+  const payload = await authApi.me({ ownerId, headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!payload?.user?.role || payload.user.id !== ownerId) throw Object.assign(new Error('The server did not return the current account profile.'), { code: 'AUTH_PROFILE_INVALID' });
+  return payload.user;
 };
 
 /**
@@ -88,11 +78,22 @@ const fetchProfileUser = async () => {
  * session is no longer valid" (401) — the only cases that should end a session.
  * Anything else (5xx, 503, network) is a temporary service problem.
  */
-const isAccountRejection = (err) => err?.status === 403 || err?.status === 401;
+const isAccountRejection = (err) => !['owner-changed', 'AUTH_SESSION_CHANGED'].includes(err?.code) && (err?.status === 403 || err?.status === 401);
+
+const sessionError = (code) => Object.assign(new Error(authFailureMessage({ code })), { code });
+const profileFailureMessage = (error) => {
+  if (isAccountRejection(error)) return error.message || 'Your account is not verified or permitted to sign in.';
+  if (isAuthNetworkFailure(error)) return 'Cannot reach your account profile. Check your connection and try again; your Supabase session has been retained.';
+  return 'Your account profile server is unavailable or could not verify your profile. Please try again; your Supabase session has been retained.';
+};
 
 /** Message shown when the profile cannot be read for a non-account reason. */
 const TRANSIENT_PROFILE_NOTICE =
-  'Signed in, but your profile could not be loaded from the server (service unavailable). Some details may be incomplete — refresh in a moment.';
+  'Your session was restored, but the server account profile is unavailable. Protected pages remain unavailable until the profile can be verified.';
+const CACHED_PROFILE_NOTICE =
+  'Offline access is using a previously server-verified account profile and unexpired cached permissions. Reconnect to verify current access; online authorization remains server-controlled.';
+const permitsCachedRestore = (error) => error?.code !== 'AUTH_PROFILE_INVALID' && !isAccountRejection(error) &&
+  (isAuthNetworkFailure(error) || Number(error?.status ?? error?.statusCode) >= 500);
 
 /**
  * True when the current page load is a Supabase password-recovery flow.
@@ -136,26 +137,166 @@ export const AuthProvider = ({ children }) => {
   // resident registers. The route guard waits on this so it never rejects a
   // session whose role has not finished loading from the `profiles` table.
   const [isResolvingProfile, setIsResolvingProfile] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [authError, setAuthError] = useState(null);
   // Non-blocking warning: the session is valid but the profile layer failed.
   const [authNotice, setAuthNotice] = useState(null);
-  // The last user resolved from the `profiles` table. Kept so a later auth
-  // event (e.g. TOKEN_REFRESHED) cannot downgrade the session back to
-  // metadata-only values and drop role/status/coverage.
+  const [profileAccess, setProfileAccess] = useState(null);
+  const profileAccessRef = useRef(null);
+  // Previously server-confirmed profile. Token changes require a fresh proof;
+  // unchanged-session events do not downgrade it to metadata-only values.
   const resolvedProfileUser = useRef(null);
   // The auth user id currently being resolved, to de-duplicate concurrent
   // profile fetches triggered by rapid auth-state events.
   const resolvingForRef = useRef(null);
+  const currentSessionRef = useRef(null);
+  const sessionEpochRef = useRef(0);
+  const profileRequestRef = useRef(null);
+  const loginRequestRef = useRef(null);
+  const logoutRequestRef = useRef(null);
   // True once a PASSWORD_RECOVERY event is seen (or the page loaded inside the
   // recovery flow). While set, auth-state changes for the recovery session are
   // ignored so the ResetPassword page can own it — see `isRecoveryFlow`.
   const recoveryActiveRef = useRef(false);
+  const lifecycleRef = useRef(null);
+  if (!lifecycleRef.current) lifecycleRef.current = createAuthOwnerLifecycle({
+    bindOwner: setOfflineOwnerResolver,
+    clearCache: clearAccountSensitiveCache,
+    resetStores: resetLegacyWorkingSets,
+    stopSync: resetSyncEngine,
+  });
+
+  useEffect(() => {
+    const lifecycle = lifecycleRef.current;
+    lifecycle.install();
+    return () => { lifecycle.dispose().catch((error) => console.error('Could not clean disposable account cache.', error)); };
+  }, []);
+
+  const invalidateProfileAccess = useCallback(async (ownerId = null, options = {}) => {
+    const cachedOwner = await invalidateServerVerifiedProfile(ownerId, options);
+    if (ownerId || cachedOwner) await invalidateVerifiedPermissions(ownerId || cachedOwner);
+  }, []);
 
   const applyUser = useCallback((nextUser, nextSession = null) => {
+    const nextOwner = nextSession?.user?.id || nextUser?.id || null;
+    const previousOwner = currentSessionRef.current?.user?.id || null;
+    if (previousOwner !== nextOwner) {
+      sessionEpochRef.current += 1;
+      resolvedProfileUser.current = null;
+      profileAccessRef.current = null;
+      setProfileAccess(null);
+      resolvingForRef.current = null;
+      profileRequestRef.current = null;
+      void invalidateProfileAccess(previousOwner, previousOwner ? {} : { keepOwnerId: nextOwner }).catch(() => {});
+    }
+    currentSessionRef.current = nextSession;
+    lifecycleRef.current.change(nextOwner, nextSession?.expires_at ? nextSession.expires_at * 1000 : null)
+      .catch((error) => console.error('Could not clean disposable account cache. Pending work was retained.', error));
     setUser(nextUser);
     setRole(nextUser?.role || null);
     setSession(nextSession);
+  }, [invalidateProfileAccess]);
+
+  const sessionGuard = useCallback((ownerId) => {
+    const epoch = sessionEpochRef.current;
+    return () => epoch === sessionEpochRef.current && currentSessionRef.current?.user?.id === ownerId &&
+      currentSessionRef.current.expires_at * 1000 > Date.now();
   }, []);
+
+  const loadSessionProfile = useCallback((ownerId) => {
+    const epoch = sessionEpochRef.current;
+    const existing = profileRequestRef.current;
+    if (existing?.ownerId === ownerId && existing.epoch === epoch) return existing.promise;
+    const request = { ownerId, epoch, promise: null };
+    request.promise = (async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const verifiedSession = currentSessionRef.current;
+        try {
+          const profileUser = await fetchProfileUser(ownerId, verifiedSession?.access_token);
+          if (epoch === sessionEpochRef.current && currentSessionRef.current?.user?.id === ownerId &&
+              currentSessionRef.current.access_token !== verifiedSession?.access_token) {
+            if (attempt === 0) continue;
+            throw sessionError('AUTH_SESSION_CHANGED');
+          }
+          return { profileUser, verifiedSession };
+        } catch (error) {
+          // A refreshed token is verified once, never rebound from unsigned
+          // claims or cached role metadata after an old-token response.
+          if (attempt === 0 && error?.status === 401 && epoch === sessionEpochRef.current &&
+              currentSessionRef.current?.user?.id === ownerId && currentSessionRef.current.access_token !== verifiedSession?.access_token) continue;
+          throw error;
+        }
+      }
+    })().finally(() => {
+      if (profileRequestRef.current === request) profileRequestRef.current = null;
+    });
+    profileRequestRef.current = request;
+    return request.promise;
+  }, []);
+
+  const rememberServerProfile = useCallback(async ({ profileUser, verifiedSession }) => {
+    const nextUser = profileToFrontendUser(profileUser);
+    const guard = sessionGuard(nextUser.id);
+    const current = () => guard() && !logoutRequestRef.current && currentSessionRef.current?.access_token === verifiedSession?.access_token;
+    if (!current()) return null;
+    let previousScope = resolvedProfileUser.current?.id === nextUser.id
+      ? verifiedProfileScopeKey(resolvedProfileUser.current) : null;
+    if (!previousScope) {
+      try { previousScope = await readStoredVerifiedProfileScope(nextUser.id); } catch { /* unavailable disposable cache */ }
+    }
+    if (!current()) return null;
+    if (previousScope !== verifiedProfileScopeKey(nextUser)) {
+      // Known role/coverage/lifecycle changes fence old reads and clear only
+      // disposable data. Pending drafts and their protected bases stay durable.
+      resolvedProfileUser.current = null;
+      profileAccessRef.current = null;
+      setProfileAccess(null);
+      applyUser(toUser(currentSessionRef.current.user), currentSessionRef.current);
+      resetSyncEngine();
+      await invalidateProfileAccess(nextUser.id);
+      await lifecycleRef.current.cleanup(nextUser.id);
+    }
+    if (!current()) return null;
+    let cached = null;
+    try { cached = await cacheServerVerifiedProfile({ user: nextUser, session: verifiedSession, isOwnerCurrent: current }); }
+    catch { /* online profile remains authoritative when secure storage is unavailable */ }
+    if (!current()) return null;
+    resolvedProfileUser.current = nextUser;
+    profileAccessRef.current = { source: 'server', expiresAt: cached?.expiresAt ?? null };
+    setProfileAccess(profileAccessRef.current);
+    applyUser(nextUser, currentSessionRef.current);
+    setAuthNotice(null);
+    return nextUser;
+  }, [applyUser, invalidateProfileAccess, sessionGuard]);
+
+  const restoreCachedProfile = useCallback(async (ownerId) => {
+    const guard = sessionGuard(ownerId);
+    const current = () => guard() && !logoutRequestRef.current;
+    let snapshot;
+    try { snapshot = await readServerVerifiedProfile({ session: currentSessionRef.current, isOwnerCurrent: current }); }
+    catch { return false; }
+    if (!current() || !snapshot || snapshot.expiresAt <= Date.now()) return false;
+    resolvedProfileUser.current = snapshot.user;
+    profileAccessRef.current = { source: 'cache', verifiedAt: snapshot.verifiedAt, expiresAt: snapshot.expiresAt };
+    setProfileAccess(profileAccessRef.current);
+    applyUser(snapshot.user, currentSessionRef.current);
+    setAuthNotice(CACHED_PROFILE_NOTICE);
+    return true;
+  }, [applyUser, sessionGuard]);
+
+  const rejectSessionProfile = useCallback(async (ownerId) => {
+    const guard = sessionGuard(ownerId);
+    if (!guard()) return;
+    resolvedProfileUser.current = null;
+    profileAccessRef.current = null;
+    setProfileAccess(null);
+    applyUser(toUser(currentSessionRef.current.user), currentSessionRef.current);
+    await invalidateProfileAccess(ownerId).catch(() => {});
+    if (!guard()) return;
+    try { await supabase.auth.signOut(); } catch { /* rejected local profile stays blocked */ }
+    if (!currentSessionRef.current || currentSessionRef.current.user?.id === ownerId) applyUser(null, null);
+  }, [applyUser, invalidateProfileAccess, sessionGuard]);
 
   /**
    * Resolve the authoritative application profile (role/status/coverage from
@@ -165,197 +306,295 @@ export const AuthProvider = ({ children }) => {
    * database, never in the Supabase auth metadata. A 403/401 ends the session;
    * a transient service failure keeps the session and surfaces a notice.
    */
-  const resolveProfileForSession = useCallback(async (nextSession) => {
+  const resolveProfileForSession = useCallback(async (nextSession, { allowCachedRestore = false, force = false } = {}) => {
     const uid = nextSession?.user?.id;
     if (!uid || !supabase) return;
+    if (!force && resolvedProfileUser.current?.id === uid) return; // a queued duplicate INITIAL_SESSION already completed
     if (resolvingForRef.current === uid) return; // a resolve is already in flight
+    const guard = sessionGuard(uid);
     resolvingForRef.current = uid;
     setIsResolvingProfile(true);
     try {
-      const profileUser = await fetchProfileUser();
-      if (profileUser) {
-        resolvedProfileUser.current = profileToFrontendUser(profileUser);
-        applyUser(resolvedProfileUser.current, nextSession);
-      }
+      const verified = await loadSessionProfile(uid);
+      if (!guard()) return;
+      await rememberServerProfile(verified);
     } catch (err) {
+      if (!guard()) return;
       if (isAccountRejection(err)) {
-        await supabase.auth.signOut();
-        resolvedProfileUser.current = null;
-        applyUser(null, null);
+        await rejectSessionProfile(uid);
       } else {
-        setAuthNotice(TRANSIENT_PROFILE_NOTICE);
+        if (allowCachedRestore && permitsCachedRestore(err) && await restoreCachedProfile(uid)) return;
+        if (!guard()) return;
+        resolvedProfileUser.current = null;
+        profileAccessRef.current = null;
+        setProfileAccess(null);
+        applyUser(toUser(currentSessionRef.current.user), currentSessionRef.current);
+        setAuthNotice(profileFailureMessage(err));
       }
     } finally {
-      resolvingForRef.current = null;
-      setIsResolvingProfile(false);
+      if (guard()) { resolvingForRef.current = null; setIsResolvingProfile(false); }
     }
-  }, [applyUser]);
+  }, [applyUser, sessionGuard, loadSessionProfile, rememberServerProfile, rejectSessionProfile, restoreCachedProfile]);
 
   // --- Session restoration + auth-state subscription -----------------------
   useEffect(() => {
     let subscription;
-
-    const init = async () => {
-      if (isSupabaseConfigured && supabase) {
-        // A password-recovery link establishes a Supabase session purely so the
-        // user can set a new password. Do NOT resolve the profile or treat it as
-        // a sign-in here — the ResetPassword page owns that session. Resolving it
-        // could 403 for a pending account and sign the user out mid-reset.
-        const inRecovery = isRecoveryFlow();
-        if (inRecovery) recoveryActiveRef.current = true;
-
-        const { data } = await supabase.auth.getSession();
-        if (data?.session?.user && !inRecovery) {
-          applyUser(toUser(data.session.user), data.session);
-          // Refresh with the authoritative profile (role/status/coverage from
-          // the profiles table) when the backend is reachable. A 403/401 means
-          // the account was rejected or the session is invalid — end it. A
-          // service failure keeps the session and surfaces a notice instead.
-          try {
-            const profileUser = await fetchProfileUser();
-            if (profileUser) {
-              resolvedProfileUser.current = profileToFrontendUser(profileUser);
-              applyUser(resolvedProfileUser.current, data.session);
-            }
-          } catch (err) {
-            if (isAccountRejection(err)) {
-              await supabase.auth.signOut();
-              resolvedProfileUser.current = null;
-              applyUser(null, null);
-            } else {
-              setAuthNotice(TRANSIENT_PROFILE_NOTICE);
-            }
-          }
-        }
-        const listener = supabase.auth.onAuthStateChange((event, nextSession) => {
-          // Password recovery: flag it and leave the session untouched so the
-          // ResetPassword page can update the password. The follow-up SIGNED_IN
-          // for the same recovery session is ignored below.
-          if (event === 'PASSWORD_RECOVERY') {
-            recoveryActiveRef.current = true;
-            return;
-          }
-          // Once the recovery session is signed out (after a successful reset,
-          // or if the user leaves), clear the flag and the local user.
-          if (event === 'SIGNED_OUT') {
-            recoveryActiveRef.current = false;
-            resolvedProfileUser.current = null;
-            applyUser(null, null);
-            return;
-          }
-          // While a recovery session is active — or the page is still on the
-          // recovery route — never hijack it into a normal authenticated
-          // session (which would resolve the profile and risk a 403 signOut).
-          if ((recoveryActiveRef.current || isRecoveryFlow()) && nextSession?.user) {
-            return;
-          }
-
-          if (nextSession?.user) {
-            const resolved = resolvedProfileUser.current;
-            if (resolved && resolved.id === nextSession.user.id) {
-              // Keep the database-resolved role/status/coverage.
-              applyUser(resolved, nextSession);
-            } else {
-              // A new/unresolved session (e.g. a resident who just completed
-              // registration). Show the metadata identity immediately, then
-              // resolve the authoritative role from the profiles table — the
-              // resident role is stored there, not in the auth metadata, so
-              // without this the role would stay null and the route guard would
-              // reject the account with /unauthorized.
-              applyUser(toUser(nextSession.user), nextSession);
-              resolveProfileForSession(nextSession);
-            }
-          } else {
-            resolvedProfileUser.current = null;
-            applyUser(null, null);
-          }
-        });
-        subscription = listener.data?.subscription;
+    let active = true;
+    let liveEventSeen = false;
+    const deferredProfiles = new Set();
+    const acceptSession = (event, nextSession) => {
+      if (!active) return;
+      if (event === 'INITIAL_SESSION' && liveEventSeen) return;
+      if (event !== 'INITIAL_SESSION') liveEventSeen = true;
+      if (event === 'PASSWORD_RECOVERY') {
+        recoveryActiveRef.current = true;
+        if (loginRequestRef.current) loginRequestRef.current.cancelReason = 'AUTH_SESSION_CHANGED';
+        applyUser(null, null);
+        void invalidateProfileAccess().catch(() => {});
+        setIsResolvingProfile(false);
+        return;
       }
-
-      setIsLoadingAuth(false);
-      setAuthChecked(true);
+      if (event === 'SIGNED_OUT' || !nextSession?.user) {
+        recoveryActiveRef.current = false;
+        applyUser(null, null);
+        void invalidateProfileAccess().catch(() => {});
+        setIsResolvingProfile(false);
+        return;
+      }
+      // Do not consume or revoke the short-lived password-reset session.
+      if (recoveryActiveRef.current || isRecoveryFlow()) return;
+      if (!nextSession.access_token || !Number.isFinite(nextSession.expires_at) || nextSession.expires_at * 1000 <= Date.now()) {
+        applyUser(null, null);
+        void invalidateProfileAccess().catch(() => {});
+        setIsResolvingProfile(false);
+        setAuthNotice('Your session expired. Sign in again to access your records. Pending offline work remains protected.');
+        return;
+      }
+      const resolved = resolvedProfileUser.current;
+      const tokenChanged = currentSessionRef.current?.user?.id === nextSession.user.id &&
+        currentSessionRef.current?.access_token !== nextSession.access_token;
+      const loginRequest = loginRequestRef.current;
+      if (loginRequest?.ownerId && loginRequest.ownerId !== nextSession.user.id) {
+        loginRequest.cancelReason = 'AUTH_SESSION_CHANGED';
+        setIsSigningIn(false);
+      }
+      if (resolved?.id === nextSession.user.id && !tokenChanged) {
+        applyUser(resolved, nextSession);
+      } else {
+        resolvedProfileUser.current = null;
+        profileAccessRef.current = null;
+        setProfileAccess(null);
+        applyUser(toUser(nextSession.user), nextSession);
+        setIsResolvingProfile(true);
+        if (loginRequest && !loginRequest.cancelReason) return; // login owns this profile lookup
+        // Defer beyond GoTrue's notification/mutex, never call SDK methods
+        // recursively inside onAuthStateChange or start duplicate lookups.
+        const timer = setTimeout(() => {
+          deferredProfiles.delete(timer);
+          if (active) void resolveProfileForSession(currentSessionRef.current, { allowCachedRestore: event === 'INITIAL_SESSION' });
+        }, 0);
+        deferredProfiles.add(timer);
+      }
     };
+    const init = async () => {
+      try {
+        if (isSupabaseConfigured && supabase) {
+          recoveryActiveRef.current = isRecoveryFlow();
+          if (recoveryActiveRef.current) void invalidateProfileAccess().catch(() => {});
+          // Subscribe before awaiting profile I/O so sign-out/switches fence it.
+          subscription = supabase.auth.onAuthStateChange(acceptSession).data?.subscription;
+          const { data, error } = await supabase.auth.getSession();
+          if (error) throw error;
+          if (!active) return;
+          if (!liveEventSeen && data?.session?.user && !recoveryActiveRef.current) acceptSession('INITIAL_SESSION', data.session);
+        }
+      } catch (error) {
+        if (active) setAuthError({ message: authFailureMessage(error) });
+      } finally {
+        if (active) { setIsLoadingAuth(false); setAuthChecked(true); }
+      }
+    };
+    void init();
+    return () => {
+      active = false;
+      sessionEpochRef.current += 1;
+      profileRequestRef.current = null;
+      for (const timer of deferredProfiles) clearTimeout(timer);
+      subscription?.unsubscribe?.();
+    };
+  }, [applyUser, resolveProfileForSession, invalidateProfileAccess]);
 
-    init();
-    return () => subscription?.unsubscribe?.();
-  }, [applyUser]);
+  useEffect(() => {
+    if (!session?.expires_at || !session.user?.id) return;
+    const id = session.user.id;
+    const timer = setTimeout(() => {
+      if (lifecycleRef.current.ownerId === id && !lifecycleRef.current.currentOwner()) {
+        resolvedProfileUser.current = null;
+        applyUser(null, null);
+        setAuthNotice('Your session expired. Sign in again to access your records. Pending offline work remains protected.');
+      }
+    }, Math.max(0, session.expires_at * 1000 - Date.now()));
+    return () => clearTimeout(timer);
+  }, [session?.expires_at, session?.user?.id, applyUser]);
+
+  useEffect(() => {
+    if (profileAccess?.source !== 'cache' || !profileAccess.expiresAt || !session?.user?.id) return;
+    const ownerId = session.user.id;
+    const timer = setTimeout(() => {
+      if (currentSessionRef.current?.user?.id !== ownerId || profileAccessRef.current?.source !== 'cache') return;
+      resolvedProfileUser.current = null;
+      profileAccessRef.current = null;
+      setProfileAccess(null);
+      applyUser(toUser(currentSessionRef.current.user), currentSessionRef.current);
+      void invalidateProfileAccess(ownerId).catch(() => {});
+      setAuthNotice('Cached account access expired. Reconnect to verify your profile and permissions. Pending work remains protected.');
+    }, Math.max(0, profileAccess.expiresAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [profileAccess?.source, profileAccess?.expiresAt, session?.user?.id, applyUser, invalidateProfileAccess]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onRejectedPermissions = (event) => {
+      const ownerId = event.detail?.userId;
+      if (!ownerId || currentSessionRef.current?.user?.id !== ownerId) return;
+      void invalidateProfileAccess(ownerId).catch(() => {});
+      if (profileAccessRef.current?.source !== 'cache') return;
+      resolvedProfileUser.current = null;
+      profileAccessRef.current = null;
+      setProfileAccess(null);
+      applyUser(toUser(currentSessionRef.current.user), currentSessionRef.current);
+      setAuthNotice('Cached access was rejected. Reconnect to verify your current profile and permissions.');
+    };
+    window.addEventListener('kalusagap:permissions-invalidated', onRejectedPermissions);
+    return () => window.removeEventListener('kalusagap:permissions-invalidated', onRejectedPermissions);
+  }, [applyUser, invalidateProfileAccess]);
 
   /**
    * Log in with email + password. Returns the resolved role on success so the
    * caller can redirect to the correct dashboard.
    */
   const login = useCallback(async ({ email, password }) => {
+    if ((loginRequestRef.current && !loginRequestRef.current.cancelReason) || logoutRequestRef.current) throw sessionError('AUTH_IN_PROGRESS');
+    const request = { ownerId: null, cancelReason: null, credentials: null, session: null };
+    loginRequestRef.current = request;
+    setIsSigningIn(true);
     setAuthError(null);
     setAuthNotice(null);
 
-    if (!isSupabaseConfigured || !supabase) {
-      const message = `Sign-in is unavailable. ${supabaseConfigurationError || 'Supabase authentication is not configured.'}`;
-      setAuthError({ message });
-      throw new Error(message);
-    }
-
-    let result;
     try {
-      result = await supabase.auth.signInWithPassword({ email, password });
-    } catch (error) {
-      const message = authFailureMessage(error);
-      setAuthError({ message });
-      throw new Error(message);
-    }
-    const { data, error } = result;
-    if (error || !data?.session?.user) {
-      const message = authFailureMessage(error);
-      setAuthError({ message });
-      throw new Error(message);
-    }
-
-    // Resolve the application profile through the backend so the role,
-    // account status and coverage come from the database. A rejection
-    // (403/401) ends the session; a service failure keeps it and warns, but
-    // never claims the account has no profile.
-    let nextUser = toUser(data.session.user);
-    try {
-      const profileUser = await fetchProfileUser();
-      if (profileUser) {
-        nextUser = profileToFrontendUser(profileUser);
-        resolvedProfileUser.current = nextUser;
-      }
-    } catch (err) {
-      if (isAccountRejection(err)) {
-        // No profile / disabled / pending activation / invalid session —
-        // do not leave a session behind.
-        await supabase.auth.signOut();
-        resolvedProfileUser.current = null;
-        const message = err.message || 'Your account cannot sign in at this time.';
+      if (!isSupabaseConfigured || !supabase) {
+        const message = `Sign-in is unavailable. ${supabaseConfigurationError || 'Supabase authentication is not configured.'}`;
         setAuthError({ message });
         throw new Error(message);
       }
 
-      // The profile service could not be read (outage, network, schema not
-      // deployed). We cannot determine the account's role, so sign-in fails
-      // closed with an accurate message — never the "no profile" error.
-      await supabase.auth.signOut();
-      resolvedProfileUser.current = null;
-      const message =
-        'Could not load your account profile from the server. Please try again in a moment.';
-      setAuthError({ message });
-      throw new Error(message);
-    }
+      recoveryActiveRef.current = false;
+      const cacheBoundary = invalidateProfileAccess().catch(() => {});
+      let result;
+      try {
+        request.credentials = supabase.auth.signInWithPassword({ email, password });
+        result = await request.credentials;
+      } catch (error) {
+        if (request.cancelReason) throw sessionError(request.cancelReason);
+        const message = authFailureMessage(error);
+        setAuthError({ message });
+        throw new Error(message);
+      }
+      request.session = result?.data?.session || null;
+      if (request.cancelReason) throw sessionError(request.cancelReason);
+      const { data, error } = result;
+      if (error || !data?.session?.user || !data.session.access_token || !Number.isFinite(data.session.expires_at)) {
+        const message = authFailureMessage(error || { code: 'AUTH_INVALID_RESPONSE' });
+        setAuthError({ message });
+        throw new Error(message);
+      }
 
-    applyUser(nextUser, data.session);
-    return nextUser.role;
-  }, [applyUser]);
+      // The application role always comes from the verified server profile.
+      let nextUser = toUser(data.session.user);
+      request.ownerId = nextUser.id;
+      const nextSession = currentSessionRef.current?.user?.id === nextUser.id ? currentSessionRef.current : data.session;
+      resolvedProfileUser.current = null;
+      profileAccessRef.current = null;
+      setProfileAccess(null);
+      applyUser(nextUser, nextSession);
+      setIsResolvingProfile(true);
+      const guard = sessionGuard(nextUser.id);
+      try {
+        await cacheBoundary;
+        if (request.cancelReason || !guard()) throw sessionError(request.cancelReason || 'AUTH_SESSION_CHANGED');
+        const verified = await loadSessionProfile(nextUser.id);
+        if (request.cancelReason || !guard()) throw sessionError(request.cancelReason || (currentSessionRef.current ? 'AUTH_SESSION_CHANGED' : 'session_expired'));
+        nextUser = await rememberServerProfile(verified);
+        if (!nextUser || request.cancelReason || !guard()) throw sessionError(request.cancelReason || 'AUTH_SESSION_CHANGED');
+      } catch (err) {
+        if (request.cancelReason || !guard()) throw sessionError(request.cancelReason || (currentSessionRef.current ? 'AUTH_SESSION_CHANGED' : 'session_expired'));
+        if (isAccountRejection(err)) {
+          await rejectSessionProfile(request.ownerId);
+          if (!currentSessionRef.current || currentSessionRef.current.user?.id === nextUser.id) {
+            resolvedProfileUser.current = null;
+            applyUser(null, null);
+            setAuthError({ message: err.message || 'Your account cannot sign in at this time.' });
+          }
+          throw new Error(err.message || 'Your account cannot sign in at this time.');
+        }
+
+        // Keep valid authentication through an outage, but never grant a
+        // metadata-only role or navigate before the server profile is verified.
+        const message = profileFailureMessage(err);
+        setAuthNotice(message);
+        setAuthError({ message });
+        throw new Error(message);
+      }
+
+      return nextUser.role;
+    } finally {
+      if (loginRequestRef.current === request) {
+        loginRequestRef.current = null;
+        setIsSigningIn(false);
+        if (!resolvingForRef.current) setIsResolvingProfile(false);
+      }
+    }
+  }, [applyUser, sessionGuard, loadSessionProfile, rememberServerProfile, rejectSessionProfile, invalidateProfileAccess]);
 
   const logout = useCallback(async (shouldRedirect = true) => {
-    if (isSupabaseConfigured && supabase) {
-      await supabase.auth.signOut();
-    }
-    resolvedProfileUser.current = null;
-    setAuthNotice(null);
-    applyUser(null, null);
-    if (shouldRedirect) window.location.href = '/login';
-  }, [applyUser]);
+    if (logoutRequestRef.current) return logoutRequestRef.current;
+    const loginRequest = loginRequestRef.current;
+    if (loginRequest) loginRequest.cancelReason = 'AUTH_SIGN_IN_CANCELLED';
+    setIsSigningOut(true);
+    const job = (async () => {
+      // Wait only for the non-abortable password grant, not its profile I/O.
+      if (loginRequest?.credentials) {
+        const result = await loginRequest.credentials.catch(() => null);
+        if (result?.data?.session) loginRequest.session = result.data.session;
+      }
+      const ownerId = lifecycleRef.current.ownerId;
+      const guard = ownerId ? sessionGuard(ownerId) : () => !currentSessionRef.current;
+      await invalidateProfileAccess(ownerId).catch(() => {});
+      resetSyncEngine();
+      resetLegacyWorkingSets();
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await authApi.logout(ownerId ? { ownerId } : undefined);
+        } catch { /* best-effort; SDK sign-out still ends this session */ }
+        const { data } = await supabase.auth.getSession();
+        const expectedOwner = ownerId || loginRequest?.session?.user?.id;
+        if ((guard() || !ownerId) && data?.session?.user?.id === expectedOwner) await supabase.auth.signOut();
+      }
+      if (guard() || !lifecycleRef.current.ownerId) {
+        resolvedProfileUser.current = null;
+        resolvingForRef.current = null;
+        setIsResolvingProfile(false);
+        setAuthNotice(null);
+        applyUser(null, null);
+      }
+      try { await lifecycleRef.current.cleanup(ownerId); }
+      catch (error) { console.error('Could not clean disposable account cache. Pending work was retained.', error); }
+      if (shouldRedirect && !lifecycleRef.current.ownerId) window.location.href = '/login';
+    })();
+    logoutRequestRef.current = job;
+    try { return await job; }
+    finally { if (logoutRequestRef.current === job) { logoutRequestRef.current = null; setIsSigningOut(false); } }
+  }, [applyUser, sessionGuard, invalidateProfileAccess]);
 
   /**
    * Re-resolve the signed-in account's authoritative profile (role/status/
@@ -368,38 +607,73 @@ export const AuthProvider = ({ children }) => {
    */
   const refreshProfile = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) return null;
-    const { data } = await supabase.auth.getSession();
+    const { data, error } = await supabase.auth.getSession();
+    if (error) { setAuthNotice(profileFailureMessage(error)); return null; }
     const currentSession = data?.session || null;
-    if (!currentSession?.user) return null;
+    if (!currentSession?.user) { applyUser(null, null); return null; }
+    if (currentSession.user.id !== lifecycleRef.current.ownerId) return null;
+    const guard = sessionGuard(currentSession.user.id);
     try {
-      const profileUser = await fetchProfileUser();
-      if (profileUser) {
-        resolvedProfileUser.current = profileToFrontendUser(profileUser);
-        applyUser(resolvedProfileUser.current, currentSession);
-        return resolvedProfileUser.current.role;
+      const verified = await loadSessionProfile(currentSession.user.id);
+      if (guard()) {
+        const nextUser = await rememberServerProfile(verified);
+        if (!nextUser || !guard()) return null;
+        setAuthError(null);
+        return nextUser.role;
       }
     } catch (err) {
+      if (!guard()) return null;
       if (isAccountRejection(err)) {
-        await supabase.auth.signOut();
-        resolvedProfileUser.current = null;
-        applyUser(null, null);
+        await rejectSessionProfile(currentSession.user.id);
       } else {
+        if (permitsCachedRestore(err) && await restoreCachedProfile(currentSession.user.id)) return null;
+        if (!guard()) return null;
+        resolvedProfileUser.current = null;
+        profileAccessRef.current = null;
+        setProfileAccess(null);
+        applyUser(toUser(currentSessionRef.current.user), currentSessionRef.current);
         setAuthNotice(TRANSIENT_PROFILE_NOTICE);
       }
     }
     return null;
-  }, [applyUser]);
+  }, [applyUser, sessionGuard, loadSessionProfile, rememberServerProfile, rejectSessionProfile, restoreCachedProfile]);
+
+  useEffect(() => {
+    if (!supabase || typeof window === 'undefined') return;
+    let active = true;
+    const retryUnverifiedSession = async () => {
+      if (loginRequestRef.current || logoutRequestRef.current || recoveryActiveRef.current ||
+          (resolvedProfileUser.current && profileAccessRef.current?.source === 'server')) return;
+      const epoch = sessionEpochRef.current;
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!active || error || epoch !== sessionEpochRef.current || !data?.session?.user || isRecoveryFlow()) return;
+        const nextSession = data.session;
+        if (currentSessionRef.current?.user?.id && currentSessionRef.current.user.id !== nextSession.user.id) return;
+        applyUser(resolvedProfileUser.current || toUser(nextSession.user), nextSession);
+        await resolveProfileForSession(nextSession, { force: true, allowCachedRestore: true });
+      } catch { /* retain the valid session and existing connectivity notice */ }
+    };
+    window.addEventListener('online', retryUnverifiedSession);
+    return () => { active = false; window.removeEventListener('online', retryUnverifiedSession); };
+  }, [applyUser, resolveProfileForSession]);
 
   const value = {
     user,
     session,
     role,
-    isAuthenticated: Boolean(user),
+    isAuthenticated: Boolean(user?.role && session?.user?.id === user.id) && !isSigningOut &&
+      (profileAccess?.source !== 'cache' || profileAccess.expiresAt > Date.now()),
     isLoadingAuth,
     authChecked,
     isResolvingProfile,
+    isSigningIn,
+    isSigningOut,
     authError,
     authNotice,
+    profileSource: profileAccess?.source ?? null,
+    isOfflineProfile: profileAccess?.source === 'cache',
+    profileExpiresAt: profileAccess?.expiresAt ?? null,
     isSupabaseConfigured,
     login,
     logout,

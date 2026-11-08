@@ -1,8 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import ErrorState from "@/components/common/ErrorState";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
+import { healthServicesApi } from "@/services/api";
 import {
   createFollowUpOffline,
   listFollowUpsOffline,
@@ -10,626 +14,530 @@ import {
   updateFollowUpOffline,
 } from "@/services/offline/followUpOfflineService";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
-import { DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
-import { dayLabel, groupByDay, manilaDateKey, monthLabel, weekLabel } from "../lib/scheduleDates";
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Plus, X, Search, ShieldAlert, Pencil, Ban, CheckCircle2, Clock,
-} from "lucide-react";
+  buildDayMap, calendarEventKey, calendarVisibleRange, formatCalendarStatus,
+  isCalendarEventInBarangay, mapFollowUpEvent, mapHealthServiceEvent,
+  parseCalendarDate, readCalendarRows, stepCalendarDate, toDateKey,
+} from "@/features/dashboards/components/scheduleCalendarUtils";
+import { AgendaView, DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
+import { SHOW_PREVIEW_DEMO, buildPreviewScheduleEvents } from "../lib/scheduleCalendarPreview";
+import { dayLabel, manilaDateKey, monthLabel, weekLabel } from "../lib/scheduleDates";
+import { followUpActionAvailability } from "../lib/followUpActions";
+import { Ban, CheckCircle2, ChevronLeft, ChevronRight, Clock, Pencil, Plus, X } from "lucide-react";
 
-/**
- * Follow-up Schedule Calendar (Health Supervisor).
- *
- * SINGLE SOURCE OF TRUTH: this calendar reads and writes the same persisted
- * `follow_ups` records (via `followUpsApi`) as the Follow-up Management table.
- * A follow-up created in either place appears in both after a refresh, and any
- * reschedule / status change here updates the same database row.
- */
+const FOLLOW_UP_STATUSES = ["Pending", "Scheduled", "Today", "Upcoming", "Ongoing", "Completed", "Missed", "Cancelled"];
+const VIEWS = ["month", "week", "day", "agenda"];
+const mobileCalendar = () => window.matchMedia("(max-width: 767px)").matches;
+const initialDate = (params) => parseCalendarDate(params.get("date")) || parseCalendarDate(manilaDateKey());
+const sourceState = () => ({ range: "", rows: [], loading: true, error: "", source: "" });
 
-/* ------------------------------ Constants -------------------------------- */
+const inputCls = (error) => `supervisor-input mt-1 w-full ${error ? "!border-brand-danger" : ""}`;
 
-const CALENDAR_STATUSES = ["Pending", "Scheduled", "Today", "Upcoming", "Ongoing", "Completed", "Missed", "Cancelled"];
-const PROVIDERS = ["Midwife", "Nurse", "BHW", "Physician", "Health Supervisor"];
-const LOCATIONS = ["Barangay Health Station", "RHU", "Home Visit", "Other"];
-
-/** follow_ups row (snake_case, with joined resident) → calendar schedule shape. */
-const confirmationLabel = (row) => {
-  if (row.resident_decision === 'approved') return 'Confirmed';
-  if (row.resident_decision === 'rejected') return 'Rejected';
-  if (row.requires_resident_response || row.resident_decision === 'pending') return 'Awaiting Confirmation';
-  return null;
-};
-const mapRowToSchedule = (row) => ({
-  id: row.id,
-  residentId: row.resident_id || row.residentId,
-  residentName: row.resident
-    ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
-    : row.residentName || "Resident",
-  barangay: row.resident?.barangay || row.barangay || "",
-  date: row.scheduled_date || row.date || "",
-  time: row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : row.time || "",
-  location: row.location || "",
-  provider: row.assigned_provider || row.provider || "",
-  instructions: row.notes || row.instructions || "",
-  purpose: row.purpose || "",
-  priority: row.priority || "Medium",
-  status: row.status || "Scheduled",
-  offline: row.offline || false,
-  syncStatus: row.syncStatus || null,
-  // Resident confirmation outcome (read-only for the Health Supervisor).
-  confirmationStatus: confirmationLabel(row),
-  respondedAt: row.resident_decision_at || "",
-  rejectionReason: row.resident_decision === 'rejected' ? (row.resident_decision_reason || "") : "",
-});
-
-/* --------------------------- Form (supervisor) ---------------------------- */
-
-const inputCls = (error) =>
-  `mt-1.5 w-full rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${
-    error ? "border-brand-danger" : "border-slate-200 dark:border-border"
-  }`;
-const labelCls = "text-sm font-medium text-brand-ink";
-
-/**
- * @param {{label: string, required?: boolean, error?: string, children: any}} props
- */
-function Field({ label, required, error, children }) {
+function Field({ label, required = false, error = "", children }) {
   return (
     <div>
-      <label className={labelCls}>
-        {label} {required && <span className="text-brand-danger">*</span>}
+      <label className="block text-caption font-medium text-brand-ink">
+        <span>{label}{required && <span className="text-brand-danger"> *</span>}</span>
+        {children}
       </label>
-      {children}
-      {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
+      {error && <p role="alert" className="mt-1 text-caption text-brand-danger">{error}</p>}
     </div>
   );
 }
 
-const EMPTY_FORM = () => ({
-  residentName: "",
-  residentId: "",
-  purpose: "General Check-up",
-  date: manilaDateKey(),
-  time: "09:00",
-  location: LOCATIONS[0],
-  provider: PROVIDERS[0],
-  priority: "Medium",
-  instructions: "",
-  status: "Scheduled",
-  requiresResidentResponse: true,
-});
-
-function ScheduleFormModal({ initial, residents, saving, onClose, onSave }) {
-  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initial ? { ...initial } : EMPTY_FORM()));
-  const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
-
-  const set = (key) => (value) => {
-    setForm((p) => ({ ...p, [key]: value }));
-    if (errors[key]) setErrors((p) => ({ ...p, [key]: "" }));
-  };
-
+function ScheduleFormModal({ initial, date, residents, residentsLoading, residentsError, onRetryResidents, providers, locations, canComplete, saving, error, onClose, onSave }) {
+  const [form, setForm] = useState(() => initial ? { ...initial } : {
+    residentId: "", residentName: "", purpose: "", date, time: "", location: "", provider: "",
+    priority: "Medium", instructions: "", status: "Scheduled", requiresResidentResponse: true,
+  });
+  const [errors, setErrors] = useState(/** @type {Record<string, string>} */ ({}));
+  const dialogRef = useRef(null);
+  const providerList = React.useId();
+  const locationList = React.useId();
   const isNew = !initial;
+  const availability = followUpActionAvailability({ ...initial, scheduled_date: form.date }, { canEdit: true, canComplete });
+  const statuses = FOLLOW_UP_STATUSES.filter((status) => {
+    if (status === "Completed") return !isNew && availability.complete;
+    if (status === "Missed") return !isNew && availability.missed;
+    if (status === "Cancelled") return !isNew && availability.cancel;
+    return true;
+  });
+  const statusOptions = [...new Set([...statuses, initial?.status, form.status].filter(Boolean))];
 
-  const validate = () => {
-    const next = {};
-    if (!form.residentName.trim()) next.residentName = "Resident name is required.";
-    if (isNew && !form.residentId) next.residentName = "Select a resident from the list.";
-    if (!form.purpose.trim()) next.purpose = "Purpose is required.";
-    if (!form.date) next.date = "Follow-up date is required.";
-    if (!form.time) next.time = "Follow-up time is required.";
-    if (!form.provider) next.provider = "Healthcare provider is required.";
-    setErrors(next);
-    return Object.keys(next).length === 0;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog.showModal();
+    return () => dialog.close();
+  }, []);
+
+  const set = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: "" }));
   };
-
-  // When the typed name matches a resident, capture their id (create needs it).
-  const onNameChange = (value) => {
-    const match = residents.find((r) => r.name.toLowerCase() === value.trim().toLowerCase());
-    setForm((p) => ({ ...p, residentName: value, residentId: match ? match.id : isNew ? "" : p.residentId }));
-    if (errors.residentName) setErrors((p) => ({ ...p, residentName: "" }));
+  const submit = (event) => {
+    event.preventDefault();
+    if (saving) return;
+    const next = /** @type {Record<string, string>} */ ({});
+    if (isNew && !residents.some((resident) => String(resident.id) === String(form.residentId))) next.residentId = "Select a resident from the authorized list.";
+    if (!String(form.purpose || "").trim()) next.purpose = "Purpose is required.";
+    if (!parseCalendarDate(form.date)) next.date = "Select a valid follow-up date.";
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(form.time || "")) next.time = "Select a valid follow-up time.";
+    if (!String(form.provider || "").trim()) next.provider = "Healthcare provider is required.";
+    setErrors(next);
+    if (!Object.keys(next).length) onSave(form);
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className="max-h-[92vh] w-full max-w-lg overflow-y-auto">
-        <div className="p-6">
-          <div className="mb-1 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-brand-ink">{initial ? "Edit Follow-up Schedule" : "Add Follow-up Schedule"}</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">Schedule a follow-up activity for a resident.</p>
-            </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
-              <X className="h-5 w-5" />
-            </button>
+    <dialog ref={dialogRef} aria-labelledby="schedule-form-title" onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }} className="supervisor-modal m-auto max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl overflow-y-auto rounded border border-brand-border bg-card p-4 text-brand-ink backdrop:bg-black/50 sm:p-5">
+      <form onSubmit={submit} noValidate className="supervisor-form">
+        <div className="mb-4 flex items-start justify-between gap-3 border-b border-brand-border pb-3">
+          <div>
+            <h2 id="schedule-form-title" className="text-section font-semibold">{isNew ? "Schedule follow-up" : "Edit / reschedule follow-up"}</h2>
+            <p className="mt-1 text-caption text-brand-gray">Use the resident's existing follow-up record and actual appointment details.</p>
           </div>
-
-          <div className="mt-4 space-y-4">
-            <Field label="Resident Name" required error={errors.residentName}>
-              <input
-                type="text"
-                list="followup-resident-names"
-                value={form.residentName}
-                disabled={!isNew}
-                onChange={(e) => onNameChange(e.target.value)}
-                placeholder="Search or select a resident..."
-                className={`${inputCls(errors.residentName)} ${!isNew ? "opacity-70" : ""}`}
-              />
-              <datalist id="followup-resident-names">
-                {residents.map((r) => <option key={r.id} value={r.name} />)}
-              </datalist>
-            </Field>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Purpose" required error={errors.purpose}>
-                <input type="text" value={form.purpose} onChange={(e) => set("purpose")(e.target.value)} placeholder="e.g. Prenatal check-up" className={inputCls(errors.purpose)} />
-              </Field>
-              <Field label="Status">
-                <select value={form.status} onChange={(e) => set("status")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                  {CALENDAR_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </Field>
-              <Field label="Follow-up Date" required error={errors.date}>
-                <input type="date" value={form.date} onChange={(e) => set("date")(e.target.value)} className={inputCls(errors.date)} />
-              </Field>
-              <Field label="Follow-up Time" required error={errors.time}>
-                <input type="time" value={form.time} onChange={(e) => set("time")(e.target.value)} className={inputCls(errors.time)} />
-              </Field>
-              <Field label="Location">
-                <select value={form.location} onChange={(e) => set("location")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                  {LOCATIONS.map((l) => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </Field>
-              <Field label="Assigned Healthcare Provider" required error={errors.provider}>
-                <select value={form.provider} onChange={(e) => set("provider")(e.target.value)} className={inputCls(errors.provider)}>
-                  {PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </Field>
-              <Field label="Priority">
-                <select value={form.priority} onChange={(e) => set("priority")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
-                  <option>High</option>
-                  <option>Medium</option>
-                  <option>Low</option>
-                </select>
-              </Field>
-            </div>
-            <Field label="Follow-up Instructions">
-              <textarea
-                rows={3}
-                value={form.instructions}
-                onChange={(e) => set("instructions")(e.target.value)}
-                placeholder="Instructions for the follow-up visit..."
-                className={`${inputCls()} resize-none`}
-              />
-            </Field>
-            {isNew && (
-              <label className="flex items-start gap-2.5 rounded-btn border border-slate-200 bg-brand-bg/50 px-3.5 py-3 dark:border-border dark:bg-input">
-                <input
-                  type="checkbox"
-                  checked={form.requiresResidentResponse}
-                  onChange={(e) => set("requiresResidentResponse")(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-blue focus:ring-brand-blue"
-                />
-                <span className="text-sm text-brand-ink">
-                  Require the resident to confirm this follow-up
-                  <span className="mt-0.5 block text-xs text-brand-gray">
-                    The resident is notified and must approve before it becomes a scheduled calendar event. If they reject it, it is cancelled.
-                  </span>
-                </span>
-              </label>
-            )}
-          </div>
-
-          <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
-            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-            <button
-              disabled={saving}
-              onClick={() => { if (validate()) onSave(form); }}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-            >
-              <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : initial ? "Save Changes" : "Add Schedule"}
-            </button>
-          </div>
+          <button type="button" onClick={onClose} disabled={saving} className="supervisor-button is-icon" aria-label="Close follow-up form"><X className="h-4 w-4" aria-hidden="true" /></button>
         </div>
-      </Card>
-    </div>
+        {error && <p role="alert" className="mb-3 border-l-2 border-brand-danger pl-3 text-ui text-brand-danger">{error}</p>}
+        <div className="space-y-3">
+          <Field label="Resident" required error={errors.residentId}>
+            {isNew ? <select required value={form.residentId} disabled={saving || residentsLoading || Boolean(residentsError)} aria-invalid={Boolean(errors.residentId)} onChange={(event) => {
+              const resident = residents.find((row) => String(row.id) === event.target.value);
+              setForm((current) => ({ ...current, residentId: resident?.id || "", residentName: resident?.name || "" }));
+              setErrors((current) => ({ ...current, residentId: "" }));
+            }} className={inputCls(errors.residentId)}>
+              <option value="">{residentsLoading ? "Loading residents..." : "Select a resident"}</option>
+              {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.name || "Name not recorded"} / {resident.id}</option>)}
+            </select> : <input readOnly value={`${form.residentName} / ${form.residentId}`} className={inputCls()} />}
+          </Field>
+          {isNew && <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-brand-gray">
+            <span>{residentsError || (residentsLoading ? "Loading the resident directory." : residents.length ? "Up to 200 authorized residents are available here. Names are distinguished by resident ID." : "No authorized residents were loaded. Reconnect or refresh the resident directory.")}</span>
+            <button type="button" onClick={onRetryResidents} disabled={saving || residentsLoading} className="supervisor-button is-quiet">Refresh residents</button>
+          </div>}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Purpose" required error={errors.purpose}><input required value={form.purpose} onChange={(event) => set("purpose", event.target.value)} aria-invalid={Boolean(errors.purpose)} className={inputCls(errors.purpose)} /></Field>
+            <Field label="Status"><select value={form.status} onChange={(event) => set("status", event.target.value)} className={inputCls()}>{statusOptions.map((status) => <option key={status} disabled={!statuses.includes(status) && status !== initial?.status}>{status}</option>)}</select></Field>
+            <Field label="Follow-up date" required error={errors.date}><input required type="date" value={form.date} onChange={(event) => set("date", event.target.value)} aria-invalid={Boolean(errors.date)} className={inputCls(errors.date)} /></Field>
+            <Field label="Follow-up time" required error={errors.time}><input required type="time" value={form.time} onChange={(event) => set("time", event.target.value)} aria-invalid={Boolean(errors.time)} className={inputCls(errors.time)} /></Field>
+            <Field label="Location"><input value={form.location} list={locationList} onChange={(event) => set("location", event.target.value)} className={inputCls()} /><datalist id={locationList}>{locations.map((location) => <option key={location} value={location} />)}</datalist></Field>
+            <Field label="Healthcare provider" required error={errors.provider}><input required value={form.provider} list={providerList} onChange={(event) => set("provider", event.target.value)} aria-invalid={Boolean(errors.provider)} className={inputCls(errors.provider)} /><datalist id={providerList}>{providers.map((provider) => <option key={provider} value={provider} />)}</datalist></Field>
+            <Field label="Priority"><select value={form.priority} onChange={(event) => set("priority", event.target.value)} className={inputCls()}><option>High</option><option>Medium</option><option>Low</option></select></Field>
+          </div>
+          <Field label="Follow-up instructions"><textarea rows={3} value={form.instructions} onChange={(event) => set("instructions", event.target.value)} className={`${inputCls()} !h-auto resize-y py-2`} /></Field>
+          {isNew && <label className="flex items-start gap-2 border-t border-brand-border pt-3 text-ui">
+            <input type="checkbox" checked={form.requiresResidentResponse} onChange={(event) => set("requiresResidentResponse", event.target.checked)} className="mt-1 h-4 w-4" />
+            <span>Require resident confirmation<span className="mt-0.5 block text-caption text-brand-gray">The resident must confirm before the follow-up is scheduled. A rejection cancels it; the supervisor cannot change the resident's decision.</span></span>
+          </label>}
+        </div>
+        <div className="mt-4 flex justify-end gap-2 border-t border-brand-border pt-3">
+          <button type="button" onClick={onClose} disabled={saving} className="supervisor-button">Cancel</button>
+          <button type="submit" disabled={saving || (isNew && (residentsLoading || Boolean(residentsError) || !residents.length))} className="supervisor-button is-primary"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />{saving ? "Saving..." : isNew ? "Add schedule" : "Save changes"}</button>
+        </div>
+      </form>
+    </dialog>
   );
 }
-
-/* ------------------------------ Main page -------------------------------- */
-
-const VIEWS = [
-  { key: "month", label: "Month" },
-  { key: "week", label: "Week" },
-  { key: "day", label: "Day" },
-];
 
 export default function FollowUpCalendar() {
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const scope = getSupervisorScope(user);
+  const assignedBarangay = scope?.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
+  const viewFollowUps = can("followups.view");
+  const viewServices = can("services.view");
+  const access = [viewFollowUps, viewServices, can("followups.create"), can("followups.edit"), can("followups.complete")];
+  let error = "";
+  if (user?.role !== "health_supervisor") error = "Only Health Supervisors can access this schedule calendar.";
+  else if (!assignedBarangay) error = "A valid barangay assignment is required. Calendar data is not loaded until your account assignment is available.";
+  else if (!viewFollowUps && !viewServices) error = "Your account does not have permission to view follow-ups or health-service attendance.";
+  if (error) return <>
+    <PageHeader dense crumbs={["Monitoring & Reports", "Schedule Calendar"]} title="Schedule Calendar" subtitle="Follow-ups and health-service attendance for your assigned barangay." />
+    <Card><ErrorState compact title="Calendar unavailable" message={error} /></Card>
+  </>;
 
-  // Health Supervisor only — the route already sits inside the supervisor's
-  // protected area; this guard is a second line of defense.
-  if (user?.role !== "health_supervisor") {
-    return (
-      <>
-        <PageHeader crumbs={["Follow-ups", "Schedule Calendar"]} title="Follow-up Schedule Calendar" subtitle="Scheduled follow-up activities for the barangay." />
-        <Card className="p-10 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-danger/10">
-            <ShieldAlert className="h-7 w-7 text-brand-danger" />
-          </div>
-          <h3 className="mt-4 text-lg font-semibold text-brand-ink">Unauthorized</h3>
-          <p className="mx-auto mt-1.5 max-w-md text-sm text-brand-gray">
-            Only the Health Supervisor can access the Follow-up Schedule Calendar.
-          </p>
-        </Card>
-      </>
-    );
-  }
-
-  return <FollowUpCalendarContent user={user} />;
+  // Remount on account, scope or capability changes so no previous data or open
+  // mutation form survives a change in authorization.
+  return <FollowUpCalendarContent key={`${user.id}:${assignedBarangay}:${access.join(":")}`} user={user} assignedBarangay={assignedBarangay} />;
 }
 
-function FollowUpCalendarContent({ user }) {
-  const supervisorScope = getSupervisorScope(user);
-  const assignedBarangay =
-    supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
-
-  const [schedules, setSchedules] = useState([]);
-  const [residents, setResidents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
+function FollowUpCalendarContent({ user, assignedBarangay }) {
+  const { can } = usePermissions();
+  const canViewFollowUps = can("followups.view");
+  const canViewServices = can("services.view");
+  const canCreate = canViewFollowUps && can("followups.create");
+  const canEdit = canViewFollowUps && can("followups.edit");
+  const canComplete = canViewFollowUps && can("followups.complete");
+  const [params] = useSearchParams();
+  const requestedDate = params.get("date");
+  const requestedView = params.get("view");
+  const requestedFollowUp = params.get("followup");
+  const [mobile, setMobile] = useState(mobileCalendar);
+  const [view, setView] = useState(() => VIEWS.includes(requestedView) ? requestedView : mobileCalendar() ? "agenda" : "month");
+  const currentView = mobile && (view === "month" || view === "week") ? "agenda" : view;
+  const [cursor, setCursor] = useState(() => initialDate(params));
+  const [selectedDay, setSelectedDay] = useState(() => initialDate(params));
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [followUps, setFollowUps] = useState(sourceState);
+  const [services, setServices] = useState(sourceState);
+  const [followUpRefresh, setFollowUpRefresh] = useState(0);
+  const [serviceRefresh, setServiceRefresh] = useState(0);
+  const [linkRefresh, setLinkRefresh] = useState(0);
+  const [linkState, setLinkState] = useState({ loading: false, error: "" });
+  const [selected, setSelected] = useState(null);
+  const [formTarget, setFormTarget] = useState(null);
+  const [residents, setResidents] = useState({ rows: [], loading: false, error: "" });
+  const [residentRefresh, setResidentRefresh] = useState(0);
   const [saving, setSaving] = useState(false);
-
-  const [view, setView] = useState("month");
-  const [cursor, setCursor] = useState(() => new Date());
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [providerFilter, setProviderFilter] = useState("All");
-  const [selected, setSelected] = useState(null); // schedule id (detail modal)
-  const [formTarget, setFormTarget] = useState(null); // null | "new" | schedule
+  const [formError, setFormError] = useState("");
+  const [detailError, setDetailError] = useState("");
   const [toast, setToast] = useState(null);
+  const active = useRef(true);
+  const busy = useRef(false);
+  const followUpRequest = useRef(0);
   const { lastSyncedAt } = useSyncStatus();
+  const range = calendarVisibleRange(cursor, currentView);
+  const rangeKey = `${range.from}:${range.to}`;
+  const today = parseCalendarDate(manilaDateKey());
+  const followUpState = followUps.range === rangeKey ? followUps : sourceState();
+  const serviceState = services.range === rangeKey ? services : sourceState();
 
-  const today = new Date();
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; followUpRequest.current += 1; };
+  }, []);
 
-  const showToast = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  };
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const change = (event) => setMobile(event.matches);
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, []);
 
-  const load = React.useCallback(() => {
-    setLoading(true);
-    setLoadError(null);
-    return Promise.all([
-      listFollowUpsOffline({ ownerId: user?.id }),
-      listFollowUpResidentsOffline({ ownerId: user?.id, params: { limit: 200 } }),
-    ])
-      .then(([followUpRows, residentResult]) => {
-        setSchedules(followUpRows.map(mapRowToSchedule));
-        const rows = residentResult?.rows || residentResult || [];
-        setResidents(
-          rows
-            .map((r) => ({
-              id: r.id,
-              name: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
-              barangay: r.barangay || "",
-            }))
-            .filter((r) => !assignedBarangay || r.barangay === assignedBarangay)
-        );
+  useEffect(() => {
+    const date = parseCalendarDate(requestedDate);
+    if (date) { setCursor(date); setSelectedDay(date); setSelected(null); }
+  }, [requestedDate]);
+
+  useEffect(() => {
+    if (VIEWS.includes(requestedView)) setView(requestedView);
+  }, [requestedView]);
+
+  useEffect(() => {
+    let current = true;
+    const request = ++followUpRequest.current;
+    const valid = () => current && request === followUpRequest.current;
+    if (!canViewFollowUps) return () => { current = false; };
+    setFollowUps({ ...sourceState(), range: rangeKey });
+    let origin = { source: "cache", error: "" };
+    listFollowUpsOffline({ ownerId: user.id, params: { from: range.from, to: range.to }, onSource: (state) => { origin = state; } })
+      .then((response) => {
+        const rows = readCalendarRows(response, "Follow-ups").map((row) => ({ ...mapFollowUpEvent(row), cached: origin.source === "cache" }))
+          .filter((event) => isCalendarEventInBarangay(event, assignedBarangay) && event.date >= range.from && event.date <= range.to);
+        if (!valid()) return;
+        setFollowUps({ range: rangeKey, rows, loading: false, error: origin.error, source: origin.source });
+        setSelected((event) => event?.type === "follow-up" && event.date >= range.from && event.date <= range.to
+          ? rows.find((row) => String(row.id) === String(event.id)) || null : event);
       })
-      .catch((err) => setLoadError(err?.message || "Unable to load the schedule. Please try again."))
-      .finally(() => setLoading(false));
-  }, [assignedBarangay, user?.id]);
+      .catch((error) => {
+        if (valid()) setFollowUps({ range: rangeKey, rows: [], loading: false, error: error?.message || "Unable to load follow-ups.", source: "" });
+      });
+    return () => { current = false; };
+  }, [assignedBarangay, canViewFollowUps, followUpRefresh, lastSyncedAt, range.from, range.to, rangeKey, user.id]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let current = true;
+    if (!canViewServices) return () => { current = false; };
+    setServices({ ...sourceState(), range: rangeKey });
+    healthServicesApi.listAttendance({ from: range.from, to: range.to })
+      .then((response) => {
+        const rows = readCalendarRows(response, "Health-service attendance").map(mapHealthServiceEvent)
+          .filter((event) => isCalendarEventInBarangay(event, assignedBarangay) && event.date >= range.from && event.date <= range.to);
+        if (!current) return;
+        setServices({ range: rangeKey, rows, loading: false, error: "", source: "server" });
+        setSelected((event) => event?.type === "health-service" && event.date >= range.from && event.date <= range.to
+          ? rows.find((row) => String(row.id) === String(event.id)) || null : event);
+      })
+      .catch((error) => {
+        if (current) setServices({ range: rangeKey, rows: [], loading: false, error: error?.message || "Unable to load health-service attendance.", source: "" });
+      });
+    return () => { current = false; };
+  }, [assignedBarangay, canViewServices, lastSyncedAt, range.from, range.to, rangeKey, serviceRefresh]);
 
   useEffect(() => {
-    if (lastSyncedAt) load();
-  }, [lastSyncedAt, load]);
+    let current = true;
+    if (formTarget !== "new" || !canCreate) return () => { current = false; };
+    setResidents({ rows: [], loading: true, error: "" });
+    listFollowUpResidentsOffline({ ownerId: user.id, params: { limit: 200 } })
+      .then((response) => {
+        const rows = readCalendarRows(response, "Resident directory").map((resident) => ({
+          id: resident.id,
+          name: [resident.firstName, resident.middleName, resident.lastName].filter(Boolean).join(" ").trim(),
+          barangay: resident.barangay || "",
+        })).filter((resident) => isCalendarEventInBarangay({ residentBarangay: resident.barangay }, assignedBarangay));
+        if (current) setResidents({ rows, loading: false, error: "" });
+      })
+      .catch((error) => {
+        if (current) setResidents({ rows: [], loading: false, error: error?.message || "Unable to load authorized residents." });
+      });
+    return () => { current = false; };
+  }, [assignedBarangay, canCreate, formTarget, residentRefresh, user.id]);
 
   useEffect(() => {
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") load();
+    let current = true;
+    if (!requestedFollowUp) { setLinkState({ loading: false, error: "" }); return () => { current = false; }; }
+    if (!canViewFollowUps) { setLinkState({ loading: false, error: "You do not have permission to open this follow-up." }); return () => { current = false; }; }
+    setSelected(null);
+    setDetailError("");
+    setLinkState({ loading: true, error: "" });
+    let origin = { source: "cache", error: "" };
+    // The API has no single-record GET. Resolve the actual ID against its
+    // authorized list, including pending device records, not a display name.
+    listFollowUpsOffline({ ownerId: user.id, onSource: (state) => { origin = state; } })
+      .then((response) => {
+        const event = readCalendarRows(response, "Follow-ups").map(mapFollowUpEvent)
+          .find((row) => String(row.id) === requestedFollowUp && isCalendarEventInBarangay(row, assignedBarangay));
+        if (!current) return;
+        if (!event) throw new Error(origin.source === "cache"
+          ? "This follow-up is not in the authorized records saved on this device. Reconnect to verify its availability."
+          : "This follow-up was not found in your assigned barangay or is no longer available.");
+        const date = parseCalendarDate(event.date);
+        if (!date) throw new Error("This follow-up does not have a valid scheduled date.");
+        setCursor(date);
+        setSelectedDay(date);
+        setSelected({ ...event, cached: origin.source === "cache" });
+        setDetailError("");
+        setLinkState({ loading: false, error: origin.source === "cache" ? "Opened a saved follow-up. Reconnect to verify the current record." : "" });
+      })
+      .catch((error) => {
+        if (current) setLinkState({ loading: false, error: error?.message || "Unable to open the requested follow-up." });
+      });
+    return () => { current = false; };
+  }, [assignedBarangay, canViewFollowUps, linkRefresh, requestedFollowUp, user.id]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      setFollowUpRefresh((value) => value + 1);
+      setServiceRefresh((value) => value + 1);
     };
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
-      window.removeEventListener("focus", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
     };
-  }, [load]);
+  }, []);
 
-  /** Filtered schedules (search + status + provider). */
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const events = useMemo(() => [
+    ...(canViewFollowUps && followUps.range === rangeKey ? followUps.rows : []),
+    ...(canViewServices && services.range === rangeKey ? services.rows : []),
+  ], [canViewFollowUps, canViewServices, followUps.range, followUps.rows, rangeKey, services.range, services.rows]);
+  // Isolated UI preview records (never persisted, never in backend results).
+  // Kept separate from `events` so source counts and the data summary stay real;
+  // merged in only for calendar display so a busy date can be demonstrated.
+  const previewEvents = useMemo(
+    () => SHOW_PREVIEW_DEMO ? buildPreviewScheduleEvents() : [],
+    []
+  );
   const filtered = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return schedules.filter((s) => {
-      if (statusFilter !== "All" && s.status !== statusFilter) return false;
-      if (providerFilter !== "All" && s.provider !== providerFilter) return false;
-      if (q) {
-        const hay = `${s.residentName} ${s.residentId}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+    const query = search.trim().toLowerCase();
+    return [...events, ...previewEvents].filter((event) => {
+      if (event.preview) {
+        // Preview rows are display-only and bypass barangay filtering, but still
+        // respond to the visible filters so the demo behaves like real data.
+        if (categoryFilter !== "all" && categoryFilter !== "type:follow-up") return false;
+        if (statusFilter !== "all" && formatCalendarStatus(event.status) !== statusFilter) return false;
+        if (providerFilter !== "all" && event.provider !== providerFilter) return false;
+        return !query || [event.residentName, event.id, event.label, event.provider]
+          .some((value) => String(value || "").toLowerCase().includes(query));
       }
-      return true;
+      if (!isCalendarEventInBarangay(event, assignedBarangay)) return false;
+      if (categoryFilter.startsWith("type:") && event.type !== categoryFilter.slice(5)) return false;
+      if (categoryFilter.startsWith("category:") && (event.type !== "health-service" || event.category !== categoryFilter.slice(9))) return false;
+      if (statusFilter !== "all" && formatCalendarStatus(event.status) !== statusFilter) return false;
+      if (providerFilter !== "all" && event.provider !== providerFilter) return false;
+      return !query || [event.id, event.residentName, event.residentId, event.label, event.category, event.provider]
+        .some((value) => String(value || "").toLowerCase().includes(query));
     });
-  }, [schedules, searchQuery, statusFilter, providerFilter]);
+  }, [assignedBarangay, categoryFilter, events, previewEvents, providerFilter, search, statusFilter]);
+  const byDay = useMemo(() => buildDayMap(filtered), [filtered]);
+  const agendaEvents = useMemo(() => Object.keys(byDay).sort().flatMap((date) => byDay[date]), [byDay]);
+  const categories = [...new Set([
+    ...events.filter((event) => event.type === "health-service").map((event) => event.category).filter(Boolean),
+    ...(categoryFilter.startsWith("category:") ? [categoryFilter.slice(9)] : []),
+  ])].sort();
+  const statuses = [...new Set([
+    ...(canViewFollowUps ? FOLLOW_UP_STATUSES : []), ...events.map((event) => formatCalendarStatus(event.status)),
+    ...(statusFilter !== "all" ? [statusFilter] : []),
+  ])].sort();
+  const providers = [...new Set(events.filter((event) => event.type === "follow-up").map((event) => event.provider).filter(Boolean))].sort();
+  const locations = [...new Set(events.filter((event) => event.type === "follow-up").map((event) => event.location).filter(Boolean))].sort();
+  const providerOptions = [...new Set([...providers, ...(providerFilter !== "all" ? [providerFilter] : [])])].sort();
+  const sources = [canViewFollowUps && followUpState, canViewServices && serviceState].filter(Boolean);
+  const loading = sources.some((source) => source.loading);
+  const incomplete = sources.some((source) => Boolean(source.error) || source.source === "cache");
+  const filtersActive = Boolean(search || categoryFilter !== "all" || statusFilter !== "all" || providerFilter !== "all");
+  const period = currentView === "month" || currentView === "agenda" ? monthLabel(cursor) : currentView === "week" ? weekLabel(cursor) : dayLabel(cursor);
+  const selectedEvent = selected && isCalendarEventInBarangay(selected, assignedBarangay) &&
+    (selected.type === "follow-up" ? canViewFollowUps : canViewServices) ? selected : null;
+  const selectedActions = followUpActionAvailability({ ...selectedEvent, scheduled_date: selectedEvent?.date }, { canEdit, canComplete });
+  const showToast = (message, error = false) => { if (active.current) setToast({ message, error }); };
+  const selectDate = (date) => { setCursor(date); setSelectedDay(date); };
+  const clearFilters = () => { setSearch(""); setCategoryFilter("all"); setStatusFilter("all"); setProviderFilter("all"); };
 
-  const byDay = useMemo(() => groupByDay(filtered), [filtered]);
-
-  const filtersActive = searchQuery !== "" || statusFilter !== "All" || providerFilter !== "All";
-  const clearFilters = () => {
-    setSearchQuery("");
-    setStatusFilter("All");
-    setProviderFilter("All");
-  };
-
-  const step = (dir) => {
-    const d = new Date(cursor);
-    if (view === "month") d.setMonth(d.getMonth() + dir);
-    else if (view === "week") d.setDate(d.getDate() + 7 * dir);
-    else d.setDate(d.getDate() + dir);
-    setCursor(d);
-  };
-
-  const periodLabel =
-    view === "month" ? monthLabel(cursor) : view === "week" ? weekLabel(cursor) : dayLabel(cursor);
-
-  const selectedSchedule = selected ? schedules.find((s) => s.id === selected) : null;
-
-  /** Apply a persisted patch to one follow-up row and refresh local state. */
-  const patchSchedule = async (id, patch, message) => {
+  const persistFollowUp = async ({ target, record, permission, message, resident = null }) => {
+    if (busy.current) throw new Error("A follow-up change is already being saved.");
+    if (!active.current || !can("followups.view") || !can(permission) || !assignedBarangay) throw new Error("You do not have permission to make this follow-up change.");
+    if (target && (target.type !== "follow-up" || !isCalendarEventInBarangay(target, assignedBarangay))) throw new Error("This follow-up is outside your assigned barangay.");
+    if (!target && (!resident || !isCalendarEventInBarangay({ residentBarangay: resident.barangay }, assignedBarangay))) throw new Error("Select an authorized resident before scheduling a follow-up.");
+    if (target) {
+      const actions = followUpActionAvailability({ ...target, scheduled_date: record.scheduled_date || target.date }, { canEdit: can("followups.edit"), canComplete: can("followups.complete") });
+      if (permission === "followups.edit" && !actions.edit) throw new Error("This follow-up is no longer editable.");
+      if (record.status === "Completed" && (!can("followups.complete") || !actions.complete)) throw new Error("This follow-up cannot be completed. Verify its date and resident confirmation.");
+      if (record.status === "Missed" && (!can("followups.complete") || !actions.missed)) throw new Error("This follow-up cannot be marked missed. Verify its date and resident confirmation.");
+    }
+    busy.current = true;
     setSaving(true);
     try {
-      const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: id, record: patch });
-      const mapped = mapRowToSchedule(result?.record || result);
-      setSchedules((prev) => prev.map((s) => (s.id === id ? { ...s, ...mapped } : s)));
-      showToast(result?.queued
-        ? `${message} Saved on this device; it will sync when a connection is available.`
-        : message);
+      const result = target
+        ? await updateFollowUpOffline({ ownerId: user.id, followUpId: target.id, record })
+        : await createFollowUpOffline({ ownerId: user.id, record });
+      if (!active.current) return null;
+      const row = result?.record || result;
+      readCalendarRows([row], "Saved follow-up");
+      // Offline updates return a partial record; merge it with the same actual
+      // resident/appointment instead of replacing its identity with defaults.
+      const mapped = mapFollowUpEvent({ ...target, ...record, ...row,
+        residentName: row.residentName && row.residentName !== "Resident" ? row.residentName : target?.residentName || resident?.name,
+        residentBarangay: row.resident?.barangay ?? row.barangay ?? target?.residentBarangay ?? resident?.barangay,
+        offline: Boolean(result?.queued || row.offline),
+        syncStatus: row.syncStatus || (result?.queued ? "Pending Sync" : ""),
+      });
+      if (!isCalendarEventInBarangay(mapped, assignedBarangay)) throw new Error("The saved follow-up response is outside your assigned barangay. Refresh the schedule to verify the record.");
+      followUpRequest.current += 1;
+      setFollowUps((state) => ({ ...state, rows: [mapped, ...state.rows.filter((event) => String(event.id) !== String(mapped.id))]
+        .filter((event) => event.date >= range.from && event.date <= range.to) }));
+      setFollowUpRefresh((value) => value + 1);
+      showToast(result?.queued ? `${message} Saved on this device; it will sync when a connection is available. Resident visibility may await synchronization.` : message);
       return mapped;
-    } catch (err) {
-      showToast(err?.message || "Could not save changes.");
-      throw err;
     } finally {
-      setSaving(false);
+      busy.current = false;
+      if (active.current) setSaving(false);
+    }
+  };
+
+  const patchSchedule = async (event, status, message) => {
+    try {
+      await persistFollowUp({ target: event, record: { status }, permission: ["Completed", "Missed"].includes(status) ? "followups.complete" : "followups.edit", message });
+      if (active.current) setSelected(null);
+    } catch (error) {
+      if (active.current) setDetailError(error?.message || "Could not save the follow-up change.");
     }
   };
 
   const handleSave = async (form) => {
-    setSaving(true);
+    setFormError("");
+    const isNew = formTarget === "new";
+    const resident = isNew ? residents.rows.find((row) => String(row.id) === String(form.residentId)) : null;
+    const record = {
+      purpose: String(form.purpose).trim(), scheduled_date: form.date, scheduled_time: form.time,
+      location: String(form.location || "").trim(), priority: form.priority,
+      assigned_provider: String(form.provider).trim(), notes: form.instructions,
+      ...(isNew || form.status !== formTarget?.status ? { status: form.status } : {}),
+      ...(isNew ? { residentId: resident?.id, _offlineBarangay: resident?.barangay || "", _offlineResidentName: resident?.name || "", requiresResidentResponse: form.requiresResidentResponse } : {}),
+    };
     try {
-      if (formTarget && formTarget !== "new") {
-        const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: formTarget.id, record: {
-          purpose: form.purpose,
-          scheduled_date: form.date,
-          scheduled_time: form.time,
-          location: form.location,
-          priority: form.priority,
-          status: form.status,
-          assigned_provider: form.provider,
-          notes: form.instructions,
-        }});
-        const mapped = mapRowToSchedule(result?.record || result);
-        setSchedules((prev) => prev.map((s) => (s.id === formTarget.id ? { ...s, ...mapped } : s)));
-        showToast(result?.queued
-          ? "Schedule update saved on this device; it will sync when a connection is available."
-          : "Follow-up schedule updated.");
-      } else {
-        const result = await createFollowUpOffline({ ownerId: user?.id, record: {
-          residentId: form.residentId,
-          _offlineBarangay: residents.find((resident) => resident.id === form.residentId)?.barangay || "",
-          purpose: form.purpose,
-          scheduled_date: form.date,
-          scheduled_time: form.time,
-          location: form.location,
-          priority: form.priority,
-          status: form.status,
-          assigned_provider: form.provider,
-          notes: form.instructions,
-          requiresResidentResponse: form.requiresResidentResponse,
-        }});
-        const mapped = mapRowToSchedule(result?.record || result);
-        setSchedules((prev) => [mapped, ...prev]);
-        showToast(result?.queued
-          ? "Follow-up saved on this device; it will sync when a connection is available and may not yet be visible to the resident or other staff."
-          : "Follow-up schedule added.");
-        setCursor(new Date(`${form.date}T00:00:00`));
-      }
+      const event = await persistFollowUp({ target: isNew ? null : formTarget, record, resident,
+        permission: isNew ? "followups.create" : "followups.edit", message: isNew ? "Follow-up schedule added." : "Follow-up schedule updated." });
+      if (!active.current || !event) return;
+      selectDate(parseCalendarDate(event.date));
       setFormTarget(null);
       setSelected(null);
-    } catch (err) {
-      showToast(err?.message || "Could not save the schedule.");
-    } finally {
-      setSaving(false);
-    }
+    } catch (error) { if (active.current) setFormError(error?.message || "Could not save the follow-up schedule."); }
+  };
+
+  const openEvent = (key) => {
+    const event = events.find((row) => calendarEventKey(row) === key);
+    if (event) { setDetailError(""); setSelected(event); }
   };
 
   return (
-    <>
-      <PageHeader
-        crumbs={["Follow-ups", "Schedule Calendar"]}
-        title="Follow-up Schedule Calendar"
-        subtitle="View, schedule, and manage follow-up activities for residents in your barangay."
-        action={
-          <button
-            onClick={() => setFormTarget("new")}
-            className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
-          >
-            <Plus className="h-4 w-4" /> Add Schedule
-          </button>
-        }
-      />
+    <div className="supervisor-module min-w-0">
+      <PageHeader dense crumbs={["Monitoring & Reports", "Schedule Calendar"]} title="Schedule Calendar"
+        subtitle={`${assignedBarangay} / Follow-ups and health-service attendance for your assigned barangay.`}
+        action={canCreate ? <button type="button" onClick={() => { setFormError(""); setFormTarget("new"); }} className="supervisor-button is-primary"><Plus className="h-4 w-4" aria-hidden="true" />Add schedule</button> : null} />
 
-      {toast && (
-        <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
-          <span className="text-sm">{toast}</span>
+      {requestedDate && !parseCalendarDate(requestedDate) && <p role="alert" className="mb-3 text-ui text-brand-danger">The linked date is invalid. Showing today's calendar instead.</p>}
+      {linkState.loading && <p role="status" className="mb-3 text-ui text-brand-gray">Opening the authorized follow-up...</p>}
+      {linkState.error && <Card className="mb-3"><ErrorState compact title="Requested follow-up" message={linkState.error} onRetry={canViewFollowUps ? () => setLinkRefresh((value) => value + 1) : undefined} /></Card>}
+      {SHOW_PREVIEW_DEMO && (
+        <div role="status" className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-l-2 border-brand-gold bg-brand-goldpale px-3 py-2 text-ui text-brand-ink">
+          <span className="font-semibold text-brand-gold">Preview demo</span>
+          <span>Sample follow-up appointments shown only for design demonstration. They are not in the health records and are never saved.</span>
         </div>
       )}
 
-      {/* Controls */}
-      <Card className="p-4 mb-5">
-        <div className="flex flex-wrap items-center gap-3">
-          {/* View toggle */}
-          <div className="inline-flex rounded-btn border border-slate-200 bg-white p-0.5 dark:border-border dark:bg-card">
-            {VIEWS.map((v) => (
-              <button
-                key={v.key}
-                onClick={() => setView(v.key)}
-                className={`rounded-btn px-3.5 py-2 text-sm font-medium transition-colors ${
-                  view === v.key ? "bg-brand-blue text-white" : "text-brand-gray hover:text-brand-ink"
-                }`}
-              >
-                {v.label}
-              </button>
-            ))}
+      <section className="supervisor-panel mb-4" aria-label="Calendar controls">
+        <div className="supervisor-toolbar">
+          <div className="supervisor-tabs" role="group" aria-label="Calendar view">
+            {VIEWS.map((option) => <button type="button" key={option} onClick={() => { setCursor(selectedDay); setView(option); }} aria-pressed={currentView === option} className={option === "month" || option === "week" ? "hidden md:inline-flex" : ""}>{option.charAt(0).toUpperCase() + option.slice(1)}</button>)}
           </div>
-          {/* Period navigation */}
-          <div className="inline-flex items-center gap-1">
-            <button onClick={() => step(-1)} aria-label="Previous period" className="flex h-9 w-9 items-center justify-center rounded-btn border border-slate-200 bg-white text-brand-gray hover:bg-brand-bg dark:border-border dark:bg-card dark:hover:bg-hover">
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setCursor(new Date())}
-              className="rounded-btn border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:border-border dark:bg-card dark:hover:bg-hover"
-            >
-              Today
-            </button>
-            <button onClick={() => step(1)} aria-label="Next period" className="flex h-9 w-9 items-center justify-center rounded-btn border border-slate-200 bg-white text-brand-gray hover:bg-brand-bg dark:border-border dark:bg-card dark:hover:bg-hover">
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-brand-ink sm:text-center">{periodLabel}</p>
-        </div>
-
-        {/* Filters */}
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="flex items-center gap-2 rounded-input border border-slate-200 bg-brand-bg/60 px-3 py-2.5 dark:border-border dark:bg-input">
-            <Search className="h-4 w-4 shrink-0 text-brand-gray" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search resident name or ID..."
-              className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
-            />
-          </div>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none dark:border-border dark:bg-input dark:text-foreground">
-            <option value="All">All Statuses</option>
-            {CALENDAR_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} className="rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none dark:border-border dark:bg-input dark:text-foreground">
-            <option value="All">All Providers</option>
-            {PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              onChange={(e) => { if (e.target.value) { setCursor(new Date(e.target.value + "T00:00:00")); setView("day"); } }}
-              className="min-w-0 flex-1 rounded-btn border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none dark:border-border dark:bg-input dark:text-foreground"
-              aria-label="Jump to date"
-            />
-            {filtersActive && (
-              <button onClick={clearFilters} className="inline-flex items-center gap-1 whitespace-nowrap rounded-btn border border-brand-border bg-white px-3 py-2.5 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
-                <X className="h-4 w-4" /> Clear
-              </button>
-            )}
+          <div className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1">
+            <div className="flex items-center gap-1.5" role="group" aria-label="Calendar period">
+              <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, currentView, -1))} aria-label={`Previous ${currentView === "agenda" ? "month" : currentView}`} className="supervisor-button is-icon"><ChevronLeft className="h-4 w-4" aria-hidden="true" /></button>
+              <button type="button" onClick={() => selectDate(parseCalendarDate(manilaDateKey()))} className="supervisor-button">Today</button>
+              <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, currentView, 1))} aria-label={`Next ${currentView === "agenda" ? "month" : currentView}`} className="supervisor-button is-icon"><ChevronRight className="h-4 w-4" aria-hidden="true" /></button>
+            </div>
+            <h2 className="min-w-0 text-section font-semibold text-brand-ink" aria-live="polite">{period}</h2>
           </div>
         </div>
-      </Card>
+        <div className="grid grid-cols-1 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-2 lg:grid-cols-5">
+          <label className="col-span-1 min-w-0 text-caption text-brand-gray sm:col-span-2 lg:col-span-1">Search activities<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Resident, ID or activity" className="supervisor-input mt-1 w-full" /></label>
+          <label className="min-w-0 text-caption text-brand-gray">Category<select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="supervisor-input mt-1 w-full"><option value="all">All activities</option>{canViewFollowUps && <option value="type:follow-up">Follow-ups</option>}{canViewServices && <option value="type:health-service">Health services</option>}{categories.length > 0 && <optgroup label="Health-service categories">{categories.map((category) => <option key={category} value={`category:${category}`}>{category}</option>)}</optgroup>}</select></label>
+          <label className="min-w-0 text-caption text-brand-gray">Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="supervisor-input mt-1 w-full"><option value="all">All Status</option>{statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
+          <label className="min-w-0 text-caption text-brand-gray">Follow-up provider<select value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)} className="supervisor-input mt-1 w-full" disabled={!canViewFollowUps}><option value="all">All providers</option>{providerOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}</select></label>
+          <label className="min-w-0 text-caption text-brand-gray">Selected date<input type="date" value={toDateKey(selectedDay)} onChange={(event) => { const date = parseCalendarDate(event.target.value); if (date) selectDate(date); }} className="supervisor-input mt-1 w-full" /></label>
+        </div>
+        {filtersActive && <div className="px-3 pb-3"><button type="button" onClick={clearFilters} className="supervisor-button is-quiet"><X className="h-4 w-4" aria-hidden="true" />Clear filters</button></div>}
+      </section>
 
-      {/* Calendar view */}
-      {loading ? (
-        <Card className="p-10 text-center">
-          <CalendarDays className="mx-auto h-10 w-10 animate-pulse text-brand-gray/50" />
-          <p className="mt-3 text-sm font-medium text-brand-ink">Loading schedule...</p>
-        </Card>
-      ) : loadError ? (
-        <Card className="p-10 text-center">
-          <ShieldAlert className="mx-auto h-10 w-10 text-brand-danger" />
-          <p className="mt-3 text-sm font-medium text-brand-ink">Unable to load the schedule</p>
-          <p className="mt-1 text-xs text-brand-gray">{loadError}</p>
-          <button onClick={load} className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-            Try Again
-          </button>
-        </Card>
-      ) : filtered.length === 0 ? (
-        <Card className="p-10 text-center">
-          <CalendarDays className="mx-auto h-10 w-10 text-brand-gray/50" />
-          <p className="mt-3 text-sm font-medium text-brand-ink">No Follow-up Schedules Found</p>
-          <p className="mt-1 text-xs text-brand-gray">
-            {filtersActive ? "No schedules match the current filters." : "There are no scheduled follow-ups yet."}
-          </p>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            {filtersActive && (
-              <button onClick={clearFilters} className="rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-blue hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
-                Clear Filters
-              </button>
-            )}
-            <button onClick={() => setFormTarget("new")} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-              Add Schedule
-            </button>
-          </div>
-        </Card>
-      ) : view === "month" ? (
-        <MonthView cursor={cursor} today={today} byDay={byDay} onOpenEvent={setSelected} onSelectDay={(d) => { setCursor(d); setView("day"); }} />
-      ) : view === "week" ? (
-        <WeekView cursor={cursor} today={today} byDay={byDay} onOpenEvent={setSelected} onSelectDay={(d) => { setCursor(d); setView("day"); }} />
-      ) : (
-        <DayView cursor={cursor} byDay={byDay} onOpenEvent={setSelected} />
-      )}
+      <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-caption text-brand-gray" aria-live="polite">
+        {canViewFollowUps && <span>Follow-ups: {followUpState.loading ? "Loading..." : followUpState.source === "cache" ? `${followUpState.rows.length} device records / not verified live` : followUpState.error ? "Unavailable" : `${followUpState.rows.length} loaded`}</span>}
+        {canViewServices && <span>Health-service attendance: {serviceState.loading ? "Loading..." : serviceState.error ? "Unavailable" : `${serviceState.rows.length} loaded`}</span>}
+        {!canViewFollowUps && <span>Follow-ups are not permitted for this account.</span>}
+        {!canViewServices && <span>Health-service attendance is not permitted for this account.</span>}
+      </div>
+      {canViewFollowUps && !followUpState.loading && followUpState.source === "cache" && <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 border-l-2 border-brand-border px-3 py-2 text-ui text-brand-gray"><span>{followUpState.error || "Showing follow-ups saved on this device."} Device records may be incomplete or out of date.</span><button type="button" onClick={() => setFollowUpRefresh((value) => value + 1)} className="supervisor-button">Retry follow-ups</button></div>}
+      {canViewFollowUps && followUpState.error && followUpState.source !== "cache" && <Card className="mb-3"><ErrorState compact title="Follow-ups unavailable" message={followUpState.error} onRetry={() => setFollowUpRefresh((value) => value + 1)} /></Card>}
+      {canViewServices && serviceState.error && <Card className="mb-3"><ErrorState compact title="Health-service attendance unavailable" message={serviceState.error} onRetry={() => setServiceRefresh((value) => value + 1)} /></Card>}
 
-      {/* Detail modal */}
-      {selectedSchedule && (
-        <ScheduleDetailModal
-          schedule={selectedSchedule}
-          onClose={() => setSelected(null)}
-          actions={
-            <>
-              {selectedSchedule.status !== "Completed" && (
-                <button
-                  disabled={saving}
-                  onClick={async () => { try { await patchSchedule(selectedSchedule.id, { status: "Completed" }, "Follow-up marked completed."); setSelected(null); } catch { /* toast shown */ } }}
-                  className="inline-flex items-center gap-1.5 rounded-btn border border-emerald-300 bg-white px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 dark:bg-card"
-                >
-                  <CheckCircle2 className="h-4 w-4" /> Complete
-                </button>
-              )}
-              {selectedSchedule.status !== "Missed" && (
-                <button
-                  disabled={saving}
-                  onClick={async () => { try { await patchSchedule(selectedSchedule.id, { status: "Missed" }, "Follow-up marked missed."); setSelected(null); } catch { /* toast shown */ } }}
-                  className="inline-flex items-center gap-1.5 rounded-btn border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60 dark:bg-card"
-                >
-                  <Clock className="h-4 w-4" /> Mark Missed
-                </button>
-              )}
-              {selectedSchedule.status !== "Cancelled" && (
-                <button
-                  disabled={saving}
-                  onClick={async () => { try { await patchSchedule(selectedSchedule.id, { status: "Cancelled" }, "Follow-up cancelled."); setSelected(null); } catch { /* toast shown */ } }}
-                  className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg disabled:opacity-60 dark:bg-card dark:hover:bg-hover"
-                >
-                  <Ban className="h-4 w-4" /> Cancel
-                </button>
-              )}
-              <button
-                onClick={() => { setFormTarget(selectedSchedule); setSelected(null); }}
-                className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
-              >
-                <Pencil className="h-4 w-4" /> Edit / Reschedule
-              </button>
-            </>
-          }
-        />
-      )}
+      {currentView === "agenda" ? <AgendaView events={agendaEvents} selectedDay={selectedDay} loading={loading} incomplete={incomplete} onSelectDay={selectDate} onOpenEvent={openEvent} />
+        : currentView === "day" ? <DayView presentation="supervisor" cursor={selectedDay} byDay={byDay} loading={loading} incomplete={incomplete} onOpenEvent={openEvent} />
+        : <div className={`grid items-start gap-4 ${currentView === "month" ? "xl:grid-cols-[minmax(0,1.8fr)_minmax(280px,1fr)]" : ""}`}>
+          {currentView === "month" ? <MonthView presentation="supervisor" cursor={cursor} today={today} selectedDay={selectedDay} byDay={byDay} onOpenEvent={openEvent} onSelectDay={selectDate} />
+            : <WeekView presentation="supervisor" cursor={cursor} today={today} selectedDay={selectedDay} byDay={byDay} onOpenEvent={openEvent} onSelectDay={selectDate} />}
+          <DayView presentation="supervisor" cursor={selectedDay} byDay={byDay} loading={loading} incomplete={incomplete} onOpenEvent={openEvent} />
+        </div>}
 
-      {/* Add / Edit modal */}
-      {formTarget && (
-        <ScheduleFormModal
-          initial={formTarget === "new" ? null : formTarget}
-          residents={residents}
-          saving={saving}
-          onClose={() => setFormTarget(null)}
-          onSave={handleSave}
-        />
-      )}
-    </>
+      {selectedEvent && <ScheduleDetailModal presentation="supervisor" schedule={selectedEvent} error={detailError} onClose={() => setSelected(null)} actions={selectedEvent.type === "follow-up" ? <>
+        {selectedActions.complete && <button type="button" disabled={saving} onClick={() => patchSchedule(selectedEvent, "Completed", "Follow-up marked completed.")} className="supervisor-button"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />Complete</button>}
+        {selectedActions.missed && <button type="button" disabled={saving} onClick={() => patchSchedule(selectedEvent, "Missed", "Follow-up marked missed.")} className="supervisor-button"><Clock className="h-4 w-4" aria-hidden="true" />Mark missed</button>}
+        {selectedActions.cancel && <button type="button" disabled={saving} onClick={() => patchSchedule(selectedEvent, "Cancelled", "Follow-up cancelled.")} className="supervisor-button"><Ban className="h-4 w-4" aria-hidden="true" />Cancel follow-up</button>}
+        {selectedActions.edit && <button type="button" disabled={saving} onClick={() => { setFormError(""); setFormTarget(selectedEvent); setSelected(null); }} className="supervisor-button is-primary"><Pencil className="h-4 w-4" aria-hidden="true" />Edit / reschedule</button>}
+      </> : <Link to="/app/health_supervisor/services" className="supervisor-button">Open health services</Link>} />}
+
+      {formTarget && <ScheduleFormModal initial={formTarget === "new" ? null : formTarget} date={toDateKey(selectedDay)} residents={residents.rows} residentsLoading={residents.loading} residentsError={residents.error} onRetryResidents={() => setResidentRefresh((value) => value + 1)} providers={providers} locations={locations} canComplete={canComplete} saving={saving} error={formError} onClose={() => { if (!saving) setFormTarget(null); }} onSave={handleSave} />}
+      {toast && <div role={toast.error ? "alert" : "status"} className="supervisor-panel fixed inset-x-4 bottom-4 z-[80] flex max-w-xl items-start gap-2 p-3 text-ui text-brand-ink shadow-sm sm:left-auto"><span>{toast.message}</span><button type="button" className="supervisor-button is-icon" onClick={() => setToast(null)} aria-label="Dismiss notification"><X className="h-4 w-4" aria-hidden="true" /></button></div>}
+    </div>
   );
 }

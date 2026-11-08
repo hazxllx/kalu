@@ -6,18 +6,11 @@ import PageHeader from "@/components/common/PageHeader";
 
 const PendingVerifications = lazy(() => import("@/features/verification/pages/PendingVerifications"));
 const HouseholdVerifications = lazy(() => import("@/features/verification/pages/HouseholdVerifications"));
-const StaffAccountApprovals = lazy(() => import("@/features/accounts/pages/StaffAccountApprovals"));
 const TransferRequests = lazy(() => import("@/features/verification/pages/TransferRequests"));
 
 const TABS = [
   { id: "resident", label: "Resident Verification", permission: "residents.registration.approve" },
   { id: "household", label: "Household Verification", permission: "households.verify" },
-  {
-    id: "bhw",
-    label: "BHW Approval",
-    permission: "accounts.personnel.approve",
-    roles: ["health_supervisor"],
-  },
   { id: "transfer", label: "Resident Transfer Requests", permission: "residents.transfer.approve" },
 ];
 
@@ -54,17 +47,17 @@ export default function VerificationsApprovals() {
       <PageHeader
         eyebrow="Verification"
         title="Verifications & Approvals"
-        subtitle="Review resident, household, and BHW requests in one place."
+        subtitle="Review resident, household, and transfer requests in one place."
       />
 
       <section aria-label="Verification and approval workflows">
         {availableTabs.length === 0 ? (
           <p className="rounded-card border border-brand-border bg-white px-4 py-3 text-sm text-brand-gray dark:border-border dark:bg-card">
-            No verification or BHW-approval permissions are assigned to this role.
+            No verification or transfer-approval permissions are assigned to this role.
           </p>
         ) : (
         <>
-        <div className="tab-scrollbar mb-4 flex w-full gap-2 overflow-x-auto border-b border-brand-border bg-background sm:gap-6 dark:border-border" role="tablist" aria-label="Verification workflows">
+        <div className="tab-scrollbar mb-4 flex w-full gap-2 overflow-x-auto border-b border-brand-border bg-background sm:gap-8 dark:border-border" role="tablist" aria-label="Verification workflows">
           {availableTabs.map((tab) => (
             <button
               key={tab.id}
@@ -93,7 +86,7 @@ export default function VerificationsApprovals() {
                   document.getElementById(`verification-tab-${nextTab.id}`)?.focus();
                 }
               }}
-              className={`-mb-px flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-[3px] px-3 text-sm transition-[color,border-color] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue focus-visible:rounded-sm sm:px-4 ${
+              className={`-mb-px flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-[3px] px-3 text-sm transition-[color,border-color] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue focus-visible:rounded-sm sm:px-5 ${
                 activeTab === tab.id
                   ? "border-brand-blue font-semibold text-brand-blue"
                   : "border-transparent font-medium text-brand-gray hover:border-brand-border hover:text-brand-ink dark:hover:text-foreground"
@@ -119,12 +112,6 @@ export default function VerificationsApprovals() {
             {activeTab === "household" && (
               <HouseholdVerifications
                 embedded
-              />
-            )}
-            {activeTab === "bhw" && (
-              <StaffAccountApprovals
-                embedded
-                bhwOnly
               />
             )}
             {activeTab === "transfer" && (

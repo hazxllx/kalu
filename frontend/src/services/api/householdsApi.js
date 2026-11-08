@@ -18,6 +18,7 @@ export const householdsApi = {
   list: (params) => api.get('/households', { params }),
   monitoringSummary: () => api.get('/households/monitoring/summary'),
   searchResidents: (q) => api.get('/households/residents/search', { params: { q } }),
+  workers: (params, options = {}) => api.get('/households/workers', { ...options, params }),
   get: (id) => api.get(`/households/${id}`),
   listVisits: (id) => api.get(`/households/${id}/visits`),
   createVisit: (id, visit, requestId = visit?.requestId) => api.post(

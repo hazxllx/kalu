@@ -4,6 +4,7 @@ import { loadActiveProfile, profileToSessionUser } from '../services/profile.ser
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
+import { AUTH_SERVICE_UNAVAILABLE_CODE, AUTH_SERVICE_UNAVAILABLE_MESSAGE, isAuthServiceUnavailable } from '../../../shared/authConnectivity.js';
 
 /**
  * Authentication middleware.
@@ -48,17 +49,31 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   const getUserWithRetry = async (accessToken) => {
     let lastResult;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      lastResult = await supabase.auth.getUser(accessToken);
-      const transportFailure =
-        lastResult.error && /fetch failed|networkerror/i.test(String(lastResult.error.message || ''));
+      try {
+        lastResult = await supabase.auth.getUser(accessToken);
+      } catch (error) {
+        if (attempt === 0 && isAuthServiceUnavailable(error)) continue;
+        throw error;
+      }
+      const transportFailure = isAuthServiceUnavailable(lastResult.error);
       if (!transportFailure || attempt === 1) return lastResult;
     }
     return lastResult;
   };
 
-  const { data, error } = await getUserWithRetry(token);
+  let verification;
+  try {
+    verification = await getUserWithRetry(token);
+  } catch (error) {
+    if (isAuthServiceUnavailable(error)) throw new ApiError(503, AUTH_SERVICE_UNAVAILABLE_MESSAGE).withCode(AUTH_SERVICE_UNAVAILABLE_CODE);
+    throw error;
+  }
+  const { data, error } = verification;
+  if (isAuthServiceUnavailable(error)) throw new ApiError(503, AUTH_SERVICE_UNAVAILABLE_MESSAGE).withCode(AUTH_SERVICE_UNAVAILABLE_CODE);
+  if (error?.status === 429) throw ApiError.tooManyRequests('Session verification is rate limited. Please wait and try again.');
 
-  if (error || !data?.user) {
+  if (!error && !data?.user) throw new ApiError(503, 'The authentication service did not return a verified user. Please try again.');
+  if (error) {
     throw ApiError.unauthorized('Invalid or expired session');
   }
 

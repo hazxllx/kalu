@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { Outlet, useLocation, Link, Navigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate, Link, Navigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search,
   Bell,
   Menu,
   X,
@@ -32,12 +31,16 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { hasValidPermissionSnapshot, permissionNotice, routePermissionsAllowed } from "@/services/accessControl/permissionAccess";
 import { isNavigatorOnline } from "@/services/offline/connectivity";
+import { getSupervisorScope } from "@/lib/supervisorScope";
 
 export default function DashboardLayout({ roleKey }) {
   const role = ROLES[roleKey];
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, logout, refreshProfile } = useAuth();
   const { can, matrixLoadState, refreshMatrix } = usePermissions();
+  const isSupervisor = roleKey === "health_supervisor";
+  const assignedBarangay = getSupervisorScope(user)?.assignedBarangay;
 
   const sidebarPreferenceKey = `kalusagap.sidebar.collapsed.v1:${user?.id || roleKey}`;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -107,7 +110,6 @@ export default function DashboardLayout({ roleKey }) {
 
   // BHW gathers community/household data only, so the resident/record lookup
   // is not exposed to that role. Every other role keeps it.
-  const showResidentSearch = roleKey !== "bhw";
 
   // Entries that declare a permission disappear once an administrator removes
   // that privilege from the role; everything else behaves exactly as before.
@@ -186,12 +188,11 @@ export default function DashboardLayout({ roleKey }) {
     });
   }, [location.pathname, items]);
 
-  // The profile reflects the signed-in demo user (name/role per account),
-  // falling back to the role's placeholder only when no user is available.
+  // Identity always comes from the authenticated account, never a demo person.
   const displayName = user?.name || role.name;
   const displayEmail =
     user?.email ||
-    `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`;
+    (isSupervisor ? "Email unavailable" : `${displayName.split(" ")[0].toLowerCase()}@pili.gov.ph`);
 
   const initials = displayName
     .split(" ")
@@ -348,7 +349,7 @@ export default function DashboardLayout({ roleKey }) {
                   [it.label]: !openGroup,
                 }))
               }
-              className={`group flex ${rowSize} w-full ${itemPadding} items-center rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue`}
+              className={`supervisor-nav-item group flex ${rowSize} w-full ${itemPadding} items-center rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue`}
             >
               <Icon
                 name={it.icon}
@@ -370,9 +371,10 @@ export default function DashboardLayout({ roleKey }) {
             <AnimatePresence initial={false}>
               {openGroup && (
                 <motion.div
-                  initial={{ height: 0, opacity: 0 }}
+                  initial={isSupervisor ? false : { height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
+                  transition={isSupervisor ? { duration: 0 } : undefined}
                   id={groupId}
                   className={`overflow-hidden ${collapsed ? "pt-1" : "pl-3 pt-1"} ${compact ? "space-y-0.5" : "space-y-1"}`}
                 >
@@ -396,7 +398,7 @@ export default function DashboardLayout({ roleKey }) {
           aria-label={collapsed ? it.label : undefined}
           aria-current={active ? "page" : undefined}
           title={collapsed || !adminNav ? it.label : undefined}
-          className={`group flex w-full min-w-0 ${rowSize} ${itemPadding} items-center rounded-md text-sm leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
+          className={`supervisor-nav-item group flex w-full min-w-0 ${rowSize} ${itemPadding} items-center rounded-md text-sm leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
             active
               ? adminNav
                 ? "bg-brand-light text-brand-blue font-medium dark:bg-brand-blue/20"
@@ -437,7 +439,7 @@ export default function DashboardLayout({ roleKey }) {
             className={adminNav && i > 0 ? "border-t border-brand-border/60 pt-2 dark:border-border" : undefined}
           >
             {block.group && !collapsed && (
-              <p className={`px-3 ${adminNav ? "pb-1 text-[10px] text-brand-gray dark:text-slate-400" : `${i === 0 ? "pt-1" : "pt-5"} pb-1.5 text-[11px] text-slate-500 dark:text-slate-500`} font-semibold uppercase tracking-[0.06em] select-none`}>
+              <p className={`supervisor-nav-group px-3 ${adminNav ? "pb-1 text-[10px] text-brand-gray dark:text-slate-400" : `${i === 0 ? "pt-1" : compact ? "pt-3" : "pt-5"} pb-1.5 text-[11px] text-slate-500 dark:text-slate-500`} font-semibold uppercase tracking-[0.06em] select-none`}>
                 {block.group}
               </p>
             )}
@@ -488,20 +490,20 @@ export default function DashboardLayout({ roleKey }) {
         </p>
 
         <p className={`mt-0.5 font-medium uppercase leading-tight text-brand-gray dark:text-slate-400 ${roleKey === "admin" ? "text-[10px] tracking-[0.03em]" : "truncate text-[9.5px] tracking-[0.12em]"}`}>
-          Community Health System
+          {isSupervisor ? "Municipal Health Office" : "Community Health System"}
         </p>
       </div>}
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[color:#f5f7fa] dark:bg-background">
+    <div className={`min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""}`}>
       <aside
-        className={`hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : "w-72"}`}
+        className={`hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : isSupervisor ? "w-64" : "w-72"}`}
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
       >
         {/* Brand header — fixed */}
-        <div className={`relative shrink-0 flex items-center border-b border-slate-200 dark:border-border ${roleKey === "admin" ? `h-[72px] ${sidebarCollapsed ? "justify-center px-2 pt-4" : "px-4 pr-11"}` : `h-20 ${sidebarCollapsed ? "justify-center gap-0 px-2" : "justify-between gap-3 px-5"}`}`}>
+        <div className={`relative shrink-0 flex items-center border-b border-slate-200 dark:border-border ${roleKey === "admin" ? `h-[72px] ${sidebarCollapsed ? "justify-center px-2 pt-4" : "px-4 pr-11"}` : `${isSupervisor ? "h-16" : "h-20"} ${sidebarCollapsed ? "justify-center gap-0 px-2" : isSupervisor ? "justify-between gap-3 px-4" : "justify-between gap-3 px-5"}`}`}>
           <div className={sidebarCollapsed ? "flex min-w-0 justify-center" : "min-w-0 flex-1"}>
             <SidebarBrand collapsed={sidebarCollapsed} />
           </div>
@@ -529,6 +531,12 @@ export default function DashboardLayout({ roleKey }) {
 
         {/* Fixed account footer */}
         <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
+          {isSupervisor && !sidebarCollapsed && (
+            <div className="px-3 pb-2 pt-1">
+              <p className="text-caption text-brand-gray">Assigned Barangay</p>
+              <p className="mt-0.5 truncate text-ui font-medium text-brand-ink">{assignedBarangay || "Assignment unavailable"}</p>
+            </div>
+          )}
           <button
             onClick={() => logout()}
             aria-label={sidebarCollapsed ? "Log out" : undefined}
@@ -563,7 +571,7 @@ export default function DashboardLayout({ roleKey }) {
               aria-label="Mobile navigation"
               className="fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col bg-white dark:bg-sidebar lg:hidden"
             >
-              <div className={`shrink-0 flex items-center justify-between border-b border-slate-200 dark:border-border ${roleKey === "admin" ? "h-[72px] gap-2 px-4" : "h-20 gap-3 px-5"}`}>
+              <div className={`shrink-0 flex items-center justify-between border-b border-slate-200 dark:border-border ${roleKey === "admin" ? "h-[72px] gap-2 px-4" : isSupervisor ? "h-16 gap-3 px-4" : "h-20 gap-3 px-5"}`}>
                 <SidebarBrand />
 
                 <button
@@ -600,7 +608,7 @@ export default function DashboardLayout({ roleKey }) {
         )}
       </AnimatePresence>
 
-      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : "lg:pl-72"}`}>
+      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : isSupervisor ? "lg:pl-64" : "lg:pl-72"}`}>
         <header className="sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 md:px-6">
           <button
             onClick={() => setOpen(true)}
@@ -612,21 +620,11 @@ export default function DashboardLayout({ roleKey }) {
             <Menu className="w-6 h-6" />
           </button>
 
-          {showResidentSearch && (
-            <div className="hidden md:flex h-9 items-center gap-2 bg-slate-50 dark:bg-input border border-slate-200 dark:border-border rounded-md px-3 w-80 xl:w-[360px]">
-              <Search className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-
-              <input
-                placeholder="Search residents, records..."
-                className="bg-transparent text-sm outline-none w-full placeholder:text-slate-400 dark:placeholder:text-slate-500"
-              />
-            </div>
-          )}
-
           <div className="ml-auto flex items-center gap-2 md:gap-4">
             <OfflineStatusIndicator />
             <Link
               to={notificationsPath}
+              aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
               className="relative w-10 h-10 rounded-md hover:bg-slate-50 dark:hover:bg-hover flex items-center justify-center"
             >
               <Bell
@@ -647,6 +645,10 @@ export default function DashboardLayout({ roleKey }) {
             >
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
+                type="button"
+                aria-label="Account menu"
+                aria-expanded={menuOpen}
+                aria-haspopup="true"
                 className="flex items-center gap-2 rounded-md hover:bg-slate-50 dark:hover:bg-hover px-2 py-1.5 transition-colors"
               >
                 <div className="w-8 h-8 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-semibold font-heading">
@@ -748,7 +750,7 @@ export default function DashboardLayout({ roleKey }) {
           </div>
         </header>
 
-        <main className="mx-auto min-w-0 max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8">
+        <main className={`mx-auto min-w-0 ${isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
           {notice && (!routePermissions || permissionsReady) && (
             <div
               className={`mb-4 flex flex-wrap items-center justify-between gap-3 border px-4 py-2 text-xs ${permissionsReady ? "border-amber-300 bg-amber-50 text-amber-950" : "border-brand-danger/30 bg-white text-brand-ink"}`}
@@ -795,9 +797,9 @@ export default function DashboardLayout({ roleKey }) {
           )}
           <motion.div
             key={pageTransitionKey}
-            initial={{ opacity: 0, y: 8 }}
+            initial={isSupervisor ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: isSupervisor ? 0 : 0.3 }}
           >
             {routePermissions && !permissionsReady ? (
               <section

@@ -1,9 +1,7 @@
 // Offline consultation (PHN/RHU "Treatment Consultation") vertical-slice tests.
 //
-// Classification under test: OFFLINE_DRAFT. A consultation is saved locally when
-// offline, survives refresh/restart, is NEVER placed in the auto-sync outbox,
-// and is submitted only by an explicit online action that cannot create a
-// duplicate. These tests are the evidence for that classification.
+// Classification under test: SAFE_SYNC. Clinical information and the original
+// operation UUID survive refresh/restart, failures and response-loss replay.
 //
 // Run with:  node --test tests/offline/consultationDraft.test.js
 
@@ -22,6 +20,7 @@ import {
   toServerPayload,
 } from '../../src/services/offline/consultationOfflineService.js';
 import { OfflineActionRequiredError } from '../../src/services/offline/mutationPolicy.js';
+import { getOperation } from '../../src/services/offline/outbox.js';
 
 const OWNER = 'phn-user-1';
 
@@ -69,26 +68,31 @@ const recordingCreate = (impl) => {
   const calls = [];
   const fn = async (data) => {
     calls.push(data);
-    return impl ? impl(data, calls.length) : { consultation: { id: 'SUB-000001', ...data, status: 'completed' } };
+    const result = impl ? await impl(data, calls.length) : { consultation: { id: 'SUB-000001', ...data } };
+    return result?.consultation ? { consultation: { status: 'completed', createdAt: new Date().toISOString(), consultationEffectsCompletedAt: new Date().toISOString(),
+      resident: { id: data.residentId }, ...result.consultation } } : result;
   };
   fn.calls = calls;
   return fn;
 };
 
-test('offline save stores an OFFLINE_DRAFT and never calls the server or the outbox', async () => {
+test('offline save stores a SAFE_SYNC operation before any server call', async () => {
   const create = recordingCreate();
   const result = await saveConsultationOffline({ ownerId: OWNER, payload: CONSULT, create, online: offline });
 
   assert.equal(create.calls.length, 0, 'server must not be called offline');
   assert.equal(result.queued, true);
   assert.equal(result.source, 'local');
-  assert.equal(result.record.status, 'Saved Offline');
+  assert.equal(result.record.status, 'Pending Sync');
   assert.ok(result.localId);
 
-  // Draft persisted; outbox stays empty (no auto-sync for clinical drafts).
+  // The durable operation and its clinical draft commit together.
   const drafts = await listConsultationDrafts(OWNER);
   assert.equal(drafts.length, 1);
-  assert.equal(await db.outbox.count(), 0, 'OFFLINE_DRAFT must not enqueue a sync operation');
+  assert.equal(await db.outbox.count(), 1);
+  const operation = await getOperation(result.record.clientOperationKey, OWNER);
+  assert.equal(operation.mutationType, 'SAFE_SYNC');
+  assert.equal(operation.idempotencyKey, result.record.clientOperationKey);
 });
 
 test('a saved consultation draft survives a browser restart (close/reopen) with data intact', async () => {
@@ -108,7 +112,7 @@ test('a saved consultation draft survives a browser restart (close/reopen) with 
   assert.equal(restored.data.residentId, 'RES-0001');
 });
 
-test('online save submits directly and returns the server-confirmed consultation', async () => {
+test('online save returns only a confirmed consultation and hides its settled draft', async () => {
   const create = recordingCreate((data) => ({ consultation: { id: 'SUB-000009', ...data, status: 'completed' } }));
   const result = await saveConsultationOffline({ ownerId: OWNER, payload: CONSULT, create, online });
 
@@ -116,13 +120,13 @@ test('online save submits directly and returns the server-confirmed consultation
   assert.equal(result.queued, false);
   assert.equal(result.source, 'server');
   assert.equal(result.record.id, 'SUB-000009');
-  // Nothing left behind locally for a server-confirmed save.
+  // Settled drafts are retained for reconciliation, not offered for another create.
   assert.equal((await listConsultationDrafts(OWNER)).length, 0);
   // Local-only markers are stripped before hitting the server.
   assert.ok(!('offline' in create.calls[0]));
 });
 
-test('a network failure while saving online falls back to a local draft (no data loss)', async () => {
+test('a network failure leaves the original durable queue and clinical data intact', async () => {
   const create = recordingCreate(() => { throw networkError(); });
   const result = await saveConsultationOffline({ ownerId: OWNER, payload: CONSULT, create, online });
   assert.equal(result.queued, true);
@@ -130,17 +134,19 @@ test('a network failure while saving online falls back to a local draft (no data
   assert.equal((await listConsultationDrafts(OWNER)).length, 1);
 });
 
-test('a validation error while saving online is surfaced, not silently drafted', async () => {
+test('a validation error is surfaced and its original clinical data is retained as failed', async () => {
   const create = recordingCreate(() => { throw httpError(422, 'Diagnosis is required.'); });
   await assert.rejects(
     () => saveConsultationOffline({ ownerId: OWNER, payload: CONSULT, create, online }),
     /Diagnosis is required\./,
   );
-  // A server rejection is not stored as an offline draft.
-  assert.equal((await listConsultationDrafts(OWNER)).length, 0);
+  const drafts = await listConsultationDrafts(OWNER);
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0].queueStatus, 'failed');
+  assert.equal(drafts[0].diagnosis, CONSULT.diagnosis);
 });
 
-test('submitting a draft online creates the consultation once and removes the local copy', async () => {
+test('submitting a queued consultation reconciles it once and caches confirmation', async () => {
   const create = recordingCreate((data) => ({ consultation: { id: 'SUB-000100', ...data } }));
   const { localId } = await saveConsultationOffline({ ownerId: OWNER, payload: CONSULT, create, online: offline });
 
@@ -148,7 +154,7 @@ test('submitting a draft online creates the consultation once and removes the lo
   assert.equal(out.submitted, true);
   assert.equal(out.record.id, 'SUB-000100');
   assert.equal(create.calls.length, 1);
-  // The only local copy is gone, so it cannot be submitted again.
+  // The confirmed queue is no longer shown as pending.
   assert.equal((await listConsultationDrafts(OWNER)).length, 0);
   // The confirmed record is cached for offline reads under the owner scope.
   const cached = await db.records.get([OWNER, 'consultation', 'SUB-000100']);
@@ -160,11 +166,9 @@ test('submitting the same draft twice cannot create a duplicate', async () => {
   const { localId } = await saveConsultationOffline({ ownerId: OWNER, payload: CONSULT, create, online: offline });
 
   await submitConsultationDraft({ ownerId: OWNER, localId, create, online });
-  // A second submit of the same draft finds nothing to submit.
-  await assert.rejects(
-    () => submitConsultationDraft({ ownerId: OWNER, localId, create, online }),
-    /no longer available|already submitted/i,
-  );
+  const replay = await submitConsultationDraft({ ownerId: OWNER, localId, create, online });
+  assert.equal(replay.alreadySynced, true);
+  assert.equal(replay.record.id, 'SUB-000200');
   assert.equal(create.calls.length, 1, 'the server create ran exactly once');
 });
 
@@ -188,7 +192,7 @@ test('an authorization failure on submit preserves the recoverable draft', async
     () => submitConsultationDraft({ ownerId: OWNER, localId, create, online }),
     /permission/i,
   );
-  // Draft is kept (not lost) and is editable/submittable again.
+  // Original clinical information stays recoverable, not copied into a new create.
   const drafts = await listConsultationDrafts(OWNER);
   assert.equal(drafts.length, 1);
   const restored = await restoreConsultationDraft({ ownerId: OWNER, localId });
@@ -216,7 +220,7 @@ test('consultation history merges cached rows with local drafts when offline', a
   const offlineList = await listConsultationsOffline({ ownerId: OWNER, fetchList, online: offline });
 
   assert.ok(offlineList.some((row) => row.id === 'SUB-1'), 'cached server row present offline');
-  assert.ok(offlineList.some((row) => row.syncStatus === 'Saved Offline'), 'local draft present offline');
+  assert.ok(offlineList.some((row) => row.syncStatus === 'Pending Sync'), 'local queue present offline');
 });
 
 test('drafts and reads are isolated to the owner on a shared device', async () => {

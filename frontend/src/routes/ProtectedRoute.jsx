@@ -24,14 +24,14 @@ import { FullPageSkeleton } from '@/components/common/Skeleton';
  * screen, so the shell never flashes empty or unstyled.
  */
 export default function ProtectedRoute({ allow = [] }) {
-  const { isAuthenticated, isLoadingAuth, authChecked, isResolvingProfile, role } = useAuth();
+  const { isAuthenticated, isLoadingAuth, authChecked, isResolvingProfile, isSigningIn, isSigningOut, role } = useAuth();
   const location = useLocation();
 
   // Wait for the initial session restore AND for any in-flight resolution of a
   // freshly-established session's authoritative role (e.g. right after a new
   // resident registers). Rejecting before the role is resolved is what caused
   // a valid resident to land on /unauthorized.
-  if (isLoadingAuth || !authChecked || isResolvingProfile) {
+  if (isLoadingAuth || !authChecked || isResolvingProfile || isSigningIn || isSigningOut) {
     return <FullPageSkeleton />;
   }
 

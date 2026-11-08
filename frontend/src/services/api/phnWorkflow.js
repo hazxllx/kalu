@@ -5,6 +5,17 @@ import { queueOfflineDraft } from "@/services/offline/queue";
 import { listDrafts } from "@/services/offline/drafts";
 import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 
+const queuePatients = (payload, endpoint) => {
+  if (!Array.isArray(payload?.submissions)) {
+    throw new Error(`${endpoint} returned an invalid submission list. The queue could not be verified.`);
+  }
+  const patients = mapVisitsToPatients(payload.submissions);
+  if (patients.length !== payload.submissions.length) {
+    throw new Error(`${endpoint} returned unsupported workflow statuses. The queue could not be verified.`);
+  }
+  return patients;
+};
+
 /**
  * PHN clinical workflow API (BUG-008).
  *
@@ -24,16 +35,16 @@ export const phnWorkflowApi = {
   },
 
   /** PHN queue — every submission routed to the PHN (municipality-scoped). */
-  listQueue: async () => {
-    const payload = await api.get("/phn/submissions");
-    return mapVisitsToPatients(payload?.submissions || []);
+  listQueue: async (options = {}) => {
+    const payload = await api.get("/phn/submissions", options);
+    return queuePatients(payload, "GET /phn/submissions");
   },
   listQueueOffline: async (ownerId) => {
     if (!ownerId) throw new Error("A signed-in user is required.");
     let patients = null;
     let networkError = null;
     try {
-      patients = await phnWorkflowApi.listQueue();
+      patients = await phnWorkflowApi.listQueue({ ownerId });
     } catch (error) {
       if (classifySyncError(error).code !== SYNC_ERROR.NETWORK) throw error;
       networkError = error;
@@ -53,7 +64,8 @@ export const phnWorkflowApi = {
           ),
         );
       } catch (cacheError) {
-        console.warn("[phnWorkflow] cache write failed, returning live data", cacheError);
+        if (classifySyncError(cacheError).code === SYNC_ERROR.AUTH) throw cacheError;
+        console.warn("[phnWorkflow] device cache unavailable; live queue was retrieved.");
       }
       return patients;
     }
@@ -75,9 +87,11 @@ export const phnWorkflowApi = {
   },
 
   /** The caller's own intake submissions (RHU personnel / BHW view). */
-  listMyIntake: async () => {
-    const payload = await api.get("/intake/visits");
-    return mapVisitsToPatients(payload?.submissions || []);
+  listMyIntake: async (options = {}) => {
+    const payload = await api.get("/intake/visits", options);
+    // Drafts are valid in the intake editor, but never in the PHN queue.
+    if (!Array.isArray(payload?.submissions)) throw new Error('GET /intake/visits returned an invalid submission list.');
+    return mapVisitsToPatients(payload.submissions);
   },
 
   listMyIntakeOffline: async (ownerId) => {
@@ -85,7 +99,7 @@ export const phnWorkflowApi = {
     let patients = null;
     let networkError = null;
     try {
-      patients = await phnWorkflowApi.listMyIntake();
+      patients = await phnWorkflowApi.listMyIntake({ ownerId });
     } catch (error) {
       if (classifySyncError(error).code !== SYNC_ERROR.NETWORK) throw error;
       networkError = error;
@@ -103,7 +117,8 @@ export const phnWorkflowApi = {
           ),
         );
       } catch (cacheError) {
-        console.warn("[phnWorkflow] cache write failed, returning live data", cacheError);
+        if (classifySyncError(cacheError).code === SYNC_ERROR.AUTH) throw cacheError;
+        console.warn("[phnWorkflow] device cache unavailable; live intake was retrieved.");
       }
       const drafts = await listDrafts(ownerId, "rhuTriage");
       return [
@@ -203,6 +218,11 @@ export const phnWorkflowApi = {
       treatmentGiven:
         recorded.recommendations || recorded.clinicalNotes || recorded.healthConcern || "",
       recommendation: recorded.recommendations || "",
+      // The workbench captures an optional health-service association; forward
+      // it verbatim so the backend persists visits.health_service_id. When the
+      // field is genuinely absent we leave it untouched rather than clearing an
+      // association the submission already carried.
+      ...(recorded.healthServiceId === undefined ? {} : { healthServiceId: recorded.healthServiceId || null }),
       // Structured prescriptions recorded in the workbench's MedicineSelector.
       // Forwarded verbatim (never renamed/dropped) so the backend persists them
       // to visits.medications; an empty array clears nothing it did not set.

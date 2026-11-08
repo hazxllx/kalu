@@ -64,13 +64,13 @@ export default function PageHeader({
   return (
     <section
       aria-label={typeof title === "string" ? `${title} header` : "Page header"}
-      className={`${dense ? "mb-4" : "mb-6"} overflow-hidden rounded-card border border-brand-deep bg-brand-dark text-white shadow-card`}
+      className={`ui-page-header ${dense ? "mb-4" : "mb-6"} overflow-hidden rounded-card border border-brand-deep bg-brand-dark text-white shadow-card`}
     >
       {/* Hairline gold rule — the official accent token, no gradient. */}
-      <div aria-hidden="true" className="h-0.5 w-full bg-brand-gold/70" />
-      <div className={`flex flex-col ${dense ? "gap-3 px-5 py-4 md:px-7" : "gap-4 px-5 py-6 md:px-7"}`}>
+      <div aria-hidden="true" className="ui-page-header-rule h-0.5 w-full bg-brand-gold/70" />
+      <div className={`ui-page-header-body flex flex-col ${dense ? "gap-3 px-5 py-4 md:px-7" : "gap-4 px-5 py-6 md:px-7"}`}>
         {showEyebrowRow && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="ui-page-header-eyebrow flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
               {isReport && (
                 <span className="inline-flex items-center rounded-[2px] border border-white/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-gov text-white/85">
@@ -113,12 +113,12 @@ export default function PageHeader({
                 </nav>
               ) : null}
             </div>
-            {meta && (
-              <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">{meta}</div>
+             {meta && (
+               <div className="ui-page-header-meta flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">{meta}</div>
             )}
           </div>
         )}
-        <div className={`flex flex-col md:flex-row md:items-end md:justify-between ${dense ? "gap-3" : "gap-4"}`}>
+        <div className={`ui-page-header-main flex flex-col md:flex-row md:items-end md:justify-between ${dense ? "gap-3" : "gap-4"}`}>
           <div className="min-w-0 flex-1">
             <h1 className={`break-words font-semibold tracking-tight text-white ${dense ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"}`}>
               {title}
@@ -129,7 +129,7 @@ export default function PageHeader({
               </p>
             )}
           </div>
-          {action && <div className="w-full shrink-0 md:w-auto">{action}</div>}
+          {action && <div className="ui-page-header-actions w-full shrink-0 md:w-auto">{action}</div>}
         </div>
       </div>
     </section>

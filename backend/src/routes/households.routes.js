@@ -79,6 +79,11 @@ router.get(
   asyncHandler(householdsController.searchResidents),
 );
 router.get(
+  '/workers',
+  authorize(HOUSEHOLD_ROLES, { anyPermission: ['households.view', 'households.create', 'followups.edit'] }),
+  asyncHandler(householdsController.listWorkers),
+);
+router.get(
   '/:id/visits',
   authorize(HOUSEHOLD_ROLES, { permission: 'households.view' }),
   params,

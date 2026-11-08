@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 import { BARANGAYS } from "@/lib/barangays";
 import { municipalSubmissionsApi } from "@/services/api/municipalSubmissionsApi";
@@ -161,3 +162,4 @@ export const municipalSubmissionsStore = {
 };
 
 export default municipalSubmissionsStore;
+registerWorkingSetReset(() => { cache = []; listeners.forEach((listener) => listener()); });

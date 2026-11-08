@@ -40,11 +40,11 @@ const formatDateTime = (iso) => {
 
 const statusLabel = (status) =>
   ({
-    pending: "Pending Verification",
+    pending: "Pending",
     approved: "Approved",
     rejected: "Rejected",
     resubmission_required: "Resubmission Required",
-  })[status] || "Pending Verification";
+  })[status] || "Pending";
 
 export default function ResidentVerificationStatus() {
   const [state, setState] = useState(null);

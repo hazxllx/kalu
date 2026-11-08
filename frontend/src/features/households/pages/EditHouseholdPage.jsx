@@ -4,6 +4,7 @@ import { ArrowLeft, Save, RotateCcw } from 'lucide-react';
 import { Card } from '@/components/common/Card';
 import { useAuth } from '@/context/AuthContext';
 import { usePermissions } from '@/context/PermissionsContext';
+import HealthSupervisorPageHeader from '@/features/dashboards/components/HealthSupervisorPageHeader';
 import { householdsApi } from '@/services/api/householdsApi';
 import { useSyncStatus } from '@/hooks/useSyncStatus';
 import { getHouseholdOffline, updateHouseholdOffline } from '@/services/offline/householdOfflineService';
@@ -307,7 +308,11 @@ export default function EditHouseholdPage() {
 
   if (user?.role !== 'bhw') return <div className="mx-auto max-w-3xl space-y-5">
     <button type="button" onClick={() => navigate(householdsPath)} className="inline-flex items-center gap-2 text-sm font-medium text-brand-blue hover:underline"><ArrowLeft className="h-4 w-4" /> Back to households</button>
+    {user?.role === 'health_supervisor' ? (
+      <HealthSupervisorPageHeader eyebrow="Households" title="Edit Household" subtitle={`Household ${householdId} · ${syncStatus.online ? 'Changes are checked by the server.' : 'Working offline'}`} />
+    ) : (
     <div><h1 className="text-2xl font-semibold text-brand-ink">Edit Household</h1><p className="mt-1 text-sm text-brand-gray">{householdId} · {syncStatus.online ? 'Changes are checked by the server.' : 'Working offline'}</p></div>
+    )}
     <Card className="p-5 sm:p-7"><form onSubmit={saveLegacy} className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">{LEGACY_FIELDS.map(([field, label, type]) => <Field key={field} label={label} type={type} value={form[field] ?? ''} onChange={(value) => updateField(field, value)} />)}</div>
       <p className="text-xs text-brand-gray">Household members, verification, approval, status, scope, and audit fields are not changed by this editor.</p>

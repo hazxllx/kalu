@@ -15,7 +15,7 @@ import {
   rejectResident,
   requestResubmission,
 } from "@/services/api/verificationsApi";
-import { CheckCircle2, ChevronRight, History } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, History } from "lucide-react";
 
 /**
  * Health Supervisor resident-verification page.
@@ -33,6 +33,7 @@ const TABS = [
   { key: "resubmission_required", label: "Resubmission" },
 ];
 const PAGE_SIZE = 10;
+const HISTORY_PAGE_SIZE = 5;
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -65,6 +66,7 @@ export default function PendingVerifications({
   const [error, setError] = useState("");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
 
   const loadQueue = useCallback(async () => {
     setLoading(true);
@@ -90,7 +92,9 @@ export default function PendingVerifications({
 
   const loadHistory = useCallback(async () => {
     try {
-      setHistory(await fetchVerificationHistory());
+      const data = await fetchVerificationHistory();
+      setHistory([...data].sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0)));
+      setHistoryPage(1);
     } catch {
       setHistory([]);
     }
@@ -147,6 +151,8 @@ export default function PendingVerifications({
   };
 
   const filtered = rows;
+  const historyPageCount = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
+  const visibleHistory = history.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
 
   const activeTab = TABS.find((t) => t.key === tab);
 
@@ -189,19 +195,19 @@ export default function PendingVerifications({
           resultText={loading ? "Loading…" : `${total} request${total === 1 ? "" : "s"}`}
         />
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto hidden sm:block">
           {loading ? (
             <SkeletonTable rows={5} cols={6} className="px-6 py-5" />
           ) : (
             <table className="verification-table">
               <thead>
                 <tr className="bg-brand-bg text-left">
-                  <th scope="col">Applicant</th>
-                  <th scope="col">Assignment</th>
-                  <th scope="col">Submitted</th>
-                  <th scope="col">Reference no.</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" className="text-right">Action</th>
+                  <th scope="col" className="is-wide">Applicant</th>
+                  <th scope="col" className="is-narrow">Assignment</th>
+                  <th scope="col" style={{ width: "19%" }}>Submitted</th>
+                  <th scope="col" style={{ width: "15%" }}>Reference no.</th>
+                  <th scope="col" style={{ width: "15%" }}>Status</th>
+                  <th scope="col" className="is-narrow text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -215,16 +221,16 @@ export default function PendingVerifications({
                   >
                     <td>
                       <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-light text-xs font-heading font-semibold text-brand-blue">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-light text-xs font-heading font-semibold text-brand-blue">
                           {(r.name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("")}
                         </div>
-                        <span className="font-medium text-brand-ink">{r.name}</span>
+                        <span className="truncate font-medium text-brand-ink dark:text-foreground">{r.name}</span>
                       </div>
                     </td>
-                    <td className="text-brand-gray">{r.barangay}</td>
-                    <td className="whitespace-nowrap text-brand-gray">{formatDate(r.submittedAt)}</td>
+                    <td className="truncate text-brand-gray dark:text-muted-foreground">{r.barangay}</td>
+                    <td className="whitespace-nowrap text-brand-gray tabular-nums dark:text-muted-foreground">{formatDate(r.submittedAt)}</td>
                     <td>
-                      <span className="font-stat text-xs font-medium text-brand-ink">{r.ref}</span>
+                      <span className="is-monospace block truncate">{r.ref}</span>
                     </td>
                     <td>
                       <VerificationBadge status={r.status} size="sm" />
@@ -233,9 +239,9 @@ export default function PendingVerifications({
                       <button
                         type="button"
                         onClick={() => openReview(r)}
-                        className="inline-flex items-center gap-1.5 rounded-btn px-1.5 py-1 text-sm font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                        className="inline-flex items-center gap-1.5 rounded-btn px-2.5 py-1.5 text-sm font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
                       >
-                        Review <ChevronRight className="h-3.5 w-3.5" />
+                        View Request <ChevronRight className="h-3.5 w-3.5" />
                       </button>
                     </td>
                   </motion.tr>
@@ -244,6 +250,43 @@ export default function PendingVerifications({
             </table>
           )}
         </div>
+
+        {/* Mobile stacked cards */}
+        <ul className="verification-cards sm:hidden">
+          {loading ? (
+            <li className="py-10 text-center text-sm text-brand-gray">Loading…</li>
+          ) : (
+            filtered.map((r) => (
+              <li key={r.id}>
+                <div className="col-span-2">
+                  <p className="text-sm font-semibold text-brand-ink dark:text-foreground">{r.name}</p>
+                  <p className="mt-0.5 text-xs text-brand-gray">{r.barangay}</p>
+                </div>
+                <div>
+                  <dt>Submitted</dt>
+                  <dd>{formatDate(r.submittedAt)}</dd>
+                </div>
+                <div>
+                  <dt>Reference</dt>
+                  <dd className="is-monospace">{r.ref}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt>Status</dt>
+                  <dd><VerificationBadge status={r.status} size="sm" /></dd>
+                </div>
+                <div className="card-action">
+                  <button
+                    type="button"
+                    onClick={() => openReview(r)}
+                    className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-btn border border-brand-border px-3 text-[13px] font-semibold text-brand-blue transition-colors hover:border-brand-blue hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:hover:bg-card-nested sm:w-auto"
+                  >
+                    View Request <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
 
         {!loading && filtered.length === 0 && (
           <div className="px-6 py-16 text-center">
@@ -280,7 +323,7 @@ export default function PendingVerifications({
               </tr>
             </thead>
             <tbody className="divide-y divide-brand-border">
-              {history.map((h) => (
+              {visibleHistory.map((h) => (
                 <tr key={h.id} className="transition-colors hover:bg-brand-bg/50">
                   <td className="px-6 py-3.5">
                     <p className="font-medium text-brand-ink">{h.residentName || h.residentRef}</p>
@@ -302,6 +345,15 @@ export default function PendingVerifications({
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-between border-t border-brand-border px-6 py-3 text-sm text-brand-gray">
+          <button type="button" onClick={() => setHistoryPage((current) => Math.max(1, current - 1))} disabled={historyPage === 1} className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-3 py-1.5 font-medium text-brand-ink disabled:cursor-not-allowed disabled:opacity-40">
+            <ChevronLeft className="h-4 w-4" /> Previous
+          </button>
+          <span>Page {historyPage} of {historyPageCount}</span>
+          <button type="button" onClick={() => setHistoryPage((current) => Math.min(historyPageCount, current + 1))} disabled={historyPage >= historyPageCount} className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-3 py-1.5 font-medium text-brand-ink disabled:cursor-not-allowed disabled:opacity-40">
+            Next <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
       </Card>
 

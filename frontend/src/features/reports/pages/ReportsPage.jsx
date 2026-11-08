@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import { Download, Send, Check, CheckCircle2, X, RefreshCw, FileText, ArrowLeft, Eye, Printer } from "lucide-react";
+import StatCard from "@/components/common/StatCard";
+import ErrorState from "@/components/common/ErrorState";
+import { Download, Send, Check, CheckCircle2, X, RefreshCw, FileText, ArrowLeft, Eye, Printer, AlertTriangle } from "lucide-react";
 import { phnMonthlyTrend } from "@/services/local/phnData";
 import {
   filterRowsByScope,
@@ -14,7 +16,10 @@ import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { monthlyConsultations, comparisonMonthlyConsultations } from "@/services/local/dashboardData";
+import { authorizedViewsApi } from "@/services/api/authorizedViewsApi";
+import useAuthorizedData from "@/hooks/useAuthorizedData";
+import { lastActivityPeriod } from "@/lib/legacyAnalytics";
+import { formatDateRange } from "@/lib/dateUtils";
 import { reportsApi, referralsApi, followUpsApi, maternalApi, immunizationsApi, healthServicesApi } from "@/services/api";
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import IncomingReports from "@/features/reports/components/IncomingReports";
@@ -47,6 +52,11 @@ const STATUS_COLORS = {
 };
 
 const REPORT_TYPE_LABELS = ["Health Records", "Referrals", "Follow-ups", "Health Services", "Community Health Trends"];
+
+const reportDateTime = (value) => {
+  if (!value || !Number.isFinite(Date.parse(value))) return "—";
+  return new Date(value).toLocaleString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
 
 // --- Real-data report generation helpers ----------------------------------
 //
@@ -96,6 +106,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const { user } = useAuth();
   const { can } = usePermissions();
   const canGenerate = can("reports.generate");
+  const canViewReports = can("reports.view");
+  const canViewAnalytics = can("reports.analytics.view");
+  const supervisor = user?.role === "health_supervisor";
   const { coverage } = usePhnCoverage();
   const isPhn = roleKey === "phn";
   const coverageLabel = coverage ? (coverage === "RHU" ? "RHU" : coverage) : null;
@@ -106,6 +119,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const supervisorScope = getSupervisorScope(user);
   const assignedBarangay = supervisorScope && supervisorScope.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null;
   const canSubmitReports = canGenerate && (isPhn || Boolean(assignedBarangay));
+  const canLoadOutgoing = canViewReports && (!supervisor || Boolean(assignedBarangay));
 
   // A PHN works at the RHU — reports are submitted upward to the MHO, while
   // barangay-level roles submit theirs to the RHU.
@@ -119,9 +133,11 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   // decides which rows are visible (barangay reports vs RHU reports). A
   // barangay-assigned supervisor only ever sees their own barangay's reports.
   const [reports, setReports] = useState(() => (isPhn ? [...PHN_REPORTS] : [...REPORTS]));
+  const [reportsOwner, setReportsOwner] = useState(null);
+  const outgoingRequest = useRef(0);
   const scopedReports = useMemo(
     () =>
-      isPhn
+      supervisor && (reportsOwner !== user?.id || !assignedBarangay) ? [] : isPhn
         ? filterRowsByScope(reports, user, coverage)
         : assignedBarangay
           ? // Outgoing reports are already server-scoped to the signed-in
@@ -130,9 +146,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
             // embed, so a resolvable-name hiccup can't hide the user's own work.
             reports.filter((r) => !r.barangay || r.barangay === assignedBarangay)
           : reports,
-    [isPhn, reports, user, coverage, assignedBarangay]
+    [isPhn, reports, user, coverage, assignedBarangay, supervisor, reportsOwner]
   );
   const [selectedReportType, setSelectedReportType] = useState("All");
+  const [selectedPeriod, setSelectedPeriod] = useState("");
   // Review step: a generated preview built from real source data, shown before
   // the report is submitted. Submission only happens from here.
   const [preview, setPreview] = useState(/** @type {any} */ (null));
@@ -151,6 +168,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const [detailContent, setDetailContent] = useState(/** @type {any} */ (null));
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [detailRetry, setDetailRetry] = useState(0);
+  const [detailOwner, setDetailOwner] = useState(null);
+  const detailStatus = detailContent?.status || detailReport?.status;
   const [submitError, setSubmitError] = useState("");
   const [formErrors, setFormErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [toast, setToast] = useState(null);
@@ -162,7 +182,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const [outgoingLoadError, setOutgoingLoadError] = useState("");
   // Distinguish "still loading" from "loaded, but empty" and "failed" so the
   // table never shows the empty-state message during a request or after an error.
-  const [loading, setLoading] = useState(canSubmitReports);
+  const [loading, setLoading] = useState(canLoadOutgoing);
 
   const writableBarangays = phnWritableBarangays(user, coverage);
 
@@ -170,24 +190,32 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   // the authoritative outgoing list (status + ids come from the backend), so it
   // runs on mount and again after a successful submission.
   const loadOutgoing = useCallback(() => {
-    if (!canSubmitReports) {
+    const requestId = ++outgoingRequest.current;
+    if (!canLoadOutgoing) {
+      setReports([]);
+      setOutgoingLoadError(supervisor && !assignedBarangay ? "A valid barangay assignment is required to view report history." : !canViewReports ? "Your account is not permitted to view reports." : "");
       setLoading(false);
       return Promise.resolve();
     }
     setLoading(true);
     setOutgoingLoadError("");
-    return reportsApi.list({ box: "outgoing" })
+    return reportsApi.list({ box: "outgoing" }, { ownerId: user?.id })
       .then((response) => {
-        const persisted = (response?.rows || response?.records || []).map((row) => ({
+        if (requestId !== outgoingRequest.current) return;
+        const rows = response?.rows || response?.records;
+        if (!Array.isArray(rows)) throw new Error("The report history response was incomplete.");
+        const persisted = rows.map((row) => ({
           id: row.id,
           name: row.title || row.reportType || "Report",
           type: row.reportType,
           period: row.reportPeriod,
           status: row.status === "Submitted" ? (isPhn ? "Submitted to MHO" : "Submitted to RHU") : row.status,
-          date: row.createdAt ? new Date(row.createdAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "",
+          date: row.createdAt ? new Date(row.createdAt).toLocaleDateString(supervisor ? "en-PH" : "en-US", { ...(supervisor ? { timeZone: "Asia/Manila" } : {}), month: supervisor ? "short" : "long", day: "numeric", year: "numeric" }) : "",
           barangay: row.barangay || assignedBarangay || "",
           submittedDate: row.submittedAt ? new Date(row.submittedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "",
           remarks: row.remarks || "",
+          reviewedAt: row.reviewedAt,
+          reviewedByName: row.reviewedByName,
           persisted: true,
         }));
         setReports((prev) => {
@@ -196,21 +224,30 @@ export default function ReportsPage({ roleKey = "midwife" }) {
           const localDrafts = prev.filter((r) => !r.persisted && r.status === "Generated");
           return [...localDrafts, ...persisted];
         });
+        setReportsOwner(user?.id);
         setOutgoingLoadError("");
       })
       .catch((error) => {
+        if (requestId !== outgoingRequest.current) return;
         setOutgoingLoadError(error?.message || "Could not load submitted reports.");
       })
       .finally(() => {
-        setLoading(false);
+        if (requestId === outgoingRequest.current) setLoading(false);
       });
-  }, [assignedBarangay, canSubmitReports, isPhn]);
+  }, [assignedBarangay, canLoadOutgoing, canViewReports, isPhn, supervisor, user?.id]);
 
   useEffect(() => {
-    let active = true;
-    loadOutgoing().finally(() => { if (!active) return; });
-    return () => { active = false; };
+    void loadOutgoing();
+    return () => { outgoingRequest.current += 1; };
   }, [loadOutgoing]);
+  useEffect(() => {
+    setDetailReport(null);
+    setShowPreview(false);
+    setShowFullPreview(false);
+    setPreview(null);
+    setRevisionTarget(null);
+    setSubmitError("");
+  }, [user?.id]);
 
   // Fetch the persisted snapshot whenever a submitted report is opened for
   // viewing. Local, not-yet-submitted drafts have no server content and skip
@@ -227,9 +264,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     setDetailLoading(true);
     setDetailError("");
     setDetailContent(null);
-    reportsApi.get(detailReport.id)
+    reportsApi.get(detailReport.id, { ownerId: user?.id })
       .then((res) => {
         if (!active) return;
+        if (!res?.record || String(res.record.id) !== String(detailReport.id)) throw new Error("The saved report was not returned.");
         setDetailContent(res?.record || null);
       })
       .catch((err) => {
@@ -240,7 +278,13 @@ export default function ReportsPage({ roleKey = "midwife" }) {
         if (active) setDetailLoading(false);
       });
     return () => { active = false; };
-  }, [detailReport]);
+  }, [detailReport, detailRetry, user?.id]);
+
+  const openReportDetail = (report) => {
+    setSubmitError("");
+    setDetailOwner(user?.id);
+    setDetailReport(report);
+  };
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
@@ -270,12 +314,11 @@ export default function ReportsPage({ roleKey = "midwife" }) {
 
   const filteredReports = scopedReports.filter((r) => {
     const matchesType = selectedReportType === "All" || r.type === selectedReportType;
-    return matchesType;
+    return matchesType && (!supervisor || !selectedPeriod || r.period === selectedPeriod);
   });
 
-  // Step 1 → 2: validate the form, then build a REAL-data preview from the
-  // scope-enforced source APIs. No row is persisted here; submission is a
-  // separate, explicit step from the preview.
+  // Validate real source data and save the draft snapshot before review.
+  // Submission remains a separate, explicit action.
   const handleGenerate = async () => {
     if (!canGenerate || generating) return;
     const errors = {};
@@ -290,7 +333,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     const barangay = isPhn ? normalizeBarangay(reportForm.barangay) : (assignedBarangay || "");
     const name = isPhn && barangay
       ? `${type} (${scopeLabel({ barangay }, user)})`
-      : `${type} Report`;
+      : supervisor && type.endsWith("Report") ? type : `${type} Report`;
     const fetcher = sourceForType(type, window);
 
     setGenerating(true);
@@ -326,6 +369,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       }
       setPreview(generatedPreview);
       setShowPreview(true);
+      void loadOutgoing();
     } catch (err) {
       setFormErrors((prev) => ({ ...prev, general: err?.message || "Could not generate the report from source data." }));
     } finally {
@@ -367,7 +411,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   };
 
   const submitStoredDraft = async () => {
-    if (!canSubmitReports || submitting || detailReport?.status !== "Draft" || !detailReport?.id) return;
+    if (!canSubmitReports || submitting || detailStatus !== "Draft" || !detailReport?.id || !hasSnapshot(detailContent?.content)) return;
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -413,14 +457,19 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     setTimeout(cleanup, 1500);
   };
 
-  // Chart shows only the series matching the active coverage (the assigned
-  // barangay, or the RHU when the PHN switches to RHU coverage). A
-  // barangay-assigned supervisor sees only their barangay's series.
+  const trendRange = lastActivityPeriod(6);
+  const loadTrend = useCallback(async (options) => {
+    if (!supervisor || !canViewAnalytics || !assignedBarangay) return null;
+    const result = await authorizedViewsApi.earlyWarning({ barangay: assignedBarangay, ...lastActivityPeriod(6) }, options);
+    if (result.scope?.barangay !== assignedBarangay) throw new Error("The consultation trend did not match your authorized barangay scope.");
+    return result;
+  }, [supervisor, canViewAnalytics, assignedBarangay]);
+  const trendResource = useAuthorizedData(loadTrend);
+  // The supervisor chart uses real aggregates, independently of report snapshots.
+  // PHN coverage presentation and its existing series are retained.
   const trendData = isPhn
     ? phnMonthlyTrend
-    : assignedBarangay
-      ? comparisonMonthlyConsultations.map((m) => ({ month: m.month, value: m[assignedBarangay] }))
-      : monthlyConsultations;
+    : trendResource.data?.consultationTrends?.slice(-6).map((row) => ({ month: row.month, value: row.consultations })) || [];
   const chartSeries = isPhn ? [rhuCoverage ? "rhu" : coverageLabel || "rhu"] : [];
   const seriesConfig = {
     rhu: { fill: "#0B5CAD" },
@@ -434,13 +483,13 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   const hasTrendData =
     Array.isArray(trendData) &&
     trendData.some((d) => (isPhn ? chartSeries.some((k) => Number(d?.[k]) > 0) : Number(d?.value) > 0));
+  const trendComplete = trendResource.data && trendData.every((row) => Number.isFinite(row.value) && row.value >= 0);
 
   // Report Summary is derived from the REAL, server-persisted reports loaded
   // for this user (scopedReports), never from mock datasets. It reports the
   // caller's own submission pipeline: how many reports exist and where they are
   // in the Submitted -> Received -> Reviewed / Rejected lifecycle. When the user
   // has no reports yet the card shows a genuine empty state.
-  const isSubmittedStatus = (s) => s === "Submitted to RHU" || s === "Submitted to MHO" || s === "Submitted";
   const summaryItems = useMemo(() => {
     const total = scopedReports.length;
     if (total === 0) return [];
@@ -460,7 +509,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   };
 
   return (
-    <>
+    <div className={supervisor ? "supervisor-module" : "contents"}>
       <PageHeader
         crumbs={["Reports"]}
         title="Reports"
@@ -469,6 +518,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
             ? "Prepare, review, and submit RHU-level health reports to the MHO."
             : assignedBarangay
               ? `Prepare, review, and submit Brgy. ${assignedBarangay} health reports to the RHU.`
+              : supervisor ? "A valid barangay assignment is required to prepare and view reports."
               : "Prepare, review, and submit your barangay health reports to the RHU."
         }
       />
@@ -476,7 +526,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       {/* Toast */}
       {toast && (
         <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-btn shadow-lg flex items-center gap-2 z-50 animate-in slide-in-from-bottom-2 ${toast.type === "error" ? "bg-brand-danger text-white" : "bg-brand-ink text-white"}`}>
-          <CheckCircle2 className={`w-4 h-4 ${toast.type === "error" ? "text-white" : "text-brand-green"}`} />
+          {toast.type === "error" ? <AlertTriangle className="w-4 h-4" aria-hidden="true" /> : <CheckCircle2 className="w-4 h-4 text-brand-green" aria-hidden="true" />}
           <span className="text-sm">{toast.message}</span>
         </div>
       )}
@@ -491,13 +541,15 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       )}
 
       {/* 1 — Primary workflow: prepare & submit a report */}
-      <Card className="mb-5 p-4 sm:p-6">
+      <Card className={supervisor ? "supervisor-form mb-4 p-4" : "mb-5 p-4 sm:p-6"}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-base font-semibold text-brand-ink">Prepare a Report</h3>
+          <h3 className="text-base font-semibold text-brand-ink">{supervisor ? "1. Prepare Report" : "Prepare a Report"}</h3>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue/10 px-3 py-1 text-xs font-medium text-brand-blue">
             {isPhn ? "Submitted to the MHO" : assignedBarangay ? `Brgy. ${assignedBarangay} → RHU` : "Submitted to the RHU"}
           </span>
         </div>
+
+        {supervisor && revisionTarget && <div role="status" className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-ui text-amber-900"><p className="font-medium">Preparing revision: {revisionTarget.type}, {revisionTarget.period}</p>{revisionTarget.remarks && <p className="mt-1 whitespace-pre-wrap">{revisionTarget.remarks}</p>}<button type="button" onClick={() => { setRevisionTarget(null); setFormErrors({}); }} className="supervisor-button is-quiet mt-2">Cancel revision</button></div>}
 
         {canGenerate ? (
           <>
@@ -588,12 +640,12 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   ? "Choose a report type to begin."
                   : !reportForm.period
                     ? "Select the month this report covers."
-                    : "Generate the report, then review the totals before submitting."}
+                     : supervisor ? "Generate a saved draft, review its source records, then submit to the RHU." : "Generate the report, then review the totals before submitting."}
               </p>
               <button
                 onClick={handleGenerate}
                 disabled={generating || !canSubmitReports}
-                className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                className={supervisor ? "supervisor-button is-primary" : "inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark transition-colors disabled:cursor-not-allowed disabled:opacity-60"}
               >
                 <Download className="h-4 w-4" /> {generating ? "Generating…" : "Generate Report"}
               </button>
@@ -608,12 +660,12 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       </Card>
 
       {/* 2 — Secondary: submission status + compact consultations trend */}
-      <div className="mb-5 grid gap-5 lg:grid-cols-3">
-        <Card className="p-4 sm:p-6 lg:col-span-2">
+      <div className={`grid lg:grid-cols-3 ${supervisor ? "mb-4 gap-4" : "mb-5 gap-5"}`}>
+        <Card className={supervisor ? "p-4 lg:col-span-2" : "p-4 sm:p-6 lg:col-span-2"}>
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-brand-ink">Submission Status</h3>
             {!loading && !outgoingLoadError && scopedReports.length > 0 && (
-              <span className="text-xs text-brand-gray">{scopedReports.length} total</span>
+              <span className="text-xs text-brand-gray">{scopedReports.length} {supervisor ? "loaded" : "total"}</span>
             )}
           </div>
           {loading ? (
@@ -627,12 +679,14 @@ export default function ReportsPage({ roleKey = "midwife" }) {
             </div>
           ) : scopedReports.length === 0 ? (
             <div className="rounded-btn border border-dashed border-brand-border p-5 text-center">
-              <p className="text-sm font-medium text-brand-ink">No reports submitted yet</p>
+              <p className="text-sm font-medium text-brand-ink">{supervisor ? "No saved reports yet" : "No reports submitted yet"}</p>
               <p className="mt-1 text-xs text-brand-gray">Prepare a report above and it will appear here with its status.</p>
             </div>
           ) : (
             <>
-              <div className="flex flex-wrap gap-2">
+               {supervisor ? <div className="supervisor-metric-grid mb-3">
+                 {[ ["Pending Review", summaryItems.find((item) => item.label === "Pending Review")?.value], ["Approved", summaryItems.find((item) => item.label === "Approved")?.value], ["Needs Revision", summaryItems.find((item) => item.label === "Needs Revision")?.value], ["Rejected", summaryItems.find((item) => item.label === "Rejected")?.value] ].map(([label, value], index) => <StatCard key={label} variant="ledger" label={label} value={value} tone={["blue", "green", "yellow", "danger"][index]} />)}
+               </div> : <div className="flex flex-wrap gap-2">
                 {summaryItems
                   .filter((s) => s.label === "Total Reports" || s.label.startsWith("Submitted") || s.value !== "0")
                   .map((s) => (
@@ -640,14 +694,14 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                       {s.label}: <span className="font-stat font-bold text-brand-ink">{s.value}</span>
                     </span>
                   ))}
-              </div>
+               </div>}
               <div className="mt-3 border-t border-brand-border">
                 <p className="pt-3 text-xs font-medium uppercase tracking-wide text-brand-gray">Recent submissions</p>
                 <div className="divide-y divide-brand-border">
                   {scopedReports.slice(0, 4).map((r) => (
                     <button
                       key={r.id}
-                      onClick={() => { setSubmitError(""); setDetailReport(r); }}
+                      onClick={() => openReportDetail(r)}
                       className="flex w-full items-center justify-between gap-3 py-2.5 text-left transition-colors hover:bg-brand-bg/50"
                     >
                       <div className="min-w-0">
@@ -663,9 +717,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
           )}
         </Card>
 
-        <Card className="h-fit p-4 sm:p-6">
+        <Card className={supervisor ? "h-fit p-4" : "h-fit p-4 sm:p-6"}>
           <h3 className="mb-1 text-base font-semibold text-brand-ink">{isPhn ? (rhuCoverage ? "RHU Health Cases Trend" : `${coverageLabel} Health Cases Trend`) : "Monthly Consultations"}</h3>
-          {hasTrendData ? (
+          {supervisor && <p className="mb-3 text-caption text-brand-gray">Recorded consultations, {formatDateRange(trendRange.from, trendRange.to)}. Current month is partial; independent of saved report snapshots.</p>}
+          {supervisor && (!canViewAnalytics || !assignedBarangay) ? <p className="py-4 text-ui text-brand-gray">Consultation analytics are unavailable for this account's permission or barangay assignment.</p> : supervisor && trendResource.loading ? <p role="status" className="py-4 text-ui text-brand-gray">Loading authorized consultation counts...</p> : supervisor && trendResource.error ? <ErrorState compact title="Consultation trend unavailable" message={trendResource.error} onRetry={trendResource.refresh} /> : supervisor && !trendComplete ? <div className="py-4 text-ui text-brand-gray"><p>The aggregate source did not provide complete consultation counts.</p><button type="button" className="supervisor-button mt-2" onClick={trendResource.refresh}>Retry analytics</button></div> : hasTrendData ? (
             <ResponsiveContainer width="100%" height={160}>
               {isPhn ? (
                 <BarChart data={trendData}>
@@ -690,28 +745,32 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   <CartesianGrid vertical={false} stroke="#E5EAF1" />
                   <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: "#5B6472", fontSize: 11 }} />
                   <Tooltip cursor={{ fill: "#EDF6FF" }} contentStyle={{ borderRadius: 12, border: "1px solid #E5EAF1" }} />
-                  <Bar dataKey="value" fill="#0B5CAD" radius={[6, 6, 0, 0]} maxBarSize={34} />
+                  <Bar isAnimationActive={!supervisor} dataKey="value" name="Consultations" fill={supervisor ? "#0B4A8F" : "#0B5CAD"} radius={supervisor ? [2, 2, 0, 0] : [6, 6, 0, 0]} maxBarSize={34} />
                 </BarChart>
               )}
             </ResponsiveContainer>
           ) : (
             <div className="flex h-28 flex-col items-center justify-center rounded-btn border border-dashed border-brand-border px-4 text-center">
-              <p className="text-sm font-medium text-brand-ink">No consultation data yet</p>
-              <p className="mt-1 text-xs text-brand-gray">Consultation activity will appear here once records are available.</p>
+              <p className="text-sm font-medium text-brand-ink">{supervisor ? "No consultations in this period" : "No consultation data yet"}</p>
+              <p className="mt-1 text-xs text-brand-gray">{supervisor ? "The authorized aggregate contains no recorded consultations in the displayed monthly window." : "Consultation activity will appear here once records are available."}</p>
             </div>
           )}
         </Card>
       </div>
 
       {/* 3 — Submission history (track status) */}
-      <Card className="p-4 sm:p-6">
+      <Card className={supervisor ? "p-4" : "p-4 sm:p-6"}>
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 sm:mb-6 gap-4">
           <div>
             <h3 className="font-semibold text-brand-ink text-base">Submission History</h3>
-            <p className="mt-0.5 text-xs text-brand-gray">Track the status of reports you have submitted.</p>
+            <p className="mt-0.5 text-xs text-brand-gray">{supervisor ? "Saved drafts and submitted reports, with their persisted workflow status." : "Track the status of reports you have submitted."}</p>
           </div>
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
-            <select
+            {supervisor ? <>
+              <label htmlFor="report-history-type" className="text-caption font-medium text-brand-gray">Report Type<select id="report-history-type" value={selectedReportType} onChange={(e) => setSelectedReportType(e.target.value)} className="supervisor-input mt-1 block w-full"><option value="All">All types</option>{reportTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+              <label htmlFor="report-history-period" className="text-caption font-medium text-brand-gray">Reporting Month<input id="report-history-period" type="month" value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="supervisor-input mt-1 block w-full" /></label>
+              {(selectedReportType !== "All" || selectedPeriod) && <button type="button" onClick={() => { setSelectedReportType("All"); setSelectedPeriod(""); }} className="supervisor-button is-quiet self-end">Clear filters</button>}
+            </> : <select
               value={selectedReportType}
               onChange={(e) => setSelectedReportType(e.target.value)}
               className="w-full sm:w-auto bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none dark:bg-card"
@@ -720,12 +779,12 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               {reportTypes.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
-            </select>
+            </select>}
           </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className={`w-full ${supervisor ? "ui-table" : ""}`} aria-busy={loading}>
             <thead className="bg-brand-bg border-b border-brand-border">
               <tr>
                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-4 py-3">Report Name</th>
@@ -738,7 +797,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               </tr>
             </thead>
             <tbody>
-              {filteredReports.map((report) => (
+              {(supervisor && (loading || outgoingLoadError) ? [] : filteredReports).map((report) => (
                 <tr key={report.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
                   <td className="px-4 py-3 text-sm font-medium text-brand-ink">{report.name}</td>
                   <td className="px-4 py-3 text-sm text-brand-gray">{report.type}</td>
@@ -753,7 +812,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   <td className="px-4 py-3">
                     <div className="flex flex-col gap-1">
                       <button
-                        onClick={() => { setSubmitError(""); setDetailReport(report); }}
+                        onClick={() => openReportDetail(report)}
                         className="flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
                       >
                         <Eye className="w-4 h-4" /> {report.status === "Draft" ? "Review draft" : "View"}
@@ -767,7 +826,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   </td>
                 </tr>
               ))}
-              {filteredReports.length === 0 && loading && (
+              {(supervisor || filteredReports.length === 0) && loading && (
                 <tr>
                   <td colSpan={isPhn ? 7 : 6} className="px-4 py-10 text-center text-sm text-brand-gray">
                     <span className="inline-flex items-center gap-2">
@@ -776,7 +835,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   </td>
                 </tr>
               )}
-              {filteredReports.length === 0 && !loading && outgoingLoadError && (
+              {(supervisor || filteredReports.length === 0) && !loading && outgoingLoadError && (
                 <tr>
                   <td colSpan={isPhn ? 7 : 6} className="px-4 py-10 text-center text-sm">
                     <p className="font-medium text-brand-danger">{outgoingLoadError}</p>
@@ -803,7 +862,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                         </p>
                       </div>
                     ) : (
-                      <p className="text-sm text-brand-gray">No reports match the selected type filter.</p>
+                      <p className="text-sm text-brand-gray">No reports match the selected filters.</p>
                     )}
                   </td>
                 </tr>
@@ -811,16 +870,17 @@ export default function ReportsPage({ roleKey = "midwife" }) {
             </tbody>
           </table>
         </div>
+        {supervisor && !loading && !outgoingLoadError && <p className="mt-2 text-caption text-brand-gray">Showing {filteredReports.length} of {scopedReports.length} loaded reports. History loads up to 200 records; these are not expected-submission totals.</p>}
       </Card>
 
       {/* Review / Preview Modal — real-data summary before submission */}
       {showPreview && preview && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-lg max-h-[92vh] overflow-y-auto">
+          <Card role="dialog" aria-modal="true" aria-label="Review Report" className={`w-full max-w-lg max-h-[92vh] overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
             <div className="p-6">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-semibold text-brand-ink">Review Report</h3>
+                  <h3 className="text-lg font-semibold text-brand-ink">{supervisor ? "2. Review Saved Draft" : "Review Report"}</h3>
                   <p className="mt-0.5 text-sm text-brand-gray">Confirm the details below, then submit to the {submitTarget}.</p>
                 </div>
                 <button onClick={() => { if (!submitting) { setShowPreview(false); } }} disabled={submitting} className="text-brand-gray hover:text-brand-ink disabled:opacity-60" aria-label="Close">
@@ -915,7 +975,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                     disabled={submitting}
                     className="flex items-center justify-center gap-2 px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <Send className="w-4 h-4" /> {submitting ? "Submitting…" : revisionTarget ? `Resubmit to ${submitTarget}` : `Submit to ${submitTarget}`}
+                    <Send className="w-4 h-4" /> {submitting ? "Submitting…" : submitError ? `Retry submission to ${submitTarget}` : revisionTarget ? `Resubmit to ${submitTarget}` : `Submit to ${submitTarget}`}
                   </button>
                 )}
               </div>
@@ -928,7 +988,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
           that back the report. Opening/closing it never submits or re-fetches. */}
       {showFullPreview && preview && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 print:static print:block print:bg-white print:p-0">
-          <Card className="w-full max-w-4xl max-h-[94vh] overflow-y-auto print:max-h-none print:w-full print:overflow-visible print:border-0 print:shadow-none">
+          <Card className={`w-full max-w-4xl max-h-[94vh] overflow-y-auto print:max-h-none print:w-full print:overflow-visible print:border-0 print:shadow-none ${supervisor ? "supervisor-modal" : ""}`}>
             <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-border bg-white px-5 py-3 dark:bg-card">
               <h3 className="text-sm font-semibold text-brand-ink">Full Report Preview</h3>
               <div className="flex items-center gap-2">
@@ -1044,9 +1104,9 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       )}
 
       {/* Report Details Modal (View a persisted submission) */}
-      {detailReport && (
+      {detailReport && (!supervisor || detailOwner === user?.id) && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-lg max-h-[92vh] overflow-y-auto">
+          <Card role="dialog" aria-modal="true" aria-label="Saved Report Details" className={`w-full max-w-lg max-h-[92vh] overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
             <div className="p-6">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
@@ -1057,13 +1117,16 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {supervisor && (detailContent?.remarks || detailReport.remarks) && <section className="mt-4 rounded border border-amber-300 bg-amber-50 p-3"><h4 className="text-ui font-semibold text-amber-900">{["Needs Revision", "Rejected"].includes(detailContent?.status || detailReport.status) ? "Reviewer Explanation" : "Reviewer Remarks"}</h4><p className="mt-1 whitespace-pre-wrap text-ui text-amber-900">{detailContent?.remarks || detailReport.remarks}</p>{(detailContent?.reviewedByName || detailReport.reviewedByName) && <p className="mt-2 text-caption text-amber-900">{detailContent?.reviewedByName || detailReport.reviewedByName}{(detailContent?.reviewedAt || detailReport.reviewedAt) ? ` · ${reportDateTime(detailContent?.reviewedAt || detailReport.reviewedAt)}` : ""}</p>}</section>}
+              {supervisor && Array.isArray(detailContent?.history) && detailContent.history.length > 0 && <section className="mt-4"><h4 className="mb-2 text-ui font-semibold text-brand-ink">Persisted Report History</h4><ol className="divide-y divide-brand-border rounded border border-brand-border px-3">{detailContent.history.map((event, index) => <li key={`${event.at}-${index}`} className="py-2"><p className="text-ui font-medium text-brand-ink">{event.previousStatus ? `${event.previousStatus} → ` : ""}{event.status || event.action}</p><p className="text-caption text-brand-gray">{reportDateTime(event.at)}{event.actorName ? ` · ${event.actorName}` : ""}{event.actorRole ? ` (${event.actorRole.replaceAll("_", " ")})` : ""}</p>{event.explanation && <p className="mt-1 whitespace-pre-wrap text-ui text-brand-gray">{event.explanation}</p>}</li>)}</ol></section>}
               <div className="space-y-2 rounded-btn border border-brand-border bg-brand-bg/50 p-4">
                 {[
                   ["Type", detailReport.type || "—"],
                   ["Period", detailReport.period || "—"],
                   [isPhn ? "Scope" : "Barangay", (isPhn ? scopeLabel(detailReport, user) : detailReport.barangay) || "—"],
                   ["Recipient", submitTarget],
-                  ["Status", displayStatus(detailReport)],
+                  ["Status", displayStatus({ ...detailReport, status: detailStatus })],
                   ["Date Generated", detailReport.date || "—"],
                   ["Submitted", detailReport.submittedDate || "—"],
                 ].map(([label, value]) => (
@@ -1077,14 +1140,15 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               {/* Submitted report snapshot — the EXACT content submitted, read
                   back from the server (never regenerated from live records). */}
               <div className="mt-4">
-                <h4 className="mb-2 text-sm font-semibold text-brand-ink">Submitted Report</h4>
+                <h4 className="mb-2 text-sm font-semibold text-brand-ink">{detailStatus === "Draft" ? "Saved Draft Snapshot" : "Submitted Report Snapshot"}</h4>
                 {detailLoading ? (
                   <p className="inline-flex items-center gap-2 text-sm text-brand-gray">
                     <RefreshCw className="h-4 w-4 animate-spin" /> Loading submitted report…
                   </p>
                 ) : detailError ? (
-                  <div className="rounded-btn border border-brand-danger/30 bg-brand-danger/5 p-4 text-sm text-brand-danger">
+                  <div role="alert" className="rounded-btn border border-brand-danger/30 bg-brand-danger/5 p-4 text-sm text-brand-danger">
                     {detailError}
+                    <button type="button" onClick={() => setDetailRetry((value) => value + 1)} className={supervisor ? "supervisor-button mt-2" : "mt-2 block text-sm font-medium text-brand-blue hover:underline"}>Retry saved report</button>
                   </div>
                 ) : hasSnapshot(detailContent?.content) ? (
                   <ReportSnapshotView content={detailContent.content} />
@@ -1095,8 +1159,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                 )}
               </div>
 
+              {submitError && <p role="alert" className="mt-4 rounded border border-brand-danger/30 bg-brand-danger/5 px-3 py-2 text-ui text-brand-danger">{submitError}</p>}
+
               <div className="mt-6 flex justify-end">
-                {canSubmitReports && detailReport.status === "Needs Revision" && (
+                {canSubmitReports && detailStatus === "Needs Revision" && (
                   <button
                     onClick={() => {
                       setRevisionTarget(detailReport);
@@ -1114,13 +1180,13 @@ export default function ReportsPage({ roleKey = "midwife" }) {
                     Prepare revision
                   </button>
                 )}
-                {canSubmitReports && detailReport.status === "Draft" && (
+                {canSubmitReports && detailStatus === "Draft" && (
                   <button
                     onClick={submitStoredDraft}
                     disabled={submitting || detailLoading || !hasSnapshot(detailContent?.content)}
                     className="mr-auto rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {submitting ? "Submitting…" : `Submit to ${submitTarget}`}
+                    {submitting ? "Submitting…" : submitError ? `Retry submission to ${submitTarget}` : `Submit to ${submitTarget}`}
                   </button>
                 )}
                 <button
@@ -1135,6 +1201,6 @@ export default function ReportsPage({ roleKey = "midwife" }) {
           </Card>
         </div>
       )}
-    </>
+    </div>
   );
 }

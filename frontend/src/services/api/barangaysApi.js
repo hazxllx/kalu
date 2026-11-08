@@ -16,10 +16,10 @@ import { api } from './apiClient';
  *   PATCH /barangays/:id/status   change Active/Inactive status only
  */
 export const barangaysApi = {
-  list: (params) => api.get('/barangays', { params }),
-  options: () => api.get('/barangays/options'),
-  get: (id) => api.get(`/barangays/${id}`),
-  create: (barangay) => api.post('/barangays', barangay),
+  list: (params, options) => api.get('/barangays', { ...options, params }),
+  options: (options) => api.get('/barangays/options', options),
+  get: (id, options) => api.get(`/barangays/${id}`, options),
+  create: (barangay, options) => api.post('/barangays', barangay, options),
   update: (id, barangay) => api.put(`/barangays/${id}`, barangay),
   // Dedicated status change (Active <-> Inactive). Inactive barangays keep all
   // their residents/records but are hidden from new selections.

@@ -192,14 +192,14 @@ test('household draft survives offline reload and synchronizes only after a conf
   assert.equal(result.source, 'local');
   assert.equal(result.household.syncStatus, 'Pending Sync');
 
-  const savedDraft = await getDraft(result.localId);
+  const savedDraft = await getDraft(result.localId, OWNER);
   assert.equal(savedDraft.data.headName, 'Ana Dela Cruz');
   const offlineList = await listHouseholdsOffline({ ownerId: OWNER, params: { limit: 20 } });
   assert.equal(offlineList.rows[0].id, result.household.id);
 
   db.close();
   await db.open();
-  assert.equal((await getDraft(result.localId)).data.headName, 'Ana Dela Cruz');
+  assert.equal((await getDraft(result.localId, OWNER)).data.headName, 'Ana Dela Cruz');
   const [queued] = await listOperations(OWNER);
 
   setOnline(true);
@@ -212,22 +212,22 @@ test('household draft survives offline reload and synchronizes only after a conf
   });
   assert.equal(failed.stoppedReason, 'network');
   assert.equal((await db.outbox.get(queued.opId)).status, OUTBOX_STATUS.FAILED);
-  assert.equal((await getDraft(result.localId)).status, OUTBOX_STATUS.FAILED);
+  assert.equal((await getDraft(result.localId, OWNER)).status, OUTBOX_STATUS.FAILED);
 
-  await requeueOperation(queued.opId);
+  await requeueOperation(queued.opId, OWNER);
   const serverRecord = { id: 'HH-SYNC-001', headName: 'Ana Dela Cruz', revision: 1 };
   const synced = await runSyncPass({
     ownerId: OWNER,
     workerId: 'reconnected',
     getHandler: () => Object.assign(async (operation) => {
-      const persisted = await getOperation(operation.opId);
+      const persisted = await getOperation(operation.opId, OWNER);
       assert.equal(persisted.payload.headName, 'Ana Dela Cruz');
       return { serverId: serverRecord.id, serverRecord };
     }, { mutationType: MUTATION_TIER.SAFE_SYNC }),
   });
   assert.equal(synced.synced, 1);
   assert.equal((await db.outbox.get(queued.opId)).status, OUTBOX_STATUS.SYNCED);
-  const reconciled = await getDraft(result.localId);
+  const reconciled = await getDraft(result.localId, OWNER);
   assert.equal(reconciled.status, OUTBOX_STATUS.SYNCED);
   assert.equal(reconciled.data.id, 'HH-SYNC-001');
 });

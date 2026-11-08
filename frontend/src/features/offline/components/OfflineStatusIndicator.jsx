@@ -18,6 +18,9 @@ import {
 } from '@/services/offline/db';
 import { applyServiceWorkerUpdate, subscribeToUpdate } from '@/lib/pwa';
 import { useSyncStatus } from '@/hooks/useSyncStatus';
+import { useAuth } from '@/context/AuthContext';
+import { usePermissions } from '@/context/PermissionsContext';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * Connection & synchronization indicator.
@@ -57,6 +60,9 @@ const Stat = ({ label, value, tone = 'default' }) => {
 
 const OfflineStatusIndicator = () => {
   const status = useSyncStatus();
+  const { user } = useAuth();
+  const { can } = usePermissions();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [updateReady, setUpdateReady] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -97,6 +103,7 @@ const OfflineStatusIndicator = () => {
   } = status;
   const attention = (counts.pending || 0) + (counts.failed || 0) + (counts.conflict || 0) + (counts.offlineDraft || 0);
   const hasProblems = (counts.failed || 0) + (counts.conflict || 0) > 0;
+  const canRetry = (counts.pending || 0) > 0 || failed.some((item) => item.retryable);
 
   const connectionLabel = online ? 'Online' : 'Offline';
   const summary = useMemo(() => {
@@ -112,8 +119,8 @@ const OfflineStatusIndicator = () => {
       return `${counts.offlineDraft} offline draft${counts.offlineDraft === 1 ? '' : 's'} need review`;
     }
     if (attention > 0) return `${attention} change${attention === 1 ? '' : 's'} pending`;
-    return 'Synced successfully';
-  }, [syncing, progress, online, attention, counts.offlineDraft, upgradeBlocked, serverAvailable, lastError]);
+    return lastSyncedAt ? 'Synced successfully' : 'No pending changes';
+  }, [syncing, progress, online, attention, counts.offlineDraft, upgradeBlocked, serverAvailable, lastError, lastSyncedAt]);
 
   const handleRetry = async () => {
     setRetrying(true);
@@ -271,6 +278,11 @@ const OfflineStatusIndicator = () => {
                     <li key={item.opId} className="rounded-md border border-amber-100 bg-amber-50/60 px-2.5 py-1.5 text-xs">
                       <span className="font-medium capitalize">{item.entity}</span>
                       <p className="mt-0.5 text-slate-600">{item.message}</p>
+                      {item.entity === 'resident' && item.opType === 'update' && user?.role && can('residents.edit') && (
+                        <button type="button" disabled={!online} className="mt-1 text-brand-blue underline disabled:opacity-50" onClick={() => { setOpen(false); navigate(`/app/${user.role}/residents`); }}>
+                          Review Resident Changes
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -287,7 +299,7 @@ const OfflineStatusIndicator = () => {
             <button
               type="button"
               onClick={handleRetry}
-              disabled={retrying || syncing || !online}
+              disabled={retrying || syncing || !online || !canRetry}
               className="inline-flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {retrying || syncing ? (
@@ -295,7 +307,7 @@ const OfflineStatusIndicator = () => {
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              {online ? 'Retry synchronization' : 'Offline — retry when connected'}
+              {online ? (canRetry ? 'Retry synchronization' : 'No automatic retries pending') : 'Offline — retry when connected'}
             </button>
           </div>
         </div>

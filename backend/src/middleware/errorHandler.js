@@ -42,7 +42,7 @@ const errorHandler = (err, req, res, next) => {
   // `errors`, which is the documented validation shape. Arrays of messages
   // (service-level domain validation) remain under `details` only.
   const isFieldErrorMap =
-    err.details && typeof err.details === 'object' && !Array.isArray(err.details);
+    !isServerError && err.details && typeof err.details === 'object' && !Array.isArray(err.details);
 
   // Only app-level machine codes (DUPLICATE_RECORD, STALE_REVISION, ...) are
   // exposed. Database driver codes such as '23505' never match this pattern.
@@ -53,7 +53,7 @@ const errorHandler = (err, req, res, next) => {
     error: {
       message,
       ...(hasPublicCode ? { code: err.code } : {}),
-      ...(err.details ? { details: err.details } : {}),
+      ...(!isServerError && err.details ? { details: err.details } : {}),
       ...(isFieldErrorMap ? { errors: err.details } : {}),
     },
   });

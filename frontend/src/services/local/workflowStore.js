@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 import { consultationLocationFor } from "@/lib/consultationLocations";
 
 /**
@@ -126,6 +127,7 @@ export const useWorkflowStore = () => useSyncExternalStore(subscribe, getState);
 
 /** Reset the workflow store back to the empty working set (dev helper). */
 export const resetWorkflowStore = () => commit(buildInitialSnapshot());
+registerWorkingSetReset(() => { snapshot = buildInitialSnapshot(); listeners.forEach((listener) => listener()); });
 
 const nextId = (list, prefix = "") =>
   list.reduce((max, row) => {

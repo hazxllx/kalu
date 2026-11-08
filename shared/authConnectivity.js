@@ -2,6 +2,18 @@ export const AUTH_SERVICE_UNAVAILABLE_CODE = 'AUTH_SERVICE_UNAVAILABLE';
 export const AUTH_SERVICE_UNAVAILABLE_MESSAGE =
   'Cannot reach the Supabase authentication service. The project may be paused or unavailable. Contact the administrator or try again after the service is restored.';
 
+export const AUTH_NETWORK_FAILURE_MESSAGE = 'Cannot connect to the authentication service. Check your internet connection and try again.';
+export const AUTH_SESSION_CHANGED_MESSAGE = 'Your authentication session changed unexpectedly. Please sign in again.';
+export const AUTH_SESSION_EXPIRED_MESSAGE = 'Your session expired. Please sign in again.';
+
+export const isAuthNetworkFailure = (error) => {
+  if (!error) return false;
+  const status = Number(error.status ?? error.statusCode);
+  const code = error.cause?.code ?? error.code;
+  return status === 0 || ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH'].includes(code)
+    || /failed to fetch|fetch failed|network ?error|network request failed/i.test(String(error.message || ''));
+};
+
 /** A network/service outage is not evidence that an account or password is invalid. */
 export const isAuthServiceUnavailable = (error) => {
   if (!error) return false;
@@ -15,9 +27,18 @@ export const isAuthServiceUnavailable = (error) => {
 };
 
 export const authFailureMessage = (error) => {
+  const code = error?.code ?? error?.payload?.error?.code;
+  if (code === 'AUTH_IN_PROGRESS') return 'A sign-in or sign-out is already in progress. Please wait.';
+  if (code === 'AUTH_SIGN_IN_CANCELLED') return 'Sign-in was cancelled. Please try again when ready.';
+  if (['AUTH_SESSION_CHANGED', 'owner-changed'].includes(code)) return AUTH_SESSION_CHANGED_MESSAGE;
+  if (['session_expired', 'session_not_found', 'refresh_token_not_found', 'refresh_token_already_used', 'bad_jwt', 'jwt_expired'].includes(code)) return AUTH_SESSION_EXPIRED_MESSAGE;
+  if (['email_not_confirmed', 'phone_not_confirmed'].includes(code)) return 'Your account is not verified. Confirm your email before signing in.';
+  if (code === 'AUTH_INVALID_RESPONSE') return 'The authentication server returned an incomplete session. Please try again.';
+  if (isAuthNetworkFailure(error)) return AUTH_NETWORK_FAILURE_MESSAGE;
   if (isAuthServiceUnavailable(error)) return AUTH_SERVICE_UNAVAILABLE_MESSAGE;
   if (Number(error?.status ?? error?.statusCode) === 429) return 'Too many sign-in attempts. Please wait and try again.';
-  return 'Invalid email or password';
+  if (code === 'invalid_credentials' || Number(error?.status ?? error?.statusCode) === 400 || /invalid (?:login )?credentials|invalid email or password/i.test(String(error?.message || ''))) return 'Invalid email or password';
+  return 'Unable to sign in due to an unexpected authentication error. Please try again.';
 };
 
 /** Validate browser/build configuration without returning or logging credential values. */

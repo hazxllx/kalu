@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   AUTH_SERVICE_UNAVAILABLE_MESSAGE,
+  AUTH_NETWORK_FAILURE_MESSAGE,
   authFailureMessage,
+  isAuthNetworkFailure,
   isAuthServiceUnavailable,
   publicSupabaseConfigurationError,
 } from '../../shared/authConnectivity.js';
@@ -18,8 +20,17 @@ test('Supabase retryable, DNS, browser fetch, and server errors are availability
     { status: 503 }, { statusCode: 503 },
   ]) {
     assert.equal(isAuthServiceUnavailable(error), true);
-    assert.equal(authFailureMessage(error), AUTH_SERVICE_UNAVAILABLE_MESSAGE);
+    assert.equal(authFailureMessage(error), isAuthNetworkFailure(error) ? AUTH_NETWORK_FAILURE_MESSAGE : AUTH_SERVICE_UNAVAILABLE_MESSAGE);
   }
+});
+
+test('sign-in failures distinguish verification, expiry, interruption, invalid credentials and unexpected errors', () => {
+  assert.match(authFailureMessage({ code: 'email_not_confirmed', status: 400 }), /not verified.*confirm your email/i);
+  assert.match(authFailureMessage({ code: 'jwt_expired', status: 401 }), /session expired/i);
+  assert.match(authFailureMessage({ code: 'AUTH_SESSION_CHANGED' }), /changed unexpectedly/i);
+  assert.match(authFailureMessage({ code: 'AUTH_INVALID_RESPONSE' }), /incomplete session/i);
+  assert.match(authFailureMessage({ name: 'UnexpectedError' }), /unexpected authentication error/i);
+  assert.equal(authFailureMessage({ code: 'invalid_credentials', status: 400 }), 'Invalid email or password');
 });
 
 test('invalid credentials and rate limiting remain distinct from service downtime', () => {

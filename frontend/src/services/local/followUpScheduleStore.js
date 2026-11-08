@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 /**
  * Follow-up Schedule Calendar store (local in-session state only).
@@ -190,3 +191,4 @@ export const followUpScheduleStore = {
 };
 
 export default followUpScheduleStore;
+registerWorkingSetReset(() => { cache = []; listeners.forEach((listener) => listener()); });

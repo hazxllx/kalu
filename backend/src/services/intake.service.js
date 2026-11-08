@@ -14,6 +14,7 @@
  *     intake for an existing patient never creates a duplicate.
  */
 import ApiError from '../utils/apiError.js';
+import { assertIncomingReferral } from './referrals.service.js';
 import repository from '../repositories/index.js';
 import { getServiceClient } from '../config/supabase.js';
 import { computeBMI, isPlausibleVital } from '../utils/bmi.js';
@@ -40,11 +41,26 @@ const assertTriageStation = (user) => {
 
 const editableStatusesForIntake = () => [SUBMISSION_STATUS.DRAFT];
 
-/** True when the resident is visible to this caller under barangay scoping. */
-const withinBarangayScope = (user, resident) => {
+/** Service-role reads must enforce municipality and barangay IDs as well as names. */
+const withinBarangayScope = (user, resident, repo = repository) => {
+  if (!resident) return false;
+  const municipality = String(user?.municipalityId || '').trim();
+  const residentMunicipality = String(resident.municipalityId || '').trim();
+  if ((municipality && residentMunicipality && municipality !== residentMunicipality) ||
+      (repo.driver === 'supabase' && (!municipality || !residentMunicipality))) return false;
   const scope = assignedBarangay(user);
+  if (['bhw', 'health_supervisor'].includes(user?.role) && !scope) return false;
+  if (scope && user?.barangayId && resident.barangayId && String(user.barangayId) !== String(resident.barangayId)) return false;
   if (!scope) return true;
   return String(resident?.barangay ?? '').trim().toLowerCase() === scope.toLowerCase();
+};
+
+const assertIntakeActorScope = (user, repo = repository) => {
+  if (!isIntakeRole(user)) throw ApiError.forbidden();
+  assertTriageStation(user);
+  if (repo.driver === 'supabase' && (!user.id || !user.municipalityId)) throw ApiError.forbidden('A current municipality assignment is required.');
+  if (['bhw', 'health_supervisor'].includes(user.role) && !assignedBarangay(user)) throw ApiError.forbidden('A current barangay assignment is required.');
+  if (user.role === 'rhu_personnel' && !user.facilityId) throw ApiError.forbidden('A current RHU facility assignment is required.');
 };
 
 const withinIntakeScope = (user, submission) =>
@@ -52,7 +68,7 @@ const withinIntakeScope = (user, submission) =>
   withinFacilityScope(user, submission?.facilityId);
 
 export const searchResidents = async ({ q = '', user, repo = repository }) => {
-  assertTriageStation(user);
+  assertIntakeActorScope(user, repo);
   const scope = assignedBarangay(user);
   // Scope is passed into the repository query so a service-role data access
   // path never fetches records outside the caller's authorized window.
@@ -64,29 +80,29 @@ export const searchResidents = async ({ q = '', user, repo = repository }) => {
   });
 };
 
-export const getResidentForIntake = async ({ id, user }) => {
-  if (!isIntakeRole(user)) throw ApiError.forbidden();
-  assertTriageStation(user);
-  const resident = await repository.getResident(id);
-  if (!resident || !withinBarangayScope(user, resident)) {
+export const getResidentForIntake = async ({ id, user, repo = repository, supabase = null }) => {
+  assertIntakeActorScope(user, repo);
+  const resident = await repo.getResident(id);
+  if (!resident || !withinBarangayScope(user, resident, repo)) {
     throw ApiError.notFound('Resident record not found');
   }
 
   // Historical measurements and recent clinical context come only from this
   // resident's own completed encounters. They are displayed as historical and
   // are never copied into a new screening encounter automatically.
-  const { data, error } = await getServiceClient()
+  let history = (supabase || getServiceClient())
     .from('visits')
     .select('id, visit_date, height_cm, weight_kg, chief_complaint, findings, phn_assessment, status')
     .eq('resident_id', resident.id)
-    .eq('status', SUBMISSION_STATUS.COMPLETED)
-    .order('visit_date', { ascending: false, nullsFirst: false })
-    .limit(50);
+    .eq('status', SUBMISSION_STATUS.COMPLETED);
+  if (user.role === 'rhu_personnel') history = history.eq('facility_id', user.facilityId);
+  const { data, error } = await history.order('visit_date', { ascending: false, nullsFirst: false }).limit(50);
   if (error) throw new ApiError(503, 'Could not load resident clinical history.');
+  if (!Array.isArray(data)) throw new ApiError(503, 'The resident clinical history response was incomplete.');
 
   const validHeight = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) < 300;
   const validWeight = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) < 500;
-  const visits = data || [];
+  const visits = data;
   const heightVisit = visits.find((visit) => validHeight(visit.height_cm));
   const weightVisit = visits.find((visit) => validWeight(visit.weight_kg));
   const recentClinicalHistory = visits
@@ -220,8 +236,7 @@ export const validateSubmissionForSubmit = (resident, visit) => {
  * New residents are identity-matched first to prevent duplicates.
  */
 export const createSubmission = async ({ residentId = null, resident = null, visit = {}, referralId = null, user }) => {
-  if (!isIntakeRole(user)) throw ApiError.forbidden();
-  assertTriageStation(user);
+  assertIntakeActorScope(user);
   if (user.role === 'rhu_personnel' && !user.facilityId) {
     throw ApiError.unprocessable('Your account must be assigned to an RHU facility before submitting triage.');
   }
@@ -233,22 +248,15 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
   let linkedReferralId = null;
   if (referralId) {
     const supabase = getServiceClient();
-    const { data: ref } = await supabase
-      .from('health_referrals')
-      .select('id, resident_id, municipality_id')
-      .eq('id', referralId)
-      .maybeSingle();
-    if (!ref) throw ApiError.notFound('Referral not found.');
-    if (user.municipalityId && ref.municipality_id && user.municipalityId !== ref.municipality_id) {
-      throw ApiError.notFound('Referral not found.');
-    }
-    const { data: existingVisits } = await supabase
+    const ref = await assertIncomingReferral({ user, id: referralId, supabase });
+    const { data: existingVisits, error: existingVisitError } = await supabase
       .from('visits')
       .select('id, status, recorded_by_id')
       .eq('referral_id', referralId)
       .neq('status', 'completed')
       .order('created_at', { ascending: false })
       .limit(1);
+    if (existingVisitError) throw new ApiError(503, 'Could not check the existing referral encounter. Try again before starting another one.');
     if (Array.isArray(existingVisits) && existingVisits.length) {
       const existing = existingVisits[0];
       if (existing.status !== SUBMISSION_STATUS.DRAFT) {
@@ -289,11 +297,22 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
       }
       demographics.barangay = scope;
     }
+    if (repository.driver === 'supabase') {
+      const barangay = await repository.findBarangayByName(demographics.barangay, user.municipalityId);
+      if (!barangay?.id || barangay.is_active === false ||
+          String(barangay.municipality_id || barangay.municipalityId || '') !== String(user.municipalityId)) {
+        throw ApiError.unprocessable('Select an active barangay within your assigned municipality.');
+      }
+      demographics.municipalityId = user.municipalityId;
+      demographics.barangayId = barangay.id;
+      demographics.barangay = barangay.name;
+    }
     const existing = await repository.findResidentByIdentity({
       lastName: demographics.lastName,
       firstName: demographics.firstName,
       middleName: demographics.middleName,
       birthDate: demographics.birthDate,
+      municipalityId: user.municipalityId || null,
     });
     if (existing) {
       throw ApiError.conflict(
@@ -336,15 +355,13 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
 };
 
 export const listMySubmissions = async ({ user }) => {
-  if (!isIntakeRole(user)) throw ApiError.forbidden();
-  assertTriageStation(user);
+  assertIntakeActorScope(user);
   const { rows } = await repository.listVisits({ submittedById: user.id, limit: 100 });
   return rows.filter((submission) => withinIntakeScope(user, submission));
 };
 
 export const getSubmissionForIntake = async ({ id, user }) => {
-  if (!isIntakeRole(user)) throw ApiError.forbidden();
-  assertTriageStation(user);
+  assertIntakeActorScope(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id || !withinIntakeScope(user, submission)) {
@@ -355,8 +372,7 @@ export const getSubmissionForIntake = async ({ id, user }) => {
 };
 
 export const updateSubmissionDraft = async ({ id, visit = {}, user }) => {
-  if (!isIntakeRole(user)) throw ApiError.forbidden();
-  assertTriageStation(user);
+  assertIntakeActorScope(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id) throw ApiError.forbidden('You may only update submissions you created.');
@@ -371,8 +387,7 @@ export const updateSubmissionDraft = async ({ id, visit = {}, user }) => {
 };
 
 export const submitSubmission = async ({ id, user }) => {
-  if (!isIntakeRole(user)) throw ApiError.forbidden();
-  assertTriageStation(user);
+  assertIntakeActorScope(user);
   const submission = await repository.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   if (submission.recordedById !== user.id || !withinIntakeScope(user, submission)) {

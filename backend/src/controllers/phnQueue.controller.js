@@ -50,14 +50,14 @@ export const completeSubmission = async (req, res) => {
 export const createReferral = async (req, res) => {
   const referral = await phnQueueService.createReferral({
     visitId: req.params.id,
-    draft: req.body.referral || {},
+    draft: req.body.referral || req.body.record || req.body || {},
     user: req.user,
   });
   sendCreated(res, { referral });
 };
 
 export const listReferrals = async (req, res) => {
-  const { rows } = await phnQueueService.listReferrals({ q: req.query.q || '', user: req.user });
+  const { rows } = await phnQueueService.listReferrals({ q: req.query.q || '', box: req.query.box, status: req.query.status, user: req.user });
   sendData(res, { referrals: rows });
 };
 
@@ -74,15 +74,21 @@ export const getReferralByVisit = async (req, res) => {
 export const updateReferral = async (req, res) => {
   const referral = await phnQueueService.updateReferral({
     id: req.params.id,
-    patch: req.body.referral || {},
+    patch: req.body.referral || req.body.record || req.body || {},
     user: req.user,
   });
   sendData(res, { referral });
 };
 
 export const syncReferral = async (req, res) => {
-  const referral = await phnQueueService.syncReferralSnapshots({ id: req.params.id, user: req.user });
+  const body = req.body.referral || req.body.record || req.body || {};
+  const referral = await phnQueueService.syncReferralSnapshots({ id: req.params.id, user: req.user, version: body.expected_version ?? body.version });
   sendData(res, { referral });
+};
+
+export const updateReferralStatus = async (req, res) => {
+  const body = req.body.referral || req.body.record || req.body || {};
+  sendData(res, { referral: await phnQueueService.updateReferralStatus({ id: req.params.id, user: req.user, status: body.status, resolutionNotes: body.resolution_notes ?? body.resolutionNotes, version: body.expected_version ?? body.version }) });
 };
 
 export default {
@@ -99,4 +105,5 @@ export default {
   getReferralByVisit,
   updateReferral,
   syncReferral,
+  updateReferralStatus,
 };

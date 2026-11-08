@@ -13,7 +13,7 @@ import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';
 import test, { afterEach, beforeEach } from 'node:test';
 
-import { db } from '../../src/services/offline/db.js';
+import { db, setOfflineOwnerResolver } from '../../src/services/offline/db.js';
 import { resetCachedKey } from '../../src/services/offline/crypto.js';
 import {
   OUTBOX_STATUS,
@@ -24,7 +24,7 @@ import {
 } from '../../src/services/offline/outbox.js';
 import { putDraft, getDraft, listDrafts, DRAFT_STATUS } from '../../src/services/offline/drafts.js';
 import { getCachedRecord, cacheRecord } from '../../src/services/offline/records.js';
-import { acquireLock, readMeta, getLastSyncedAt, META_KEYS } from '../../src/services/offline/meta.js';
+import { acquireLock, readMeta, getLastSyncedAt, syncLockKey } from '../../src/services/offline/meta.js';
 import { runSyncPass } from '../../src/services/offline/syncRunner.js';
 import { computeBackoffMs, earliestRetryAt } from '../../src/services/offline/syncCore.js';
 import { classifySyncError, SYNC_ERROR } from '../../src/services/offline/errors.js';
@@ -41,6 +41,7 @@ const OWNER = 'user-aaaa';
 const OTHER_OWNER = 'user-bbbb';
 
 const resetAll = async () => {
+  setOfflineOwnerResolver(null);
   resetCachedKey();
   if (!db.isOpen()) await db.open();
   await db.transaction('rw', db.drafts, db.outbox, db.records, db.syncMeta, db.keys, async () => {
@@ -125,7 +126,7 @@ test('draft payload persists encrypted and round-trips independently of the netw
   const raw = await db.drafts.get('d1');
   // Stored payload must not be plaintext-readable as the original object.
   assert.notEqual(raw.data?.headName, 'Dela Cruz');
-  const decrypted = await getDraft('d1');
+  const decrypted = await getDraft('d1', OWNER);
   assert.equal(decrypted.data.headName, 'Dela Cruz');
   assert.equal(decrypted.status, DRAFT_STATUS.PENDING);
 });
@@ -152,7 +153,7 @@ test('Draft -> Queued -> Syncing -> Synced: success caches the authoritative rec
   assert.equal(received.payload.headName, 'Dela Cruz');
   assert.equal(received.idempotencyKey, op.idempotencyKey);
   // Draft reconciled to the authoritative server record.
-  const draft = await getDraft(localId);
+  const draft = await getDraft(localId, OWNER);
   assert.equal(draft.status, DRAFT_STATUS.SYNCED);
   assert.equal(draft.authoritative, true);
   assert.equal(draft.data.id, 'HH-0001');
@@ -293,7 +294,7 @@ test('409 conflict parks the op for review and never overwrites server data', as
   assert.equal(summary.conflicts, 1);
   const stored = await db.outbox.get(op.opId);
   assert.equal(stored.status, OUTBOX_STATUS.CONFLICT);
-  const draft = await getDraft(localId);
+  const draft = await getDraft(localId, OWNER);
   assert.equal(draft.status, DRAFT_STATUS.CONFLICT);
   // Nothing was cached as authoritative from a conflicting write.
   const cached = await getCachedRecord('household', 'HH-9', OWNER);
@@ -401,8 +402,8 @@ test('a dependent op is deferred while its parent is unsynced', async () => {
 test('the single-worker lock prevents a second concurrent pass', async () => {
   await seedOperation({ entity: 'household', payload: { x: 1 } });
   // Another worker already holds the lock.
-  const held = await acquireLock('other-worker', 30_000);
-  assert.equal(held, 'other-worker');
+  const held = await acquireLock(OWNER, 'other-worker', { ttlMs: 30_000 });
+  assert.equal(held.workerId, 'other-worker');
   let called = false;
   const getHandler = makeRegistry({ 'household:create': async () => { called = true; return { serverId: 'HH' }; } });
   const summary = await runSyncPass(basePass({ getHandler }));
@@ -410,17 +411,17 @@ test('the single-worker lock prevents a second concurrent pass', async () => {
   assert.equal(summary.stoppedReason, 'locked');
   assert.equal(called, false);
   // The foreign lock is left intact.
-  const lock = await readMeta(META_KEYS.LOCK, null);
-  assert.equal(lock.owner, 'other-worker');
+  const lock = await readMeta(syncLockKey(OWNER), null);
+  assert.equal(lock.workerId, 'other-worker');
 });
 
 test('concurrent tabs atomically elect only one sync-lock owner', async () => {
   const results = await Promise.all([
-    acquireLock('tab-one', 30_000),
-    acquireLock('tab-two', 30_000),
+    acquireLock(OWNER, 'tab-one', { ttlMs: 30_000 }),
+    acquireLock(OWNER, 'tab-two', { ttlMs: 30_000 }),
   ]);
   assert.equal(results.filter(Boolean).length, 1);
-  assert.ok(['tab-one', 'tab-two'].includes((await readMeta(META_KEYS.LOCK, null)).owner));
+  assert.ok(['tab-one', 'tab-two'].includes((await readMeta(syncLockKey(OWNER), null)).workerId));
 });
 
 test('interrupted (orphaned) syncing op is recovered and completed on the next pass', async () => {

@@ -286,6 +286,8 @@ const RESIDENT_TO_DB = {
   submittedForVerificationAt: 'submitted_for_verification_at',
   authUserId: 'auth_user_id',
   createdAt: 'created_at',
+  updatedAt: 'updated_at',
+  revision: 'revision',
   createdById: 'created_by_id',
   createdByRole: 'created_by_role',
   // Persisted authoritative risk assessment (computed server-side; never
@@ -332,6 +334,13 @@ const VISIT_TO_DB = {
   referralRequired: 'referral_required',
   healthServiceId: 'health_service_id',
   healthServiceName: 'health_service_name',
+  clientOperationKey: 'client_operation_key',
+  clientOperationPayloadHash: 'client_operation_payload_hash',
+  consultationDetails: 'consultation_details',
+  consultationEffectsCompletedAt: 'consultation_effects_completed_at',
+  recordedAt: 'recorded_at',
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
   submittedAt: 'submitted_at',
   receivedAt: 'received_at',
   reviewedAt: 'reviewed_at',
@@ -967,7 +976,7 @@ export const supabaseRepository = {
    * trigger); `municipalityId` limits rows to the caller's municipality.
    * Returns { rows, total }.
    */
-  async listResidents({ q = '', limit = 50, offset = 0, barangay = null, municipalityId = null, verificationStatuses = null } = {}) {
+  async listResidents({ q = '', limit = 50, offset = 0, barangay = null, barangayId = null, ids = null, municipalityId = null, verificationStatuses = null } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.residents)
@@ -976,6 +985,8 @@ export const supabaseRepository = {
       .range(offset, offset + limit - 1);
     if (q) query = query.or(residentSearchFilter(q));
     if (barangay) query = query.eq('barangay', barangay);
+    if (barangayId) query = query.eq('barangay_id', barangayId);
+    if (Array.isArray(ids)) query = query.in('id', ids);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
     if (verificationStatuses && verificationStatuses.length) query = query.in('verification_status', verificationStatuses);
     const { data, error, count } = await query;
@@ -1453,12 +1464,13 @@ export const supabaseRepository = {
     return memberHealthFromRow(data);
   },
 
-  async findResidentByIdentity({ lastName, firstName, middleName, birthDate, identityNo } = {}) {
+  async findResidentByIdentity({ lastName, firstName, middleName, birthDate, identityNo, municipalityId } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.residents)
       .select('*')
       .limit(5);
+    if (municipalityId) query = query.eq('municipality_id', municipalityId);
     if (identityNo) query = query.eq('identity_no', String(identityNo).trim());
     else {
       query = query
@@ -1475,7 +1487,7 @@ export const supabaseRepository = {
       if (birthDate && r.birth_date !== birthDate) return false;
       return true;
     });
-    return exact ? residentFromRow(exact) : rows[0] ? residentFromRow(rows[0]) : null;
+    return exact ? residentFromRow(exact) : null;
   },
 
   async getResident(id) {
@@ -1528,12 +1540,13 @@ export const supabaseRepository = {
     return data ? residentFromRow(data) : null;
   },
 
-  async updateResident(id, patch, { expectedUpdatedAt = null } = {}) {
+  async updateResident(id, patch, { expectedRevision = null, expectedUpdatedAt = null } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.residents)
       .update({ ...residentToRow(patch), updated_at: new Date().toISOString() })
       .eq('id', id);
+    if (expectedRevision !== null) query = query.eq('revision', expectedRevision);
     if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt);
     const { data, error } = await query.select().maybeSingle();
     throwOnError(error, 'Could not update resident');
@@ -2072,12 +2085,51 @@ export const supabaseRepository = {
     let { data, error } = await supabase.from(TABLES.visits).insert(row).select().single();
     // Gracefully degrade when optional consultation columns are not present
     // yet: retry without them so older database schemas can still save visits.
-    if (error && isMissingConsultationColumn(error)) {
+    if (error && !visit.clientOperationKey && !visit.consultationDetails && isMissingConsultationColumn(error)) {
       ({ data, error } = await supabase.from(TABLES.visits).insert(stripConsultationExtras(row)).select().single());
+    }
+    if (error?.code === '23505' && visit.clientOperationKey) {
+      throw Object.assign(new Error('A visit for this consultation operation already exists.'), { code: '23505' });
     }
     throwOnError(error, 'Could not create submission');
     const resident = await this.getResident(visit.residentId);
     return { ...visitFromRow(data), resident };
+  },
+
+  async findVisitByOperationKey(clientOperationKey) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from(TABLES.visits)
+      .select(`*, resident:residents(${SELECT_RESIDENT})`)
+      .eq('client_operation_key', clientOperationKey)
+      .maybeSingle();
+    // Fail closed if the migration is missing; never fall back to an insert
+    // without the database-enforced operation key or clinical detail columns.
+    throwOnError(error, 'Could not verify consultation operation');
+    return data ? { ...visitFromRow(data), resident: residentFromRow(data.resident) } : null;
+  },
+
+  async completeConsultationOperation({ id, creatorId }) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('complete_consultation_operation', {
+      p_visit_id: id,
+      p_creator_id: creatorId,
+    });
+    if (error?.code === '23505' || error?.code === '42501') {
+      throw ApiError.conflict('The consultation operation could not be completed for this author and resident.');
+    }
+    if (error || data?.completed !== true || data?.consultationId !== id) {
+      throw new ApiError(503, 'Consultation completion is unavailable. Retry the original operation.');
+    }
+    return data;
+  },
+
+  async hasUnkeyedVisitsForResident(residentId) {
+    const { data, error } = await getServiceClient().from(TABLES.visits)
+      .select('id').eq('resident_id', residentId).is('client_operation_key', null).limit(1);
+    throwOnError(error, 'Could not verify pre-upgrade consultation history');
+    if (!Array.isArray(data)) throw new ApiError(503, 'Pre-upgrade consultation history could not be confirmed.');
+    return data.length > 0;
   },
 
   async getVisit(id) {
@@ -2092,21 +2144,27 @@ export const supabaseRepository = {
     return { ...visitFromRow(data), resident: residentFromRow(data.resident) };
   },
 
-  async listVisits({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null, limit = 100, offset = 0 } = {}) {
+  async listVisits({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null,
+    municipalityId = null, barangayId = null, barangay = null, facilityId = null, limit = 100, offset = 0 } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.visits)
-      .select(`*, resident:residents(${SELECT_RESIDENT})`, { count: 'exact' })
+      .select(`*, resident:residents${municipalityId || barangayId || barangay ? '!inner' : ''}(${SELECT_RESIDENT})`, { count: 'exact' })
       .order('updated_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(offset, offset + limit - 1);
     if (statuses && statuses.length) query = query.in('status', statuses);
     if (submittedById) query = query.eq('recorded_by_id', submittedById);
     if (residentId) query = query.eq('resident_id', residentId);
+    if (municipalityId) query = query.eq('resident.municipality_id', municipalityId);
+    if (barangayId) query = query.eq('resident.barangay_id', barangayId);
+    if (facilityId) query = query.eq('facility_id', facilityId);
+    if (barangay) query = query.ilike('resident.barangay', String(barangay).replace(/[\\%_]/g, '\\$&'));
     // Server-side date-range filter on the visit date (consultation date).
-    // `visit_date` is a timestamptz; an inclusive upper bound needs the last
-    // instant of the `to` day.
-    if (from) query = query.gte('visit_date', `${from}T00:00:00`);
-    if (to) query = query.lte('visit_date', `${to}T23:59:59.999`);
+    // The generated calendar key preserves legacy displayed dates and new
+    // explicit local clinical dates without UTC/midnight boundary drift.
+    if (from) query = query.gte('consultation_date', from);
+    if (to) query = query.lte('consultation_date', to);
     if (serviceId) query = query.eq('health_service_id', serviceId);
     if (q) {
       const term = String(q).trim();
@@ -2154,7 +2212,7 @@ export const supabaseRepository = {
     let { data, error } = await runUpdate(row);
     // Retry without optional consultation columns when the database has not
     // received the migrations that add them yet.
-    if (error && isMissingConsultationColumn(error)) {
+    if (error && !patch.consultationDetails && isMissingConsultationColumn(error)) {
       ({ data, error } = await runUpdate(stripConsultationExtras(row)));
     }
     throwOnError(error, 'Could not update submission');
@@ -2163,12 +2221,8 @@ export const supabaseRepository = {
   },
 
   // ----- referrals ----------------------------------------------------------
-  async insertReferral(referral) {
-    const supabase = getServiceClient();
-    const { data, error } = await supabase.from(TABLES.referrals).insert(referralToRow(referral)).select().single();
-    throwOnError(error, 'Could not create referral');
-    const resident = await this.getResident(referral.residentId);
-    return { ...referralFromRow(data), resident };
+  async insertReferral() {
+    throw ApiError.conflict('Historical referrals are read-only. Use the canonical referral service.');
   },
 
   async getReferral(id) {
@@ -2195,17 +2249,8 @@ export const supabaseRepository = {
     return { ...referralFromRow(data), resident: residentFromRow(data.resident) };
   },
 
-  async updateReferral(id, patch) {
-    const supabase = getServiceClient();
-    const { data, error } = await supabase
-      .from(TABLES.referrals)
-      .update({ ...referralToRow(patch), updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select(`*, resident:residents(${SELECT_RESIDENT})`)
-      .maybeSingle();
-    throwOnError(error, 'Could not update referral');
-    if (!data) return null;
-    return { ...referralFromRow(data), resident: residentFromRow(data.resident) };
+  async updateReferral() {
+    throw ApiError.conflict('Historical referrals are read-only. Use the canonical referral service.');
   },
 
   async listReferrals({ q = '', residentId = null, limit = 100, offset = 0 } = {}) {

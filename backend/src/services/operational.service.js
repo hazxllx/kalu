@@ -1,6 +1,7 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { assignedBarangay } from '../config/scope.js';
+import { resolveHouseholdWorker } from './households.service.js';
 
 const TABLES = Object.freeze({
   followups: 'follow_ups',
@@ -188,7 +189,7 @@ const selectFor = (kind) => {
   const normalizedKind = normalizeKind(kind);
   if (normalizedKind === 'followups') return `*, ${RESIDENT_EMBED}, ${CONSULTATION_EMBED}`;
   if (normalizedKind === 'maternalvisits') return `*, ${RESIDENT_EMBED}, ${MATERNAL_CASE_EMBED}`;
-  if (normalizedKind === 'maternal' || normalizedKind === 'immunizations') return `*, ${RESIDENT_EMBED}`;
+  if (normalizedKind === 'maternal' || normalizedKind === 'immunizations' || normalizedKind === 'tcl') return `*, ${RESIDENT_EMBED}`;
   return '*';
 };
 
@@ -262,6 +263,32 @@ export const withScheduleState = (row, today = manilaDateString()) => {
   };
 };
 
+const withTclWorker = (row) => ({
+  ...row,
+  assignedBhwId: row.assigned_bhw_id || null,
+  assignedBhwName: row.assigned_bhw_name || row.assigned_bhw || '',
+});
+
+const normalizeTclWorker = async ({ row, existing = null, user, resident, supabase }) => {
+  const supplied = row.assignedBhwId ?? row.assigned_bhw_id ?? row.assigned_bhw;
+  delete row.assignedBhwId;
+  delete row.assignedBhwName;
+  delete row.assigned_bhw_name;
+  delete row.assigned_bhw_id;
+  delete row.assigned_bhw;
+  if (supplied === undefined) return;
+  const workerId = text(supplied);
+  if (existing && workerId === text(existing.assigned_bhw) && !existing.assigned_bhw_id) return;
+  if (!workerId) {
+    Object.assign(row, { assigned_bhw_id: null, assigned_bhw_name: '', assigned_bhw: '' });
+    return;
+  }
+  if (!resident.barangay_id) throw ApiError.unprocessable('Record the resident barangay before assigning a BHW.');
+  const worker = await resolveHouseholdWorker({ user, workerId, barangayId: resident.barangay_id, supabase });
+  if (worker.role !== 'bhw') throw ApiError.unprocessable('The target client must be assigned to an authorized BHW.');
+  Object.assign(row, { assigned_bhw_id: worker.id, assigned_bhw_name: worker.name, assigned_bhw: worker.name });
+};
+
 export const list = async ({ user, kind, residentId = null, status = null, from = null, to = null, supabase = getServiceClient() }) => {
   const normalizedKind = normalizeKind(kind);
   const tableName = TABLES[normalizedKind] || TABLES[kind];
@@ -292,7 +319,7 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
   }
   const select = selectFor(normalizedKind);
   let query = supabase.from(tableName).select(select).order('created_at', { ascending: false });
-  if (normalizedKind !== 'followups') query = query.limit(FOLLOW_UP_PAGE_SIZE);
+  if (!['followups', 'tcl'].includes(normalizedKind)) query = query.limit(FOLLOW_UP_PAGE_SIZE);
   if (user.role === 'health_supervisor') {
     if (!user.barangayId) return [];
     query = query.eq('barangay_id', user.barangayId);
@@ -310,16 +337,16 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
     if (from) query = query.gte('visit_date', from);
     if (to) query = query.lte('visit_date', to);
   }
-  if (normalizedKind === 'followups') {
+  if (normalizedKind === 'followups' || normalizedKind === 'tcl') {
     query = query.order('id', { ascending: true });
     const rows = [];
     for (let offset = 0; ; offset += FOLLOW_UP_PAGE_SIZE) {
       const { data, error } = await query.range(offset, offset + FOLLOW_UP_PAGE_SIZE - 1);
-      throwOnError(error, 'Could not load followups');
+      throwOnError(error, `Could not load ${normalizedKind}`);
       rows.push(...(data || []));
       if (!data || data.length < FOLLOW_UP_PAGE_SIZE) break;
     }
-    return rows.map((row) => withScheduleState(row));
+    return normalizedKind === 'followups' ? rows.map((row) => withScheduleState(row)) : rows.map(withTclWorker);
   }
   const { data, error } = await query;
   throwOnError(error, `Could not load ${normalizedKind}`);
@@ -391,6 +418,8 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   delete row.consultationId;
   delete row.id;
   delete row.client_operation_key;
+
+  if (normalizedKind === 'tcl') await normalizeTclWorker({ row, user, resident, supabase });
 
   if (normalizedKind === 'followups' && idempotencyKey) {
     const existing = await findFollowUpByOperationKey({ supabase, idempotencyKey, user, resident });
@@ -472,7 +501,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   throwOnError(error, `Could not create ${normalizedKind}`);
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
   await notifyResident(supabase, resident, normalizedKind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);
-  return normalizedKind === 'followups' ? withScheduleState(data) : data;
+  return normalizedKind === 'followups' ? withScheduleState(data) : normalizedKind === 'tcl' ? withTclWorker(data) : data;
 };
 
 export const update = async ({ user, kind, id, payload = {}, consultationId = null, expectedUpdatedAt = null, supabase = getServiceClient() }) => {
@@ -513,6 +542,7 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
   delete row.created_at;
   delete row.consultation_id;
   delete row.consultationId;
+  if (normalizedKind === 'tcl') await normalizeTclWorker({ row, existing, user, resident, supabase });
   if (normalizedKind === 'maternalvisits') {
     const maternalCaseId = text(row.maternal_case_id || row.maternalCaseId || row.maternal_record_id || row.maternalRecordId);
     if (maternalCaseId) {
@@ -578,7 +608,7 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
       await notifyResident(supabase, resident, 'followups', 'rescheduled', data);
     }
   }
-  return normalizedKind === 'followups' ? withScheduleState(data) : data;
+  return normalizedKind === 'followups' ? withScheduleState(data) : normalizedKind === 'tcl' ? withTclWorker(data) : data;
 };
 
 /**

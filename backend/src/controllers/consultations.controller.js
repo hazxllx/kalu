@@ -15,9 +15,17 @@ export const list = async (req, res) => {
   if (errors.length) {
     throw ApiError.unprocessable('Please correct the consultation filters.', errors);
   }
-  sendData(res, await consultationsService.list({ user: req.user, q: req.query.q, filters }));
+  return sendData(res, await consultationsService.list({ user: req.user, q: req.query.q, filters,
+    limit: req.query.limit, offset: req.query.offset }));
 };
-export const create = async (req, res) => sendCreated(res, { consultation: await consultationsService.create({ user: req.user, payload: req.body?.consultation || req.body || {} }) });
+export const get = async (req, res) => sendData(res, { consultation: await consultationsService.get({ user: req.user, id: req.params.id }) });
+export const create = async (req, res) => sendCreated(res, {
+  consultation: await consultationsService.create({
+    user: req.user,
+    payload: req.body?.consultation || req.body || {},
+    idempotencyKey: req.idempotencyKey,
+  }),
+});
 export const update = async (req, res) => sendData(res, { consultation: await consultationsService.update({ user: req.user, id: req.params.id, payload: req.body?.consultation || req.body || {} }) });
 
-export default { list, create, update };
+export default { list, get, create, update };

@@ -22,6 +22,22 @@
 import repository from '../repositories/index.js';
 import { assessVitals, hasAssessableVitals } from '../utils/residentRisk.js';
 import { getRiskConfig, setRecalcHandler } from './riskConfig.service.js';
+import { getServiceClient } from '../config/supabase.js';
+import ApiError from '../utils/apiError.js';
+
+const getSqlAssessments = async (ids, { user = null, supabase = getServiceClient() } = {}) => {
+  const rows = [];
+  const distinct = [...new Set(ids)];
+  for (let offset = 0; offset < distinct.length; offset += 1000) {
+    const { data, error } = await supabase.rpc('resident_risk_for_ids', {
+      p_resident_ids: distinct.slice(offset, offset + 1000), p_actor_id: user?.id || null,
+    });
+    if (error?.code === '42501') throw ApiError.forbidden('Resident risk records are outside the current account scope.');
+    if (error || !Array.isArray(data)) throw new ApiError(503, 'Resident risk assessment is unavailable. Deploy analytics migrations 20261106030000 and 20261106041000, then retry.').withCode('RISK_SOURCE_UNAVAILABLE');
+    rows.push(...data);
+  }
+  return new Map(rows.map(({ residentId, ...assessment }) => [residentId, assessment]));
+};
 
 const latestVisitMap = (visits = []) => {
   const map = new Map();
@@ -48,15 +64,19 @@ const assessFromVisit = (visit, config) => {
 };
 
 /**
- * Attach the freshly-computed risk fields to a set of resident rows. Never
- * throws: on any failure the residents are returned unchanged (risk null) so a
- * directory listing is never broken by the risk computation.
+ * Production uses a bounded SQL query and surfaces missing source/permission
+ * failures instead of inventing unassessed data. Test/file drivers use JS.
  */
-export const attachRiskToResidents = async (residents = [], { repo = repository, config = null } = {}) => {
+export const attachRiskToResidents = async (residents = [], { repo = repository, config = null, user = null, supabase } = {}) => {
   if (!Array.isArray(residents) || !residents.length) return residents || [];
+  if (repo.driver === 'supabase') {
+    const risks = await getSqlAssessments(residents.map((resident) => resident.id), { user, supabase });
+    if (residents.some((resident) => !risks.has(resident.id))) throw ApiError.forbidden('The resident scope changed. Reload the directory.');
+    return residents.map((resident) => ({ ...resident, ...risks.get(resident.id) }));
+  }
   try {
     const cfg = config || (await getRiskConfig({ repo }));
-    const { rows: visits } = await repo.listVisits({ limit: 5000 });
+    const { rows: visits } = await repo.listVisits({ limit: Number.MAX_SAFE_INTEGER });
     const latest = latestVisitMap(visits || []);
     return residents.map((r) => ({ ...r, ...assessFromVisit(latest.get(r.id), cfg) }));
   } catch {
@@ -67,7 +87,13 @@ export const attachRiskToResidents = async (residents = [], { repo = repository,
 };
 
 /** Assess one resident by id (used by the Resident Detail breakdown). */
-export const assessResidentById = async ({ id, repo = repository, config = null } = {}) => {
+export const assessResidentById = async ({ id, repo = repository, config = null, user = null, supabase } = {}) => {
+  if (repo.driver === 'supabase') {
+    const risks = await getSqlAssessments([id], { user, supabase });
+    const risk = risks.get(id);
+    if (!risk) throw ApiError.notFound('Resident risk record not found in your scope.');
+    return risk;
+  }
   const cfg = config || (await getRiskConfig({ repo }));
   const { rows: visits } = await repo.listVisits({ residentId: id, limit: 500 });
   const latest = latestVisitMap(visits || []).get(id) || null;
@@ -115,11 +141,22 @@ const scopeResidents = (residents, { barangay, municipalityId }) =>
  * Scope-aware risk summary over the authorized resident population. Reuses the
  * one engine so the figures agree with the Resident Directory and Health Trends.
  */
-export const getRiskSummary = async ({ barangay = null, municipalityId = null, repo = repository } = {}) => {
+const sqlRiskSummary = async ({ user, barangay, municipalityId, limit = 0, offset = 0, supabase = getServiceClient() }) => {
+  if (!user?.id || !user.municipalityId || (municipalityId && municipalityId !== user.municipalityId)) {
+    throw ApiError.forbidden('An authorized municipality-scoped account is required.');
+  }
+  const { data, error } = await supabase.rpc('resident_risk_summary', { p_actor_id: user.id, p_barangay: barangay, p_limit: limit, p_offset: offset });
+  if (error?.code === '42501') throw ApiError.forbidden('Risk records are outside the current account permissions.');
+  if (error || !data?.summary || !Array.isArray(data.highRisk)) throw new ApiError(503, 'The risk summary is unavailable. Deploy analytics migrations 20261106030000 and 20261106041000, then retry.').withCode('RISK_SOURCE_UNAVAILABLE');
+  return data;
+};
+
+export const getRiskSummary = async ({ barangay = null, municipalityId = null, repo = repository, user = null, supabase } = {}) => {
+  if (repo.driver === 'supabase') return (await sqlRiskSummary({ user, barangay, municipalityId, supabase })).summary;
   const cfg = await getRiskConfig({ repo });
   const [{ rows: visits }, allResidents] = await Promise.all([
-    repo.listVisits({ limit: 5000 }),
-    repo.searchResidents({ q: '', limit: 5000 }),
+    repo.listVisits({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.searchResidents({ q: '', limit: Number.MAX_SAFE_INTEGER }),
   ]);
   const residents = scopeResidents(allResidents || [], { barangay, municipalityId });
   const residentIds = new Set(residents.map((r) => r.id));
@@ -149,18 +186,30 @@ export const getRiskSummary = async ({ barangay = null, municipalityId = null, r
 
 export const getRiskDistribution = async (scope) => (await getRiskSummary(scope)).distribution;
 
-export const getHighRiskResidents = async ({ barangay = null, municipalityId = null, repo = repository } = {}) => {
+export const getHighRiskResidents = async ({ barangay = null, municipalityId = null, repo = repository, user = null, supabase, limit = 100, offset = 0, includeTotal = false } = {}) => {
+  if (repo.driver === 'supabase') {
+    const result = await sqlRiskSummary({ user, barangay, municipalityId, limit, offset, supabase });
+    if (!result.highRisk.length) return includeTotal ? { rows: [], total: result.summary.high } : [];
+    const ids = result.highRisk.map((row) => row.residentId);
+    const page = await repo.listResidents({ ids, municipalityId: user.municipalityId,
+      barangayId: user.role === 'health_supervisor' ? user.barangayId : null, limit });
+    if (page.rows.length !== ids.length) throw ApiError.forbidden('The resident scope changed. Reload the list.');
+    const risks = new Map(result.highRisk.map(({ residentId, ...risk }) => [residentId, risk]));
+    const rows = page.rows.map((resident) => ({ resident: { ...resident, ...risks.get(resident.id) }, ...risks.get(resident.id) }));
+    return includeTotal ? { rows, total: result.summary.high } : rows;
+  }
   const cfg = await getRiskConfig({ repo });
   const [{ rows: visits }, allResidents] = await Promise.all([
-    repo.listVisits({ limit: 5000 }),
-    repo.searchResidents({ q: '', limit: 5000 }),
+    repo.listVisits({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.searchResidents({ q: '', limit: Number.MAX_SAFE_INTEGER }),
   ]);
   const residents = scopeResidents(allResidents || [], { barangay, municipalityId });
   const residentIds = new Set(residents.map((r) => r.id));
   const latest = latestVisitMap((visits || []).filter((v) => residentIds.has(v.residentId)));
-  return residents
+  const rows = residents
     .map((r) => ({ resident: r, ...assessFromVisit(latest.get(r.id), cfg) }))
     .filter((row) => row.riskLevel === 'High');
+  return includeTotal ? { rows: rows.slice(offset, offset + limit), total: rows.length } : rows;
 };
 
 /**
@@ -168,11 +217,19 @@ export const getHighRiskResidents = async ({ barangay = null, municipalityId = n
  * after an administrator changes the configuration so the new classification
  * propagates to the stored resident records. Returns the number updated.
  */
-export const recalculateAll = async ({ barangay = null, municipalityId = null, repo = repository } = {}) => {
+export const recalculateAll = async ({ barangay = null, municipalityId = null, repo = repository, supabase } = {}) => {
+  if (repo.driver === 'supabase') {
+    const client = supabase || getServiceClient();
+    const { data, error } = await client.rpc('recalculate_resident_risk', { p_barangay: barangay, p_municipality_id: municipalityId });
+    if (error || !Number.isInteger(data?.updated) || !Number.isInteger(data?.total)) {
+      throw new ApiError(503, 'Risk recalculation did not complete. Check the analytics migrations and retry.');
+    }
+    return data;
+  }
   const cfg = await getRiskConfig({ repo });
   const [{ rows: visits }, allResidents] = await Promise.all([
-    repo.listVisits({ limit: 5000 }),
-    repo.searchResidents({ q: '', limit: 5000 }),
+    repo.listVisits({ limit: Number.MAX_SAFE_INTEGER }),
+    repo.searchResidents({ q: '', limit: Number.MAX_SAFE_INTEGER }),
   ]);
   const residents = scopeResidents(allResidents || [], { barangay, municipalityId });
   const latest = latestVisitMap(visits || []);

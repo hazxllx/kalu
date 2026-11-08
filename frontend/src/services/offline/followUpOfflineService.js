@@ -12,25 +12,30 @@ const isNetworkFailure = (error) => classifySyncError(error).code === SYNC_ERROR
 const startQueuedSync = () => requestSync('after-queue').catch(() => {});
 
 const unwrap = (result) => result?.record ?? result;
-const localSchedule = (data, localRef, localId) => ({
-  id: localRef,
-  localId,
-  residentId: data.residentId,
-  residentName: data.residentName || 'Resident',
-  barangay: data._offlineBarangay || '',
-  date: data.scheduled_date || '',
-  time: data.scheduled_time ? String(data.scheduled_time).slice(0, 5) : '',
-  location: data.location || '',
-  provider: data.assigned_provider || '',
-  instructions: data.notes || '',
-  purpose: data.purpose || '',
-  priority: data.priority || 'Medium',
-  status: data.status || 'Scheduled',
-  offline: true,
-  syncStatus: 'Pending Sync',
-});
+const localSchedule = (data, localRef, localId) => {
+  const requiresResponse = Boolean(data.requiresResidentResponse ?? data.requires_resident_response);
+  return {
+    id: localRef,
+    localId,
+    residentId: data.residentId,
+    residentName: data._offlineResidentName || data.residentName || 'Resident name unavailable',
+    barangay: data._offlineBarangay || '',
+    date: data.scheduled_date || '',
+    time: data.scheduled_time ? String(data.scheduled_time).slice(0, 5) : '',
+    location: data.location || '',
+    provider: data.assigned_provider || '',
+    instructions: data.notes || '',
+    purpose: data.purpose || '',
+    priority: data.priority || 'Medium',
+    status: requiresResponse ? 'Pending' : data.status || 'Scheduled',
+    requiresResidentResponse: requiresResponse,
+    residentDecision: requiresResponse ? 'pending' : '',
+    offline: true,
+    syncStatus: 'Pending Sync',
+  };
+};
 const serverPayload = (record = {}) => {
-  const { _offlineBarangay, ...payload } = record;
+  const { _offlineBarangay, _offlineResidentName, ...payload } = record;
   return payload;
 };
 
@@ -46,18 +51,24 @@ const assertSafeFollowUpPayload = (record = {}) => {
   }
 };
 
-export const listFollowUpsOffline = async ({ ownerId, params } = {}) => {
+/** @param {{ownerId?: string, params?: Record<string, unknown>, onSource?: (state: {source: string, error: string}) => void}} options */
+export const listFollowUpsOffline = async ({ ownerId, params, onSource } = {}) => {
   if (!ownerId) throw new Error('A signed-in user is required.');
   let serverRows = null;
+  let source = 'cache';
+  let loadError = '';
   if (isNavigatorOnline()) {
     try {
       const result = await followUpsApi.list(params);
-      serverRows = result?.rows || [];
+      if (!Array.isArray(result?.rows)) throw new Error('The server returned an incomplete follow-up list.');
+      serverRows = result.rows;
       await Promise.all(serverRows.filter((row) => row?.id).map((row) =>
         cacheRecord({ entity: 'followup', remoteId: row.id, ownerId, data: row }),
       ));
+      source = 'server';
     } catch (error) {
       if (!isNetworkFailure(error)) throw error;
+      loadError = error?.message || 'Follow-ups could not be refreshed from the server.';
     }
   }
   if (!serverRows) {
@@ -78,6 +89,7 @@ export const listFollowUpsOffline = async ({ ownerId, params } = {}) => {
   const local = pending
     .filter((draft) => !draft.serverId)
     .map((draft) => localSchedule(draft.data, draft.localRef, draft.localId));
+  onSource?.({ source, error: loadError });
   return [...local, ...merged];
 };
 
@@ -140,11 +152,14 @@ export const updateFollowUpOffline = async ({ ownerId, followUpId, record }) => 
   };
 };
 
+/** @param {{ownerId?: string, params?: Record<string, unknown>}} options */
 export const listFollowUpResidentsOffline = async ({ ownerId, params } = {}) => {
   if (!ownerId) throw new Error('A signed-in user is required.');
   if (isNavigatorOnline()) {
     try {
-      const rows = (await residentsApi.list(params))?.rows || [];
+      const result = await residentsApi.list(params);
+      if (!Array.isArray(result?.rows)) throw new Error('The server returned an incomplete resident directory.');
+      const rows = result.rows;
       await Promise.all(rows.filter((row) => row?.id).map((row) =>
         cacheRecord({ entity: 'residentDirectory', remoteId: row.id, ownerId, data: row }),
       ));

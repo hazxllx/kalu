@@ -25,7 +25,10 @@ import { canConsult } from '../config/rhuStations.js';
 import { validateVitals } from './intake.service.js';
 import { normalizeMedications } from './medicines.service.js';
 import { markCompletedFromVisit } from './referrals.service.js';
+import * as canonicalReferrals from './referrals.service.js';
 import { getServiceClient } from '../config/supabase.js';
+import { getRiskConfig } from './riskConfig.service.js';
+import { assessVitals, hasAssessableVitals } from '../utils/residentRisk.js';
 
 const isPHN = (user) => user?.role === 'phn';
 
@@ -64,7 +67,7 @@ const recordInScope = (user, resident, facilityId = null) => {
   const municipalityId = resident?.municipalityId ?? null;
   const barangayId = resident?.barangayId ?? null;
   if (BARANGAY_ROLES.has(user.role)) {
-    return Boolean(user.barangayId) && barangayId === user.barangayId;
+    return Boolean(user.municipalityId && user.barangayId) && municipalityId === user.municipalityId && barangayId === user.barangayId;
   }
   if (MUNICIPALITY_ROLES.has(user.role)) {
     return Boolean(user.municipalityId) && municipalityId === user.municipalityId;
@@ -78,29 +81,38 @@ const assertSubmissionScope = (user, submission) => {
   }
 };
 
-const clone = (value) => JSON.parse(JSON.stringify(value));
-
-const withoutMeta = (obj) => {
-  const next = clone(obj);
-  delete next.createdAt;
-  delete next.updatedAt;
-  delete next.resident;
-  delete next.recordedById;
-  delete next.recordedByRole;
-  delete next.recordedByName;
-  return next;
-};
-
 export const listQueue = async ({ statuses = null, q = '', user } = {}) => {
   assertCanProcessConsultation(user);
   const allowed = statuses && statuses.length ? statuses : null;
   const effectiveStatuses = allowed && allowed.length
     ? allowed
     : [SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.COMPLETED];
-  const result = await repository.listVisits({ statuses: effectiveStatuses, q, limit: 100 });
-  // BUG-002: the PHN queue is limited to the PHN's own municipality.
-  const rows = (result?.rows ?? result ?? []).filter((v) => recordInScope(user, v.resident, v.facilityId));
-  return Array.isArray(result) ? rows : { ...result, rows, total: rows.length };
+  const validStatuses = new Set([SUBMISSION_STATUS.SUBMITTED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.COMPLETED]);
+  if (effectiveStatuses.some((status) => !validStatuses.has(status))) throw ApiError.badRequest('Unknown consultation queue status.');
+  if (!user.municipalityId) throw ApiError.forbidden('The consultation queue requires an assigned municipality.');
+  const rows = [];
+  const seen = new Set();
+  for (let offset = 0; ; offset += 100) {
+    const result = await repository.listVisits({ statuses: effectiveStatuses, q, limit: 100, offset,
+      municipalityId: user.municipalityId,
+      barangayId: BARANGAY_ROLES.has(user.role) ? user.barangayId : null,
+      facilityId: user.role === 'rhu_personnel' ? user.facilityId : null });
+    const page = Array.isArray(result) ? result : result?.rows;
+    if (!Array.isArray(page)) throw new ApiError(503, 'The consultation queue returned an invalid record list.');
+    for (const visit of page) {
+      if (!visit?.id || seen.has(visit.id)) throw new ApiError(503, 'The consultation queue pagination did not advance.');
+      seen.add(visit.id);
+      if (recordInScope(user, visit.resident, visit.facilityId)) rows.push(visit);
+    }
+    if (page.length < 100 || (Number.isFinite(result?.total) && offset + page.length >= result.total)) break;
+  }
+  const config = await getRiskConfig({ repo: repository });
+  const assessed = rows.map((visit) => {
+    const risk = hasAssessableVitals(visit.vitals) ? assessVitals(visit.vitals, config) : null;
+    return { ...visit, riskLevel: risk?.level ?? null, riskScore: risk?.score ?? null,
+      riskFactors: risk?.factors ?? [], riskAssessedAt: risk ? visit.visitDate || visit.createdAt : null };
+  });
+  return { rows: assessed, total: assessed.length };
 };
 
 export const viewSubmission = async ({ id, user }) => {
@@ -349,88 +361,71 @@ export const completeSubmission = async ({ id, user }) => {
   return updated;
 };
 
-const referralDraftDefaults = (submission, user) => {
-  const resident = submission.resident || {};
-  const snapResident = withoutMeta(resident);
-  const snapVisit = withoutMeta(submission);
-  return {
-    residentId: submission.residentId,
-    visitId: submission.id,
-    referringFacility: FACILITY.name,
-    referringFacilityAddress: FACILITY.address,
-    referringPersonnel: user.name || user.email || '',
-    referringContact: FACILITY.contactNumber,
-    referralDate: new Date().toISOString(),
-    patientSnapshot: snapResident,
-    visitSnapshot: snapVisit,
-    createdById: user.id,
-    createdByRole: user.role,
-    createdByName: user.name || user.email || '',
-    status: SUBMISSION_STATUS.REFERRED,
+/** Sparse document-field adapter. Free-text names never establish recipients. */
+export const normalizeReferralDraft = (draft = {}, existing = null) => {
+  const row = {};
+  const fields = {
+    referringFacility: 'referring_facility', receivingFacility: 'destination_facility',
+    reasonForReferral: 'reason', workingImpression: 'impression', outpatientService: 'destination_service', referralCategory: 'referral_category',
+    recipientPersonnelId: 'recipient_personnel_id', recipientFacilityId: 'recipient_facility_id',
+    recipientRole: 'recipient_role', recipientStation: 'recipient_station',
+    chiefComplaints: 'chief_complaints', medicalHistory: 'medical_history', physicalExamFindings: 'physical_exam_findings',
+    scheduledAt: 'scheduled_at', laboratoryTestRequired: 'laboratory_test_required', laboratoryTest: 'laboratory_test',
+    additionalInstructions: 'additional_instructions', clientTimeZone: 'client_time_zone', expectedVersion: 'expected_version',
   };
+  for (const [camel, snake] of Object.entries(fields)) {
+    if (Object.prototype.hasOwnProperty.call(draft, camel)) row[snake] = draft[camel];
+    if (Object.prototype.hasOwnProperty.call(draft, snake)) row[snake] = draft[snake];
+  }
+  for (const key of ['priority', 'notes', 'version', 'status', 'resident_id', 'created_by', 'municipality_id', 'barangay_id', 'patient_snapshot', 'visit_snapshot', 'completed_at']) {
+    if (Object.prototype.hasOwnProperty.call(draft, key)) row[key] = draft[key];
+  }
+  if (draft.referralDate !== undefined || draft.referral_date !== undefined) {
+    row.referral_date = String(draft.referralDate ?? draft.referral_date ?? '').slice(0, 10) || null;
+  }
+  if (row.scheduled_at === undefined && (draft.appointmentDate !== undefined || draft.appointmentTime !== undefined)) {
+    const prior = existing?.scheduled_at ? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(existing.scheduled_at)) : '';
+    const date = draft.appointmentDate ?? prior.slice(0, 10);
+    const time = draft.appointmentTime ?? prior.slice(11, 16);
+    if (!date && time) throw ApiError.unprocessable('An appointment date is required with the appointment time.');
+    row.scheduled_at = date ? `${date}T${time || '09:00'}:00+08:00` : null;
+  }
+  return row;
 };
 
-const normalizeReferralDraft = (draft = {}) => {
-  const text = (v) => String(v ?? '').trim();
-  return {
-    receivingFacility: text(draft.receivingFacility),
-    receivingFacilityAddress: text(draft.receivingFacilityAddress),
-    receivingPersonnel: text(draft.receivingPersonnel),
-    appointmentDate: draft.appointmentDate || null,
-    appointmentTime: draft.appointmentTime || null,
-    reasonForReferral: text(draft.reasonForReferral),
-    workingImpression: text(draft.workingImpression),
-    referralCategory: text(draft.referralCategory),
-    outpatientService: text(draft.outpatientService),
-  };
-};
-
-export const createReferral = async ({ visitId, draft = {}, user }) => {
+export const createReferral = async ({ visitId, draft = {}, user, repo = repository, supabase }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const submission = await repository.getVisit(visitId);
+  const submission = await repo.getVisit(visitId);
   if (!submission) throw ApiError.notFound('Submission not found');
+  // BUG-002: enforce scope on the source submission so a PHN cannot generate a
+  // referral for a visit in another municipality (IDOR). Mirrors the check used
+  // by receiveSubmission / markInReview / completeSubmission.
+  assertSubmissionScope(user, submission);
   if (!PHN_EDITABLE_STATUSES.includes(submission.status)) {
     throw ApiError.forbidden('The submission must be received and in review before a referral is generated.');
   }
-  const existingReferral = await repository.getReferralByVisitId(visitId);
-  if (existingReferral) {
-    throw ApiError.conflict('A referral has already been generated for this submission.');
-  }
-
   const normalized = normalizeReferralDraft(draft);
-  if (!normalized.receivingFacility) throw ApiError.badRequest('Receiving facility is required.');
-  if (!normalized.reasonForReferral) throw ApiError.badRequest('Reason for referral is required.');
-
-  const ids = await repository.nextReferralId();
-  const referral = await repository.insertReferral({
-    id: ids.id,
-    ...referralDraftDefaults(submission, user),
-    ...normalized,
+  const referral = await canonicalReferrals.create({
+    user, fromPhn: true, supabase: supabase || getServiceClient(),
+    payload: {
+      referring_facility: FACILITY.name,
+      ...normalized,
+      residentId: submission.residentId,
+      treatment_visit_id: submission.id,
+    },
   });
-
-  const now = new Date().toISOString();
-  await repository.updateVisit(visitId, {
-    status: SUBMISSION_STATUS.REFERRED,
-    receivedAt: submission.receivedAt || now,
-    reviewedAt: submission.reviewedAt || now,
-    referredAt: now,
-  });
-
-  return referral;
+  // The canonical RPC commits the source visit's referred status, snapshots,
+  // history and addressed notifications in the SAME transaction.
+  return canonicalReferrals.toPhnReferral(referral);
 };
 
-export const updateReferral = async ({ id, patch = {}, user }) => {
+export const updateReferral = async ({ id, patch = {}, user, supabase }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const referral = await repository.getReferral(id);
-  if (!referral) throw ApiError.notFound('Referral not found');
-  const normalized = normalizeReferralDraft(patch);
-  if (Object.prototype.hasOwnProperty.call(normalized, 'receivingFacility') && !normalized.receivingFacility) {
-    throw ApiError.badRequest('Receiving facility is required.');
-  }
-  if (Object.prototype.hasOwnProperty.call(normalized, 'reasonForReferral') && !normalized.reasonForReferral) {
-    throw ApiError.badRequest('Reason for referral is required.');
-  }
-  return repository.updateReferral(id, normalized);
+  const client = supabase || getServiceClient();
+  // Canonical get/update both recheck CURRENT resident geography and sender
+  // identity. Resolving an old REF-* ID never bypasses the prior scope fix.
+  const existing = await canonicalReferrals.getById({ user, id, supabase: client });
+  return canonicalReferrals.toPhnReferral(await canonicalReferrals.update({ user, id: existing.id, payload: normalizeReferralDraft(patch, existing), supabase: client }));
 };
 
 /**
@@ -438,48 +433,41 @@ export const updateReferral = async ({ id, patch = {}, user }) => {
  * resident/visit state. Called explicitly when the PHN edits clinical data
  * after generating the referral.
  */
-export const syncReferralSnapshots = async ({ id, user }) => {
+export const syncReferralSnapshots = async ({ id, user, version, repo = repository, supabase }) => {
   if (!isPHN(user)) throw ApiError.forbidden();
-  const referral = await repository.getReferral(id);
-  if (!referral) throw ApiError.notFound('Referral not found');
-  const submission = await repository.getVisit(referral.visitId);
+  const client = supabase || getServiceClient();
+  const referral = await canonicalReferrals.getById({ user, id, supabase: client });
+  const submission = await repo.getVisit(referral.treatment_visit_id);
   if (!submission) throw ApiError.notFound('Source submission not found');
-  const updated = await repository.updateReferral(id, {
-    patientSnapshot: withoutMeta(submission.resident || {}),
-    visitSnapshot: withoutMeta(submission),
-  });
-  return updated;
+  assertSubmissionScope(user, submission);
+  if (submission.residentId !== referral.resident_id) throw ApiError.notFound('Source submission not found');
+  return canonicalReferrals.toPhnReferral(await canonicalReferrals.syncSnapshots({ user, id: referral.id, version, supabase: client }));
 };
 
-export const listReferrals = async ({ q = '', user } = {}) => {
+export const listReferrals = async ({ q = '', user, box = 'all', status = null, supabase } = {}) => {
   const canView =
     isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role);
   if (!canView) throw ApiError.forbidden();
-  const result = await repository.listReferrals({ q, limit: 100 });
-  // BUG-002: filter the queue to the caller's scope. The repository has no
-  // scope columns of its own, so filter on the embedded resident scope.
-  const rows = (result?.rows ?? result ?? []).filter((r) => recordInScope(user, r.resident));
-  return Array.isArray(result) ? rows : { ...result, rows, total: rows.length };
+  const records = await canonicalReferrals.list({ user, box, status, supabase: supabase || getServiceClient() });
+  const needle = String(q || '').trim().toLowerCase();
+  const rows = records.map(canonicalReferrals.toPhnReferral).filter((row) => !needle || [row.id, row.reasonForReferral, row.receivingFacility, row.resident.firstName, row.resident.lastName].some((value) => String(value || '').toLowerCase().includes(needle)));
+  return { rows, total: rows.length };
 };
 
-export const getReferral = async ({ id, user }) => {
+export const getReferral = async ({ id, user, supabase }) => {
   const canView = isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role);
   if (!canView) throw ApiError.notFound('Referral not found');
-  const referral = await repository.getReferral(id);
-  if (!referral) throw ApiError.notFound('Referral not found');
-  // BUG-002: out-of-scope referral reads return 404 even with a known id.
-  if (!recordInScope(user, referral.resident)) throw ApiError.notFound('Referral not found');
-  return referral;
+  return canonicalReferrals.toPhnReferral(await canonicalReferrals.getById({ user, id, supabase: supabase || getServiceClient() }));
 };
 
-export const getReferralByVisitId = async ({ visitId, user }) => {
+export const getReferralByVisitId = async ({ visitId, user, supabase }) => {
   const canView = isPHN(user) || ['mho', 'health_supervisor', 'rhu_personnel'].includes(user?.role);
   if (!canView) throw ApiError.notFound('Referral not found');
-  const referral = await repository.getReferralByVisitId(visitId);
-  if (!referral) throw ApiError.notFound('Referral not found');
-  if (!recordInScope(user, referral.resident)) throw ApiError.notFound('Referral not found');
-  return referral;
+  return canonicalReferrals.toPhnReferral(await canonicalReferrals.getByVisitId({ user, visitId, supabase: supabase || getServiceClient() }));
 };
+
+export const updateReferralStatus = async ({ id, status, resolutionNotes, version, user, supabase }) =>
+  canonicalReferrals.toPhnReferral(await canonicalReferrals.updateStatus({ user, id, status, resolutionNotes, version, supabase: supabase || getServiceClient() }));
 
 export default {
   listQueue,
@@ -494,4 +482,6 @@ export default {
   syncReferralSnapshots,
   listReferrals,
   getReferral,
+  getReferralByVisitId,
+  updateReferralStatus,
 };

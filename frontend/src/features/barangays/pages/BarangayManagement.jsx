@@ -557,7 +557,7 @@ export default function BarangayManagement() {
             <div>
               <label className="text-xs font-medium text-brand-gray">Status</label>
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectCls}>
-                <option value="">All statuses</option>
+                <option value="">All Status</option>
                 <option value="Active">Active</option>
                 <option value="Inactive">Inactive</option>
               </select>

@@ -9,9 +9,10 @@ import { api } from "./apiClient";
  * is no longer the source of truth for review decisions.
  */
 export const municipalSubmissionsApi = {
-  listReviews: async () => {
-    const payload = await api.get("/municipal-submissions/reviews");
-    return payload?.reviews || [];
+  listReviews: async (params, options) => {
+    const payload = await api.get("/municipal-submissions/reviews", { ...options, params });
+    if (!Array.isArray(payload?.reviews)) throw new Error("The review-history response was incomplete.");
+    return payload.reviews;
   },
   reviewSubmission: async (payload) => {
     const res = await api.post("/municipal-submissions/reviews", payload);

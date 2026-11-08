@@ -18,6 +18,8 @@ import { update, remove } from '../src/services/healthServices.service.js';
  */
 
 const SERVICE_ID = '11111111-1111-1111-1111-111111111111';
+const OLD_PERSONNEL_ID = '20000000-0000-0000-0000-000000000001';
+const NEW_PERSONNEL_ID = '20000000-0000-0000-0000-000000000002';
 const mho = { id: 'u-mho', name: 'MHO', role: 'mho', municipalityId: 'm1', barangayId: null };
 const supervisor = { id: 'u-sup', name: 'Supervisor', role: 'health_supervisor', municipalityId: 'm1', barangayId: 'b1' };
 
@@ -57,6 +59,12 @@ const makeSupabase = ({ service, dependents = { visit_plans: 0, health_service_a
         if (ctx.op === 'update') { calls.assignUpdates.push({ patch: ctx.payload, filters: { ...ctx.filters } }); return { data: null, error: null }; }
         return { data: [], error: null };
       }
+      if (table === 'profiles') return { data: [{
+        id: NEW_PERSONNEL_ID, full_name: 'New Worker', email: 'new@example.test', role: 'bhw', status: 'active',
+        municipality_id: 'm1', barangay_id: 'b1', facility_id: null, account: null,
+        municipality: { id: 'm1', is_active: true },
+        barangay: { id: 'b1', municipality_id: 'm1', name: 'San Isidro', status: 'Active' },
+      }], error: null };
       if (table === 'visit_plans') { calls.countTables.push('visit_plans'); return { data: [], count: dependents.visit_plans, error: null }; }
       if (table === 'health_service_attendance') { calls.countTables.push('attendance'); return { data: [], count: dependents.health_service_attendance, error: null }; }
       if (table === 'appointments') { calls.countTables.push('appointments'); return { data: [], count: dependents.appointments, error: null }; }
@@ -71,6 +79,7 @@ const makeSupabase = ({ service, dependents = { visit_plans: 0, health_service_a
       eq(c, v) { ctx.filters.eq[c] = v; return chain; },
       in(c, v) { ctx.filters.in[c] = v; return chain; },
       order() { return chain; },
+      range() { return chain; },
       limit() { return Promise.resolve(resolve()); },
       maybeSingle() { const r = resolve(); return Promise.resolve({ data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error }); },
       single() { const r = resolve(); return Promise.resolve({ data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error }); },
@@ -110,21 +119,21 @@ test('update: a status-only payload toggles active without altering the schedule
 test('update: reconciles personnel — adds new, deactivates removed', async () => {
   const service = baseService();
   service.health_service_assignments = [
-    { id: 'a1', personnel_id: 'p-old', active: true, personnel: { full_name: 'Old', role: 'bhw' } },
+    { id: 'a1', personnel_id: OLD_PERSONNEL_ID, active: true, personnel: { full_name: 'Old', role: 'bhw' } },
   ];
   const { client, calls } = makeSupabase({ service });
   await update({
     user: supervisor,
     serviceId: SERVICE_ID,
-    payload: { name: 'Prenatal', personnelIds: ['p-new'] },
+    payload: { name: 'Prenatal', personnelIds: [NEW_PERSONNEL_ID] },
     supabase: client,
   });
   // p-new is added via upsert, p-old is deactivated (soft remove, never deleted).
   assert.equal(calls.assignUpserts.length, 1);
-  assert.deepEqual(calls.assignUpserts[0].map((r) => r.personnel_id), ['p-new']);
+  assert.deepEqual(calls.assignUpserts[0].map((r) => r.personnel_id), [NEW_PERSONNEL_ID]);
   assert.equal(calls.assignUpdates.length, 1);
   assert.equal(calls.assignUpdates[0].patch.active, false);
-  assert.deepEqual(calls.assignUpdates[0].filters.in.personnel_id, ['p-old']);
+  assert.deepEqual(calls.assignUpdates[0].filters.in.personnel_id, [OLD_PERSONNEL_ID]);
 });
 
 test('update: a supervisor cannot edit a service outside their barangay (404)', async () => {

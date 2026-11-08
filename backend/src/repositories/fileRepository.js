@@ -11,6 +11,8 @@ import { residentId, healthRecordNo, submissionId, referralId } from './ids.js';
 import { DEFAULT_RISK_CRITERIA } from '../config/riskConfig.js';
 import { DEFAULT_MEDICINES, medicineIdentityKey } from '../config/medicineCatalog.js';
 import { APPROVED_BARANGAYS } from '../config/barangays.js';
+import { randomUUID } from 'node:crypto';
+import ApiError from '../utils/apiError.js';
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
@@ -78,9 +80,11 @@ export const fileRepository = {
    * driver is single-municipality dev data, so `municipalityId` is ignored and
    * barangay filtering uses the stored text. Returns { rows, total }.
    */
-  listResidents: async ({ q = '', limit = 50, offset = 0, barangay = null, municipalityId = null } = {}) => {
+  listResidents: async ({ q = '', limit = 50, offset = 0, barangay = null, barangayId = null, ids = null, municipalityId = null } = {}) => {
     let rows = store.residents.filter((r) => matchesQuery(r, q));
     if (barangay) rows = rows.filter((r) => r.barangay === barangay);
+    if (barangayId) rows = rows.filter((r) => r.barangayId === barangayId);
+    if (Array.isArray(ids)) rows = rows.filter((r) => ids.includes(r.id));
     const total = rows.length;
     return { rows: clone(rows.slice(offset, offset + limit)), total };
   },
@@ -150,7 +154,7 @@ export const fileRepository = {
 
   getResident: async (id) => {
     const found = store.residents.find((r) => r.id === id);
-    return found ? clone(found) : null;
+    return found ? clone({ ...found, revision: found.revision ?? 1 }) : null;
   },
 
   insertResident: async (resident) => {
@@ -162,6 +166,7 @@ export const fileRepository = {
         createdAt: now,
         updatedAt: now,
         ...resident,
+        revision: 1,
       };
       delete row.age;
       data.residents.push(row);
@@ -169,11 +174,13 @@ export const fileRepository = {
     });
   },
 
-  updateResident: async (id, patch) => {
+  updateResident: async (id, patch, { expectedRevision = null, expectedUpdatedAt = null } = {}) => {
     return store.mutate((data) => {
       const row = data.residents.find((r) => r.id === id);
       if (!row) return null;
-      const next = { ...row, ...patch, updatedAt: new Date().toISOString() };
+      if (expectedRevision !== null && (row.revision ?? 1) !== expectedRevision) return null;
+      if (expectedUpdatedAt && row.updatedAt !== expectedUpdatedAt) return null;
+      const next = { ...row, ...patch, revision: (row.revision ?? 1) + 1, updatedAt: new Date().toISOString() };
       delete next.age;
       Object.assign(row, next);
       return clone(row);
@@ -254,13 +261,85 @@ export const fileRepository = {
   // ----- visits / submissions ----------------------------------------------
   insertVisit: async (visit) => {
     return store.mutate((data) => {
+      if (data.visits.some((row) => row.id === visit.id
+        || (visit.clientOperationKey && String(row.clientOperationKey).toLowerCase() === String(visit.clientOperationKey).toLowerCase()))) {
+        throw Object.assign(new Error('A visit for this consultation operation already exists.'), { code: '23505' });
+      }
       const now = new Date().toISOString();
-      const row = { createdAt: now, updatedAt: now, ...visit };
+      const row = { createdAt: now, updatedAt: now, ...visit,
+        ...(visit.clientOperationKey ? { clientOperationKey: visit.clientOperationKey.toLowerCase() } : {}) };
       data.visits.push(row);
       const residentsById = Object.fromEntries(data.residents.map((r) => [r.id, r]));
       return attachResidentToVisit(clone(row), residentsById);
     });
   },
+
+  findVisitByOperationKey: async (key) => {
+    const found = store.visits.find((visit) => visit.clientOperationKey?.toLowerCase() === key.toLowerCase());
+    if (!found) return null;
+    const residentsById = Object.fromEntries(store.residents.map((resident) => [resident.id, resident]));
+    return attachResidentToVisit(clone(found), residentsById);
+  },
+
+  hasUnkeyedVisitsForResident: async (residentId) => store.visits.some((visit) =>
+    visit.residentId === residentId && !visit.clientOperationKey),
+
+  completeConsultationOperation: async ({ id, creatorId }) => store.mutate((data) => {
+    const visit = data.visits.find((row) => row.id === id);
+    if (!visit || !visit.clientOperationKey || visit.recordedById !== creatorId) {
+      throw ApiError.conflict('The consultation operation does not belong to this author.');
+    }
+    if (visit.consultationEffectsCompletedAt) return { completed: true, consultationId: id };
+    const resident = data.residents.find((row) => row.id === visit.residentId);
+    if (!resident) throw ApiError.notFound('Resident record not found.');
+    const details = visit.consultationDetails || {};
+    const now = new Date().toISOString();
+    const followUps = data.followUps || [];
+    const notifications = data.notifications || [];
+    let followUp = null;
+    if (details.nextVisitDate) {
+      const key = `consultation-followup:${id}:${details.nextVisitDate}`;
+      followUp = followUps.find((row) => row.client_operation_key === key);
+      if (followUp && (followUp.resident_id !== resident.id || followUp.created_by !== creatorId
+        || followUp.consultation_id !== id)) {
+        throw ApiError.conflict('The follow-up operation belongs to a different author or resident.');
+      }
+      if (!followUp) {
+        followUp = {
+          id: randomUUID(), resident_id: resident.id, consultation_id: id,
+          municipality_id: resident.municipalityId || null, barangay_id: resident.barangayId || null,
+          created_by: creatorId, created_at: now, updated_at: now, client_operation_key: key,
+          purpose: `${details.chiefComplaint || details.diagnosis || 'Consultation'} follow-up`,
+          scheduled_date: details.nextVisitDate, notes: details.adviceGiven || '',
+          assigned_provider: visit.recordedByName || '', status: 'Pending',
+          requires_resident_response: true, resident_decision: 'pending',
+          resident_decision_at: null, resident_decision_reason: '',
+        };
+        followUps.push(followUp);
+        data.healthAuditLogs.push({ id: randomUUID(), actor_id: creatorId, action: 'FOLLOWUPS_CREATED',
+          entity_type: 'follow_ups', entity_id: followUp.id, created_at: now });
+      }
+    }
+    if (resident.authUserId) {
+      const notifyOnce = (relatedType, relatedId, title, message, category) => {
+        if (!notifications.some((row) => row.recipient_id === resident.authUserId
+          && row.related_type === relatedType && row.related_id === relatedId && row.title === title)) {
+          notifications.push({ id: randomUUID(), recipient_id: resident.authUserId,
+            related_type: relatedType, related_id: relatedId, title, message, category, created_at: now });
+        }
+      };
+      if (followUp) notifyOnce('follow_ups', followUp.id, 'New follow-up requires your response',
+        `A health worker requested a follow-up on ${details.nextVisitDate}. Please review it and confirm or reject it in your Follow-ups.`, 'reminder');
+      notifyOnce('consultation', id, 'New consultation record',
+        `A new consultation record from ${details.consultationDate} is now available in My Health Records.`, 'information');
+    }
+    data.followUps = followUps;
+    data.notifications = notifications;
+    data.healthAuditLogs.push({ id: randomUUID(), actor_id: creatorId, action: 'CONSULTATION_CREATED',
+      entity_type: 'visits', entity_id: id, created_at: now });
+    visit.consultationEffectsCompletedAt = now;
+    return { completed: true, consultationId: id, followUpId: followUp?.id || null };
+  }),
 
   getVisit: async (id) => {
     const found = store.visits.find((v) => v.id === id);
@@ -269,15 +348,19 @@ export const fileRepository = {
     return attachResidentToVisit(clone(found), residentsById);
   },
 
-  listVisits: async ({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null, limit = 100, offset = 0 } = {}) => {
+  listVisits: async ({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null,
+    municipalityId = null, barangayId = null, barangay = null, limit = 100, offset = 0 } = {}) => {
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
     let rows = store.visits.map((v) => attachResidentToVisit(clone(v), residentsById));
 
     if (statuses && statuses.length) rows = rows.filter((v) => statuses.includes(v.status));
     if (submittedById) rows = rows.filter((v) => v.recordedById === submittedById);
     if (residentId) rows = rows.filter((v) => v.residentId === residentId);
-    if (from) rows = rows.filter((v) => String(v.visitDate || '').slice(0, 10) >= from);
-    if (to) rows = rows.filter((v) => String(v.visitDate || '').slice(0, 10) <= to);
+    if (municipalityId) rows = rows.filter((v) => v.resident?.municipalityId === municipalityId);
+    if (barangayId) rows = rows.filter((v) => v.resident?.barangayId === barangayId);
+    if (barangay) rows = rows.filter((v) => normalizeText(v.resident?.barangay) === normalizeText(barangay));
+    if (from) rows = rows.filter((v) => (v.consultationDetails?.consultationDate || String(v.visitDate || '').slice(0, 10)) >= from);
+    if (to) rows = rows.filter((v) => (v.consultationDetails?.consultationDate || String(v.visitDate || '').slice(0, 10)) <= to);
     if (serviceId) rows = rows.filter((v) => v.healthServiceId === serviceId);
     if (q) {
       const query = normalizeText(q);
@@ -289,7 +372,7 @@ export const fileRepository = {
       );
     }
 
-    rows.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    rows.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(b.id).localeCompare(String(a.id)));
     return { rows: rows.slice(offset, offset + limit), total: rows.length };
   },
 
@@ -299,6 +382,11 @@ export const fileRepository = {
     return store.mutate((data) => {
       const row = data.visits.find((v) => v.id === id);
       if (!row) return null;
+      if (row.clientOperationKey && ['clientOperationKey', 'clientOperationPayloadHash', 'residentId',
+        'recordedById', 'recordedByRole', 'recordedByName', 'recordedAt'].some((field) =>
+        patch[field] !== undefined && patch[field] !== row[field])) {
+        throw ApiError.conflict('The original consultation operation, resident, and recorder are immutable.');
+      }
       const residentsById = Object.fromEntries(data.residents.map((r) => [r.id, r]));
       const next = { ...row, ...patch, updatedAt: new Date().toISOString() };
       Object.assign(row, next);
@@ -307,14 +395,8 @@ export const fileRepository = {
   },
 
   // ----- referrals ----------------------------------------------------------
-  insertReferral: async (referral) => {
-    return store.mutate((data) => {
-      const now = new Date().toISOString();
-      const row = { createdAt: now, updatedAt: now, ...referral };
-      data.referrals.push(row);
-      const residentsById = Object.fromEntries(data.residents.map((r) => [r.id, r]));
-      return { ...clone(row), resident: residentsById[row.residentId] || null };
-    });
+  insertReferral: async () => {
+    throw ApiError.conflict('Historical referrals are read-only. Use the canonical referral service.');
   },
 
   getReferral: async (id) => {
@@ -331,15 +413,8 @@ export const fileRepository = {
     return attachResidentToReferral(clone(found), residentsById);
   },
 
-  updateReferral: async (id, patch) => {
-    return store.mutate((data) => {
-      const row = data.referrals.find((r) => r.id === id);
-      if (!row) return null;
-      const next = { ...row, ...patch, updatedAt: new Date().toISOString() };
-      Object.assign(row, next);
-      const residentsById = Object.fromEntries(data.residents.map((r) => [r.id, r]));
-      return { ...clone(row), resident: residentsById[row.residentId] || null };
-    });
+  updateReferral: async () => {
+    throw ApiError.conflict('Historical referrals are read-only. Use the canonical referral service.');
   },
 
   listReferrals: async ({ q = '', residentId = null, limit = 100, offset = 0 } = {}) => {

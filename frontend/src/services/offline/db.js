@@ -25,7 +25,7 @@ let offlineDbUpgradeBlocked = false;
 export const isOfflineDbUpgradeBlocked = () => offlineDbUpgradeBlocked;
 
 /** Current local schema version. Bump together with a new `.version(n)` block. */
-export const OFFLINE_DB_VERSION = 5;
+export const OFFLINE_DB_VERSION = 6;
 const OFFLINE_DB_IDB_VERSION = OFFLINE_DB_VERSION * 10;
 
 const RECORDS_KEY_PATH = ['ownerId', 'entity', 'remoteId'];
@@ -44,7 +44,12 @@ const migrateRecordRows = (rows) => {
   for (const row of rows) {
     if (!row || !row.entity || row.remoteId == null) continue;
     const ownerId = typeof row.ownerId === 'string' ? row.ownerId : '';
-    const migrated = { ...row, ownerId, remoteId: String(row.remoteId) };
+    const migrated = {
+      ...row,
+      ownerId,
+      remoteId: String(row.remoteId),
+      lastAccessedAt: row.lastAccessedAt ?? row.cachedAt ?? 0,
+    };
     const key = JSON.stringify([ownerId, migrated.entity, migrated.remoteId]);
     const previous = byKey.get(key);
     if (!previous || (migrated.cachedAt || 0) > (previous.cachedAt || 0)) {
@@ -107,7 +112,7 @@ export const prepareOfflineDatabase = async () => {
         if (database.objectStoreNames.contains('records')) database.deleteObjectStore('records');
         if (database.objectStoreNames.contains('records_backup')) database.deleteObjectStore('records_backup');
         const records = database.createObjectStore('records', { keyPath: RECORDS_KEY_PATH });
-        for (const name of ['ownerId', 'entity', 'remoteId', 'cachedAt']) {
+        for (const name of ['ownerId', 'entity', 'remoteId', 'cachedAt', 'lastAccessedAt']) {
           ensureIndex(records, name, name);
         }
 
@@ -196,6 +201,7 @@ export const prepareOfflineDatabase = async () => {
  *   serverRecord?: unknown,
  *   syncingAt?: number,
  *   workerId?: string,
+ *   workerToken?: string | null,
  *   syncedAt?: number | null,
  *   lastError?: unknown
  * }} OfflineOutboxRow
@@ -208,6 +214,7 @@ export const prepareOfflineDatabase = async () => {
  *   ownerId: string,
  *   data: unknown,
  *   cachedAt: number,
+ *   lastAccessedAt?: number,
  *   revision?: number | null
  * }} OfflineRecordRow
  */
@@ -290,7 +297,7 @@ db.version(OFFLINE_DB_VERSION).stores({
     drafts: 'localId, entity, ownerId, status, updatedAt',
     outbox:
       'opId, entity, ownerId, status, localRecordId, nextAttemptAt, updatedAt, [ownerId+status]',
-    records: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt',
+    records: '[ownerId+entity+remoteId], ownerId, entity, remoteId, cachedAt, lastAccessedAt',
     syncMeta: 'key',
     keys: 'id',
   });
@@ -326,6 +333,82 @@ export const safeWrite = async (fn) => {
     throw error;
   }
 };
+
+let offlineOwnerResolver = null;
+let ownerBindingGeneration = 0;
+let boundOwnerId = null;
+const ownerGenerations = new Map();
+
+/** Bind once at authentication boundaries; the resolver must read a live session. */
+export const setOfflineOwnerResolver = (getOwnerId) => {
+  let nextOwnerId = null;
+  try { nextOwnerId = getOwnerId?.() || null; } catch { /* expired/unavailable session */ }
+  // Reconfiguring a worker for the SAME authenticated account is not a new
+  // session. Real A -> B -> A boundaries still change the generation twice.
+  if (nextOwnerId !== boundOwnerId || Boolean(getOwnerId) !== Boolean(offlineOwnerResolver)) {
+    ownerBindingGeneration += 1;
+  }
+  boundOwnerId = nextOwnerId;
+  offlineOwnerResolver = getOwnerId;
+};
+
+export const getOfflineOwnerId = () => {
+  try {
+    const ownerId = offlineOwnerResolver?.();
+    return typeof ownerId === 'string' && ownerId.trim() ? ownerId : null;
+  } catch {
+    return null;
+  }
+};
+
+export const requireOwnerId = (ownerId) => {
+  if (typeof ownerId !== 'string' || !ownerId.trim() || ownerId !== ownerId.trim()) {
+    throw Object.assign(new Error('A signed-in owner is required for offline data.'), { code: 'no-owner' });
+  }
+  return ownerId;
+};
+
+/** Invalidate already-started work without deleting its durable queue. */
+export const invalidateOfflineOwner = (ownerId) => {
+  requireOwnerId(ownerId);
+  ownerGenerations.set(ownerId, (ownerGenerations.get(ownerId) || 0) + 1);
+};
+
+export const captureOwnerGuard = (ownerId, getOwnerId = null) => {
+  requireOwnerId(ownerId);
+  const generation = ownerBindingGeneration;
+  const ownerGeneration = ownerGenerations.get(ownerId) || 0;
+  const resolver = getOwnerId || offlineOwnerResolver;
+  return () => {
+    try {
+      return generation === ownerBindingGeneration &&
+        ownerGeneration === (ownerGenerations.get(ownerId) || 0) &&
+        (!resolver || resolver() === ownerId) &&
+        (!offlineOwnerResolver || offlineOwnerResolver() === ownerId);
+    } catch {
+      return false;
+    }
+  };
+};
+
+export const assertCurrentOwner = (isOwnerCurrent) => {
+  if (!isOwnerCurrent()) {
+    throw Object.assign(new Error('The authenticated offline owner changed or the session expired.'), {
+      code: 'owner-changed',
+      status: 401,
+    });
+  }
+};
+
+export const requireEncryptedPayload = (envelope) => {
+  if (envelope?.enc !== true) {
+    throw new OfflineStorageError('encryption', 'Secure offline storage is unavailable. Connect securely before saving offline.');
+  }
+  return envelope;
+};
+
+/** Keep crypto awaits inside the same transaction as dependency-protected writes. */
+export const waitForOfflineCrypto = (promise) => Dexie.waitFor(promise);
 
 /** Resolve once the database is open (used before first read/write in the UI). */
 export const openOfflineDb = async () => {

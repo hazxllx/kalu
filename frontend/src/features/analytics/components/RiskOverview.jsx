@@ -29,7 +29,7 @@ export default function RiskOverview({
   }
 
   return (
-    <div className={compact ? "space-y-2" : "space-y-3"}>
+    <div className={`ui-risk-overview ${compact ? "space-y-2" : "space-y-3"}`}>
       {counts.map((row) => {
         const percentage = assessed > 0 ? Math.round((row.value / assessed) * 100) : 0;
         return (

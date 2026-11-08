@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from "react";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 /**
  * Admin user management store (local work set).
@@ -143,6 +144,7 @@ export const adminUserStore = {
 };
 
 export default adminUserStore;
+registerWorkingSetReset(() => { cache = []; listeners.forEach((listener) => listener()); });
 
 // Ignore and purge any previously persisted demo records, then persist the
 // empty snapshot so the session starts with no fabricated entries.

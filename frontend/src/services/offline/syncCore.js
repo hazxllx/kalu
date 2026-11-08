@@ -9,6 +9,7 @@ export const SYNC_STATE = Object.freeze({
   SYNCED: 'synced',
   FAILED: 'failed',
   CONFLICT: 'conflict',
+  RESOLVED: 'resolved',
 });
 
 /**
@@ -98,7 +99,7 @@ const _hasInternalCycle = (op, readyIds, byId) => {
 export const dependenciesSatisfied = (op, allOpsById) =>
   (op.dependsOn || []).every((dep) => {
     const dependency = allOpsById.get(dep);
-    return !dependency || dependency.status === SYNC_STATE.SYNCED;
+    return !dependency || dependency.status === SYNC_STATE.SYNCED || dependency.status === SYNC_STATE.RESOLVED;
   });
 
 /** Build the user-facing status summary consumed by the UI. */
@@ -114,6 +115,7 @@ export const summarizeOperations = (ops) => {
       entity: op.entity,
       opType: op.opType,
       attempts: op.attempts,
+      retryable: op.lastError?.retryable === true,
       code: op.lastError?.code || 'unknown',
       message: op.lastError?.message || 'Synchronization failed.',
     }));

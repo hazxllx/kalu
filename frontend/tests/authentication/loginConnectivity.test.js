@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { AUTH_SERVICE_UNAVAILABLE_MESSAGE, authFailureMessage } from '../../../shared/authConnectivity.js';
+import { AUTH_NETWORK_FAILURE_MESSAGE, authFailureMessage } from '../../../shared/authConnectivity.js';
 
 test('the existing login uses Supabase Auth with an accurate network-outage message', async () => {
   const source = await readFile(new URL('../../src/context/AuthContext.jsx', import.meta.url), 'utf8');
   assert.match(source, /supabase\.auth\.signInWithPassword\(\{ email, password \}\)/);
   assert.match(source, /authFailureMessage\(error\)/);
-  assert.equal(authFailureMessage({ name: 'AuthRetryableFetchError', status: 0 }), AUTH_SERVICE_UNAVAILABLE_MESSAGE);
+  assert.equal(authFailureMessage({ name: 'AuthRetryableFetchError', status: 0 }), AUTH_NETWORK_FAILURE_MESSAGE);
 });
 
 test('the current login form and design remain in place with no role picker or hardcoded sign-in', async () => {

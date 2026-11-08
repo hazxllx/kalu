@@ -1,5 +1,14 @@
 import api from './apiClient';
 
+const aggregatePayload = (payload, arrays, needsSummary = false) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+      !arrays.every((key) => Array.isArray(payload[key])) ||
+      (needsSummary && (!payload.summary || typeof payload.summary !== 'object'))) {
+    throw new Error('Aggregate analytics data is unavailable.');
+  }
+  return payload;
+};
+
 /**
  * Early Warning analytics API.
  *
@@ -7,16 +16,21 @@ import api from './apiClient';
  * authenticated session on the SERVER — a barangay-assigned Health
  * Supervisor always receives their own barangay's figures, and any attempt
  * to request another barangay is rejected with 403. A municipality-wide
- * caller (MHO / unassigned supervisor) may optionally drill down to one of
+ * caller (MHO / PHN) may optionally drill down to one of
  * their own barangays with `barangay`; passing another municipality's
  * barangay is still rejected server-side. While the request is in flight the
  * page shows its loading skeleton; an unreachable API leaves the empty state
  * in place rather than any fabricated figures.
  */
-export const fetchEarlyWarningData = async (barangay) => {
-  const params = barangay ? { barangay } : undefined;
-  const payload = await api.get('/analytics/early-warning', params ? { params } : undefined);
-  return payload || null;
+// Reporting filters apply only to the additive activity chart block.
+export const fetchEarlyWarningData = async (barangay, { from = null, to = null, year = null } = {}) => {
+  const params = {};
+  if (barangay) params.barangay = barangay;
+  if (from) params.from = from;
+  if (to) params.to = to;
+  if (year != null) params.year = year;
+  const payload = await api.get('/analytics/early-warning', Object.keys(params).length ? { params } : undefined);
+  return aggregatePayload(payload, ['consultationTrends', 'diseaseDistribution', 'riskDistribution'], true);
 };
 
 /**
@@ -47,13 +61,14 @@ export const fetchCommunityMap = async ({
   if (from) params.from = from;
   if (to) params.to = to;
   const payload = await api.get('/analytics/community-map', Object.keys(params).length ? { params } : undefined);
-  return payload || { scope: 'municipality', barangays: [], summary: {} };
+  return aggregatePayload(payload, ['barangays', 'conditionTotals'], true);
 };
 
 /** Monthly (Jan..Dec) case trend for the map's selected condition + scope. */
 export const fetchCommunityMapTrends = async ({
   barangay = null,
   condition = null,
+  distinctResidents = false,
   status = null,
   riskLevel = null,
   from = null,
@@ -63,19 +78,20 @@ export const fetchCommunityMapTrends = async ({
   const params = {};
   if (barangay) params.barangay = barangay;
   if (condition && condition !== 'All') params.condition = condition;
+  if (distinctResidents) params.distinctResidents = 'true';
   if (status && status !== 'All') params.status = status;
   if (riskLevel && riskLevel !== 'All') params.riskLevel = riskLevel;
   if (from) params.from = from;
   if (to) params.to = to;
   if (year) params.year = year;
   const payload = await api.get('/analytics/community-map/trends', Object.keys(params).length ? { params } : undefined);
-  return payload || { monthly: [] };
+  return aggregatePayload(payload, ['monthly']);
 };
 
 /** The disease/condition options for the filter dropdown (from the backend). */
 export const fetchConditions = async () => {
   const payload = await api.get('/analytics/conditions');
-  return payload?.conditions || [];
+  return aggregatePayload(payload, ['conditions']).conditions;
 };
 
 /**
@@ -88,7 +104,7 @@ export const fetchHouseholdMap = async ({ barangay = null } = {}) => {
   const params = {};
   if (barangay) params.barangay = barangay;
   const payload = await api.get('/analytics/household-map', Object.keys(params).length ? { params } : undefined);
-  return payload || { scope: 'municipality', locations: [], summary: {} };
+  return aggregatePayload(payload, ['locations'], true);
 };
 
 export default { fetchEarlyWarningData, fetchCommunityMap, fetchCommunityMapTrends, fetchConditions, fetchHouseholdMap };

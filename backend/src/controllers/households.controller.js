@@ -3,6 +3,7 @@
  */
 import * as householdsService from '../services/households.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
+import ApiError from '../utils/apiError.js';
 
 export const listHouseholds = async (req, res) => {
   const result = await householdsService.listHouseholds({
@@ -25,6 +26,15 @@ export const searchResidents = async (req, res) => {
     user: req.user,
     q: req.query.q,
   });
+  sendData(res, { rows });
+};
+
+export const listWorkers = async (req, res) => {
+  const household = req.query.householdId
+    ? await householdsService.getHousehold({ id: req.query.householdId, user: req.user })
+    : null;
+  if (household && !household.barangayId) throw ApiError.unprocessable('The household has no recorded barangay assignment.');
+  const rows = await householdsService.listHouseholdWorkers({ user: req.user, barangayId: household?.barangayId || req.query.barangayId });
   sendData(res, { rows });
 };
 
@@ -122,6 +132,7 @@ export default {
   listHouseholds,
   getHouseholdMonitoring,
   searchResidents,
+  listWorkers,
   getHousehold,
   listHouseholdVisits,
   recordHouseholdVisit,

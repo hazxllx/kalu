@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import HealthSupervisorPageHeader from "@/features/dashboards/components/HealthSupervisorPageHeader";
 import {
   AlertCircle,
   ArrowRight,
@@ -33,7 +34,7 @@ const STATUS_FILTERS = [
   { value: "resubmission_required", label: "Resubmission Required" },
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
-  { value: "all", label: "All statuses" },
+  { value: "all", label: "All Status" },
 ];
 
 // Compact 5-column row/header layout shared by the list header and each request
@@ -228,13 +229,11 @@ export default function TransferRequests({ embedded = false }) {
   return (
     <Wrapper className={embedded ? "space-y-4" : "space-y-6 p-6"}>
       {!embedded && (
-        <header>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand-blue">Verification</p>
-          <h1 className="mt-1 font-display text-2xl font-bold text-brand-dark">Resident Transfer Requests</h1>
-          <p className="mt-2 text-sm text-brand-gray">
-            Review each incoming request and approve to update the resident&apos;s current barangay. Approving keeps the same resident record, Health Record Number, and all existing health history.
-          </p>
-        </header>
+        <HealthSupervisorPageHeader
+          eyebrow="Transfers"
+          title="Resident Transfer Requests"
+          subtitle="Review each incoming request and approve to update the resident's current barangay. Approving keeps the same resident record, Health Record Number, and all existing health history."
+        />
       )}
 
       {notice && (

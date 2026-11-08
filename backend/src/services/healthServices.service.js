@@ -23,6 +23,8 @@
  */
 import { getServiceClient } from '../config/supabase.js';
 import { ROLES } from '../config/roles.js';
+import { isApprovedBarangayName } from '../config/barangays.js';
+import { isUuid } from '../validators/common.js';
 import ApiError from '../utils/apiError.js';
 import { notifyResident } from './notifications.service.js';
 
@@ -30,6 +32,8 @@ const TABLE = 'health_services';
 const ASSIGN_TABLE = 'health_service_assignments';
 const ATTENDANCE_TABLE = 'health_service_attendance';
 const APPOINTMENTS_TABLE = 'appointments';
+const PLAN_TABLE = 'visit_plans';
+const PAGE_SIZE = 500;
 const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'cancelled', 'walk_in']);
 
 export const SERVICE_CATEGORIES = Object.freeze([
@@ -43,11 +47,24 @@ export const SERVICE_CATEGORIES = Object.freeze([
 
 const MANAGE_ROLES = new Set([ROLES.MHO, ROLES.PHN, ROLES.HEALTH_SUPERVISOR]);
 const MUNICIPALITY_WIDE_ROLES = new Set([ROLES.MHO, ROLES.PHN, ROLES.RHU_PERSONNEL]);
+const BARANGAY_SCOPED_ROLES = new Set([ROLES.HEALTH_SUPERVISOR, ROLES.BHW]);
+const PERSONNEL_ROLES = new Set([...MUNICIPALITY_WIDE_ROLES, ...BARANGAY_SCOPED_ROLES]);
 
 const text = (v) => String(v ?? '').trim();
 const hhmm = (v) => (v ? String(v).slice(0, 5) : null);
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
+};
+
+const readAllRows = async (query, fallback) => {
+  const rows = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
+    throwOnError(error, fallback);
+    if (data !== null && !Array.isArray(data)) throw Object.assign(new Error(fallback), { statusCode: 500 });
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) return rows;
+  }
 };
 
 /**
@@ -88,10 +105,45 @@ const isVerificationArtifactAccount = (email) => {
 const dateIsDateOnly = (value) =>
   typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`));
 
+const PERSONNEL_SELECT = 'id, full_name, email, role, status, municipality_id, barangay_id, facility_id, municipality:municipalities(id, is_active), barangay:barangays(id, name, status, municipality_id), facility:facilities(id, type, municipality_id, barangay_id), account:personnel_accounts!account_id(approval_status, setup_required, suspended_at)';
 const FACILITY_EMBED = 'facility:facilities(name, type)';
 const BARANGAY_EMBED = 'barangay:barangays(name)';
-const ASSIGN_EMBED = `${ASSIGN_TABLE}(id, personnel_id, active, personnel:profiles!personnel_id(full_name, email, role))`;
+const ASSIGN_EMBED = `${ASSIGN_TABLE}(id, personnel_id, active, personnel:profiles!personnel_id(${PERSONNEL_SELECT}))`;
 const SELECT = `*, ${FACILITY_EMBED}, ${BARANGAY_EMBED}, ${ASSIGN_EMBED}`;
+
+const personnelIsEligible = (profile, municipalityId) => {
+  if (!profile || !isUuid(profile.id) || profile.status !== 'active' || !PERSONNEL_ROLES.has(profile.role)
+    || !municipalityId || profile.municipality_id !== municipalityId
+    || profile.municipality?.id !== municipalityId || profile.municipality?.is_active !== true) return false;
+  const account = Array.isArray(profile.account) ? profile.account[0] : profile.account;
+  if (account && (account.approval_status !== 'approved' || account.setup_required || account.suspended_at)) return false;
+  if (BARANGAY_SCOPED_ROLES.has(profile.role) && !profile.barangay_id) return false;
+  if (profile.barangay_id && (profile.barangay?.id !== profile.barangay_id
+    || profile.barangay?.municipality_id !== municipalityId || profile.barangay?.status !== 'Active'
+    || !isApprovedBarangayName(profile.barangay?.name))) return false;
+  if (profile.role === ROLES.RHU_PERSONNEL && (!profile.facility_id || profile.facility?.type !== 'rhu')) return false;
+  if (profile.facility_id && (profile.facility?.id !== profile.facility_id
+    || profile.facility?.municipality_id !== municipalityId
+    || (BARANGAY_SCOPED_ROLES.has(profile.role) && profile.facility?.type === 'barangay_health_station'
+      && profile.facility.barangay_id && profile.facility.barangay_id !== profile.barangay_id))) return false;
+  return true;
+};
+
+const hasResidentScope = (user) => user.role === ROLES.ADMIN || Boolean(user.municipalityId
+  && PERSONNEL_ROLES.has(user.role) && (!BARANGAY_SCOPED_ROLES.has(user.role) || user.barangayId));
+
+const residentVisibleTo = (user, resident) => Boolean(resident?.id && hasResidentScope(user)
+  && (user.role === ROLES.ADMIN || (resident.municipality_id === user.municipalityId
+    && (!BARANGAY_SCOPED_ROLES.has(user.role) || resident.barangay_id === user.barangayId))));
+
+// The resident relationship is authoritative; service coverage and a plan's
+// historical barangay snapshot cannot authorize disclosure of resident data.
+const scopeResidentQuery = (user, query) => {
+  if (user.role === ROLES.ADMIN) return query;
+  let scoped = query.eq('resident.municipality_id', user.municipalityId);
+  if (BARANGAY_SCOPED_ROLES.has(user.role)) scoped = scoped.eq('resident.barangay_id', user.barangayId);
+  return scoped;
+};
 
 const toService = (row) => {
   if (!row) return null;
@@ -119,7 +171,8 @@ const toService = (row) => {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     assignedPersonnel: assignments
-      .filter((a) => a.active !== false)
+      .filter((a) => a.active === true && a.personnel?.id === a.personnel_id
+        && personnelIsEligible(a.personnel, row.municipality_id))
       .map((a) => ({
         id: a.personnel_id,
         assignmentId: a.id,
@@ -146,33 +199,26 @@ const dedupeById = (rows) => {
  * Attach a live `registrationCount` (non-cancelled resident visit plans) to each
  * shaped service for the catalog cards. One grouped read over the already-scoped
  * service ids; a barangay-scoped role is confined to their own barangay's plans,
- * mirroring the registrations roster scope. Best-effort: a failure here must
- * never blank the catalog, so the count is simply omitted on error.
+ * mirroring the registrations roster scope. Lookup failures are surfaced, not
+ * presented as an authoritative empty roster or zero count.
  */
 const attachRegistrationCounts = async (user, services, supabase) => {
   const ids = services.map((s) => s.id);
   if (ids.length === 0) return services;
-  try {
-    let query = supabase
-      .from(PLAN_TABLE)
-      .select('service_id, status, barangay_id')
-      .in('service_id', ids)
-      .neq('status', 'Cancelled');
-    if (BARANGAY_SCOPED_ROLES.has(user.role)) {
-      if (!user.barangayId) {
-        for (const s of services) s.registrationCount = 0;
-        return services;
-      }
-      query = query.eq('barangay_id', user.barangayId);
-    }
-    const { data, error } = await query;
-    if (error) return services;
-    const counts = new Map();
-    for (const row of data || []) counts.set(row.service_id, (counts.get(row.service_id) || 0) + 1);
-    for (const s of services) s.registrationCount = counts.get(s.id) || 0;
-  } catch {
-    /* best-effort enrichment only */
+  if (!hasResidentScope(user)) {
+    for (const s of services) s.registrationCount = 0;
+    return services;
   }
+  const query = scopeResidentQuery(user, supabase.from(PLAN_TABLE)
+    .select('id, service_id, resident_id, status, resident:residents!inner(id, municipality_id, barangay_id)')
+    .in('service_id', ids).neq('status', 'Cancelled').order('id'));
+  const rows = await readAllRows(query, 'Could not load service registration counts');
+  const counts = new Map();
+  for (const row of rows) {
+    if (row.resident?.id !== row.resident_id || !residentVisibleTo(user, row.resident)) continue;
+    counts.set(row.service_id, (counts.get(row.service_id) || 0) + 1);
+  }
+  for (const s of services) s.registrationCount = counts.get(s.id) || 0;
   return services;
 };
 
@@ -183,49 +229,40 @@ const attachRegistrationCounts = async (user, services, supabase) => {
  */
 export const list = async ({ user, mine = false, category = null, supabase = getServiceClient() }) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+  if (!user.municipalityId || (!PERSONNEL_ROLES.has(user.role) && user.role !== ROLES.ADMIN)) return [];
 
-  // Services assigned to the caller (always included).
-  const { data: myAssignments, error: assignErr } = await supabase
+  // An assignment is a barangay exception, never a municipality exception.
+  const myAssignments = await readAllRows(supabase
     .from(ASSIGN_TABLE)
     .select('service_id')
     .eq('personnel_id', user.id)
-    .eq('active', true);
-  throwOnError(assignErr, 'Could not load assigned services');
+    .eq('active', true).order('id'), 'Could not load assigned services');
   const assignedIds = (myAssignments || []).map((a) => a.service_id);
 
   if (mine) {
     if (assignedIds.length === 0) return [];
-    let q = supabase.from(TABLE).select(SELECT).in('id', assignedIds).order('created_at', { ascending: false });
+    let q = supabase.from(TABLE).select(SELECT).eq('municipality_id', user.municipalityId)
+      .in('id', assignedIds).order('created_at', { ascending: false }).order('id');
     if (category) q = q.eq('category', category);
-    const { data, error } = await q;
-    throwOnError(error, 'Could not load services');
-    return attachRegistrationCounts(user, (data || []).map(toService), supabase);
+    const data = await readAllRows(q, 'Could not load services');
+    return attachRegistrationCounts(user, data.filter((row) => row.municipality_id === user.municipalityId).map(toService), supabase);
   }
 
   // In-scope services.
   const results = [];
   if (user.municipalityId) {
-    let scopeQuery = supabase.from(TABLE).select(SELECT).eq('municipality_id', user.municipalityId).order('created_at', { ascending: false });
+    let scopeQuery = supabase.from(TABLE).select(SELECT).eq('municipality_id', user.municipalityId)
+      .order('created_at', { ascending: false }).order('id');
     if (category) scopeQuery = scopeQuery.eq('category', category);
-    const { data: scoped, error: scopeErr } = await scopeQuery;
-    throwOnError(scopeErr, 'Could not load services');
+    const scoped = await readAllRows(scopeQuery, 'Could not load services');
     for (const row of scoped || []) {
+      if (row.municipality_id !== user.municipalityId) continue;
       const muniWide = row.barangay_id === null;
       if (MUNICIPALITY_WIDE_ROLES.has(user.role)) {
         results.push(row); // sees municipality-wide + every barangay in municipality
-      } else if (muniWide || row.barangay_id === user.barangayId) {
+      } else if (muniWide || row.barangay_id === user.barangayId || assignedIds.includes(row.id)) {
         results.push(row); // barangay-scoped: municipality-wide + own barangay
       }
-    }
-  }
-
-  // Plus any assigned service outside the scope filter.
-  if (assignedIds.length > 0) {
-    const missing = assignedIds.filter((id) => !results.some((r) => r.id === id));
-    if (missing.length > 0) {
-      const { data: extra, error: extraErr } = await supabase.from(TABLE).select(SELECT).in('id', missing);
-      throwOnError(extraErr, 'Could not load assigned services');
-      results.push(...(extra || []));
     }
   }
 
@@ -259,11 +296,10 @@ export const getById = async ({ user, id, supabase = getServiceClient() }) => {
 async function serviceVisibleTo(user, row, supabase) {
   if (!row) return false;
   if (user.role === ROLES.ADMIN) return true;
-  if (user.municipalityId && row.municipality_id === user.municipalityId) {
-    if (MUNICIPALITY_WIDE_ROLES.has(user.role)) return true;
-    if (row.barangay_id === null || row.barangay_id === user.barangayId) return true;
-  }
-  // A service explicitly assigned to the caller is always visible to them.
+  if (!PERSONNEL_ROLES.has(user.role) || !user.municipalityId || row.municipality_id !== user.municipalityId) return false;
+  if (MUNICIPALITY_WIDE_ROLES.has(user.role)) return true;
+  if (row.barangay_id === null || row.barangay_id === user.barangayId) return true;
+  // Explicit assignments may extend barangay catalog visibility in this municipality.
   const { data, error } = await supabase
     .from(ASSIGN_TABLE)
     .select('id')
@@ -327,11 +363,13 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   await manageableService(user, serviceId, supabase);
   const { data: resident, error: residentError } = await supabase
     .from('residents')
-    .select('id')
+    .select('id, municipality_id, barangay_id, barangay')
     .eq('id', residentId)
     .maybeSingle();
   throwOnError(residentError, 'Could not verify resident');
   if (!resident) throw ApiError.unprocessable('The selected resident does not exist.');
+
+  if (!residentVisibleTo(user, resident)) throw ApiError.notFound('Resident not found in your scope.');
 
   const row = {
     service_id: serviceId,
@@ -352,15 +390,16 @@ export const listAttendanceByService = async ({ user, query = {}, supabase = get
   const serviceId = text(query.service_id);
   if (!serviceId) throw ApiError.badRequest('A service reference is required.');
   await getById({ user, id: serviceId, supabase });
+  if (!hasResidentScope(user)) return [];
 
-  let request = supabase
+  let request = scopeResidentQuery(user, supabase
     .from(ATTENDANCE_TABLE)
-    .select('*')
-    .eq('service_id', serviceId);
+    .select('*, resident:residents!inner(id, municipality_id, barangay_id)')
+    .eq('service_id', serviceId));
   request = applyAttendanceDateRange(request, query);
-  const { data, error } = await request.order('scheduled_date', { ascending: false });
-  throwOnError(error, 'Could not load health service attendance');
-  return data || [];
+  const data = await readAllRows(request.order('scheduled_date', { ascending: false }).order('id'), 'Could not load health service attendance');
+  return data.filter((row) => row.resident?.id === row.resident_id && residentVisibleTo(user, row.resident))
+    .map(({ resident, ...attendance }) => attendance);
 };
 
 export const listAttendanceByResident = async ({ user, query = {}, supabase = getServiceClient() }) => {
@@ -369,19 +408,19 @@ export const listAttendanceByResident = async ({ user, query = {}, supabase = ge
   if (!residentId) throw ApiError.badRequest('A resident reference is required.');
   const { data: resident, error: residentError } = await supabase
     .from('residents')
-    .select('id')
+    .select('id, municipality_id, barangay_id')
     .eq('id', residentId)
     .maybeSingle();
   throwOnError(residentError, 'Could not verify resident');
-  if (!resident) throw ApiError.notFound('Resident not found.');
+  if (!residentVisibleTo(user, resident)) throw ApiError.notFound('Resident not found.');
 
   let request = supabase
     .from(ATTENDANCE_TABLE)
-    .select('*, service:health_services(id, municipality_id, barangay_id)')
+    .select('*, service:health_services!inner(id, municipality_id, barangay_id)')
     .eq('resident_id', residentId);
+  if (user.role !== ROLES.ADMIN) request = request.eq('service.municipality_id', user.municipalityId);
   request = applyAttendanceDateRange(request, query);
-  const { data, error } = await request.order('scheduled_date', { ascending: false });
-  throwOnError(error, 'Could not load health service attendance');
+  const data = await readAllRows(request.order('scheduled_date', { ascending: false }).order('id'), 'Could not load health service attendance');
 
   const visibleRows = [];
   for (const row of data || []) {
@@ -393,8 +432,8 @@ export const listAttendanceByResident = async ({ user, query = {}, supabase = ge
   return visibleRows;
 };
 
-export const RESIDENTS_EMBED = 'resident:residents(id, first_name, middle_name, last_name, sex, birth_date, barangay)';
-const ATTENDANCE_SELECT = `*, service:health_services(id, name, category, municipality_id, barangay_id), ${RESIDENTS_EMBED}`;
+export const RESIDENTS_EMBED = 'resident:residents!inner(id, first_name, middle_name, last_name, sex, birth_date, barangay, municipality_id, barangay_id)';
+const ATTENDANCE_SELECT = `*, service:health_services!inner(id, name, category, municipality_id, barangay_id), ${RESIDENTS_EMBED}`;
 
 /**
  * Attendance records (scheduled health-service appointments) for the caller's
@@ -404,8 +443,9 @@ const ATTENDANCE_SELECT = `*, service:health_services(id, name, category, munici
  * client bypasses RLS): a barangay-assigned Health Supervisor only sees
  * attendance for services in their barangay or assigned to them; a
  * municipality-wide caller sees every service in their municipality. Each row
- * is passed through `serviceVisibleTo` so a known id (or one reached via a
- * wider join) can never leak an out-of-scope service. Date filtering uses
+ * is checked against both the service and the resident's stored scope. The
+ * inner resident filters precede pagination; the service-role client does not
+ * inherit resident RLS. Date filtering uses
  * `scheduled_date` against the requested `from`/`to` window.
  */
 export const listScopeAttendance = async ({ user, query = {}, supabase = getServiceClient() }) => {
@@ -416,20 +456,19 @@ export const listScopeAttendance = async ({ user, query = {}, supabase = getServ
   if ((from && !dateIsDateOnly(from)) || (to && !dateIsDateOnly(to))) {
     throw ApiError.badRequest('Invalid date range for the health service calendar.');
   }
+  if (!hasResidentScope(user)) return [];
 
-  let request = supabase.from(ATTENDANCE_TABLE).select(ATTENDANCE_SELECT);
+  let request = scopeResidentQuery(user, supabase.from(ATTENDANCE_TABLE).select(ATTENDANCE_SELECT));
+  if (user.role !== ROLES.ADMIN) request = request.eq('service.municipality_id', user.municipalityId);
   if (from) request = request.gte('scheduled_date', from);
   if (to) request = request.lte('scheduled_date', to);
-  const { data, error } = await request.order('scheduled_date', { ascending: true });
-  throwOnError(error, 'Could not load health service schedules');
+  const data = await readAllRows(request.order('scheduled_date', { ascending: true }).order('id'), 'Could not load health service schedules');
 
   const visibleRows = [];
   for (const row of data || []) {
     if (!row.service) continue; // orphan row — not visible to anyone
+    if (row.resident?.id !== row.resident_id || !residentVisibleTo(user, row.resident)) continue;
     if (!(await serviceVisibleTo(user, row.service, supabase))) continue;
-    // A resident embed only returns residents the caller may see (RLS). Barangay
-    // supervisors are additionally bound to their barangay by serviceVisibleTo,
-    // so no other-barangay resident identity is ever attached.
     const { service, resident, ...attendance } = row;
     visibleRows.push({
       ...attendance,
@@ -456,6 +495,10 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
   throwOnError(currentError, 'Could not load health service attendance');
   if (!current) throw ApiError.notFound('Health service attendance not found.');
   await manageableService(user, current.service_id, supabase);
+  const { data: resident, error: residentError } = await supabase.from('residents')
+    .select('id, municipality_id, barangay_id').eq('id', current.resident_id).maybeSingle();
+  throwOnError(residentError, 'Could not verify resident');
+  if (!residentVisibleTo(user, resident)) throw ApiError.notFound('Health service attendance not found.');
 
   const patch = {};
   if (payload.status !== undefined) {
@@ -490,9 +533,6 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
   return data;
 };
 
-const BARANGAY_SCOPED_ROLES = new Set([ROLES.HEALTH_SUPERVISOR, ROLES.BHW]);
-const PLAN_TABLE = 'visit_plans';
-
 const residentDisplayName = (r) =>
   [r?.first_name, r?.middle_name, r?.last_name].filter(Boolean).join(' ').trim() || 'Resident';
 
@@ -521,43 +561,23 @@ export const listServiceRegistrations = async ({ user, serviceId, supabase = get
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
   // Scope + existence gate (throws 404 when out of scope or unknown).
   const service = await getById({ user, id: serviceId, supabase });
+  if (!hasResidentScope(user)) return { service, registrations: [], counts: emptyRegistrationCounts() };
 
-  let planQuery = supabase
+  const planQuery = scopeResidentQuery(user, supabase
     .from(PLAN_TABLE)
-    .select('id, resident_id, barangay_id, facility_type, planned_date, note, status, created_at, updated_at')
+    .select(`id, resident_id, barangay_id, facility_type, planned_date, note, status, created_at, updated_at, ${RESIDENTS_EMBED}`)
     .eq('service_id', serviceId)
-    .order('planned_date', { ascending: false });
-
-  // A barangay-scoped role is confined to their own barangay's registrations,
-  // regardless of whether the service is barangay-specific or RHU-wide.
-  if (BARANGAY_SCOPED_ROLES.has(user.role)) {
-    if (!user.barangayId) return { service, registrations: [], counts: emptyRegistrationCounts() };
-    planQuery = planQuery.eq('barangay_id', user.barangayId);
-  }
-
-  const { data: plans, error: planErr } = await planQuery;
-  throwOnError(planErr, 'Could not load service registrations');
-  const planRows = plans || [];
+    .order('planned_date', { ascending: false }).order('id'));
+  const plans = await readAllRows(planQuery, 'Could not load service registrations');
+  const planRows = plans.filter((row) => row.resident?.id === row.resident_id && residentVisibleTo(user, row.resident));
 
   const residentIds = [...new Set(planRows.map((p) => p.resident_id).filter(Boolean))];
-  const residentById = new Map();
   const attendanceByResident = new Map();
   if (residentIds.length > 0) {
-    const [{ data: residents, error: resErr }, { data: attendance, error: attErr }] = await Promise.all([
-      supabase
-        .from('residents')
-        .select('id, first_name, middle_name, last_name, barangay')
-        .in('id', residentIds),
-      supabase
-        .from(ATTENDANCE_TABLE)
-        .select('id, resident_id, attendance_status, attended_at, scheduled_date')
-        .eq('service_id', serviceId)
-        .in('resident_id', residentIds)
-        .order('scheduled_date', { ascending: false }),
-    ]);
-    throwOnError(resErr, 'Could not load residents');
-    throwOnError(attErr, 'Could not load attendance');
-    for (const r of residents || []) residentById.set(r.id, r);
+    const attendance = await readAllRows(supabase.from(ATTENDANCE_TABLE)
+      .select('id, resident_id, attendance_status, attended_at, scheduled_date')
+      .eq('service_id', serviceId).in('resident_id', residentIds)
+      .order('scheduled_date', { ascending: false }).order('id'), 'Could not load attendance');
     // Keep the most recent attendance record per resident (ordered desc above).
     for (const a of attendance || []) {
       if (!attendanceByResident.has(a.resident_id)) attendanceByResident.set(a.resident_id, a);
@@ -565,7 +585,7 @@ export const listServiceRegistrations = async ({ user, serviceId, supabase = get
   }
 
   const registrations = planRows.map((p) => {
-    const resident = residentById.get(p.resident_id) || null;
+    const resident = p.resident;
     const att = attendanceByResident.get(p.resident_id) || null;
     return {
       id: p.id,
@@ -661,7 +681,7 @@ const resolveOrCreateFacilityByName = async (user, { municipalityId, name, super
   if (createErr) {
     // Lost a race against the unique (municipality_id, name) constraint — the
     // other writer created it, so re-read instead of failing the request.
-    const { data: raced } = await supabase
+    const { data: raced, error: raceErr } = await supabase
       .from('facilities')
       .select('id, municipality_id, barangay_id, type')
       .eq('municipality_id', municipalityId)
@@ -669,6 +689,7 @@ const resolveOrCreateFacilityByName = async (user, { municipalityId, name, super
       .order('created_at', { ascending: true })
       .limit(1);
     if (raced && raced[0]) return raced[0];
+    throwOnError(raceErr, 'Could not verify the facility after creation failed');
     throwOnError(createErr, 'Could not create the facility');
   }
   return created;
@@ -757,11 +778,49 @@ const notifyAssignees = async (supabase, { serviceName, personnelIds, assignedBy
   );
 };
 
+const assignmentPersonnelIds = (values) => {
+  if (values == null) return [];
+  if (!Array.isArray(values)) throw ApiError.unprocessable('Select personnel from the authorized directory.');
+  const ids = [...new Set(values.map((value) => text(value)).filter(Boolean))];
+  if (ids.some((id) => !isUuid(id))) throw ApiError.unprocessable('Select personnel from the authorized directory.');
+  return ids;
+};
+
+const loadAssignableProfiles = async (user, personnelIds, supabase) => {
+  if (!user.municipalityId || (user.role === ROLES.HEALTH_SUPERVISOR && !user.barangayId)) return [];
+  let query = supabase.from('profiles').select(PERSONNEL_SELECT)
+    .eq('municipality_id', user.municipalityId).eq('status', 'active').in('role', [...PERSONNEL_ROLES]).order('id');
+  if (personnelIds) query = query.in('id', personnelIds);
+  if (user.role === ROLES.HEALTH_SUPERVISOR) query = query.eq('barangay_id', user.barangayId);
+  const profiles = await readAllRows(query, 'Could not load personnel');
+  return profiles.filter((profile) => personnelIsEligible(profile, user.municipalityId)
+    && (user.role !== ROLES.HEALTH_SUPERVISOR || profile.barangay_id === user.barangayId)
+    && !isVerificationArtifactAccount(profile.email));
+};
+
+const validatePersonnelAssignments = async (user, service, personnelIds, supabase) => {
+  if (personnelIds.length === 0) return;
+  if (!user.municipalityId || service.municipality_id !== user.municipalityId) {
+    throw ApiError.unprocessable('Personnel must belong to the service municipality.');
+  }
+  // Municipal managers may explicitly assign across barangays in their own
+  // municipality. Supervisors retain the narrower existing personnel directory.
+  const profiles = await loadAssignableProfiles(user, personnelIds, supabase);
+  const eligibleIds = new Set(profiles.map((profile) => profile.id));
+  if (personnelIds.some((id) => !eligibleIds.has(id))) {
+    throw ApiError.unprocessable('One or more selected personnel are inactive or outside the authorized assignment scope.', {
+      personnelIds: 'Select active personnel from the authorized directory.',
+    });
+  }
+};
+
 export const create = async ({ user, payload = {}, supabase = getServiceClient() }) => {
   assertManager(user);
   const name = text(payload.name);
   if (!name) throw ApiError.unprocessable('A service name is required.');
   const category = SERVICE_CATEGORIES.includes(text(payload.category)) ? text(payload.category) : 'Other';
+  const personnelIds = assignmentPersonnelIds(payload.personnelIds);
+  await validatePersonnelAssignments(user, { municipality_id: user.municipalityId }, personnelIds, supabase);
 
   const scope = await resolveScope(user, payload, supabase);
 
@@ -787,9 +846,6 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   throwOnError(error, 'Could not create the health service');
 
   // Optional initial personnel assignment.
-  const personnelIds = Array.isArray(payload.personnelIds)
-    ? payload.personnelIds.map((p) => text(p)).filter(Boolean)
-    : [];
   if (personnelIds.length > 0) {
     const rows = personnelIds.map((personnelId) => ({
       service_id: data.id,
@@ -826,6 +882,8 @@ export const update = async ({ user, serviceId, payload = {}, supabase = getServ
 
   const row = { updated_at: new Date().toISOString() };
   const has = (key) => Object.prototype.hasOwnProperty.call(payload, key);
+  const personnelIds = has('personnelIds') ? assignmentPersonnelIds(payload.personnelIds) : null;
+  if (personnelIds) await validatePersonnelAssignments(user, existing, personnelIds, supabase);
 
   // Content fields — only written when supplied, so a status-only toggle leaves
   // the schedule/coverage untouched.
@@ -869,8 +927,8 @@ export const update = async ({ user, serviceId, payload = {}, supabase = getServ
   // Personnel reconciliation — add newly selected, deactivate removed. Existing
   // assignments (and their id) are preserved; a removed person is soft-marked
   // inactive, never hard-deleted, so historical attendance stays attributable.
-  if (has('personnelIds') && Array.isArray(payload.personnelIds)) {
-    const wanted = new Set(payload.personnelIds.map((p) => text(p)).filter(Boolean));
+  if (personnelIds) {
+    const wanted = new Set(personnelIds);
     const current = (existing[ASSIGN_TABLE] || []).filter((a) => a.active !== false);
     const currentIds = new Set(current.map((a) => a.personnel_id));
 
@@ -962,6 +1020,7 @@ export const assign = async ({ user, serviceId, personnelId, supabase = getServi
   const pid = text(personnelId);
   if (!pid) throw ApiError.unprocessable('Select a personnel to assign.');
   const service = await manageableService(user, serviceId, supabase); // BUG-004: scope + management check
+  await validatePersonnelAssignments(user, service, assignmentPersonnelIds([pid]), supabase);
   const { error } = await supabase
     .from(ASSIGN_TABLE)
     .upsert({ service_id: serviceId, personnel_id: pid, assigned_by: user.id, active: true }, { onConflict: 'service_id,personnel_id' });
@@ -985,18 +1044,7 @@ export const unassign = async ({ user, serviceId, personnelId, supabase = getSer
 /** Active staff in the caller's municipality who can be assigned a service. */
 export const assignablePersonnel = async ({ user, supabase = getServiceClient() }) => {
   assertManager(user);
-  if (!user.municipalityId) return [];
-  if (user.role === ROLES.HEALTH_SUPERVISOR && !user.barangayId) return [];
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, full_name, email, role, barangay_id')
-    .eq('municipality_id', user.municipalityId)
-    .eq('status', 'active')
-    .in('role', [ROLES.PHN, ROLES.HEALTH_SUPERVISOR, ROLES.BHW, ROLES.RHU_PERSONNEL, ROLES.MHO]);
-  throwOnError(error, 'Could not load personnel');
-  const scoped = user.role === ROLES.HEALTH_SUPERVISOR
-    ? (data || []).filter((p) => p.barangay_id === user.barangayId)
-    : data || [];
+  const scoped = await loadAssignableProfiles(user, null, supabase);
   // Exclude QA / live-verification artifact accounts (see
   // isVerificationArtifactAccount) and deduplicate by the stable profile id so
   // the picker lists every eligible person exactly once — never by display

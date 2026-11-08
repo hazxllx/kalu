@@ -9,9 +9,15 @@ import { computeBMI } from '../utils/bmi.js';
 import { normalizeMedications } from './medicines.service.js';
 import { classifyWithConfig } from './bpConfig.service.js';
 import { classifyBloodPressure as classifyBpWithThresholds } from '../config/bpThresholds.js';
+import { requestFingerprint } from '../middleware/idempotency.js';
 
 const STAFF_ROLES = new Set(['health_supervisor', 'phn']);
 const text = (value) => String(value ?? '').trim();
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const serviceClientFor = (repo = repository) => repo.driver === 'file' ? null : getServiceClient();
+const dateOnly = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
+  && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 
 /** Consultation statuses the list endpoint can filter by (visits workflow). */
 export const CONSULTATION_STATUSES = Object.freeze([
@@ -141,7 +147,7 @@ export const validateFollowUp = (payload = {}) => {
   const nextVisit = text(payload.nextVisitDate);
 
   if (nextVisit) {
-    if (Number.isNaN(Date.parse(nextVisit))) {
+    if (!dateOnly(nextVisit)) {
       errors.push('Next visit date is invalid.');
     } else if (present(payload.consultationDate) && !Number.isNaN(Date.parse(text(payload.consultationDate)))) {
       if (nextVisit < text(payload.consultationDate)) {
@@ -165,6 +171,10 @@ const assertResidentScope = (user, resident) => {
   if (!resident) throw ApiError.notFound('Resident record not found.');
   const barangay = assignedBarangay(user);
   if (barangay && text(resident.barangay).toLowerCase() !== text(barangay).toLowerCase()) {
+    throw ApiError.notFound('Resident record not found.');
+  }
+  if (user.role === 'health_supervisor' && user.barangayId && resident.barangayId
+    && user.barangayId !== resident.barangayId) {
     throw ApiError.notFound('Resident record not found.');
   }
   if (user.municipalityId && resident.municipalityId && user.municipalityId !== resident.municipalityId) {
@@ -273,13 +283,16 @@ export const resolveConsultationService = async ({
     if (service.barangay_id && user?.barangayId && service.barangay_id !== user.barangayId) {
       // Assigned personnel keep access to their assigned service regardless of
       // barangay scope (mirrors healthServices.serviceVisibleTo).
-      const { data: assignment } = await supabase
+      const { data: assignment, error: assignmentError } = await supabase
         .from('health_service_assignments')
         .select('id')
         .eq('service_id', service.id)
         .eq('personnel_id', user.id)
         .eq('active', true)
         .maybeSingle();
+      if (assignmentError) {
+        throw new ApiError(502, 'Could not verify health service assignment.');
+      }
       if (!assignment) {
         throw ApiError.unprocessable('Please correct the consultation fields shown below.', {
           serviceId: 'The selected health service is outside your assigned area.',
@@ -297,15 +310,37 @@ export const resolveConsultationService = async ({
   return { id: service.id, name: service.name || '' };
 };
 
+const CLINICAL_TEXT_FIELDS = [
+  'consultationDate', 'consultationTime', 'chiefComplaint', 'findings', 'diagnosis',
+  'treatmentGiven', 'medicationPrescribed', 'adviceGiven', 'remarks', 'nextVisitDate',
+];
+
+const clinicalDetails = (payload) => ({
+  ...(payload.consultationDetails || {}),
+  ...Object.fromEntries(CLINICAL_TEXT_FIELDS.map((field) => [field, text(payload[field])])),
+  followUpRequired: text(payload.nextVisitDate) ? 'Yes' : 'No',
+});
+
+const numericVital = (value) => present(value) ? Number(value) : null;
+
 export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
   residentId,
   recordedById: user.id,
   recordedByRole: user.role,
   recordedByName: user.name || user.email || '',
-  status: 'completed',
+  // The consultation/visit STATUS is only 'completed' when a NEW visit is
+  // created by the consultation staff. `update` passes `status: extra.status`
+  // to preserve an existing draft/in_review/referred state instead of
+  // clobbering it back to 'completed' (the prior bug forced every update to
+  // 'completed').
+  status: extra.status ?? 'completed',
   visitDate: payload.consultationDate
-    ? `${payload.consultationDate}${payload.consultationTime ? `T${payload.consultationTime}:00` : 'T00:00:00'}`
+    ? `${payload.consultationDate}T${text(payload.consultationTime) || '00:00'}:00+08:00`
     : new Date().toISOString(),
+  recordedAt: extra.recordedAt ?? payload.recordedAt ?? new Date().toISOString(),
+  // Keep the individual form fields: clinical text can itself contain the
+  // legacy Diagnosis/Medication/Next visit delimiters.
+  consultationDetails: clinicalDetails(payload),
   chiefComplaint: text(payload.chiefComplaint),
   clinicalHistory: text(payload.remarks),
   findings: [text(payload.findings), text(payload.diagnosis)].filter(Boolean).join('\nDiagnosis: '),
@@ -326,12 +361,12 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
   bpClassification: extra.bpClassification ?? null,
   vitals: {
     bp: text(payload.bloodPressure),
-    temperature: payload.temperature,
-    hr: payload.pulseRate,
-    rr: payload.respiratoryRate,
-    heightCm: payload.height,
-    weightKg: payload.weight,
-    o2sat: payload.oxygenSaturation,
+    temperature: numericVital(payload.temperature),
+    hr: numericVital(payload.pulseRate),
+    rr: numericVital(payload.respiratoryRate),
+    heightCm: numericVital(payload.height),
+    weightKg: numericVital(payload.weight),
+    o2sat: numericVital(payload.oxygenSaturation),
     ...(() => {
       const { bmi, category } = computeBMI(payload.height, payload.weight);
       // `visits.bmi_category` is NOT NULL (default ''), so a consultation saved
@@ -346,8 +381,9 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
   },
 });
 
-export const fromVisit = async (visit, supabase = getServiceClient()) => {
+export const fromVisit = async (visit, supabase = serviceClientFor()) => {
   const resident = visit.resident || {};
+  const details = visit.consultationDetails || {};
   const findings = text(visit.findings);
   const diagnosisMarker = '\nDiagnosis: ';
   const [findingsText, diagnosis] = findings.includes(diagnosisMarker)
@@ -357,13 +393,14 @@ export const fromVisit = async (visit, supabase = getServiceClient()) => {
   let attendingPersonnel = null;
   let facilityName = null;
 
-  if (visit.recordedById) {
+  if (visit.recordedById && supabase) {
     try {
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('id, full_name, position, facility_id, facilities(name)')
         .eq('id', visit.recordedById)
         .maybeSingle();
+      if (profileError) throw profileError;
       if (profile) {
         attendingPersonnel = {
           id: profile.id,
@@ -372,10 +409,8 @@ export const fromVisit = async (visit, supabase = getServiceClient()) => {
         };
         facilityName = profile.facilities?.name || null;
       }
-    } catch {
-      attendingPersonnel = {
-        fullName: visit.recordedByName || '',
-      };
+    } catch (error) {
+      throw new ApiError(502, 'Could not load recording personnel.');
     }
   }
 
@@ -411,27 +446,28 @@ export const fromVisit = async (visit, supabase = getServiceClient()) => {
       name: [resident.firstName, resident.middleName, resident.lastName].filter(Boolean).join(' '),
       barangay: resident.barangay || '',
       barangayId: resident.barangayId || visit.barangay_id || '',
+      zone: resident.zone ?? null,
       sex: resident.sex || '',
       contact: resident.cellphoneNo || '',
       age: resident.birthDate ? Math.max(0, new Date().getFullYear() - new Date(resident.birthDate).getFullYear()) : '',
       program: 'General',
     },
-    consultationDate: visit.visitDate ? String(visit.visitDate).slice(0, 10) : '',
-    consultationTime: visit.visitDate?.includes('T') ? String(visit.visitDate).slice(11, 16) : '',
+    consultationDate: details.consultationDate ?? (visit.visitDate ? String(visit.visitDate).slice(0, 10) : ''),
+    consultationTime: details.consultationTime ?? (visit.visitDate?.includes('T') ? String(visit.visitDate).slice(11, 16) : ''),
     // Health service provided (id + name snapshot recorded at save time, so a
     // later rename/deactivation in the catalog never changes history).
     serviceId: visit.healthServiceId || null,
     serviceName: visit.healthServiceName || '',
     chiefComplaint: visit.chiefComplaint || '',
-    findings: findingsText,
-    diagnosis: text(diagnosis),
-    treatmentGiven: treatmentText,
-    medicationPrescribed,
+    findings: details.findings ?? findingsText,
+    diagnosis: details.diagnosis ?? text(diagnosis),
+    treatmentGiven: details.treatmentGiven ?? treatmentText,
+    medicationPrescribed: details.medicationPrescribed || medicationPrescribed,
     medications,
-    adviceGiven: visit.recommendation || '',
-    remarks: visit.clinicalHistory || visit.phn?.notes || '',
-    followUpRequired: visit.recommendation?.includes('Next visit:') ? 'Yes' : 'No',
-    nextVisitDate: visit.recommendation?.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || '',
+    adviceGiven: details.adviceGiven ?? (visit.recommendation || ''),
+    remarks: details.remarks ?? (visit.clinicalHistory || visit.phn?.notes || ''),
+    followUpRequired: details.followUpRequired ?? (visit.recommendation?.includes('Next visit:') ? 'Yes' : 'No'),
+    nextVisitDate: details.nextVisitDate ?? (visit.recommendation?.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || ''),
     referralRequired: visit.referralRequired ? 'Yes' : 'No',
     bloodPressureClassification,
     vitals: {
@@ -440,8 +476,15 @@ export const fromVisit = async (visit, supabase = getServiceClient()) => {
     },
     status: visit.status,
     createdAt: visit.createdAt,
+    updatedAt: visit.updatedAt,
+    recordedAt: visit.recordedAt || visit.createdAt,
+    clientOperationKey: visit.clientOperationKey || null,
+    consultationEffectsCompletedAt: visit.consultationEffectsCompletedAt || null,
+    consultationDetails: details,
     facilityName: facilityName,
     attendingPersonnel: attendingPersonnel,
+    responsiblePersonnelId: visit.responsiblePersonnelId || null,
+    responsiblePersonnelName: visit.responsiblePersonnelName || visit.phn?.personnel || '',
   };
 };
 
@@ -491,9 +534,9 @@ export const planFollowUpSync = (existing, payload = {}) => {
  * upgrades older rows that were created before confirmation was required); a row
  * the resident has already approved is only rescheduled, never reset.
  *
- * De-duplication uses ONLY columns already in the deployed schema (resident_id +
- * created_by + purpose, restricted to a live/non-terminal follow-up), so a later
- * edit updates that one row instead of duplicating. No migration is required.
+ * Edits resolve ONLY follow-ups linked to this visit, never another user's
+ * unlinked follow-up with a similar purpose. A stable visit/date operation key
+ * also prevents a concurrent create or retry from duplicating a follow-up.
  *
  * BEST-EFFORT: a follow-up bookkeeping failure is logged but never propagates,
  * so a clinical consultation save is never rejected because of the follow-up
@@ -509,21 +552,18 @@ export const syncConsultationFollowUp = async ({
   if (!visit?.id || !visit?.residentId) return;
   try {
     const purpose = followUpPurpose(payload);
-    // Find a live follow-up already recorded for this resident+consultation by
-    // this staff member. Terminal (Completed/Cancelled/Rejected) rows are left
-    // as history, so a new one is created instead of resurrecting them.
+    const operationKey = `consultation-followup:${visit.id}:${text(payload.nextVisitDate)}`;
     const { data: rows, error } = await supabase
       .from('follow_ups')
-      .select('id, status, resident_decision, consultation_id')
+      .select('id, status, resident_decision, consultation_id, client_operation_key, scheduled_date')
       .eq('resident_id', visit.residentId)
-      .eq('created_by', user.id)
-      .eq('purpose', purpose)
+      .eq('consultation_id', visit.id)
       .order('created_at', { ascending: false });
     if (error) throw new Error(error.message || 'Could not look up the linked follow-up');
     const liveRows = (rows || []).filter((r) => !TERMINAL_FOLLOWUP.has(text(r.status)));
-    const existing = liveRows.find((r) => r.consultation_id === visit.id)
-      || liveRows.find((r) => !r.consultation_id)
-      || null;
+    const existing = liveRows[0] || null;
+    if (!existing && (rows || []).some((r) => r.client_operation_key === operationKey
+      || text(r.scheduled_date).slice(0, 10) === text(payload.nextVisitDate))) return;
 
     const { action } = planFollowUpSync(existing, payload);
     if (action === 'noop') return;
@@ -572,6 +612,8 @@ export const syncConsultationFollowUp = async ({
     await ops.create({
       user,
       kind: 'followups',
+      idempotencyKey: operationKey,
+      supabase,
       payload: {
         residentId: visit.residentId,
         consultation_id: visit.id,
@@ -637,7 +679,14 @@ const notifyResidentOfConsultation = async ({ resident = null, residentId = null
   }
 };
 
-export const list = async ({ user, q = '', filters = {}, repo = repository, supabase = getServiceClient() }) => {
+export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0,
+  repo = repository, supabase = serviceClientFor(repo) }) => {
+  const pageSize = Number(limit);
+  const pageOffset = Number(offset);
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 500
+    || !Number.isSafeInteger(pageOffset) || pageOffset < 0 || pageOffset > 1_000_000) {
+    throw ApiError.unprocessable('Invalid consultation pagination.', { limit: 'Use a page size from 1 to 500 and a non-negative offset.' });
+  }
   if (user?.role === 'resident') {
     const resident = await repo.getResidentByAuthUserId(user.id);
     if (!resident) return { rows: [], total: 0 };
@@ -646,20 +695,39 @@ export const list = async ({ user, q = '', filters = {}, repo = repository, supa
     // only ever list their OWN consultations no matter what ids they send.
     const result = await repo.listVisits({
       q: text(q),
-      residentId: resident.id,
       ...filters,
-      limit: 200,
+      residentId: resident.id,
+      limit: pageSize,
+      offset: pageOffset,
     });
     return { rows: await Promise.all(result.rows.map((v) => fromVisit(v, supabase))), total: result.total };
   }
 
   assertStaff(user);
-  const result = await repo.listVisits({ q: text(q), ...filters, limit: 200 });
+  const result = await repo.listVisits({ q: text(q), ...filters, limit: pageSize, offset: pageOffset,
+    municipalityId: user.municipalityId,
+    barangayId: user.role === 'health_supervisor' ? user.barangayId : null,
+    barangay: assignedBarangay(user) });
   const filtered = [];
   for (const visit of result.rows) {
     try { assertResidentScope(user, visit.resident); filtered.push(visit); } catch {}
   }
-  return { rows: await Promise.all(filtered.map((v) => fromVisit(v, supabase))), total: filtered.length };
+  return { rows: await Promise.all(filtered.map((v) => fromVisit(v, supabase))),
+    total: filtered.length === result.rows.length ? result.total : filtered.length };
+};
+
+export const get = async ({ user, id, repo = repository, supabase = serviceClientFor(repo) }) => {
+  const isResidentSelf = user?.role === 'resident';
+  if (!isResidentSelf) assertStaff(user);
+  const visit = await repo.getVisit(id);
+  if (!visit) throw ApiError.notFound('Consultation not found.');
+  if (isResidentSelf) {
+    const resident = await repo.getResidentByAuthUserId(user.id);
+    if (!resident || resident.id !== visit.residentId) throw ApiError.notFound('Consultation not found.');
+  } else {
+    assertResidentScope(user, visit.resident);
+  }
+  return fromVisit(visit, supabase);
 };
 
 const consultationFieldErrors = (payload = {}, { requireResident = false } = {}) => {
@@ -669,60 +737,160 @@ const consultationFieldErrors = (payload = {}, { requireResident = false } = {})
   };
   if (requireResident) required('residentId', 'Please select a resident.');
   required('consultationDate', 'Consultation date is required.');
-  if (payload.consultationDate && Number.isNaN(Date.parse(text(payload.consultationDate)))) {
+  if (payload.consultationDate && !dateOnly(payload.consultationDate)) {
     errors.consultationDate = 'Consultation date is invalid.';
+  }
+  if (present(payload.consultationTime) && !/^([01]\d|2[0-3]):[0-5]\d$/.test(text(payload.consultationTime))) {
+    errors.consultationTime = 'Consultation time must be a valid time (HH:MM).';
+  }
+  if (present(payload.recordedAt) && (typeof payload.recordedAt !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(payload.recordedAt)
+    || !Number.isFinite(Date.parse(payload.recordedAt)))) {
+    errors.recordedAt = 'The original recording timestamp is invalid.';
   }
   required('chiefComplaint', 'Chief complaint is required.');
   required('findings', 'Findings are required.');
   required('diagnosis', 'Diagnosis is required.');
+  if (payload.consultationDetails !== undefined && (!payload.consultationDetails
+    || typeof payload.consultationDetails !== 'object' || Array.isArray(payload.consultationDetails))) {
+    errors.consultationDetails = 'Additional clinical details must be a JSON object.';
+  }
   const { errors: followUpErrors } = validateFollowUp(payload);
   if (followUpErrors.length) errors.nextVisitDate = followUpErrors.join(' ');
   return errors;
 };
 
-export const create = async ({ user, payload = {}, supabase = getServiceClient() }) => {
+export const consultationOperationKey = (payload = {}, idempotencyKey = null) => {
+  const key = text(idempotencyKey || payload.clientOperationKey).toLowerCase();
+  if (!UUID.test(key)) {
+    throw ApiError.unprocessable('A stable consultation operation UUID is required.', {
+      clientOperationKey: 'Retry with the original consultation operation UUID.',
+    });
+  }
+  if (present(payload.clientOperationKey) && text(payload.clientOperationKey).toLowerCase() !== key) {
+    throw ApiError.conflict('The consultation operation key does not match this request.');
+  }
+  return key;
+};
+
+const operationHash = (payload) => {
+  const { clientOperationKey, ...clinical } = payload;
+  return requestFingerprint({ method: 'POST', path: '/consultations', body: clinical });
+};
+
+const assertOperationOwner = (visit, user, payload, hash) => {
+  if (visit.recordedById !== user.id || visit.residentId !== payload.residentId
+    || visit.clientOperationPayloadHash !== hash) {
+    throw ApiError.conflict('This consultation operation belongs to a different author, resident, or clinical payload.');
+  }
+};
+
+/** Re-check current scope/eligibility even when the HTTP ledger has a response. */
+export const validateCreateReplay = async (req, body, { repo = repository, supabase = serviceClientFor(repo) } = {}) => {
+  assertStaff(req.user);
+  const payload = req.body?.consultation || req.body || {};
+  const key = consultationOperationKey(payload, req.idempotencyKey);
+  const visit = await repo.findVisitByOperationKey(key);
+  if (!visit || visit.id !== body?.data?.consultation?.id) {
+    throw ApiError.conflict('The consultation operation could not be confirmed. Retry the original operation.');
+  }
+  assertOperationOwner(visit, req.user, payload, operationHash(payload));
+  const resident = await repo.getResident(visit.residentId);
+  assertResidentScope(req.user, resident);
+  await assertResidentEligibleForConsultation(resident, repo);
+  await resolveConsultationService({ user: req.user, serviceId: payload.serviceId ?? payload.service_id,
+    existingServiceId: visit.healthServiceId, supabase });
+};
+
+export const create = async ({ user, payload = {}, idempotencyKey = null, repo = repository,
+  supabase = serviceClientFor(repo), classifyBp = classifyWithConfig, persistRisk = persistResidentRisk }) => {
   assertStaff(user);
+  const key = consultationOperationKey(payload, idempotencyKey);
+  const hash = operationHash(payload);
+  // Resolve the durable operation before allocating a new visit. The original
+  // recorder is immutable, including when another staff member edits the visit.
+  let visit = await repo.findVisitByOperationKey(key);
+  if (visit) assertOperationOwner(visit, user, payload, hash);
   const fieldErrors = consultationFieldErrors(payload, { requireResident: true });
   if (Object.keys(fieldErrors).length) {
     throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
   }
-  const resident = await repository.getResident(payload.residentId);
+  const resident = await repo.getResident(payload.residentId);
   assertResidentScope(user, resident);
   // Verified residents only: enforce eligibility on the submission endpoint so a
   // direct API call cannot record a consultation for a pending/unverified
   // resident even though the UI filters them out of the selector.
-  await assertResidentEligibleForConsultation(resident);
+  await assertResidentEligibleForConsultation(resident, repo);
   const { errors: followUpErrors, normalized } = validateFollowUp(payload);
   if (followUpErrors.length) throw ApiError.unprocessable('Please correct the consultation fields shown below.', { nextVisitDate: followUpErrors.join(' ') });
   const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate };
   // Validate the selected health service against the database (new consultation:
   // an inactive service is rejected; the association must be a real, in-scope
   // service row — never a free-text name).
-  const healthService = await resolveConsultationService({ user, serviceId: payload.serviceId ?? payload.service_id, supabase });
-  const ids = await repository.nextSubmissionId();
-  const bpClassification = await classifyWithConfig(cleanPayload.bloodPressure);
-  const visit = await repository.insertVisit({ id: ids.id, ...toVisit(cleanPayload, user, resident.id, { bpClassification, ...healthService }) });
-  await syncConsultationFollowUp({ user, visit, payload: cleanPayload, supabase });
+  const healthService = await resolveConsultationService({
+    user, serviceId: payload.serviceId ?? payload.service_id, existingServiceId: visit?.healthServiceId, supabase,
+  });
+  if (!visit) {
+    // A keyless historical write cannot be correlated with an old response-loss
+    // draft. Never guess a clinical match or silently create a second visit.
+    if (payload.legacyDraftAdopted === true && await repo.hasUnkeyedVisitsForResident(resident.id)) {
+      throw ApiError.conflict('This legacy draft cannot be safely distinguished from a pre-upgrade visit. Review existing records before recording another visit. Clinical information remains on this device.');
+    }
+    const ids = await repo.nextSubmissionId();
+    const bpClassification = await classifyBp(cleanPayload.bloodPressure);
+    try {
+      visit = await repo.insertVisit({
+        id: ids.id,
+        ...toVisit(cleanPayload, user, resident.id, {
+          bpClassification, healthServiceId: healthService.id, healthServiceName: healthService.name,
+        }),
+        clientOperationKey: key,
+        clientOperationPayloadHash: hash,
+      });
+    } catch (error) {
+      if ((error.code || error.details?.code) !== '23505') throw error;
+      visit = await repo.findVisitByOperationKey(key);
+      if (!visit) throw error;
+      assertOperationOwner(visit, user, payload, hash);
+    }
+  }
+  // The clinical row survives a failed side-effect transaction. A retry resumes
+  // this step, under a database row lock, rather than inserting another visit or
+  // silently treating a missing follow-up/notification as completed.
+  await repo.completeConsultationOperation({ id: visit.id, creatorId: user.id });
   // Recorded health data changed -> recompute + persist the resident's risk
   // (backend-authoritative; best-effort so a save is never blocked by it).
-  await persistResidentRisk({ residentId: resident.id });
-  // Only after the consultation is persisted: tell the resident a new record is
-  // available (idempotent, non-clinical, best-effort).
-  await notifyResidentOfConsultation({ resident, visit });
-  return fromVisit(visit, supabase);
+  await persistRisk({ residentId: resident.id });
+  const completed = await repo.getVisit(visit.id);
+  if (!completed?.consultationEffectsCompletedAt) {
+    throw new ApiError(503, 'The consultation completion could not be confirmed. Retry the original operation.');
+  }
+  return fromVisit(completed, supabase);
 };
 
-export const update = async ({ user, id, payload = {}, supabase = getServiceClient() }) => {
+export const update = async ({ user, id, payload = {}, repo = repository, supabase = serviceClientFor(repo),
+  classifyBp = classifyWithConfig, persistRisk = persistResidentRisk,
+  syncFollowUp = syncConsultationFollowUp, notify = notifyResidentOfConsultation }) => {
   assertStaff(user);
-  const visit = await repository.getVisit(id);
+  const visit = await repo.getVisit(id);
   if (!visit) throw ApiError.notFound('Consultation not found.');
   assertResidentScope(user, visit.resident);
+  if (present(payload.residentId) && payload.residentId !== visit.residentId) {
+    throw ApiError.conflict('A consultation cannot be reassigned to another resident.');
+  }
+  if (present(payload.clientOperationKey) && payload.clientOperationKey !== visit.clientOperationKey) {
+    throw ApiError.conflict('A consultation operation key cannot be changed.');
+  }
+  if (visit.clientOperationKey && !visit.consultationEffectsCompletedAt) {
+    throw ApiError.conflict('This consultation is still being completed. Retry its original create operation first.');
+  }
   const fieldErrors = consultationFieldErrors(payload);
   const { errors: followUpErrors, normalized } = validateFollowUp(payload);
   if (Object.keys(fieldErrors).length) {
     throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
   }
-  const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate, residentId: visit.residentId };
+  const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate, residentId: visit.residentId,
+    consultationDetails: { ...visit.consultationDetails, ...payload.consultationDetails } };
   // Validate the (possibly changed) health service. `existingServiceId` keeps an
   // association with a since-deactivated service valid when the editor leaves it
   // untouched, while a NEWLY selected inactive service is rejected.
@@ -732,15 +900,29 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
     existingServiceId: visit.healthServiceId,
     supabase,
   });
-  const bpClassification = await classifyWithConfig(cleanPayload.bloodPressure);
-  const updated = await repository.updateVisit(id, toVisit(cleanPayload, user, visit.residentId, { bpClassification, ...healthService }));
-  await syncConsultationFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
+  const bpClassification = await classifyBp(cleanPayload.bloodPressure);
+  // Preserve the existing visit status (draft / in_review / referred / etc.) —
+  // only a NEW consultation defaults to 'completed'. This stops an update from
+  // clobbering a status the workflow (e.g. intake) set on the row.
+  const updated = await repo.updateVisit(id, {
+    ...toVisit(cleanPayload, user, visit.residentId, {
+      bpClassification,
+      healthServiceId: healthService.id,
+      healthServiceName: healthService.id === visit.healthServiceId ? visit.healthServiceName || healthService.name : healthService.name,
+      status: visit.status || 'completed',
+      recordedAt: visit.recordedAt || visit.createdAt,
+    }),
+    recordedById: visit.recordedById,
+    recordedByRole: visit.recordedByRole,
+    recordedByName: visit.recordedByName,
+  });
+  await syncFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
   // Recorded health data changed -> recompute + persist the resident's risk.
-  await persistResidentRisk({ residentId: visit.residentId });
+  await persistRisk({ residentId: visit.residentId });
   // Only after the consultation is persisted. Idempotent per visit id, so
   // editing an existing consultation does not create a duplicate notification.
-  await notifyResidentOfConsultation({ residentId: visit.residentId, visit: updated });
+  await notify({ residentId: visit.residentId, visit: updated });
   return fromVisit(updated, supabase);
 };
 
-export default { list, create, update };
+export default { list, get, create, update };

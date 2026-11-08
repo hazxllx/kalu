@@ -4,6 +4,7 @@ import {
   RISK_WORKFLOW_STATUSES,
 } from "@/lib/householdRisk";
 import { householdRiskApi } from "@/services/api/householdRiskApi";
+import { registerWorkingSetReset } from "./accountWorkingSets";
 
 /**
  * Household Risk Cluster store.
@@ -179,3 +180,4 @@ export const householdRiskStore = {
 };
 
 export default householdRiskStore;
+registerWorkingSetReset(() => { cache = []; computedCache = null; listeners.forEach((listener) => listener()); });

@@ -17,8 +17,9 @@ export const meta = async (req, res) => {
 
 export const list = async (req, res) => {
   const box = String(req.query.box || 'incoming').toLowerCase() === 'outgoing' ? 'outgoing' : 'incoming';
-  const rows = await service.list({ user: req.user, box, status: req.query.status });
-  sendData(res, { rows, records: rows });
+  const includeTotal = req.query.limit !== undefined || req.query.offset !== undefined;
+  const result = await service.list({ user: req.user, box, status: req.query.status, limit: req.query.limit || 200, offset: req.query.offset || 0, includeTotal });
+  sendData(res, includeTotal ? { ...result, records: result.rows } : { rows: result, records: result });
 };
 
 export const get = async (req, res) => {

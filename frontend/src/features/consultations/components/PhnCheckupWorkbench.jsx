@@ -1,9 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTriangle, FileText, Pill } from "lucide-react";
 import { Card } from "@/components/common/Card";
-import { calculateRiskLevel } from "@/lib/riskRules";
 import { consultationLocationFor } from "@/lib/consultationLocations";
-import { useWorkflowStore } from "@/services/local/workflowStore";
 import { useAuth } from "@/context/AuthContext";
 import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
@@ -112,13 +110,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const residenceBarangay = patient?.residenceBarangay || patient?.barangay || null;
   const consultationLocation = consultationLocationFor(patient || {});
 
-  const workflow = useWorkflowStore();
-  const referralRow = (workflow.referrals || []).find((r) => r.resident === patient?.patient);
-  const followUpRow = (workflow.followUps || []).find((f) => f.resident === patient?.patient);
-  const serviceRow = (workflow.services || []).find(
-    (s) => (s.name || "").includes(patient?.patient) || (s.notes || "").includes(patient?.patient)
-  );
-
   useEffect(() => {
     document.body.style.overflow = "hidden";
     const onKey = (e) => {
@@ -167,17 +158,17 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     };
   }, [patient?.id, patient?.serviceId, patient?.raw?.healthServiceId, completed]);
 
-  // Automatic, rule-based risk level that re-evaluates live as the PHN types.
-  const autoRisk = useMemo(
-    () =>
-      calculateRiskLevel(patient || {}, patient?.triage || {}, {
-        healthConcern,
-        assessment,
-        clinicalNotes,
-        recommendations,
-      }),
-    [patient, healthConcern, assessment, clinicalNotes, recommendations]
-  );
+  // Authoritative risk comes from the backend assessment (phnQueue.service /
+  // residentRisk.js), resolved onto the patient row by mapVisitToPatient. A
+  // client-side prototype engine must not override the stored clinical risk.
+  const autoRisk = {
+    level: patient?.riskLevel ?? patient?.checkup?.riskLevel ?? "Unassessed",
+    reason: patient?.riskFactors?.length
+      ? (Array.isArray(patient.riskFactors) ? patient.riskFactors : []).map((factor) =>
+          typeof factor === "string" ? factor : factor?.label || factor?.message || factor?.reason || "")
+          .filter(Boolean).join("; ")
+      : "Backend assessment on file; no factors were returned.",
+  };
 
   const validate = () => {
     const next = {};
@@ -192,8 +183,6 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
     const recorded = {
       assessment: assessment.trim(),
       healthConcern: healthConcern.trim(),
-      riskLevel: autoRisk.level,
-      riskReason: autoRisk.reason,
       consultationLocation,
       clinicalNotes: clinicalNotes.trim(),
       recommendations: recommendations.trim(),
@@ -382,11 +371,11 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <OutcomeItem label="Consultation Status" value={patient?.status} />
                     <OutcomeItem label="Outcome" value={checkup.outcome || "No Further Action"} />
-                    <OutcomeItem label="Referral" value={referralRow ? referralRow.status : null} />
-                    <OutcomeItem label="Follow-up" value={followUpRow ? followUpRow.status : null} />
+                    <OutcomeItem label="Referral" value={checkup.referralStatus || "—"} />
+                    <OutcomeItem label="Follow-up" value={checkup.followUpStatus || "—"} />
                     <OutcomeItem
                       label="Monitoring / Health Service"
-                      value={serviceRow ? serviceRow.status : null}
+                      value={checkup.serviceStatus || "—"}
                     />
                   </div>
                 </div>

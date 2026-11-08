@@ -237,19 +237,19 @@ export default function HouseholdVerifications({
           />
         </VerificationQueueToolbar>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto hidden sm:block">
           {loading ? (
             <SkeletonTable rows={5} cols={6} className="px-4 py-5" />
           ) : (
           <table className="verification-table">
             <thead>
               <tr>
-                <th scope="col">Household ID</th>
-                <th scope="col">Representative</th>
-                <th scope="col">Assignment</th>
-                <th scope="col">Submitted</th>
-                <th scope="col">Status</th>
-                <th scope="col" className="text-right">Action</th>
+                <th scope="col" style={{ width: "18%" }}>Household ID</th>
+                <th scope="col" style={{ width: "22%" }}>Representative</th>
+                <th scope="col" style={{ width: "14%" }}>Assignment</th>
+                <th scope="col" style={{ width: "17%" }}>Submitted</th>
+                <th scope="col" style={{ width: "15%" }}>Status</th>
+                <th scope="col" className="is-narrow text-right">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -293,7 +293,7 @@ export default function HouseholdVerifications({
                     {h.verificationStatus === "Pending Verification" ? <button
                       type="button"
                       onClick={() => openReview(h)}
-                      className="inline-flex items-center gap-1.5 rounded-btn px-1.5 py-1 text-sm font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                      className="inline-flex items-center gap-1.5 rounded-btn px-2.5 py-1.5 text-sm font-medium text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
                     >
                       Review <ChevronRight className="w-3.5 h-3.5" />
                     </button> : <span className="text-xs text-brand-gray">Reviewed</span>}
@@ -304,6 +304,58 @@ export default function HouseholdVerifications({
           </table>
           )}
         </div>
+
+        {/* Mobile stacked cards */}
+        <ul className="verification-cards sm:hidden">
+          {loading ? (
+            <li className="py-10 text-center text-sm text-brand-gray">Loading…</li>
+          ) : (
+            pageRows.map((h) => (
+              <li key={h.householdId}>
+                <div className="col-span-2">
+                  <p className="text-sm font-semibold text-brand-ink dark:text-foreground">{h.head}</p>
+                  <p className="mt-0.5 text-xs text-brand-gray">{h.householdId} · {h.barangay || "—"}</p>
+                </div>
+                <div>
+                  <dt>Members</dt>
+                  <dd>{h.members} · {h.families} {h.families === 1 ? "family" : "families"}</dd>
+                </div>
+                <div>
+                  <dt>Submitted</dt>
+                  <dd>{h.createdAt ? new Date(h.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt>Status</dt>
+                  <dd>
+                    <VerificationBadge
+                      status={
+                        h.verificationStatus === "Verified"
+                          ? "approved"
+                          : h.verificationStatus === "Returned for Correction"
+                            ? "resubmission_required"
+                            : "pending"
+                      }
+                      size="sm"
+                    />
+                  </dd>
+                </div>
+                <div className="card-action">
+                  {h.verificationStatus === "Pending Verification" ? (
+                    <button
+                      type="button"
+                      onClick={() => openReview(h)}
+                      className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-btn border border-brand-border px-3 text-[13px] font-semibold text-brand-blue transition-colors hover:border-brand-blue hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:hover:bg-card-nested"
+                    >
+                      Review <ChevronRight className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <span className="text-xs text-brand-gray">Reviewed</span>
+                  )}
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
 
         {filtered.length === 0 && (
           <div className="px-6 py-16 text-center">

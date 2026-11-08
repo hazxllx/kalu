@@ -150,14 +150,14 @@ export default function RhuTriage() {
   const loadIncomingReferrals = useCallback(async () => {
     const seq = (referralLoadSeq.current += 1);
     try {
-      const result = await referralsApi.list();
+      const result = await referralsApi.inbox({}, { ownerId: user?.id });
       if (seq !== referralLoadSeq.current) return;
-      setIncomingReferrals(filterOpenReferrals(result?.rows || []));
+      setIncomingReferrals(filterOpenReferrals(result?.rows || []).filter((row) => row.status === 'Accepted' || row.status === 'In Progress'));
     } catch {
       if (seq !== referralLoadSeq.current) return;
       setIncomingReferrals([]);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     loadIncomingReferrals();

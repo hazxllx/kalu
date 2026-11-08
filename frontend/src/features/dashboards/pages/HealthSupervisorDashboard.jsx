@@ -1,837 +1,263 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "framer-motion";
+import { ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Download, MapPin, Send, Stethoscope, UserRound } from "lucide-react";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card } from "@/components/common/Card";
-import PageHeader from "@/components/common/PageHeader";
-import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
-import { referralsApi, followUpsApi } from "@/services/api";
-import {
-  fetchEarlyWarningData,
-  fetchCommunityMap,
-} from "@/services/api/earlyWarningApi";
-import {
-  filterSupervisorRows,
-  getSupervisorScope,
-  supervisorVisibleBarangays,
-} from "@/lib/supervisorScope";
-import { riskOfPatient } from "@/lib/riskRules";
+import StatCard from "@/components/common/StatCard";
+import StatusBadge from "@/components/common/StatusBadge";
+import EmptyState from "@/components/common/EmptyState";
+import ErrorState from "@/components/common/ErrorState";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
+import useAuthorizedData from "@/hooks/useAuthorizedData";
+import { referralsApi, followUpsApi, residentsApi, consultationsApi, healthServicesApi } from "@/services/api";
+import { fetchEarlyWarningData, fetchCommunityMap } from "@/services/api/earlyWarningApi";
+import { authorizedViewsApi } from "@/services/api/authorizedViewsApi";
+import { buildBarangayHealthOverview } from "@/services/api/monitoringApi";
+import { getSupervisorScope } from "@/lib/supervisorScope";
+import { loadServerRows } from "@/lib/serverRows";
+import { toLocalISODate } from "@/lib/dateUtils";
+import { manilaDateKey, fromKey, formatTime } from "@/features/follow-ups/lib/scheduleDates";
 import CommunityHealthMap from "@/features/analytics/components/CommunityHealthMap";
 import TopHealthTrends from "@/features/dashboards/components/TopHealthTrends";
+import HealthSupervisorPageHeader from "@/features/dashboards/components/HealthSupervisorPageHeader";
 import { buildTopHealthTrends } from "@/features/dashboards/components/healthTrendsUtils";
-import ScheduleCalendar from "@/features/dashboards/components/ScheduleCalendar";
-import { X, AlertTriangle, Clock, FileText, MapPin, TrendingUp } from "lucide-react";
-import { toLocalISODate } from "@/lib/dateUtils";
+import { mapFollowUpEvent, mapHealthServiceEvent } from "@/features/dashboards/components/scheduleCalendarUtils";
+import { downloadCsv } from "@/features/health-records/lib/programFormExport";
+import {
+  requireDashboardRows, recordsForBarangay, isOpenFollowUp, isOverdueFollowUp,
+  buildMonitoringPriorities, enrichMonitoringCases, matchesMonitoringFilter,
+  upcomingActivities, requireSupervisorMap, riskDistributionRows, dashboardGreeting,
+  previousFourMonths, openedCaseSeries, highRiskCaseSeries, followUpPerformance, monitoringCasesCsv,
+} from "@/features/dashboards/components/supervisorDashboardData";
 
-// Referral statuses that count as "still pending" (mirrors the DB check
-// constraint on public.health_referrals — Completed/Cancelled are terminal).
-const OPEN_REFERRAL_STATUSES = new Set(["Pending", "Accepted", "In Progress"]);
-const todayIso = () => new Date().toISOString().slice(0, 10);
-
-/** persisted health_referrals row → the flat shape the dashboard renders. */
-const mapReferral = (row) => ({
-  id: row.id,
-  resident: row.resident
-    ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
-    : "Resident",
-  barangay: row.resident?.barangay || "",
-  reason: row.reason || "",
-  facility: row.destination_facility || "",
-  priority: row.priority || "Medium",
-  status: row.status || "Pending",
-  // Real creation timestamp for the "Date Added" column (falls back to the
-  // referral date when the row predates created_at tracking).
-  createdAt: row.created_at || row.referral_date || "",
-});
-
-/** persisted follow_ups row → the flat shape the dashboard renders. */
-const mapFollowUp = (row) => ({
-  id: row.id,
-  resident: row.resident
-    ? [row.resident.first_name, row.resident.middle_name, row.resident.last_name].filter(Boolean).join(" ")
-    : "Resident",
-  barangay: row.resident?.barangay || "",
-  purpose: row.purpose || "",
-  dueDate: row.scheduled_date || "",
-  time: row.scheduled_time ? String(row.scheduled_time).slice(0, 5) : "",
-  status: row.status || "Scheduled",
-  // Real creation timestamp for the "Date Added" column.
-  createdAt: row.created_at || "",
-});
-
-/** A follow-up is "overdue/attention" when it is still open and due today or earlier. */
-const isFollowUpDue = (f) =>
-  !["Completed", "Cancelled"].includes(f.status) && f.dueDate && String(f.dueDate).slice(0, 10) <= todayIso();
-
-const RISK_TONES = {
-  High: "bg-brand-danger/10 text-brand-danger",
-  Medium: "bg-brand-gray/10 text-brand-gray",
-  Low: "bg-brand-gray/10 text-brand-gray",
-};
-
-// Priority/status badge shown in the first table column. Colours follow the
-// shared status language: red for an overdue follow-up, orange for a high-risk
-// case, amber for a follow-up due today, and blue for a pending referral.
-const PRIORITY_BADGES = {
-  "HIGH-RISK CASE": { label: "High Risk", className: "bg-orange-100 text-orange-700" },
-  "OVERDUE FOLLOW-UP": { label: "Overdue", className: "bg-brand-danger/10 text-brand-danger" },
-  "FOLLOW-UP DUE": { label: "Due", className: "bg-amber-100 text-amber-700" },
-  "PENDING REFERRAL": { label: "Pending", className: "bg-brand-blue/10 text-brand-blue" },
-};
-
-// Secondary case description shown under the resident name. Combines the
-// specific detail (reason/purpose) with any supporting context already derived.
-const getCaseReason = (item) => [item.detail, item.extra].filter(Boolean).join(" · ");
-
-// "Date Added" — the record's real creation timestamp rendered as a local date
-// and time. Returns null when no timestamp is available so the cell can show a
-// neutral placeholder instead of a fabricated date.
-const formatCaseDate = (value) => {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(date);
-};
-
-// Quick filters for the Cases Requiring Attention list. Each maps to the
-// synthetic `kind` tags assigned below so a resident never appears twice and a
-// filter never fabricates a category.
-const ATTENTION_FILTERS = [
-  { id: "all", label: "All" },
-  { id: "high-risk", label: "High Risk" },
-  { id: "overdue", label: "Overdue" },
-  { id: "pending-referral", label: "Pending Referrals" },
+const BASE = "/app/health_supervisor";
+const PAGE_SIZE = 5;
+const FILTERS = [
+  { id: "all", label: "All" }, { id: "high-risk", label: "High Risk" },
+  { id: "overdue", label: "Overdue" }, { id: "pending-referral", label: "Pending Referrals" },
 ];
-
-const matchesAttentionFilter = (item, filterId) => {
-  switch (filterId) {
-    case "high-risk":
-      return item.kind === "HIGH-RISK CASE";
-    case "overdue":
-      return item.kind === "OVERDUE FOLLOW-UP" || item.kind === "FOLLOW-UP DUE";
-    case "pending-referral":
-      return item.kind === "PENDING REFERRAL";
-    default:
-      return true;
-  }
+const RISK_COLORS = { "Low Risk": "#367B59", "Moderate Risk": "#B18A32", "High Risk": "#B3202C", Unassessed: "#CBD5E1" };
+const dateLabel = (value, options = {}) => {
+  if (!value) return "Date not recorded";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? new Date(`${value}T00:00:00+08:00`) : new Date(value);
+  return Number.isNaN(date.getTime()) ? "Date not recorded" : new Intl.DateTimeFormat("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric", ...options }).format(date);
 };
+
+function SourceErrors({ errors }) {
+  if (!errors.length) return null;
+  return <div className="hs-source-errors" role="alert">{errors.map(({ label, message, retry }) => <div key={label}><p><strong>{label}: </strong>{message}</p><button type="button" onClick={retry} aria-label={`Retry ${label.toLowerCase()}`}>Retry</button></div>)}</div>;
+}
 
 export default function HealthSupervisorDashboard() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const scope = getSupervisorScope(user);
-  const [selectedPeriod, setSelectedPeriod] = useState(() => {
-    const now = new Date();
-    return { month: now.getMonth(), year: now.getFullYear() };
-  });
-  const now = new Date();
-  const firstSelectableMonth = new Date(now.getFullYear(), now.getMonth() - 23, 1);
-  const yearOptions = Array.from(
-    { length: now.getFullYear() - firstSelectableMonth.getFullYear() + 1 },
-    (_, index) => now.getFullYear() - index,
-  );
-  const monthOptions = (year) =>
-    Array.from({ length: 12 }, (_, month) => month).filter((month) => {
-      const optionDate = new Date(year, month, 1);
-      return optionDate >= firstSelectableMonth && optionDate <= new Date(now.getFullYear(), now.getMonth(), 1);
-    });
-  const availableMonths = monthOptions(selectedPeriod.year);
-  const selectedPeriodLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(
-    new Date(selectedPeriod.year, selectedPeriod.month, 1),
-  );
-  const selectedPeriodRange = useMemo(() => ({
-    from: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month, 1)),
-    to: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month + 1, 0)),
-  }), [selectedPeriod.month, selectedPeriod.year]);
+  const { user, refreshProfile } = useAuth();
+  const { can } = usePermissions();
+  const assignedBarangay = getSupervisorScope(user)?.assignedBarangay;
+  const reducedMotion = useReducedMotion();
+  const canAnalytics = can("reports.analytics.view");
+  const canResidents = can("residents.directory.view");
+  const canReferrals = can("referrals.view") || can("referrals.history.view");
+  const canOpenReferrals = can("referrals.view");
+  const canFollowUps = can("followups.view");
+  const canConsultations = can("consultation.requests.view");
+  const canServices = can("services.view");
+  const canReports = can("reports.view");
+  const canExport = can("reports.export");
+  const [localTime, setLocalTime] = useState(() => new Date());
+  const [today, setToday] = useState(manilaDateKey);
+  const [selectedPeriod, setSelectedPeriod] = useState(() => { const date = fromKey(manilaDateKey()); return { month: date.getMonth(), year: date.getFullYear() }; });
+  const [attentionFilter, setAttentionFilter] = useState("all");
+  const [attentionPage, setAttentionPage] = useState(0);
+  const [mapMetric, setMapMetric] = useState("highRiskResidents");
+  const [selectedMapName, setSelectedMapName] = useState(null);
+  const [exportError, setExportError] = useState("");
+  const registerMenu = useRef(null);
 
-  const [communityMapData, setCommunityMapData] = useState(null);
-  const [communityMapLoading, setCommunityMapLoading] = useState(true);
-  const [communityMapError, setCommunityMapError] = useState("");
-  const [communityMapRetry, setCommunityMapRetry] = useState(0);
-  const [selectedMapBarangayName, setSelectedMapBarangayName] = useState(null);
   useEffect(() => {
-    let active = true;
-    setCommunityMapLoading(true);
-    setCommunityMapError("");
-    fetchCommunityMap(selectedPeriodRange)
-      .then((data) => {
-        if (!active) return;
-        const mapBarangays = (data?.barangays || []).map((row) => {
-          const filteredRow = { ...row };
-          delete filteredRow.newCases;
-          return filteredRow;
-        });
-        setCommunityMapData({
-          ...data,
-          // The map's legacy popup labels this field "New (this month)" and
-          // calculates it against today's month, not the selected period.
-          barangays: mapBarangays,
-        });
-      })
-      .catch(() => {
-        if (active) setCommunityMapError("Unable to load community health data.");
-      })
-      .finally(() => {
-        if (active) setCommunityMapLoading(false);
-      });
-    return () => { active = false; };
-  }, [selectedPeriodRange, communityMapRetry]);
-  const selectedMapBarangay = communityMapData?.barangays?.find(
-    (barangay) => barangay.name === selectedMapBarangayName,
-  ) || null;
+    const update = () => { setLocalTime(new Date()); setToday(manilaDateKey()); };
+    const closeMenu = (event) => { if (registerMenu.current && !registerMenu.current.contains(event.target)) registerMenu.current.removeAttribute("open"); };
+    const escape = (event) => { if (event.key === "Escape") registerMenu.current?.removeAttribute("open"); };
+    const clock = window.setInterval(update, 60000);
+    window.addEventListener("focus", update);
+    document.addEventListener("pointerdown", closeMenu);
+    document.addEventListener("keydown", escape);
+    return () => { clearInterval(clock); window.removeEventListener("focus", update); document.removeEventListener("pointerdown", closeMenu); document.removeEventListener("keydown", escape); };
+  }, []);
 
-  const {
-    patients: workflowPatients,
-    loading: workflowLoading,
-    error: workflowError,
-  } = usePhnWorkflow({ source: "intake" });
+  const currentDate = fromKey(today);
+  const firstMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() - 23, 1);
+  const years = Array.from({ length: currentDate.getFullYear() - firstMonth.getFullYear() + 1 }, (_, i) => currentDate.getFullYear() - i);
+  const monthOptions = (year) => Array.from({ length: 12 }, (_, month) => month).filter((month) => new Date(year, month, 1) >= firstMonth && new Date(year, month, 1) <= new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+  const periodLabel = new Date(selectedPeriod.year, selectedPeriod.month, 1).toLocaleDateString("en-PH", { month: "long", year: "numeric" });
+  const periodRange = useMemo(() => ({ from: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month, 1)), to: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month + 1, 0)) }), [selectedPeriod]);
+  const previousRange = useMemo(() => ({ from: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month - 1, 1)), to: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month, 0)) }), [selectedPeriod]);
+  const trendMonths = useMemo(() => previousFourMonths(selectedPeriod.year, selectedPeriod.month), [selectedPeriod]);
+  const trendRange = useMemo(() => ({ from: `${trendMonths[0].key}-01`, to: toLocalISODate(new Date(selectedPeriod.year, selectedPeriod.month, 0)) }), [trendMonths, selectedPeriod]);
+  const trendLabel = `${dateLabel(trendRange.from, { day: undefined })} - ${dateLabel(trendRange.to, { day: undefined, year: "numeric" })}`;
+  const upcomingRange = useMemo(() => { const end = fromKey(today); end.setDate(end.getDate() + 30); return { from: today, to: toLocalISODate(end) }; }, [today]);
 
-  const [referrals, setReferrals] = useState([]);
-  const [followUps, setFollowUps] = useState([]);
-  const [earlyWarning, setEarlyWarning] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-  // Freshness: set only when a load truly succeeds so the indicator never shows
-  // a timestamp for failed or empty data.
-  const [lastUpdated, setLastUpdated] = useState(null);
-
-  const visibleBarangays = useMemo(() => supervisorVisibleBarangays(user), [user]);
-  const barangayKey = visibleBarangays.join("|");
-
-  const loadStats = useCallback(() => {
-    setLoading(true);
-    setLoadError(null);
-    const barangays = barangayKey ? barangayKey.split("|") : [];
-    return Promise.all([
-      referralsApi.list(),
-      followUpsApi.list(),
-      Promise.all(barangays.map((b) => fetchEarlyWarningData(b))),
-    ])
-      .then(([referralResult, followUpResult, ewList]) => {
-        setReferrals((referralResult?.rows || []).map(mapReferral));
-        setFollowUps((followUpResult?.rows || []).map(mapFollowUp));
-        const map = {};
-        barangays.forEach((b, i) => { map[b] = ewList[i] || null; });
-        setEarlyWarning(map);
-        setLastUpdated(new Date());
-      })
-      .catch((err) => {
-        setLoadError(err?.message || "Unable to load dashboard statistics. Please try again.");
-        setReferrals([]);
-        setFollowUps([]);
-        setEarlyWarning({});
-        setLastUpdated(null);
-      })
-      .finally(() => setLoading(false));
-  }, [barangayKey]);
-
-  useEffect(() => { loadStats(); }, [loadStats]);
-
-  const visibleReferrals = referrals;
-  const visibleFollowUps = followUps;
-
-  const highRiskResidents = useMemo(
-    () => Object.values(earlyWarning).reduce((sum, ew) => sum + (ew?.summary?.highRiskResidents || 0), 0),
-    [earlyWarning]
-  );
-
-  // Previous equivalent reporting period (one calendar month earlier) used only
-  // to derive a trend direction for the Top 3 Health Trends panel. The range
-  // mirrors `selectedPeriodRange` exactly — same authorized scope, same length —
-  // so the comparison is like-for-like. The scope itself always comes from the
-  // authenticated session server-side, never from these client dates.
-  const previousPeriodRange = useMemo(() => {
-    const year = selectedPeriod.month === 0 ? selectedPeriod.year - 1 : selectedPeriod.year;
-    const month = selectedPeriod.month === 0 ? 11 : selectedPeriod.month - 1;
-    return {
-      from: toLocalISODate(new Date(year, month, 1)),
-      to: toLocalISODate(new Date(year, month + 1, 0)),
-    };
-  }, [selectedPeriod.month, selectedPeriod.year]);
-
-  const [previousMapData, setPreviousMapData] = useState(null);
-  const [previousMapError, setPreviousMapError] = useState(false);
-  useEffect(() => {
-    let active = true;
-    setPreviousMapError(false);
-    fetchCommunityMap(previousPeriodRange)
-      .then((data) => { if (active) setPreviousMapData(data); })
-      .catch(() => {
-        if (active) {
-          setPreviousMapData(null);
-          setPreviousMapError(true);
-        }
-      });
-    return () => { active = false; };
-  }, [previousPeriodRange]);
-
-  // Top 3 recorded conditions for the selected period, ranked by case count,
-  // aggregated from the SAME scoped, server-classified community-map rows that
-  // drive the map. A comparison is attached only when the previous period
-  // returned usable rows; otherwise the panel shows the case count alone.
-  const topHealthTrends = useMemo(
-    () => buildTopHealthTrends(
-      communityMapData?.barangays || [],
-      previousMapError ? null : previousMapData?.barangays || null,
-      { limit: 3 },
-    ),
-    [communityMapData, previousMapData, previousMapError],
-  );
-
-  const visiblePatients = useMemo(
-    () => filterSupervisorRows(workflowPatients, user),
-    [workflowPatients, user]
-  );
-
-  const [caseModal, setCaseModal] = useState(null);
-
-  const patientByName = useMemo(() => {
-    const map = {};
-    visiblePatients.forEach((p) => {
-      map[p.patient] = p;
-    });
-    return map;
-  }, [visiblePatients]);
-
-  const riskOf = (patient) => riskOfPatient(patient);
-
-  const stats = useMemo(() => {
-    return {
-      activeCases: visiblePatients.filter((p) => p.status !== "Consultation Completed").length,
-      highRisk: highRiskResidents,
-      pendingReferrals: visibleReferrals.filter((r) => OPEN_REFERRAL_STATUSES.has(r.status)).length,
-      overdueFollowUps: visibleFollowUps.filter(isFollowUpDue).length,
-    };
-  }, [visiblePatients, visibleReferrals, visibleFollowUps, highRiskResidents]);
+  const loadOverview = useCallback(async () => {
+    if (!assignedBarangay || !canAnalytics) return null;
+    const data = await fetchEarlyWarningData(assignedBarangay, periodRange);
+    if (data.scope?.barangay !== assignedBarangay || data.activity?.rows?.some((row) => row.barangay !== assignedBarangay)) throw new Error("The monitoring response is outside your assigned barangay.");
+    return { ...buildBarangayHealthOverview(data, assignedBarangay), riskDistribution: data.riskDistribution };
+  }, [assignedBarangay, canAnalytics, periodRange]);
+  const overview = useAuthorizedData(loadOverview);
+  const loadCurrentCases = useCallback(async () => !assignedBarangay || !canAnalytics ? null : requireSupervisorMap(await fetchCommunityMap({ barangay: assignedBarangay }), assignedBarangay), [assignedBarangay, canAnalytics]);
+  const currentCases = useAuthorizedData(loadCurrentCases);
+  const loadPeriodMap = useCallback(async () => !assignedBarangay || !canAnalytics ? null : requireSupervisorMap(await fetchCommunityMap({ barangay: assignedBarangay, ...periodRange }), assignedBarangay), [assignedBarangay, canAnalytics, periodRange]);
+  const periodMap = useAuthorizedData(loadPeriodMap);
+  const loadPreviousMap = useCallback(async () => !assignedBarangay || !canAnalytics ? null : requireSupervisorMap(await fetchCommunityMap({ barangay: assignedBarangay, ...previousRange }), assignedBarangay), [assignedBarangay, canAnalytics, previousRange]);
+  const previousMap = useAuthorizedData(loadPreviousMap);
+  const loadReferrals = useCallback(async ({ ownerId }) => !assignedBarangay || !canReferrals ? null : recordsForBarangay(requireDashboardRows(await referralsApi.list(undefined, { ownerId }), "referrals"), assignedBarangay), [assignedBarangay, canReferrals]);
+  const referrals = useAuthorizedData(loadReferrals);
+  const loadFollowUps = useCallback(async () => !assignedBarangay || !canFollowUps ? null : recordsForBarangay(requireDashboardRows(await followUpsApi.list(), "follow-ups"), assignedBarangay), [assignedBarangay, canFollowUps]);
+  const followUps = useAuthorizedData(loadFollowUps);
+  const loadResidents = useCallback(async ({ ownerId }) => !assignedBarangay || !canResidents ? null : recordsForBarangay(await loadServerRows((params) => residentsApi.list({ ...params, barangay: assignedBarangay }, { ownerId })), assignedBarangay), [assignedBarangay, canResidents]);
+  const residents = useAuthorizedData(loadResidents);
+  // Opening-time trends require all authorized records, not an encounter-date subset.
+  const loadConsultations = useCallback(async ({ ownerId }) => !assignedBarangay || !canConsultations ? null : recordsForBarangay(await loadServerRows((params) => consultationsApi.list(params, { ownerId }), 500), assignedBarangay), [assignedBarangay, canConsultations]);
+  const consultations = useAuthorizedData(loadConsultations);
+  const loadServices = useCallback(async () => !assignedBarangay || !canServices ? null : recordsForBarangay(requireDashboardRows(await healthServicesApi.listAttendance(upcomingRange), "health-service schedule"), assignedBarangay), [assignedBarangay, canServices, upcomingRange]);
+  const services = useAuthorizedData(loadServices);
+  const loadHighRiskTrend = useCallback(async ({ ownerId }) => {
+    if (!assignedBarangay || !canAnalytics) return null;
+    const years = [...new Set(trendMonths.map((month) => month.year))];
+    const data = await Promise.all(years.map((year) => authorizedViewsApi.communityTrends({ barangay: assignedBarangay, riskLevel: "High", year, ...trendRange }, { ownerId })));
+    return highRiskCaseSeries(data, trendMonths, assignedBarangay);
+  }, [assignedBarangay, canAnalytics, trendMonths, trendRange]);
+  const highRiskTrend = useAuthorizedData(loadHighRiskTrend);
 
   const cases = useMemo(() => {
-    const items = [];
-    const represented = new Set();
-    const push = (item) => {
-      if (represented.has(item.resident)) return;
-      represented.add(item.resident);
-      items.push(item);
-    };
-
-    // Auto high-risk patients in the check-up workflow.
-    visiblePatients
-      .filter((p) => riskOf(p).level === "High")
-      .forEach((p) => {
-        push({
-          key: `case-${p.id}`,
-          kind: "HIGH-RISK CASE",
-          resident: p.patient,
-          barangay: p.barangay || "RHU",
-          caseType: "Check-up",
-          detail: p.reason || p.triage?.chiefComplaint || "High-risk check-up case",
-          extra: riskOf(p).reason,
-          createdAt: p.visitDate || p.triage?.date || "",
-          action: "Review Case",
-          residentId: p.id,
-        });
-      });
-
-    // High-priority referrals awaiting action (e.g. high-risk maternal cases).
-    visibleReferrals
-      .filter((r) => r.priority === "High" && OPEN_REFERRAL_STATUSES.has(r.status))
-      .forEach((r) => {
-        push({
-          key: `high-referral-${r.id}`,
-          kind: "HIGH-RISK CASE",
-          resident: r.resident,
-          barangay: r.barangay || "RHU",
-          caseType: "Referral",
-          detail: r.reason,
-          extra: `${r.facility || ""} · ${r.status || ""}`,
-          createdAt: r.createdAt || "",
-          action: "Review Referral",
-        });
-      });
-
-    // Remaining referrals awaiting review.
-    visibleReferrals
-      .filter((r) => r.status === "Pending")
-      .forEach((r) => {
-        push({
-          key: `referral-${r.id}`,
-          kind: "PENDING REFERRAL",
-          resident: r.resident,
-          barangay: r.barangay || "RHU",
-          caseType: "Referral",
-          detail: r.reason,
-          extra: `${r.facility || ""} · ${r.priority || ""}`,
-          createdAt: r.createdAt || "",
-          action: "Review Referral",
-        });
-      });
-
-    // Overdue / due follow-ups (open and due today or earlier).
-    visibleFollowUps
-      .filter(isFollowUpDue)
-      .forEach((f) => {
-        const overdue = String(f.dueDate).slice(0, 10) < todayIso();
-        items.push({
-          key: `followup-${f.id}`,
-          kind: overdue ? "OVERDUE FOLLOW-UP" : "FOLLOW-UP DUE",
-          resident: f.resident,
-          barangay: f.barangay || "RHU",
-          caseType: "Follow-up",
-          detail: f.purpose,
-          extra: `${f.dueDate || ""} · ${f.time || ""}`,
-          createdAt: f.createdAt || "",
-          action: "Review",
-        });
-      });
-
-    // Urgent first: high-risk cases, then overdue follow-ups, then pending
-    // referrals. Ordering stays stable even when a resident has several reasons.
-    const rank = (item) =>
-      item.kind === "HIGH-RISK CASE" ? 0
-        : item.kind === "OVERDUE FOLLOW-UP" ? 1
-          : item.kind === "FOLLOW-UP DUE" ? 2
-            : 3;
-    return [...items].sort((a, b) => rank(a) - rank(b));
-  }, [visiblePatients, visibleReferrals, visibleFollowUps, patientByName]);
-
-  // Quick-filter UI applied over the already-deduplicated attention list.
-  const [attentionFilter, setAttentionFilter] = useState("all");
-  const filteredCases = useMemo(
-    () => cases.filter((item) => matchesAttentionFilter(item, attentionFilter)),
-    [cases, attentionFilter],
-  );
-  // Per-filter totals so each control can advertise how many cases it matches.
-  const casesByFilter = useMemo(
-    () =>
-      ATTENTION_FILTERS.reduce((acc, filter) => {
-        acc[filter.id] = cases.filter((item) => matchesAttentionFilter(item, filter.id)).length;
-        return acc;
-      }, {}),
-    [cases],
-  );
-  // Keep rows compact: show a bounded set in-view and route the rest to the
-  // dedicated work queues via the footer link.
-  const MAX_VISIBLE_CASES = 8;
-  const visibleCases = filteredCases.slice(0, MAX_VISIBLE_CASES);
-  const hasMoreCases = filteredCases.length > visibleCases.length;
-  // The attention list depends on both the operational queues and the intake
-  // workflow; it is "loading" until both have resolved for the first time.
-  const casesLoading = (loading || workflowLoading) && cases.length === 0;
-
-  const handleCaseAction = (item) => {
-    if (item.action === "Review Case") {
-      const patient = item.residentId != null ? patientByName[item.resident] : null;
-      if (patient) setCaseModal(patient);
-      else navigate("/app/health_supervisor/residents");
-    } else if (item.action === "Review Referral") {
-      navigate("/app/health_supervisor/referrals");
-    } else {
-      navigate("/app/health_supervisor/followups");
-    }
+    const data = { residents: residents.data || [], referrals: referrals.data || [], followUps: followUps.data || [], consultations: consultations.data || [], barangay: assignedBarangay, today };
+    return enrichMonitoringCases(buildMonitoringPriorities(data), data);
+  }, [residents.data, referrals.data, followUps.data, consultations.data, assignedBarangay, today]);
+  const filteredCases = cases.filter((item) => matchesMonitoringFilter(item, attentionFilter));
+  const pageCount = Math.max(1, Math.ceil(filteredCases.length / PAGE_SIZE));
+  const page = Math.min(attentionPage, pageCount - 1);
+  const visibleCases = filteredCases.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const prioritySources = [{ allowed: canResidents, label: "Resident assessments", state: residents }, { allowed: canReferrals, label: "Referrals", state: referrals }, { allowed: canFollowUps, label: "Follow-ups", state: followUps }, { allowed: canConsultations, label: "Consultations", state: consultations }].filter((source) => source.allowed);
+  const priorityErrors = prioritySources.filter(({ state }) => state.error).map(({ label, state }) => ({ label, message: state.error, retry: state.refresh }));
+  const prioritiesLoading = prioritySources.some(({ state }) => state.loading);
+  const filterAvailable = (id) => id === "all" ? priorityErrors.length ? cases.length > 0 : prioritySources.some(({ state }) => Array.isArray(state.data)) : id === "high-risk" ? canResidents && !residents.error : id === "overdue" ? canFollowUps && !followUps.error : canReferrals && !referrals.error;
+  const registerLinks = [{ label: "Resident Directory", href: `${BASE}/residents`, allowed: canResidents, filter: "high-risk" }, { label: "Consultation Records", href: `${BASE}/consultations`, allowed: canConsultations }, { label: "Follow-up Monitoring", href: `${BASE}/followups?status=Overdue`, allowed: canFollowUps, filter: "overdue" }, { label: "Referral Register", href: `${BASE}/referrals?status=Pending`, allowed: canOpenReferrals, filter: "pending-referral" }].filter((link) => link.allowed && (attentionFilter === "all" || link.filter === attentionFilter));
+  const exportCases = () => {
+    try { setExportError(""); downloadCsv(`KALUSAGAP-attention-${String(assignedBarangay).replace(/[^a-z0-9]+/gi, "-")}-${today}.csv`, monitoringCasesCsv(filteredCases)); }
+    catch (error) { setExportError(error?.message || "The monitoring records could not be exported."); }
   };
+  const openedTrend = useMemo(() => {
+    if (!consultations.data) return { data: null, error: "" };
+    try { return { data: openedCaseSeries(consultations.data, trendMonths), error: "" }; }
+    catch (error) { return { data: null, error: error.message }; }
+  }, [consultations.data, trendMonths]);
+  const caseTrend = useMemo(() => trendMonths.map((month, index) => ({ ...month, opened: openedTrend.data?.[index]?.opened ?? null, highRisk: highRiskTrend.data?.[index]?.highRisk ?? null })), [trendMonths, openedTrend.data, highRiskTrend.data]);
+  const hasTrend = caseTrend.some((row) => row.opened > 0 || row.highRisk > 0);
+  const trendErrors = [...(consultations.error || openedTrend.error ? [{ label: "Cases opened", message: consultations.error || openedTrend.error, retry: consultations.refresh }] : []), ...(highRiskTrend.error ? [{ label: "High-risk findings", message: highRiskTrend.error, retry: highRiskTrend.refresh }] : [])];
+  const mapOptions = [{ value: "highRiskResidents", label: "High-risk residents" }, { value: "activeCases", label: "Active health cases" }, { value: "caseCount", label: "Recorded cases" }, ...(periodMap.data?.conditionTotals || []).filter((row) => row.value > 0).map((row) => ({ value: `condition:${row.name}`, label: row.name }))];
+  const condition = mapMetric.startsWith("condition:") ? mapMetric.slice(10) : null;
+  useEffect(() => {
+    if (condition && !periodMap.loading && periodMap.data && !periodMap.data.conditionTotals.some((row) => row.name === condition && row.value > 0)) setMapMetric("caseCount");
+  }, [condition, periodMap.loading, periodMap.data]);
+  const mapSource = mapMetric === "highRiskResidents" ? currentCases : periodMap;
+  const mapContext = mapMetric === "highRiskResidents" ? "Latest recorded resident risk" : periodLabel;
+  const scheduleErrors = [...(canFollowUps && followUps.error ? [{ label: "Follow-ups", message: followUps.error, retry: followUps.refresh }] : []), ...(canServices && services.error ? [{ label: "Health services", message: services.error, retry: services.refresh }] : [])];
+  const activities = useMemo(() => upcomingActivities([...(followUps.data || []).filter(isOpenFollowUp).map(mapFollowUpEvent), ...(services.data || []).map(mapHealthServiceEvent)].filter(Boolean), upcomingRange.from, upcomingRange.to), [followUps.data, services.data, upcomingRange]);
+  const people = new Map((residents.data || []).map((row) => [row.id, row]));
+  const conditions = useMemo(() => buildTopHealthTrends(periodMap.data?.barangays || [], previousMap.loading || previousMap.error ? null : previousMap.data?.barangays || null, { limit: 3 }), [periodMap.data, previousMap.data, previousMap.loading, previousMap.error]);
+  const riskRows = riskDistributionRows(overview.data?.riskDistribution);
+  const riskTotal = riskRows?.reduce((sum, row) => sum + row.value, 0) || 0;
+  const performance = followUpPerformance(followUps.data, periodRange, today);
+  const metricValue = (allowed, source, value) => !allowed ? "No access" : source.loading ? "Loading" : source.error ? null : value ?? null;
+  const statistics = [
+    { label: "Residents Monitored", value: metricValue(canAnalytics, overview, overview.data?.metrics.totalResidents), description: "Registered residents in your barangay", tone: "accent", href: canResidents ? `${BASE}/residents` : null },
+    { label: "Active Health Cases", value: metricValue(canAnalytics, currentCases, currentCases.data?.summary.activeCases), description: "Open consultation and TB records", tone: "blue", href: canConsultations ? `${BASE}/consultations` : null },
+    { label: "High-Risk Residents", value: metricValue(canAnalytics, overview, overview.data?.metrics.residentRisk.high), description: "Latest recorded risk assessments", tone: "danger", href: canResidents ? `${BASE}/residents?risk=High` : null },
+    { label: "Pending Referrals", value: metricValue(canAnalytics, overview, overview.data?.metrics.pendingReferrals), description: "Awaiting receiving action", tone: "yellow", href: canOpenReferrals ? `${BASE}/referrals?status=Pending` : null },
+    { label: "Overdue Follow-ups", value: metricValue(canFollowUps, followUps, followUps.data?.filter((row) => isOverdueFollowUp(row, today)).length), description: "Open follow-ups past their due date", tone: "danger", href: canFollowUps ? `${BASE}/followups?status=Overdue` : null },
+  ];
+  const intro = { hidden: { opacity: 0, y: reducedMotion ? 0 : 7 }, visible: { opacity: 1, y: 0, transition: { duration: reducedMotion ? 0 : 0.28 } } };
 
-  const viewAllCases = () => {
-    // Overdue follow-ups live on the Follow-ups page; everything else is
-    // actioned from Referrals (or the resident directory for high-risk cases).
-    if (attentionFilter === "overdue") navigate("/app/health_supervisor/followups");
-    else navigate("/app/health_supervisor/referrals");
-  };
-
-  const casePatient = caseModal;
-
-  const freshnessLabel = lastUpdated
-    ? new Intl.DateTimeFormat(undefined, {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      }).format(lastUpdated)
-    : null;
-
-  return (
-    <main className="space-y-5 bg-brand-bg font-body">
-      <PageHeader
-        crumbs={["Health Monitoring"]}
-        title="Health Supervisor Dashboard"
-        subtitle={`${
-          scope?.level === "barangay"
-            ? `Barangay ${scope.assignedBarangay}`
-            : "Municipal coverage"
-        } · Health Supervisor · Reporting period: ${selectedPeriodLabel}`}
-        action={
-          <div className="flex max-w-full flex-wrap items-center gap-2">
-            <select
-              aria-label="Reporting month"
-              value={selectedPeriod.month}
-              onChange={(event) =>
-                setSelectedPeriod((current) => ({ ...current, month: Number(event.target.value) }))
-              }
-              className="h-9 max-w-full rounded-sm border border-brand-border bg-brand-paper px-2 py-1.5 text-xs text-brand-ink outline-none focus:border-brand-blue"
-            >
-              {availableMonths.map((month) => (
-                <option key={month} value={month}>
-                  {new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(2000, month, 1))}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Reporting year"
-              value={selectedPeriod.year}
-              onChange={(event) => {
-                const year = Number(event.target.value);
-                const months = monthOptions(year);
-                const month = months.includes(selectedPeriod.month)
-                  ? selectedPeriod.month
-                  : months[months.length - 1];
-                setSelectedPeriod({ year, month });
-              }}
-              className="h-9 rounded-sm border border-brand-border bg-brand-paper px-2 py-1.5 text-xs text-brand-ink outline-none focus:border-brand-blue"
-            >
-              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
-            </select>
-            <button
-              type="button"
-              onClick={() => navigate("/app/health_supervisor/reports")}
-              className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-brand-border bg-brand-paper px-3 py-1.5 text-xs font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
-            >
-              <FileText className="h-3.5 w-3.5" />
-              View Reports
-            </button>
-          </div>
-        }
-      />
-
-      <section aria-label="Key indicators">
-        <p className="mb-3 text-xs text-brand-gray">
-          Operational indicators below reflect the current open queues. The selected reporting period applies to the map and health trends.
-        </p>
-        {loadError && (
-          <Card className="!rounded-card mb-3 flex items-start justify-between gap-3 !border-brand-border !bg-brand-paper p-4 !shadow-none">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-brand-gray" />
-              <div>
-                <p className="text-sm font-semibold text-brand-ink">Couldn't load dashboard statistics</p>
-                <p className="mt-0.5 text-xs text-brand-gray">{loadError}</p>
-              </div>
-            </div>
-            <button
-              onClick={loadStats}
-              className="shrink-0 rounded-sm border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-ink hover:border-brand-gray"
-            >
-              Retry
-            </button>
-          </Card>
-        )}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            {
-              label: "Pending Referrals",
-              value: loading ? "…" : loadError ? "—" : stats.pendingReferrals,
-              path: "/app/health_supervisor/referrals",
-              tone: "text-brand-ink",
-              dot: "bg-brand-gold/70",
-            },
-            {
-              label: "Overdue Follow-ups",
-              value: loading ? "…" : loadError ? "—" : stats.overdueFollowUps,
-              path: "/app/health_supervisor/followups",
-              tone: "text-brand-ink",
-              dot: "bg-brand-gold/70",
-            },
-            {
-              label: "High-Risk Cases",
-              value: loading ? "…" : loadError ? "—" : stats.highRisk,
-              path: "/app/health_supervisor/residents",
-              tone: "text-brand-danger",
-              dot: "bg-brand-danger",
-            },
-            {
-              label: "Active Cases",
-              value: workflowLoading ? "…" : workflowError ? "—" : stats.activeCases,
-              path: "/app/health_supervisor/consultations",
-              tone: "text-brand-blue",
-              dot: "bg-brand-blue",
-            },
-          ].map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              onClick={() => navigate(item.path)}
-              className="group min-w-0 rounded-card border border-brand-border bg-brand-paper p-4 text-left transition-colors hover:border-brand-blue/70 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-gray"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-brand-gray">{item.label}</span>
-                <span className={`h-2 w-2 rounded-full ${item.dot}`} aria-hidden="true" />
-              </div>
-              <p className={`mt-4 font-stat text-[30px] font-semibold leading-none tracking-tight ${item.tone}`}>
-                {item.value}
-              </p>
-            </button>
-          ))}
+  return <MotionConfig reducedMotion="user"><motion.div className="hs-dashboard" key={`${user?.id}:${assignedBarangay}`} initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: reducedMotion ? 0 : 0.045 } } }}>
+    <HealthSupervisorPageHeader
+      title={`${dashboardGreeting(localTime)}${user?.name ? `, ${user.name}` : ""}`}
+      subtitle="Here's an overview of your health supervision activities."
+      meta={
+        <span className="inline-flex items-center gap-2 whitespace-nowrap">
+          <span className="text-[10px] font-semibold uppercase tracking-gov text-brand-goldlight">KALUSAGAP</span>
+          <span className="text-[10px] uppercase tracking-gov text-white/70">{assignedBarangay ? `Barangay ${assignedBarangay}` : "Barangay assignment unavailable"}</span>
+        </span>
+      }
+      action={
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Reporting period controls">
+          <select className="hs-control" aria-label="Reporting month" value={selectedPeriod.month} onChange={(event) => setSelectedPeriod((current) => ({ ...current, month: Number(event.target.value) }))}>{monthOptions(selectedPeriod.year).map((month) => <option key={month} value={month}>{new Date(2000, month, 1).toLocaleDateString("en-PH", { month: "long" })}</option>)}</select>
+          <select className="hs-control hs-year-control" aria-label="Reporting year" value={selectedPeriod.year} onChange={(event) => { const year = Number(event.target.value); const months = monthOptions(year); setSelectedPeriod({ year, month: months.includes(selectedPeriod.month) ? selectedPeriod.month : months[months.length - 1] }); }}>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select>
+          {canReports ? <Link className="hs-button hs-button-primary" to={`${BASE}/reports`}>View Reports<ArrowUpRight aria-hidden="true" /></Link> : <button className="hs-button hs-button-primary" type="button" disabled title="Reports permission is required">View Reports<ArrowUpRight aria-hidden="true" /></button>}
         </div>
-      </section>
+      }
+    />
 
-      <section aria-label="Operational overview" className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.8fr)]">
-        <div className="min-w-0">
-          <ScheduleCalendar selectedMonth={new Date(selectedPeriod.year, selectedPeriod.month, 1)} />
+    <motion.section className="hs-quick-actions" aria-labelledby="quick-actions-heading" variants={intro}><h2 id="quick-actions-heading" className="hs-eyebrow">Quick Actions</h2><div>
+      {[{ label: "Consults", Icon: Stethoscope, href: `${BASE}/consultations`, allowed: canConsultations }, { label: "Follow-ups", Icon: CalendarClock, href: `${BASE}/followups`, allowed: canFollowUps }, { label: "Referrals", Icon: Send, href: `${BASE}/referrals`, allowed: canOpenReferrals }].filter((action) => action.allowed).map(({ label, Icon, href }) => <Link className="hs-shortcut" to={href} key={label}><span><Icon aria-hidden="true" /></span>{label}</Link>)}
+    </div></motion.section>
+
+    {!assignedBarangay ? <Card><ErrorState compact title="Barangay assignment unavailable" message="Refresh your account information before opening community records." onRetry={refreshProfile} retryLabel="Refresh Account" /></Card> : <>
+      <div className="hs-main-grid">
+        <motion.section className="hs-panel hs-attention-panel" aria-labelledby="attention-heading" variants={intro}>
+          <header className="hs-panel-header"><div className="hs-title-group"><h2 id="attention-heading">Cases Requiring Attention</h2><span className="hs-case-total" title="Authorized monitoring records; failed sources are not counted">{prioritiesLoading ? "..." : !filterAvailable("all") ? "--" : `${cases.length}${priorityErrors.length ? "+" : ""}`}</span></div><div className="hs-panel-actions">
+            <button type="button" className="hs-button" onClick={exportCases} disabled={!canExport || !filteredCases.length || prioritiesLoading || priorityErrors.length > 0} title={!canExport ? "Export permission is required" : "Export all records matching the selected filter"}><Download aria-hidden="true" />Export</button>
+            {registerLinks.length === 1 ? <Link className="hs-button" to={registerLinks[0].href} title={`Open ${registerLinks[0].label}`}>View All<ArrowUpRight aria-hidden="true" /></Link> : registerLinks.length ? <details ref={registerMenu} className="hs-register-menu"><summary className="hs-button">View All<ArrowUpRight aria-hidden="true" /></summary><nav aria-label="Choose an existing monitoring register">{registerLinks.map((link) => <Link to={link.href} key={link.href} onClick={() => registerMenu.current?.removeAttribute("open")}>{link.label}<ArrowUpRight aria-hidden="true" /></Link>)}</nav></details> : <button type="button" className="hs-button" disabled>View All<ArrowUpRight aria-hidden="true" /></button>}
+          </div></header>
+          <p className="hs-panel-description">Residents with high-risk assessments, unresolved cases, referrals or follow-ups requiring review.</p>
+          <div className="hs-case-filters" role="group" aria-label="Filter cases requiring attention">{FILTERS.map((filter) => <button key={filter.id} type="button" aria-pressed={attentionFilter === filter.id} title={priorityErrors.length ? "Available source records only; retry failed sources for complete counts" : "Authorized monitoring records"} onClick={() => { setAttentionFilter(filter.id); setAttentionPage(0); }}><span>{filter.label}</span><span>{prioritiesLoading ? "..." : !filterAvailable(filter.id) ? "--" : `${cases.filter((item) => matchesMonitoringFilter(item, filter.id)).length}${priorityErrors.length ? "+" : ""}`}</span></button>)}</div>
+          <SourceErrors errors={priorityErrors} />{exportError && <p className="hs-inline-error" role="alert">{exportError}</p>}
+          <AnimatePresence initial={false} mode="wait"><motion.div key={`${attentionFilter}:${page}`} initial={{ opacity: reducedMotion ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: reducedMotion ? 1 : 0 }} transition={{ duration: reducedMotion ? 0 : 0.12 }}>
+            {prioritiesLoading && !cases.length ? <p className="hs-loading" role="status">Loading authorized monitoring records...</p> : visibleCases.length ? <ul className="hs-case-list">{visibleCases.map((item) => {
+              const clickable = item.category === "Resident assessment" ? can("residents.profile.view") : item.category === "Referral" ? canOpenReferrals : true;
+              const content = <><div className="hs-case-first-line"><h3>{item.resident}</h3><span className={`hs-risk-badge ${item.riskLevel === "High" ? "is-high" : item.riskLevel === "Moderate" ? "is-medium" : item.riskLevel === "Low" ? "is-low" : "is-unassessed"}`}>{item.riskLabel}</span>{clickable && <ArrowRight className="hs-case-arrow" aria-hidden="true" />}</div><p className="hs-case-concern" title={`${item.category}: ${item.detail}`}>{item.priority !== "High Risk" ? `${item.priority}: ` : ""}{item.detail}</p><div className="hs-case-metadata"><span title={item.areaBasis}><MapPin aria-hidden="true" />{item.area}</span><span title={item.dateLabel}><CalendarDays aria-hidden="true" />{dateLabel(item.date, { year: "numeric" })}</span><span title={item.responsible || "No responsible-personnel name was provided"}><UserRound aria-hidden="true" />{item.responsible || "Personnel not recorded"}</span></div></>;
+              return <li key={item.key}>{clickable ? <Link to={item.href} aria-label={`${item.action} for ${item.resident}`}>{content}</Link> : <article>{content}</article>}</li>;
+            })}</ul> : <EmptyState compact title={priorityErrors.length ? "No cases in the available sources" : !prioritySources.length ? "Monitoring access unavailable" : "No cases match this filter"} description={priorityErrors.length ? "Retry the unavailable sources to complete this list." : "Cases requiring clinical or supervisory review appear here."} />}
+          </motion.div></AnimatePresence>
+          <footer className="hs-case-pagination"><span>{filteredCases.length ? `Showing ${page * PAGE_SIZE + 1}-${Math.min((page + 1) * PAGE_SIZE, filteredCases.length)} of ${filteredCases.length}${priorityErrors.length ? " available records" : " records"}` : prioritiesLoading ? "Checking records" : priorityErrors.length ? "Some record sources are unavailable" : !prioritySources.length ? "Register access is unavailable" : "0 matching records"}</span><div><button type="button" className="hs-page-button" aria-label="Previous case page" disabled={page === 0} onClick={() => setAttentionPage(page - 1)}><ChevronLeft aria-hidden="true" /></button><span>{page + 1} / {pageCount}</span><button type="button" className="hs-page-button" aria-label="Next case page" disabled={page === pageCount - 1} onClick={() => setAttentionPage(page + 1)}><ChevronRight aria-hidden="true" /></button></div></footer>
+        </motion.section>
+
+        <div className="hs-main-sidebar">
+          <motion.section className="hs-panel hs-map-panel" aria-labelledby="map-heading" variants={intro}>
+            <header className="hs-panel-header"><div><h2 id="map-heading">Community Health Map</h2><p>{assignedBarangay}</p></div><select className="hs-control hs-metric-select" aria-label="Community map metric" value={mapMetric} onChange={(event) => setMapMetric(event.target.value)}>{mapOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></header>
+            <div className="hs-map-content">{canAnalytics ? <CommunityHealthMap variant="dashboard" height={260} barangays={mapSource.data?.barangays || []} center={mapSource.data?.center || null} loading={mapSource.loading} error={mapSource.error} onRetry={mapSource.refresh} showCountLabels showNewCases={false} periodLabel={mapContext} displayMetric={condition ? "caseCount" : mapMetric} metricLabel={mapOptions.find((option) => option.value === mapMetric)?.label || condition || "Recorded cases"} visibleConditions={condition ? [condition] : null} selectedName={selectedMapName} onSelect={(row) => setSelectedMapName(row.name)} detailsHref={`${BASE}/trends`} /> : <EmptyState compact title="Map access unavailable" description="Analytics permission is required." />}</div>
+            <footer className="hs-panel-footer">{canAnalytics ? <Link to={`${BASE}/trends`}>Open health trends<ArrowUpRight aria-hidden="true" /></Link> : <span>Health trends requires analytics access</span>}</footer>
+          </motion.section>
+          <motion.section className="hs-panel hs-trends-panel" aria-labelledby="case-trends-heading" variants={intro}>
+            <header className="hs-panel-header"><div><h2 id="case-trends-heading">Case Trends</h2><p>{trendLabel}</p></div>{canReports && <Link to={`${BASE}/reports`} className="hs-text-link">Reports<ArrowUpRight aria-hidden="true" /></Link>}</header>
+            <SourceErrors errors={trendErrors} />
+            {(canConsultations && consultations.loading) || (canAnalytics && highRiskTrend.loading) ? <p className="hs-loading" role="status">Loading four-month case trends...</p> : hasTrend ? <><div className="hs-line-chart" role="img" aria-label="Case records opened and high-risk case findings over the previous four completed months"><ResponsiveContainer width="100%" height={148}><LineChart data={caseTrend} margin={{ top: 8, right: 9, left: -12, bottom: 0 }}><CartesianGrid vertical={false} stroke="#DDE5EF" strokeDasharray="2 4" /><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#667991" }} tickMargin={8} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#667991" }} width={36} tickCount={3} /><Tooltip contentStyle={{ fontSize: 11, borderRadius: 3, border: "1px solid #D6DEE8", boxShadow: "0 2px 8px #102E5010" }} labelFormatter={(_label, payload) => payload[0]?.payload?.key || _label} />{openedTrend.data && <Line type="monotone" dataKey="opened" name="Cases opened" stroke="#124C80" strokeWidth={1.8} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={!reducedMotion} animationDuration={420} />}{highRiskTrend.data && <Line type="monotone" dataKey="highRisk" name="High-risk findings" stroke="#B28A31" strokeWidth={1.8} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={!reducedMotion} animationDuration={420} />}</LineChart></ResponsiveContainer></div><div className="hs-chart-legend">{openedTrend.data && <span><i style={{ background: "#124C80" }} />Cases opened</span>}{highRiskTrend.data && <span><i style={{ background: "#B28A31" }} />High-risk findings</span>}</div><p className="hs-chart-note">Opened: record creation dates. High-risk: recorded cases under current assessment rules.</p></> : <EmptyState compact title={trendErrors.length ? "Available trend data has no recorded cases" : !canAnalytics && !canConsultations ? "Trend access unavailable" : "No case activity in these months"} description="Historical values are shown only when authorized records are available." />}
+          </motion.section>
         </div>
+      </div>
 
-        <div className="space-y-4">
-          <Card className="!rounded-card min-w-0 !border-brand-border !bg-brand-paper p-4 !shadow-none">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-brand-gold shrink-0" aria-hidden="true" />
-              <h2 className="font-heading text-sm font-semibold text-brand-blue">Top 3 Health Trends</h2>
-            </div>
-            <p className="mt-1 text-xs text-brand-gray">
-              Most frequently recorded conditions within your authorized coverage · {selectedPeriodLabel}.
-            </p>
-            <TopHealthTrends
-              trends={topHealthTrends}
-              loading={communityMapLoading}
-              error={communityMapError}
-            />
-          </Card>
+      <motion.section className="hs-statistics" aria-label="Operational statistics" variants={intro}><div className="hs-statistics-strip">{statistics.map((stat) => <StatCard key={stat.label} variant="ledger" animateValue label={stat.label} value={stat.value} description={stat.description} tone={stat.tone} href={stat.href} />)}</div>{(overview.error || currentCases.error) && <SourceErrors errors={[...(overview.error ? [{ label: "Operational statistics", message: overview.error, retry: overview.refresh }] : []), ...(currentCases.error ? [{ label: "Active cases", message: currentCases.error, retry: currentCases.refresh }] : [])]} />}</motion.section>
 
-          <Card className="!rounded-card min-w-0 !border-brand-border !bg-brand-paper p-4 !shadow-none">
-            <div className="flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-brand-gold shrink-0" aria-hidden="true" />
-              <h2 className="font-heading text-sm font-semibold text-brand-blue">Community Health Map</h2>
-            </div>
-            <p className="mt-1 text-xs text-brand-gray">
-              Aggregated case activity for {selectedPeriodLabel} within your authorized coverage.
-            </p>
-            <div className="mt-3">
-              <div className="min-w-0 [&_.leaflet-container]:!h-[270px] [&>div>div.mt-3]:hidden">
-                <CommunityHealthMap
-                  barangays={communityMapData?.barangays || []}
-                  center={communityMapData?.center || null}
-                  loading={communityMapLoading}
-                  error={communityMapError}
-                  onRetry={() => setCommunityMapRetry((count) => count + 1)}
-                  onSelect={(barangay) => setSelectedMapBarangayName(barangay.name)}
-                  selectedName={selectedMapBarangayName}
-                />
-              </div>
-            </div>
-            {selectedMapBarangay && (
-              <div aria-live="polite" className="mt-3 rounded-sm border border-brand-border bg-brand-bg/60 p-3 text-xs">
-                <p className="font-semibold text-brand-ink">{selectedMapBarangay.name}</p>
-                <p className="mt-1 text-brand-gray">
-                  {selectedMapBarangay.caseCount ?? 0} total cases · {selectedMapBarangay.activeCases ?? 0} active cases
-                </p>
-                {selectedMapBarangay.topCondition && (
-                  <p className="text-brand-gray">
-                    Top condition: {selectedMapBarangay.topCondition.name} ({selectedMapBarangay.topCondition.value})
-                  </p>
-                )}
-              </div>
-            )}
-          </Card>
-        </div>
-      </section>
+      <div className="hs-bottom-grid">
+        <motion.section className="hs-panel hs-upcoming-panel" aria-labelledby="upcoming-heading" variants={intro}>
+          <header className="hs-panel-header"><div><h2 id="upcoming-heading">Upcoming Activities</h2><p>Next scheduled services and follow-ups</p></div>{(canFollowUps || canServices) && <Link to={`${BASE}/followup-calendar`} className="hs-text-link">View Schedule<ArrowUpRight aria-hidden="true" /></Link>}</header>
+          <SourceErrors errors={scheduleErrors} />
+          {(canFollowUps && followUps.loading) || (canServices && services.loading) ? <p className="hs-loading" role="status">Loading scheduled activities...</p> : activities.length ? <ul className="hs-activity-list">{activities.map((event) => {
+            const person = people.get(event.residentId);
+            const location = event.location || (person?.zone ? `Zone ${person.zone}` : "Location not recorded");
+            return <li key={`${event.type}-${event.id}`}><Link to={`${BASE}/followup-calendar?date=${event.dateKey}`}><time dateTime={event.dateKey}><strong>{fromKey(event.dateKey).getDate()}</strong><span>{dateLabel(event.dateKey, { day: undefined, month: "short" })}</span></time><div className="hs-activity-info"><h3>{event.label}</h3><p><span>{event.time ? formatTime(event.time) : "Time not specified"}</span><span>{location}</span><span>{event.typeLabel}</span></p></div><StatusBadge value={event.status} /></Link></li>;
+          })}</ul> : <EmptyState compact title={scheduleErrors.length ? "No activities in the available sources" : !canFollowUps && !canServices ? "Schedule access unavailable" : "No upcoming activities"} description="The next 30 days of scheduled follow-ups and services appear here." />}
+          <footer className="hs-panel-footer"><span>Next 30 days | Philippine time</span></footer>
+        </motion.section>
 
-      <section aria-labelledby="attention-heading">
-        <Card className="!rounded-card overflow-hidden !border-brand-border !bg-brand-paper p-0 !shadow-none">
-          <div className="flex flex-col gap-3 px-4 pb-3 pt-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-brand-gold shrink-0" aria-hidden="true" />
-                <h2 id="attention-heading" className="font-heading text-sm font-semibold text-brand-blue">Cases Requiring Attention</h2>
-              </div>
-              <p className="mt-1 text-xs text-brand-gray">
-                {scope?.level === "barangay"
-                  ? `Cases requiring supervisory review and follow-up within ${scope.assignedBarangay}.`
-                  : "Cases requiring supervisory review and follow-up within your authorized coverage."}
-              </p>
-            </div>
-            <div
-              className="flex flex-wrap items-center gap-1.5 lg:justify-end"
-              role="group"
-              aria-label="Filter attention cases"
-            >
-              {ATTENTION_FILTERS.map((filter) => {
-                const active = attentionFilter === filter.id;
-                const count = casesByFilter[filter.id] ?? 0;
-                return (
-                  <button
-                    key={filter.id}
-                    type="button"
-                    onClick={() => setAttentionFilter(filter.id)}
-                    aria-pressed={active}
-                    className={`inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-gray ${
-                      active
-                        ? "border-brand-blue bg-brand-blue text-white"
-                        : "border-brand-border bg-brand-paper text-brand-gray hover:border-brand-gray"
-                    }`}
-                  >
-                    {filter.label}
-                    <span
-                      className={`inline-flex min-w-[1.1rem] justify-center rounded-full px-1 text-[10px] font-semibold leading-4 ${
-                        active ? "bg-white/25 text-white" : "bg-brand-light text-brand-gray"
-                      }`}
-                    >
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {casesLoading ? (
-            <p className="px-4 py-10 text-center text-[13px] text-brand-gray">Loading cases…</p>
-          ) : loadError ? (
-            <p className="px-4 py-10 text-center text-[13px] text-brand-gray">
-              Unable to load cases right now. Use the Retry control above to try again.
-            </p>
-          ) : cases.length === 0 ? (
-            <div className="px-4 py-12 text-center">
-              <p className="text-[13px] font-medium text-brand-ink">No cases require attention right now</p>
-              <p className="mx-auto mt-1 max-w-md text-xs text-brand-gray">
-                High-risk cases, overdue follow-ups, and pending referrals within your coverage will appear here as they arise.
-              </p>
-            </div>
-          ) : filteredCases.length === 0 ? (
-            <p className="px-4 py-10 text-center text-[13px] text-brand-gray">
-              No cases match this filter. Select another filter to see more.
-            </p>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] border-collapse text-left">
-                  <thead>
-                    <tr className="border-y border-brand-border bg-brand-light text-[10px] uppercase tracking-wide text-brand-gray">
-                      <th scope="col" className="px-4 py-2 font-semibold">Priority</th>
-                      <th scope="col" className="px-4 py-2 font-semibold">Resident / Case</th>
-                      <th scope="col" className="px-4 py-2 font-semibold">Barangay</th>
-                      <th scope="col" className="px-4 py-2 font-semibold">Case Type</th>
-                      <th scope="col" className="px-4 py-2 font-semibold">Date Added</th>
-                      <th scope="col" className="px-4 py-2 text-right font-semibold">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-brand-border">
-                    {visibleCases.map((item) => {
-                      const badge =
-                        PRIORITY_BADGES[item.kind] || { label: "Review", className: "bg-brand-gray/10 text-brand-gray" };
-                      const barangayLabel =
-                        item.barangay === "RHU" && scope?.level === "barangay"
-                          ? scope.assignedBarangay
-                          : item.barangay || "—";
-                      const reason = getCaseReason(item);
-                      const dateAdded = formatCaseDate(item.createdAt);
-                      return (
-                        <tr key={item.key} className="align-top transition-colors hover:bg-brand-light/50">
-                          <td className="px-4 py-2.5">
-                            <span
-                              className={`inline-flex rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badge.className}`}
-                            >
-                              {badge.label}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <p className="text-[13px] font-medium text-brand-ink">{item.resident || "Unknown resident"}</p>
-                            {reason && (
-                              <p title={reason} className="mt-0.5 max-w-[22rem] text-xs text-brand-gray line-clamp-2">
-                                {reason}
-                              </p>
-                            )}
-                          </td>
-                          <td className="px-4 py-2.5 text-xs text-brand-gray">{barangayLabel}</td>
-                          <td className="px-4 py-2.5 text-xs text-brand-gray">{item.caseType || "—"}</td>
-                          <td className="whitespace-nowrap px-4 py-2.5 text-xs text-brand-gray">{dateAdded || "—"}</td>
-                          <td className="px-4 py-2.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleCaseAction(item)}
-                              className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-blue transition-colors hover:border-brand-blue hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-gray"
-                            >
-                              Review <span aria-hidden="true">→</span>
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-brand-border px-4 py-2">
-                <p className="text-[11px] text-brand-gray">
-                  Showing {visibleCases.length} of {filteredCases.length}{" "}
-                  {filteredCases.length === 1 ? "case" : "cases"}
-                </p>
-                {hasMoreCases && (
-                  <button
-                    type="button"
-                    onClick={viewAllCases}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline"
-                  >
-                    View all cases <span aria-hidden="true">→</span>
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </Card>
-      </section>
-
-      {freshnessLabel && (
-        <p className="flex items-center justify-end gap-1.5 text-xs text-brand-gray">
-          <Clock className="h-3 w-3" />
-          Last updated {freshnessLabel}
-        </p>
-      )}
-
-      {/* Resident case modal (read-only oversight view) */}
-      {casePatient && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setCaseModal(null)}>
-          <Card role="dialog" aria-modal="true" aria-label={`Case review for ${casePatient.patient}`} className="w-full max-w-lg flex max-h-[90vh] flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center justify-between border-b border-brand-border px-6 py-4">
-              <div>
-                <h3 className="text-base font-semibold text-brand-ink">{casePatient.patient}</h3>
-                <p className="text-xs text-brand-gray mt-0.5">
-                  {casePatient.barangay || "RHU"} · {casePatient.reason || casePatient.triage?.chiefComplaint}
-                </p>
-              </div>
-              <button onClick={() => setCaseModal(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray hover:bg-brand-bg hover:text-brand-ink" aria-label="Close modal">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              <div className="space-y-4 text-sm">
-                <div className="grid grid-cols-2 gap-3">
-                  <p className="text-brand-gray">Age: <span className="text-brand-ink">{casePatient.age} yrs</span></p>
-                  <p className="text-brand-gray">Sex: <span className="text-brand-ink">{casePatient.sex}</span></p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-2">Triage</p>
-                  <p className="text-brand-ink">
-                    {casePatient.triage?.chiefComplaint || casePatient.reason} — BP {casePatient.triage?.bloodPressure || "—"}, T {casePatient.triage?.temperature ? `${casePatient.triage.temperature}°C` : "—"}
-                  </p>
-                  {casePatient.triage?.notes && <p className="text-xs text-brand-gray mt-1">{casePatient.triage.notes}</p>}
-                </div>
-                <div className="rounded-btn border border-brand-border px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Risk Level</p>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${RISK_TONES[riskOf(casePatient).level] || RISK_TONES.Low}`}>
-                      {riskOf(casePatient).level}
-                    </span>
-                  </div>
-                  <p className="mt-1.5 text-xs text-brand-gray">{riskOf(casePatient).reason}</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border px-6 py-4">
-              <button onClick={() => setCaseModal(null)} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">
-                Close
-              </button>
-            </div>
-          </Card>
-        </div>
-      )}
-    </main>
-  );
+        <motion.section className="hs-panel hs-insights-panel" aria-labelledby="insights-heading" variants={intro}>
+          <header className="hs-panel-header"><div><h2 id="insights-heading">Community Health Insights</h2><p>{periodLabel}</p></div>{canReports && <Link to={`${BASE}/reports`} className="hs-text-link">Reports<ArrowUpRight aria-hidden="true" /></Link>}</header>
+          <div className="hs-insight-section"><h3>Common Conditions</h3>{canAnalytics ? <><TopHealthTrends compact trends={conditions} loading={periodMap.loading} error={periodMap.error} onRetry={periodMap.refresh} /><p className="hs-insight-note">Classified complaint records, not confirmed diagnoses.{previousMap.error ? " Previous comparison unavailable." : conditions.some((row) => row.direction) ? " Compared with the preceding month." : " No reliable preceding-period comparison."}</p>{previousMap.error && <button className="hs-inline-retry" type="button" onClick={previousMap.refresh}>Retry comparison</button>}</> : <p className="hs-muted">Analytics access is required.</p>}</div>
+          <div className="hs-insight-section"><h3>Resident Risk Distribution</h3>{overview.loading && canAnalytics ? <p className="hs-muted" role="status">Loading assessments...</p> : !riskRows ? <p className="hs-muted">Risk distribution unavailable.</p> : <><div className="hs-risk-bar" role="img" aria-label={riskRows.map((row) => `${row.name}: ${row.value}`).join(", ")}>{riskRows.filter((row) => row.value > 0).map((row) => <motion.span key={row.name} initial={{ width: 0 }} animate={{ width: `${riskTotal ? row.value / riskTotal * 100 : 0}%` }} transition={{ duration: reducedMotion ? 0 : 0.35 }} style={{ backgroundColor: RISK_COLORS[row.name] }} />)}</div><dl className="hs-risk-legend">{riskRows.map((row) => <div key={row.name}><dt><i style={{ background: RISK_COLORS[row.name] }} />{row.name === "Moderate Risk" ? "Medium" : row.name.replace(" Risk", "")}</dt><dd>{row.value.toLocaleString()}</dd></div>)}</dl></>}</div>
+          <div className="hs-insight-section hs-followup-performance"><div className="hs-followup-heading"><h3>Follow-up Performance</h3><strong>{followUps.loading ? "Loading" : performance?.percentage != null ? `${performance.percentage}%` : "--"}</strong></div>{performance ? <><dl><div><dt>Completed</dt><dd>{performance.completed}</dd></div><div><dt>Pending</dt><dd>{performance.pending}</dd></div><div><dt>Overdue</dt><dd className="hs-urgent">{performance.overdue}</dd></div></dl><div className="hs-followup-bar" role="img" aria-label={`${performance.completed} completed, ${performance.pending} pending, ${performance.overdue} overdue, ${performance.other} other outcomes`}>
+            {[{ key: "completed", color: "#367B59" }, { key: "pending", color: "#B18A32" }, { key: "overdue", color: "#B3202C" }, { key: "other", color: "#D5DEE9" }].map((part) => <motion.span key={part.key} initial={{ width: 0 }} animate={{ width: `${performance.scheduled ? performance[part.key] / performance.scheduled * 100 : 0}%` }} transition={{ duration: reducedMotion ? 0 : 0.35 }} style={{ backgroundColor: part.color }} />)}
+          </div><p className="hs-insight-note">{performance.scheduled ? `${performance.scheduled} scheduled in this period; current outcomes. Grey includes missed/cancelled records.` : "No scheduled follow-ups in this period; a completion rate cannot be calculated."}</p></> : <p className="hs-muted">{followUps.error ? "Follow-up performance unavailable." : !canFollowUps ? "Follow-up access is required." : "Loading scheduled outcomes..."}</p>}{followUps.error && <button type="button" className="hs-inline-retry" onClick={followUps.refresh}>Retry follow-up data</button>}</div>
+        </motion.section>
+      </div>
+    </>}
+  </motion.div></MotionConfig>;
 }

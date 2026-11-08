@@ -4,6 +4,26 @@ import { toVisit, fromVisit } from '../src/services/consultations.service.js';
 
 const user = { id: 'u1', role: 'health_supervisor', name: 'HS One' };
 
+test('consultation metadata retains recorded zone and responsible personnel separately from the recorder', async () => {
+  const client = {
+    from() {
+      const query = { select() { return query; }, eq() { return query; }, maybeSingle: async () => ({ data: { full_name: 'Recorded triage worker', role: 'rhu_personnel' } }) };
+      return query;
+    },
+  };
+  const record = await fromVisit({
+    id: 'metadata-visit', residentId: 'metadata-resident', resident: { zone: 3 },
+    recordedById: 'recorder-id', responsiblePersonnelId: 'responsible-id',
+    responsiblePersonnelName: 'Recorded responsible worker', visitDate: '2026-11-07',
+    vitals: {}, status: 'submitted',
+  }, client);
+  assert.equal(record.resident.zone, 3);
+  assert.equal(record.responsiblePersonnelId, 'responsible-id');
+  assert.equal(record.responsiblePersonnelName, 'Recorded responsible worker');
+  assert.equal(record.attendingPersonnel.fullName, 'Recorded triage worker');
+  assert.notEqual(record.responsiblePersonnelName, record.attendingPersonnel.fullName);
+});
+
 test('toVisit stores structured medications, referral flag and BP classification snapshot', () => {
   const payload = {
     consultationDate: '2026-01-02',

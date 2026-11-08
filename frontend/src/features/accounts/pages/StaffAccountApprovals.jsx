@@ -13,13 +13,13 @@ import { legacyApprovalMessage } from "@/features/users/personnelLifecycle";
 import { Search, CheckCircle2, ChevronRight, Loader2, AlertCircle, Inbox } from "lucide-react";
 
 const STATUS_FILTERS = ["pending", "approved", "rejected", "resubmission_required", "all"];
-const STATUS_FILTER_LABELS = { pending: "Pending", approved: "Approved", rejected: "Rejected", resubmission_required: "Resubmission", all: "All statuses" };
+const STATUS_FILTER_LABELS = { pending: "Pending", approved: "Approved", rejected: "Rejected", resubmission_required: "Resubmission", all: "All Status" };
 const BHW_STATUS_FILTERS = [
   { value: "pending", label: "Pending" },
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
   { value: "resubmission_required", label: "Resubmission" },
-  { value: "all", label: "All statuses" },
+  { value: "all", label: "All Status" },
 ];
 const PAGE_SIZE = 10;
 const STATUS_META = {

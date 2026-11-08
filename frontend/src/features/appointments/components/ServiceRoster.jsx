@@ -5,7 +5,7 @@ import { appointmentsApi } from "@/services/api";
 import { statusLabel, formatDate, formatTime, effectiveSchedule, weekdayOf, slotTimes, WEEKDAYS } from "../lib/appointmentStatus";
 
 const STATUS_OPTIONS = [
-  { value: "", label: "All statuses" },
+  { value: "", label: "All Status" },
   { value: "pending", label: "Pending" },
   { value: "reschedule_proposed", label: "Reschedule Proposed" },
   { value: "approved", label: "Approved" },

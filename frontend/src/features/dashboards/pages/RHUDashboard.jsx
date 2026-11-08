@@ -29,8 +29,7 @@ const QUICK_ACTIONS = [
     icon: FileText,
     label: "Incoming Referrals",
     path: "/app/rhu_personnel/incoming-referrals",
-    description: "Review barangay referrals and begin resident screening.",
-    station: "triage",
+    description: "Respond to referrals assigned to your account and facility.",
   },
   {
     icon: Stethoscope,
@@ -115,11 +114,11 @@ export default function RHUDashboard() {
   } = usePhnWorkflow({ source: consultationStation ? "queue" : "intake" });
 
   const refreshReferrals = useCallback(async () => {
-    if (!triageStation) return;
+    if (!user?.id) return;
     setReferralsLoading(true);
     setReferralsError("");
     try {
-      const result = await referralsApi.list();
+      const result = await referralsApi.inbox({}, { ownerId: user.id });
       const openReferrals = filterOpenReferrals(result?.rows || []);
       setIncomingCount(openReferrals.length);
       setReferralStageCounts({
@@ -132,7 +131,7 @@ export default function RHUDashboard() {
     } finally {
       setReferralsLoading(false);
     }
-  }, [triageStation]);
+  }, [user?.id]);
 
   useEffect(() => { void refreshReferrals(); }, [refreshReferrals]);
 

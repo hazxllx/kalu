@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, Users } from "lucide-react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, MoreVertical, Users } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -21,11 +22,13 @@ import {
 } from "@/services/offline/residentOfflineService";
 import { useBarangays } from "@/context/BarangaysContext";
 import { dateOfBirth, isStrictMobile } from "@/utils/validation";
+import ResidentConflictReview from "../components/ResidentConflictReview";
 
 const CIVIL_STATUS_OPTIONS = ["Single", "Married", "Widowed", "Separated"];
 const SEX_OPTIONS = ["Female", "Male"];
 const SUFFIX_OPTIONS = ["", "Jr.", "Sr.", "II", "III", "IV"];
 const RELIGION_OPTIONS = ["Roman Catholic", "Protestant", "Iglesia ni Cristo", "Born Again", "Muslim", "Other"];
+const RISK_FILTERS = ["All", "High", "Moderate", "Low", "Unassessed"];
 
 const EMPTY_FORM = {
   firstName: "",
@@ -89,6 +92,8 @@ const EMPTY_FORM = {
  * @property {string} [healthRecordNo]
  * @property {string} [createdAt]
  * @property {string} [updatedAt]
+ * @property {number} [revision]
+ * @property {string} [syncStatus]
  * @property {string} [authUserId]
  * @property {string} [accountStatus]
  * @property {string} [guardianStatus]
@@ -131,6 +136,16 @@ const calcAge = (dob) => {
 
 /** @param {Partial<ResidentRecord>|null|undefined} r */
 const fullNameOf = (r) => [r?.firstName, r?.middleName, r?.lastName, r?.suffix].filter(Boolean).join(" ");
+
+/** @param {ResidentRecord} resident @returns {ResidentRow} */
+const mapRecord = (resident) => ({
+  ...resident,
+  name: fullNameOf(resident) || resident.name || "Name unavailable",
+  age: calcAge(resident.birthDate),
+  gender: resident.sex || "—",
+  status: resident.verificationStatus === "approved" ? "Approved" : resident.verificationStatus || "Unknown",
+  riskLevel: resident.riskLevel || null,
+});
 
 /** @param {string} name */
 const initialsOf = (name) =>
@@ -229,11 +244,13 @@ const LinkingStatePill = ({ resident }) => {
  * @param {{label: string, value: string, onChange: (value: string) => void, options?: string[], placeholder?: string, error?: string, emptyLabel?: string, children?: import("react").ReactNode}} props
  */
 function Select({ label, value, onChange, options = [], placeholder = "", error = "", emptyLabel = "", children = null }) {
+  const id = useId();
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={id} className={labelClass}>{label}</label>
       <div className="relative">
         <select
+          id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`${inputClass(error)} appearance-none pr-9 cursor-pointer`}
@@ -267,10 +284,12 @@ function Field({
   pattern,
   autoComplete,
 }) {
+  const id = useId();
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={id} className={labelClass}>{label}</label>
       <input
+        id={id}
         type={type}
         value={value}
         placeholder={placeholder}
@@ -306,9 +325,18 @@ export default function ResidentsPage() {
   /** @type {{user: {id?: string, role?: string, assignedBarangay?: string|null, barangay?: string|null}|null}} */
   const { user } = useAuth();
   const { can, matrixLoadState } = usePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const supervisor = user?.role === "health_supervisor";
+  const scope = getSupervisorScope(user);
+  const assignedBarangay = scope?.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
+  const queryParam = supervisor ? searchParams.get("q") || "" : "";
+  const riskParam = supervisor && RISK_FILTERS.includes(searchParams.get("risk")) ? searchParams.get("risk") : "All";
+  const residentParam = supervisor ? searchParams.get("residentId") || "" : "";
   /** @type {(permissionId: string) => boolean} */
   const canFn = can;
-  const canCreate = canFn("residents.create");
+  const canCreate = canFn("residents.create") && (!supervisor || Boolean(assignedBarangay));
+  const canViewDirectory = canFn("residents.directory.view");
+  const canViewProfile = canFn("residents.profile.view");
   const canCreateLoginAccount = canFn("accounts.create");
   // Show the Yes/No choice whenever the user may add a resident. The actual
   // account-creation capability is gated separately on the Yes button; this
@@ -323,13 +351,20 @@ export default function ResidentsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(/** @type {string|null} */ (null));
   const [loadWarning, setLoadWarning] = useState(/** @type {string|null} */ (null));
+  const [directoryOwner, setDirectoryOwner] = useState(/** @type {string|null} */ (null));
+  const loadRequest = useRef(0);
 
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(queryParam);
+  const [riskFilter, setRiskFilter] = useState(riskParam);
+  const [linkedLoading, setLinkedLoading] = useState(false);
+  const [linkedError, setLinkedError] = useState("");
+  const [linkedRetry, setLinkedRetry] = useState(0);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selected, setSelected] = useState(/** @type {ResidentRow|null} */ (null));
+  const [selectedOwner, setSelectedOwner] = useState(/** @type {string|null|undefined} */ (null));
   const [editTarget, setEditTarget] = useState(/** @type {ResidentRow|null} */ (null));
   const [form, setForm] = useState(/** @type {ResidentForm} */ (initialFromUser(user)));
   const [errors, setErrors] = useState(/** @type {ValidationErrors} */ ({}));
@@ -340,6 +375,7 @@ export default function ResidentsPage() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState(/** @type {string|null} */ (null));
   const [toast, setToast] = useState(/** @type {string|null} */ (null));
+  const [openActionMenu, setOpenActionMenu] = useState(null);
 
   // "Create login account" action inside the View modal, shown only for records
   // that are Not Linked. It invites a Supabase Auth account for the EXISTING
@@ -356,13 +392,20 @@ export default function ResidentsPage() {
     setTimeout(() => setToast(null), 3200);
   };
 
+  useEffect(() => {
+    if (!openActionMenu) return undefined;
+    const close = (event) => {
+      if (!event.target.closest("[data-resident-actions]")) setOpenActionMenu(null);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [openActionMenu]);
+
   // The Resident Directory is owned by the Health Supervisor. Rows are scoped
   // to the supervisor's assigned barangay by the BACKEND (403 on any other
   // barangay); the scope here only drives the subtitle and the barangay picker.
-  const scope = getSupervisorScope(user);
-  const assignedBarangay = scope && scope.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
   const { barangays: liveBarangays } = useBarangays();
-  const allowedBarangays = assignedBarangay ? [assignedBarangay] : [...liveBarangays];
+  const allowedBarangays = assignedBarangay ? [assignedBarangay] : supervisor ? [] : [...liveBarangays];
 
   /**
    * The MHO browses the same directory municipally but may not correct
@@ -370,15 +413,28 @@ export default function ResidentsPage() {
    * Supervisor), so the edit action is hidden rather than shown and 403'd.
    */
   const canEdit =
-    (user?.role === "phn" || user?.role === "health_supervisor") && canEditPermission;
+    (user?.role === "phn" || (supervisor && Boolean(assignedBarangay))) && canEditPermission;
+
+  useEffect(() => {
+    if (supervisor) setQ(queryParam);
+  }, [supervisor, queryParam]);
+  useEffect(() => {
+    if (supervisor) setRiskFilter(riskParam);
+  }, [supervisor, riskParam]);
 
   /** Load authorized rows from the API or this account's encrypted local cache. */
   const load = useCallback(
     async (searchTerm = "") => {
+      const requestId = ++loadRequest.current;
       setLoading(true);
       setLoadError(null);
       setLoadWarning(null);
+      if (supervisor && matrixLoadState.status === "loading") return;
       try {
+        if (supervisor && !assignedBarangay) throw new Error("A valid barangay assignment is required to access the resident directory.");
+        if (supervisor && !canViewDirectory) {
+          throw new Error("Your account is not permitted to view the resident directory.");
+        }
         // Verified directory only: the backend returns residents who are
         // individually approved OR belong to a Verified household, scoped to
         // this supervisor's barangay. Pending/unverified residents live in the
@@ -387,49 +443,97 @@ export default function ResidentsPage() {
           ownerId: user?.id,
           params: { q: searchTerm, limit: 100, verified: true },
         });
-        setResidents(result?.rows || []);
+        if (requestId !== loadRequest.current) return;
+        if (!Array.isArray(result?.rows)) throw new Error("The resident directory response was incomplete.");
+        // Unverified local creates are not part of the server's verified directory.
+        setResidents(result.rows.filter((r) => !supervisor || !r.localId || ["approved", "verified"].includes(r.verificationStatus)));
+        setDirectoryOwner(user?.id || null);
         if (result.warning) setLoadWarning(result.warning.message);
       } catch (err) {
+        if (requestId !== loadRequest.current) return;
         setResidents([]);
+        setDirectoryOwner(user?.id || null);
         const error = /** @type {RequestError} */ (err);
         setLoadError(error?.message || "Could not load the resident directory.");
       } finally {
-        setLoading(false);
+        if (requestId === loadRequest.current) setLoading(false);
       }
     },
-    [user?.id],
+    [user?.id, supervisor, assignedBarangay, canViewDirectory, matrixLoadState.status],
   );
-
-  useEffect(() => {
-    load("");
-  }, [load]);
 
   // Debounced server-side search.
   const debounceRef = useRef(/** @type {ReturnType<typeof setTimeout>|null} */ (null));
   useEffect(() => {
+    loadRequest.current += 1;
+    setLoading(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       load(q.trim());
     }, 350);
     return () => {
       if (debounceRef.current !== null) clearTimeout(debounceRef.current);
+      loadRequest.current += 1;
     };
   }, [q, load]);
 
   const rows = useMemo(() => {
-    return residents
-      .map((r) => ({
-        ...r,
-        name: fullNameOf(r),
-        age: calcAge(r.birthDate),
-        gender: r.sex || "—",
-        status: r.verificationStatus || "verified",
-        // Authoritative risk comes from the backend (persisted/recomputed from
-        // recorded vitals + the configured criteria); the directory never
-        // recalculates it locally.
-        riskLevel: r.riskLevel || null,
-      }));
-  }, [residents]);
+    if (directoryOwner !== user?.id || (supervisor && !assignedBarangay)) return [];
+    return residents.filter((r) => !supervisor || String(r.barangay || "").trim().toLowerCase() === assignedBarangay.toLowerCase()).map(mapRecord);
+  }, [residents, directoryOwner, user?.id, supervisor, assignedBarangay]);
+  const visibleRows = supervisor && riskFilter !== "All"
+    ? rows.filter((row) => riskFilter === "Unassessed" ? !row.riskLevel : row.riskLevel === riskFilter)
+    : rows;
+
+  useEffect(() => {
+    if (!supervisor || !residentParam) {
+      setLinkedLoading(false);
+      setLinkedError("");
+      return undefined;
+    }
+    let active = true;
+    setShowViewModal(false);
+    setSelected(null);
+    setLinkedError("");
+    if (matrixLoadState.status === "loading") return undefined;
+    if (!user?.id || !canViewProfile || !assignedBarangay) {
+      setLinkedLoading(false);
+      setLinkedError(!assignedBarangay ? "A valid barangay assignment is required to view this resident." : "Your account is not permitted to view resident profiles.");
+      return undefined;
+    }
+    setLinkedLoading(true);
+    residentsApi.get(encodeURIComponent(residentParam), { ownerId: user.id })
+      .then((response) => {
+        if (!active) return;
+        const record = response?.resident;
+        if (!record || String(record.id) !== residentParam) throw new Error("The requested resident record was not returned.");
+        if (String(record.barangay || "").trim().toLowerCase() !== assignedBarangay.toLowerCase()) throw new Error("This resident is not available in your assigned barangay.");
+        setSelected(mapRecord(record));
+        setSelectedOwner(user.id);
+        setLinkPanelOpen(false);
+        setLinkEmail("");
+        setLinkError(null);
+        setShowViewModal(true);
+      })
+      .catch((error) => { if (active) setLinkedError(error?.message || "Could not open the requested resident."); })
+      .finally(() => { if (active) setLinkedLoading(false); });
+    return () => { active = false; };
+  }, [supervisor, residentParam, user?.id, assignedBarangay, canViewProfile, matrixLoadState.status, linkedRetry]);
+
+  useEffect(() => {
+    setShowAddModal(false);
+    setShowEditModal(false);
+    setEditTarget(null);
+  }, [user?.id, assignedBarangay]);
+
+  const closeView = () => {
+    setShowViewModal(false);
+    if (residentParam) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("residentId");
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   const openAdd = () => {
     if (!canCreate) return;
@@ -441,7 +545,9 @@ export default function ResidentsPage() {
 
   /** @param {ResidentRow} resident */
   const openView = (resident) => {
+    if (supervisor && (!canViewProfile || !assignedBarangay)) return;
     setSelected(resident);
+    setSelectedOwner(user?.id);
     setLinkPanelOpen(false);
     setLinkEmail("");
     setLinkError(null);
@@ -455,7 +561,7 @@ export default function ResidentsPage() {
    * it never duplicates the resident and never auto-verifies anyone.
    */
   const handleCreateAccount = async () => {
-    if (!canCreateLoginAccount || !selected) return;
+    if (!canCreateLoginAccount || !selected || selectedOwner !== user?.id) return;
     const email = linkEmail.trim();
     if (!email) {
       setLinkError("An email is required to create a login account.");
@@ -631,6 +737,7 @@ export default function ResidentsPage() {
       );
       await load(q.trim());
       if (record) {
+        setSelectedOwner(user?.id);
         setSelected({
           ...record,
           name: fullNameOf(record),
@@ -679,7 +786,7 @@ export default function ResidentsPage() {
       const result = await updateResidentOffline({
         ownerId: user?.id,
         residentId: editTarget.id,
-        baseRevision: editTarget.updatedAt,
+        baseRevision: editTarget.revision ?? editTarget.updatedAt,
         payload: {
           resident: {
             cellphoneNo: editForm.contact,
@@ -698,7 +805,9 @@ export default function ResidentsPage() {
       setShowEditModal(false);
       setEditTarget(null);
       showToast(
-        result.queued
+        result.conflict
+          ? "A newer server version exists. Your changes are saved on this device for conflict review."
+          : result.queued
           ? "Changes saved on this device. They will sync when you reconnect."
           : "Resident updated successfully.",
       );
@@ -746,14 +855,12 @@ export default function ResidentsPage() {
 
   const columns = [
     { key: "name", label: "Resident" },
-    { key: "age", label: "Age" },
-    { key: "gender", label: "Sex" },
     { key: "barangay", label: "Barangay" },
     { key: "healthRecordNo", label: "Health Record No." },
     { key: "riskLevel", label: "Risk" },
-    { key: "status", label: "Status" },
+    { key: "status", label: supervisor ? "Verification" : "Status" },
     { key: "account", label: "Account" },
-    { key: "actions", label: "" },
+    { key: "actions", label: "Actions" },
   ];
 
   /** @param {string} label @param {string|number|null|undefined} value */
@@ -765,19 +872,24 @@ export default function ResidentsPage() {
   );
 
   return (
-    <>
+    <div className={supervisor ? "supervisor-module" : "contents"}>
+      {canEdit && <ResidentConflictReview onResolved={async (result) => {
+        showToast(result.queued ? 'Reviewed changes are queued with the current server revision.' : 'The current server version was kept.');
+        await load(q.trim());
+      }} />}
       <PageHeader
         crumbs={["Residents"]}
         title="Resident Directory"
         subtitle={
           assignedBarangay
             ? `Verified residents in Barangay ${assignedBarangay}. Pending registrations are reviewed under Resident Verification.`
+            : supervisor ? "No valid barangay assignment. Resident records are unavailable."
             : "Verified residents in your area. Pending registrations are reviewed under Resident Verification."
         }
         action={canCreate ? (
           <button
             onClick={openAdd}
-            className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
+            className={supervisor ? "supervisor-button is-primary" : "flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"}
           >
             <Plus className="w-4 h-4" /> Add Resident
           </button>
@@ -791,7 +903,24 @@ export default function ResidentsPage() {
         </div>
       )}
 
-      <Card className="p-4 mb-5 flex flex-col lg:flex-row gap-3">
+      {supervisor ? (
+        <Card className="supervisor-toolbar mb-4 flex flex-wrap items-end gap-3">
+          <label htmlFor="resident-search" className="min-w-[12rem] flex-1 text-caption font-medium text-brand-gray">
+            Search Residents
+            <div className="supervisor-input mt-1 flex items-center gap-2">
+              <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+              <input id="resident-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, health record no. or contact" className="min-w-0 w-full bg-transparent outline-none" />
+            </div>
+          </label>
+          <label htmlFor="resident-risk" className="text-caption font-medium text-brand-gray">
+            Recorded Risk
+            <select id="resident-risk" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} className="supervisor-input mt-1 block w-full sm:w-40">
+              {RISK_FILTERS.map((risk) => <option key={risk} value={risk}>{risk === "All" ? "All risk levels" : risk === "Unassessed" ? "Not assessed" : risk}</option>)}
+            </select>
+          </label>
+          {(q || riskFilter !== "All") && <button type="button" className="supervisor-button is-quiet" onClick={() => { setQ(""); setRiskFilter("All"); }}>Clear filters</button>}
+        </Card>
+      ) : <Card className="p-4 mb-5 flex flex-col lg:flex-row gap-3">
         <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 flex-1">
           <Search className="w-4 h-4 text-brand-gray" />
           <input
@@ -801,11 +930,18 @@ export default function ResidentsPage() {
             className="bg-transparent text-sm outline-none w-full"
           />
         </div>
-      </Card>
+      </Card>}
+
+      {residentParam && (linkedLoading || linkedError) && (
+        <Card className="mb-4" aria-busy={linkedLoading}>
+          {linkedLoading ? <p role="status" className="p-4 text-ui text-brand-gray">Opening the authorized resident profile...</p> : <ErrorState compact title="Resident profile unavailable" message={linkedError} onRetry={() => setLinkedRetry((value) => value + 1)} />}
+        </Card>
+      )}
 
       {loadError && (
         <Card className="mb-5">
           <ErrorState
+            compact={supervisor}
             title="Could not load the resident directory"
             message={loadError}
             onRetry={() => load(q.trim())}
@@ -819,25 +955,27 @@ export default function ResidentsPage() {
         </Card>
       )}
 
-      {!loadError && !loading && rows.length === 0 && (
+      {!loadError && !loading && visibleRows.length === 0 && (
         <Card>
           <EmptyState
+            compact={supervisor}
             icon={Users}
             title="No residents found"
             description={
               loadWarning
                 ? "No locally cached or queued resident records are available. Reconnect to load this authorized directory."
+                : supervisor && riskFilter !== "All" ? "No loaded residents match this recorded risk level. Risk filters apply to the current directory page, not the complete barangay population."
                 : q.trim()
                 ? `No residents match “${q.trim()}”. Try a different name, health record number, or clear the search.`
                 : "The resident directory is empty. Register the first resident to get started."
             }
             action={
-              q.trim() ? (
+              q.trim() || (supervisor && riskFilter !== "All") ? (
                 <button
-                  onClick={() => setQ("")}
+                  onClick={() => { setQ(""); setRiskFilter("All"); }}
                   className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
                 >
-                  Clear search
+                  Clear filters
                 </button>
               ) : undefined
             }
@@ -845,11 +983,15 @@ export default function ResidentsPage() {
         </Card>
       )}
 
-      {!loadError && !loading && rows.length > 0 && (
+      {!loadError && !loading && visibleRows.length > 0 && (
         <>
           <DataTable
+            className="resident-directory-table"
+            tableClassName="resident-directory-grid"
+            fitContainer
+            dense={supervisor}
             columns={columns}
-            rows={rows}
+            rows={visibleRows}
             renderCell={(/** @type {string} */ key, /** @type {ResidentRow} */ row) => {
               if (key === "name")
                 return (
@@ -859,7 +1001,8 @@ export default function ResidentsPage() {
                     </div>
                     <div>
                       <p className="font-medium text-brand-ink">{row.name}</p>
-                      <p className="text-xs text-brand-gray">{row.id}</p>
+                      <p className="text-xs text-brand-gray">{supervisor ? row.cellphoneNo || "Contact not recorded" : row.id}</p>
+                      {supervisor && row.syncStatus && <p className="text-caption text-amber-800">{row.syncStatus}</p>}
                     </div>
                   </div>
                 );
@@ -868,28 +1011,58 @@ export default function ResidentsPage() {
               if (key === "account") return <AccountStatusPill status={row.accountStatus} />;
               if (key === "actions")
                 return (
-                  <div className="flex gap-3">
+                  <div className="relative flex justify-end" data-resident-actions>
                     <button
-                      onClick={() => openView(row)}
-                      className="flex items-center gap-1 text-brand-blue text-sm font-medium hover:underline"
+                      type="button"
+                      onClick={() => setOpenActionMenu((current) => current === row.id ? null : row.id)}
+                      className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-2.5 py-1.5 text-sm font-medium text-brand-blue hover:border-brand-blue"
+                      aria-haspopup="menu"
+                      aria-expanded={openActionMenu === row.id}
                     >
-                      <Eye className="w-4 h-4" /> View
+                      <MoreVertical className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    {canEdit && (
-                      <button
-                        onClick={() => openEdit(row)}
-                        className="flex items-center gap-1 text-brand-gray text-sm font-medium hover:underline"
-                      >
-                        <Pencil className="w-4 h-4" /> Edit
-                      </button>
+                    {openActionMenu === row.id && (
+                      <div role="menu" className="absolute right-0 top-full z-30 mt-1 min-w-[9rem] rounded-btn border border-brand-border bg-white p-1 shadow-lg">
+                        {(!supervisor || canViewProfile) && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openView(row); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg"><Eye className="h-4 w-4 text-brand-blue" /> View Details</button>}
+                        {canEdit && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openEdit(row); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg"><Pencil className="h-4 w-4 text-brand-gray" /> Edit Resident</button>}
+                      </div>
                     )}
                   </div>
                 );
               return row[/** @type {keyof ResidentRow} */ (key)] || "—";
             }}
           />
-          <p className="mt-4 text-sm text-brand-gray">
-            {rows.length === 0
+          <div className="resident-directory-mobile">
+            {visibleRows.map((row) => (
+              <article key={row.id} className="border-b border-brand-border p-3 last:border-b-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-light text-xs font-semibold text-brand-blue">{initialsOf(row.name)}</div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-brand-ink">{row.name}</p>
+                      <p className="truncate text-xs text-brand-gray">{row.cellphoneNo || "Contact not recorded"}</p>
+                    </div>
+                  </div>
+                  <div className="relative shrink-0" data-resident-actions>
+                    <button type="button" onClick={() => setOpenActionMenu((current) => current === row.id ? null : row.id)} className="inline-flex h-8 w-8 items-center justify-center rounded-btn text-brand-blue transition-colors hover:bg-brand-light hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" aria-label={`Actions for ${row.name}`} aria-haspopup="menu" aria-expanded={openActionMenu === row.id}><MoreVertical className="h-4 w-4" aria-hidden="true" /></button>
+                    {openActionMenu === row.id && <div role="menu" className="absolute right-0 top-full z-30 mt-1 min-w-[9rem] rounded-btn border border-brand-border bg-white p-1 shadow-lg">
+                      {(!supervisor || canViewProfile) && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openView(row); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg"><Eye className="h-4 w-4 text-brand-blue" /> View Details</button>}
+                      {canEdit && <button type="button" role="menuitem" onClick={() => { setOpenActionMenu(null); openEdit(row); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg"><Pencil className="h-4 w-4 text-brand-gray" /> Edit Resident</button>}
+                    </div>}
+                  </div>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                  <div><dt className="text-brand-gray">Barangay</dt><dd className="truncate font-medium text-brand-ink">{row.barangay || "—"}</dd></div>
+                  <div><dt className="text-brand-gray">Health Record No.</dt><dd className="truncate font-medium text-brand-ink">{row.healthRecordNo || "—"}</dd></div>
+                  <div><dt className="text-brand-gray">Risk</dt><dd><RiskBadge level={row.riskLevel} /></dd></div>
+                  <div><dt className="text-brand-gray">Verification</dt><dd><StatusBadge value={row.status} /></dd></div>
+                  <div><dt className="text-brand-gray">Account</dt><dd><AccountStatusPill status={row.accountStatus} /></dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+          <p className={supervisor ? "mt-2 text-caption text-brand-gray" : "mt-4 text-sm text-brand-gray"}>
+            {supervisor ? `Showing ${visibleRows.length} of ${rows.length} loaded residents. The directory loads up to 100 server records per search; risk filters do not represent barangay totals.` : rows.length === 0
               ? "No residents found."
               : `Showing ${rows.length} resident${rows.length === 1 ? "" : "s"}${
                   q.trim() ? ` matching “${q.trim()}”` : ""
@@ -899,13 +1072,13 @@ export default function ResidentsPage() {
       )}
 
       {/* Add Resident Modal */}
-      {showAddModal && (
+      {showAddModal && canCreate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <Card role="dialog" aria-modal="true" aria-label="Add Resident" className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto ${supervisor ? "supervisor-modal supervisor-form" : ""}`}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-lg font-semibold text-brand-ink">Add Resident</h3>
-                <button onClick={closeAdd} className="text-brand-gray hover:text-brand-ink">
+                <button onClick={closeAdd} className="text-brand-gray hover:text-brand-ink" aria-label="Close resident registration">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1021,9 +1194,9 @@ export default function ResidentsPage() {
       )}
 
       {/* View Resident Modal */}
-      {showViewModal && selected && (
+      {showViewModal && selected && selectedOwner === user?.id && (!supervisor || (canViewProfile && assignedBarangay)) && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <Card role="dialog" aria-modal="true" aria-label="Resident Profile" className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
             <div className="p-6">
               <div className="flex items-start justify-between mb-5">
                 <div className="flex items-center gap-3">
@@ -1035,7 +1208,7 @@ export default function ResidentsPage() {
                     <p className="text-xs text-brand-gray">{selected.id}</p>
                   </div>
                 </div>
-                <button onClick={() => setShowViewModal(false)} className="text-brand-gray hover:text-brand-ink">
+                <button onClick={closeView} className="text-brand-gray hover:text-brand-ink" aria-label="Close resident profile">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1044,13 +1217,13 @@ export default function ResidentsPage() {
                 <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Demographics</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {detailCell("Age", selected.age)}
-                  {Number(selected.age) < 18 && detailCell("Age Category", "Minor — under 18")}
+                  {selected.age !== "" && Number(selected.age) < 18 && detailCell("Age Category", "Minor — under 18")}
                   {detailCell("Sex", selected.sex || selected.gender)}
                   {detailCell("Civil Status", selected.civilStatus)}
                   {detailCell("Birthdate", selected.birthDate)}
                   {detailCell("Barangay", selected.barangay)}
                   {detailCell("Contact Number", selected.cellphoneNo)}
-                  {Number(selected.age) < 18 && detailCell("Parent / Guardian Link", selected.guardianStatus || "Skipped")}
+                  {selected.age !== "" && Number(selected.age) < 18 && detailCell("Parent / Guardian Link", selected.guardianStatus || "Skipped")}
                   {detailCell("Address", selected.currentAddress)}
                   {detailCell("PhilHealth No.", selected.philhealthNo)}
                 </div>
@@ -1080,7 +1253,7 @@ export default function ResidentsPage() {
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Registered</p>
                     <p className="mt-0.5 text-sm font-medium text-brand-ink">
-                      {selected.createdAt ? new Date(selected.createdAt).toLocaleDateString() : "—"}
+                      {selected.createdAt ? new Date(selected.createdAt).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "short", day: "numeric" }) : "—"}
                     </p>
                   </div>
                 </div>
@@ -1131,6 +1304,7 @@ export default function ResidentsPage() {
                           value={linkEmail}
                           placeholder="e.g. resident@example.com"
                           onChange={(e) => { setLinkEmail(e.target.value); if (linkError) setLinkError(null); }}
+                          aria-label="Email for login account"
                           className={inputClass(linkError || "")}
                         />
                         {linkError && <p className={errorClass}>{linkError}</p>}
@@ -1181,7 +1355,7 @@ export default function ResidentsPage() {
                   <div>
                     <p className="text-[11px] text-brand-gray uppercase tracking-wide">Last Assessment</p>
                     <p className="mt-0.5 text-sm font-medium text-brand-ink">
-                      {selected.riskAssessedAt ? new Date(selected.riskAssessedAt).toLocaleDateString() : "—"}
+                      {selected.riskAssessedAt ? new Date(selected.riskAssessedAt).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "short", day: "numeric" }) : "—"}
                     </p>
                   </div>
                 </div>
@@ -1225,7 +1399,7 @@ export default function ResidentsPage() {
 
               <div className="flex justify-end gap-3">
                 <button
-                  onClick={() => setShowViewModal(false)}
+                  onClick={closeView}
                   className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
                 >
                   Close
@@ -1239,9 +1413,9 @@ export default function ResidentsPage() {
       {/* Edit Resident Modal (Health Supervisor, assigned barangay only).
           Edits are limited to the fields the API permits for correction —
           identity fields (name, birth date, sex) are locked by design. */}
-      {showEditModal && editTarget && (
+      {showEditModal && editTarget && canEdit && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <Card role="dialog" aria-modal="true" aria-label="Edit Resident" className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto ${supervisor ? "supervisor-modal supervisor-form" : ""}`}>
             <div className="p-6">
               <div className="flex items-start justify-between mb-4">
                 <div>
@@ -1313,6 +1487,6 @@ export default function ResidentsPage() {
           <span className="text-sm">{toast}</span>
         </div>
       )}
-    </>
+    </div>
   );
 }
