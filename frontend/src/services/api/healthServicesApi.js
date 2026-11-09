@@ -41,6 +41,18 @@ export const healthServicesApi = {
   // Record / update attendance against a service + resident.
   createAttendance: (payload) => api.post('/health-services/attendance', payload),
   updateAttendance: (id, payload) => api.patch(`/health-services/attendance/${id}`, payload),
+  // Upload a health service attachment (memo or pubmat).
+  uploadAttachment: (serviceId, attachmentType, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/health-services/${serviceId}/attachments/${attachmentType}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  // Get a signed URL for downloading an attachment.
+  getAttachmentSignedUrl: (serviceId, attachmentType) => api.get(`/health-services/${serviceId}/attachments/${attachmentType}`),
+  // Delete a health service attachment.
+  deleteAttachment: (serviceId, attachmentType) => api.delete(`/health-services/${serviceId}/attachments/${attachmentType}`),
 };
 
 export default healthServicesApi;

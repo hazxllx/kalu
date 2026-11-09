@@ -109,6 +109,49 @@ export const deleteDocument = async (storagePath) => {
   return true;
 };
 
+/**
+ * Upload a health service attachment (memo or pubmat).
+ * Returns the storage path and file metadata.
+ */
+export const uploadHealthServiceAttachment = async ({ file, serviceId, attachmentType }) => {
+  const supabase = getServiceClient();
+  const ext = path.extname(String(file.name || '')).toLowerCase();
+  const fileName = `${attachmentType}${ext}`;
+  const storagePath = `health-service-attachments/${serviceId}/${fileName}`;
+
+  // Convert buffer to Blob if needed
+  const fileData = file.buffer instanceof Buffer ? new Blob([file.buffer], { type: file.type }) : file;
+
+  const { error } = await supabase.storage.from(BUCKET).upload(storagePath, fileData, {
+    cacheControl: '3600',
+    upsert: true,
+    contentType: file.type,
+  });
+
+  if (error) {
+    throw new Error(`Upload failed: ${error.message}`);
+  }
+
+  return {
+    storagePath,
+    filename: file.name,
+    mimeType: file.type,
+    fileSize: file.size,
+  };
+};
+
+/**
+ * Delete a health service attachment from storage.
+ */
+export const deleteHealthServiceAttachment = async (storagePath) => {
+  const supabase = getServiceClient();
+  const { error } = await supabase.storage.from(BUCKET).remove([storagePath]);
+  if (error) {
+    throw new Error(`Delete failed: ${error.message}`);
+  }
+  return true;
+};
+
 export default {
   uploadDocument,
   downloadDocumentFile,
@@ -116,5 +159,7 @@ export default {
   uploadStaffDocument,
   getDocumentSignedUrl,
   deleteDocument,
+  uploadHealthServiceAttachment,
+  deleteHealthServiceAttachment,
   storagePath,
 };

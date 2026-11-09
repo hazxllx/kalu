@@ -377,8 +377,8 @@ function SupervisorDayView({ cursor, byDay, loading, incomplete, onOpenEvent }) 
   const list = byDay[key] || [];
   const previewCount = list.filter((event) => event.preview).length;
   return (
-    <section className="supervisor-panel self-start" aria-label="Selected date activities">
-      <div className="border-b border-brand-border px-4 py-3">
+    <section className="supervisor-panel flex flex-col h-full" aria-label="Selected date activities">
+      <div className="border-b border-brand-border px-4 py-3 shrink-0">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="min-w-0">
             <p className="text-caption text-brand-gray">Selected date</p>
@@ -391,7 +391,7 @@ function SupervisorDayView({ cursor, byDay, loading, incomplete, onOpenEvent }) 
         </div>
         {previewCount > 0 && <p className="mt-1.5 text-caption text-brand-gray">Includes {previewCount} preview sample follow-up{previewCount === 1 ? "" : "s"} (not saved).</p>}
       </div>
-      <div className="max-h-[65vh] overflow-y-auto">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {list.length ? <ScheduleRowList events={list} onOpenEvent={onOpenEvent} />
           : <ActivityEmpty loading={loading} incomplete={incomplete} title="No activities for this day" />}
       </div>

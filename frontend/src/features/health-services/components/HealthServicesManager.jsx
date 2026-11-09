@@ -12,11 +12,12 @@ import { healthServicesApi } from "@/services/api";
 import FacilityField from "./FacilityField";
 import TimePicker from "./TimePicker";
 import DateField from "./DateField";
+import DocumentUploadField from "./DocumentUploadField";
 import { filterHealthServices } from "../lib/filterHealthServices";
 import {
-  Plus, X, CheckCircle2, RefreshCw, Search, Users, MapPin, Building2, Activity, UserPlus, UserMinus,
+  Plus, X, CheckCircle2, Search, Users, MapPin, Building2, Activity, UserPlus, UserMinus,
   ClipboardList, UserCheck, UserX, CalendarDays, MoreVertical, Pencil, Trash2, Power, AlertTriangle,
-  ListChecks, CalendarClock, Layers,
+  ListChecks, CalendarClock, Layers, FileText, RefreshCw,
 } from "lucide-react";
 
 /**
@@ -403,6 +404,15 @@ export default function HealthServicesManager({ subtitle }) {
     registrationDeadlineTime: "",
     personnelIds: [],
     active: true,
+    memoFile: null,
+    memoFilename: "",
+    memoError: "",
+    pubmatFile: null,
+    pubmatFilename: "",
+    pubmatPreview: null,
+    pubmatError: "",
+    uploadingMemo: false,
+    uploadingPubmat: false,
   });
 
   const openCreate = () => {
@@ -427,9 +437,9 @@ export default function HealthServicesManager({ subtitle }) {
       name: service.name || "",
       category: service.category || "Other",
       facilityId: service.facilityId || "",
-      facilityName: "",
+      facilityName: service.customLocation || "",
       // No facility and no barangay => a municipality-wide service.
-      municipalityWide: !service.facilityId && !service.barangayId,
+      municipalityWide: !service.facilityId && !service.customLocation && !service.barangayId,
       description: service.description || "",
       startDate: sched.startDate ? String(sched.startDate).slice(0, 10) : "",
       startTime: sched.startTime || "",
@@ -439,6 +449,12 @@ export default function HealthServicesManager({ subtitle }) {
       registrationDeadlineTime: deadline ? deadline.slice(11, 16) : "",
       personnelIds: (service.assignedPersonnel || []).map((p) => p.id),
       active: service.active !== false,
+      memoFilename: service.attachments?.memo?.filename || "",
+      memoError: "",
+      pubmatFilename: service.attachments?.pubmat?.filename || "",
+      pubmatError: "",
+      uploadingMemo: false,
+      uploadingPubmat: false,
     });
     setFormError("");
     setScheduleErrors({});
@@ -498,11 +514,38 @@ export default function HealthServicesManager({ subtitle }) {
       personnelIds: form.personnelIds,
     };
     try {
+      let serviceId = editingId;
       if (isEdit) {
         await healthServicesApi.update(editingId, { ...payload, active: form.active });
       } else {
-        await healthServicesApi.create(payload);
+        const created = await healthServicesApi.create(payload);
+        serviceId = created?.record?.id;
+        if (!serviceId) throw new Error("Service creation succeeded but no ID was returned.");
       }
+
+      // Upload attachments
+      if (form.memoFile && serviceId) {
+        try {
+          setForm((f) => ({ ...f, uploadingMemo: true }));
+          await healthServicesApi.uploadAttachment(serviceId, 'memo', form.memoFile);
+        } catch (err) {
+          setForm((f) => ({ ...f, uploadingMemo: false, memoError: err?.message || "Failed to upload memo." }));
+          throw new Error(`Memo upload failed: ${err?.message}`);
+        }
+        setForm((f) => ({ ...f, uploadingMemo: false }));
+      }
+
+      if (form.pubmatFile && serviceId) {
+        try {
+          setForm((f) => ({ ...f, uploadingPubmat: true }));
+          await healthServicesApi.uploadAttachment(serviceId, 'pubmat', form.pubmatFile);
+        } catch (err) {
+          setForm((f) => ({ ...f, uploadingPubmat: false, pubmatError: err?.message || "Failed to upload pubmat." }));
+          throw new Error(`Publication material upload failed: ${err?.message}`);
+        }
+        setForm((f) => ({ ...f, uploadingPubmat: false }));
+      }
+
       setShowForm(false);
       setEditingId(null);
       showToast(isEdit ? "Health service updated." : "Health service created.");
@@ -692,28 +735,24 @@ export default function HealthServicesManager({ subtitle }) {
       )}
 
       {/* Summary counts — derived from the real catalog + status rules. */}
-      {isSupervisor ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard variant="consultation" icon="Layers" label="Catalog Services" value={loading || error ? "Unavailable" : summary.total} description="Authorized visible catalog" tone="blue" />
-        <StatCard variant="consultation" icon="ListChecks" label="Active" value={loading || error ? "Unavailable" : summary.active} description="Active within the stored schedule" tone="green" />
-        <StatCard variant="consultation" icon="CalendarClock" label="Upcoming" value={loading || error ? "Unavailable" : summary.upcoming} description="Active services with a future start" tone="blue" />
-      </div> : <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <SummaryCard icon={Layers} label="Total services" value={summary.total} tone="text-brand-ink" loading={loading || Boolean(error)} />
-        <SummaryCard icon={ListChecks} label="Active services" value={summary.active} tone="text-brand-green" loading={loading || Boolean(error)} />
-        <SummaryCard icon={CalendarClock} label="Upcoming services" value={summary.upcoming} tone="text-brand-blue" loading={loading || Boolean(error)} />
-      </div>}
+      <div className="supervisor-metric-grid mb-4">
+        <StatCard variant="ledger" label="CATALOG SERVICES" value={loading || error ? "Unavailable" : summary.total} description="Authorized visible catalog" tone="blue" />
+        <StatCard variant="ledger" label="ACTIVE" value={loading || error ? "Unavailable" : summary.active} description="Active within the stored schedule" tone="green" />
+        <StatCard variant="ledger" label="UPCOMING" value={loading || error ? "Unavailable" : summary.upcoming} description="Active services with a future start" tone="blue" />
+      </div>
 
       {isSupervisor && referenceState.errors.length > 0 && <Card className="mb-4"><ErrorState compact title="Service form references unavailable" message={referenceState.errors.join(" ")} onRetry={loadReference} /></Card>}
 
-      {/* Search, filters, and refresh */}
+      {/* Search, filters */}
       <Card className={`mb-4 p-3 ${isSupervisor ? "supervisor-toolbar" : ""}`}>
-        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(10rem,0.58fr)_minmax(10rem,0.58fr)_auto] lg:items-end">
-          {isSupervisor ? <label htmlFor="health-service-search" className="min-w-0 text-caption font-medium text-brand-gray sm:col-span-2 lg:col-span-1">
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-3 lg:items-end">
+          {isSupervisor ? <label htmlFor="health-service-search" className="min-w-0 text-caption font-medium text-brand-gray">
             Search Services
             <div className="supervisor-input mt-1 flex items-center gap-2">
               <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
               <input id="health-service-search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Service name or category" className="w-full min-w-0 bg-transparent outline-none" />
             </div>
-          </label> : <div className="flex h-10 min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input sm:col-span-2 lg:col-span-1">
+          </label> : <div className="flex h-10 min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input">
             <Search className="h-4 w-4 text-brand-gray" />
             <input
               type="search"
@@ -751,14 +790,6 @@ export default function HealthServicesManager({ subtitle }) {
               ))}
             </select>
           </label>
-          <button
-            type="button"
-            onClick={loadServices}
-            disabled={loading}
-            className={isSupervisor ? "supervisor-button" : "inline-flex h-10 items-center justify-center gap-2 rounded-btn border border-brand-border px-3 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue sm:col-span-2 sm:justify-self-end lg:col-span-1"}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </button>
         </div>
 
         <div className="mt-2 flex w-full items-center justify-between gap-3 border-t border-brand-border pt-2 dark:border-border">
@@ -800,80 +831,138 @@ export default function HealthServicesManager({ subtitle }) {
             </button>
           )}
         </Card>
-      ) : (
-        <>
-          <div className={`grid sm:grid-cols-2 lg:grid-cols-3 ${isSupervisor ? "gap-3" : "gap-4"}`}>
-            {filtered.map((s) => {
-              const status = deriveStatus(s);
-              const personnelList = s.assignedPersonnel || [];
-              return (
-                <Card key={s.id} className={`flex h-full flex-col ${isSupervisor ? "p-3" : "p-4"}`}>
-                  <div className="mb-2 flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <h4 className={`${isSupervisor ? "text-section" : "truncate"} font-semibold leading-snug text-brand-ink`} title={s.name}>{s.name}</h4>
-                      <p className="mt-0.5 text-xs font-medium text-brand-gray">{CATEGORY_LABELS[s.category] || s.category}</p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      {isSupervisor ? <StatusBadge value={status} /> : <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE[status]}`}>{status}</span>}
+       ) : (
+         <>
+           <div className="grid sm:grid-cols-2 lg:grid-cols-2 gap-6 mb-6">
+             {filtered.map((s) => {
+               const status = deriveStatus(s);
+               const personnelList = s.assignedPersonnel || [];
+               return (
+                 <div key={s.id} className="flex flex-col h-full bg-white border border-[#E4DED2] rounded" style={{ borderColor: '#E4DED2' }}>
+                    {/* Header — Horizontal layout with image on left */}
+                    <div className="flex gap-5 p-6 border-b border-[#E4DED2]" style={{ minHeight: '150px' }}>
+                      {/* Left: Service Image Thumbnail */}
+                      <div className="shrink-0">
+                        {s.attachments?.pubmat ? (
+                          <img
+                            src={`data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 72 100%22%3E%3Crect fill=%22%23E4DED2%22 width=%2272%22 height=%22100%22/%3E%3Ctext x=%2236%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 font-size=%2212%22 fill=%22%239CA3AF%22%3EPubmat%3C/text%3E%3C/svg%3E`}
+                            alt={s.name}
+                            className="w-[72px] h-[100px] object-cover rounded border border-[#D4CCBF]"
+                            style={{ borderColor: '#D4CCBF' }}
+                          />
+                        ) : (
+                          <img
+                            src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 72 100%22%3E%3Crect fill=%22%23E4DED2%22 width=%2272%22 height=%22100%22/%3E%3Ctext x=%2236%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 font-size=%2212%22 fill=%22%239CA3AF%22%3EHealth%3C/text%3E%3C/svg%3E"
+                            alt={s.name}
+                            className="w-[72px] h-[100px] object-cover rounded border border-[#D4CCBF]"
+                            style={{ borderColor: '#D4CCBF' }}
+                          />
+                        )}
+                      </div>
+
+                     {/* Right: Service Information */}
+                     <div className="flex-1 flex flex-col justify-between min-w-0">
+                       <div>
+                         {/* Category */}
+                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F]" style={{ color: '#89939F', letterSpacing: '0.8px' }}>
+                           {CATEGORY_LABELS[s.category] || s.category}
+                         </p>
+                         {/* Service Title — Serif font */}
+                         <h3 className="mt-1 text-2xl font-medium text-[#243447]" style={{ fontFamily: 'Georgia, serif', color: '#243447', fontSize: '26px' }}>
+                           {s.name}
+                         </h3>
+                       </div>
+                       
+                       {/* Status Badge */}
+                       <div className="mt-2">
+                         {isSupervisor ? <StatusBadge value={status} /> : <span className={`inline-block text-xs font-medium uppercase px-2 py-1 rounded border ${STATUS_BADGE[status]}`}>{status}</span>}
+                       </div>
+                     </div>
+
+                     {/* Three-dot menu — top right */}
+                     <div className="shrink-0 flex items-start">
                       {(canEdit || canDelete) && (
-                        <ActionMenu
-                          open={menuOpenId === s.id}
-                          onToggle={() => setMenuOpenId((cur) => (cur === s.id ? null : s.id))}
-                          onClose={() => setMenuOpenId(null)}
-                          canEdit={canEdit}
-                          canDelete={canDelete}
-                          active={s.active !== false}
-                          busy={statusBusyId === s.id}
-                          onEdit={() => openEdit(s)}
-                          onToggleActive={() => setActive(s, s.active === false)}
-                          onDelete={() => openDelete(s)}
-                        />
-                      )}
+                          <ActionMenu
+                            service={s}
+                            open={menuOpenId === s.id}
+                            onToggle={() => setMenuOpenId((cur) => (cur === s.id ? null : s.id))}
+                            onClose={() => setMenuOpenId(null)}
+                            canEdit={canEdit}
+                            canDelete={canDelete}
+                            active={s.active !== false}
+                            busy={statusBusyId === s.id}
+                            onEdit={() => openEdit(s)}
+                            onToggleActive={() => setActive(s, s.active === false)}
+                            onDelete={() => openDelete(s)}
+                          />
+                        )}
+                     </div>
+                   </div>
+
+                   {/* Information Section — Two-column layout */}
+                   <div className="flex-1 px-6 py-5 grid grid-cols-2 gap-x-8 gap-y-5">
+                     {/* Left Column */}
+                     <div className="space-y-5">
+                       {/* Facility */}
+                       <div>
+                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Facility</p>
+                         <p className="text-sm font-medium text-[#243447]" style={{ color: '#243447' }}>{s.facilityMeta?.label || s.facility || "—"}</p>
+                       </div>
+
+                       {/* Schedule */}
+                       <div>
+                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Schedule</p>
+                         <p className="text-sm font-medium text-[#243447]" style={{ color: '#243447' }}>{scheduleSummary(s.schedule) || "—"}</p>
+                       </div>
+
+                       {/* Register By — only when applicable */}
+                       {deadlineSummary(s.schedule) && (
+                         <div>
+                           <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Register By</p>
+                           <p className="text-sm font-semibold text-[#C54040]" style={{ color: '#C54040' }}>{deadlineSummary(s.schedule)}</p>
+                         </div>
+                       )}
+                     </div>
+
+                     {/* Right Column */}
+                     <div className="space-y-5">
+                       {/* Coverage */}
+                       <div>
+                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Coverage</p>
+                         <p className="text-sm font-medium text-[#243447]" style={{ color: '#243447' }}>{s.barangay === null || s.barangay === "" ? "Municipality-wide" : s.barangay || "—"}</p>
+                       </div>
+
+                       {/* Personnel */}
+                       <div>
+                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Personnel</p>
+                         <p className="text-sm font-medium text-[#243447]" style={{ color: '#243447' }}>{personnelList.length ? personnelList.map((person) => person.name).filter(Boolean).join(", ") : "—"}</p>
+                       </div>
+                     </div>
+                   </div>
+
+                    {/* Footer — Separate section */}
+                    <div className="border-t border-[#E4DED2] px-6 py-4 flex items-center justify-between" style={{ borderColor: '#E4DED2', minHeight: '48px' }}>
+                      <button
+                        onClick={() => openRegistrations(s)}
+                        className="text-xs font-medium uppercase tracking-wide text-[#245B89] hover:text-[#173653] transition-colors"
+                        style={{ letterSpacing: '0.8px', color: '#245B89' }}
+                      >
+                        Registrations {s.registrationCount !== undefined && `(${s.registrationCount})`}
+                      </button>
+                      {canEdit && <button
+                        onClick={() => setManageTarget(s)}
+                        className="text-xs font-medium uppercase tracking-wide text-[#6D927B] hover:text-[#4C5F5A] transition-colors"
+                        style={{ letterSpacing: '0.8px', color: '#6D927B' }}
+                      >
+                        Assign
+                      </button>}
                     </div>
-                  </div>
-
-                  {isSupervisor ? <dl className="flex-1 space-y-2 text-ui">
-                    {[ ["Facility", s.facilityMeta?.label || s.facility || "Not recorded"], ["Coverage", s.barangay === null || s.barangay === "" ? "Municipality-wide" : s.barangay || "Not recorded"], ["Schedule", scheduleSummary(s.schedule) || "Not scheduled"], ["Personnel", personnelList.length ? personnelList.map((person) => person.name).filter(Boolean).join(", ") : "Not assigned"] ].map(([label, value]) => <div key={label}><dt className="text-caption text-brand-gray">{label}</dt><dd className="break-words text-brand-ink">{value || "Not recorded"}</dd></div>)}
-                    {deadlineSummary(s.schedule) && <div><dt className="text-caption text-brand-gray">Registration Deadline</dt><dd className="text-brand-ink">{deadlineSummary(s.schedule)}</dd></div>}
-                  </dl> : <div className="flex-1 space-y-1.5 text-sm text-brand-gray">
-                    <p className="flex items-start gap-1.5"><Building2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span className="min-w-0">{facilityLabel(s)}</span></p>
-                    <p className="flex items-start gap-1.5"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span className="min-w-0">{s.barangay || "Municipality-wide"}</span></p>
-                    {scheduleSummary(s.schedule) && (
-                      <p className="flex items-start gap-1.5"><CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span className="min-w-0">{scheduleSummary(s.schedule)}</span></p>
-                    )}
-                    {deadlineSummary(s.schedule) && (
-                      <p className="flex items-start gap-1.5"><CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span className="min-w-0">Register by {deadlineSummary(s.schedule)}</span></p>
-                    )}
-                    <p className="flex items-start gap-1.5">
-                      <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span className="min-w-0">
-                        {personnelList.length === 0
-                          ? "No personnel assigned"
-                          : personnelList.map((p) => `${p.name}${p.role ? ` (${ROLE_LABELS[p.role] || p.role})` : ""}`).join(", ")}
-                      </span>
-                    </p>
-                  </div>}
-
-                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-brand-border pt-2.5 dark:border-border">
-                    <button
-                      onClick={() => openRegistrations(s)}
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-ink hover:text-brand-blue hover:underline"
-                    >
-                      <ClipboardList className="h-3.5 w-3.5" /> Registrations
-                    </button>
-                    {canEdit && <button
-                      onClick={() => setManageTarget(s)}
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
-                    >
-                      <UserPlus className="h-3.5 w-3.5" /> Assign
-                    </button>}
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </>
-      )}
+                 </div>
+               );
+             })}
+           </div>
+         </>
+       )}
 
       {/* Create / Edit service — ONE shared form */}
       {showForm && form && (
@@ -1071,10 +1160,71 @@ export default function HealthServicesManager({ subtitle }) {
                         ))
                       )}
                     </div>
-                  </div>
-                </section>
+                   </div>
+                 </section>
 
-                {formError && (
+                 {/* Documents and publication materials */}
+                 <section className="space-y-3 border-t border-brand-border pt-5 dark:border-border">
+                   <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Documents and publication materials</h4>
+                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                     <DocumentUploadField
+                       type="memo"
+                       label="Official Memorandum"
+                       filename={form.memoFilename}
+                       uploading={form.uploadingMemo}
+                       error={form.memoError}
+                       onSelect={(file) => {
+                         setForm((f) => ({
+                           ...f,
+                           memoFile: file,
+                           memoFilename: file.name,
+                           memoError: "",
+                         }));
+                       }}
+                       onRemove={() => {
+                         setForm((f) => ({
+                           ...f,
+                           memoFile: null,
+                           memoFilename: "",
+                           memoError: "",
+                         }));
+                       }}
+                     />
+                     <DocumentUploadField
+                       type="pubmat"
+                       label="Publication Material"
+                       filename={form.pubmatFilename}
+                       uploading={form.uploadingPubmat}
+                       error={form.pubmatError}
+                       preview={form.pubmatPreview}
+                       onSelect={(file) => {
+                         const reader = new FileReader();
+                         reader.onload = (e) => {
+                           setForm((f) => ({
+                             ...f,
+                             pubmatFile: file,
+                             pubmatFilename: file.name,
+                             pubmatPreview: e.target?.result,
+                             pubmatError: "",
+                           }));
+                         };
+                         reader.readAsDataURL(file);
+                       }}
+                       onRemove={() => {
+                         setForm((f) => ({
+                           ...f,
+                           pubmatFile: null,
+                           pubmatFilename: "",
+                           pubmatPreview: null,
+                           pubmatError: "",
+                         }));
+                       }}
+                     />
+                   </div>
+                   <p className="text-xs text-brand-gray">Both fields are optional. The publication material will be used as the service card thumbnail.</p>
+                 </section>
+
+                 {formError && (
                   <div className="rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-3.5 py-2.5 text-sm text-brand-danger">{formError}</div>
                 )}
               </div>
@@ -1242,8 +1392,10 @@ function SummaryCard({ icon: Icon, label, value, tone, loading }) {
  * Compact three-dot action menu for a service card: Edit, Activate/Deactivate,
  * Delete. Closes on outside click or Escape.
  */
-function ActionMenu({ open, onToggle, onClose, canEdit, canDelete, active, busy, onEdit, onToggleActive, onDelete }) {
+function ActionMenu({ service, open, onToggle, onClose, canEdit, canDelete, active, busy, onEdit, onToggleActive, onDelete }) {
   const ref = useRef(null);
+  const [downloading, setDownloading] = useState(false);
+
   useEffect(() => {
     if (!open) return undefined;
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
@@ -1253,12 +1405,35 @@ function ActionMenu({ open, onToggle, onClose, canEdit, canDelete, active, busy,
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
   }, [open, onClose]);
 
+  const downloadMemo = async () => {
+    if (!service?.attachments?.memo) return;
+    setDownloading(true);
+    try {
+      const response = await healthServicesApi.getAttachmentSignedUrl(service.id, 'memo');
+      const url = response?.url;
+      if (!url) throw new Error('Could not generate download link');
+      
+      // Create a temporary link and trigger download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = service.attachments.memo.filename || 'memo.pdf';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Failed to download memo:', err);
+    } finally {
+      setDownloading(false);
+      onClose();
+    }
+  };
+
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={onToggle}
-        disabled={busy}
+        disabled={busy || downloading}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Service actions"
@@ -1268,6 +1443,11 @@ function ActionMenu({ open, onToggle, onClose, canEdit, canDelete, active, busy,
       </button>
       {open && (
         <div role="menu" className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-btn border border-brand-border bg-white py-1 shadow-lg dark:border-border dark:bg-card">
+          {service?.attachments?.memo && (
+            <button role="menuitem" onClick={downloadMemo} disabled={downloading} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg disabled:opacity-60 dark:hover:bg-hover">
+              <FileText className="h-3.5 w-3.5" /> {downloading ? "Downloading..." : "Memo"}
+            </button>
+          )}
           {canEdit && (
             <button role="menuitem" onClick={onEdit} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-brand-ink hover:bg-brand-bg dark:hover:bg-hover">
               <Pencil className="h-3.5 w-3.5" /> Edit
@@ -1325,10 +1505,27 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
   const { loading, error, registrations, counts } = state;
   const active = registrations.filter((r) => r.status !== "Cancelled");
   const cancelled = registrations.filter((r) => r.status === "Cancelled");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  // Filter registrations based on search and status
+  const filtered = active.filter((reg) => {
+    const query = searchQuery.trim().toLowerCase();
+    const matchesSearch = !query || 
+      reg.residentName.toLowerCase().includes(query) ||
+      reg.barangay.toLowerCase().includes(query);
+    
+    const matchesStatus = statusFilter === "all" || 
+      (statusFilter === "attended" && reg.attendance?.status === "attended") ||
+      (statusFilter === "absent" && reg.attendance?.status === "absent") ||
+      (statusFilter === "pending" && !reg.attendance?.status);
+    
+    return matchesSearch && matchesStatus;
+  });
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={`Registrations for ${service.name}`}>
-      <Card className={`max-h-[92vh] w-full max-w-2xl overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
+      <Card className={`max-h-[92vh] w-full max-w-3xl overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
         <div className="p-6">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -1348,14 +1545,60 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
             <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
 
+          {/* KPI Cards */}
           {counts && !loading && !error && (
-            <div className="mb-4 flex flex-wrap gap-2 text-xs">
-              <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-medium text-brand-blue">{counts.registered} registered</span>
-              <span className="rounded-full bg-brand-green/10 px-2.5 py-1 font-medium text-brand-green">{counts.attended} attended</span>
-              <span className="rounded-full bg-brand-danger/10 px-2.5 py-1 font-medium text-brand-danger">{counts.absent} missed</span>
-              {counts.pendingAttendance > 0 && (
-                <span className="rounded-full bg-brand-gray/10 px-2.5 py-1 font-medium text-brand-gray">{counts.pendingAttendance} not yet recorded</span>
-              )}
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
+                <p className="text-xs font-medium text-brand-gray">Total Registered</p>
+                <p className="mt-1 text-xl font-semibold text-brand-blue">{counts.registered}</p>
+              </div>
+              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
+                <p className="text-xs font-medium text-brand-gray">Attended</p>
+                <p className="mt-1 text-xl font-semibold text-brand-green">{counts.attended}</p>
+              </div>
+              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
+                <p className="text-xs font-medium text-brand-gray">Not Attended</p>
+                <p className="mt-1 text-xl font-semibold text-brand-danger">{counts.absent}</p>
+              </div>
+              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
+                <p className="text-xs font-medium text-brand-gray">Pending</p>
+                <p className="mt-1 text-xl font-semibold text-brand-gray">{counts.pendingAttendance}</p>
+              </div>
+              <div className="rounded-btn border border-brand-border bg-brand-bg p-3 dark:border-border dark:bg-input">
+                <p className="text-xs font-medium text-brand-gray">Cancelled</p>
+                <p className="mt-1 text-xl font-semibold text-brand-gray">{counts.cancelled}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Search and Filter */}
+          {!loading && !error && active.length > 0 && (
+            <div className="mb-4 space-y-3">
+              <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 dark:border-border dark:bg-input">
+                <Search className="h-4 w-4 text-brand-gray" />
+                <input
+                  type="search"
+                  placeholder="Search by name or barangay..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {["all", "attended", "pending", "absent"].map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setStatusFilter(status)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                      statusFilter === status
+                        ? "bg-brand-blue text-white"
+                        : "border border-brand-border text-brand-ink hover:border-brand-blue hover:text-brand-blue dark:border-border"
+                    }`}
+                  >
+                    {status === "all" ? "All" : status === "attended" ? "Attended" : status === "pending" ? "Pending" : "Not Attended"}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1374,14 +1617,19 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
             </div>
           ) : loading ? (
             <p className="py-10 text-center text-sm text-brand-gray">Loading registrations…</p>
-          ) : active.length === 0 ? (
+          ) : filtered.length === 0 && searchQuery ? (
+            <div className="py-10 text-center">
+              <Users className="mx-auto mb-3 h-10 w-10 text-brand-gray/40" />
+              <p className="text-sm text-brand-gray">No residents match your search.</p>
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="py-10 text-center">
               <Users className="mx-auto mb-3 h-10 w-10 text-brand-gray/40" />
               <p className="text-sm text-brand-gray">{cancelled.length ? "No active resident registrations. All loaded registrations are cancelled." : "No residents have registered for this service yet."}</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {active.map((reg) => {
+              {filtered.map((reg) => {
                 const label = registrationLabel(reg);
                 return (
                   <div key={reg.id} className="rounded-btn border border-brand-border p-3 dark:border-border">
@@ -1393,7 +1641,7 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
                           {reg.plannedDate && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Plans to visit {formatDate(reg.plannedDate)}</span>}
                           {reg.registeredAt && <span>Registered {formatDateTime(reg.registeredAt)}</span>}
                         </div>
-                        {reg.note && <p className="mt-1 text-xs italic text-brand-gray">“{reg.note}”</p>}
+                        {reg.note && <p className="mt-1 text-xs italic text-brand-gray">"{reg.note}"</p>}
                       </div>
                       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${REG_STATUS_BADGE[label] || "bg-brand-gray/10 text-brand-gray"}`}>{label}</span>
                     </div>

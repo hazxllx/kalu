@@ -1545,6 +1545,9 @@ a.supervisor-metric:hover, button.supervisor-metric:hover { box-shadow: inset 0 
 .hs-case-filters button > span:last-child { font-size: 0.625rem; font-variant-numeric: tabular-nums; opacity: 0.85; }
 .hs-case-filters button:hover { background: #F3F7FC; border-color: #BECDDE; }
 .hs-case-filters button[aria-pressed="true"] { background: #072F5F; border-color: #072F5F; color: #fff; }
+.hs-case-filters button[aria-pressed="true"]:has(span:first-child:contains("High Risk")) { background: #B3202C; border-color: #B3202C; }
+/* Alternative for High Risk filter - targeting by filter index or custom attribute */
+.hs-case-filters button:nth-child(3)[aria-pressed="true"] { background: #B3202C; border-color: #B3202C; }
 .hs-register-menu { position: relative; }
 .hs-register-menu summary { list-style: none; cursor: pointer; }
 .hs-register-menu summary::-webkit-details-marker { display: none; }

@@ -315,71 +315,111 @@ const CLINICAL_TEXT_FIELDS = [
   'treatmentGiven', 'medicationPrescribed', 'adviceGiven', 'remarks', 'nextVisitDate',
 ];
 
-const clinicalDetails = (payload) => ({
-  ...(payload.consultationDetails || {}),
-  ...Object.fromEntries(CLINICAL_TEXT_FIELDS.map((field) => [field, text(payload[field])])),
-  followUpRequired: text(payload.nextVisitDate) ? 'Yes' : 'No',
-});
+/**
+ * Normalize the clinical findings and diagnosis fields.
+ * Supports both new merged format (clinicalFindingsDiagnosis) and legacy separate fields.
+ * Returns an object with normalized findings and diagnosis.
+ */
+const normalizeClinicalFindings = (payload = {}) => {
+  // New merged field takes priority
+  if (payload.clinicalFindingsDiagnosis) {
+    const merged = text(payload.clinicalFindingsDiagnosis);
+    // Try to split if diagnosis marker exists (for safety with mixed input)
+    if (merged.includes('\n')) {
+      const parts = merged.split('\n');
+      return {
+        findings: parts.slice(0, -1).join('\n'),
+        diagnosis: parts[parts.length - 1],
+      };
+    }
+    // No newline, treat entire content as findings with no separate diagnosis
+    return {
+      findings: merged,
+      diagnosis: '',
+    };
+  }
+  // Fallback to legacy separate fields
+  return {
+    findings: text(payload.findings || ''),
+    diagnosis: text(payload.diagnosis || ''),
+  };
+};
+
+const clinicalDetails = (payload) => {
+  const { findings, diagnosis } = normalizeClinicalFindings(payload);
+  return ({
+    ...(payload.consultationDetails || {}),
+    ...Object.fromEntries(CLINICAL_TEXT_FIELDS.map((field) => {
+      if (field === 'findings') return [field, findings];
+      if (field === 'diagnosis') return [field, diagnosis];
+      return [field, text(payload[field])];
+    })),
+    followUpRequired: text(payload.nextVisitDate) ? 'Yes' : 'No',
+  });
+};
 
 const numericVital = (value) => present(value) ? Number(value) : null;
 
-export const toVisit = (payload = {}, user, residentId, extra = {}) => ({
-  residentId,
-  recordedById: user.id,
-  recordedByRole: user.role,
-  recordedByName: user.name || user.email || '',
-  // The consultation/visit STATUS is only 'completed' when a NEW visit is
-  // created by the consultation staff. `update` passes `status: extra.status`
-  // to preserve an existing draft/in_review/referred state instead of
-  // clobbering it back to 'completed' (the prior bug forced every update to
-  // 'completed').
-  status: extra.status ?? 'completed',
-  visitDate: payload.consultationDate
-    ? `${payload.consultationDate}T${text(payload.consultationTime) || '00:00'}:00+08:00`
-    : new Date().toISOString(),
-  recordedAt: extra.recordedAt ?? payload.recordedAt ?? new Date().toISOString(),
-  // Keep the individual form fields: clinical text can itself contain the
-  // legacy Diagnosis/Medication/Next visit delimiters.
-  consultationDetails: clinicalDetails(payload),
-  chiefComplaint: text(payload.chiefComplaint),
-  clinicalHistory: text(payload.remarks),
-  findings: [text(payload.findings), text(payload.diagnosis)].filter(Boolean).join('\nDiagnosis: '),
-  treatmentGiven: [text(payload.treatmentGiven), text(payload.medicationPrescribed)].filter(Boolean).join('\nMedication: '),
-  recommendation: [text(payload.adviceGiven), payload.nextVisitDate ? `Next visit: ${payload.nextVisitDate}` : ''].filter(Boolean).join('\n'),
-  // The health service provided during this consultation (FK + name snapshot,
-  // validated by resolveConsultationService before the row is written).
-  healthServiceId: extra.healthServiceId ?? null,
-  healthServiceName: extra.healthServiceName ?? '',
-  // Structured, non-lossy prescription storage (by value, so a later catalog
-  // change never alters an already-recorded consultation).
-  medications: normalizeMedications(payload.medications),
-  // Previously-dropped field, now persisted.
-  referralRequired: referralIsRequired(payload),
-  // Blood-pressure classification SNAPSHOT recorded at the time of the
-  // consultation. Preserved historically: a later threshold change does not
-  // alter it (it is only recomputed when the consultation itself is saved).
-  bpClassification: extra.bpClassification ?? null,
-  vitals: {
-    bp: text(payload.bloodPressure),
-    temperature: numericVital(payload.temperature),
-    hr: numericVital(payload.pulseRate),
-    rr: numericVital(payload.respiratoryRate),
-    heightCm: numericVital(payload.height),
-    weightKg: numericVital(payload.weight),
-    o2sat: numericVital(payload.oxygenSaturation),
-    ...(() => {
-      const { bmi, category } = computeBMI(payload.height, payload.weight);
-      // `visits.bmi_category` is NOT NULL (default ''), so a consultation saved
-      // without both height and weight must store '' here, not null — otherwise
-      // the insert fails with a NOT-NULL violation. `bmi` itself is nullable.
-      return { bmi, bmiCategory: category || '' };
-    })(),
-  },
-  phn: {
-    assessment: text(payload.diagnosis),
-    notes: text(payload.remarks),
-  },
-});
+export const toVisit = (payload = {}, user, residentId, extra = {}) => {
+  const { findings, diagnosis } = normalizeClinicalFindings(payload);
+  return ({
+    residentId,
+    recordedById: user.id,
+    recordedByRole: user.role,
+    recordedByName: user.name || user.email || '',
+    // The consultation/visit STATUS is only 'completed' when a NEW visit is
+    // created by the consultation staff. `update` passes `status: extra.status`
+    // to preserve an existing draft/in_review/referred state instead of
+    // clobbering it back to 'completed' (the prior bug forced every update to
+    // 'completed').
+    status: extra.status ?? 'completed',
+    visitDate: payload.consultationDate
+      ? `${payload.consultationDate}T${text(payload.consultationTime) || '00:00'}:00+08:00`
+      : new Date().toISOString(),
+    recordedAt: extra.recordedAt ?? payload.recordedAt ?? new Date().toISOString(),
+    // Keep the individual form fields: clinical text can itself contain the
+    // legacy Diagnosis/Medication/Next visit delimiters.
+    consultationDetails: clinicalDetails(payload),
+    chiefComplaint: text(payload.chiefComplaint),
+    clinicalHistory: text(payload.remarks),
+    findings: [findings, diagnosis].filter(Boolean).join('\nDiagnosis: '),
+    treatmentGiven: [text(payload.treatmentGiven), text(payload.medicationPrescribed)].filter(Boolean).join('\nMedication: '),
+    recommendation: [text(payload.adviceGiven), payload.nextVisitDate ? `Next visit: ${payload.nextVisitDate}` : ''].filter(Boolean).join('\n'),
+    // The health service provided during this consultation (FK + name snapshot,
+    // validated by resolveConsultationService before the row is written).
+    healthServiceId: extra.healthServiceId ?? null,
+    healthServiceName: extra.healthServiceName ?? '',
+    // Structured, non-lossy prescription storage (by value, so a later catalog
+    // change never alters an already-recorded consultation).
+    medications: normalizeMedications(payload.medications),
+    // Previously-dropped field, now persisted.
+    referralRequired: referralIsRequired(payload),
+    // Blood-pressure classification SNAPSHOT recorded at the time of the
+    // consultation. Preserved historically: a later threshold change does not
+    // alter it (it is only recomputed when the consultation itself is saved).
+    bpClassification: extra.bpClassification ?? null,
+    vitals: {
+      bp: text(payload.bloodPressure),
+      temperature: numericVital(payload.temperature),
+      hr: numericVital(payload.pulseRate),
+      rr: numericVital(payload.respiratoryRate),
+      heightCm: numericVital(payload.height),
+      weightKg: numericVital(payload.weight),
+      o2sat: numericVital(payload.oxygenSaturation),
+      ...(() => {
+        const { bmi, category } = computeBMI(payload.height, payload.weight);
+        // `visits.bmi_category` is NOT NULL (default ''), so a consultation saved
+        // without both height and weight must store '' here, not null — otherwise
+        // the insert fails with a NOT-NULL violation. `bmi` itself is nullable.
+        return { bmi, bmiCategory: category || '' };
+      })(),
+    },
+    phn: {
+      assessment: diagnosis,
+      notes: text(payload.remarks),
+    },
+  });
+};
 
 export const fromVisit = async (visit, supabase = serviceClientFor()) => {
   const resident = visit.resident || {};
@@ -749,8 +789,12 @@ const consultationFieldErrors = (payload = {}, { requireResident = false } = {})
     errors.recordedAt = 'The original recording timestamp is invalid.';
   }
   required('chiefComplaint', 'Chief complaint is required.');
-  required('findings', 'Findings are required.');
-  required('diagnosis', 'Diagnosis is required.');
+  // Accept either the merged field or the legacy separate fields
+  const hasMergedField = present(payload.clinicalFindingsDiagnosis);
+  const hasSeparateFields = present(payload.findings) || present(payload.diagnosis);
+  if (!hasMergedField && !hasSeparateFields) {
+    errors.clinicalFindingsDiagnosis = 'Clinical findings and diagnosis are required.';
+  }
   if (payload.consultationDetails !== undefined && (!payload.consultationDetails
     || typeof payload.consultationDetails !== 'object' || Array.isArray(payload.consultationDetails))) {
     errors.consultationDetails = 'Additional clinical details must be a JSON object.';

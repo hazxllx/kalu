@@ -68,6 +68,40 @@ export const registrations = async (req, res) => {
   sendData(res, data);
 };
 
+export const uploadAttachment = async (req, res) => {
+  if (!req.file) throw new Error('No file provided');
+  const record = await service.uploadAttachment({
+    user: req.user,
+    serviceId: req.params.id,
+    attachmentType: req.params.attachmentType,
+    file: {
+      name: req.file.originalname,
+      type: req.file.mimetype,
+      size: req.file.size,
+      buffer: req.file.buffer,
+    },
+  });
+  sendData(res, { record });
+};
+
+export const deleteAttachment = async (req, res) => {
+  const result = await service.deleteAttachment({
+    user: req.user,
+    serviceId: req.params.id,
+    attachmentType: req.params.attachmentType,
+  });
+  sendData(res, result);
+};
+
+export const getAttachmentSignedUrl = async (req, res) => {
+  const url = await service.getAttachmentSignedUrl({
+    user: req.user,
+    serviceId: req.params.id,
+    attachmentType: req.params.attachmentType,
+  });
+  sendData(res, { url });
+};
+
 export const createAttendance = async (req, res) => {
   const record = await service.createHealthServiceAttendance({ user: req.user, payload: req.body || {} });
   sendCreated(res, { record });
@@ -107,6 +141,9 @@ export default {
   remove,
   assign,
   unassign,
+  uploadAttachment,
+  deleteAttachment,
+  getAttachmentSignedUrl,
   createAttendance,
   listAttendance,
   updateAttendance,

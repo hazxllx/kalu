@@ -2,19 +2,21 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import StatCard from "@/components/common/StatCard";
 import DataTable from "@/components/tables/DataTable";
 import ErrorState from "@/components/common/ErrorState";
 import StatusBadge from "@/components/common/StatusBadge";
 import RiskBadge from "@/components/common/RiskBadge";
 import useAuthorizedData from "@/hooks/useAuthorizedData";
 import {
-  Search, FileText, Save, X, Plus, CheckCircle2, Users, ChevronLeft, MoreVertical, Eye, Stethoscope, Calendar, AlertTriangle,
+  Search, FileText, Save, X, Plus, CheckCircle2, ChevronLeft, MoreVertical, Eye, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { api, consultationsApi, residentsApi, healthServicesApi } from "@/services/api";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
+import DateRangePicker from "@/features/consultations/components/DateRangePicker";
 import { classifyBloodPressure as classifyBp } from "@/features/consultations/utils/bpClassification";
 import {
   saveConsultationOffline,
@@ -157,8 +159,7 @@ const emptyForm = (now = new Date()) => ({
   height: "",
   weight: "",
   oxygenSaturation: "",
-  findings: "",
-  diagnosis: "",
+  clinicalFindingsDiagnosis: "",
   treatmentGiven: "",
   medicationPrescribed: "",
   medications: [],
@@ -183,8 +184,7 @@ const emptyForm = (now = new Date()) => ({
  * @property {string} [height]
  * @property {string} [weight]
  * @property {string} [oxygenSaturation]
- * @property {string} [findings]
- * @property {string} [diagnosis]
+ * @property {string} [clinicalFindingsDiagnosis]
  * @property {string} [treatmentGiven]
  * @property {string} [nextVisitDate]
  * @property {string} [submit]
@@ -473,6 +473,11 @@ export default function TreatmentConsultation() {
     // heightCm/weightKg/o2sat); map them back to the flat form fields so an
     // edited consultation shows its saved vitals instead of blanks.
     const v = record.vitals || {};
+    // Merge findings and diagnosis for the combined field
+    const mergedClinicalData = [
+      record.findings || "",
+      record.diagnosis || ""
+    ].filter(Boolean).join("\n");
     setFormData({
       consultationDate: record.consultationDate || "",
       consultationTime: record.consultationTime || "",
@@ -484,8 +489,7 @@ export default function TreatmentConsultation() {
       height: v.heightCm ?? record.height ?? "",
       weight: v.weightKg ?? record.weight ?? "",
       oxygenSaturation: v.o2sat ?? record.oxygenSaturation ?? "",
-      findings: record.findings || "",
-      diagnosis: record.diagnosis || "",
+      clinicalFindingsDiagnosis: mergedClinicalData,
       treatmentGiven: record.treatmentGiven || "",
       medicationPrescribed: record.medicationPrescribed || "",
       medications: Array.isArray(record.medications) ? record.medications : [],
@@ -517,8 +521,7 @@ export default function TreatmentConsultation() {
     if (!selectedResident) next.resident = "Please select a resident.";
     if (!formData.consultationDate) next.consultationDate = "Consultation date is required.";
     if (!formData.chiefComplaint.trim()) next.chiefComplaint = "Chief complaint is required.";
-    if (!formData.findings.trim()) next.findings = "Findings are required.";
-    if (!formData.diagnosis.trim()) next.diagnosis = "Diagnosis is required.";
+    if (!formData.clinicalFindingsDiagnosis.trim()) next.clinicalFindingsDiagnosis = "Clinical findings and diagnosis are required.";
     if (!formData.treatmentGiven.trim()) next.treatmentGiven = "Treatment provided is required.";
     if (!isPositiveOrEmpty(formData.height)) next.height = "Height must be a number greater than 0.";
     if (!isPositiveOrEmpty(formData.weight)) next.weight = "Weight must be a number greater than 0.";
@@ -572,13 +575,13 @@ export default function TreatmentConsultation() {
       const referralDraft = {
         residentId: selectedResident.id,
         resident: selectedResident.name,
-        reason: formData.diagnosis || formData.chiefComplaint || "",
+        reason: formData.clinicalFindingsDiagnosis || formData.chiefComplaint || "",
         riskLevel: "High",
-        findings: formData.findings || "",
+        findings: formData.clinicalFindingsDiagnosis || "",
         chiefComplaints: formData.chiefComplaint || "",
         clinicalHistory: "",
-        physicalExamFindings: formData.findings || "",
-        impression: formData.diagnosis || "",
+        physicalExamFindings: formData.clinicalFindingsDiagnosis || "",
+        impression: formData.clinicalFindingsDiagnosis || "",
         recommendations: formData.adviceGiven || "",
         clinicalNotes: formData.remarks || "",
         referringFacility: selectedResident.barangay ? `${selectedResident.barangay} Health Station` : "",
@@ -677,10 +680,22 @@ export default function TreatmentConsultation() {
       const resident =
         residentOptions.find((r) => r.id === data.residentId) ||
         (data.residentId ? { id: data.residentId, name: data.residentId, barangay: "" } : null);
+      // Merge findings and diagnosis for the combined field
+      const mergedClinicalData = [
+        data.findings || data.clinicalFindingsDiagnosis || "",
+        data.diagnosis || ""
+      ].filter(Boolean).join("\n");
       setEditingId(null);
       setReviewLocalId(localId);
       setSelectedResident(resident);
-      setFormData({ ...emptyForm(), ...data });
+      setFormData({ 
+        ...emptyForm(),
+        ...data,
+        clinicalFindingsDiagnosis: mergedClinicalData,
+        // Clear old separate fields if they exist
+        findings: undefined,
+        diagnosis: undefined,
+      });
       setErrors(restored.lastError ? { submit: restored.lastError.message } : {});
       setSearchQuery("");
       setMode("form");
@@ -1026,32 +1041,15 @@ export default function TreatmentConsultation() {
           <h4 className="text-sm font-semibold text-brand-gray uppercase tracking-wide mb-2">Clinical Assessment</h4>
           <div className="space-y-3">
             <div>
-              <p className="text-xs text-brand-gray mb-1">Findings <span className="text-brand-danger">*</span></p>
+              <p className="text-xs text-brand-gray mb-1">Clinical Findings & Diagnosis <span className="text-brand-danger">*</span></p>
               <textarea
-                rows={2}
-                value={formData.findings}
-                onChange={(e) => setFormData({ ...formData, findings: e.target.value })}
-                className={`${inputCls(errors.findings)} resize-none`}
+                rows={4}
+                value={formData.clinicalFindingsDiagnosis}
+                onChange={(e) => setFormData({ ...formData, clinicalFindingsDiagnosis: e.target.value })}
+                placeholder="Enter clinical findings, symptoms, examination results, and diagnosis or assessment..."
+                className={`${inputCls(errors.clinicalFindingsDiagnosis)} resize-none w-full`}
               />
-              {errors.findings && <p className="mt-1 text-xs text-brand-danger">{errors.findings}</p>}
-            </div>
-            <div>
-              <p className="text-xs text-brand-gray mb-1">Diagnosis / Assessment <span className="text-brand-danger">*</span></p>
-              <input
-                type="text"
-                value={formData.diagnosis}
-                onChange={(e) => setFormData({ ...formData, diagnosis: e.target.value })}
-                placeholder="e.g. Uncomplicated Upper Respiratory Tract Infection"
-                className={inputCls(errors.diagnosis)}
-              />
-              {errors.diagnosis && <p className="mt-1 text-xs text-brand-danger">{errors.diagnosis}</p>}
-            </div>
-            <div>
-              <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
-              <MedicineSelector
-                value={formData.medications}
-                onChange={(medications) => setFormData((prev) => ({ ...prev, medications }))}
-              />
+              {errors.clinicalFindingsDiagnosis && <p className="mt-1 text-xs text-brand-danger">{errors.clinicalFindingsDiagnosis}</p>}
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Treatment Provided <span className="text-brand-danger">*</span></p>
@@ -1062,6 +1060,13 @@ export default function TreatmentConsultation() {
                 className={`${inputCls(errors.treatmentGiven)} resize-none`}
               />
               {errors.treatmentGiven && <p className="mt-1 text-xs text-brand-danger">{errors.treatmentGiven}</p>}
+            </div>
+            <div>
+              <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
+              <MedicineSelector
+                value={formData.medications}
+                onChange={(medications) => setFormData((prev) => ({ ...prev, medications }))}
+              />
             </div>
             <div>
               <p className="text-xs text-brand-gray mb-1">Recommendations / Instructions</p>
@@ -1156,8 +1161,7 @@ export default function TreatmentConsultation() {
             ["Consultation Date", formatDate(focusedRecord.data.consultationDate)],
             ["Health Service", focusedRecord.data.serviceName],
             ["Chief Complaint", focusedRecord.data.chiefComplaint],
-            ["Diagnosis", focusedRecord.data.diagnosis],
-            ["Recorded Findings", focusedRecord.data.findings],
+            ["Clinical Findings & Diagnosis", focusedRecord.data.findings],
             ["Treatment Given", focusedRecord.data.treatmentGiven],
             ["Advice", focusedRecord.data.adviceGiven],
             ["Remarks", focusedRecord.data.remarks],
@@ -1165,74 +1169,142 @@ export default function TreatmentConsultation() {
         </>}
       </Card>}
       {/* Summary strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
-        <Card className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0">
-            <Stethoscope className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-sm text-brand-gray">Total Consultations</p>
-            <p className="text-2xl font-semibold text-brand-ink mt-0.5">{recordRows.length}</p>
-          </div>
-        </Card>
-        <Card className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-brand-accent/10 text-brand-accent flex items-center justify-center shrink-0">
-            <Calendar className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-sm text-brand-gray">This Month</p>
-            <p className="text-2xl font-semibold text-brand-ink mt-0.5">
-              {recordRows.filter((c) => (c.consultationDate || "").startsWith(new Date().toISOString().slice(0, 7))).length}
-            </p>
-          </div>
-        </Card>
-        <Card className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-brand-green/10 text-brand-green flex items-center justify-center shrink-0">
-            <Users className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-sm text-brand-gray">With Follow-up</p>
-            <p className="text-2xl font-semibold text-brand-ink mt-0.5">
-              {recordRows.filter((c) => c.followUpRequired === "Yes").length}
-            </p>
-          </div>
-        </Card>
+      <div className="supervisor-metric-grid mb-5">
+        <StatCard
+          variant="ledger"
+          label="TOTAL CONSULTATIONS"
+          value={recordRows.length}
+          description="All recorded consultations"
+          tone="blue"
+        />
+        <StatCard
+          variant="ledger"
+          label="THIS MONTH"
+          value={recordRows.filter((c) => (c.consultationDate || "").startsWith(new Date().toISOString().slice(0, 7))).length}
+          description="Current month count"
+          tone="blue"
+        />
+        <StatCard
+          variant="ledger"
+          label="WITH FOLLOW-UP"
+          value={recordRows.filter((c) => c.followUpRequired === "Yes").length}
+          description="Requiring follow-up"
+          tone="danger"
+        />
       </div>
 
       <Card className="p-6">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="flex min-w-[15rem] flex-1 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2">
-            <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
-          <input
-            type="search"
-            value={recordSearch}
-            onChange={(event) => setRecordSearch(event.target.value)}
-            placeholder="Search resident, health record, consultation..."
-            aria-label="Search consultation records"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray"
-          />
+        {/* Filter Controls */}
+        <div className="mb-5">
+          {/* Unified Filter Row: Search + Date Range + Risk + Follow-up + Sort */}
+          <div className="mb-3 grid gap-3" style={{ 
+            gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1.2fr) minmax(0, 0.75fr) minmax(0, 0.75fr) minmax(0, 0.8fr)',
+            minWidth: 0 
+          }}>
+            {/* Search - 30% */}
+            <div style={{ minWidth: 0 }}>
+              <label htmlFor="filter-search" className="block text-xs text-brand-gray mb-1.5 font-medium">Search</label>
+              <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-white px-3 py-2 h-9" style={{ minWidth: 0 }}>
+                <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+                <input
+                  id="filter-search"
+                  type="search"
+                  value={recordSearch}
+                  onChange={(event) => setRecordSearch(event.target.value)}
+                  placeholder="Resident, health record..."
+                  aria-label="Search consultation records"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray"
+                  style={{ minWidth: 0 }}
+                />
+              </div>
+            </div>
+            
+            {/* Date Range - 24% */}
+            <div style={{ minWidth: 0 }}>
+              <label className="block text-xs text-brand-gray mb-1.5 font-medium">Date Range</label>
+              <div style={{ minWidth: 0 }}>
+                <DateRangePicker
+                  startDate={recordDateFrom}
+                  endDate={recordDateTo}
+                  onApply={(start, end) => {
+                    setRecordDateFrom(start);
+                    setRecordDateTo(end);
+                  }}
+                  placeholder="Select date range"
+                />
+              </div>
+            </div>
+
+            {/* Risk Level - 15% */}
+            <div style={{ minWidth: 0 }}>
+              <label htmlFor="filter-risk" className="block text-xs text-brand-gray mb-1.5 font-medium">Risk</label>
+              <select
+                id="filter-risk"
+                value={recordRisk}
+                onChange={(event) => setRecordRisk(event.target.value)}
+                aria-label="Risk level filter"
+                className="w-full rounded-btn border border-brand-border bg-white px-3 py-2 h-9 text-sm text-brand-ink outline-none focus:border-brand-blue"
+                style={{ minWidth: 0 }}
+              >
+                <option value="All">All</option>
+                <option value="High">High</option>
+                <option value="Moderate">Moderate</option>
+                <option value="Low">Low</option>
+                <option value="Not assessed">Not Assessed</option>
+              </select>
+            </div>
+
+            {/* Follow-up Status - 15% */}
+            <div style={{ minWidth: 0 }}>
+              <label htmlFor="filter-followup" className="block text-xs text-brand-gray mb-1.5 font-medium">Follow-up</label>
+              <select
+                id="filter-followup"
+                value={recordFollowUp}
+                onChange={(event) => setRecordFollowUp(event.target.value)}
+                aria-label="Follow-up filter"
+                className="w-full rounded-btn border border-brand-border bg-white px-3 py-2 h-9 text-sm text-brand-ink outline-none focus:border-brand-blue"
+                style={{ minWidth: 0 }}
+              >
+                <option value="All">All</option>
+                <option value="With Follow-up">With Follow-up</option>
+                <option value="Without Follow-up">Without Follow-up</option>
+              </select>
+            </div>
+
+            {/* Sorting - 16% */}
+            <div style={{ minWidth: 0 }}>
+              <label htmlFor="filter-sort" className="block text-xs text-brand-gray mb-1.5 font-medium">Sort</label>
+              <select
+                id="filter-sort"
+                value={recordSort}
+                onChange={(event) => setRecordSort(event.target.value)}
+                aria-label="Sort consultation records"
+                className="w-full rounded-btn border border-brand-border bg-white px-3 py-2 h-9 text-sm text-brand-ink outline-none focus:border-brand-blue"
+                style={{ minWidth: 0 }}
+              >
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="residentAsc">Name (A-Z)</option>
+                <option value="residentDesc">Name (Z-A)</option>
+              </select>
+            </div>
           </div>
-          <input type="date" value={recordDateFrom} onChange={(event) => setRecordDateFrom(event.target.value)} aria-label="Consultation date from" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue" />
-          <input type="date" value={recordDateTo} onChange={(event) => setRecordDateTo(event.target.value)} aria-label="Consultation date to" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue" />
-          <select value={recordRisk} onChange={(event) => setRecordRisk(event.target.value)} aria-label="Risk level filter" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue">
-            <option value="All">All Risk Levels</option>
-            <option value="High">High</option>
-            <option value="Moderate">Moderate</option>
-            <option value="Low">Low</option>
-            <option value="Not assessed">Not Assessed</option>
-          </select>
-          <select value={recordFollowUp} onChange={(event) => setRecordFollowUp(event.target.value)} aria-label="Follow-up filter" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue">
-            <option value="All">All Follow-up</option>
-            <option value="With Follow-up">With Follow-up</option>
-            <option value="Without Follow-up">Without Follow-up</option>
-          </select>
-          <select value={recordSort} onChange={(event) => setRecordSort(event.target.value)} aria-label="Sort consultation records" className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue">
-            <option value="newest">Newest First</option>
-            <option value="oldest">Oldest First</option>
-            <option value="residentAsc">Resident Name (A-Z)</option>
-            <option value="residentDesc">Resident Name (Z-A)</option>
-          </select>
-          {hasRecordFilters && <button type="button" onClick={clearRecordFilters} className="rounded-btn px-2.5 py-2 text-sm font-medium text-brand-blue hover:bg-brand-light">Clear</button>}
+
+          {/* Clear Filters Button */}
+          {hasRecordFilters && (
+            <button
+              type="button"
+              onClick={clearRecordFilters}
+              className="text-sm font-medium text-brand-blue hover:text-brand-dark transition-colors"
+            >
+              Clear all filters
+            </button>
+          )}
+        </div>
+
+        {/* Results Count */}
+        <div className="mb-3 text-sm text-brand-gray">
+          {filteredRecordRows.length} {filteredRecordRows.length === 1 ? 'consultation' : 'consultations'} found
         </div>
         {offlineDrafts.length > 0 && (
           <div className="mb-5 rounded-btn border border-amber-300 bg-amber-50/70 p-4">
@@ -1255,7 +1327,7 @@ export default function TreatmentConsultation() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-brand-ink truncate">
                       {draft.chiefComplaint || "Consultation"}
-                      {draft.diagnosis ? ` — ${draft.diagnosis}` : ""}
+                      {draft.clinicalFindingsDiagnosis ? ` — ${draft.clinicalFindingsDiagnosis.split("\n")[0]}` : draft.diagnosis ? ` — ${draft.diagnosis}` : ""}
                     </p>
                     <p className="text-xs text-brand-gray">
                       {formatDate(draft.consultationDate)} · Resident {draft.residentId || "—"} · {draft.syncStatus}
@@ -1389,9 +1461,9 @@ export default function TreatmentConsultation() {
                   ["Chief Complaint", detailRecord.chiefComplaint],
                 ]],
                 ["Clinical Information", [
-                  ["Diagnosis", detailRecord.diagnosis],
-                  ["Risk Level", detailRecord.resident?.riskLevel || detailRecord.resident?.risk_level || detailRecord.riskLevel],
-                  ["Vital Signs", parseVitals(detailRecord.vitals)],
+                   ["Clinical Findings & Diagnosis", detailRecord.findings],
+                   ["Risk Level", detailRecord.resident?.riskLevel || detailRecord.resident?.risk_level || detailRecord.riskLevel],
+                   ["Vital Signs", parseVitals(detailRecord.vitals)],
                 ]],
                 ["Treatment and Care", [
                   ["Treatment", detailRecord.treatmentGiven],

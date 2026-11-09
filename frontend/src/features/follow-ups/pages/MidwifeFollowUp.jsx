@@ -1137,28 +1137,15 @@ export default function MidwifeFollowUp() {
 
       {/* Summary Cards */}
       {supervisor ? (
-        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard variant="consultation" icon="ClipboardList" label="Loaded Follow-ups" value={loading || loadError ? "Unavailable" : stats.total} description={followUpSource?.source === "cache" ? "Saved records on this device" : "Authorized follow-up records"} tone="blue" />
-          <StatCard variant="consultation" icon="CalendarClock" label="Due Today" value={loading || loadError ? "Unavailable" : stats.today} description="Scheduled today, Manila time" tone="blue" />
-          <StatCard variant="consultation" icon="AlertTriangle" label="Overdue" value={loading || loadError ? "Unavailable" : overdueCount} description="Past due; closed visits excluded" tone="danger" onClick={() => setStatusFilter(statusFilter === "Overdue" ? "All" : "Overdue")} active={statusFilter === "Overdue"} />
-          <StatCard variant="consultation" icon="CheckCircle2" label="Completed" value={loading || loadError ? "Unavailable" : stats.completed} description="Persisted completed visits" tone="green" />
-        </div>
-      ) : <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {[
-          { label: "Total Follow-ups", value: loading || loadError ? "—" : stats.total, subtitle: "All follow-up records" },
-          { label: "Today's Follow-ups", value: loading || loadError ? "—" : stats.today, subtitle: "Scheduled for today" },
-          { label: "Upcoming", value: loading || loadError ? "—" : stats.upcoming, subtitle: "Next 7 days" },
-          { label: "Completed", value: loading || loadError ? "—" : stats.completed, subtitle: "Completed follow-up records" },
-        ].map((stat) => (
-          <Card key={stat.label} className="p-5">
-            <p className="text-sm text-brand-gray">{stat.label}</p>
-            <p className="text-2xl font-semibold text-brand-blue mt-1">{stat.value}</p>
-            <p className="text-xs text-brand-gray mt-1">{stat.subtitle}</p>
-          </Card>
-        ))}
-      </div>}
+       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+         <StatCard variant="ledger" label="LOADED FOLLOW-UPS" value={loading || loadError ? "Unavailable" : stats.total} description={followUpSource?.source === "cache" ? "Saved records on this device" : "Authorized follow-up records"} tone="blue" />
+         <StatCard variant="ledger" label="DUE TODAY" value={loading || loadError ? "Unavailable" : stats.today} description="Scheduled today, Manila time" tone="blue" />
+         <StatCard variant="ledger" label="OVERDUE" value={loading || loadError ? "Unavailable" : overdueCount} description="Past due; closed visits excluded" tone="danger" onClick={() => setStatusFilter(statusFilter === "Overdue" ? "All" : "Overdue")} active={statusFilter === "Overdue"} />
+         <StatCard variant="ledger" label="COMPLETED" value={loading || loadError ? "Unavailable" : stats.completed} description="Persisted completed visits" tone="green" />
+       </div>
+       ) : null}
 
-      {/* Search & Filters */}
+       {/* Search & Filters */}
       {supervisor ? <Card className="supervisor-toolbar mb-4 flex flex-wrap items-end gap-3">
         <label htmlFor="followup-search" className="min-w-[12rem] flex-1 text-caption font-medium text-brand-gray">
           Search Follow-ups

@@ -197,14 +197,16 @@ export default function HealthSupervisorDashboard() {
       }
     />
 
-    <motion.section className="hs-quick-actions" aria-labelledby="quick-actions-heading" variants={intro}><h2 id="quick-actions-heading" className="hs-eyebrow">Quick Actions</h2><div>
-      {[{ label: "Consults", Icon: Stethoscope, href: `${BASE}/consultations`, allowed: canConsultations }, { label: "Follow-ups", Icon: CalendarClock, href: `${BASE}/followups`, allowed: canFollowUps }, { label: "Referrals", Icon: Send, href: `${BASE}/referrals`, allowed: canOpenReferrals }].filter((action) => action.allowed).map(({ label, Icon, href }) => <Link className="hs-shortcut" to={href} key={label}><span><Icon aria-hidden="true" /></span>{label}</Link>)}
-    </div></motion.section>
+    <motion.section className="hs-statistics" aria-label="Operational statistics" variants={intro}><div className="hs-statistics-strip">{statistics.map((stat) => <StatCard key={stat.label} variant="ledger" animateValue label={stat.label} value={stat.value} description={stat.description} tone={stat.tone} href={stat.href} />)}</div>{(overview.error || currentCases.error) && <SourceErrors errors={[...(overview.error ? [{ label: "Operational statistics", message: overview.error, retry: overview.refresh }] : []), ...(currentCases.error ? [{ label: "Active cases", message: currentCases.error, retry: currentCases.refresh }] : [])]} />}</motion.section>
 
     {!assignedBarangay ? <Card><ErrorState compact title="Barangay assignment unavailable" message="Refresh your account information before opening community records." onRetry={refreshProfile} retryLabel="Refresh Account" /></Card> : <>
+      <motion.section className="hs-quick-actions" aria-labelledby="quick-actions-heading" variants={intro}><h2 id="quick-actions-heading" className="hs-eyebrow">Quick Actions</h2><div>
+        {[{ label: "Consults", Icon: Stethoscope, href: `${BASE}/consultations`, allowed: canConsultations }, { label: "Follow-ups", Icon: CalendarClock, href: `${BASE}/followups`, allowed: canFollowUps }, { label: "Referrals", Icon: Send, href: `${BASE}/referrals`, allowed: canOpenReferrals }].filter((action) => action.allowed).map(({ label, Icon, href }) => <Link className="hs-shortcut" to={href} key={label}><span><Icon aria-hidden="true" /></span>{label}</Link>)}
+      </div></motion.section>
+
       <div className="hs-main-grid">
         <motion.section className="hs-panel hs-attention-panel" aria-labelledby="attention-heading" variants={intro}>
-          <header className="hs-panel-header"><div className="hs-title-group"><h2 id="attention-heading">Cases Requiring Attention</h2><span className="hs-case-total" title="Authorized monitoring records; failed sources are not counted">{prioritiesLoading ? "..." : !filterAvailable("all") ? "--" : `${cases.length}${priorityErrors.length ? "+" : ""}`}</span></div><div className="hs-panel-actions">
+          <header className="hs-panel-header"><div className="hs-title-group"><h2 id="attention-heading">Cases Requiring Attention</h2></div><div className="hs-panel-actions">
             <button type="button" className="hs-button" onClick={exportCases} disabled={!canExport || !filteredCases.length || prioritiesLoading || priorityErrors.length > 0} title={!canExport ? "Export permission is required" : "Export all records matching the selected filter"}><Download aria-hidden="true" />Export</button>
             {registerLinks.length === 1 ? <Link className="hs-button" to={registerLinks[0].href} title={`Open ${registerLinks[0].label}`}>View All<ArrowUpRight aria-hidden="true" /></Link> : registerLinks.length ? <details ref={registerMenu} className="hs-register-menu"><summary className="hs-button">View All<ArrowUpRight aria-hidden="true" /></summary><nav aria-label="Choose an existing monitoring register">{registerLinks.map((link) => <Link to={link.href} key={link.href} onClick={() => registerMenu.current?.removeAttribute("open")}>{link.label}<ArrowUpRight aria-hidden="true" /></Link>)}</nav></details> : <button type="button" className="hs-button" disabled>View All<ArrowUpRight aria-hidden="true" /></button>}
           </div></header>
@@ -223,7 +225,7 @@ export default function HealthSupervisorDashboard() {
 
         <div className="hs-main-sidebar">
           <motion.section className="hs-panel hs-map-panel" aria-labelledby="map-heading" variants={intro}>
-            <header className="hs-panel-header"><div><h2 id="map-heading">Community Health Map</h2><p>{assignedBarangay}</p></div><select className="hs-control hs-metric-select" aria-label="Community map metric" value={mapMetric} onChange={(event) => setMapMetric(event.target.value)}>{mapOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></header>
+            <header className="hs-panel-header"><div><h2 id="map-heading">Community Health Map</h2></div><select className="hs-control hs-metric-select" aria-label="Community map metric" value={mapMetric} onChange={(event) => setMapMetric(event.target.value)}>{mapOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></header>
             <div className="hs-map-content">{canAnalytics ? <CommunityHealthMap variant="dashboard" height={260} barangays={mapSource.data?.barangays || []} center={mapSource.data?.center || null} loading={mapSource.loading} error={mapSource.error} onRetry={mapSource.refresh} showCountLabels showNewCases={false} periodLabel={mapContext} displayMetric={condition ? "caseCount" : mapMetric} metricLabel={mapOptions.find((option) => option.value === mapMetric)?.label || condition || "Recorded cases"} visibleConditions={condition ? [condition] : null} selectedName={selectedMapName} onSelect={(row) => setSelectedMapName(row.name)} detailsHref={`${BASE}/trends`} /> : <EmptyState compact title="Map access unavailable" description="Analytics permission is required." />}</div>
             <footer className="hs-panel-footer">{canAnalytics ? <Link to={`${BASE}/trends`}>Open health trends<ArrowUpRight aria-hidden="true" /></Link> : <span>Health trends requires analytics access</span>}</footer>
           </motion.section>
@@ -234,8 +236,6 @@ export default function HealthSupervisorDashboard() {
           </motion.section>
         </div>
       </div>
-
-      <motion.section className="hs-statistics" aria-label="Operational statistics" variants={intro}><div className="hs-statistics-strip">{statistics.map((stat) => <StatCard key={stat.label} variant="ledger" animateValue label={stat.label} value={stat.value} description={stat.description} tone={stat.tone} href={stat.href} />)}</div>{(overview.error || currentCases.error) && <SourceErrors errors={[...(overview.error ? [{ label: "Operational statistics", message: overview.error, retry: overview.refresh }] : []), ...(currentCases.error ? [{ label: "Active cases", message: currentCases.error, retry: currentCases.refresh }] : [])]} />}</motion.section>
 
       <div className="hs-bottom-grid">
         <motion.section className="hs-panel hs-upcoming-panel" aria-labelledby="upcoming-heading" variants={intro}>

@@ -27,14 +27,18 @@ import { isApprovedBarangayName } from '../config/barangays.js';
 import { isUuid } from '../validators/common.js';
 import ApiError from '../utils/apiError.js';
 import { notifyResident } from './notifications.service.js';
+import * as storageService from './storage.service.js';
 
 const TABLE = 'health_services';
 const ASSIGN_TABLE = 'health_service_assignments';
 const ATTENDANCE_TABLE = 'health_service_attendance';
 const APPOINTMENTS_TABLE = 'appointments';
 const PLAN_TABLE = 'visit_plans';
+const ATTACHMENTS_TABLE = 'health_service_attachments';
 const PAGE_SIZE = 500;
 const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'cancelled', 'walk_in']);
+const ALLOWED_MEMO_TYPES = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+const ALLOWED_PUBMAT_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export const SERVICE_CATEGORIES = Object.freeze([
   'Maternal',
@@ -148,6 +152,18 @@ const scopeResidentQuery = (user, query) => {
 const toService = (row) => {
   if (!row) return null;
   const assignments = Array.isArray(row[ASSIGN_TABLE]) ? row[ASSIGN_TABLE] : [];
+  const attachments = Array.isArray(row[ATTACHMENTS_TABLE]) ? row[ATTACHMENTS_TABLE] : [];
+  const memoAttachment = attachments.find((a) => a.attachment_type === 'memo');
+  const pubmatAttachment = attachments.find((a) => a.attachment_type === 'pubmat');
+  
+  // Derive display facility name: custom location takes precedence, then registered facility, then empty
+  let facilityDisplay = '';
+  if (row.custom_location) {
+    facilityDisplay = row.custom_location;
+  } else if (row.facility?.name) {
+    facilityDisplay = row.facility.name;
+  }
+  
   return {
     id: row.id,
     name: row.name,
@@ -155,8 +171,9 @@ const toService = (row) => {
     description: row.description || '',
     municipalityId: row.municipality_id || null,
     facilityId: row.facility_id || null,
-    facility: row.facility?.name || '',
+    facility: facilityDisplay,
     facilityType: row.facility?.type || '',
+    customLocation: row.custom_location || null,
     barangayId: row.barangay_id || null,
     barangay: row.barangay?.name || '',
     schedule: {
@@ -170,6 +187,25 @@ const toService = (row) => {
     createdBy: row.created_by || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    // Attachments will be populated after migration is applied
+    attachments: {
+      memo: memoAttachment ? {
+        id: memoAttachment.id,
+        filename: memoAttachment.filename,
+        mimeType: memoAttachment.mime_type,
+        fileSize: memoAttachment.file_size,
+        storagePath: memoAttachment.storage_path,
+        uploadedAt: memoAttachment.created_at,
+      } : null,
+      pubmat: pubmatAttachment ? {
+        id: pubmatAttachment.id,
+        filename: pubmatAttachment.filename,
+        mimeType: pubmatAttachment.mime_type,
+        fileSize: pubmatAttachment.file_size,
+        storagePath: pubmatAttachment.storage_path,
+        uploadedAt: pubmatAttachment.created_at,
+      } : null,
+    },
     assignedPersonnel: assignments
       .filter((a) => a.active === true && a.personnel?.id === a.personnel_id
         && personnelIsEligible(a.personnel, row.municipality_id))
@@ -723,11 +759,14 @@ const resolveScope = async (user, payload, supabase) => {
 
   // Explicit municipality-wide, or nothing chosen: no facility, no barangay.
   if (municipalityWide || (!facilityId && !facilityName)) {
-    return { municipalityId, facilityId: null, barangayId: null };
+    return { municipalityId, facilityId: null, customLocation: null, barangayId: null };
   }
 
   let facility = null;
+  let customLocation = null;
+
   if (facilityId) {
+    // User selected a registered facility
     const { data, error } = await supabase
       .from('facilities')
       .select('id, municipality_id, barangay_id, type')
@@ -738,19 +777,15 @@ const resolveScope = async (user, payload, supabase) => {
       throw ApiError.unprocessable('The selected facility is not in your municipality.');
     }
     facility = data;
-  } else {
-    facility = await resolveOrCreateFacilityByName(
-      user,
-      { municipalityId, name: facilityName, supervisorBarangayId, isSupervisor },
-      supabase,
-    );
+  } else if (facilityName) {
+    // User entered a custom location name (not from registered facilities)
+    customLocation = facilityName;
   }
 
-  // Derive coverage from the facility. RHU (or any non-BHS) stays barangay-less
-  // (municipality/RHU-wide); a Barangay Health Station scopes to its barangay.
-  let barangayId = facility.type === 'barangay_health_station' ? (facility.barangay_id || null) : null;
+  // Derive barangay from facility type only (custom locations don't affect barangay scope)
+  let barangayId = facility && facility.type === 'barangay_health_station' ? (facility.barangay_id || null) : null;
 
-  if (isSupervisor && facility.type === 'barangay_health_station') {
+  if (isSupervisor && facility && facility.type === 'barangay_health_station') {
     // A supervisor's BHS must be in their assigned barangay; a BHS with no
     // barangay yet adopts theirs. (An RHU chosen by a supervisor stays
     // barangay-less — an RHU-wide service, per the coverage rules.)
@@ -760,7 +795,7 @@ const resolveScope = async (user, payload, supabase) => {
     barangayId = supervisorBarangayId;
   }
 
-  return { municipalityId, facilityId: facility.id, barangayId };
+  return { municipalityId, facilityId: facility ? facility.id : null, customLocation, barangayId };
 };
 
 const notifyAssignees = async (supabase, { serviceName, personnelIds, assignedBy }) => {
@@ -833,6 +868,7 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
     municipality_id: scope.municipalityId,
     facility_id: scope.facilityId,
     barangay_id: scope.barangayId,
+    custom_location: scope.customLocation || null,
     start_date: startDate,
     start_time: text(payload.startTime || payload.start_time) || null,
     end_date: endDate,
@@ -916,6 +952,7 @@ export const update = async ({ user, serviceId, payload = {}, supabase = getServ
   if (has('facilityId') || has('facility_id') || has('facilityName') || has('facility_name') || has('municipalityWide')) {
     const scope = await resolveScope(user, payload, supabase);
     row.facility_id = scope.facilityId;
+    row.custom_location = scope.customLocation || null;
     row.barangay_id = scope.barangayId;
   }
 
@@ -1108,6 +1145,171 @@ export const reference = async ({ user, supabase = getServiceClient() }) => {
   return out;
 };
 
+/**
+ * Upload a health service attachment (memo or pubmat).
+ * Validates file type, stores in Supabase Storage, and persists metadata in DB.
+ */
+export const uploadAttachment = async ({ user, serviceId, attachmentType, file, supabase = getServiceClient() }) => {
+  assertManager(user);
+  
+  if (!file) throw ApiError.unprocessable('No file provided.');
+  if (!['memo', 'pubmat'].includes(attachmentType)) {
+    throw ApiError.unprocessable('Attachment type must be "memo" or "pubmat".');
+  }
+
+  // Validate file type
+  const allowedTypes = attachmentType === 'memo' ? ALLOWED_MEMO_TYPES : ALLOWED_PUBMAT_TYPES;
+  if (!allowedTypes.includes(file.type)) {
+    throw ApiError.unprocessable(
+      `Invalid file type. ${attachmentType === 'memo' ? 'Memo must be PDF, DOC, or DOCX' : 'Pubmat must be JPG, PNG, or WebP'}.`
+    );
+  }
+
+  // Validate file size (10 MB for memo, 5 MB for pubmat)
+  const maxSize = attachmentType === 'memo' ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+  if (file.size > maxSize) {
+    throw ApiError.unprocessable(
+      `File is too large. Maximum ${attachmentType === 'memo' ? '10 MB' : '5 MB'} allowed.`
+    );
+  }
+
+  // Verify service exists and user can manage it
+  const service = await manageableService(user, serviceId, supabase);
+
+  // Delete existing attachment if present
+  const { data: existing } = await supabase
+    .from(ATTACHMENTS_TABLE)
+    .select('storage_path')
+    .eq('health_service_id', serviceId)
+    .eq('attachment_type', attachmentType)
+    .single();
+
+  if (existing?.storage_path) {
+    try {
+      await storageService.deleteHealthServiceAttachment(existing.storage_path);
+    } catch (err) {
+      console.error('Failed to delete old attachment:', err);
+      // Continue anyway — the old file is orphaned but the upload proceeds
+    }
+  }
+
+  // Upload to storage
+  let uploadResult;
+  try {
+    uploadResult = await storageService.uploadHealthServiceAttachment({
+      file,
+      serviceId,
+      attachmentType,
+    });
+  } catch (err) {
+    throw ApiError.internal(`Upload failed: ${err.message}`);
+  }
+
+  // Upsert attachment record in DB
+  const { data: attachment, error } = await supabase
+    .from(ATTACHMENTS_TABLE)
+    .upsert(
+      {
+        health_service_id: serviceId,
+        attachment_type: attachmentType,
+        filename: uploadResult.filename,
+        mime_type: uploadResult.mimeType,
+        file_size: uploadResult.fileSize,
+        storage_path: uploadResult.storagePath,
+        uploaded_by: user.id,
+      },
+      { onConflict: 'health_service_id,attachment_type' }
+    )
+    .select()
+    .single();
+
+  throwOnError(error, 'Could not save attachment metadata');
+
+  return attachment;
+};
+
+/**
+ * Delete a health service attachment.
+ * Removes from Supabase Storage and deletes the database record.
+ */
+export const deleteAttachment = async ({ user, serviceId, attachmentType, supabase = getServiceClient() }) => {
+  assertManager(user);
+
+  if (!['memo', 'pubmat'].includes(attachmentType)) {
+    throw ApiError.unprocessable('Attachment type must be "memo" or "pubmat".');
+  }
+
+  // Verify service exists and user can manage it
+  await manageableService(user, serviceId, supabase);
+
+  // Get attachment to find storage path
+  const { data: attachment, error: getErr } = await supabase
+    .from(ATTACHMENTS_TABLE)
+    .select('id, storage_path')
+    .eq('health_service_id', serviceId)
+    .eq('attachment_type', attachmentType)
+    .single();
+
+  if (getErr && getErr.code !== 'PGRST116') {
+    // PGRST116 is "not found" — that's okay
+    throwOnError(getErr, 'Could not retrieve attachment');
+  }
+
+  if (attachment?.storage_path) {
+    try {
+      await storageService.deleteHealthServiceAttachment(attachment.storage_path);
+    } catch (err) {
+      console.error('Failed to delete attachment from storage:', err);
+      // Continue — the DB record will be cleaned up anyway
+    }
+  }
+
+  // Delete DB record
+  const { error: deleteErr } = await supabase
+    .from(ATTACHMENTS_TABLE)
+    .delete()
+    .eq('health_service_id', serviceId)
+    .eq('attachment_type', attachmentType);
+
+  throwOnError(deleteErr, 'Could not delete attachment');
+
+  return { id: serviceId, attachmentType, deleted: true };
+};
+
+/**
+ * Get a signed URL for a health service attachment.
+ */
+export const getAttachmentSignedUrl = async ({ user, serviceId, attachmentType, supabase = getServiceClient() }) => {
+  if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
+
+  if (!['memo', 'pubmat'].includes(attachmentType)) {
+    throw ApiError.unprocessable('Attachment type must be "memo" or "pubmat".');
+  }
+
+  // Verify service is visible to the user
+  const service = await getById({ user, id: serviceId, supabase });
+  if (!service) throw ApiError.notFound('Service not found.');
+
+  // Get attachment to find storage path
+  const { data: attachment, error: getErr } = await supabase
+    .from(ATTACHMENTS_TABLE)
+    .select('storage_path')
+    .eq('health_service_id', serviceId)
+    .eq('attachment_type', attachmentType)
+    .single();
+
+  if (getErr && getErr.code !== 'PGRST116') {
+    throwOnError(getErr, 'Could not retrieve attachment');
+  }
+
+  if (!attachment?.storage_path) {
+    throw ApiError.notFound('Attachment not found.');
+  }
+
+  const url = await storageService.getDocumentSignedUrl(attachment.storage_path);
+  return url;
+};
+
 export default {
   SERVICE_CATEGORIES,
   list,
@@ -1120,6 +1322,9 @@ export default {
   assignablePersonnel,
   reference,
   meta,
+  uploadAttachment,
+  deleteAttachment,
+  getAttachmentSignedUrl,
   createHealthServiceAttendance,
   listAttendanceByService,
   listAttendanceByResident,

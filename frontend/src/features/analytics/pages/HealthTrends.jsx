@@ -44,22 +44,85 @@ export default function HealthTrends() {
   // selector, URL or filter the user controls.
   const assignedBarangay = supervisor ? supervisorScope?.level === HS_SCOPE.BARANGAY ? supervisorScope.assignedBarangay : null : getAssignedBarangay(user);
   const [period, setPeriod] = useState("12m");
-  const activityRange = lastActivityPeriod(period === "3m" ? 3 : period === "6m" ? 6 : 12);
-  const activityCaption = formatDateRange(activityRange.from, activityRange.to);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [selectedQuarter, setSelectedQuarter] = useState(() => {
+    const now = new Date();
+    const q = Math.floor(now.getMonth() / 3) + 1;
+    return { year: now.getFullYear(), quarter: q };
+  });
+  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+  const activityRange = period === "monthly" ? (() => {
+    const [year, month] = selectedMonth.split('-');
+    const start = new Date(parseInt(year), parseInt(month) - 1, 1);
+    const end = new Date(parseInt(year), parseInt(month), 0);
+    return { from: toLocalISODate(start), to: toLocalISODate(end) };
+  })() : period === "quarterly" ? (() => {
+    const quarterStartMonth = (selectedQuarter.quarter - 1) * 3;
+    const start = new Date(selectedQuarter.year, quarterStartMonth, 1);
+    const end = new Date(selectedQuarter.year, quarterStartMonth + 3, 0);
+    return { from: toLocalISODate(start), to: toLocalISODate(end) };
+  })() : period === "yearly" ? (() => {
+    const start = new Date(selectedYear, 0, 1);
+    const end = new Date(selectedYear, 11, 31);
+    return { from: toLocalISODate(start), to: toLocalISODate(end) };
+  })() : lastActivityPeriod(period === "3m" ? 3 : period === "6m" ? 6 : 12);
+  
+  const activityCaption = period === "monthly" ? new Date(`${selectedMonth}-01`).toLocaleDateString("en-PH", { month: "long", year: "numeric" }) 
+    : period === "quarterly" ? `Q${selectedQuarter.quarter} ${selectedQuarter.year}`
+    : period === "yearly" ? `${selectedYear}`
+    : formatDateRange(activityRange.from, activityRange.to);
 
   const muniRange = useMemo(() => {
     const now = new Date();
-    // Local calendar days only — toISOString() would shift the boundary back a
-    // day (and, at year start, back a year) under Philippine time.
     const iso = (d) => toLocalISODate(d);
+    if (period === "monthly") {
+      const [year, month] = selectedMonth.split('-');
+      const start = new Date(parseInt(year), parseInt(month) - 1, 1);
+      const end = new Date(parseInt(year), parseInt(month), 0);
+      return { from: iso(start), to: iso(end) };
+    }
+    if (period === "quarterly") {
+      const quarterStartMonth = (selectedQuarter.quarter - 1) * 3;
+      const start = new Date(selectedQuarter.year, quarterStartMonth, 1);
+      const end = new Date(selectedQuarter.year, quarterStartMonth + 3, 0);
+      return { from: iso(start), to: iso(end) };
+    }
+    if (period === "yearly") {
+      const start = new Date(selectedYear, 0, 1);
+      const end = new Date(selectedYear, 11, 31);
+      return { from: iso(start), to: iso(end) };
+    }
     const months = period === "3m" ? 3 : period === "6m" ? 6 : 12;
     return { from: iso(new Date(now.getFullYear(), now.getMonth() - months, now.getDate())), to: iso(now) };
-  }, [period]);
+  }, [period, selectedMonth, selectedQuarter, selectedYear]);
 
   const load = useCallback(async (options) => {
     if (supervisor && !assignedBarangay) throw new Error("A valid barangay assignment is required to view health trends.");
     if (supervisor && !canViewAnalytics) throw new Error("Your account is not permitted to view health analytics.");
-    const warningRequest = authorizedViewsApi.earlyWarning({ barangay: assignedBarangay, ...lastActivityPeriod(period === '3m' ? 3 : period === '6m' ? 6 : 12) }, options);
+    const getRangeForPeriod = () => {
+      if (period === "monthly") {
+        const [year, month] = selectedMonth.split('-');
+        const start = new Date(parseInt(year), parseInt(month) - 1, 1);
+        const end = new Date(parseInt(year), parseInt(month), 0);
+        return { from: toLocalISODate(start), to: toLocalISODate(end) };
+      }
+      if (period === "quarterly") {
+        const quarterStartMonth = (selectedQuarter.quarter - 1) * 3;
+        const start = new Date(selectedQuarter.year, quarterStartMonth, 1);
+        const end = new Date(selectedQuarter.year, quarterStartMonth + 3, 0);
+        return { from: toLocalISODate(start), to: toLocalISODate(end) };
+      }
+      if (period === "yearly") {
+        const start = new Date(selectedYear, 0, 1);
+        const end = new Date(selectedYear, 11, 31);
+        return { from: toLocalISODate(start), to: toLocalISODate(end) };
+      }
+      return lastActivityPeriod(period === '3m' ? 3 : period === '6m' ? 6 : 12);
+    };
+    const warningRequest = authorizedViewsApi.earlyWarning({ barangay: assignedBarangay, ...getRangeForPeriod() }, options);
     if (supervisor) {
       const ew = await warningRequest;
       if (ew.scope?.barangay !== assignedBarangay || ew.activity?.rows?.some((row) => row.barangay !== assignedBarangay)) throw new Error("Health trends are outside your assigned barangay.");
@@ -70,7 +133,7 @@ export default function HealthTrends() {
       authorizedViewsApi.communityMap({ barangay: assignedBarangay, from: muniRange.from, to: muniRange.to }, options),
     ]);
     return { ew, map };
-  }, [assignedBarangay, muniRange.from, muniRange.to, period, supervisor, canViewAnalytics]);
+  }, [assignedBarangay, muniRange.from, muniRange.to, period, selectedMonth, selectedQuarter, selectedYear, supervisor, canViewAnalytics]);
   const resource = useAuthorizedData(load);
   const muniEW = resource.data?.ew;
   const muniMap = resource.data?.map;
@@ -78,37 +141,14 @@ export default function HealthTrends() {
   const muniLoading = resource.loading;
   const muniError = resource.error;
   const loadMunicipality = resource.refresh;
-  const base = healthTrendScope(muniEW, period === "3m" ? 3 : period === "6m" ? 6 : 12);
+  const base = healthTrendScope(muniEW, period === "3m" ? 3 : period === "6m" ? 6 : period === "quarterly" ? 3 : period === "yearly" ? 12 : period === "monthly" ? 1 : 12);
   const conditionPalette = supervisor ? SUPERVISOR_CONDITION_PALETTE : CONDITION_PALETTE;
   const riskPalette = supervisor ? SUPERVISOR_RISK_COLORS : RISK_COLORS;
   const scopedData = base && { ...base, diseaseDistribution: base.diseaseDistribution.map((row, index) => ({ ...row, color: conditionPalette[index % conditionPalette.length] })), riskDistribution: muniEW.riskDistribution.map((row) => ({ ...row, color: riskPalette[row.name] || "#94A3B8" })) };
 
-const periodSelect = (
-    <div className={supervisor ? "supervisor-input flex max-w-full items-center gap-2" : "flex h-10 max-w-full items-center gap-2 rounded-btn border border-white/25 bg-white/10 px-3 text-white"}>
-      <CalendarDays className={`h-4 w-4 shrink-0 ${supervisor ? "text-brand-gray" : "text-brand-goldlight"}`} aria-hidden="true" />
-      <label htmlFor="health-trends-period" className={`shrink-0 text-xs font-medium ${supervisor ? "text-brand-gray" : "text-white/75"}`}>
-        Period
-      </label>
-      <div className="relative flex min-w-0 items-center">
-        <select
-          id="health-trends-period"
-          aria-label="Reporting period"
-          value={period}
-          onChange={(e) => setPeriod(e.target.value)}
-          className={supervisor ? "h-control min-w-[7.5rem] appearance-none bg-transparent pr-6 text-ui font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30" : "h-9 min-w-0 appearance-none bg-transparent pr-5 text-sm font-medium text-white outline-none focus-visible:ring-2 focus-visible:ring-brand-goldlight/70"}
-        >
-          <option className="bg-white text-brand-ink" value="3m">Last 3 Months</option>
-          <option className="bg-white text-brand-ink" value="6m">Last 6 Months</option>
-          <option className="bg-white text-brand-ink" value="12m">Last 12 Months</option>
-        </select>
-        <ChevronDown className={`pointer-events-none absolute right-0 h-4 w-4 ${supervisor ? "text-brand-gray" : "text-white/75"}`} aria-hidden="true" />
-      </div>
-    </div>
-  );
-
-  if (resource.error) return <><PageHeader crumbs={["Analytics", "Health Trends"]} title="Health Trends" subtitle="Authorized recorded health activity." action={periodSelect} /><Card className="p-5"><ErrorState compact={supervisor} title="Health trends unavailable" message={resource.error} onRetry={resource.refresh} /></Card></>;
+  if (resource.error) return <><PageHeader crumbs={["Analytics", "Health Trends"]} title="Health Trends" subtitle="Authorized recorded health activity." /><Card className="p-5"><ErrorState compact={supervisor} title="Health trends unavailable" message={resource.error} onRetry={resource.refresh} /></Card></>;
   if (supervisor && !assignedBarangay) return <><PageHeader crumbs={["Health Trends"]} title="Health Trends" subtitle="Barangay assignment required" /><Card><ErrorState compact title="Health trends unavailable" message="No valid barangay assignment is available for this account. Municipal coverage is not available to an unassigned Health Supervisor." /></Card></>;
-  if (assignedBarangay && !scopedData) return <><PageHeader crumbs={["Analytics", "Health Trends"]} title={`Brgy. ${assignedBarangay} Health Trends`} action={periodSelect} /><PageSkeleton /></>;
+  if (assignedBarangay && !scopedData) return <><PageHeader crumbs={["Analytics", "Health Trends"]} title={`Brgy. ${assignedBarangay} Health Trends`} /><PageSkeleton /></>;
 
   /* ------------------------------------------------------------------ */
   /* Barangay-scoped view (Health Supervisor assigned to one barangay)   */
@@ -134,40 +174,123 @@ const periodSelect = (
 
     return (
       <div className={supervisor ? "supervisor-module" : "contents"}>
+        {/* Compact Header */}
         <PageHeader
-          crumbs={["Health Trends"]}
-          title="Health Trends"
-          subtitle={`Recorded health activity and risk monitoring for Barangay ${assignedBarangay}`}
-action={
-            <div className="flex w-full flex-wrap items-center gap-2.5 md:w-auto md:flex-nowrap md:justify-end">
-              <div
-                className={supervisor ? "supervisor-input flex max-w-full items-center gap-2 text-ui" : "flex h-10 max-w-full items-center gap-2 rounded-btn border border-white/25 bg-white/10 px-3 text-sm font-medium text-white"}
-                title="Your account is assigned to this barangay"
-              >
-                <MapPin className={`h-4 w-4 shrink-0 ${supervisor ? "text-brand-gray" : "text-brand-goldlight"}`} aria-hidden="true" />
-                <span className="truncate">Barangay {assignedBarangay}</span>
-              </div>
-              {periodSelect}
-            </div>
-          }
+           crumbs={["Health Trends"]}
+           title="Health Trends"
+           subtitle={`Recorded health activity and risk monitoring for Barangay ${assignedBarangay}`}
         />
+
+        {/* Compact Filter Toolbar */}
+         <div className="border-b border-brand-border bg-white mb-6">
+           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between px-4 py-3 min-h-[60px]">
+            {/* Left: Report Filters */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+              <span className="text-xs font-semibold text-brand-gray uppercase tracking-wide">Report Filters</span>
+              
+              {/* Barangay Selector */}
+              <div className="flex items-center gap-2 min-w-fit">
+                <MapPin className="h-4 w-4 text-brand-blue shrink-0" aria-hidden="true" />
+                <span className="text-sm font-medium text-brand-ink">{assignedBarangay}</span>
+              </div>
+
+              {/* Period Selector */}
+              <div className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-brand-blue shrink-0" aria-hidden="true" />
+                <select
+                  id="health-trends-period"
+                  aria-label="Reporting period"
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  className="rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 min-w-[120px]"
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
+                  <option value="3m">Last 3 Months</option>
+                  <option value="6m">Last 6 Months</option>
+                  <option value="12m">Last 12 Months</option>
+                </select>
+              </div>
+
+               {/* Date Selector Container (reserved space with consistent width) */}
+               <div className="h-9 flex items-center min-w-[200px]">
+                 {/* Month Selector (Monthly) */}
+                 {period === "monthly" && (
+                   <input
+                     type="month"
+                     value={selectedMonth}
+                     onChange={(e) => setSelectedMonth(e.target.value)}
+                     className="rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 w-[140px]"
+                     aria-label="Select month"
+                   />
+                 )}
+
+                 {/* Quarter Selector (Quarterly) */}
+                 {period === "quarterly" && (
+                   <div className="flex items-center gap-2 w-[200px]">
+                     <select
+                       value={selectedQuarter.quarter}
+                       onChange={(e) => setSelectedQuarter({ ...selectedQuarter, quarter: parseInt(e.target.value) })}
+                       className="rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 w-[60px]"
+                       aria-label="Select quarter"
+                     >
+                       <option value={1}>Q1</option>
+                       <option value={2}>Q2</option>
+                       <option value={3}>Q3</option>
+                       <option value={4}>Q4</option>
+                     </select>
+                     <input
+                       type="number"
+                       value={selectedQuarter.year}
+                       onChange={(e) => setSelectedQuarter({ ...selectedQuarter, year: parseInt(e.target.value) })}
+                       min="2020"
+                       max="2099"
+                       className="rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 w-[90px]"
+                       aria-label="Select year"
+                     />
+                   </div>
+                 )}
+
+                 {/* Year Selector (Yearly) */}
+                 {period === "yearly" && (
+                   <input
+                     type="number"
+                     value={selectedYear}
+                     onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                     min="2020"
+                     max="2099"
+                     className="rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 w-[90px]"
+                     aria-label="Select year"
+                   />
+                 )}
+               </div>
+            </div>
+
+            {/* Right: Reporting Period Indicator */}
+             <div className="flex items-baseline gap-1.5 lg:border-l lg:border-brand-border lg:pl-4 lg:ml-auto">
+               <span className="text-xs font-semibold text-brand-gray uppercase tracking-wide">Period:</span>
+               <span className="text-sm font-semibold text-brand-ink whitespace-nowrap">{activityCaption}</span>
+             </div>
+          </div>
+        </div>
 
         {/* Summary */}
         {loading ? (
           <PageSkeleton />
         ) : (
         <>
-        {supervisor ? <div className="supervisor-metric-grid mb-4">
+        {supervisor ? <div className="supervisor-metric-grid mb-6">
           {cards.map((card, index) => <StatCard key={card.label} variant="ledger" label={card.label} value={card.value} description={index === 2 ? `${card.change}; all recorded consultations` : card.change} tone={["blue", "yellow", "accent", "danger"][index]} />)}
-        </div> : <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5">
+        </div> : <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
           {cards.map((c) => (
-            <div key={c.label} className="rounded-2xl border border-slate-200 bg-white shadow-card p-5">
-              <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${c.tone}`}>
+            <div key={c.label} className="rounded-lg border border-brand-border bg-white p-4 shadow-sm">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${c.tone}`}>
                 <c.icon className="w-5 h-5" strokeWidth={1.8} />
               </div>
-              <p className="mt-4 text-xs text-brand-gray uppercase tracking-wide">{c.label}</p>
-              <div className="mt-1 flex items-baseline gap-2">
-                <p className="text-2xl font-stat font-bold text-brand-ink">{c.value}</p>
+              <p className="mt-3 text-xs text-brand-gray uppercase tracking-wide font-semibold">{c.label}</p>
+              <div className="mt-2 flex items-baseline gap-1.5">
+                <p className="text-2xl font-bold text-brand-ink">{c.value}</p>
                 <span className={`text-xs font-medium ${c.up ? "text-brand-green" : "text-brand-danger"} flex items-center gap-0.5`}>
                   {c.up !== null && (c.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />)} {c.change}
                 </span>
@@ -175,14 +298,13 @@ action={
             </div>
           ))}
         </div>}
-        {supervisor && <p className="mb-4 text-caption text-brand-gray">Monthly activity: {activityCaption}. Headline counts retain their labelled current-month or all-record definitions; the selected period changes the monthly charts.</p>}
 
 {/* Trends + Disease Distribution */}
-        <div className={`grid lg:grid-cols-3 ${supervisor ? "gap-4 mt-4" : "gap-5 mt-6"}`}>
-          <Card className={`lg:col-span-2 ${supervisor ? "p-4" : "p-6"}`}>
-            <h3 className="font-semibold text-brand-ink mb-1">Consultation &amp; Referral Trends</h3>
-            <p className="text-xs text-brand-gray mb-4">Monthly recorded counts, {activityCaption}. Current month is partial.</p>
-            {s.consultationTrends.some((row) => row.consultations > 0 || row.referrals > 0) ? <ResponsiveContainer width="100%" height={supervisor ? 240 : 280}>
+        <div className={`grid lg:grid-cols-3 ${supervisor ? "gap-4 mb-6" : "gap-4 mb-6"}`}>
+          <Card className={supervisor ? "lg:col-span-2 p-4" : "lg:col-span-2 p-5"}>
+            <h3 className="text-sm font-semibold text-brand-ink mb-1">Consultation & Referral Trends</h3>
+            <p className="text-xs text-brand-gray mb-3">{activityCaption} — monthly recorded counts</p>
+            {s.consultationTrends.some((row) => row.consultations > 0 || row.referrals > 0) ? <ResponsiveContainer width="100%" height={260}>
               <LineChart data={s.consultationTrends} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
@@ -192,41 +314,38 @@ action={
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="consultations" name="Consultations" stroke={supervisor ? "#0B4A8F" : "#0B5CAD"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="referrals" name="Referrals" stroke="#F5B400" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
-            </ResponsiveContainer> : <EmptyState compact title="No recorded activity in this period" description="The authorized aggregate contains no consultations or referrals for the selected monthly window." />}
+            </ResponsiveContainer> : <EmptyState compact title="No recorded activity in this period" description="No consultations or referrals for the selected period." />}
           </Card>
 
-          <Card className={supervisor ? "p-4" : "p-6"}>
-            <h3 className="font-semibold text-brand-ink mb-1">{supervisor ? "Recorded Conditions" : "Disease Distribution"}</h3>
-            <p className="text-xs text-brand-gray mb-4">{supervisor ? "Classified recorded complaints across all available records, not confirmed diagnoses or unique residents." : "Condition counts across all recorded consultations, not unique residents."}</p>
-            {s.diseaseDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={200}>
+          <Card className={supervisor ? "p-4" : "p-5"}>
+            <h3 className="text-sm font-semibold text-brand-ink mb-1">{supervisor ? "Recorded Conditions" : "Disease Distribution"}</h3>
+            <p className="text-xs text-brand-gray mb-3">{supervisor ? "Classified recorded complaints" : "Condition counts"}</p>
+            {s.diseaseDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={220}>
               <PieChart>
-                <Pie isAnimationActive={!supervisor} data={s.diseaseDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2}>
+                <Pie isAnimationActive={!supervisor} data={s.diseaseDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={2}>
                   {s.diseaseDistribution.map((d) => <Cell key={d.name} fill={d.color} />)}
                 </Pie>
                 <Tooltip contentStyle={tooltipStyle} />
               </PieChart>
-            </ResponsiveContainer> : <EmptyState compact title="No recorded conditions" description="No condition counts were returned from authorized consultations." />}
-            <div className="space-y-1.5 mt-2">
+            </ResponsiveContainer> : <EmptyState compact title="No recorded conditions" description="No condition counts available." />}
+            <div className="space-y-1 mt-3 max-h-24 overflow-y-auto">
               {s.diseaseDistribution.map((d) => (
                 <div key={d.name} className="flex items-center gap-2 text-xs">
-                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: d.color }} />
+                  <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: d.color }} />
                   <span className="flex-1 text-brand-ink">{d.name}</span>
-                  <span className="text-brand-gray font-stat font-bold">{d.value}</span>
+                  <span className="text-brand-gray font-semibold">{d.value}</span>
                 </div>
               ))}
-              {s.diseaseDistribution.length === 0 && (
-                <p className="text-xs text-brand-gray">No conditions recorded yet.</p>
-              )}
             </div>
           </Card>
         </div>
 
         {/* Maternal + Senior monitoring */}
-        <div className={`grid lg:grid-cols-2 ${supervisor ? "gap-4 mt-4" : "gap-5 mt-5"}`}>
-          <Card className={supervisor ? "p-4" : "p-6"}>
-            <h3 className="font-semibold text-brand-ink mb-1">Recorded Maternal Activity</h3>
-            <p className="text-xs text-brand-gray mb-4">Unique residents with maternal records per month, {activityCaption}.</p>
-            {Array.isArray(s.maternalTrend) && s.maternalTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={200}>
+        <div className={`grid lg:grid-cols-2 gap-4 mb-6`}>
+          <Card className={supervisor ? "p-4" : "p-5"}>
+            <h3 className="text-sm font-semibold text-brand-ink mb-1">Recorded Maternal Activity</h3>
+            <p className="text-xs text-brand-gray mb-3">Unique residents with maternal records, {activityCaption}</p>
+            {Array.isArray(s.maternalTrend) && s.maternalTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={220}>
               <LineChart data={s.maternalTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
@@ -234,13 +353,13 @@ action={
                 <Tooltip contentStyle={tooltipStyle} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="count" name="Residents" stroke="#0B4A8F" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
-            </ResponsiveContainer> : <EmptyState compact title={Array.isArray(s.maternalTrend) && s.maternalTrend.every((row) => Number.isFinite(row.count)) ? "No recorded maternal activity" : "Maternal activity unavailable"} description={Array.isArray(s.maternalTrend) && s.maternalTrend.every((row) => Number.isFinite(row.count)) ? "No maternal records were returned for the selected monthly window." : "The aggregate source did not provide complete monthly maternal counts."} />}
+            </ResponsiveContainer> : <EmptyState compact title="No recorded maternal activity" description="No maternal records for the selected period." />}
           </Card>
 
-          <Card className={supervisor ? "p-4" : "p-6"}>
-            <h3 className="font-semibold text-brand-ink mb-1">Recorded Senior Consultation Activity</h3>
-            <p className="text-xs text-brand-gray mb-4">Unique residents aged 60 or older at the encounter, {activityCaption}.</p>
-            {Array.isArray(s.seniorTrend) && s.seniorTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={200}>
+          <Card className={supervisor ? "p-4" : "p-5"}>
+            <h3 className="text-sm font-semibold text-brand-ink mb-1">Recorded Senior Consultation Activity</h3>
+            <p className="text-xs text-brand-gray mb-3">Unique residents aged 60+, {activityCaption}</p>
+            {Array.isArray(s.seniorTrend) && s.seniorTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={220}>
               <LineChart data={s.seniorTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
@@ -248,26 +367,26 @@ action={
                 <Tooltip contentStyle={tooltipStyle} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="count" name="Residents" stroke="#28B463" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
-            </ResponsiveContainer> : <EmptyState compact title={Array.isArray(s.seniorTrend) && s.seniorTrend.every((row) => Number.isFinite(row.count)) ? "No recorded senior activity" : "Senior activity unavailable"} description={Array.isArray(s.seniorTrend) && s.seniorTrend.every((row) => Number.isFinite(row.count)) ? "No senior consultations were returned for the selected monthly window." : "The aggregate source did not provide complete monthly senior counts."} />}
+            </ResponsiveContainer> : <EmptyState compact title="No recorded senior activity" description="No senior consultations for the selected period." />}
           </Card>
         </div>
 
         {/* Risk + Program compliance */}
-        <div className={`grid lg:grid-cols-2 ${supervisor ? "gap-4 mt-4" : "gap-5 mt-5"}`}>
+        <div className={`grid lg:grid-cols-2 gap-4`}>
           {supervisor ? <Card className="min-w-0 p-4">
             <h3 className="text-section font-semibold text-brand-ink">Follow-up Completion</h3>
-            <p className="mb-3 mt-1 text-caption text-brand-gray">Recorded outcomes by scheduled month, {activityCaption}.</p>
+            <p className="mb-3 mt-1 text-caption text-brand-gray">Recorded outcomes by scheduled month, {activityCaption}</p>
             {completionAvailable && completionRows.some((row) => row.denominator > 0) ? <div className="table-scroll max-h-64 overflow-auto">
               <table className="ui-table w-full text-left">
                 <caption className="sr-only">Scheduled and completed follow-ups in the selected reporting period</caption>
                 <thead className="sticky top-0 bg-brand-bg"><tr><th scope="col">Month</th><th scope="col" className="text-right">Scheduled</th><th scope="col" className="text-right">Completed</th><th scope="col" className="text-right">Completion</th></tr></thead>
                 <tbody className="divide-y divide-brand-border">{completionRows.map((row) => <tr key={row.month}><td className="whitespace-nowrap">{row.month}</td><td className="text-right font-stat">{row.denominator}</td><td className="text-right font-stat">{row.numerator}</td><td className="text-right font-stat">{Number.isFinite(row.value) ? `${row.value}%` : "Not applicable"}</td></tr>)}</tbody>
               </table>
-            </div> : <EmptyState compact title={completionAvailable ? "No scheduled follow-ups in this period" : "Follow-up completion unavailable"} description={completionAvailable ? "A completion percentage requires scheduled follow-ups." : "The aggregate source did not provide complete scheduled and completed counts."} />}
-          </Card> : <Card className="p-6">
+            </div> : <EmptyState compact title="No scheduled follow-ups in this period" description="A completion percentage requires scheduled follow-ups." />}
+          </Card> : <Card className="p-5">
             <h3 className="font-semibold text-brand-ink mb-1">Risk Classification Distribution</h3>
-            <p className="text-xs text-brand-gray mb-4">Latest recorded consultation per resident; includes unassessed residents with a consultation.</p>
-            {s.riskDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={200}>
+            <p className="text-xs text-brand-gray mb-3">Latest recorded consultation per resident</p>
+            {s.riskDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie isAnimationActive={!supervisor} data={s.riskDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
                   {s.riskDistribution.map((d) => <Cell key={d.name} fill={d.color} />)}
@@ -275,12 +394,12 @@ action={
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
               </PieChart>
-            </ResponsiveContainer> : <EmptyState compact title="No resident risk distribution" description="No consultation-based resident assessment counts were returned. A risk percentage cannot be calculated." />}
+            </ResponsiveContainer> : <EmptyState compact title="No resident risk distribution" description="No consultation-based resident assessment counts available." />}
           </Card>}
 
           {supervisor ? <Card className="min-w-0 p-4">
             <h3 className="text-section font-semibold text-brand-ink">Health Service Activity</h3>
-            <p className="mb-3 mt-1 text-caption text-brand-gray">{serviceMonthLabel} | Recorded counts, not population coverage rates</p>
+            <p className="mb-3 mt-1 text-caption text-brand-gray">{serviceMonthLabel} | Recorded counts</p>
             <dl className="divide-y divide-brand-border border-y border-brand-border">{[
               ["TCL enrolled residents", enrollment?.value],
               ["TCL recorded participants", participation?.value],
@@ -288,10 +407,10 @@ action={
               ["Children with recorded consultations", childConsultations?.value],
             ].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-3 py-2.5 text-ui"><dt className="text-brand-gray">{label}</dt><dd className="shrink-0 font-stat font-semibold text-brand-ink">{metricValue(value)}</dd></div>)}</dl>
             {can("services.view") && <Link to="/app/health_supervisor/services" className="mt-3 inline-flex text-ui font-medium text-brand-blue hover:underline">View Health Services</Link>}
-          </Card> : <Card className="p-6">
+          </Card> : <Card className="p-5">
             <h3 className="font-semibold text-brand-ink mb-1">Recorded TCL Enrollments</h3>
-            <p className="text-xs text-brand-gray mb-4">Recorded enrolled residents in {s.programCompliance?.[0]?.month || "the latest reported month"}; not a compliance percentage.</p>
-            {Array.isArray(s.programCompliance) && s.programCompliance.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={200}>
+            <p className="text-xs text-brand-gray mb-3">Enrolled residents in {s.programCompliance?.[0]?.month || "the latest month"}</p>
+            {Array.isArray(s.programCompliance) && s.programCompliance.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={220}>
               <BarChart data={s.programCompliance} layout="vertical" margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
@@ -299,7 +418,7 @@ action={
                 <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#F8FBFF" }} />
                 <Bar isAnimationActive={!supervisor} dataKey="value" name="Residents" fill="#0B5CAD" radius={[0, 4, 4, 0]} barSize={20} />
               </BarChart>
-            </ResponsiveContainer> : <EmptyState compact title={Array.isArray(s.programCompliance) && s.programCompliance.every((row) => Number.isFinite(row.value)) ? "No recorded TCL enrollments" : "TCL enrollments unavailable"} description={Array.isArray(s.programCompliance) && s.programCompliance.every((row) => Number.isFinite(row.value)) ? "No enrolled residents were returned for the latest reported month." : "The aggregate source did not provide complete enrollment counts."} />}
+            </ResponsiveContainer> : <EmptyState compact title="No recorded TCL enrollments" description="No enrolled residents available." />}
           </Card>}
         </div>
         </>

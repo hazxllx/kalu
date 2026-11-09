@@ -529,15 +529,9 @@ export default function DashboardLayout({ roleKey }) {
           <div className="h-2" aria-hidden="true" />
         </nav>
 
-        {/* Fixed account footer */}
-        <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
-          {isSupervisor && !sidebarCollapsed && (
-            <div className="px-3 pb-2 pt-1">
-              <p className="text-caption text-brand-gray">Assigned Barangay</p>
-              <p className="mt-0.5 truncate text-ui font-medium text-brand-ink">{assignedBarangay || "Assignment unavailable"}</p>
-            </div>
-          )}
-          <button
+         {/* Fixed account footer */}
+         <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
+           <button
             onClick={() => logout()}
             aria-label={sidebarCollapsed ? "Log out" : undefined}
             title={sidebarCollapsed ? "Log out" : undefined}

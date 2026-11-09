@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
 import validate from '../middleware/validate.js';
+import { uploadMiddleware } from '../middleware/upload.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 import {
   createServiceValidator,
@@ -53,5 +54,8 @@ router.delete('/:id', ...deleters, idParam, asyncHandler(controller.remove));
 router.post('/attendance', ...editors, validate(createAttendanceValidator), asyncHandler(controller.createAttendance));
 router.post('/:id/assign', ...editors, idParam, validate(assignValidator), asyncHandler(controller.assign));
 router.delete('/:id/assign/:personnelId', ...editors, idParam, asyncHandler(controller.unassign));
+router.get('/:id/attachments/:attachmentType', ...readers, idParam, asyncHandler(controller.getAttachmentSignedUrl));
+router.post('/:id/attachments/:attachmentType', ...editors, idParam, uploadMiddleware.single('file'), asyncHandler(controller.uploadAttachment));
+router.delete('/:id/attachments/:attachmentType', ...editors, idParam, asyncHandler(controller.deleteAttachment));
 
 export default router;

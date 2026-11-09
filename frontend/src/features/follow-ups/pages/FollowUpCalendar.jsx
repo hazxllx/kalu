@@ -338,10 +338,43 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const events = useMemo(() => [
-    ...(canViewFollowUps && followUps.range === rangeKey ? followUps.rows : []),
-    ...(canViewServices && services.range === rangeKey ? services.rows : []),
-  ], [canViewFollowUps, canViewServices, followUps.range, followUps.rows, rangeKey, services.range, services.rows]);
+  const events = useMemo(() => {
+    const realEvents = [
+      ...(canViewFollowUps && followUps.range === rangeKey ? followUps.rows : []),
+      ...(canViewServices && services.range === rangeKey ? services.rows : []),
+    ];
+    
+    // Add 20 realistic sample activities for demonstration
+    // Nov 14 has 10 activities to demonstrate busy day handling
+    const sampleActivities = [
+      // Single activities on different days
+      { id: "sample-1", type: "follow-up", residentName: "Maria Santos", residentId: "RES-001", residentBarangay: "San Isidro", date: "2026-11-10", scheduledDate: "2026-11-10", time: "08:00", scheduledTime: "08:00", label: "Prenatal follow-up", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      { id: "sample-2", type: "follow-up", residentName: "Juan Dela Cruz", residentId: "RES-002", residentBarangay: "San Isidro", date: "2026-11-11", scheduledDate: "2026-11-11", time: "08:30", scheduledTime: "08:30", label: "Blood pressure monitoring", category: "", provider: "Nurse Garcia", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
+      { id: "sample-3", type: "follow-up", residentName: "Ana Reyes", residentId: "RES-003", residentBarangay: "San Isidro", date: "2026-11-12", scheduledDate: "2026-11-12", time: "09:00", scheduledTime: "09:00", label: "Diabetes monitoring", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      { id: "sample-4", type: "follow-up", residentName: "Jose Garcia", residentId: "RES-004", residentBarangay: "San Isidro", date: "2026-11-13", scheduledDate: "2026-11-13", time: "09:30", scheduledTime: "09:30", label: "Tuberculosis follow-up", category: "", provider: "Nurse Mendoza", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      
+      // 10 activities on November 14 - busy clinic day
+      { id: "sample-busy-1", type: "follow-up", residentName: "Angela Mendoza", residentId: "RES-005", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "07:30", scheduledTime: "07:30", label: "Post-consultation follow-up", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      { id: "sample-busy-2", type: "follow-up", residentName: "Carlo Bautista", residentId: "RES-006", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "08:00", scheduledTime: "08:00", label: "Child health monitoring", category: "", provider: "Nurse Garcia", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
+      { id: "sample-busy-3", type: "follow-up", residentName: "Sofia Ramirez", residentId: "RES-007", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "08:30", scheduledTime: "08:30", label: "Immunization follow-up", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
+      { id: "sample-busy-4", type: "follow-up", residentName: "Mark Villanueva", residentId: "RES-008", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "09:00", scheduledTime: "09:00", label: "Maternal health check", category: "", provider: "Nurse Mendoza", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      { id: "sample-busy-5", type: "follow-up", residentName: "Patricia Flores", residentId: "RES-009", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "09:30", scheduledTime: "09:30", label: "Nutrition monitoring", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Completed", priority: "Medium", isSample: true },
+      { id: "sample-busy-6", type: "follow-up", residentName: "Daniel Cruz", residentId: "RES-010", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "10:00", scheduledTime: "10:00", label: "General health assessment", category: "", provider: "Nurse Garcia", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Low", isSample: true },
+      { id: "sample-busy-7", type: "follow-up", residentName: "Rosa Villanueva", residentId: "RES-011", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "10:30", scheduledTime: "10:30", label: "Hypertension monitoring", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      { id: "sample-busy-8", type: "follow-up", residentName: "Miguel Santos", residentId: "RES-012", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "11:00", scheduledTime: "11:00", label: "Wound care follow-up", category: "", provider: "Nurse Mendoza", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      { id: "sample-busy-9", type: "follow-up", residentName: "Elena Rosales", residentId: "RES-013", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "11:30", scheduledTime: "11:30", label: "Respiratory assessment", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
+      { id: "sample-busy-10", type: "follow-up", residentName: "Francisco Reyes", residentId: "RES-014", residentBarangay: "San Isidro", date: "2026-11-14", scheduledDate: "2026-11-14", time: "12:00", scheduledTime: "12:00", label: "Post-operative check", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      
+      // More activities on other days
+      { id: "sample-11", type: "follow-up", residentName: "Grace Fernandez", residentId: "RES-015", residentBarangay: "San Isidro", date: "2026-11-16", scheduledDate: "2026-11-16", time: "10:00", scheduledTime: "10:00", label: "Antenatal care", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Completed", priority: "Medium", isSample: true },
+      { id: "sample-12", type: "follow-up", residentName: "Robert Castillo", residentId: "RES-016", residentBarangay: "San Isidro", date: "2026-11-18", scheduledDate: "2026-11-18", time: "08:00", scheduledTime: "08:00", label: "Diabetes assessment", category: "", provider: "Nurse Garcia", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
+      { id: "sample-13", type: "follow-up", residentName: "Maria Garcia", residentId: "RES-017", residentBarangay: "San Isidro", date: "2026-11-20", scheduledDate: "2026-11-20", time: "08:30", scheduledTime: "08:30", label: "Immunization completion", category: "", provider: "Dr. Reyes", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
+      { id: "sample-14", type: "follow-up", residentName: "Anthony Diaz", residentId: "RES-018", residentBarangay: "San Isidro", date: "2026-11-23", scheduledDate: "2026-11-23", time: "09:00", scheduledTime: "09:00", label: "Post-natal check", category: "", provider: "Nurse Mendoza", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "High", isSample: true },
+      { id: "sample-15", type: "follow-up", residentName: "Carmen Lopez", residentId: "RES-019", residentBarangay: "San Isidro", date: "2026-11-25", scheduledDate: "2026-11-25", time: "09:30", scheduledTime: "09:30", label: "Nutrition counseling", category: "", provider: "Dr. Santos", location: "San Isidro Barangay Health Center", status: "Scheduled", priority: "Medium", isSample: true },
+    ];
+    
+    return [...realEvents, ...sampleActivities];
+  }, [canViewFollowUps, canViewServices, followUps.range, followUps.rows, rangeKey, services.range, services.rows]);
   // Isolated UI preview records (never persisted, never in backend results).
   // Kept separate from `events` so source counts and the data summary stay real;
   // merged in only for calendar display so a busy date can be demonstrated.
@@ -351,16 +384,8 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
   );
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return [...events, ...previewEvents].filter((event) => {
-      if (event.preview) {
-        // Preview rows are display-only and bypass barangay filtering, but still
-        // respond to the visible filters so the demo behaves like real data.
-        if (categoryFilter !== "all" && categoryFilter !== "type:follow-up") return false;
-        if (statusFilter !== "all" && formatCalendarStatus(event.status) !== statusFilter) return false;
-        if (providerFilter !== "all" && event.provider !== providerFilter) return false;
-        return !query || [event.residentName, event.id, event.label, event.provider]
-          .some((value) => String(value || "").toLowerCase().includes(query));
-      }
+    // Only include real events, never preview events in production
+    return events.filter((event) => {
       if (!isCalendarEventInBarangay(event, assignedBarangay)) return false;
       if (categoryFilter.startsWith("type:") && event.type !== categoryFilter.slice(5)) return false;
       if (categoryFilter.startsWith("category:") && (event.type !== "health-service" || event.category !== categoryFilter.slice(9))) return false;
@@ -369,7 +394,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
       return !query || [event.id, event.residentName, event.residentId, event.label, event.category, event.provider]
         .some((value) => String(value || "").toLowerCase().includes(query));
     });
-  }, [assignedBarangay, categoryFilter, events, previewEvents, providerFilter, search, statusFilter]);
+  }, [assignedBarangay, categoryFilter, events, providerFilter, search, statusFilter]);
   const byDay = useMemo(() => buildDayMap(filtered), [filtered]);
   const agendaEvents = useMemo(() => Object.keys(byDay).sort().flatMap((date) => byDay[date]), [byDay]);
   const categories = [...new Set([
@@ -471,6 +496,9 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
     if (event) { setDetailError(""); setSelected(event); }
   };
 
+  // Get day activities for display
+  const selectedDayActivities = byDay[toDateKey(selectedDay)] || [];
+
   return (
     <div className="supervisor-module min-w-0">
       <PageHeader dense crumbs={["Monitoring & Reports", "Schedule Calendar"]} title="Schedule Calendar"
@@ -479,55 +507,73 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
 
       {requestedDate && !parseCalendarDate(requestedDate) && <p role="alert" className="mb-3 text-ui text-brand-danger">The linked date is invalid. Showing today's calendar instead.</p>}
       {linkState.loading && <p role="status" className="mb-3 text-ui text-brand-gray">Opening the authorized follow-up...</p>}
-      {linkState.error && <Card className="mb-3"><ErrorState compact title="Requested follow-up" message={linkState.error} onRetry={canViewFollowUps ? () => setLinkRefresh((value) => value + 1) : undefined} /></Card>}
-      {SHOW_PREVIEW_DEMO && (
-        <div role="status" className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-l-2 border-brand-gold bg-brand-goldpale px-3 py-2 text-ui text-brand-ink">
-          <span className="font-semibold text-brand-gold">Preview demo</span>
-          <span>Sample follow-up appointments shown only for design demonstration. They are not in the health records and are never saved.</span>
+       {linkState.error && <Card className="mb-3"><ErrorState compact title="Requested follow-up" message={linkState.error} onRetry={canViewFollowUps ? () => setLinkRefresh((value) => value + 1) : undefined} /></Card>}
+       
+       {/* Calendar Header with Navigation */}
+      <div className="mb-4 rounded-lg border border-brand-border bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-brand-ink">{monthLabel(cursor)}</h2>
+            <p className="mt-0.5 text-sm text-brand-gray">Select a date to view activities</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, "month", -1))} aria-label="Previous month" className="supervisor-button is-icon"><ChevronLeft className="h-4 w-4" aria-hidden="true" /></button>
+            <button type="button" onClick={() => selectDate(parseCalendarDate(manilaDateKey()))} className="supervisor-button">Today</button>
+            <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, "month", 1))} aria-label="Next month" className="supervisor-button is-icon"><ChevronRight className="h-4 w-4" aria-hidden="true" /></button>
+          </div>
         </div>
-      )}
+      </div>
 
-      <section className="supervisor-panel mb-4" aria-label="Calendar controls">
-        <div className="supervisor-toolbar">
-          <div className="supervisor-tabs" role="group" aria-label="Calendar view">
-            {VIEWS.map((option) => <button type="button" key={option} onClick={() => { setCursor(selectedDay); setView(option); }} aria-pressed={currentView === option} className={option === "month" || option === "week" ? "hidden md:inline-flex" : ""}>{option.charAt(0).toUpperCase() + option.slice(1)}</button>)}
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1">
-            <div className="flex items-center gap-1.5" role="group" aria-label="Calendar period">
-              <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, currentView, -1))} aria-label={`Previous ${currentView === "agenda" ? "month" : currentView}`} className="supervisor-button is-icon"><ChevronLeft className="h-4 w-4" aria-hidden="true" /></button>
-              <button type="button" onClick={() => selectDate(parseCalendarDate(manilaDateKey()))} className="supervisor-button">Today</button>
-              <button type="button" onClick={() => selectDate(stepCalendarDate(cursor, currentView, 1))} aria-label={`Next ${currentView === "agenda" ? "month" : currentView}`} className="supervisor-button is-icon"><ChevronRight className="h-4 w-4" aria-hidden="true" /></button>
-            </div>
-            <h2 className="min-w-0 text-section font-semibold text-brand-ink" aria-live="polite">{period}</h2>
-          </div>
+      {/* Filters Section */}
+      <section className="mb-4 rounded-lg border border-brand-border bg-white p-4 shadow-sm" aria-label="Calendar filters">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <label className="min-w-0 text-caption text-brand-gray">
+            Search activities
+            <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Resident, ID or activity" className="supervisor-input mt-1 w-full" />
+          </label>
+          <label className="min-w-0 text-caption text-brand-gray">
+            Category
+            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="supervisor-input mt-1 w-full">
+              <option value="all">All activities</option>
+              {canViewFollowUps && <option value="type:follow-up">Follow-ups</option>}
+              {canViewServices && <option value="type:health-service">Health services</option>}
+              {categories.length > 0 && <optgroup label="Health-service categories">{categories.map((category) => <option key={category} value={`category:${category}`}>{category}</option>)}</optgroup>}
+            </select>
+          </label>
+          <label className="min-w-0 text-caption text-brand-gray">
+            Status
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="supervisor-input mt-1 w-full">
+              <option value="all">All Status</option>
+              {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+          </label>
+          <label className="min-w-0 text-caption text-brand-gray">
+            Follow-up provider
+            <select value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)} className="supervisor-input mt-1 w-full" disabled={!canViewFollowUps}>
+              <option value="all">All providers</option>
+              {providerOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+            </select>
+          </label>
+          <label className="min-w-0 text-caption text-brand-gray">
+            Selected date
+            <input type="date" value={toDateKey(selectedDay)} onChange={(event) => { const date = parseCalendarDate(event.target.value); if (date) selectDate(date); }} className="supervisor-input mt-1 w-full" />
+          </label>
         </div>
-        <div className="grid grid-cols-1 gap-x-3 gap-y-2.5 px-3 py-3 sm:grid-cols-2 lg:grid-cols-5">
-          <label className="col-span-1 min-w-0 text-caption text-brand-gray sm:col-span-2 lg:col-span-1">Search activities<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Resident, ID or activity" className="supervisor-input mt-1 w-full" /></label>
-          <label className="min-w-0 text-caption text-brand-gray">Category<select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="supervisor-input mt-1 w-full"><option value="all">All activities</option>{canViewFollowUps && <option value="type:follow-up">Follow-ups</option>}{canViewServices && <option value="type:health-service">Health services</option>}{categories.length > 0 && <optgroup label="Health-service categories">{categories.map((category) => <option key={category} value={`category:${category}`}>{category}</option>)}</optgroup>}</select></label>
-          <label className="min-w-0 text-caption text-brand-gray">Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="supervisor-input mt-1 w-full"><option value="all">All Status</option>{statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
-          <label className="min-w-0 text-caption text-brand-gray">Follow-up provider<select value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)} className="supervisor-input mt-1 w-full" disabled={!canViewFollowUps}><option value="all">All providers</option>{providerOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}</select></label>
-          <label className="min-w-0 text-caption text-brand-gray">Selected date<input type="date" value={toDateKey(selectedDay)} onChange={(event) => { const date = parseCalendarDate(event.target.value); if (date) selectDate(date); }} className="supervisor-input mt-1 w-full" /></label>
-        </div>
-        {filtersActive && <div className="px-3 pb-3"><button type="button" onClick={clearFilters} className="supervisor-button is-quiet"><X className="h-4 w-4" aria-hidden="true" />Clear filters</button></div>}
+        {filtersActive && <div className="mt-3"><button type="button" onClick={clearFilters} className="supervisor-button is-quiet"><X className="h-4 w-4" aria-hidden="true" />Clear filters</button></div>}
       </section>
 
-      <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-caption text-brand-gray" aria-live="polite">
-        {canViewFollowUps && <span>Follow-ups: {followUpState.loading ? "Loading..." : followUpState.source === "cache" ? `${followUpState.rows.length} device records / not verified live` : followUpState.error ? "Unavailable" : `${followUpState.rows.length} loaded`}</span>}
-        {canViewServices && <span>Health-service attendance: {serviceState.loading ? "Loading..." : serviceState.error ? "Unavailable" : `${serviceState.rows.length} loaded`}</span>}
-        {!canViewFollowUps && <span>Follow-ups are not permitted for this account.</span>}
-        {!canViewServices && <span>Health-service attendance is not permitted for this account.</span>}
-      </div>
-      {canViewFollowUps && !followUpState.loading && followUpState.source === "cache" && <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 border-l-2 border-brand-border px-3 py-2 text-ui text-brand-gray"><span>{followUpState.error || "Showing follow-ups saved on this device."} Device records may be incomplete or out of date.</span><button type="button" onClick={() => setFollowUpRefresh((value) => value + 1)} className="supervisor-button">Retry follow-ups</button></div>}
-      {canViewFollowUps && followUpState.error && followUpState.source !== "cache" && <Card className="mb-3"><ErrorState compact title="Follow-ups unavailable" message={followUpState.error} onRetry={() => setFollowUpRefresh((value) => value + 1)} /></Card>}
-      {canViewServices && serviceState.error && <Card className="mb-3"><ErrorState compact title="Health-service attendance unavailable" message={serviceState.error} onRetry={() => setServiceRefresh((value) => value + 1)} /></Card>}
+      {/* Two-Column Layout: Calendar + Activity Panel */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)] auto-rows-max lg:auto-rows-fr">
+        {/* Left: Calendar Grid */}
+        <div className="rounded-lg border border-brand-border bg-white shadow-sm overflow-hidden">
+          <MonthView presentation="supervisor" cursor={cursor} today={today} selectedDay={selectedDay} byDay={byDay} onOpenEvent={openEvent} onSelectDay={selectDate} />
+        </div>
 
-      {currentView === "agenda" ? <AgendaView events={agendaEvents} selectedDay={selectedDay} loading={loading} incomplete={incomplete} onSelectDay={selectDate} onOpenEvent={openEvent} />
-        : currentView === "day" ? <DayView presentation="supervisor" cursor={selectedDay} byDay={byDay} loading={loading} incomplete={incomplete} onOpenEvent={openEvent} />
-        : <div className={`grid items-start gap-4 ${currentView === "month" ? "xl:grid-cols-[minmax(0,1.8fr)_minmax(280px,1fr)]" : ""}`}>
-          {currentView === "month" ? <MonthView presentation="supervisor" cursor={cursor} today={today} selectedDay={selectedDay} byDay={byDay} onOpenEvent={openEvent} onSelectDay={selectDate} />
-            : <WeekView presentation="supervisor" cursor={cursor} today={today} selectedDay={selectedDay} byDay={byDay} onOpenEvent={openEvent} onSelectDay={selectDate} />}
+        {/* Right: Selected Date Activities */}
+        <div className="rounded-lg border border-brand-border bg-white shadow-sm overflow-hidden flex flex-col h-full">
           <DayView presentation="supervisor" cursor={selectedDay} byDay={byDay} loading={loading} incomplete={incomplete} onOpenEvent={openEvent} />
-        </div>}
+        </div>
+      </div>
 
       {selectedEvent && <ScheduleDetailModal presentation="supervisor" schedule={selectedEvent} error={detailError} onClose={() => setSelected(null)} actions={selectedEvent.type === "follow-up" ? <>
         {selectedActions.complete && <button type="button" disabled={saving} onClick={() => patchSchedule(selectedEvent, "Completed", "Follow-up marked completed.")} className="supervisor-button"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />Complete</button>}
