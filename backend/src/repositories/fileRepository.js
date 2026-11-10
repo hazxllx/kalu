@@ -20,6 +20,15 @@ const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stri
 const DEV_BARANGAYS = APPROVED_BARANGAYS;
 
 const normalizeText = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+const zoneFromResidentAddress = (resident) => {
+  const text = `${resident?.currentAddress || ''} ${resident?.permanentAddress || ''}`;
+  const match = text.match(/\b(?:purok|zone)\s+(?:(?:purok|zone)\s+)*([1-8])\b/i);
+  return match ? Number(match[1]) : null;
+};
+const matchesZone = (resident, zone) => {
+  if (zone === 'unassigned') return (resident.zone === null || resident.zone === undefined || resident.zone === '') && !zoneFromResidentAddress(resident);
+  return Number(resident.zone) === Number(zone) || zoneFromResidentAddress(resident) === Number(zone);
+};
 
 const attachResidentToVisit = (visit, residentsById) => ({
   ...visit,
@@ -80,13 +89,26 @@ export const fileRepository = {
    * driver is single-municipality dev data, so `municipalityId` is ignored and
    * barangay filtering uses the stored text. Returns { rows, total }.
    */
-  listResidents: async ({ q = '', limit = 50, offset = 0, barangay = null, barangayId = null, ids = null, municipalityId = null } = {}) => {
+  listResidents: async ({ q = '', limit = 50, offset = 0, barangay = null, barangayId = null, zone = null, ids = null, municipalityId = null, verificationStatuses = null } = {}) => {
     let rows = store.residents.filter((r) => matchesQuery(r, q));
     if (barangay) rows = rows.filter((r) => r.barangay === barangay);
     if (barangayId) rows = rows.filter((r) => r.barangayId === barangayId);
+    if (zone !== null && zone !== undefined && zone !== '') rows = rows.filter((r) => matchesZone(r, zone));
     if (Array.isArray(ids)) rows = rows.filter((r) => ids.includes(r.id));
+    if (Array.isArray(verificationStatuses) && verificationStatuses.length) rows = rows.filter((r) => verificationStatuses.includes(r.verificationStatus));
     const total = rows.length;
     return { rows: clone(rows.slice(offset, offset + limit)), total };
+  },
+
+  verifiedHouseholdResidentIds: async () => [],
+
+  listResidentsByIds: async ({ ids = [], q = '', barangay = null, barangayId = null, zone = null, municipalityId = null } = {}) => {
+    let rows = store.residents.filter((r) => ids.includes(r.id) && matchesQuery(r, q));
+    if (barangay) rows = rows.filter((r) => r.barangay === barangay);
+    if (barangayId) rows = rows.filter((r) => r.barangayId === barangayId);
+    if (zone !== null && zone !== undefined && zone !== '') rows = rows.filter((r) => matchesZone(r, zone));
+    if (municipalityId) rows = rows.filter((r) => r.municipalityId === municipalityId);
+    return clone(rows);
   },
 
   findBarangayByName: async (name) => {
@@ -100,6 +122,17 @@ export const fileRepository = {
   listBarangays: async () => DEV_BARANGAYS.map((name) => ({
     id: `dev-${name}`, name, municipality_id: null, status: 'active',
   })),
+
+  listResidentZoneOptions: async ({ barangayId, municipalityId } = {}) => {
+    const rows = store.residents.filter((r) =>
+      (!barangayId || r.barangayId === barangayId)
+      && (!municipalityId || r.municipalityId === municipalityId),
+    );
+    return {
+      zones: [...new Set(rows.flatMap((r) => [r.zone, zoneFromResidentAddress(r)]).filter((zone) => zone !== null && zone !== undefined && zone !== '').map(Number))].sort((a, b) => a - b),
+      hasUnassigned: rows.some((r) => matchesZone(r, 'unassigned')),
+    };
+  },
 
   // The file driver is single-municipality and has no municipalities store, so
   // there is no centre coordinate to return; the map falls back to framing the

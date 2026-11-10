@@ -29,6 +29,16 @@ const TABLES = Object.freeze({
   documents: 'documents',
 });
 
+const zoneNumberFromPurok = (value) => {
+  const match = String(value || '').trim().match(/^(?:(?:purok|zone)\s*)*([1-8])$/i);
+  return match ? Number(match[1]) : null;
+};
+
+const zoneNumberFromAddress = (value) => {
+  const match = String(value || '').match(/\b(?:purok|zone)\s+(?:(?:purok|zone)\s+)*([1-8])\b/i);
+  return match ? Number(match[1]) : null;
+};
+
 // ---------------------------------------------------------------------------
 // Household mapping — the domain shape mirrors what the profiling form sends
 // and what the household list/cards render (camelCase), including the
@@ -976,7 +986,7 @@ export const supabaseRepository = {
    * trigger); `municipalityId` limits rows to the caller's municipality.
    * Returns { rows, total }.
    */
-  async listResidents({ q = '', limit = 50, offset = 0, barangay = null, barangayId = null, ids = null, municipalityId = null, verificationStatuses = null } = {}) {
+  async listResidents({ q = '', limit = 50, offset = 0, barangay = null, barangayId = null, zone = null, ids = null, municipalityId = null, verificationStatuses = null } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.residents)
@@ -986,12 +996,33 @@ export const supabaseRepository = {
     if (q) query = query.or(residentSearchFilter(q));
     if (barangay) query = query.eq('barangay', barangay);
     if (barangayId) query = query.eq('barangay_id', barangayId);
+    if (zone === 'unassigned') {
+      query = query.is('zone', null);
+      const assignedIds = [...new Set((await this.listDerivedZoneAssignments({ barangayId, municipalityId })).map((row) => row.residentId))];
+      if (assignedIds.length) {
+        query = query.not('id', 'in', `(${assignedIds.map((id) => `\"${String(id).replaceAll('"', '\\"')}\"`).join(',')})`);
+      }
+    } else if (zone !== null && zone !== undefined && zone !== '') {
+      const householdIds = (await this.listDerivedZoneAssignments({ barangayId, municipalityId }))
+        .filter((row) => row.zone === Number(zone))
+        .map((row) => row.residentId);
+      query = householdIds.length
+        ? query.or(`zone.eq.${Number(zone)},id.in.(${[...new Set(householdIds)].join(',')})`)
+        : query.eq('zone', Number(zone));
+    }
     if (Array.isArray(ids)) query = query.in('id', ids);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
     if (verificationStatuses && verificationStatuses.length) query = query.in('verification_status', verificationStatuses);
     const { data, error, count } = await query;
     throwOnError(error, 'Could not list residents');
-    return { rows: (data || []).map(residentFromRow), total: count ?? (data || []).length };
+    const rows = (data || []).map((row) => {
+      const resident = residentFromRow(row);
+      if (zone !== null && zone !== undefined && zone !== '' && zone !== 'unassigned' && resident.zone == null) {
+        resident.zone = Number(zone);
+      }
+      return resident;
+    });
+    return { rows, total: count ?? (data || []).length };
   },
 
   /**
@@ -1000,14 +1031,15 @@ export const supabaseRepository = {
    * free-form roster entries are ignored. Used to include household-verified
    * residents in the verified directory without a second verification system.
    */
-  async verifiedHouseholdResidentIds({ barangay = null, municipalityId = null } = {}) {
+  async verifiedHouseholdResidentIds({ barangay = null, barangayId = null, municipalityId = null } = {}) {
     const supabase = getServiceClient();
     let query = supabase
       .from('household_members')
-      .select('resident_id, households!inner(verification_status, barangay, municipality_id)')
+      .select('resident_id, households!inner(verification_status, barangay, barangay_id, municipality_id)')
       .not('resident_id', 'is', null)
       .eq('households.verification_status', 'Verified');
     if (barangay) query = query.eq('households.barangay', barangay);
+    if (barangayId) query = query.eq('households.barangay_id', barangayId);
     if (municipalityId) query = query.eq('households.municipality_id', municipalityId);
     const { data, error } = await query;
     throwOnError(error, 'Could not load verified household members');
@@ -1015,7 +1047,7 @@ export const supabaseRepository = {
   },
 
   /** Fetch residents by id, scope- and search-filtered. Returns mapped rows. */
-  async listResidentsByIds({ ids = [], q = '', barangay = null, municipalityId = null } = {}) {
+  async listResidentsByIds({ ids = [], q = '', barangay = null, barangayId = null, zone = null, municipalityId = null } = {}) {
     if (!ids.length) return [];
     const supabase = getServiceClient();
     let query = supabase
@@ -1024,11 +1056,32 @@ export const supabaseRepository = {
       .in('id', ids)
       .order('created_at', { ascending: false });
     if (barangay) query = query.eq('barangay', barangay);
+    if (barangayId) query = query.eq('barangay_id', barangayId);
+    if (zone === 'unassigned') {
+      query = query.is('zone', null);
+      const assignedIds = [...new Set((await this.listDerivedZoneAssignments({ barangayId, municipalityId })).map((row) => row.residentId))];
+      if (assignedIds.length) {
+        query = query.not('id', 'in', `(${assignedIds.map((id) => `\"${String(id).replaceAll('"', '\\"')}\"`).join(',')})`);
+      }
+    } else if (zone !== null && zone !== undefined && zone !== '') {
+      const householdIds = (await this.listDerivedZoneAssignments({ barangayId, municipalityId }))
+        .filter((row) => row.zone === Number(zone))
+        .map((row) => row.residentId);
+      query = householdIds.length
+        ? query.or(`zone.eq.${Number(zone)},id.in.(${[...new Set(householdIds)].join(',')})`)
+        : query.eq('zone', Number(zone));
+    }
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
     if (q) query = query.or(residentSearchFilter(q));
     const { data, error } = await query;
     throwOnError(error, 'Could not list residents');
-    return (data || []).map(residentFromRow);
+    return (data || []).map((row) => {
+      const resident = residentFromRow(row);
+      if (zone !== null && zone !== undefined && zone !== '' && zone !== 'unassigned' && resident.zone == null) {
+        resident.zone = Number(zone);
+      }
+      return resident;
+    });
   },
 
   /** Barangay reference lookup (name, optionally restricted to a municipality). */
@@ -1064,6 +1117,98 @@ export const supabaseRepository = {
     const { data, error } = await query;
     throwOnError(error, 'Could not list barangays');
     return data || [];
+  },
+
+  /** Numeric Zone assignments derived from linked household Purok values. */
+  async listHouseholdZoneAssignments({ barangayId, municipalityId } = {}) {
+    if (!barangayId || !municipalityId) return [];
+    const supabase = getServiceClient();
+    const pageSize = 1000;
+    const ids = new Set();
+    for (let offset = 0; ; offset += pageSize) {
+      const query = supabase
+        .from('household_members')
+        .select('resident_id, households!inner(purok, barangay_id, municipality_id)')
+        .not('resident_id', 'is', null)
+        .eq('households.barangay_id', barangayId)
+        .eq('households.municipality_id', municipalityId)
+        .not('households.purok', 'is', null)
+        .range(offset, offset + pageSize - 1);
+      const { data, error } = await query;
+      throwOnError(error, 'Could not load household Purok assignments');
+      for (const row of data || []) {
+        const zone = zoneNumberFromPurok(row.households?.purok);
+        if (zone && row.resident_id) ids.add(`${row.resident_id}\u0000${zone}`);
+      }
+      if (!data || data.length < pageSize) break;
+    }
+    return [...ids].map((entry) => {
+      const [residentId, zone] = entry.split('\u0000');
+      return { residentId, zone: Number(zone) };
+    });
+  },
+
+  /** Zone assignments read from a resident's registered address. */
+  async listResidentAddressZoneAssignments({ barangayId, municipalityId } = {}) {
+    if (!barangayId || !municipalityId) return [];
+    const supabase = getServiceClient();
+    const pageSize = 1000;
+    const assignments = new Map();
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabase
+        .from(TABLES.residents)
+        .select('id, current_address, permanent_address')
+        .eq('barangay_id', barangayId)
+        .eq('municipality_id', municipalityId)
+        .order('id', { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      throwOnError(error, 'Could not load resident address zones');
+      for (const row of data || []) {
+        const zone = zoneNumberFromAddress(row.current_address) || zoneNumberFromAddress(row.permanent_address);
+        if (zone && row.id) assignments.set(`${row.id}\u0000${zone}`, { residentId: row.id, zone });
+      }
+      if (!data || data.length < pageSize) break;
+    }
+    return [...assignments.values()];
+  },
+
+  async listDerivedZoneAssignments({ barangayId, municipalityId } = {}) {
+    const [householdAssignments, addressAssignments] = await Promise.all([
+      this.listHouseholdZoneAssignments({ barangayId, municipalityId }),
+      this.listResidentAddressZoneAssignments({ barangayId, municipalityId }),
+    ]);
+    return [...new Map([...householdAssignments, ...addressAssignments]
+      .map((assignment) => [`${assignment.residentId}\u0000${assignment.zone}`, assignment])).values()];
+  },
+
+  /** Distinct recorded resident zones and linked household Puroks for a barangay. */
+  async listResidentZoneOptions({ barangayId, municipalityId } = {}) {
+    if (!barangayId || !municipalityId) return { zones: [], hasUnassigned: false };
+    const supabase = getServiceClient();
+    const pageSize = 1000;
+    const zones = new Set();
+    let hasUnassigned = false;
+    const unassignedResidentIds = new Set();
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabase
+        .from(TABLES.residents)
+        .select('id, zone')
+        .eq('barangay_id', barangayId)
+        .eq('municipality_id', municipalityId)
+        .order('id', { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      throwOnError(error, 'Could not load resident zone options');
+      for (const row of data || []) {
+        if (row.zone === null || row.zone === undefined) unassignedResidentIds.add(row.id);
+        else zones.add(Number(row.zone));
+      }
+      if (!data || data.length < pageSize) break;
+    }
+    const derivedAssignments = await this.listDerivedZoneAssignments({ barangayId, municipalityId });
+    for (const assignment of derivedAssignments) zones.add(assignment.zone);
+    const assignedIds = new Set(derivedAssignments.map((row) => row.residentId));
+    hasUnassigned = [...unassignedResidentIds].some((id) => !assignedIds.has(id));
+    return { zones: [...zones].sort((a, b) => a - b), hasUnassigned };
   },
 
   /** One municipality (with its centre coordinates) by id, or null. */

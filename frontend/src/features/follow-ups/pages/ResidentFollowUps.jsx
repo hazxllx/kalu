@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import { residentFollowUpsApi } from "@/services/api";
 import { ScheduleDetailModal } from "../components/ScheduleCalendarViews";
 import ScheduleStatusBadge, { ConfirmationBadge } from "../components/ScheduleStatusBadge";
@@ -67,6 +68,8 @@ export default function ResidentFollowUps() {
   const [rejectTarget, setRejectTarget] = useState(null); // follow-up id
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
+  const [followUpPage, setFollowUpPage] = useState(1);
+  const [followUpPageSize, setFollowUpPageSize] = useState(8);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
 
@@ -100,6 +103,10 @@ export default function ResidentFollowUps() {
     }),
     [rows]
   );
+  const pageRows = sorted.slice((followUpPage - 1) * followUpPageSize, followUpPage * followUpPageSize);
+  useEffect(() => {
+    setFollowUpPage((page) => Math.min(page, Math.max(1, Math.ceil(sorted.length / followUpPageSize))));
+  }, [sorted.length, followUpPageSize]);
 
   const selectedSchedule = selected ? schedules.find((s) => s.id === selected) : null;
 
@@ -178,8 +185,10 @@ export default function ResidentFollowUps() {
             <p className="mt-1 text-xs text-brand-gray">When your health team schedules a follow-up, it will appear here.</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {sorted.map((f, i) => {
+          <>
+          <TablePagination total={sorted.length} page={followUpPage} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="mb-3" />
+          <div className="space-y-3">
+            {pageRows.map((f, i) => {
               const actionable = isActionable(f);
               return (
                 <motion.div
@@ -253,6 +262,7 @@ export default function ResidentFollowUps() {
               );
             })}
           </div>
+          </>
         )}
       </Card>
 

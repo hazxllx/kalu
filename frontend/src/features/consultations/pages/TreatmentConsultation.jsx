@@ -4,6 +4,7 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
 import DataTable from "@/components/tables/DataTable";
+import TablePagination from "@/components/tables/TablePagination";
 import ErrorState from "@/components/common/ErrorState";
 import StatusBadge from "@/components/common/StatusBadge";
 import RiskBadge from "@/components/common/RiskBadge";
@@ -319,6 +320,8 @@ export default function TreatmentConsultation() {
   const [recordRisk, setRecordRisk] = useState("All");
   const [recordFollowUp, setRecordFollowUp] = useState("All");
   const [recordSort, setRecordSort] = useState("newest");
+  const [recordPage, setRecordPage] = useState(1);
+  const [recordPageSize, setRecordPageSize] = useState(8);
   const [formData, setFormData] = useState(emptyForm());
   const [errors, setErrors] = useState(/** @type {FormErrors} */ ({}));
   const [toast, setToast] = useState(null);
@@ -757,7 +760,13 @@ export default function TreatmentConsultation() {
     setRecordFollowUp("All");
     setRecordSort("newest");
   };
-  const displayedRecords = focusedId ? focusedRecord.data ? [focusedRecord.data] : [] : filteredRecordRows;
+  const displayedRecords = focusedId
+    ? focusedRecord.data ? [focusedRecord.data] : []
+    : filteredRecordRows.slice((recordPage - 1) * recordPageSize, recordPage * recordPageSize);
+  useEffect(() => { setRecordPage(1); }, [recordSearch, recordDateFrom, recordDateTo, recordRisk, recordFollowUp, recordSort]);
+  useEffect(() => {
+    setRecordPage((page) => Math.min(page, Math.max(1, Math.ceil(filteredRecordRows.length / recordPageSize))));
+  }, [filteredRecordRows.length, recordPageSize]);
 
   const columns = [
     { key: "resident", label: "Resident" },
@@ -1375,6 +1384,7 @@ export default function TreatmentConsultation() {
           </div>
         ) : (
           <>
+            {!focusedId && filteredRecordRows.length > 0 && <TablePagination total={filteredRecordRows.length} page={recordPage} pageSize={recordPageSize} onPageChange={setRecordPage} onPageSizeChange={(size) => { setRecordPageSize(size); setRecordPage(1); }} className="mb-3" />}
             <DataTable
               className="consultation-records-table"
               tableClassName="consultation-records-grid"

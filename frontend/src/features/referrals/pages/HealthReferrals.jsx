@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
+import TablePagination from "@/components/tables/TablePagination";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -483,6 +484,8 @@ export default function HealthReferrals() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [referralPage, setReferralPage] = useState(1);
+  const [referralPageSize, setReferralPageSize] = useState(8);
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [box, setBox] = useState("all");
   const [toast, setToast] = useState(null);
@@ -677,6 +680,11 @@ export default function HealthReferrals() {
       return true;
     });
   }, [records, search, statusFilter, priorityFilter]);
+  const pageRecords = filtered.slice((referralPage - 1) * referralPageSize, referralPage * referralPageSize);
+  useEffect(() => { setReferralPage(1); }, [search, statusFilter, priorityFilter]);
+  useEffect(() => {
+    setReferralPage((page) => Math.min(page, Math.max(1, Math.ceil(filtered.length / referralPageSize))));
+  }, [filtered.length, referralPageSize]);
 
   const openCreate = () => {
     if (!canCreate) return;
@@ -995,6 +1003,7 @@ export default function HealthReferrals() {
       </Card>
 
       <Card className="overflow-hidden">
+        <TablePagination total={filtered.length} page={referralPage} pageSize={referralPageSize} onPageChange={setReferralPage} onPageSizeChange={(size) => { setReferralPageSize(size); setReferralPage(1); }} className="m-3" />
         <div>
           <table className={`ui-table w-full referral-monitoring-grid ${isResident ? "referral-monitoring-grid-resident" : "referral-monitoring-grid-supervisor"}`}>
             <thead className="bg-brand-bg border-b border-brand-border">
@@ -1005,7 +1014,7 @@ export default function HealthReferrals() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
+              {pageRecords.map((r) => (
                 <tr key={r.id} className="border-b border-brand-border hover:bg-brand-bg/50">
                   {!isResident && (
                     <td className="px-4 py-3">

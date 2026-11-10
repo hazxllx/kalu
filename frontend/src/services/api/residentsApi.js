@@ -12,6 +12,7 @@ import { api } from './apiClient.js';
  */
 export const residentsApi = {
   list: (params, options = {}) => api.get('/residents', { ...options, params }),
+  directoryFilters: (options = {}) => api.get('/residents/directory-filters', options),
   get: (id, options = {}) => api.get(`/residents/${id}`, options),
   create: (payload, options) => api.post('/residents', payload, options),
   update: (id, payload, options) => api.put(`/residents/${id}`, payload, options),

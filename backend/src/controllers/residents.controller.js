@@ -17,12 +17,19 @@ export const listResidents = async (req, res) => {
     user: req.user,
     q: req.query.q,
     barangay: req.query.barangay,
+    barangayId: req.query.barangayId ?? req.query.barangay_id,
+    zone: req.query.zone,
     limit: req.query.limit,
     offset: req.query.offset,
     verifiedOnly,
     riskLevel: req.query.riskLevel,
   });
   sendData(res, result);
+};
+
+export const getDirectoryFilters = async (req, res) => {
+  const filters = await residentsService.getResidentDirectoryFilters({ user: req.user });
+  sendData(res, filters);
 };
 
 export const createResident = async (req, res) => {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import { X, Search, Activity, User, MapPin, Stethoscope, Plus, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
@@ -116,6 +117,8 @@ export default function TBRecords() {
   const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(8);
   const [detail, setDetail] = useState(null);
 
   // Add TB Record modal state. Creating a TB record enrolls an existing resident
@@ -224,6 +227,11 @@ export default function TBRecords() {
       return true;
     });
   }, [scopedRecords, search, statusFilter]);
+  const pageRecords = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => {
+    setPage((current) => Math.min(current, Math.max(1, Math.ceil(filtered.length / pageSize))));
+  }, [filtered.length, pageSize]);
 
   // Residents selectable in the Add form — restricted to the supervisor's
   // assigned barangay when barangay-scoped, matching the record scope above.
@@ -364,6 +372,7 @@ export default function TBRecords() {
       </Card>
 
       <Card className="overflow-hidden">
+        <TablePagination total={filtered.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} className="m-3" />
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-brand-bg border-b border-brand-border">
@@ -374,7 +383,7 @@ export default function TBRecords() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
+              {pageRecords.map((r) => (
                 <tr key={r.id} className="border-b border-brand-border hover:bg-brand-bg/50">
                   <td className="px-4 py-3">
                     <p className="text-sm font-medium text-brand-ink">{r.resident?.name || "—"}</p>

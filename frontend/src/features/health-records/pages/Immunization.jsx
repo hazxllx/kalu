@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
@@ -250,6 +251,8 @@ export default function Immunization() {
   const [detail, setDetail] = useState(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(8);
   const [toast, setToast] = useState(null);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
@@ -289,6 +292,11 @@ export default function Immunization() {
       return true;
     });
   }, [records, search, statusFilter]);
+  const pageRecords = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => {
+    setPage((current) => Math.min(current, Math.max(1, Math.ceil(filtered.length / pageSize))));
+  }, [filtered.length, pageSize]);
 
   const openCreate = () => { setEditing(null); setSelectedResident(null); setFormOpen(true); };
   const openEdit = (record) => { setEditing(record); setSelectedResident(null); setDetail(null); setFormOpen(true); };
@@ -371,6 +379,7 @@ export default function Immunization() {
       </Card>
 
       <Card className="overflow-hidden">
+        <TablePagination total={filtered.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} className="m-3" />
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-brand-bg border-b border-brand-border">
@@ -381,7 +390,7 @@ export default function Immunization() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
+              {pageRecords.map((r) => (
                 <tr key={r.id} className="border-b border-brand-border hover:bg-brand-bg/50">
                   <td className="px-4 py-3">
                     <p className="text-sm font-medium text-brand-ink">{r.residentName}</p>

@@ -26,6 +26,12 @@ const router = Router();
 
 router.use(authenticate, resolveBarangayScope);
 
+router.get(
+  '/directory-filters',
+  authorize(FEATURE_ROLES.residents, { permission: 'residents.directory.view' }),
+  asyncHandler(residentsController.getDirectoryFilters),
+);
+
 const requireAccountCreationPermission = (req, res, next) => {
   const resident = req.body?.resident || req.body || {};
   if (!resident.createLoginAccount) return next();

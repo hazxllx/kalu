@@ -690,13 +690,67 @@ export const listResidents = async ({
   user,
   q = '',
   barangay = '',
+  barangayId = '',
+  zone = '',
   limit = 50,
   offset = 0,
   verifiedOnly = false,
   riskLevel = '',
 } = {}) => {
+  const role = String(user?.role || '').toLowerCase();
+  if (!['health_supervisor', 'phn', 'mho'].includes(role)) {
+    throw ApiError.forbidden('You are not permitted to view the resident directory.');
+  }
   const scope = assignedBarangay(user);
   const requested = String(barangay || '').trim();
+  const requestedBarangayId = String(barangayId || '').trim();
+  const municipalityId = user?.municipalityId || null;
+
+  if (!municipalityId && repository.driver === 'supabase') {
+    throw ApiError.forbidden('A valid municipality assignment is required to access the resident directory.');
+  }
+  if (role === 'health_supervisor' && !scope) {
+    throw ApiError.forbidden('A valid barangay assignment is required to access the resident directory.');
+  }
+
+  let effectiveBarangayId = null;
+  if (scope) {
+    const barangayRows = await repository.listBarangays({ municipalityId });
+    const assignedRow = barangayRows.find((row) =>
+      String(row.id) === String(user?.barangayId || '')
+      || String(row.name || '').trim().toLowerCase() === scope.toLowerCase(),
+    );
+    if (!assignedRow || String(assignedRow.status).toLowerCase() !== 'active' || !isApprovedBarangayName(assignedRow.name)) {
+      throw ApiError.forbidden('A valid active barangay assignment is required to access residents.');
+    }
+    effectiveBarangayId = assignedRow.id;
+    if (requestedBarangayId && requestedBarangayId !== String(effectiveBarangayId)) {
+      throw ApiError.forbidden('Your account is assigned to Barangay ' + scope + ' only');
+    }
+  } else if (requestedBarangayId) {
+    const barangayRows = await repository.listBarangays({ municipalityId });
+    const selected = barangayRows.find((row) => String(row.id) === requestedBarangayId);
+    if (!selected || String(selected.status).toLowerCase() !== 'active' || !isApprovedBarangayName(selected.name)) {
+      throw ApiError.forbidden('Select an active barangay within your authorized municipality.');
+    }
+    effectiveBarangayId = selected.id;
+  }
+
+  let zoneFilter = null;
+  const requestedZone = String(zone ?? '').trim();
+  if (requestedZone) {
+    if (role !== 'health_supervisor') {
+      throw ApiError.badRequest('Zone filtering is available only to Health Supervisors.');
+    }
+    if (requestedZone === 'unassigned') zoneFilter = 'unassigned';
+    else {
+      const parsedZone = Number(requestedZone);
+      if (!Number.isInteger(parsedZone) || parsedZone < 1 || parsedZone > 8) {
+        throw ApiError.badRequest('Zone must be a recorded zone from 1 to 8.');
+      }
+      zoneFilter = parsedZone;
+    }
+  }
 
   if (
     scope &&
@@ -724,9 +778,6 @@ export const listResidents = async ({
   );
 
   const search = String(q || '').trim();
-  const municipalityId =
-    user?.municipalityId || null;
-
   if (riskLevel) {
     if (riskLevel !== 'High' || verifiedOnly || search) throw ApiError.badRequest('The high-risk list supports riskLevel=High without an additional verification/search filter.');
     const { getHighRiskResidents } = await import('./residentRisk.service.js');
@@ -744,6 +795,8 @@ export const listResidents = async ({
         limit: parsedLimit,
         offset: parsedOffset,
         barangay: effectiveBarangay,
+        barangayId: effectiveBarangayId,
+        zone: zoneFilter,
         municipalityId,
       });
 
@@ -769,6 +822,8 @@ export const listResidents = async ({
       limit: parsedLimit,
       offset: 0,
       barangay: effectiveBarangay,
+      barangayId: effectiveBarangayId,
+      zone: zoneFilter,
       municipalityId,
       verificationStatuses: ['approved'],
     });
@@ -780,6 +835,7 @@ export const listResidents = async ({
   const householdVerifiedIds =
     await repository.verifiedHouseholdResidentIds({
       barangay: effectiveBarangay,
+      barangayId: effectiveBarangayId,
       municipalityId,
     });
 
@@ -794,6 +850,8 @@ export const listResidents = async ({
         ids: missingIds,
         q: search,
         barangay: effectiveBarangay,
+        barangayId: effectiveBarangayId,
+        zone: zoneFilter,
         municipalityId,
       });
 
@@ -818,6 +876,42 @@ export const listResidents = async ({
     rows: await attachRiskToResidents(rows, { user }),
     total: byId.size,
   };
+};
+
+/** Role-specific directory filter values, sourced from actual assignments. */
+export const getResidentDirectoryFilters = async ({ user } = {}) => {
+  const role = String(user?.role || '').toLowerCase();
+  const municipalityId = user?.municipalityId || null;
+  if (!municipalityId && repository.driver === 'supabase') {
+    throw ApiError.forbidden('A valid municipality assignment is required to access directory filters.');
+  }
+
+  if (role === 'health_supervisor') {
+    const scope = assignedBarangay(user);
+    if (!scope) throw ApiError.forbidden('A valid barangay assignment is required to access directory filters.');
+    const barangayRows = await repository.listBarangays({ municipalityId });
+    const assignedRow = barangayRows.find((row) =>
+      String(row.id) === String(user?.barangayId || '')
+      || String(row.name || '').trim().toLowerCase() === scope.toLowerCase(),
+    );
+    if (!assignedRow || String(assignedRow.status).toLowerCase() !== 'active' || !isApprovedBarangayName(assignedRow.name)) {
+      throw ApiError.forbidden('A valid active barangay assignment is required to access directory filters.');
+    }
+    const { zones, hasUnassigned } = await repository.listResidentZoneOptions({
+      barangayId: assignedRow.id,
+      municipalityId,
+    });
+    return { geography: 'zone', barangay: { id: assignedRow.id, name: assignedRow.name }, zones, hasUnassigned };
+  }
+
+  if (role === 'phn' || role === 'mho') {
+    const barangays = (await repository.listBarangays({ municipalityId }))
+      .filter((row) => String(row.status).toLowerCase() === 'active' && isApprovedBarangayName(row.name))
+      .map((row) => ({ id: row.id, name: row.name }));
+    return { geography: 'barangay', barangays };
+  }
+
+  throw ApiError.forbidden('You are not permitted to view resident directory filters.');
 };
 
 /**

@@ -369,6 +369,16 @@ export default function PhnCheckups() {
 
         {/* Check-ups table */}
         <Card className="overflow-hidden">
+          {filtered.length > PAGE_SIZE && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-border px-4 py-2.5 text-xs text-brand-gray">
+              <span>Showing {rangeStart}–{rangeEnd} of {filtered.length} check-ups</span>
+              <div className="flex items-center gap-2">
+                <button type="button" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-btn border border-brand-border px-3 py-1.5 text-brand-ink disabled:opacity-40">Previous</button>
+                <span>Page {page} of {pageCount}</span>
+                <button type="button" disabled={page >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} className="rounded-btn border border-brand-border px-3 py-1.5 text-brand-ink disabled:opacity-40">Next</button>
+              </div>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-brand-bg border-b border-brand-border">

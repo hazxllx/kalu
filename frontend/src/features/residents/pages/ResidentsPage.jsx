@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, MoreVertical, Users } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import DataTable from "@/components/tables/DataTable";
+import TablePagination from "@/components/tables/TablePagination";
 import StatusBadge from "@/components/common/StatusBadge";
 import RiskBadge from "@/components/common/RiskBadge";
 import SearchableSelect from "@/components/common/SearchableSelect";
@@ -20,7 +21,6 @@ import {
   listResidentsOffline,
   updateResidentOffline,
 } from "@/services/offline/residentOfflineService";
-import { useBarangays } from "@/context/BarangaysContext";
 import { dateOfBirth, isStrictMobile } from "@/utils/validation";
 import ResidentConflictReview from "../components/ResidentConflictReview";
 
@@ -356,6 +356,13 @@ export default function ResidentsPage() {
 
   const [q, setQ] = useState(queryParam);
   const [riskFilter, setRiskFilter] = useState(riskParam);
+  const [directoryPage, setDirectoryPage] = useState(1);
+  const [directoryPageSize, setDirectoryPageSize] = useState(8);
+  const [barangayFilter, setBarangayFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [geographicOptions, setGeographicOptions] = useState(null);
+  const [geographicOptionsLoading, setGeographicOptionsLoading] = useState(false);
+  const [geographicOptionsError, setGeographicOptionsError] = useState("");
   const [linkedLoading, setLinkedLoading] = useState(false);
   const [linkedError, setLinkedError] = useState("");
   const [linkedRetry, setLinkedRetry] = useState(0);
@@ -401,11 +408,36 @@ export default function ResidentsPage() {
     return () => document.removeEventListener("pointerdown", close);
   }, [openActionMenu]);
 
-  // The Resident Directory is owned by the Health Supervisor. Rows are scoped
-  // to the supervisor's assigned barangay by the BACKEND (403 on any other
-  // barangay); the scope here only drives the subtitle and the barangay picker.
-  const { barangays: liveBarangays } = useBarangays();
-  const allowedBarangays = assignedBarangay ? [assignedBarangay] : supervisor ? [] : [...liveBarangays];
+  const role = String(user?.role || "").toLowerCase();
+  const showBarangayFilter = role === "phn" || role === "mho";
+  const showZoneFilter = supervisor && Boolean(assignedBarangay);
+  // Reuse the municipality-scoped directory options for resident registration.
+  // A Health Supervisor can register only in their assigned barangay; PHN/MHO
+  // can choose from the same authorized barangays shown by the directory filter.
+  const allowedBarangays = assignedBarangay
+    ? [assignedBarangay]
+    : (geographicOptions?.barangays || []).map((barangay) => barangay.name).filter(Boolean);
+
+  useEffect(() => {
+    if (!user?.id || (!showBarangayFilter && !showZoneFilter)) {
+      setGeographicOptions(null);
+      return undefined;
+    }
+    let current = true;
+    setGeographicOptionsLoading(true);
+    setGeographicOptionsError("");
+    residentsApi.directoryFilters({ ownerId: user.id })
+      .then((result) => {
+        if (current) setGeographicOptions(result || null);
+      })
+      .catch((error) => {
+        if (current) setGeographicOptionsError(error?.message || "Unable to load geographic filters.");
+      })
+      .finally(() => {
+        if (current) setGeographicOptionsLoading(false);
+      });
+    return () => { current = false; };
+  }, [user?.id, showBarangayFilter, showZoneFilter]);
 
   /**
    * The MHO browses the same directory municipally but may not correct
@@ -439,9 +471,16 @@ export default function ResidentsPage() {
         // individually approved OR belong to a Verified household, scoped to
         // this supervisor's barangay. Pending/unverified residents live in the
         // Resident Verification queue, not here.
+        const directoryParams = {
+          q: searchTerm,
+          limit: 100,
+          verified: true,
+          ...(showBarangayFilter && barangayFilter ? { barangayId: barangayFilter } : {}),
+          ...(showZoneFilter && zoneFilter ? { zone: zoneFilter } : {}),
+        };
         const result = await listResidentsOffline({
           ownerId: user?.id,
-          params: { q: searchTerm, limit: 100, verified: true },
+          params: directoryParams,
         });
         if (requestId !== loadRequest.current) return;
         if (!Array.isArray(result?.rows)) throw new Error("The resident directory response was incomplete.");
@@ -459,7 +498,8 @@ export default function ResidentsPage() {
         if (requestId === loadRequest.current) setLoading(false);
       }
     },
-    [user?.id, supervisor, assignedBarangay, canViewDirectory, matrixLoadState.status],
+    [user?.id, supervisor, assignedBarangay, canViewDirectory, matrixLoadState.status,
+      showBarangayFilter, barangayFilter, showZoneFilter, zoneFilter],
   );
 
   // Debounced server-side search.
@@ -484,6 +524,12 @@ export default function ResidentsPage() {
   const visibleRows = supervisor && riskFilter !== "All"
     ? rows.filter((row) => riskFilter === "Unassessed" ? !row.riskLevel : row.riskLevel === riskFilter)
     : rows;
+  const pageRows = visibleRows.slice((directoryPage - 1) * directoryPageSize, directoryPage * directoryPageSize);
+
+  useEffect(() => { setDirectoryPage(1); }, [q, riskFilter, barangayFilter, zoneFilter]);
+  useEffect(() => {
+    setDirectoryPage((page) => Math.min(page, Math.max(1, Math.ceil(visibleRows.length / directoryPageSize))));
+  }, [visibleRows.length, directoryPageSize]);
 
   useEffect(() => {
     if (!supervisor || !residentParam) {
@@ -912,13 +958,22 @@ export default function ResidentsPage() {
               <input id="resident-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, health record no. or contact" className="min-w-0 w-full bg-transparent outline-none" />
             </div>
           </label>
+          {showZoneFilter && <label htmlFor="resident-zone-filter" className="text-caption font-medium text-brand-gray">
+            Zone
+            <select id="resident-zone-filter" value={zoneFilter} onChange={(e) => setZoneFilter(e.target.value)} disabled={geographicOptionsLoading} className="supervisor-input mt-1 block w-full sm:w-48">
+              <option value="">All Zones</option>
+              {(geographicOptions?.zones || []).map((zone) => <option key={zone} value={String(zone)}>Zone {zone}</option>)}
+              {geographicOptions?.hasUnassigned && <option value="unassigned">Unassigned</option>}
+              {!geographicOptionsLoading && geographicOptions && !geographicOptions.zones?.length && !geographicOptions.hasUnassigned && <option value="" disabled>No recorded zones</option>}
+            </select>
+          </label>}
           <label htmlFor="resident-risk" className="text-caption font-medium text-brand-gray">
             Recorded Risk
             <select id="resident-risk" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} className="supervisor-input mt-1 block w-full sm:w-40">
               {RISK_FILTERS.map((risk) => <option key={risk} value={risk}>{risk === "All" ? "All risk levels" : risk === "Unassessed" ? "Not assessed" : risk}</option>)}
             </select>
           </label>
-          {(q || riskFilter !== "All") && <button type="button" className="supervisor-button is-quiet" onClick={() => { setQ(""); setRiskFilter("All"); }}>Clear filters</button>}
+          {(q || riskFilter !== "All" || zoneFilter) && <button type="button" className="supervisor-button is-quiet" onClick={() => { setQ(""); setRiskFilter("All"); setZoneFilter(""); }}>Clear filters</button>}
         </Card>
       ) : <Card className="p-4 mb-5 flex flex-col lg:flex-row gap-3">
         <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 flex-1">
@@ -930,7 +985,16 @@ export default function ResidentsPage() {
             className="bg-transparent text-sm outline-none w-full"
           />
         </div>
+        {showBarangayFilter && <label htmlFor="resident-barangay-filter" className="text-sm font-medium text-brand-ink lg:w-60">
+          Barangay
+          <select id="resident-barangay-filter" value={barangayFilter} onChange={(e) => setBarangayFilter(e.target.value)} disabled={geographicOptionsLoading} className={inputClass(false)}>
+            <option value="">All Barangays</option>
+            {(geographicOptions?.barangays || []).map((barangay) => <option key={barangay.id} value={barangay.id}>{barangay.name}</option>)}
+          </select>
+        </label>}
+        {(q || barangayFilter) && <button type="button" className="px-3 py-2 text-sm font-medium text-brand-blue hover:underline self-end" onClick={() => { setQ(""); setBarangayFilter(""); }}>Clear filters</button>}
       </Card>}
+      {geographicOptionsError && (showBarangayFilter || showZoneFilter) && <p className="-mt-3 mb-4 text-sm text-brand-danger" role="status">{geographicOptionsError}</p>}
 
       {residentParam && (linkedLoading || linkedError) && (
         <Card className="mb-4" aria-busy={linkedLoading}>
@@ -985,13 +1049,14 @@ export default function ResidentsPage() {
 
       {!loadError && !loading && visibleRows.length > 0 && (
         <>
+          <TablePagination total={visibleRows.length} page={directoryPage} pageSize={directoryPageSize} onPageChange={setDirectoryPage} onPageSizeChange={(size) => { setDirectoryPageSize(size); setDirectoryPage(1); }} className="mb-2" />
           <DataTable
             className="resident-directory-table"
             tableClassName="resident-directory-grid"
             fitContainer
             dense={supervisor}
             columns={columns}
-            rows={visibleRows}
+            rows={pageRows}
             renderCell={(/** @type {string} */ key, /** @type {ResidentRow} */ row) => {
               if (key === "name")
                 return (
@@ -1033,7 +1098,7 @@ export default function ResidentsPage() {
             }}
           />
           <div className="resident-directory-mobile">
-            {visibleRows.map((row) => (
+            {pageRows.map((row) => (
               <article key={row.id} className="border-b border-brand-border p-3 last:border-b-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2.5">

@@ -259,12 +259,25 @@ export const listResidentsOffline = async ({ ownerId, params = {} }) => {
     })),
   ];
   const query = String(params.q || '').trim().toLowerCase();
-  const filtered = query
+  const searchFiltered = query
     ? rows.filter((row) =>
         [row.firstName, row.middleName, row.lastName, row.name, row.healthRecordNo, row.cellphoneNo]
           .some((value) => String(value || '').toLowerCase().includes(query)),
       )
     : rows;
+  const barangayId = String(params.barangayId || params.barangay_id || '').trim();
+  const requestedZone = String(params.zone ?? '').trim();
+  const addressZone = (row) => {
+    const address = `${row.currentAddress || ''} ${row.permanentAddress || ''}`;
+    const match = address.match(/\b(?:purok|zone)\s+(?:(?:purok|zone)\s+)*([1-8])\b/i);
+    return match ? Number(match[1]) : null;
+  };
+  const filtered = searchFiltered.filter((row) => {
+    if (barangayId && String(row.barangayId || '') !== barangayId) return false;
+    if (!requestedZone) return true;
+    if (requestedZone === 'unassigned') return (row.zone === null || row.zone === undefined || row.zone === '') && !addressZone(row);
+    return Number(row.zone) === Number(requestedZone) || addressZone(row) === Number(requestedZone);
+  });
   return {
     rows: filtered,
     total: serverRows ? serverTotal + localCreates.length : filtered.length,

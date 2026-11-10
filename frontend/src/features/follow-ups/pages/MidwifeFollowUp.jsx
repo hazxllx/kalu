@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
+import TablePagination from "@/components/tables/TablePagination";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
@@ -256,6 +257,8 @@ export default function MidwifeFollowUp() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState(statusParam);
   const [priorityFilter, setPriorityFilter] = useState("All");
+  const [followUpPage, setFollowUpPage] = useState(1);
+  const [followUpPageSize, setFollowUpPageSize] = useState(8);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showDetailPanel, setShowDetailPanel] = useState(false);
   const [showRecordVisitModal, setShowRecordVisitModal] = useState(false);
@@ -476,6 +479,11 @@ export default function MidwifeFollowUp() {
     status: supervisor && statusFilter === "Overdue" ? "All" : statusFilter,
     priority: priorityFilter,
   }).filter((row) => !supervisor || statusFilter !== "Overdue" || isOverdue(row));
+  const pageFollowUps = filteredFollowUps.slice((followUpPage - 1) * followUpPageSize, followUpPage * followUpPageSize);
+  useEffect(() => { setFollowUpPage(1); }, [searchQuery, statusFilter, priorityFilter]);
+  useEffect(() => {
+    setFollowUpPage((page) => Math.min(page, Math.max(1, Math.ceil(filteredFollowUps.length / followUpPageSize))));
+  }, [filteredFollowUps.length, followUpPageSize]);
   const filtersActive = Boolean(
     searchQuery || statusFilter !== "All" || priorityFilter !== "All",
   );
@@ -1192,6 +1200,7 @@ export default function MidwifeFollowUp() {
       {/* Follow-up Table */}
       <Card className="overflow-hidden" aria-busy={loading}>
         {supervisor && <div className="supervisor-section-heading border-b border-brand-border px-3 py-2"><h2 className="text-section font-semibold text-brand-ink">Follow-up Register</h2></div>}
+        <TablePagination total={filteredFollowUps.length} page={followUpPage} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="m-3" />
         <div className="overflow-x-auto">
           <table className={`w-full follow-up-monitoring-grid ${supervisor ? "ui-table" : ""}`}>
             <thead className="bg-brand-bg border-b border-brand-border">
@@ -1207,7 +1216,7 @@ export default function MidwifeFollowUp() {
               </tr>
             </thead>
             <tbody>
-              {filteredFollowUps.map((f) => (
+              {pageFollowUps.map((f) => (
                 <tr key={f.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
                   <td data-label="Resident" className="px-3 py-2.5">
                     <div className="min-w-0">

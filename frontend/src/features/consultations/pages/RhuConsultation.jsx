@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
+import TablePagination from "@/components/tables/TablePagination";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
@@ -64,6 +65,9 @@ export default function RhuConsultation() {
   const [activePatientId, setActivePatientId] = useState(null);
   const [toast, setToast] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [activePage, setActivePage] = useState(1);
+  const [completedPage, setCompletedPage] = useState(1);
+  const [queuePageSize, setQueuePageSize] = useState(8);
 
   const showToast = (message) => {
     setToast(message);
@@ -102,6 +106,16 @@ export default function RhuConsultation() {
     () => partitionConsultationQueue(filtered, ACTIVE_STATUSES),
     [filtered],
   );
+  const activePageRows = active.slice((activePage - 1) * queuePageSize, activePage * queuePageSize);
+  const completedPageRows = handled.slice((completedPage - 1) * queuePageSize, completedPage * queuePageSize);
+  useEffect(() => {
+    setActivePage(1);
+    setCompletedPage(1);
+  }, [searchQuery, statusFilter]);
+  useEffect(() => {
+    setActivePage((page) => Math.min(page, Math.max(1, Math.ceil(active.length / queuePageSize))));
+    setCompletedPage((page) => Math.min(page, Math.max(1, Math.ceil(handled.length / queuePageSize))));
+  }, [active.length, handled.length, queuePageSize]);
 
   const activePatient = activePatientId ? patients.find((p) => p.id === activePatientId) || null : null;
 
@@ -304,7 +318,8 @@ export default function RhuConsultation() {
                 {active.length} active
               </span>
             </div>
-            {queueTable(active, {
+            <TablePagination total={active.length} page={activePage} pageSize={queuePageSize} onPageChange={setActivePage} onPageSizeChange={(size) => { setQueuePageSize(size); setActivePage(1); setCompletedPage(1); }} className="mx-3 mt-3" />
+            {queueTable(activePageRows, {
               emptyIcon: <Stethoscope className="w-6 h-6 mx-auto mb-2 text-brand-gray/60" />,
               emptyText:
                 patients.length === 0
@@ -327,7 +342,8 @@ export default function RhuConsultation() {
                   {handled.length} done
                 </span>
               </div>
-              {queueTable(handled, { emptyText: "No completed consultations." })}
+              <TablePagination total={handled.length} page={completedPage} pageSize={queuePageSize} onPageChange={setCompletedPage} onPageSizeChange={(size) => { setQueuePageSize(size); setActivePage(1); setCompletedPage(1); }} className="mx-3 mt-3" />
+              {queueTable(completedPageRows, { emptyText: "No completed consultations." })}
             </Card>
           )}
         </div>
