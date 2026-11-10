@@ -21,7 +21,7 @@ import {
 } from "@/features/dashboards/components/scheduleCalendarUtils";
 import { AgendaView, DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
 import { SHOW_PREVIEW_DEMO, buildPreviewScheduleEvents } from "../lib/scheduleCalendarPreview";
-import { dayLabel, manilaDateKey, monthLabel, weekLabel } from "../lib/scheduleDates";
+import { dayLabel, isPastSameDaySchedule, manilaDateKey, monthLabel, weekLabel } from "../lib/scheduleDates";
 import { followUpActionAvailability } from "../lib/followUpActions";
 import { Ban, CheckCircle2, ChevronLeft, ChevronRight, Clock, Pencil, Plus, X } from "lucide-react";
 
@@ -82,6 +82,7 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
     if (!String(form.purpose || "").trim()) next.purpose = "Purpose is required.";
     if (!parseCalendarDate(form.date)) next.date = "Select a valid follow-up date.";
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(form.time || "")) next.time = "Select a valid follow-up time.";
+    else if (isPastSameDaySchedule(form.date, form.time)) next.time = "That time has already passed today. Choose a later time or another date.";
     if (!String(form.provider || "").trim()) next.provider = "Healthcare provider is required.";
     setErrors(next);
     if (!Object.keys(next).length) onSave(form);

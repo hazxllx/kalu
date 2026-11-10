@@ -20,6 +20,15 @@ export const manilaDateKey = (date = new Date()) => {
   return `${values.year}-${values.month}-${values.day}`;
 };
 
+/** True when a same-day appointment time has already passed in Philippine time. */
+export const isPastSameDaySchedule = (date, time, now = new Date()) => {
+  const day = String(date || "").slice(0, 10);
+  const clock = String(time || "").slice(0, 5);
+  if (day !== manilaDateKey(now) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(clock)) return false;
+  const scheduledAt = Date.parse(`${day}T${clock}:00+08:00`);
+  return Number.isFinite(scheduledAt) && scheduledAt < now.getTime();
+};
+
 /** Display status from the date-only schedule value, without parsing it as UTC. */
 export const followUpDisplayStatus = (status, scheduledDate, now = new Date()) => {
   const current = String(status || "Scheduled");

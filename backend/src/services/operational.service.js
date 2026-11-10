@@ -55,6 +55,20 @@ const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
 export const manilaDateString = (d = new Date()) =>
   new Date(d.getTime() + MANILA_OFFSET_MS).toISOString().slice(0, 10);
 
+/** Block saving a follow-up appointment for a time already passed today. */
+export const assertFollowUpScheduleNotInPast = (scheduledDate, scheduledTime, { now = new Date() } = {}) => {
+  const date = text(scheduledDate);
+  const time = text(scheduledTime).slice(0, 5);
+  if (!date || !time || date !== manilaDateString(now)) return;
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    throw ApiError.unprocessable('The scheduled time is invalid.');
+  }
+  const scheduledAt = Date.parse(`${date}T${time}:00+08:00`);
+  if (Number.isFinite(scheduledAt) && scheduledAt < now.getTime()) {
+    throw ApiError.unprocessable('The selected time has already passed today. Choose a later time or another date.');
+  }
+};
+
 // Statuses a follow-up may not be completed from.
 const COMPLETE_BLOCKERS = new Set(['Pending', 'Cancelled', 'Rejected', 'Missed']);
 // Final statuses that can no longer change.
@@ -491,6 +505,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     if (sched && Number.isNaN(Date.parse(sched))) {
       throw ApiError.unprocessable('The scheduled date is invalid.');
     }
+    assertFollowUpScheduleNotInPast(sched, row.scheduled_time);
     await assertNoDuplicateFollowUp({ supabase, residentId: resident.id, row });
   }
   const { data, error } = await supabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
@@ -573,6 +588,15 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
       throw ApiError.unprocessable('The selected consultation does not belong to this resident.');
     }
     row.consultation_id = consultation.id;
+  }
+  if (normalizedKind === 'followups' && (
+    Object.prototype.hasOwnProperty.call(payload, 'scheduled_date')
+    || Object.prototype.hasOwnProperty.call(payload, 'scheduled_time')
+  )) {
+    assertFollowUpScheduleNotInPast(
+      row.scheduled_date ?? existing.scheduled_date,
+      row.scheduled_time ?? existing.scheduled_time,
+    );
   }
   delete row.resident_decision;
   delete row.resident_decision_at;

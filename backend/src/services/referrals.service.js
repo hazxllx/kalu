@@ -417,7 +417,9 @@ export const listRecipients = async ({ user, residentId = null, supabase = getSe
   if (!residentId) throw ApiError.badRequest('Select a resident before choosing a referral recipient.');
   const resident = await residentInScope(supabase, user, residentId);
   const [profiles, facilities] = await Promise.all([
-    supabase.from('profiles').select(`${PROFILE_COLUMNS}, account:personnel_accounts(approval_status, setup_required, suspended_at)`).eq('municipality_id', user.municipalityId).eq('status', 'active').in('role', [...RECIPIENT_ROLES]).order('full_name', { ascending: true }),
+    // personnel_accounts references profiles through several audit columns;
+    // name its identity FK so PostgREST does not have to guess the relation.
+    supabase.from('profiles').select(`${PROFILE_COLUMNS}, account:personnel_accounts!account_id(approval_status, setup_required, suspended_at)`).eq('municipality_id', user.municipalityId).eq('status', 'active').in('role', [...RECIPIENT_ROLES]).order('full_name', { ascending: true }),
     supabase.from('facilities').select(FACILITY_COLUMNS).eq('municipality_id', user.municipalityId).order('name', { ascending: true }),
   ]);
   throwOnError(profiles.error, 'Could not load referral recipients');
@@ -444,7 +446,7 @@ const resolveRecipient = async (supabase, resident, payload, existing = null) =>
     throw ApiError.unprocessable('Select a receiving facility and an assigned recipient.');
   }
   const [personnel, destination] = await Promise.all([
-    supabase.from('profiles').select(`${PROFILE_COLUMNS}, account:personnel_accounts(approval_status, setup_required, suspended_at)`).eq('id', personnelId).maybeSingle(),
+    supabase.from('profiles').select(`${PROFILE_COLUMNS}, account:personnel_accounts!account_id(approval_status, setup_required, suspended_at)`).eq('id', personnelId).maybeSingle(),
     supabase.from('facilities').select(FACILITY_COLUMNS).eq('id', facilityId).maybeSingle(),
   ]);
   throwOnError(personnel.error, 'Could not validate referral recipient');

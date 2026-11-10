@@ -24,6 +24,7 @@ import { useSyncStatus } from "@/hooks/useSyncStatus";
 import {
   filterFollowUps,
   followUpManagementStatus,
+  isPastSameDaySchedule,
   manilaDateKey,
   summarizeFollowUps,
 } from "../lib/scheduleDates";
@@ -1002,7 +1003,11 @@ export default function MidwifeFollowUp() {
       : isPastDate(scheduleForm.date)
         ? "Please select today or a future date."
         : "",
-    time: touched.time && !scheduleForm.time ? "Please select a follow-up time." : "",
+    time: touched.time && !scheduleForm.time
+      ? "Please select a follow-up time."
+      : isPastSameDaySchedule(scheduleForm.date, scheduleForm.time)
+        ? "That time has already passed today. Choose a later time or another date."
+        : "",
     reason: touched.reason && !scheduleForm.reason.trim() ? "Please enter the reason for the follow-up." : "",
   };
 
@@ -1011,6 +1016,7 @@ export default function MidwifeFollowUp() {
     Boolean(scheduleForm.date) &&
     !isPastDate(scheduleForm.date) &&
     Boolean(scheduleForm.time) &&
+    !isPastSameDaySchedule(scheduleForm.date, scheduleForm.time) &&
     Boolean(scheduleForm.reason.trim());
 
   const canSaveSchedule = selectedFollowUp ? canEditFollowUp : canScheduleFollowUp;
