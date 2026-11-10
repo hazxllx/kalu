@@ -36,6 +36,46 @@ const riskTone = (risk) => {
   return "bg-brand-green/10 text-brand-green";
 };
 
+const riskBar = (risk) => {
+  const r = String(risk || "").toLowerCase();
+  if (r === "high") return "bg-brand-danger";
+  if (r === "moderate" || r === "medium") return "bg-brand-yellow";
+  return "bg-brand-green";
+};
+
+function ResidentKpiCard({ card, loading, index }) {
+  const Icon = card.icon;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.04, duration: 0.3 }}
+      className="h-full"
+    >
+      <Link
+        to={card.href}
+        aria-label={`${card.label}: ${loading ? "loading" : card.main}`}
+        className="group relative flex h-full min-h-[142px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-card transition-colors hover:border-brand-blue focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:border-border dark:bg-card"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${card.tone}`}>
+            <Icon className="h-[18px] w-[18px]" strokeWidth={1.9} />
+          </span>
+          <ArrowRight className="h-4 w-4 text-slate-300 transition-colors group-hover:text-brand-blue" strokeWidth={1.9} aria-hidden="true" />
+        </div>
+        {loading ? (
+          <span className="mt-3 text-2xl font-stat font-extrabold tracking-tight text-slate-300">—</span>
+        ) : (
+          <span className="mt-3 line-clamp-1 text-xl font-stat font-extrabold tracking-tight text-slate-900 dark:text-foreground" title={card.main}>{card.main}</span>
+        )}
+        <span className="mt-1 text-sm font-medium text-slate-700 dark:text-foreground">{card.label}</span>
+        {!loading && card.sub && <span className="mt-0.5 line-clamp-2 text-[11px] text-brand-gray">{card.sub}</span>}
+        <span aria-hidden="true" className={`absolute inset-x-0 bottom-0 h-1 ${card.bar}`} />
+      </Link>
+    </motion.div>
+  );
+}
+
 // The resident Health Services directory — the single, backend-driven source of
 // truth for registration. Dashboard cards deep-link here so the resident can see
 // requirements, schedule and deadline, then register.
@@ -170,7 +210,9 @@ export default function ResidentDashboard() {
     {
       icon: CalendarClock,
       tone: "bg-brand-accent/10 text-brand-accent",
+      bar: "bg-brand-accent",
       label: "Upcoming Follow-up",
+      href: "/app/resident/followups",
       main: upcomingFollowUp
         ? formatLongDate(upcomingFollowUp.scheduledDate)
         : followUpsError ? "Unable to load follow-ups" : "No upcoming follow-up",
@@ -183,14 +225,18 @@ export default function ResidentDashboard() {
     {
       icon: ShieldCheck,
       tone: riskTone(riskLevel),
+      bar: riskBar(riskLevel),
       label: "Health Risk Level",
+      href: "/app/resident/record",
       main: riskLevel || "No health risk assessment yet",
       sub: riskLevel ? "Based on your latest check-up" : "",
     },
     {
       icon: Stethoscope,
       tone: "bg-brand-yellow/15 text-[#B07E00]",
+      bar: "bg-brand-blue",
       label: "Last Check-up",
+      href: "/app/resident/record",
       main: lastCheckUp ? formatLongDate(lastCheckUp) : "No check-up recorded",
       sub: "",
     },
@@ -225,20 +271,20 @@ export default function ResidentDashboard() {
       <PageHeader
         crumbs={["Dashboard"]}
         title={`Welcome back, ${first}`}
-        subtitle="Here's an overview of your health at a glance."
+        subtitle="Here are your health updates and services that need your attention."
+        action={(
+          <div className="text-left md:text-right">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/75">Today</p>
+            <p className="text-sm font-medium text-white">{formatLongDate(todayIso())}</p>
+          </div>
+        )}
       />
 
       <TransferStatusBanner />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-        {cards.map((c, i) => (
-          <motion.div key={c.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
-            className="rounded-2xl border border-slate-200 bg-white shadow-card p-4 sm:p-5 dark:border-border dark:bg-card">
-            <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center ${c.tone}`}><c.icon className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.8} /></div>
-            <p className="mt-3 sm:mt-4 text-xs text-brand-gray uppercase tracking-wide">{c.label}</p>
-            <p className="mt-1 text-lg sm:text-xl font-semibold text-brand-ink">{loading ? "Loading…" : c.main}</p>
-            {!loading && c.sub && <p className="mt-0.5 text-sm text-brand-gray line-clamp-2">{c.sub}</p>}
-          </motion.div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+        {cards.map((card, index) => (
+          <ResidentKpiCard key={card.label} card={card} loading={loading} index={index} />
         ))}
       </div>
 

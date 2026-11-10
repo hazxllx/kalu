@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import {
   Activity,
   CalendarDays,
@@ -126,6 +127,8 @@ export default function HealthRecord() {
   // Consultation History is consolidated into this page as a tab/subsection
   // rather than a separate sidebar entry.
   const [activeTab, setActiveTab] = useState("overview");
+  const [consultationPage, setConsultationPage] = useState(1);
+  const [consultationPageSize, setConsultationPageSize] = useState(8);
 
   // Consultation-history filters. Applied server-side (GET
   // /residents/me/health-records?from&to&serviceId&type&status); the backend
@@ -192,6 +195,10 @@ export default function HealthRecord() {
   useEffect(() => {
     loadConsultations(appliedFilters);
   }, [loadConsultations, appliedFilters]);
+
+  useEffect(() => {
+    setConsultationPage(1);
+  }, [appliedFilters]);
 
   // Use the resident-facing, barangay/RHU-scoped directory. The staff catalog
   // endpoint is intentionally not available to resident accounts.
@@ -314,6 +321,15 @@ export default function HealthRecord() {
   }, [resident, consultations]);
 
   const hasFilters = filtersActive(appliedFilters);
+  const consultationPageCount = Math.max(1, Math.ceil(consultations.length / consultationPageSize));
+  const visibleConsultations = consultations.slice(
+    (consultationPage - 1) * consultationPageSize,
+    consultationPage * consultationPageSize,
+  );
+
+  useEffect(() => {
+    setConsultationPage((page) => Math.min(page, consultationPageCount));
+  }, [consultationPageCount]);
 
   const renderConsultationHistory = () => (
     <section aria-labelledby="consultation-history-title">
@@ -454,8 +470,9 @@ export default function HealthRecord() {
           )}
         </div>
       ) : (
+        <>
         <div className="space-y-3">
-          {consultations.map((c) => (
+          {visibleConsultations.map((c) => (
             <article key={c.id} className="overflow-hidden rounded-xl border border-brand-border bg-white">
               <div className="grid min-w-0 gap-4 p-4 md:grid-cols-[9.5rem_minmax(0,1fr)] md:gap-5">
                 <div className="flex items-center gap-3 border-b border-brand-border pb-3 md:block md:border-b-0 md:border-r md:pb-0 md:pr-5">
@@ -496,7 +513,7 @@ export default function HealthRecord() {
                     {consultationFields(c).map((column, columnIndex) => (
                       <div key={columnIndex} className="min-w-0 space-y-2">
                         {column.map(({ label, value, Icon, preserveLines }) => (
-                          <div key={label} className="grid min-w-0 grid-cols-[1rem_6.5rem_minmax(0,1fr)] items-start gap-x-2 text-[13px] leading-5">
+                          <div key={label} className="grid min-w-0 grid-cols-[1rem_7.5rem_minmax(0,1fr)] items-start gap-x-2 text-[13px] leading-5">
                             <Icon className="mt-0.5 h-3.5 w-3.5 text-brand-blue" aria-hidden="true" />
                             <span className="font-medium text-brand-ink">{label}</span>
                             <span className={`min-w-0 break-words text-brand-gray ${preserveLines ? "whitespace-pre-line" : ""}`}>{dash(value)}</span>
@@ -543,6 +560,15 @@ export default function HealthRecord() {
             </article>
           ))}
         </div>
+        <TablePagination
+          total={consultations.length}
+          page={consultationPage}
+          pageSize={consultationPageSize}
+          onPageChange={setConsultationPage}
+          onPageSizeChange={(size) => { setConsultationPageSize(size); setConsultationPage(1); }}
+          className="mt-4"
+        />
+        </>
       )}
     </section>
   );
