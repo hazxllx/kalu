@@ -218,7 +218,7 @@ export default function RhuConsultation() {
   );
 
   return (
-    <>
+    <div className="space-y-6">
       <PageHeader
         crumbs={["Consultation"]}
         title="RHU Consultation Station"
@@ -233,7 +233,7 @@ export default function RhuConsultation() {
       )}
 
       {error && (
-        <Card className="mb-5 flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="flex items-center gap-2 text-sm text-brand-danger">
             <AlertCircle className="h-4 w-4 shrink-0" />
             {error}
@@ -249,7 +249,7 @@ export default function RhuConsultation() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         {[
           { label: "Waiting for Consultation", value: stats.waiting, icon: "ClipboardList", tone: "accent", index: 0 },
           { label: "In Consultation", value: stats.inConsult, icon: "Stethoscope", tone: "blue", index: 1 },
@@ -259,7 +259,7 @@ export default function RhuConsultation() {
         ))}
       </div>
 
-      <Card className="p-4 mb-5">
+      <Card className="p-4">
         <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
           <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 flex-1 max-w-md w-full">
             <Search className="w-4 h-4 shrink-0 text-brand-gray" />
@@ -356,6 +356,6 @@ export default function RhuConsultation() {
           onComplete={(recorded) => handleComplete(activePatient.id, recorded)}
         />
       )}
-    </>
+    </div>
   );
 }

@@ -4,6 +4,7 @@ import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup } from "@/components/system";
 import SearchableSelect from "@/components/common/SearchableSelect";
+import TablePagination from "@/components/tables/TablePagination";
 import { intakeApi, referralsApi } from "@/services/api";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
@@ -127,6 +128,8 @@ export default function RhuTriage() {
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [listSearch, setListSearch] = useState("");
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(8);
   const [toast, setToast] = useState(null);
 
   // Registered-patient search is backed by the REAL resident directory
@@ -186,7 +189,7 @@ export default function RhuTriage() {
     };
   }, [selected?.id]);
 
-  const visibleHistory = useMemo(
+  const filteredHistory = useMemo(
     () =>
       sentPatients.filter((p) => {
         const q = listSearch.trim().toLowerCase();
@@ -198,6 +201,16 @@ export default function RhuTriage() {
       }),
     [sentPatients, listSearch]
   );
+  const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / historyPageSize));
+  const visibleHistory = filteredHistory.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [listSearch]);
+
+  useEffect(() => {
+    setHistoryPage((page) => Math.min(page, historyPageCount));
+  }, [historyPageCount]);
 
   // Live filter over actual resident records. Typed text is never a patient.
   const trimmedQuery = searchQuery.trim();
@@ -550,7 +563,7 @@ export default function RhuTriage() {
   );
 
   return (
-    <>
+    <div className="space-y-6">
       <PageHeader
         crumbs={["RHU", "Triage"]}
         title="RHU Triage"
@@ -566,7 +579,7 @@ export default function RhuTriage() {
       )}
 
       {/* Single column — fills the application content area */}
-      <div className="w-full space-y-5 sm:space-y-6">
+      <div className="w-full space-y-6">
         {/* ============ NEW TRIAGE ============ */}
         <Card className="overflow-hidden">
           <div className="flex items-center gap-3 border-b border-brand-border/70 px-4 py-4 sm:px-6">
@@ -1127,7 +1140,9 @@ export default function RhuTriage() {
           </div>
 
           {visibleHistory.length === 0 ? (
-            <p className="py-8 text-center text-sm text-brand-gray">No patients have been sent yet.</p>
+            <p className="py-8 text-center text-sm text-brand-gray">
+              {sentPatients.length > 0 ? "No hand-offs match your search." : "No patients have been sent yet."}
+            </p>
           ) : (
             <div>
               <div className={`hidden border-b border-brand-border px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-brand-gray md:grid ${ROW_COLS}`}>
@@ -1195,9 +1210,19 @@ export default function RhuTriage() {
               </ul>
             </div>
           )}
+          {filteredHistory.length > 0 && (
+            <TablePagination
+              total={filteredHistory.length}
+              page={historyPage}
+              pageSize={historyPageSize}
+              onPageChange={setHistoryPage}
+              onPageSizeChange={(size) => { setHistoryPageSize(size); setHistoryPage(1); }}
+              className="m-3"
+            />
+          )}
         </Card>
       </div>
 
-    </>
+    </div>
   );
 }

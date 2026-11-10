@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import MedicalCertificateModal, { CertificateStatusBadge } from "@/features/certificates/components/MedicalCertificateModal";
 import { useCertificateMeta, useCertificateRegister } from "@/features/certificates/hooks/useCertificateRegister";
 import { useAuth } from "@/context/AuthContext";
@@ -41,6 +42,8 @@ export default function MedicalCertificates() {
   const [selected, setSelected] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [toast, setToast] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -64,6 +67,16 @@ export default function MedicalCertificates() {
   }, [certificates, query, statusFilter]);
 
   const statuses = ["All", ...(meta.statuses || [])];
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const visibleCertificates = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, statusFilter]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
 
   return (
     <>
@@ -137,7 +150,7 @@ export default function MedicalCertificates() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-border">
-                {filtered.map((c) => (
+                {visibleCertificates.map((c) => (
                   <tr key={c.id} className="hover:bg-brand-bg/50">
                     <td className="px-5 py-3 font-medium text-brand-ink">{c.reference}</td>
                     <td className="px-5 py-3">
@@ -169,6 +182,17 @@ export default function MedicalCertificates() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {!loading && !error && filtered.length > 0 && (
+          <TablePagination
+            total={filtered.length}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+            className="m-3"
+          />
         )}
 
         {!loading && !error && filtered.length === 0 && (

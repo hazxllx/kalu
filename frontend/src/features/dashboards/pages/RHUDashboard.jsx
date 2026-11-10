@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatCard from "@/components/common/StatCard";
@@ -10,40 +10,22 @@ import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { useAuth } from "@/context/AuthContext";
 import { canTriage, canConsult } from "@/lib/rhuStations";
-import { referralsApi } from "@/services/api";
-import { filterOpenReferrals } from "@/features/triage/lib/triageWorkflow";
 import {
   Activity,
   ArrowRight,
   Bell,
   FileText,
   RefreshCw,
-  Stethoscope,
 } from "lucide-react";
 
-// Quick actions are STATION-aware: a Triage-station account sees Triage +
-// Medical Certificate requests; a Consultation-station account sees
-// Consultation. Items with no `station` are shown to every RHU account.
+// Shared shortcuts only. Station pages remain available from the role
+// navigation, without duplicating them as quick-action cards here.
 const QUICK_ACTIONS = [
   {
     icon: FileText,
     label: "Incoming Referrals",
     path: "/app/rhu_personnel/incoming-referrals",
     description: "Respond to referrals assigned to your account and facility.",
-  },
-  {
-    icon: Stethoscope,
-    label: "Open Triage",
-    path: "/app/rhu_personnel/triage",
-    description: "Record and manage RHU triage visits.",
-    station: "triage",
-  },
-  {
-    icon: Stethoscope,
-    label: "Open Consultation",
-    path: "/app/rhu_personnel/consultation",
-    description: "Pick up triaged patients and record consultations.",
-    station: "consultation",
   },
   {
     icon: FileText,
@@ -102,38 +84,12 @@ export default function RHUDashboard() {
   const { user } = useAuth();
   const triageStation = canTriage(user);
   const consultationStation = canConsult(user);
-  const [incomingCount, setIncomingCount] = useState(0);
-  const [referralStageCounts, setReferralStageCounts] = useState({ awaitingTriage: 0, screening: 0, awaitingConsultation: 0 });
-  const [referralsLoading, setReferralsLoading] = useState(false);
-  const [referralsError, setReferralsError] = useState("");
   const {
     patients,
     loading,
     error,
     refresh,
   } = usePhnWorkflow({ source: consultationStation ? "queue" : "intake" });
-
-  const refreshReferrals = useCallback(async () => {
-    if (!user?.id) return;
-    setReferralsLoading(true);
-    setReferralsError("");
-    try {
-      const result = await referralsApi.inbox({}, { ownerId: user.id });
-      const openReferrals = filterOpenReferrals(result?.rows || []);
-      setIncomingCount(openReferrals.length);
-      setReferralStageCounts({
-        awaitingTriage: openReferrals.filter((referral) => referral.stage?.key === "awaiting_rhu").length,
-        screening: openReferrals.filter((referral) => referral.stage?.key === "triage").length,
-        awaitingConsultation: openReferrals.filter((referral) => referral.stage?.key === "awaiting_consultation").length,
-      });
-    } catch (err) {
-      setReferralsError(err?.message || "Could not load incoming referral totals.");
-    } finally {
-      setReferralsLoading(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => { void refreshReferrals(); }, [refreshReferrals]);
 
   // Only surface the quick actions the signed-in station can actually use.
   const quickActions = useMemo(
@@ -193,6 +149,19 @@ export default function RHUDashboard() {
     [patientList, todayStart, consultationStation],
   );
 
+  const stats = consultationStation
+    ? [
+        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "yellow" },
+        { icon: "Stethoscope", label: "In Consultation", value: loading ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
+        { icon: "CheckCircle2", label: "Completed Consultations", value: loading ? "—" : counts.completed.toLocaleString(), tone: "green" },
+      ]
+    : [
+        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "yellow" },
+        { icon: "Stethoscope", label: "In Consultation", value: loading ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
+        { icon: "CheckCircle2", label: "Completed Consultations", value: loading ? "—" : counts.completed.toLocaleString(), tone: "green" },
+        { icon: "ClipboardList", label: "Triage Screenings Today", value: loading ? "—" : visitsToday.length.toLocaleString(), tone: "accent" },
+      ];
+
   const columns = [
     { key: "patient", label: "Patient" },
     { key: "barangay", label: "Barangay" },
@@ -215,21 +184,6 @@ export default function RHUDashboard() {
 
     return row[column.key] || "—";
   };
-
-  const stats = [
-    ...(consultationStation
-      ? [
-          { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "yellow" },
-          { icon: "Stethoscope", label: "In Consultation", value: loading ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
-          { icon: "CheckCircle2", label: "Completed Consultations", value: loading ? "—" : counts.completed.toLocaleString(), tone: "green" },
-        ]
-      : [
-          { icon: "Inbox", label: "Incoming Referrals", value: referralsLoading ? "—" : incomingCount.toLocaleString(), tone: "accent" },
-          { icon: "ClipboardList", label: "Patients Awaiting Triage", value: referralsLoading ? "—" : referralStageCounts.awaitingTriage.toLocaleString(), tone: "yellow" },
-          { icon: "Activity", label: "Resident Arrived / Triage Stage", value: referralsLoading ? "—" : referralStageCounts.screening.toLocaleString(), tone: "blue" },
-          { icon: "CheckCircle2", label: "Awaiting PHN / Consultation", value: referralsLoading ? "—" : referralStageCounts.awaitingConsultation.toLocaleString(), tone: "green" },
-        ]),
-  ];
 
   const todayActivity = useMemo(() => {
     return visitsToday
@@ -257,39 +211,32 @@ export default function RHUDashboard() {
         title={consultationStation ? "RHU Consultation Dashboard" : "RHU Triage Dashboard"}
         subtitle={consultationStation
           ? "Review the consultation queue and track completed consultations."
-          : "Review incoming barangay referrals and manage initial resident screening."}
+          : "Review the triage workload, record resident screening, and hand patients off to consultation."}
+        action={(
+          <button
+            type="button"
+            onClick={() => { void refresh(); }}
+            disabled={loading}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-btn border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/15 disabled:opacity-50 md:w-auto"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        )}
       />
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={() => { void refresh(); void refreshReferrals(); }}
-          disabled={loading || referralsLoading}
-          className="inline-flex items-center gap-2 rounded-btn border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${
-              loading || referralsLoading ? "animate-spin" : ""
-            }`}
-          />
-          Refresh
-        </button>
-      </div>
 
       {error && (
         <Card className="p-4 text-sm text-brand-danger">
           {error}
         </Card>
       )}
-      {referralsError && triageStation && <Card className="p-4 text-sm text-brand-danger">{referralsError}</Card>}
-
       <section aria-labelledby="summary-heading">
         <div className="mb-3 flex items-center justify-between">
           <h2
             id="summary-heading"
             className="text-base font-semibold text-brand-ink"
           >
-            Operational Summary
+            {consultationStation ? "Consultation Overview" : "Triage Overview"}
           </h2>
 
           {loading && (
@@ -299,12 +246,14 @@ export default function RHUDashboard() {
           )}
         </div>
 
-        <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${consultationStation ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
+        <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${stats.length === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
           {stats.map((stat, index) => (
             <StatCard
               key={stat.label}
               {...stat}
               index={index}
+              compact
+              indicator
             />
           ))}
         </div>
@@ -320,14 +269,14 @@ export default function RHUDashboard() {
           </h2>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {quickActions.map((action) => (
             <Link
               key={action.label}
               to={action.path}
-              className="block"
+              className="block h-full"
             >
-              <Card className="h-full p-4 transition-colors hover:border-brand-blue">
+              <Card className="h-full p-4 transition-colors hover:border-brand-blue hover:shadow-md">
                 <div className="flex items-start gap-3">
                   <div className="rounded-lg bg-brand-blue/10 p-2">
                     <action.icon className="h-5 w-5 text-brand-blue" />
@@ -351,8 +300,8 @@ export default function RHUDashboard() {
         </div>
       </section>
 
-      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
-        <Card className="p-4 sm:p-6 lg:col-span-2">
+      <div className={`grid grid-cols-1 gap-4 sm:gap-5 ${triageStation ? "lg:grid-cols-3" : ""}`}>
+        <Card className={`p-4 sm:p-6 ${triageStation ? "lg:col-span-2" : ""}`}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-brand-ink sm:text-base">
               {consultationStation ? "Consultation Queue" : "Recent Screening Hand-offs"}
@@ -362,7 +311,7 @@ export default function RHUDashboard() {
               to={consultationStation ? "/app/rhu_personnel/consultation" : "/app/rhu_personnel/triage"}
               className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
             >
-              {consultationStation ? "Open Consultation" : "Open Triage"}
+              {consultationStation ? "View Consultation Queue" : "View Screening History"}
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
@@ -425,12 +374,12 @@ export default function RHUDashboard() {
             to="/app/rhu_personnel/consultation"
             className="mt-4 block w-full text-center text-sm font-medium text-brand-blue hover:underline"
           >
-            Open Consultation Queue
+            View Consultation Queue
           </Link>
         </Card>}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:gap-5">
+      <div>
         <Card className="p-4 sm:p-6">
           <div className="mb-4 flex items-center justify-between">
             <div>
