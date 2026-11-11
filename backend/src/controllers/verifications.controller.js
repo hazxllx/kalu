@@ -51,6 +51,11 @@ export const getVerification = async (req, res) => {
   sendData(res, { verification: result.verification, history: result.history });
 };
 
+export const getDiditEvidence = async (req, res) => {
+  const evidence = await verificationsService.getDiditEvidence({ user: req.user, id: req.params.id });
+  sendData(res, { diditEvidence: evidence });
+};
+
 export const getHistory = async (req, res) => {
   const result = await verificationsService.getVerification({ user: req.user, id: req.params.id });
   sendData(res, { history: result.history });
@@ -105,6 +110,16 @@ export const getMine = async (req, res) => {
   sendData(res, result);
 };
 
+export const startDiditSession = async (req, res) => {
+  const result = await verificationsService.startDiditSession({ user: req.user, consent: req.body?.consent });
+  sendData(res, result);
+};
+
+export const syncMyDiditResult = async (req, res) => {
+  const result = await verificationsService.syncMyDiditResult({ user: req.user });
+  sendData(res, { identityVerification: result });
+};
+
 // Backward-compatible single-decision endpoint.
 export const decide = async (req, res) => {
   const { decision, reason, remarks } = req.body || {};
@@ -123,6 +138,8 @@ export default {
   listPending,
   listHistory,
   getVerification,
+  getDiditEvidence,
+  syncMyDiditResult,
   getHistory,
   approve,
   reject,

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, BadgeCheck, Clock, Loader2, RefreshCw, RotateCcw, ShieldAlert, UploadCloud, X } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Clock, ExternalLink, Fingerprint, Loader2, RefreshCw, RotateCcw, ShieldAlert, UploadCloud, X } from "lucide-react";
 
 import { Card } from "@/components/common/Card";
-import { fetchMyVerification, resubmitOwnVerification } from "@/services/api/verificationsApi";
+import { fetchMyVerification, resubmitOwnVerification, startDiditIdentityVerification, syncMyDiditResult } from "@/services/api/verificationsApi";
 import { registrationApi } from "@/services/api";
 import { postFormData } from "@/services/api/apiClient";
 import UploadComponent from "@/features/registration/components/UploadComponent";
@@ -80,6 +80,9 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [resubmitting, setResubmitting] = useState(false);
+  const [showDiditConsent, setShowDiditConsent] = useState(false);
+  const [diditConsentChecked, setDiditConsentChecked] = useState(false);
+  const [startingDidit, setStartingDidit] = useState(false);
   const { refreshProfile } = useAuth();
   const syncedApproval = useRef(false);
 
@@ -122,6 +125,19 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
         }
       }
 
+      const callbackParams = new URLSearchParams(window.location.search);
+      const diditCallback = callbackParams.has("verificationSessionId") || callbackParams.get("didit") === "complete";
+      if (diditCallback && next.hasResidentRecord) {
+        try {
+          await syncMyDiditResult();
+          next = await fetchMyVerification();
+          window.history.replaceState({}, "", window.location.pathname);
+        } catch (syncError) {
+          console.error("Could not sync the returned Didit result:", syncError);
+          setError("Didit returned, but KALUSAGAP could not retrieve the result yet. Refresh status again in a moment.");
+        }
+      }
+
       setState(next);
 
       // Single authoritative verification state: the moment this banner can see
@@ -154,6 +170,20 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
     setFormErrors({});
     setError("");
     setShowResubmit(true);
+  };
+
+  const beginDidit = async () => {
+    if (!diditConsentChecked) return;
+    setStartingDidit(true);
+    setError("");
+    try {
+      const result = await startDiditIdentityVerification();
+      if (!result?.url) throw new Error("Didit did not return a verification link. Please try again.");
+      window.location.assign(result.url);
+    } catch (err) {
+      setError(err?.message || "We could not start identity verification. Please try again.");
+      setStartingDidit(false);
+    }
   };
 
   const uploadOne = async (residentId, file, documentType) => {
@@ -231,6 +261,25 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
   const meta = META[status] || META.pending;
   const { Icon } = meta;
   const verification = state?.verification;
+  const identityVerification = state?.identityVerification;
+  const identityStatus = identityVerification?.status || "unverified";
+  const identityLabels = {
+    unverified: "Not started",
+    in_progress: "In progress",
+    pending_review: "Under Didit review",
+    verified: "Identity verified",
+    declined: "Could not verify identity",
+    failed: "Verification did not finish",
+    expired: "Session expired",
+  };
+  const canStartIdentity = !verification?.isMinor
+    && verification?.status !== "approved"
+    && identityStatus !== "verified";
+  const identityActionLabel = identityStatus === "in_progress"
+    ? "Continue identity check"
+    : ["declined", "failed", "expired", "pending_review"].includes(identityStatus)
+      ? "Try identity verification again"
+      : "Verify identity with Didit";
   const canResubmit = status === "rejected" || status === "resubmission_required";
   // Enable the submit button only once the required fields are valid (mirrors
   // the click-time validation; the actual rules live in handleResubmit).
@@ -267,7 +316,7 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <h2 className="font-heading text-lg font-semibold text-brand-ink">{meta.label}</h2>
                 <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.06em] ${meta.chip}`}>
-                  Manual review
+                  {status === "approved" ? "Account active" : "Review in progress"}
                 </span>
               </div>
               <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-brand-gray">{meta.message}</p>
@@ -277,6 +326,32 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
                   Submitted on <span className="font-medium text-brand-ink">{formatDate(verification.submittedAt)}</span>
                   {verification.barangay ? ` · Barangay ${verification.barangay}` : ""}
                 </p>
+              )}
+              {!verification?.isMinor && (
+                <div className="mt-4 rounded-xl border border-brand-border bg-white/80 p-3 sm:max-w-xl">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <Fingerprint className="h-5 w-5 shrink-0 text-brand-blue" aria-hidden="true" />
+                      <div>
+                        <p className="text-sm font-semibold text-brand-ink">Identity check</p>
+                        <p className="text-xs text-brand-gray">Didit status: {identityLabels[identityStatus] || identityStatus}</p>
+                      </div>
+                    </div>
+                    {canStartIdentity && (
+                      <button
+                        type="button"
+                        onClick={() => { setDiditConsentChecked(false); setShowDiditConsent(true); }}
+                        className="inline-flex items-center gap-2 rounded-btn border border-brand-blue px-3 py-2 text-xs font-semibold text-brand-blue hover:bg-brand-blue/5"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        {identityActionLabel}
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-brand-gray">
+                    Didit checks your ID, liveness, and selfie match. If all required checks pass, your account is approved automatically. If a check fails or needs review, your account stays limited while authorized health personnel review your registration.
+                  </p>
+                </div>
               )}
               {showVerificationMethod && verification?.minorVerificationMethod && (
                 <p className="mt-1 text-xs text-brand-gray">
@@ -332,6 +407,37 @@ export default function VerificationBanner({ showVerificationMethod = false }) {
           </p>
         )}
       </Card>
+
+      {showDiditConsent && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3 sm:p-4" role="presentation">
+          <section className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-6" role="dialog" aria-modal="true" aria-labelledby="didit-consent-title">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 id="didit-consent-title" className="font-heading text-lg font-semibold text-brand-ink">Before you continue</h3>
+                <p className="mt-2 text-sm leading-relaxed text-brand-gray">
+                  KALUSAGAP will share your name and date of birth with Didit to compare with your identity check. Didit will process your ID and face/selfie data in its secure hosted verification flow. KALUSAGAP stores the session and verification result, not your ID images or face data.
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-brand-gray">
+                  This check does not replace the Health Supervisor’s review of your residency and registration.
+                </p>
+              </div>
+              <button type="button" onClick={() => setShowDiditConsent(false)} disabled={startingDidit} className="rounded-lg p-1 text-brand-gray hover:bg-brand-bg" aria-label="Close consent dialog"><X className="h-5 w-5" /></button>
+            </div>
+            <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border border-brand-border bg-brand-bg p-3 text-sm text-brand-ink">
+              <input type="checkbox" checked={diditConsentChecked} onChange={(event) => setDiditConsentChecked(event.target.checked)} className="mt-0.5 h-4 w-4 accent-brand-blue" />
+              <span>I consent to sharing this information with Didit and to Didit processing my ID and face/selfie data for identity verification.</span>
+            </label>
+            {error && <p role="alert" className="mt-3 text-sm text-brand-danger">{error}</p>}
+            <div className="mt-5 flex justify-end gap-3">
+              <button type="button" onClick={() => setShowDiditConsent(false)} disabled={startingDidit} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>
+              <button type="button" onClick={beginDidit} disabled={!diditConsentChecked || startingDidit} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50">
+                {startingDidit ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+                {startingDidit ? "Starting…" : "Continue to Didit"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Resubmission document upload — reuses the registration upload component,
           private storage endpoint and validation rules. Fixed header/footer with

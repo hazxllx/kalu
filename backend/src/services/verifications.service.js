@@ -24,6 +24,7 @@ import storageService from './storage.service.js';
 import { notifyResident } from './notifications.service.js';
 import { ageFromDateOnly } from '../validators/common.js';
 import { isMinorAge } from '../config/guardianPolicy.js';
+import diditService from './didit.service.js';
 
 export const VERIFICATION_STATUS = Object.freeze({
   PENDING: 'pending',
@@ -85,6 +86,12 @@ const isVerificationComplete = async (resident) => {
     return hasValidRequiredDocument(resident, studentId);
   }
   if (ageFromDateOnly(resident.birthDate) === null) return false;
+
+  // A successful Didit identity check replaces the old manual adult ID-front,
+  // ID-back and holding-ID-photo bundle. Mismatched/inconclusive checks still
+  // qualify for staff review, where authorized personnel may decide manually.
+  if (resident.identityVerificationStatus === 'verified') return true;
+  if (['declined', 'pending_review'].includes(resident.identityVerificationStatus)) return true;
 
   const proofOfResidency = documents.find((document) =>
     document.documentType === 'proof_of_residency'
@@ -172,6 +179,9 @@ const toVerification = async (resident) => {
     minorAlternativeStatus: resident.minorAlternativeStatus || null,
     minorAlternativeReason: resident.minorAlternativeReason || '',
     status: resident.verificationStatus || VERIFICATION_STATUS.PENDING,
+    identityVerificationStatus: resident.identityVerificationStatus || 'unverified',
+    identityVerifiedAt: resident.identityVerifiedAt || null,
+    identityLastAttemptAt: resident.identityLastAttemptAt || null,
     verificationSubmittedBy: resident.verificationSubmittedBy || null,
     verifiedBy: resident.verifiedBy || null,
     verifiedAt: resident.verifiedAt || null,
@@ -270,6 +280,12 @@ export const getVerification = async ({ user, id }) => {
   const resident = await requireStaffResident(user, id);
   const history = await repository.listResidentVerificationLogs(resident.id, { limit: 100 });
   return { verification: await toVerification(resident), history };
+};
+
+/** Fetch short-lived Didit document/selfie links for a scoped staff reviewer. */
+export const getDiditEvidence = async ({ user, id }) => {
+  const resident = await requireStaffResident(user, id);
+  return diditService.getReviewEvidence(resident.id);
 };
 
 /** Recent decisions across the caller's scope, for the history table. */
@@ -494,6 +510,7 @@ export const getMine = async ({ user } = {}) => {
     return { hasResidentRecord: false, verification: null, history: [] };
   }
   const history = await repository.listResidentVerificationLogs(resident.id, { limit: 50 });
+  const identityVerification = await diditService.getLatestForResident(resident.id);
   // Resolve the municipality NAME (system-controlled) from the resident's
   // barangay for the Settings → Profile display, reusing the existing lookup.
   let municipality = '';
@@ -508,9 +525,16 @@ export const getMine = async ({ user } = {}) => {
   return {
     hasResidentRecord: true,
     verification: { ...(await toVerification(resident)), municipality },
+    identityVerification,
     history,
   };
 };
+
+export const startDiditSession = async ({ user, consent } = {}) =>
+  diditService.startSession({ user, consent });
+
+export const syncMyDiditResult = async ({ user } = {}) =>
+  diditService.syncOwnResult({ user });
 
 // ---------------------------------------------------------------------------
 // Backward-compatible helpers (existing routes/consumers)
@@ -530,12 +554,15 @@ export default {
   listQueue,
   listHistory,
   getVerification,
+  getDiditEvidence,
   approve,
   reject,
   requestResubmission,
   reviewMinorAlternative,
   resubmit,
   getMine,
+  startDiditSession,
+  syncMyDiditResult,
   listPending,
   decide,
 };

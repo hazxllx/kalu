@@ -47,6 +47,8 @@ export const rejectDirectStatusWrite = (req, res, next) => {
 
 // Resident self-service
 router.get('/me', ...self, asyncHandler(verificationsController.getMine));
+router.post('/didit/sync', ...self, asyncHandler(verificationsController.syncMyDiditResult));
+router.post('/didit/session', ...self, asyncHandler(verificationsController.startDiditSession));
 router.patch('/:id/resubmit', ...self, rejectDirectStatusWrite, idParam, asyncHandler(verificationsController.resubmit));
 
 // Staff queue + history (specific paths before '/:id')
@@ -82,6 +84,7 @@ router.patch(
 );
 
 // Staff single-record reads
+router.get('/:id/didit-evidence', ...staff, idParam, asyncHandler(verificationsController.getDiditEvidence));
 router.get('/:id/history', ...staff, idParam, asyncHandler(verificationsController.getHistory));
 router.get('/:id', ...staff, idParam, asyncHandler(verificationsController.getVerification));
 

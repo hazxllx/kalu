@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
-  Eye, EyeOff, ArrowRight, ArrowLeft, Check, MapPin, ChevronDown, Shield, Loader2, Mail, Camera,
+  Eye, EyeOff, ArrowRight, ArrowLeft, Check, MapPin, ChevronDown, Shield, Loader2, Mail,
   CheckCircle2, AlertTriangle, XCircle, FileText,
 } from "lucide-react";
 import {
@@ -25,23 +25,15 @@ import { REGISTRATION_OTP_LENGTH, isValidRegistrationOtp } from "@/features/regi
 import { supabase } from "@/lib/supabase";
 import { registrationApi } from "@/services/api";
 import { postFormData } from "@/services/api/apiClient";
+import { startDiditIdentityVerification } from "@/services/api/verificationsApi";
 import { guardianLinksApi } from "@/services/api/guardianLinksApi";
 import UploadComponent from "@/features/registration/components/UploadComponent";
 import ExistingResidentActivation from "@/features/registration/pages/ExistingResidentActivation";
 import {
-  SLOT_STATUS,
-  SLOT_DOCUMENT_TYPE,
-  REQUIRED_DOCUMENT_SLOTS,
-  initialSlotState,
   initialScreeningState,
   slotStateFromScreening,
-  isSlotEligible,
-  canSubmitDocuments,
-  firstBlockingSlot,
-  updateSlotForCurrentRequest,
   slotStatusLabel,
   slotStatusTone,
-  blockingSlotError,
 } from "@/features/registration/documentScreening";
 import { isPasswordReuseError } from "@/features/registration/passwordErrors";
 import {
@@ -82,38 +74,6 @@ const GOVT_ID_TYPES = [
 
 const GOVT_ID_LABEL = Object.fromEntries(GOVT_ID_TYPES.map((o) => [o.value, o.label]));
 
-const screeningRequestErrorMessage = (error, pair = false) => {
-  const status = Number(error?.status);
-  if (status === 404) {
-    return "The document-screening service is unavailable. Your ID has not been marked invalid. Please retry shortly or contact support.";
-  }
-  if (status === 401) {
-    return "Your session has expired. Sign in again before retrying screening.";
-  }
-  if (status === 403) {
-    return "Your account is not authorized to screen these documents. Your files have not been marked invalid.";
-  }
-  if (status === 413) {
-    return "Each ID image must be 10 MB or smaller. Your files have not been screened.";
-  }
-  if (status === 415) {
-    return "Use a supported PDF, JPG, or PNG file. Your files have not been screened.";
-  }
-  if (!status || status >= 500) {
-    return pair
-      ? "We could not reach the document-screening service. Your files have not been marked invalid. Please retry."
-      : "We could not reach the document-screening service. This file has not been marked invalid. Please retry.";
-  }
-  if (status === 400) {
-    return error?.message || (pair
-      ? "The screening request could not be processed. Check that both ID sides and the ID type are selected."
-      : "The screening request could not be processed. Check the selected file and try again.");
-  }
-  return error?.message || (pair
-    ? "We could not screen both ID sides. Your files have not been marked invalid. Please retry."
-    : "We could not screen this document. It has not been marked invalid. Please retry.");
-};
-
 // Supabase Auth email OTP length for New Resident Registration. This is the
 // registration-only constant and is deliberately kept separate from the Transfer
 // of Residency OTP (a custom 4-digit backend code). See features/registration/otp.js.
@@ -152,7 +112,7 @@ function checkStrength(pw) {
 const STEPS_META = [
   { num: 1, title: "Personal Information", subtitle: "Tell us about yourself." },
   { num: 2, title: "Account & Contact", subtitle: "Set up your login and contact details." },
-  { num: 3, title: "Identity Verification", subtitle: "Provide your government-issued ID and identity photo for review." },
+  { num: 3, title: "Identity Verification", subtitle: "Verify your identity securely with Didit." },
   { num: 4, title: "Review Your Information", subtitle: "Please verify all details before submitting." },
 ];
 
@@ -261,14 +221,6 @@ export default function NewResidentRegistration() {
   // Automated screening state, one entry per required slot. Both ID sides are
   // screened independently and cross-checked when both current files exist.
   const [screening, setScreening] = useState(initialScreeningState);
-  // Per-slot request sequence so an out-of-order response from a previous file
-  // can never overwrite the result of a newer replacement.
-  const screeningSeq = useRef({
-    governmentIdFront: 0,
-    governmentIdBack: 0,
-    identityPhoto: 0,
-  });
-  const governmentIdPairSeq = useRef(0);
 
   // Email verification (real Supabase Confirm Signup OTP — no local/fake OTP)
   // emailPhase: "idle" | "sending" | "sent" | "verifying" | "verified"
@@ -562,6 +514,7 @@ export default function NewResidentRegistration() {
     agree: false,
     agreePrivacy: false,
     agreeReview: false,
+    agreeDidit: false,
     minorVerificationMethod: "",
     parentLinkChoice: "skip",
     guardianEmail: "",
@@ -605,8 +558,6 @@ export default function NewResidentRegistration() {
     const crossedMinorBoundary =
       (oldAge !== "" && Number(oldAge) < 18) !== (nextAge !== "" && Number(nextAge) < 18);
     if (crossedMinorBoundary) {
-      for (const slot of Object.keys(screeningSeq.current)) screeningSeq.current[slot] += 1;
-      governmentIdPairSeq.current += 1;
       setScreening(initialScreeningState());
       setForm((previous) => ({
         ...previous,
@@ -634,33 +585,12 @@ export default function NewResidentRegistration() {
     }));
   };
 
-  // Targeted identity-state setters so unrelated fields (e.g. password) do not
-  // need to re-render the entire identity object.
+  // Adult identity evidence is handled in Didit's hosted flow. Keep only the
+  // selected ID type/number for profile matching and resident-record linking.
   const setIdType = (e) => {
     const selectedType = e.target.value;
-    governmentIdPairSeq.current += 1;
     setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdType: selectedType } }));
     setErrors((prev) => ({ ...prev, governmentIdType: "", governmentIdTypeOther: "" }));
-    // The selected type changes the screening rules. Re-screen the current
-    // front/back files and invalidate any in-flight response from the old type.
-    const frontFile = form.identity.governmentIdFront;
-    const backFile = form.identity.governmentIdBack;
-    if (frontFile && backFile) {
-      screenGovernmentIdPair(frontFile, backFile, selectedType);
-      return;
-    }
-    for (const [slot, file] of [
-      ["governmentIdFront", frontFile],
-      ["governmentIdBack", backFile],
-    ]) {
-      if (file) {
-        const seq = ++screeningSeq.current[slot];
-        screenSingleDocument(slot, file, selectedType, seq);
-      } else {
-        screeningSeq.current[slot] += 1;
-        setScreening((p) => ({ ...p, [slot]: initialSlotState() }));
-      }
-    }
   };
   const setIdTypeOther = (e) => {
     setForm((p) => ({ ...p, identity: { ...p.identity, governmentIdTypeOther: e.target.value } }));
@@ -670,165 +600,6 @@ export default function NewResidentRegistration() {
     setForm((p) => ({ ...p, identity: { ...p.identity, identityNo: e.target.value } }));
     setErrors((prev) => ({ ...prev, identityNo: "" }));
   };
-  /**
-   * Set/clear one identity document slot and run the automated screen on it.
-   * Passing `null` clears BOTH the file and its screening result, so a replaced
-   * file can never inherit a stale result. Every document slot keeps its own
-   * file reference and result.
-   */
-  const screenSingleDocument = (slot, file, selectedGovernmentIdType, seq) => {
-    setScreening((p) => ({
-      ...p,
-      [slot]: { ...initialSlotState(), status: SLOT_STATUS.CHECKING, requestId: seq },
-    }));
-    (async () => {
-      try {
-        const fd = new FormData();
-        fd.append("file", file);
-        fd.append("documentType", SLOT_DOCUMENT_TYPE[slot]);
-        if (selectedGovernmentIdType && (slot === "governmentIdFront" || slot === "governmentIdBack")) {
-          fd.append("governmentIdType", selectedGovernmentIdType);
-        }
-        const resp = await postFormData("/resident-documents/screen", fd);
-        setScreening((p) => updateSlotForCurrentRequest(
-          p,
-          slot,
-          seq,
-          screeningSeq.current[slot],
-          slotStateFromScreening(resp?.screening, seq),
-        ));
-      } catch (err) {
-        setScreening((p) => updateSlotForCurrentRequest(
-          p,
-          slot,
-          seq,
-          screeningSeq.current[slot],
-          {
-            status: SLOT_STATUS.ERROR,
-            requestId: seq,
-            reason: "SCREENING_ERROR",
-            message: screeningRequestErrorMessage(err),
-            result: null,
-          },
-        ));
-      }
-    })();
-  };
-
-  const screenGovernmentIdPair = (frontFile, backFile, selectedGovernmentIdType) => {
-    const pairRequest = ++governmentIdPairSeq.current;
-    const frontSeq = ++screeningSeq.current.governmentIdFront;
-    const backSeq = ++screeningSeq.current.governmentIdBack;
-    setScreening((p) => ({
-      ...p,
-      governmentIdFront: { ...initialSlotState(), status: SLOT_STATUS.CHECKING, requestId: frontSeq },
-      governmentIdBack: { ...initialSlotState(), status: SLOT_STATUS.CHECKING, requestId: backSeq },
-    }));
-
-    (async () => {
-      try {
-        const fd = new FormData();
-        fd.append("governmentIdFront", frontFile);
-        fd.append("governmentIdBack", backFile);
-        fd.append("governmentIdType", selectedGovernmentIdType);
-        const resp = await postFormData("/resident-documents/screen-id-pair", fd);
-        if (
-          pairRequest !== governmentIdPairSeq.current
-          || frontSeq !== screeningSeq.current.governmentIdFront
-          || backSeq !== screeningSeq.current.governmentIdBack
-        ) return;
-        setScreening((p) => ({
-          ...p,
-          governmentIdFront: slotStateFromScreening(resp?.governmentIdFront, frontSeq),
-          governmentIdBack: slotStateFromScreening(resp?.governmentIdBack, backSeq),
-        }));
-      } catch (err) {
-        if (
-          pairRequest !== governmentIdPairSeq.current
-          || frontSeq !== screeningSeq.current.governmentIdFront
-          || backSeq !== screeningSeq.current.governmentIdBack
-        ) return;
-        const message = screeningRequestErrorMessage(err, true);
-        setScreening((p) => ({
-          ...p,
-          governmentIdFront: {
-            status: SLOT_STATUS.ERROR,
-            requestId: frontSeq,
-            reason: "SCREENING_ERROR",
-            message,
-            result: null,
-          },
-          governmentIdBack: {
-            status: SLOT_STATUS.ERROR,
-            requestId: backSeq,
-            reason: "SCREENING_ERROR",
-            message,
-            result: null,
-          },
-        }));
-      }
-    })();
-  };
-
-  const retryDocumentScreening = (slot) => {
-    if (slot === "governmentIdFront" || slot === "governmentIdBack") {
-      const frontFile = form.identity.governmentIdFront;
-      const backFile = form.identity.governmentIdBack;
-      if (frontFile && backFile) {
-        screenGovernmentIdPair(frontFile, backFile, form.identity.governmentIdType);
-      } else {
-        const file = form.identity[slot];
-        if (file) {
-          const seq = ++screeningSeq.current[slot];
-          screenSingleDocument(slot, file, form.identity.governmentIdType, seq);
-        }
-      }
-      return;
-    }
-    const file = form.identity[slot];
-    if (file) {
-      const seq = ++screeningSeq.current[slot];
-      screenSingleDocument(slot, file, form.identity.governmentIdType, seq);
-    }
-  };
-
-  const handleDocumentFile = (slot, file, selectedGovernmentIdType = form.identity.governmentIdType) => {
-    const errorKey = slot; // form.identity keys match the slot keys
-    const nextIdentity = { ...form.identity, [slot]: file };
-    setForm((p) => ({ ...p, identity: { ...p.identity, [slot]: file } }));
-    setErrors((prev) => ({ ...prev, [errorKey]: "" }));
-
-    // Clear the previous result immediately and mark this slot as the newest.
-    const seq = (screeningSeq.current[slot] || 0) + 1;
-    screeningSeq.current[slot] = seq;
-    setScreening((p) => ({ ...p, [slot]: initialSlotState() }));
-
-    const idSlots = ["governmentIdFront", "governmentIdBack"];
-    if (idSlots.includes(slot)) {
-      const otherSlot = slot === "governmentIdFront" ? "governmentIdBack" : "governmentIdFront";
-      const otherSeq = ++screeningSeq.current[otherSlot];
-      const frontFile = nextIdentity.governmentIdFront;
-      const backFile = nextIdentity.governmentIdBack;
-      governmentIdPairSeq.current += 1;
-      setScreening((p) => ({ ...p, [otherSlot]: initialSlotState() }));
-
-      if (frontFile && backFile) {
-        screenGovernmentIdPair(frontFile, backFile, selectedGovernmentIdType);
-      } else {
-        if (file) screenSingleDocument(slot, file, selectedGovernmentIdType, seq);
-        if (nextIdentity[otherSlot]) {
-          screenSingleDocument(otherSlot, nextIdentity[otherSlot], selectedGovernmentIdType, otherSeq);
-        }
-      }
-      return;
-    }
-
-    if (file) screenSingleDocument(slot, file, selectedGovernmentIdType, seq);
-  };
-
-  const setIdFront = (file) => handleDocumentFile("governmentIdFront", file);
-  const setIdBack = (file) => handleDocumentFile("governmentIdBack", file);
-  const setIdentityPhoto = (file) => handleDocumentFile("identityPhoto", file);
 
   // Changing the email invalidates any in-flight or completed verification.
   const setEmailValue = (val) => {
@@ -938,23 +709,7 @@ export default function NewResidentRegistration() {
         if (idt.governmentIdType === "other" && !idt.governmentIdTypeOther.trim()) {
           errs.governmentIdTypeOther = "Please specify the type of government-issued ID.";
         }
-        const slotFiles = {
-          governmentIdFront: idt.governmentIdFront,
-          governmentIdBack: idt.governmentIdBack,
-          identityPhoto: idt.identityPhoto,
-        };
-        for (const slot of REQUIRED_DOCUMENT_SLOTS) {
-          if (!slotFiles[slot]) {
-            const missingMessages = {
-              governmentIdFront: "Upload the front of your government ID.",
-              governmentIdBack: "Upload the back of your government ID.",
-              identityPhoto: "Upload your identity photo holding the ID.",
-            };
-            errs[slot] = missingMessages[slot];
-          } else if (!isSlotEligible(screening[slot])) {
-            errs[slot] = blockingSlotError(screening[slot]);
-          }
-        }
+        if (!form.agreeDidit) errs.agreeDidit = "Consent is required to continue to Didit identity verification.";
       }
       if (!form.agreeReview) errs.agreeReview = "Please confirm your information for review to continue";
     }
@@ -995,14 +750,15 @@ export default function NewResidentRegistration() {
     const missingSlot = isMinorApplicant
       ? form.minorVerificationMethod === "student_id" && !form.identity.studentId
       : !isAdultApplicant
-        || REQUIRED_DOCUMENT_SLOTS.some((slot) => !form.identity[slot])
-        || Boolean(firstBlockingSlot(screening));
+        || !form.identity.governmentIdType
+        || !form.identity.identityNo.trim()
+        || !form.agreeDidit;
     if (missingSlot) {
       setErrors((prev) => ({
         ...prev,
         submit: isMinorApplicant
           ? "Upload your student ID or select the staff-approved alternative verification path."
-          : "Upload and complete screening for both ID sides and your identity photo before submitting.",
+          : "Choose your ID type, enter its number, and accept the Didit consent before submitting.",
       }));
       setStep(3);
       return;
@@ -1102,35 +858,27 @@ export default function NewResidentRegistration() {
         throw new Error('Registration failed. Please try again.');
       }
 
-      // Upload each identity document through the real upload endpoint. Each
-      // file becomes its own documents record with verification_status
-      // 'pending' (Uploaded → Pending Review). Status is never 'Verified' at
-      // upload time — only Health Supervisor review can set that. Any failed
-      // upload throws, so the form never falsely reports success.
+      if (isAdultApplicant) {
+        const didit = await startDiditIdentityVerification();
+        if (!didit?.url) throw new Error('Didit did not return a verification link. Please try again.');
+        window.location.assign(didit.url);
+        return;
+      }
+
+      // Minors retain the existing student-ID document path. Adult identity
+      // checks are handled by the Didit hosted flow above; KALUSAGAP does not
+      // collect or store adult ID/selfie images in this registration form.
       const uploads = isMinorApplicant
         ? (form.minorVerificationMethod === 'student_id' && idt.studentId
-          ? [{ slot: 'studentId', file: idt.studentId, documentType: 'student_id', label: 'your student ID', needsIdType: false }]
+          ? [{ slot: 'studentId', file: idt.studentId, documentType: 'student_id', label: 'your student ID' }]
           : [])
-        : [
-            idt.governmentIdFront && { slot: 'governmentIdFront', file: idt.governmentIdFront, documentType: SLOT_DOCUMENT_TYPE.governmentIdFront, label: 'the front of your government ID', needsIdType: true },
-            idt.identityPhoto && { slot: 'identityPhoto', file: idt.identityPhoto, documentType: SLOT_DOCUMENT_TYPE.identityPhoto, label: 'your identity photo', needsIdType: false },
-          ].filter(Boolean);
+        : [];
 
       for (const u of uploads) {
         const fd = new FormData();
         fd.append('file', u.file);
         fd.append('documentType', u.documentType);
         fd.append('residentId', resident.id);
-        if (u.needsIdType) {
-          fd.append('governmentIdType', idt.governmentIdType);
-          if (idt.governmentIdType === 'other' && idt.governmentIdTypeOther.trim()) {
-            fd.append('governmentIdTypeOther', idt.governmentIdTypeOther.trim());
-          }
-          if (u.documentType === SLOT_DOCUMENT_TYPE.governmentIdFront && idt.governmentIdBack) {
-            fd.append('governmentIdFront', idt.governmentIdFront);
-            fd.append('governmentIdBack', idt.governmentIdBack);
-          }
-        }
         const docResp = await postFormData('/resident-documents/upload', fd);
         if (!docResp?.document) {
           throw new Error(`We could not upload ${u.label}. Please go back and try again.`);
@@ -1139,27 +887,13 @@ export default function NewResidentRegistration() {
         // authenticity decision). The backend returns a resident-safe message;
         // a rejected upload keeps the resident on this step so they can replace
         // the file. Technical reason codes are never shown to residents.
-        const screening = docResp.document.screening;
-        const counterpartSlot = screening?.counterpartScreening
-          ? Object.keys(SLOT_DOCUMENT_TYPE).find(
-            (slot) => SLOT_DOCUMENT_TYPE[slot] === screening.counterpartScreening.documentType,
-          )
-          : null;
+        const screeningResult = docResp.document.screening;
         setScreening((previous) => ({
           ...previous,
-          [u.slot]: slotStateFromScreening(screening, screeningSeq.current[u.slot]),
-          ...(counterpartSlot ? {
-            [counterpartSlot]: slotStateFromScreening(
-              {
-                ...screening.counterpartScreening,
-                crossVerificationMessage: screening.counterpartScreening.crossVerificationMessage,
-              },
-              screeningSeq.current[counterpartSlot],
-            ),
-          } : {}),
+          [u.slot]: slotStateFromScreening(screeningResult),
         }));
-        if (screening?.status === 'automated_rejected') {
-          throw new Error(screening.message || 'The uploaded file does not meet the document requirements. Please upload a clear copy of your identification document.');
+        if (screeningResult?.status === 'automated_rejected') {
+          throw new Error(screeningResult.message || 'The uploaded file does not meet the document requirements. Please upload a clear copy of your identification document.');
         }
       }
 
@@ -1187,28 +921,8 @@ export default function NewResidentRegistration() {
       const backendMessage = typeof err?.message === 'string' ? err.message : '';
       const isGenericStatusOnly = /^Request failed with status/i.test(backendMessage);
 
-      // A 422 from the document upload path is the deterministic screening
-      // result: the file was rejected and the registration cannot proceed.
-      // Show the resident-safe message; never a technical reason code.
-      const rejectedPair = err?.payload?.details?.screening;
-      if (status === 422 && rejectedPair?.governmentIdFront && rejectedPair?.governmentIdBack) {
-        const front = rejectedPair.governmentIdFront;
-        const back = rejectedPair.governmentIdBack;
-        setScreening((previous) => ({
-          ...previous,
-          governmentIdFront: slotStateFromScreening(front, screeningSeq.current.governmentIdFront),
-          governmentIdBack: slotStateFromScreening(back, screeningSeq.current.governmentIdBack),
-        }));
-        setErrors((previous) => ({
-          ...previous,
-          submit: front.status === 'automated_rejected'
-            ? front.message
-            : back.message || 'One or both government ID images need to be replaced.',
-        }));
-        setStep(3);
-        setSubmitting(false);
-        return;
-      }
+      // Preserve any resident-safe file screening response on the minor
+      // student-ID path. Adult identity photos are captured by Didit instead.
       if (status === 422 && typeof err?.payload?.details?.screening?.message === 'string') {
         setErrors((prev) => ({ ...prev, submit: err.payload.details.screening.message }));
         setStep(3);
@@ -1222,13 +936,11 @@ export default function NewResidentRegistration() {
       } else if (status === 403) {
         message = "Your account is not authorized to submit this registration.";
       } else if (status === 404) {
-        message = "The registration or document-upload service is unavailable. No ID decision was made; contact support before trying to register again.";
+        message = "The registration or verification service is unavailable. Please try again or contact support.";
       } else if (status === 413) {
-        message = "An uploaded file exceeds the 10 MB limit. Replace it with a smaller file and retry.";
+        message = "The uploaded student ID exceeds the file size limit. Replace it with a smaller file and retry.";
       } else if (status === 415) {
-        message = isMinorApplicant
-          ? "The student ID file format is not supported. Use a PDF, JPG, or PNG."
-          : "An uploaded file format is not supported. Use a PDF, JPG, or PNG document, and a JPG or PNG identity photo.";
+        message = "The student ID file format is not supported. Use a PDF, JPG, or PNG.";
       } else if (status >= 500) {
         message = "The server returned an error while processing registration. This is not an ID decision; some registration data may already be saved. Please retry once, and contact support if the problem continues.";
       } else if (!status) {
@@ -1252,17 +964,19 @@ export default function NewResidentRegistration() {
 
   const meta = STEPS_META[step - 1];
 
-  // Submission is only enabled when every required document has been uploaded
-  // AND passed its own automated check. This is a UX guard; the backend
-  // independently rejects rejected/stale documents.
+  // Adult applicants submit the resident profile then continue to Didit's
+  // hosted identity flow. Minor applicants retain their existing document
+  // and staff-review path.
   const documentsSubmittable = isMinorApplicant
     ? form.minorVerificationMethod === "staff_alternative"
       || (form.minorVerificationMethod === "student_id" && Boolean(form.identity.studentId))
     : isAdultApplicant
-      && canSubmitDocuments(screening)
-      && REQUIRED_DOCUMENT_SLOTS.every((slot) => Boolean(form.identity[slot]));
+      && Boolean(form.identity.governmentIdType)
+      && Boolean(form.identity.identityNo.trim())
+      && (form.identity.governmentIdType !== "other" || Boolean(form.identity.governmentIdTypeOther.trim()))
+      && form.agreeDidit
+      && form.agreeReview;
   const canSubmit = documentsSubmittable && !submitting;
-  const blockingSlot = isAdultApplicant ? firstBlockingSlot(screening) : null;
 
   // When the applicant indicates they already have a barangay health record,
   // switch to the dedicated simplified activation flow. Rendered as a full
@@ -1776,7 +1490,7 @@ export default function NewResidentRegistration() {
                     {isMinorApplicant
                       ? "Upload a student ID for staff review, or request the staff-approved alternative verification path. Parent or guardian linking is optional."
                       : isAdultApplicant
-                        ? "Select a valid government-issued ID and upload its front and back plus an identity photo. A Health Supervisor reviews the submitted documents."
+                        ? "Enter your government ID details, then complete the secure Didit identity check after you submit your registration."
                         : "Enter a valid date of birth to see the verification requirements for your age."}
                   </p>
                 </InfoNote>
@@ -1944,60 +1658,27 @@ export default function NewResidentRegistration() {
                   )}
                 </div>
 
-                {/* 2 & 3. Government ID — Front / Back */}
-                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
-                  <SectionKicker className="mb-3.5">2. Government ID — Front &amp; Back</SectionKicker>
-                  <div className="space-y-4">
-                    <UploadComponent
-                      label="Government ID — Front"
-                      optional={false}
-                      file={form.identity.governmentIdFront}
-                      onFile={setIdFront}
-                      onRemove={() => setIdFront(null)}
-                      screening={screening.governmentIdFront}
-                      onRetry={() => retryDocumentScreening("governmentIdFront")}
+                <div className="rounded-xl border border-brand-blue/20 bg-brand-light/40 p-5">
+                  <SectionKicker className="mb-2.5">2. Secure identity check with Didit</SectionKicker>
+                  <p className="text-sm leading-relaxed text-slate-600">
+                    After you submit your registration, KALUSAGAP will open Didit’s secure verification page. Didit will guide you through capturing your ID and selfie; you do not need to upload those photos to KALUSAGAP.
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                    If Didit confirms your ID, liveness, and selfie match, your account is approved automatically. If a check fails or needs review, your account remains limited while authorized health personnel review your registration.
+                  </p>
+                  <label className="mt-4 flex cursor-pointer items-start gap-3 text-[12.5px] leading-relaxed text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={form.agreeDidit}
+                      onChange={(event) => {
+                        setForm((previous) => ({ ...previous, agreeDidit: event.target.checked }));
+                        setErrors((previous) => ({ ...previous, agreeDidit: "" }));
+                      }}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-blue focus:ring-brand-blue/30"
                     />
-                    {errors.governmentIdFront && (
-                      <p className="-mt-3 text-[11.5px] font-medium text-brand-danger">{errors.governmentIdFront}</p>
-                    )}
-                    <UploadComponent
-                      label="Government ID — Back"
-                      optional={false}
-                      file={form.identity.governmentIdBack}
-                      onFile={setIdBack}
-                      onRemove={() => setIdBack(null)}
-                      screening={screening.governmentIdBack}
-                      onRetry={() => retryDocumentScreening("governmentIdBack")}
-                    />
-                    {errors.governmentIdBack && (
-                      <p className="-mt-3 text-[11.5px] font-medium text-brand-danger">{errors.governmentIdBack}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* 3. Identity Photo */}
-                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
-                  <SectionKicker className="mb-3.5">3. Identity Photo</SectionKicker>
-                  <div className="mb-4 flex items-start gap-3 rounded-lg border border-brand-blue/15 bg-brand-light/40 px-3.5 py-3 text-[12px] leading-relaxed text-slate-500">
-                    <Camera className="mt-0.5 h-4 w-4 shrink-0 text-brand-blue" strokeWidth={1.9} />
-                    <p>
-                      Take a clear photo of yourself holding the same government ID uploaded above. The Health Supervisor
-                      will use it to confirm that the ID belongs to you.
-                    </p>
-                  </div>
-                  <UploadComponent
-                    label="Identity Photo (you holding your ID)"
-                    optional={false}
-                    file={form.identity.identityPhoto}
-                    onFile={setIdentityPhoto}
-                    onRemove={() => setIdentityPhoto(null)}
-                    accept=".png,.jpg,.jpeg"
-                    allowedExts={["png", "jpg", "jpeg"]}
-                    screening={screening.identityPhoto}
-                  />
-                  {errors.identityPhoto && (
-                    <p className="mt-1.5 text-[11.5px] font-medium text-brand-danger">{errors.identityPhoto}</p>
-                  )}
+                    <span>I consent to sharing my name and date of birth with Didit, and to Didit processing my government ID and face/selfie data to verify my identity.</span>
+                  </label>
+                  {errors.agreeDidit && <p className="mt-2 text-[12px] font-medium text-brand-danger">{errors.agreeDidit}</p>}
                 </div>
                   </>
                 ) : (
@@ -2019,7 +1700,7 @@ export default function NewResidentRegistration() {
                     <span>
                       {isMinorApplicant
                         ? "I confirm that the information I provided is accurate. I understand that my student ID or requested alternative verification and my registration will be reviewed by authorized staff before my resident record is approved."
-                        : "I confirm that the government ID and identity photo I uploaded belong to me and that the information I provided is accurate. I understand that my registration documents will be reviewed by the Health Supervisor before my account is approved."}
+                        : "I confirm that the information I provided is accurate. I understand that a successful Didit identity match can approve my account automatically, while failed or inconclusive checks may be reviewed by authorized health personnel."}
                     </span>
                   </label>
                   {errors.agreeReview && <p className="mt-3 text-[12px] font-medium text-brand-danger">{errors.agreeReview}</p>}
@@ -2054,11 +1735,9 @@ export default function NewResidentRegistration() {
                     : (GOVT_ID_LABEL[form.identity.governmentIdType] || "—")],
                   ["Government ID Number", form.identity.identityNo ? "••••••••••" : "—"],
                 ]} />
-                {/* Document status is tied to each file's OWN automated screening
-                    result, never a hardcoded "Uploaded — Pending Review". */}
                 <div className="overflow-hidden rounded-xl border border-slate-200">
                   <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-100/80 px-4 py-3">
-                    <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-ink">Document Status</p>
+                    <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-ink">{isMinorApplicant ? "Document Status" : "Identity Check"}</p>
                     <button
                       type="button"
                       onClick={() => goTo(3)}
@@ -2074,16 +1753,17 @@ export default function NewResidentRegistration() {
                         : <ReviewPlainRow label="Alternative path" value="Pending staff review" />
                     ) : (
                       <>
-                        <ReviewDocRow label="Government ID — Front" slot={screening.governmentIdFront} fileName={form.identity.governmentIdFront?.name} />
-                        <ReviewDocRow label="Government ID — Back" slot={screening.governmentIdBack} fileName={form.identity.governmentIdBack?.name} />
-                        <ReviewDocRow label="Identity Photo" slot={screening.identityPhoto} fileName={form.identity.identityPhoto?.name} />
+                        <ReviewPlainRow label="Government ID type" value={GOVT_ID_LABEL[form.identity.governmentIdType] || form.identity.governmentIdTypeOther || form.identity.governmentIdType} />
+                        <ReviewPlainRow label="Identity check" value="Didit hosted verification starts after registration submission" />
                       </>
                     )}
                   </div>
                 </div>
                 <ReviewBlock title="Verification" onEdit={() => goTo(3)} items={[
-                  ["Method", "Health Supervisor review"],
-                  ["Status", documentsSubmittable ? "Ready to submit for staff review" : "Complete the selected verification method before submitting."],
+                  ["Method", isAdultApplicant ? "Didit identity match; staff review if the result needs review" : "Health Supervisor review"],
+                  ["Status", documentsSubmittable
+                    ? (isAdultApplicant ? "Ready to register and start Didit identity verification" : "Ready to submit for staff review")
+                    : "Complete the selected verification method before submitting."],
                 ]} />
               </div>
             )}
@@ -2127,7 +1807,7 @@ export default function NewResidentRegistration() {
               <>
                 {!documentsSubmittable && (
                   <p className="mr-auto text-left text-[12px] leading-snug text-brand-danger">
-                    {blockingSlot ? blockingSlotError(screening[blockingSlot]) : "Upload all required documents before submitting."}
+                    {isAdultApplicant ? "Complete the ID details and Didit consent before submitting." : "Complete the selected verification method before submitting."}
                   </p>
                 )}
                 <button
@@ -2138,11 +1818,11 @@ export default function NewResidentRegistration() {
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Checking document...
+                      {isAdultApplicant ? "Starting Didit…" : "Checking document…"}
                     </>
                   ) : (
                     <>
-                      Submit Registration {documentsSubmittable && <Check className="h-4 w-4" strokeWidth={2.5} />}
+                      {isAdultApplicant ? "Submit & Verify with Didit" : "Submit Registration"} {documentsSubmittable && <Check className="h-4 w-4" strokeWidth={2.5} />}
                     </>
                   )}
                 </button>

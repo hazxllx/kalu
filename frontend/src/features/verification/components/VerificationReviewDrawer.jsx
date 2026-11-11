@@ -9,6 +9,7 @@ import ImageLightbox from "@/features/verification/components/ImageLightbox";
 import { DecisionButton, DecisionButtonRow, DECISION_TEXTAREA_CLASS } from "@/features/verification/components/DecisionButtons";
 import { REJECTION_REASONS } from "@/services/local/verifications";
 import {
+  fetchResidentDiditEvidence,
   fetchResidentDocuments,
   reviewMinorAlternative,
   reviewResidentDocument,
@@ -29,6 +30,20 @@ const DOC_LABELS = {
 const docLabel = (doc) => DOC_LABELS[doc?.documentType] || doc?.fileName || doc?.documentType || "Document";
 
 const isImageDoc = (doc) => String(doc?.mimeType || "").startsWith("image/");
+
+const diditImagesFromEvidence = (result) => {
+  const images = [];
+  for (const item of result?.evidence?.idVerifications || []) {
+    const type = item.documentType || "Identity document";
+    for (const [key, label] of [["frontImage", "Front"], ["backImage", "Back"], ["portraitImage", "ID portrait"]]) {
+      if (item[key]) images.push({ id: `${item.id}-${key}`, title: `${type} · ${label}`, url: item[key] });
+    }
+  }
+  for (const item of result?.evidence?.livenessChecks || []) {
+    if (item.referenceImage) images.push({ id: `${item.id}-selfie`, title: "Didit selfie / liveness image", url: item.referenceImage });
+  }
+  return images;
+};
 
 // Staff-facing labels for the deterministic automated screening result. The
 // automated check is ADVISORY: "Rejected" here never blocks a staff member from
@@ -139,6 +154,9 @@ export default function VerificationReviewDrawer({
   const [documents, setDocuments] = useState([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState("");
+  const [diditEvidence, setDiditEvidence] = useState(null);
+  const [diditLoading, setDiditLoading] = useState(false);
+  const [diditError, setDiditError] = useState("");
   const [guardianLinks, setGuardianLinks] = useState([]);
   const [guardianLinksError, setGuardianLinksError] = useState("");
   const [reviewReason, setReviewReason] = useState("");
@@ -157,9 +175,20 @@ export default function VerificationReviewDrawer({
   // mid-review can recover without reopening the drawer (parity with the staff
   // account approval drawer).
   const refreshDocumentUrl = useCallback(async (documentId) => {
+    if (String(documentId).startsWith("didit-")) {
+      const result = await fetchResidentDiditEvidence(verification.id);
+      setDiditEvidence(result);
+      return diditImagesFromEvidence(result).find((image) => image.id === documentId)?.url || null;
+    }
     const docs = await fetchResidentDocuments(verification.id);
     setDocuments(docs);
     return docs.find((d) => d.id === documentId)?.url || null;
+  }, [verification.id]);
+
+  const loadDiditEvidence = useCallback(async () => {
+    const result = await fetchResidentDiditEvidence(verification.id);
+    setDiditEvidence(result);
+    return result;
   }, [verification.id]);
 
   // Reset per-resident state and fetch the SELECTED resident's documents only.
@@ -173,12 +202,21 @@ export default function VerificationReviewDrawer({
     setLightboxIndex(null);
     setDocsLoading(true);
     setDocsError("");
+    setDiditEvidence(null);
+    setDiditError("");
+    if (!verification?.isMinor) {
+      setDiditLoading(true);
+      fetchResidentDiditEvidence(residentId)
+        .then((result) => { if (active) setDiditEvidence(result); })
+        .catch((error) => { if (active) setDiditError(error?.message || "Could not retrieve Didit evidence."); })
+        .finally(() => { if (active) setDiditLoading(false); });
+    }
     fetchResidentDocuments(residentId)
       .then((docs) => { if (active) setDocuments(docs); })
       .catch(() => { if (active) setDocsError("Could not load the submitted documents."); })
       .finally(() => { if (active) setDocsLoading(false); });
     return () => { active = false; };
-  }, [verification?.id]);
+  }, [verification?.id, verification?.isMinor]);
 
   useEffect(() => {
     let active = true;
@@ -189,9 +227,13 @@ export default function VerificationReviewDrawer({
     return () => { active = false; };
   }, [verification?.id, verification?.isMinor]);
 
+  const diditImages = useMemo(() => diditImagesFromEvidence(diditEvidence), [diditEvidence]);
   const imageDocs = useMemo(
-    () => documents.filter(isImageDoc).map((doc) => ({ id: doc.id, title: docLabel(doc), url: doc.url })),
-    [documents],
+    () => [
+      ...documents.filter(isImageDoc).map((doc) => ({ id: doc.id, title: docLabel(doc), url: doc.url })),
+      ...diditImages,
+    ],
+    [documents, diditImages],
   );
 
   const openLightbox = useCallback((doc) => {
@@ -310,6 +352,7 @@ export default function VerificationReviewDrawer({
 
   const status = verification.status || "pending";
   const decided = status !== "pending";
+  const diditAutoApproved = diditEvidence?.registrationApproved === true;
 
   return (
     <ReviewModal
@@ -332,6 +375,12 @@ export default function VerificationReviewDrawer({
           <InfoItem label="Contact Number" value={verification.contactNumber} />
           <InfoItem label="Barangay" value={verification.barangay} />
           <InfoItem label="Registration Date" value={formatDate(verification.registeredDate)} />
+          {!verification.isMinor && (
+            <InfoItem
+              label="Didit identity check"
+              value={`${String(verification.identityVerificationStatus || "unverified").replace(/_/g, " ")}${verification.identityVerifiedAt ? ` · ${formatDate(verification.identityVerifiedAt)}` : ""}`}
+            />
+          )}
           <InfoItem label="Address" value={verification.address} full />
           <InfoItem label="Reference Number" value={verification.ref} />
           {verification.isMinor && (
@@ -397,8 +446,8 @@ export default function VerificationReviewDrawer({
         ) : documents.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-brand-border bg-brand-bg px-4 py-8 text-center">
             <FileText className="h-8 w-8 text-brand-gray" strokeWidth={1.5} />
-            <p className="text-sm font-medium text-brand-ink">No documents were uploaded</p>
-            <p className="text-xs text-brand-gray">This resident has no submitted documents to review.</p>
+            <p className="text-sm font-medium text-brand-ink">No files uploaded directly to KALUSAGAP</p>
+            <p className="text-xs text-brand-gray">Didit identity evidence is retrieved separately below.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -459,6 +508,71 @@ export default function VerificationReviewDrawer({
         )}
         {reviewError && <p className="mt-2 text-xs text-rose-700">{reviewError}</p>}
       </ModalSection>
+
+      {!verification.isMinor && (
+        <ModalSection label="Didit Identity Evidence">
+          {diditLoading ? (
+            <div className="flex items-center gap-2 rounded-xl bg-brand-bg p-3 text-sm text-brand-gray">
+              <Loader2 className="h-4 w-4 animate-spin" /> Retrieving Didit decision and secure evidence…
+            </div>
+          ) : diditError ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p>{diditError}</p>
+              <button type="button" onClick={() => {
+                setDiditLoading(true);
+                setDiditError("");
+                loadDiditEvidence().catch((error) => setDiditError(error?.message || "Could not retrieve Didit evidence."))
+                  .finally(() => setDiditLoading(false));
+              }} className="mt-2 font-semibold underline">Retry Didit evidence</button>
+            </div>
+          ) : (
+            <>
+              <div className="mb-3 rounded-xl border border-brand-border bg-brand-bg p-3 text-sm">
+                <p className="font-semibold text-brand-ink">
+                  Didit status: {diditEvidence?.diditStatus || "Not Started"}
+                </p>
+                {diditEvidence?.decision?.idVerifications?.map((item, index) => (
+                  <p key={`didit-id-result-${index}`} className="mt-1 text-xs text-brand-gray">
+                    {item.documentType || "Identity document"}: {item.status || "No result"}
+                    {item.verificationMethod ? ` · ${item.verificationMethod.replace(/_/g, " ")}` : ""}
+                  </p>
+                ))}
+                {diditEvidence?.decision?.livenessChecks?.map((item, index) => (
+                  <p key={`didit-live-result-${index}`} className="mt-1 text-xs text-brand-gray">
+                    Liveness: {item.status || "No result"}{item.score != null ? ` · score ${item.score}` : ""}
+                  </p>
+                ))}
+                {diditEvidence?.decision?.faceMatches?.map((item, index) => (
+                  <p key={`didit-face-result-${index}`} className="mt-1 text-xs text-brand-gray">
+                    Face match: {item.status || "No result"}{item.score != null ? ` · score ${item.score}` : ""}
+                  </p>
+                ))}
+              </div>
+              {diditImages.length ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {diditImages.map((image) => (
+                    <DocumentPreviewCard
+                      key={image.id}
+                      doc={{ id: image.id, title: image.title, filename: image.title, mimeType: "image/jpeg", url: image.url, statusLabel: diditEvidence?.diditStatus || "Didit" }}
+                      onEnlarge={openLightbox}
+                      onRefreshUrl={refreshDocumentUrl}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-xl border border-dashed border-brand-border bg-brand-bg p-4 text-sm text-brand-gray">
+                  {diditEvidence?.diditStatus && diditEvidence.diditStatus !== "Not Started"
+                    ? "Didit has no image evidence available for this session yet. If the check just completed, retry after the result finishes syncing."
+                    : "No Didit verification session is recorded for this resident yet."}
+                </p>
+              )}
+              <p className="mt-2 text-[11px] leading-relaxed text-brand-gray">
+                Evidence links are retrieved from Didit when this review is opened and expire automatically. KALUSAGAP does not store the ID images or selfie.
+              </p>
+            </>
+          )}
+        </ModalSection>
+      )}
 
       {verification.isMinor && (
         <ModalSection label="Parent / Guardian Requests">
@@ -564,6 +678,16 @@ export default function VerificationReviewDrawer({
         </ModalSection>
       )}
 
+      {diditAutoApproved && (
+        <ModalSection label="Automatic Didit Approval">
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm leading-relaxed text-emerald-900">
+            {diditAutoApproved
+              ? "Didit confirmed the identity document, liveness, and selfie face match. The resident registration has been automatically approved and the account activated."
+              : "Didit confirmed the identity document, liveness, and selfie face match. The identity check passed, but the registration still needs staff review because its current status or required resident details need attention."}
+          </p>
+        </ModalSection>
+      )}
+
       {history.length > 0 && (
         <ModalSection label="Verification History">
           <div className="mb-3 flex items-center gap-2">
@@ -586,7 +710,7 @@ export default function VerificationReviewDrawer({
       )}
 
       {/* Decision actions */}
-      {!decided && (
+      {!decided && !diditAutoApproved && (
         <ModalSection label="Verification Decision">
           {!mode && (
             <DecisionButtonRow columns={3}>

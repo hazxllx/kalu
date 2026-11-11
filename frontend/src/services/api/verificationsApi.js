@@ -57,6 +57,13 @@ export const fetchResidentDocuments = async (residentId) => {
   return payload?.documents || [];
 };
 
+// Staff: fetch the latest Didit decision and short-lived evidence URLs. The
+// backend enforces reviewer role and barangay/municipality scope.
+export const fetchResidentDiditEvidence = async (residentId) => {
+  const payload = await api.get(`/verifications/${encodeURIComponent(residentId)}/didit-evidence`);
+  return payload?.diditEvidence || null;
+};
+
 export const fetchMyDocuments = async (residentId) => {
   const payload = await api.get(`/resident-documents/me/list?residentId=${encodeURIComponent(residentId)}`);
   return payload?.documents || [];
@@ -110,8 +117,17 @@ export const fetchMyVerification = async () => {
   return {
     hasResidentRecord: Boolean(payload?.hasResidentRecord),
     verification: payload?.verification || null,
+    identityVerification: payload?.identityVerification || null,
     history: payload?.history || [],
   };
+};
+
+export const startDiditIdentityVerification = async () =>
+  api.post('/verifications/didit/session', { consent: true });
+
+export const syncMyDiditResult = async () => {
+  const payload = await api.post('/verifications/didit/sync', {});
+  return payload?.identityVerification || null;
 };
 
 export const resubmitOwnVerification = async (id) =>
@@ -131,5 +147,7 @@ export default {
   requestResubmission,
   submitVerificationDecision,
   fetchMyVerification,
+  startDiditIdentityVerification,
+  syncMyDiditResult,
   resubmitOwnVerification,
 };

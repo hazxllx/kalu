@@ -93,6 +93,12 @@ const env = {
   ))) * 1000,
   otpPepper: process.env.OTP_PEPPER || '',
 
+  // Didit credentials are backend-only. Residents are redirected to Didit's
+  // hosted verification flow; keys must never reach the browser.
+  diditApiKey: process.env.DIDIT_API_KEY || '',
+  diditWebhookSecret: process.env.DIDIT_WEBHOOK_SECRET || '',
+  diditWorkflowId: process.env.DIDIT_WORKFLOW_ID || '',
+
   // --- Local data store ------------------------------------------------------
   // Used only while Supabase is not configured (see repository). Holds the
   // JSON file that persists residents, submissions and referrals so the

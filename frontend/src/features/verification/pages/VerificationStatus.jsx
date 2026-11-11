@@ -1,5 +1,5 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { LogIn } from "lucide-react";
 
@@ -17,6 +17,9 @@ import VerificationBanner from "@/features/verification/components/VerificationB
  */
 export default function VerificationStatus() {
   const { user, isAuthenticated, isLoadingAuth } = useAuth();
+  const location = useLocation();
+  const diditReturned = new URLSearchParams(location.search).has("verificationSessionId")
+    || new URLSearchParams(location.search).get("didit") === "complete";
 
   const dashboardPath =
     user?.role === ROLE.RESIDENT
@@ -45,6 +48,11 @@ export default function VerificationStatus() {
           </p>
 
           <div className="mt-6">
+            {diditReturned && (
+              <div className="mb-4 rounded-xl border border-brand-blue/20 bg-brand-light/40 px-4 py-3 text-sm leading-relaxed text-slate-700">
+                You’ve returned from Didit. Your registration has already been submitted, so you do not need to fill out the sign-up form again. If the identity checks passed, your account may already be approved; otherwise, authorized health personnel can review your registration. Refresh the status if Didit’s result is still syncing.
+              </div>
+            )}
             {isAuthenticated ? (
               <VerificationBanner />
             ) : (

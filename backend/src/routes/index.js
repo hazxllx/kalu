@@ -13,6 +13,7 @@ import observabilityRoutes from './observability.routes.js';
 import householdsRoutes from './households.routes.js';
 import analyticsRoutes from './analytics.routes.js';
 import verificationsRoutes from './verifications.routes.js';
+import diditWebhookRoutes from './diditWebhook.routes.js';
 import documentsRoutes from './documents.routes.js';
 import transferRoutes from './transfer.routes.js';
 import consultationsRoutes from './consultations.routes.js';
@@ -51,6 +52,7 @@ const router = Router();
 
 // Public
 router.use('/health', healthRoutes);
+router.use('/webhooks/didit', diditWebhookRoutes);
 
 // Authentication
 router.use('/auth', authRoutes);
