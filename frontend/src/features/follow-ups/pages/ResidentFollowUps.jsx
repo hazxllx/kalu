@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import TablePagination from "@/components/tables/TablePagination";
 import { residentFollowUpsApi } from "@/services/api";
 import { ScheduleDetailModal } from "../components/ScheduleCalendarViews";
@@ -134,21 +135,6 @@ export default function ResidentFollowUps() {
     } finally { setBusy(false); }
   };
 
-  const StatCard = ({ icon: Icon, tone, label, value, hint }) => (
-    <Card className="p-5">
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${tone}`}>
-          <Icon className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="text-sm text-brand-gray">{label}</p>
-          <p className="text-2xl font-semibold text-brand-ink mt-1">{value}</p>
-        </div>
-      </div>
-      <p className="text-xs text-brand-gray">{hint}</p>
-    </Card>
-  );
-
   return (
     <>
       <PageHeader
@@ -157,12 +143,12 @@ export default function ResidentFollowUps() {
         subtitle="Review the follow-ups your health team scheduled for you, and confirm or reject the ones that need your response."
       />
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard icon={AlertCircle} tone="bg-amber-100 text-amber-700" label="Action Required" value={stats.actionRequired} hint="Awaiting your response" />
-        <StatCard icon={CalendarClock} tone="bg-brand-blue/10 text-brand-blue" label="Upcoming" value={stats.upcoming} hint="Confirmed / scheduled visits" />
-        <StatCard icon={CheckCircle2} tone="bg-brand-green/10 text-brand-green" label="Completed" value={stats.completed} hint="Completed visits" />
-        <StatCard icon={XCircle} tone="bg-brand-danger/10 text-brand-danger" label="Cancelled" value={stats.cancelled} hint="Rejected / cancelled" />
-      </div>
+      <KpiHorizontal count={4} className="mb-6">
+        <KpiHorizontal.Item label="ACTION REQUIRED" value={stats.actionRequired} tone="amber" description="Awaiting your response" />
+        <KpiHorizontal.Item label="UPCOMING" value={stats.upcoming} tone="blue" description="Confirmed / scheduled visits" />
+        <KpiHorizontal.Item label="COMPLETED" value={stats.completed} tone="green" description="Completed visits" />
+        <KpiHorizontal.Item label="CANCELLED" value={stats.cancelled} tone="red" description="Rejected / cancelled" />
+      </KpiHorizontal>
 
       <Card className="p-6">
         <h3 className="font-semibold text-brand-ink mb-4">Your Follow-ups</h3>

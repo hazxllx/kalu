@@ -1,7 +1,7 @@
 import React, { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Plus, FileHeart, Send, CalendarCheck, ClipboardList } from "lucide-react";
@@ -37,12 +37,12 @@ export default function MidwifeDashboard() {
   const services = useAuthorizedData(serviceLoad);
   const metrics = overview.data?.metrics;
   const midwifeStats = metrics ? [
-    { label: "Registered Residents", value: metricValue(metrics.totalResidents), icon: "Users" },
-    { label: "Consultations This Month", value: metricValue(metrics.consultationsThisMonth), icon: "Stethoscope" },
-    { label: "Pending Referrals", value: metricValue(metrics.pendingReferrals), icon: "Send" },
-    { label: "Active Follow-ups", value: metricValue(metrics.activeFollowUps), icon: "CalendarCheck" },
-    { label: "Active Maternal Cases", value: metricValue(metrics.activeMaternalCases), icon: "Heart" },
-    { label: "Immunization Records", value: metricValue(metrics.immunizationRecords), icon: "Syringe" },
+    { label: "Registered Residents", value: metricValue(metrics.totalResidents), icon: "Users", tone: "blue" },
+    { label: "Consultations This Month", value: metricValue(metrics.consultationsThisMonth), icon: "Stethoscope", tone: "green" },
+    { label: "Pending Referrals", value: metricValue(metrics.pendingReferrals), icon: "Send", tone: "amber" },
+    { label: "Active Follow-ups", value: metricValue(metrics.activeFollowUps), icon: "CalendarCheck", tone: "indigo" },
+    { label: "Active Maternal Cases", value: metricValue(metrics.activeMaternalCases), icon: "Heart", tone: "red" },
+    { label: "Immunization Records", value: metricValue(metrics.immunizationRecords), icon: "Syringe", tone: "slate" },
   ] : [];
   const healthServices = services.data || [];
   const firstName = (user?.name || "").trim().split(" ")[0];
@@ -54,9 +54,9 @@ export default function MidwifeDashboard() {
     <>
       <PageHeader crumbs={["Dashboard"]} title={welcome} subtitle="Authorized barangay health records and assigned service activity." />
       {overview.loading ? <SkeletonStatGrid count={6} /> : overview.error ? <ErrorState message={overview.error} onRetry={overview.refresh} /> : null}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 mb-6">
-        {midwifeStats.map((s, i) => <StatCard key={s.label} {...s} index={i} />)}
-      </div>
+      <KpiHorizontal count={6} className="mb-6">
+        {midwifeStats.map((s, i) => <KpiHorizontal.Item key={s.label} label={s.label.toUpperCase()} value={s.value} tone={s.tone} description="" />)}
+      </KpiHorizontal>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         <Card className="p-4 sm:p-6 lg:col-span-2">

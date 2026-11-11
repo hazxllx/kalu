@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 import PageHeader from "@/components/common/PageHeader";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import { Card } from "@/components/common/Card";
 import { SkeletonList } from "@/components/common/Skeleton";
 import { usersApi, auditTrailApi, systemLogsApi, api } from "@/services/api";
@@ -190,13 +190,13 @@ export default function AdminDashboard() {
       icon: "ShieldAlert",
       label: "Pending Activation",
       value: fmt(counts.pending),
-      tone: "yellow",
+      tone: "amber",
     },
     {
       icon: "Lock",
       label: "Disabled Accounts",
       value: fmt(counts.disabled),
-      tone: "danger",
+      tone: "red",
     },
   ];
 
@@ -266,15 +266,16 @@ export default function AdminDashboard() {
         </Card>
       )}
 
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <KpiHorizontal count={4} className="mb-6">
         {stats.map((stat, index) => (
-          <StatCard
+          <KpiHorizontal.Item
             key={stat.label}
-            {...stat}
-            index={index}
+            label={stat.label.toUpperCase()}
+            value={stat.value}
+            tone={stat.tone}
           />
         ))}
-      </div>
+      </KpiHorizontal>
 
       <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         <Card className="p-4 sm:p-6 lg:col-span-2">

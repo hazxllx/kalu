@@ -4,7 +4,7 @@ import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "framer-
 import { ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Download, MapPin, Send, Stethoscope, UserRound } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card } from "@/components/common/Card";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import StatusBadge from "@/components/common/StatusBadge";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
@@ -170,11 +170,11 @@ export default function HealthSupervisorDashboard() {
   const performance = followUpPerformance(followUps.data, periodRange, today);
   const metricValue = (allowed, source, value) => !allowed ? "No access" : source.loading ? "Loading" : source.error ? null : value ?? null;
   const statistics = [
-    { label: "Residents Monitored", value: metricValue(canAnalytics, overview, overview.data?.metrics.totalResidents), description: "Registered residents in your barangay", tone: "accent", href: canResidents ? `${BASE}/residents` : null },
-    { label: "Active Health Cases", value: metricValue(canAnalytics, currentCases, currentCases.data?.summary.activeCases), description: "Open consultation and TB records", tone: "blue", href: canConsultations ? `${BASE}/consultations` : null },
-    { label: "High-Risk Residents", value: metricValue(canAnalytics, overview, overview.data?.metrics.residentRisk.high), description: "Latest recorded risk assessments", tone: "danger", href: canResidents ? `${BASE}/residents?risk=High` : null },
-    { label: "Pending Referrals", value: metricValue(canAnalytics, overview, overview.data?.metrics.pendingReferrals), description: "Awaiting receiving action", tone: "yellow", href: canOpenReferrals ? `${BASE}/referrals?status=Pending` : null },
-    { label: "Overdue Follow-ups", value: metricValue(canFollowUps, followUps, followUps.data?.filter((row) => isOverdueFollowUp(row, today)).length), description: "Open follow-ups past their due date", tone: "danger", href: canFollowUps ? `${BASE}/followups?status=Overdue` : null },
+    { label: "Residents Monitored", value: metricValue(canAnalytics, overview, overview.data?.metrics.totalResidents), description: "Registered residents in your barangay", tone: "blue", href: canResidents ? `${BASE}/residents` : null },
+    { label: "Active Health Cases", value: metricValue(canAnalytics, currentCases, currentCases.data?.summary.activeCases), description: "Open consultation and TB records", tone: "green", href: canConsultations ? `${BASE}/consultations` : null },
+    { label: "High-Risk Residents", value: metricValue(canAnalytics, overview, overview.data?.metrics.residentRisk.high), description: "Latest recorded risk assessments", tone: "red", href: canResidents ? `${BASE}/residents?risk=High` : null },
+    { label: "Pending Referrals", value: metricValue(canAnalytics, overview, overview.data?.metrics.pendingReferrals), description: "Awaiting receiving action", tone: "amber", href: canOpenReferrals ? `${BASE}/referrals?status=Pending` : null },
+    { label: "Overdue Follow-ups", value: metricValue(canFollowUps, followUps, followUps.data?.filter((row) => isOverdueFollowUp(row, today)).length), description: "Open follow-ups past their due date", tone: "red", href: canFollowUps ? `${BASE}/followups?status=Overdue` : null },
   ];
   const intro = { hidden: { opacity: 0, y: reducedMotion ? 0 : 7 }, visible: { opacity: 1, y: 0, transition: { duration: reducedMotion ? 0 : 0.28 } } };
 
@@ -197,7 +197,7 @@ export default function HealthSupervisorDashboard() {
       }
     />
 
-    <motion.section className="hs-statistics" aria-label="Operational statistics" variants={intro}><div className="hs-statistics-strip">{statistics.map((stat) => <StatCard key={stat.label} variant="ledger" animateValue label={stat.label} value={stat.value} description={stat.description} tone={stat.tone} href={stat.href} />)}</div>{(overview.error || currentCases.error) && <SourceErrors errors={[...(overview.error ? [{ label: "Operational statistics", message: overview.error, retry: overview.refresh }] : []), ...(currentCases.error ? [{ label: "Active cases", message: currentCases.error, retry: currentCases.refresh }] : [])]} />}</motion.section>
+    <motion.section className="hs-statistics" aria-label="Operational statistics" variants={intro}><KpiHorizontal count={5}>{statistics.map((stat) => <KpiHorizontal.Item key={stat.label} label={stat.label.toUpperCase()} value={stat.value} description={stat.description} tone={stat.tone} />)}</KpiHorizontal>{(overview.error || currentCases.error) && <SourceErrors errors={[...(overview.error ? [{ label: "Operational statistics", message: overview.error, retry: overview.refresh }] : []), ...(currentCases.error ? [{ label: "Active cases", message: currentCases.error, retry: currentCases.refresh }] : [])]} />}</motion.section>
 
     {!assignedBarangay ? <Card><ErrorState compact title="Barangay assignment unavailable" message="Refresh your account information before opening community records." onRetry={refreshProfile} retryLabel="Refresh Account" /></Card> : <>
       <motion.section className="hs-quick-actions" aria-labelledby="quick-actions-heading" variants={intro}><h2 id="quick-actions-heading" className="hs-eyebrow">Quick Actions</h2><div>

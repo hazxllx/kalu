@@ -341,7 +341,7 @@ export default function Immunization() {
   return (
     <>
       <PageHeader
-        crumbs={["Immunization"]}
+        crumbs={["Health Operations", "Records", "Immunization"]}
         title="Immunization"
         subtitle={
           assignedBarangay

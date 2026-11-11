@@ -128,7 +128,7 @@ export default function CertificateComposer() {
   if (!AUTHORIZED_ROLES.includes(user?.role)) {
     return (
       <>
-        <PageHeader crumbs={["Medical Certificates"]} title="Medical Certificate" subtitle="Prepare, preview, and print an official medical certificate." />
+        <PageHeader crumbs={user?.role === "phn" ? ["Documents & Reports", "Medical Certificates"] : ["Medical Certificates"]} title="Medical Certificate" subtitle="Prepare, preview, and print an official medical certificate." />
         <Card className="p-10 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-danger/10">
             <ShieldAlert className="h-7 w-7 text-brand-danger" />
@@ -373,7 +373,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
   return (
     <>
       <PageHeader
-        crumbs={["Medical Certificates", isRequester ? "Request Certificate" : "Issue Certificate"]}
+        crumbs={user?.role === "phn" ? ["Documents & Reports", "Medical Certificates", isRequester ? "Request Certificate" : "Issue Certificate"] : ["Medical Certificates", isRequester ? "Request Certificate" : "Issue Certificate"]}
         title={isRequester ? "Medical Certificate Request" : "Medical Certificate"}
         subtitle={
           isRequester

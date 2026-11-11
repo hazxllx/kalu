@@ -298,11 +298,12 @@ export default function NewResidentRegistration() {
   }, [resendIn]);
 
   // Temporary random password used to trigger Supabase's Confirm Signup email.
-  // Stored in sessionStorage (not localStorage) only until the resident's real
-  // password is set at submission. Never rendered or logged.
-  const tempPasswordRef = useRef(
-    typeof sessionStorage !== "undefined" ? sessionStorage.getItem("pendingSignupTempPassword") || "" : ""
-  );
+  // Kept in memory only (not persisted to browser storage) for security.
+  // The resident's real password is set after OTP verification at submission.
+  // Never rendered or logged.
+  // SECURITY NOTE: If the user refreshes or closes the tab during registration,
+  // they will need to restart the registration process from the beginning.
+  const tempPasswordRef = useRef("");
 
   // Session returned by the successful email OTP verification. It is real Supabase
   // session state — never fake/local verification state.
@@ -348,10 +349,33 @@ export default function NewResidentRegistration() {
         // one is used; the resident's real password is set after OTP verification
         // (via updateUser) before the registration is submitted. No fake OTP is
         // ever created — the code always comes from Supabase Auth.
-        const tempPassword = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}K${Math.floor(Math.random() * 10)}`;
-        // Held only in sessionStorage until the resident's real password is set
-        // at submission. It never appears in the DOM, logs, or network payloads.
-        sessionStorage.setItem("pendingSignupTempPassword", tempPassword);
+        
+        // SECURITY FIX (FE-01b): Generate cryptographically secure random password
+        // CORRECTED (Phase 5A.2): Use crypto.getRandomValues() exclusively, no Math.random()
+        let tempPassword;
+        try {
+          // Use Web Crypto API for cryptographically secure random generation
+          const array = new Uint8Array(20);
+          crypto.getRandomValues(array);
+          // Convert entire password from secure random bytes
+          // Base36 encoding + uppercase letter for complexity requirement
+          tempPassword = Array.from(array)
+            .map(byte => byte.toString(36).padStart(2, '0'))
+            .join('')
+            .slice(0, 22) + 'K' + array[19].toString(10);
+        } catch (cryptoError) {
+          // If crypto is unavailable (non-secure context), fail gracefully
+          // DO NOT fall back to Math.random()
+          console.error('[kalusagap/registration] crypto.getRandomValues unavailable:', cryptoError);
+          setSendError("Registration requires a secure connection (HTTPS). Please ensure you are accessing the site securely or contact the RHU.");
+          setEmailPhase("idle");
+          signupInFlightRef.current = false;
+          return;
+        }
+        
+        // SECURITY FIX (FE-01a): Held only in memory (not persisted to browser storage).
+        // This means users must keep the registration tab open to complete the process.
+        // The password never appears in the DOM, logs, network payloads, or browser storage.
         tempPasswordRef.current = tempPassword;
         const { data, error } = await supabase.auth.signUp({
           email: normalizedEmail,
@@ -365,7 +389,6 @@ export default function NewResidentRegistration() {
         });
         const responseIssue = signupResponseIssue({ data, error, email: normalizedEmail });
         if (responseIssue === "duplicate_email") {
-          sessionStorage.removeItem("pendingSignupTempPassword");
           tempPasswordRef.current = "";
           setEmailPhase("idle");
           setEmailDuplicate(true);
@@ -380,7 +403,6 @@ export default function NewResidentRegistration() {
           // account. Do not claim the email is registered; do not create a
           // second account. Direct the applicant to the RHU without exposing
           // any account details.
-          sessionStorage.removeItem("pendingSignupTempPassword");
           tempPasswordRef.current = "";
           setEmailPhase("idle");
           setSendError(
@@ -389,7 +411,6 @@ export default function NewResidentRegistration() {
           return;
         }
         if (responseIssue === "rate_limited") {
-          sessionStorage.removeItem("pendingSignupTempPassword");
           tempPasswordRef.current = "";
           setEmailPhase("idle");
           const retry = rateLimitRetrySeconds(error) || 60;
@@ -418,7 +439,6 @@ export default function NewResidentRegistration() {
       const duplicateEmail = errClass === "duplicate_email";
       setEmailPhase(duplicateEmail ? "idle" : (isResend ? "sent" : "idle"));
       if ((duplicateEmail || errClass === "profile_conflict") && !isResend) {
-        sessionStorage.removeItem("pendingSignupTempPassword");
         tempPasswordRef.current = "";
       }
       if (errClass === "rate_limited") {
@@ -1083,7 +1103,7 @@ export default function NewResidentRegistration() {
       if (!session) {
         throw new Error('Your email could not be used to sign in. Please verify your email and try again.');
       }
-      sessionStorage.removeItem('pendingSignupTempPassword');
+      // Clear temporary password from memory (defensive cleanup, not from storage)
       tempPasswordRef.current = '';
 
       // The Supabase account was created in Step 2 with a temporary password

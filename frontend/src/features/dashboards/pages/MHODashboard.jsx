@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Map, Users, Stethoscope, Send, ShieldAlert, Activity, RefreshCw, AlertTriangle } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import { referralsApi, followUpsApi } from "@/services/api";
 import { municipalSubmissionsApi } from "@/services/api/municipalSubmissionsApi";
 import {
@@ -230,11 +231,11 @@ export default function MHODashboard() {
 
   const statValue = (status, value) => status.loading ? "…" : status.error ? "Unavailable" : value;
   const statCards = [
-    { icon: Map, tone: "bg-brand-blue/10 text-brand-blue", label: "Total Barangays", value: statValue(mapStatus, stats.totalBarangays), status: mapStatus },
-    { icon: Users, tone: "bg-brand-accent/10 text-brand-accent", label: "Registered Residents", value: statValue(mapStatus, stats.totalResidents ?? "Unavailable"), status: mapStatus },
-    { icon: Stethoscope, tone: "bg-brand-green/10 text-brand-green", label: "Consultations (This Month)", value: statValue(earlyWarningStatus, stats.consultationsThisMonth), status: earlyWarningStatus },
-    { icon: Send, tone: "bg-brand-yellow/15 text-[#B07E00]", label: "Total Referrals", value: statValue(referralsStatus, stats.totalReferrals), status: referralsStatus },
-    { icon: ShieldAlert, tone: "bg-brand-danger/10 text-brand-danger", label: "High-Risk Residents", value: statValue(mapStatus, stats.highRisk ?? "Unavailable"), status: mapStatus },
+    { icon: Map, tone: "blue", label: "Total Barangays", value: statValue(mapStatus, stats.totalBarangays), status: mapStatus },
+    { icon: Users, tone: "blue", label: "Registered Residents", value: statValue(mapStatus, stats.totalResidents ?? "Unavailable"), status: mapStatus },
+    { icon: Stethoscope, tone: "green", label: "Consultations (This Month)", value: statValue(earlyWarningStatus, stats.consultationsThisMonth), status: earlyWarningStatus },
+    { icon: Send, tone: "amber", label: "Total Referrals", value: statValue(referralsStatus, stats.totalReferrals), status: referralsStatus },
+    { icon: ShieldAlert, tone: "red", label: "High-Risk Residents", value: statValue(mapStatus, stats.highRisk ?? "Unavailable"), status: mapStatus },
   ];
   const loadErrors = [
     mapStatus.error && "community map",
@@ -289,19 +290,18 @@ export default function MHODashboard() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-5">
+      <KpiHorizontal count={5} className="mb-6">
         {statCards.map((s, i) => (
-          <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-            className="rounded-2xl border border-slate-200 bg-white shadow-card p-4 sm:p-5">
-            <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center ${s.tone}`}>
-              <s.icon className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.8} />
-            </div>
-            <p className="mt-3 sm:mt-4 text-xs text-brand-gray uppercase tracking-wide">{s.label}</p>
-            <p className="mt-1 text-xl sm:text-2xl font-stat font-bold text-brand-ink">{s.value}</p>
-            {s.status.error && <p className="mt-1 text-xs text-brand-danger">Data unavailable</p>}
+          <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+            <KpiHorizontal.Item
+              label={s.label.toUpperCase()}
+              value={s.value}
+              tone={s.tone}
+              description={s.status.error ? "Data unavailable" : ""}
+            />
           </motion.div>
         ))}
-      </div>
+      </KpiHorizontal>
 
       <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-card">
         <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">

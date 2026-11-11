@@ -511,7 +511,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   return (
     <div className={supervisor ? "supervisor-module" : "contents"}>
       <PageHeader
-        crumbs={["Reports"]}
+        crumbs={isPhn ? ["Documents & Reports", "Reports"] : supervisor ? ["Monitoring", "Reports"] : ["Reports"]}
         title="Reports"
         subtitle={
           isPhn

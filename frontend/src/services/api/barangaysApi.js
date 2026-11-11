@@ -1,4 +1,5 @@
 import { api } from './apiClient';
+import { memoryCache } from '../../utils/memoryCache';
 
 /**
  * Admin Barangay Management API (admin-only backend). Thin wrapper over the
@@ -15,15 +16,33 @@ import { api } from './apiClient';
  *   PUT   /barangays/:id          update (rename propagates to denormalized names)
  *   PATCH /barangays/:id/status   change Active/Inactive status only
  */
+
+const BARANGAY_OPTIONS_TTL = 10 * 60 * 1000; // 10 minutes
+
 export const barangaysApi = {
   list: (params, options) => api.get('/barangays', { ...options, params }),
-  options: (options) => api.get('/barangays/options', options),
+  options: (options) => {
+    return memoryCache.getOrFetch(
+      'barangays:options',
+      () => api.get('/barangays/options', options),
+      BARANGAY_OPTIONS_TTL
+    );
+  },
   get: (id, options) => api.get(`/barangays/${id}`, options),
-  create: (barangay, options) => api.post('/barangays', barangay, options),
-  update: (id, barangay) => api.put(`/barangays/${id}`, barangay),
+  create: (barangay, options) => {
+    memoryCache.invalidate('barangays:options');
+    return api.post('/barangays', barangay, options);
+  },
+  update: (id, barangay) => {
+    memoryCache.invalidate('barangays:options');
+    return api.put(`/barangays/${id}`, barangay);
+  },
   // Dedicated status change (Active <-> Inactive). Inactive barangays keep all
   // their residents/records but are hidden from new selections.
-  setStatus: (id, status) => api.patch(`/barangays/${id}/status`, { status }),
+  setStatus: (id, status) => {
+    memoryCache.invalidate('barangays:options');
+    return api.patch(`/barangays/${id}/status`, { status });
+  },
 };
 
 export default barangaysApi;

@@ -565,7 +565,7 @@ export default function RhuTriage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        crumbs={["RHU", "Triage"]}
+        crumbs={["Triage"]}
         title="RHU Triage"
         subtitle="Record a patient's visit and send them to the RHU consultation station."
       />

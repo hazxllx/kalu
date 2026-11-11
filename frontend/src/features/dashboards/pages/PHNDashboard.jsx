@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 
 import PageHeader from "@/components/common/PageHeader";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import { Card } from "@/components/common/Card";
 import ErrorState from "@/components/common/ErrorState";
 import EmptyState from "@/components/common/EmptyState";
@@ -41,14 +42,7 @@ import {
 
 /* --------------------------------- Styling -------------------------------- */
 
-const KPI_TONES = {
-  accent: "bg-brand-accent/10 text-brand-accent",
-  blue: "bg-brand-blue/10 text-brand-blue",
-  yellow: "bg-brand-yellow/15 text-[#B07E00]",
-  danger: "bg-brand-danger/10 text-brand-danger",
-  green: "bg-brand-green/10 text-brand-green",
-};
-
+// Legacy tone mappings for status pills (not used for KPI cards anymore)
 const RISK_TONES = {
   High: "bg-brand-danger/10 text-brand-danger",
   Medium: "bg-brand-yellow/15 text-[#B07E00]",
@@ -120,55 +114,7 @@ function SectionHeader({ title, subtitle, action = null, icon: Icon = null }) {
   );
 }
 
-/**
- * A compact, actionable priority indicator.
- *
- * Renders the real count only when its request succeeded. While loading it
- * shows a placeholder; on failure it shows an error affordance that retries the
- * exact failed request instead of a misleading zero.
- */
-function KpiCard({ icon: Icon, label, value, hint, tone, loading, error, onClick, onRetry, index = 0 }) {
-  const failed = Boolean(error);
-  return (
-    <motion.button
-      type="button"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.04, duration: 0.3 }}
-      onClick={failed ? onRetry : onClick}
-      aria-label={failed ? `Retry loading ${label}` : `${label}: ${loading ? "loading" : value}`}
-      className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-card transition-colors hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${KPI_TONES[tone]}`}>
-          <Icon className="h-[18px] w-[18px]" strokeWidth={1.9} />
-        </span>
-        {failed ? (
-          <RefreshCw className="h-4 w-4 text-brand-danger" strokeWidth={1.9} />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-slate-300" strokeWidth={1.9} />
-        )}
-      </div>
 
-      {loading ? (
-        <Skeleton className="mt-3 h-7 w-12" />
-      ) : failed ? (
-        <span className="mt-3 text-2xl font-stat font-extrabold text-slate-300">—</span>
-      ) : (
-        <span className="mt-3 text-2xl font-stat font-extrabold tracking-tight text-slate-900">{value}</span>
-      )}
-
-      <span className="mt-1 text-sm font-medium text-slate-700">{label}</span>
-      {loading ? (
-        <Skeleton className="mt-1 h-3 w-16" />
-      ) : failed ? (
-        <span className="mt-0.5 text-[11px] text-brand-danger">Couldn’t load — tap to retry</span>
-      ) : hint ? (
-        <span className="mt-0.5 text-[11px] text-brand-gray">{hint}</span>
-      ) : null}
-    </motion.button>
-  );
-}
 
 /** A work section that always communicates loading, error (with retry) and empty. */
 function WorkSection({ title, subtitle, icon, onViewAll, loading, error, onRetry, isEmpty, emptyText, children }) {
@@ -298,56 +244,34 @@ export default function PHNDashboard() {
         }
       />
 
-      {/* Four compact priority indicators */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <KpiCard
-          index={0}
-          icon={Users}
-          tone="accent"
-          label="PHN Work Queue"
-          value={waitingQueue.length}
-          hint={`${counts.waiting} waiting · ${counts.inCheckup} in check-up`}
-          loading={queue.loading}
-          error={queue.error}
-          onClick={() => navigate("/app/phn/consultations")}
-          onRetry={queue.reload}
-        />
-        <KpiCard
-          index={1}
-          icon={CalendarClock}
-          tone="blue"
-          label="Follow-ups Due"
-          value={followUpsDue}
-          hint={followUpsOverdue > 0 ? `${followUpsOverdue} overdue` : "Due today or overdue"}
-          loading={followUps.loading}
-          error={followUps.error}
-          onClick={() => navigate("/app/phn/followups")}
-          onRetry={followUps.reload}
-        />
-        <KpiCard
-          index={2}
-          icon={Send}
-          tone="yellow"
-          label="Pending Referrals"
-          value={pendingReferrals}
-          hint="Assigned to you and awaiting acceptance"
-          loading={referrals.loading}
-          error={referrals.error}
-          onClick={() => navigate("/app/phn/referrals")}
-          onRetry={referrals.reload}
-        />
-        <KpiCard
-          index={3}
-          icon={AlertTriangle}
-          tone="danger"
-          label="High-Risk Cases"
-          value={residents.total}
-          hint="Requiring PHN review"
-          loading={residents.loading}
-          error={residents.error}
-          onClick={() => navigate("/app/phn/residents")}
-          onRetry={residents.reload}
-        />
+      {/* Four KPI indicators with standardized design */}
+      <div className="phn-kpi-white">
+        <KpiHorizontal count={4}>
+          <KpiHorizontal.Item
+            label="PHN WORK QUEUE"
+            value={queue.loading ? "—" : queue.error ? "—" : waitingQueue.length}
+            tone="blue"
+            description={`${counts.waiting} waiting · ${counts.inCheckup} in check-up`}
+          />
+          <KpiHorizontal.Item
+            label="FOLLOW-UPS DUE"
+            value={followUps.loading ? "—" : followUps.error ? "—" : followUpsDue}
+            tone="amber"
+            description={followUpsOverdue > 0 ? `${followUpsOverdue} overdue` : "Due today or overdue"}
+          />
+          <KpiHorizontal.Item
+            label="PENDING REFERRALS"
+            value={referrals.loading ? "—" : referrals.error ? "—" : pendingReferrals}
+            tone="teal"
+            description="Assigned to you and awaiting acceptance"
+          />
+          <KpiHorizontal.Item
+            label="HIGH-RISK CASES"
+            value={residents.loading ? "—" : residents.error ? "—" : residents.total}
+            tone="red"
+            description="Requiring PHN review"
+          />
+        </KpiHorizontal>
       </div>
 
       {/* Priority work queue */}

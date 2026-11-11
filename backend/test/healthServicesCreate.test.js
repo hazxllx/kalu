@@ -116,18 +116,19 @@ test('create: an existing BHS facility scopes the service to its barangay', asyn
 test('create: a supervisor typing a new facility creates a BHS in their own barangay', async () => {
   const { client, inserts } = makeSupabase();
   const record = await create({ user: supervisor, payload: { name: 'Prenatal', category: 'Maternal', facilityName: 'Purok 5 Health Post' }, supabase: client });
-  assert.equal(inserts.facilities.length, 1, 'a new facility is created');
-  assert.equal(inserts.facilities[0].type, 'barangay_health_station');
-  assert.equal(inserts.facilities[0].barangay_id, 'b1', 'tied to the supervisor assigned barangay from the session');
-  assert.equal(record.barangayId, 'b1');
+  assert.equal(inserts.facilities.length, 0, 'no facility is created - custom_location is used instead');
+  assert.equal(record.customLocation, 'Purok 5 Health Post', 'custom location name is stored');
+  assert.equal(record.facilityId, null, 'no facility_id when using custom location');
+  assert.equal(record.barangayId, null, 'custom locations do not derive barangay scope');
 });
 
 test('create: an existing facility name is reused, never duplicated (case-insensitive)', async () => {
   const { client, inserts } = makeSupabase([{ id: 'fac-bhs', municipality_id: 'm1', name: 'Barangay 1 Health Center', type: 'barangay_health_station', barangay_id: 'b1' }]);
   const record = await create({ user: supervisor, payload: { name: 'Immunization', category: 'Immunization', facilityName: 'barangay 1 health center' }, supabase: client });
   assert.equal(inserts.facilities.length, 0, 'no duplicate facility is created');
-  assert.equal(record.facilityId, 'fac-bhs');
-  assert.equal(record.barangayId, 'b1');
+  assert.equal(record.facilityId, null, 'facilityName becomes custom_location, not a facility lookup');
+  assert.equal(record.customLocation, 'barangay 1 health center', 'custom location stored as-is');
+  assert.equal(record.barangayId, null, 'custom locations do not derive barangay scope');
 });
 
 test('create: a supervisor cannot attach a BHS from another barangay', async () => {

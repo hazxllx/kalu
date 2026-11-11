@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import StatusBadge from "@/components/common/StatusBadge";
 import ErrorState from "@/components/common/ErrorState";
 import EmptyState from "@/components/common/EmptyState";
@@ -714,7 +714,7 @@ export default function HealthServicesManager({ subtitle }) {
   return (
     <div className={isSupervisor ? "supervisor-module" : "contents"}>
       <PageHeader
-        crumbs={["Health Services"]}
+        crumbs={isSupervisor ? ["Health Operations", "Health Services"] : ["Clinical Care", "Health Services"]}
         title="Health Services"
         subtitle={subtitle || "Catalog of health services and their assigned personnel."}
         action={canCreate ? (
@@ -735,10 +735,27 @@ export default function HealthServicesManager({ subtitle }) {
       )}
 
       {/* Summary counts — derived from the real catalog + status rules. */}
-      <div className="supervisor-metric-grid mb-4">
-        <StatCard variant="ledger" label="CATALOG SERVICES" value={loading || error ? "Unavailable" : summary.total} description="Authorized visible catalog" tone="blue" />
-        <StatCard variant="ledger" label="ACTIVE" value={loading || error ? "Unavailable" : summary.active} description="Active within the stored schedule" tone="green" />
-        <StatCard variant="ledger" label="UPCOMING" value={loading || error ? "Unavailable" : summary.upcoming} description="Active services with a future start" tone="blue" />
+      <div className="mb-4 phn-kpi-white">
+        <KpiHorizontal count={3}>
+          <KpiHorizontal.Item
+            label="CATALOG SERVICES"
+            value={loading || error ? "—" : summary.total}
+            tone="blue"
+            description="Authorized visible catalog"
+          />
+          <KpiHorizontal.Item
+            label="ACTIVE"
+            value={loading || error ? "—" : summary.active}
+            tone="green"
+            description="Active within the stored schedule"
+          />
+          <KpiHorizontal.Item
+            label="UPCOMING"
+            value={loading || error ? "—" : summary.upcoming}
+            tone="blue"
+            description="Active services with a future start"
+          />
+        </KpiHorizontal>
       </div>
 
       {isSupervisor && referenceState.errors.length > 0 && <Card className="mb-4"><ErrorState compact title="Service form references unavailable" message={referenceState.errors.join(" ")} onRetry={loadReference} /></Card>}

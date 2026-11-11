@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import ErrorState from "@/components/common/ErrorState";
@@ -88,12 +88,12 @@ export default function BHWDashboard() {
         title={`Good morning, ${firstName || "BHW"}`}
         subtitle={assignedBarangay ? `Here's what needs your attention today in ${assignedBarangay}.` : "Here's what needs your attention today."}
       />
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 sm:gap-4">
-        <StatCard icon="Home" label="Households in your barangay" value={loading ? "…" : monitoring?.totalHouseholds ?? households.length} tone="blue" index={0} onClick={() => navigate("/app/bhw/households")} />
-        <StatCard icon="Activity" label="Households with a recorded visit" value={loading ? "…" : monitoring?.visitedHouseholds ?? "—"} tone="green" index={1} onClick={() => navigate("/app/bhw/households")} />
-        <StatCard icon="CalendarDays" label="Households without a visit" value={loading ? "…" : monitoring?.householdsWithoutVisits ?? "—"} tone="yellow" index={2} onClick={() => navigate("/app/bhw/households")} />
-        <StatCard icon="HeartPulse" label="High-risk households" value={loading ? "…" : highRiskCount} tone="danger" index={3} onClick={() => navigate("/app/bhw/households")} />
-      </div>
+      <KpiHorizontal count={4} className="mb-6">
+         <KpiHorizontal.Item label="HOUSEHOLDS IN BARANGAY" value={loading ? "…" : monitoring?.totalHouseholds ?? households.length} tone="blue" description="Total registered" />
+         <KpiHorizontal.Item label="HOUSEHOLDS WITH VISIT" value={loading ? "…" : monitoring?.visitedHouseholds ?? "—"} tone="green" description="Recorded visit activity" />
+         <KpiHorizontal.Item label="HOUSEHOLDS WITHOUT VISIT" value={loading ? "…" : monitoring?.householdsWithoutVisits ?? "—"} tone="amber" description="Pending visit" />
+         <KpiHorizontal.Item label="HIGH-RISK HOUSEHOLDS" value={loading ? "…" : highRiskCount} tone="red" description="Risk assessment level" />
+       </KpiHorizontal>
 
       <div className="mb-5 flex flex-wrap gap-2">
         <Link to="/app/bhw/households/new" className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-dark"><Plus className="h-4 w-4" /> Add Household</Link>

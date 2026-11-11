@@ -937,7 +937,13 @@ export default function HealthReferrals() {
   return (
     <>
       <PageHeader
-        crumbs={["Referrals"]}
+        crumbs={
+          isResident || isSupervisorOnly 
+            ? ["Referrals"] 
+            : isHealthSupervisor 
+              ? ["Health Operations", "Referrals"]
+              : ["Care Coordination", "Referrals"]
+        }
         title={isResident ? "My Referrals" : isSupervisorOnly ? "Referral Tracking" : isHealthSupervisor ? "Referral Monitoring" : "Referrals"}
         subtitle={
           isResident

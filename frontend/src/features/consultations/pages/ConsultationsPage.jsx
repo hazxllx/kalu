@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import { Search, ClipboardList, Stethoscope, CalendarClock, AlertTriangle, Loader2, User, Building2 } from "lucide-react";
 import { consultationsApi } from "@/services/api";
 
@@ -18,6 +19,8 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(8);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +56,19 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
       [r.resident?.name, r.chiefComplaint, r.diagnosis].some((v) => String(v || "").toLowerCase().includes(q)),
     );
   }, [completed, query]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const visibleConsultations = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  // Reset to page 1 when search term changes
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
+
+  // Auto-adjust page if it exceeds the new page count
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
 
   return (
     <>
@@ -105,7 +121,7 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
             </div>
           ) : (
             <div className="space-y-3">
-              {filtered.map((item) => (
+              {visibleConsultations.map((item) => (
                 <div key={item.id} className="border border-brand-border rounded-2xl p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-semibold text-brand-ink">
@@ -126,6 +142,17 @@ export default function ConsultationsPage({ showResidentSearch = true }) {
                   </div>
                 </div>
               ))}
+              <TablePagination
+                total={filtered.length}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={(size) => {
+                  setPageSize(size);
+                  setPage(1);
+                }}
+                className="mt-4"
+              />
             </div>
           )}
         </Card>

@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import CommunityHealthMap from "@/features/analytics/components/CommunityHealthMap";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonStatGrid } from "@/components/common/Skeleton";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import useAuthorizedData from "@/hooks/useAuthorizedData";
 import { authorizedViewsApi } from "@/services/api/authorizedViewsApi";
 import { getBarangayHealthOverview } from "@/services/api/monitoringApi";
@@ -23,7 +23,7 @@ const tooltipStyle = { borderRadius: 12, border: "1px solid #E5EAF1", fontSize: 
 const tickStyle = { fill: "#5B6472", fontSize: 12, fontFamily: "DM Sans" };
 const legendStyle = { fontSize: 12, fontFamily: "DM Sans" };
 
-function ChartCard({ title, subtitle, children, data, delay = 0 }) {
+const ChartCard = React.memo(function ChartCard({ title, subtitle, children, data, delay = 0 }) {
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay, duration: 0.4 }}>
       <Card className="p-6 h-full">
@@ -37,7 +37,7 @@ function ChartCard({ title, subtitle, children, data, delay = 0 }) {
       </Card>
     </motion.div>
   );
-}
+});
 
 function AreaGradients({ idPrefix, names }) {
   return (
@@ -62,17 +62,33 @@ export default function Analytics() {
   const resource = useAuthorizedData(load);
   useEffect(() => setSelected(null), [user?.id]);
   const data = resource.data?.earlyWarning;
-  const names = (resource.data?.map?.barangays || []).map((row) => row.name);
-  const highlightedBarangays = (resource.data?.map?.barangays || []).map((row, index) => ({ ...row, population: row.residents, consultations: row.caseCount, color: CHART_COLORS[row.name] || DONUT_COLORS[index % DONUT_COLORS.length], healthStatus: row.registryAvailable === false ? "Registry unavailable" : row.highRiskResidents > 0 ? "High-risk records present" : "Recorded health profile" }));
-  const comparisonMonthlyConsultations = data?.consultationTrends?.slice(-6) || [];
-  const diseaseDonutData = data?.diseaseDistribution || [];
-  const comparisonFollowUpTrend = optionalSeries(data, "followUpCompletion", 6, names);
-  const comparisonVaccinationCoverage = optionalSeries(data, "vaccinationCoverage", 12, names);
-  const comparisonReferralCompletion = optionalSeries(data, "referralCompletion", 12, names);
-  const comparisonMaternalTrend = optionalSeries(data, "maternalTrend", 6, names);
-  const comparisonChildHealth = optionalSeries(data, "childHealthCoverage", 12, names);
-  const comparisonSeniorTrend = optionalSeries(data, "seniorTrend", 6, names);
-  const comparisonProgramParticipation = optionalSeries(data, "programParticipation", 12, names);
+  const names = useMemo(() => {
+    return (resource.data?.map?.barangays || []).map((row) => row.name);
+  }, [resource.data?.map?.barangays]);
+  
+  const highlightedBarangays = useMemo(() => {
+    return (resource.data?.map?.barangays || []).map((row, index) => ({
+      ...row,
+      population: row.residents,
+      consultations: row.caseCount,
+      color: CHART_COLORS[row.name] || DONUT_COLORS[index % DONUT_COLORS.length],
+      healthStatus: row.registryAvailable === false
+        ? "Registry unavailable"
+        : row.highRiskResidents > 0
+        ? "High-risk records present"
+        : "Recorded health profile"
+    }));
+  }, [resource.data?.map?.barangays]);
+  
+  const comparisonMonthlyConsultations = useMemo(() => data?.consultationTrends?.slice(-6) || [], [data?.consultationTrends]);
+  const diseaseDonutData = useMemo(() => data?.diseaseDistribution || [], [data?.diseaseDistribution]);
+  const comparisonFollowUpTrend = useMemo(() => optionalSeries(data, "followUpCompletion", 6, names), [data, names]);
+  const comparisonVaccinationCoverage = useMemo(() => optionalSeries(data, "vaccinationCoverage", 12, names), [data, names]);
+  const comparisonReferralCompletion = useMemo(() => optionalSeries(data, "referralCompletion", 12, names), [data, names]);
+  const comparisonMaternalTrend = useMemo(() => optionalSeries(data, "maternalTrend", 6, names), [data, names]);
+  const comparisonChildHealth = useMemo(() => optionalSeries(data, "childHealthCoverage", 12, names), [data, names]);
+  const comparisonSeniorTrend = useMemo(() => optionalSeries(data, "seniorTrend", 6, names), [data, names]);
+  const comparisonProgramParticipation = useMemo(() => optionalSeries(data, "programParticipation", 12, names), [data, names]);
   const header = <PageHeader crumbs={["Analytics"]} title="Analytics" subtitle="Authorized community health aggregates and recorded case trends." />;
   if (resource.loading) return <>{header}<SkeletonStatGrid count={3} /></>;
   if (resource.error || !data) return <>{header}<ErrorState title="Analytics unavailable" message={resource.error || "The server did not return the aggregate."} onRetry={resource.refresh} /></>;
@@ -120,7 +136,9 @@ export default function Analytics() {
       </motion.div>
 
       {/* Health Status Summary */}
-      <div className="grid gap-4 sm:grid-cols-3">{data.riskDistribution.map((risk, index) => <StatCard key={risk.name} label={`${risk.name} Recorded Risk Assessments`} value={metricValue(risk.value)} icon="Activity" index={index} tone={risk.name === "High" ? "danger" : "blue"} />)}</div>
+      <KpiHorizontal count={3} className="gap-4 sm:grid-cols-3">
+        {data.riskDistribution.map((risk, index) => <KpiHorizontal.Item key={risk.name} label={`${risk.name.toUpperCase()} RISK`} value={risk.value} tone={risk.name === "High" ? "red" : risk.name === "Moderate" ? "amber" : "green"} description="Recorded assessments" />)}
+      </KpiHorizontal>
 
       {/* Community Health Trends */}
       <div className="mt-8">

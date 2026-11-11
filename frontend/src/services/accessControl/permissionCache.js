@@ -1,7 +1,12 @@
 import { decryptJson, encryptJson } from '../offline/crypto.js';
 import { db, safeWrite } from '../offline/db.js';
 
-export const PERMISSION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+// SECURITY FIX (FE-02): Reduced from 6 hours to 30 minutes
+// This ensures revoked permissions are revalidated more frequently,
+// reducing the window where cached stale permissions could be used.
+// Offline functionality remains intact: cached permissions are still
+// available offline within the TTL window.
+export const PERMISSION_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CACHE_VERSION = 1;
 const cacheKey = (userId) => `verifiedPermissions:${userId}`;
 

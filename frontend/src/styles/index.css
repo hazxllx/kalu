@@ -724,7 +724,7 @@
   @media (prefers-reduced-motion: reduce) {
     .marquee-track { animation: none; }
   }
-}
+} /* End @layer utilities - close before dark mode to avoid circular dependencies */
 
 @keyframes gov-marquee {
   from { transform: translateX(0); }
@@ -738,64 +738,67 @@
    Instead of rewriting every component, we remap those tokens when the `.dark`
    class is present. This keeps the existing design language (institutional
    blues, same radius/spacing) while making every screen readable in dark.
+   
+   NOTE: This section is intentionally OUTSIDE @layer utilities to avoid
+   circular dependencies when overriding Tailwind's built-in utility classes.
    =========================================================================== */
 .dark body { background: hsl(var(--background)); color: hsl(var(--foreground)); }
 
 /* ============================ TEXT HIERARCHY ============================ */
 /* Page / section titles, card titles, numbers — near-white */
-.dark .text-slate-900, .dark .text-slate-800,
-.dark .text-brand-ink, .dark .text-brand-dark { color: hsl(var(--foreground)); }
+:where(.dark) :where(.text-slate-900), :where(.dark) :where(.text-slate-800),
+:where(.dark) :where(.text-brand-ink), :where(.dark) :where(.text-brand-dark) { color: hsl(var(--foreground)); }
 
 /* Body text — light gray */
-.dark .text-slate-700, .dark .text-slate-600,
-.dark .text-brand-gray { color: hsl(var(--muted-foreground)); }
+:where(.dark) :where(.text-slate-700), :where(.dark) :where(.text-slate-600),
+:where(.dark) :where(.text-brand-gray) { color: hsl(var(--muted-foreground)); }
 
 /* Secondary / metadata — muted light gray */
-.dark .text-slate-500, .dark .text-slate-400 { color: hsl(214 18% 70%); }
-.dark .text-slate-300 { color: hsl(214 18% 78%); }
+:where(.dark) :where(.text-slate-500), :where(.dark) :where(.text-slate-400) { color: hsl(214 18% 70%); }
+:where(.dark) :where(.text-slate-300) { color: hsl(214 18% 78%); }
 
 /* ========================== SURFACE HIERARCHY =========================== */
 /* L3 — primary cards (page surfaces lifted off the background) */
-.dark .bg-white { background-color: hsl(var(--card)); }
-.dark .bg-white\/95 { background-color: hsl(var(--card) / 0.95); }
-.dark .bg-brand-paper { background-color: hsl(var(--card)); }
-.dark .bg-brand-paper\/50 { background-color: hsl(var(--card) / 0.5); }
-.dark .bg-brand-paper\/60 { background-color: hsl(var(--card) / 0.6); }
+:where(.dark) :where(.bg-white) { background-color: hsl(var(--card)); }
+:where(.dark) :where(.bg-white\/95) { background-color: hsl(var(--card) / 0.95); }
+:where(.dark) :where(.bg-brand-paper) { background-color: hsl(var(--card)); }
+:where(.dark) :where(.bg-brand-paper\/50) { background-color: hsl(var(--card) / 0.5); }
+:where(.dark) :where(.bg-brand-paper\/60) { background-color: hsl(var(--card) / 0.6); }
 
 /* L4 — nested / info / highlight boxes */
-.dark .bg-slate-50, .dark .bg-slate-100,
-.dark .bg-brand-bg { background-color: hsl(var(--card-nested)); }
-.dark .bg-slate-200 { background-color: hsl(var(--border)); }
-.dark .bg-brand-light { background-color: hsl(var(--card-nested)); }
-.dark .bg-brand-light\/50 { background-color: hsl(var(--card-nested) / 0.6); }
-.dark .bg-brand-light\/60 { background-color: hsl(var(--card-nested) / 0.7); }
-.dark .bg-brand-light\/70 { background-color: hsl(var(--card-nested) / 0.8); }
+:where(.dark) :where(.bg-slate-50,) :where(.dark) :where(.bg-slate-100,)
+:where(.dark) :where(.bg-brand-bg) { background-color: hsl(var(--card-nested)); }
+:where(.dark) :where(.bg-slate-200) { background-color: hsl(var(--border)); }
+:where(.dark) :where(.bg-brand-light) { background-color: hsl(var(--card-nested)); }
+:where(.dark) :where(.bg-brand-light\/50) { background-color: hsl(var(--card-nested) / 0.6); }
+:where(.dark) :where(.bg-brand-light\/60) { background-color: hsl(var(--card-nested) / 0.7); }
+:where(.dark) :where(.bg-brand-light\/70) { background-color: hsl(var(--card-nested) / 0.8); }
 
 /* L5 — inputs */
-.dark .bg-brand-border { background-color: hsl(var(--input)); }
+:where(.dark) :where(.bg-brand-border) { background-color: hsl(var(--input)); }
 
 /* L6 — hover */
 .dark .hover\:bg-slate-50:hover { background-color: hsl(var(--hover)); }
 
 /* L7 — blue-tinted active */
-.dark .bg-brand-blue\/5 { background-color: hsl(210 86% 58% / 0.12); }
-.dark .bg-brand-blue\/10 { background-color: hsl(210 86% 58% / 0.16); }
-.dark .bg-brand-blue\/15 { background-color: hsl(210 86% 58% / 0.2); }
+:where(.dark) :where(.bg-brand-blue\/5) { background-color: hsl(210 86% 58% / 0.12); }
+:where(.dark) :where(.bg-brand-blue\/10) { background-color: hsl(210 86% 58% / 0.16); }
+:where(.dark) :where(.bg-brand-blue\/15) { background-color: hsl(210 86% 58% / 0.2); }
 
 /* ============================= BORDER SYSTEM ============================= */
-.dark .border-slate-200, .dark .border-slate-300,
-.dark .border-brand-border, .dark .border-brand-rule { border-color: hsl(var(--border)); }
-.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
-.dark .divide-brand-border > :not([hidden]) ~ :not([hidden]) { border-color: hsl(var(--border)); }
-.dark .border-brand-blue\/20 { border-color: hsl(210 86% 58% / 0.25); }
-.dark .border-brand-blue\/30 { border-color: hsl(210 86% 58% / 0.35); }
-.dark .border-brand-blue\/40 { border-color: hsl(210 86% 58% / 0.45); }
+:where(.dark) :where(.border-slate-200,) :where(.dark) :where(.border-slate-300,)
+:where(.dark) :where(.border-brand-border,) :where(.dark) :where(.border-brand-rule) { border-color: hsl(var(--border)); }
+:where(.dark) :where(.divide-slate-200) > :not([hidden]) ~ :not([hidden]),
+:where(.dark) :where(.divide-brand-border) > :not([hidden]) ~ :not([hidden]) { border-color: hsl(var(--border)); }
+:where(.dark) :where(.border-brand-blue\/20) { border-color: hsl(210 86% 58% / 0.25); }
+:where(.dark) :where(.border-brand-blue\/30) { border-color: hsl(210 86% 58% / 0.35); }
+:where(.dark) :where(.border-brand-blue\/40) { border-color: hsl(210 86% 58% / 0.45); }
 
 /* ============================== SEMANTIC ================================ */
-.dark .text-brand-blue { color: hsl(210 86% 66%); }
-.dark .bg-brand-blue { background-color: hsl(210 86% 46%); }
-.dark .bg-brand-dark { background-color: hsl(var(--primary)); }
-.dark .bg-brand-goldpale { background-color: hsl(42 60% 14% / 0.55); }
+:where(.dark) :where(.text-brand-blue) { color: hsl(210 86% 66%); }
+:where(.dark) :where(.bg-brand-blue) { background-color: hsl(210 86% 46%); }
+:where(.dark) :where(.bg-brand-dark) { background-color: hsl(var(--primary)); }
+:where(.dark) :where(.bg-brand-goldpale) { background-color: hsl(42 60% 14% / 0.55); }
 
 /* ============================== FORMS =================================== */
 .dark input, .dark select, .dark textarea { color-scheme: dark; }
@@ -807,14 +810,14 @@
    remap above misses the opacity variant, so in dark mode these rendered as a
    washed-out, semi-transparent light box — making editable fields look
    disabled. Map them to a solid nested surface so fields read as editable. */
-.dark .bg-slate-50\/60 { background-color: hsl(var(--card-nested)); }
+:where(.dark) :where(.bg-slate-50\/60) { background-color: hsl(var(--card-nested)); }
 /* Error field fill (`bg-rose-50/50`) — tinted dark danger wash, not pale rose. */
-.dark .bg-rose-50\/50 { background-color: hsl(350 50% 18% / 0.55); }
+:where(.dark) :where(.bg-rose-50\/50) { background-color: hsl(350 50% 18% / 0.55); }
 /* Focused fields must never flash a bright white background in dark mode. */
 .dark .focus\:bg-white:focus { background-color: hsl(var(--input)); }
 
 /* Dropdowns / popovers use the popover surface (slightly lighter than cards) */
-.dark .bg-popover, .dark .bg-white\/95, .dark [role="listbox"], .dark [role="menu"] {
+:where(.dark) :where(.bg-popover,) :where(.dark) :where(.bg-white\/95,) .dark [role="listbox"], .dark [role="menu"] {
   background-color: hsl(var(--popover));
   border-color: hsl(var(--border));
 }
@@ -831,59 +834,59 @@
 
 /* Status / success / error / warning translucent washes —
    dark tinted background + brighter text + (used via small indicator) */
-.dark .bg-emerald-50 { background-color: hsl(150 45% 16% / 0.55); }
-.dark .bg-emerald-100 { background-color: hsl(150 40% 20%); }
-.dark .text-emerald-600, .dark .text-emerald-700 { color: hsl(150 55% 64%); }
-.dark .border-emerald-200 { border-color: hsl(150 40% 30%); }
-.dark .border-emerald-300 { border-color: hsl(150 40% 36%); }
+:where(.dark) :where(.bg-emerald-50) { background-color: hsl(150 45% 16% / 0.55); }
+:where(.dark) :where(.bg-emerald-100) { background-color: hsl(150 40% 20%); }
+:where(.dark) :where(.text-emerald-600,) :where(.dark) :where(.text-emerald-700) { color: hsl(150 55% 64%); }
+:where(.dark) :where(.border-emerald-200) { border-color: hsl(150 40% 30%); }
+:where(.dark) :where(.border-emerald-300) { border-color: hsl(150 40% 36%); }
 
-.dark .bg-rose-50 { background-color: hsl(350 50% 18% / 0.55); }
-.dark .text-rose-600, .dark .text-rose-700 { color: hsl(350 70% 72%); }
-.dark .border-rose-200 { border-color: hsl(350 45% 34%); }
+:where(.dark) :where(.bg-rose-50) { background-color: hsl(350 50% 18% / 0.55); }
+:where(.dark) :where(.text-rose-600,) :where(.dark) :where(.text-rose-700) { color: hsl(350 70% 72%); }
+:where(.dark) :where(.border-rose-200) { border-color: hsl(350 45% 34%); }
 
-.dark .bg-amber-50 { background-color: hsl(42 50% 16% / 0.55); }
-.dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800 { color: hsl(42 60% 68%); }
-.dark .border-amber-200 { border-color: hsl(42 45% 34%); }
+:where(.dark) :where(.bg-amber-50) { background-color: hsl(42 50% 16% / 0.55); }
+:where(.dark) :where(.text-amber-600,) :where(.dark) :where(.text-amber-700,) :where(.dark) :where(.text-amber-800) { color: hsl(42 60% 68%); }
+:where(.dark) :where(.border-amber-200) { border-color: hsl(42 45% 34%); }
 
-.dark .bg-orange-50 { background-color: hsl(25 55% 18% / 0.55); }
-.dark .text-orange-600, .dark .text-orange-700 { color: hsl(25 70% 66%); }
-.dark .border-orange-200 { border-color: hsl(25 45% 34%); }
+:where(.dark) :where(.bg-orange-50) { background-color: hsl(25 55% 18% / 0.55); }
+:where(.dark) :where(.text-orange-600,) :where(.dark) :where(.text-orange-700) { color: hsl(25 70% 66%); }
+:where(.dark) :where(.border-orange-200) { border-color: hsl(25 45% 34%); }
 
-.dark .bg-red-50\/40 { background-color: hsl(0 60% 18% / 0.5); }
-.dark .text-red-600 { color: hsl(350 72% 70%); }
+:where(.dark) :where(.bg-red-50\/40) { background-color: hsl(0 60% 18% / 0.5); }
+:where(.dark) :where(.text-red-600) { color: hsl(350 72% 70%); }
 
-.dark .bg-brand-danger\/5 { background-color: hsl(350 74% 60% / 0.14); }
-.dark .bg-brand-danger\/10 { background-color: hsl(350 74% 60% / 0.2); }
-.dark .bg-brand-green\/10 { background-color: hsl(150 55% 50% / 0.2); }
-.dark .bg-brand-green\/15 { background-color: hsl(150 55% 50% / 0.24); }
-.dark .bg-brand-yellow\/10 { background-color: hsl(42 60% 60% / 0.22); }
-.dark .bg-brand-yellow\/15 { background-color: hsl(42 60% 60% / 0.26); }
-.dark .bg-brand-accent\/10 { background-color: hsl(210 70% 58% / 0.2); }
-.dark .text-brand-green { color: hsl(150 55% 62%); }
-.dark .text-brand-danger { color: hsl(350 72% 70%); }
-.dark .text-brand-accent { color: hsl(210 70% 68%); }
-.dark .text-brand-amber { color: hsl(42 60% 68%); }
+:where(.dark) :where(.bg-brand-danger\/5) { background-color: hsl(350 74% 60% / 0.14); }
+:where(.dark) :where(.bg-brand-danger\/10) { background-color: hsl(350 74% 60% / 0.2); }
+:where(.dark) :where(.bg-brand-green\/10) { background-color: hsl(150 55% 50% / 0.2); }
+:where(.dark) :where(.bg-brand-green\/15) { background-color: hsl(150 55% 50% / 0.24); }
+:where(.dark) :where(.bg-brand-yellow\/10) { background-color: hsl(42 60% 60% / 0.22); }
+:where(.dark) :where(.bg-brand-yellow\/15) { background-color: hsl(42 60% 60% / 0.26); }
+:where(.dark) :where(.bg-brand-accent\/10) { background-color: hsl(210 70% 58% / 0.2); }
+:where(.dark) :where(.text-brand-green) { color: hsl(150 55% 62%); }
+:where(.dark) :where(.text-brand-danger) { color: hsl(350 72% 70%); }
+:where(.dark) :where(.text-brand-accent) { color: hsl(210 70% 68%); }
+:where(.dark) :where(.text-brand-amber) { color: hsl(42 60% 68%); }
 
 /* Gold accent stays legible on dark (institutional gold, not pale) */
-.dark .text-brand-gold { color: hsl(42 62% 64%); }
-.dark .text-\[\#B07E00\] { color: hsl(42 62% 64%); }
-.dark .border-brand-gold\/40 { border-color: hsl(42 62% 55% / 0.5); }
-.dark .border-brand-gold\/20 { border-color: hsl(42 62% 55% / 0.3); }
+:where(.dark) :where(.text-brand-gold) { color: hsl(42 62% 64%); }
+:where(.dark) :where(.text-\[\#B07E00\]) { color: hsl(42 62% 64%); }
+:where(.dark) :where(.border-brand-gold\/40) { border-color: hsl(42 62% 55% / 0.5); }
+:where(.dark) :where(.border-brand-gold\/20) { border-color: hsl(42 62% 55% / 0.3); }
 
 /* Dark toast / ink surfaces should lift off the dark page */
-.dark .bg-brand-ink { background-color: hsl(216 34% 15%); }
+:where(.dark) :where(.bg-brand-ink) { background-color: hsl(216 34% 15%); }
 .dark .shadow-float { box-shadow: 0 10px 34px -18px rgba(0, 0, 0, 0.7), 0 1px 0 0 rgba(255, 255, 255, 0.05); }
 
 /* Inputs & controls */
-.dark .bg-brand-border { background-color: hsl(var(--input)); }
-.dark .border-slate-400 { border-color: hsl(214 18% 60%); }
+:where(.dark) :where(.bg-brand-border) { background-color: hsl(var(--input)); }
+:where(.dark) :where(.border-slate-400) { border-color: hsl(214 18% 60%); }
 
 /* Sidebar / navigation hover + active */
 .dark .hover\:bg-slate-50:hover { background-color: hsl(var(--hover)); }
 .dark .hover\:text-slate-900:hover { color: hsl(var(--foreground)); }
 
 /* L7 active nav: blue-tinted dark surface */
-.dark .bg-brand-light { background-color: hsl(var(--card-nested)); }
+:where(.dark) :where(.bg-brand-light) { background-color: hsl(var(--card-nested)); }
 
 /* ===========================================================================
    MEDICAL CERTIFICATE — official A4 document
@@ -1291,27 +1294,57 @@
 .dark .supervisor-button.is-quiet,
 .dark .supervisor-tabs button[aria-pressed="true"] { color: #73ACE3; }
 
-.supervisor-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--supervisor-border); border-radius: var(--radius); background: var(--supervisor-surface); }
+.supervisor-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--supervisor-border); border-radius: var(--radius); background: var(--supervisor-surface); border-top: 3px solid transparent; }
 .supervisor-metric-grid.is-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .supervisor-metric { display: block; min-width: 0; padding: 1rem 1.125rem; border-right: 1px solid var(--supervisor-border); background: var(--supervisor-surface); color: var(--supervisor-ink); text-align: left; }
 .supervisor-metric:last-child { border-right: 0; }
-.supervisor-metric-label { font-size: 0.75rem; font-weight: 500; line-height: 1.125rem; }
+.supervisor-metric-label { font-size: 0.75rem; font-weight: 500; line-height: 1.125rem; color: #334155; }
 .supervisor-metric-value { min-height: 2.25rem; margin-top: 0.5rem; font-family: var(--font-stat); font-variant-numeric: tabular-nums; font-size: 0.875rem; line-height: 2.25rem; font-weight: 600; letter-spacing: -0.03em; }
 .supervisor-metric-value[data-numeric="true"] { font-size: 2rem; }
-.supervisor-metric-description { margin-top: 0.25rem; color: var(--supervisor-muted); font-size: 0.6875rem; line-height: 1rem; }
+.supervisor-metric-description { margin-top: 0.25rem; color: #64748B; font-size: 0.6875rem; line-height: 1rem; }
 .supervisor-metric-description { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.supervisor-metric[data-tone="danger"] .supervisor-metric-value { color: #B3202C; }
-.supervisor-metric[data-tone="yellow"] .supervisor-metric-value { color: #7A5A12; }
-.supervisor-metric[data-tone="green"] .supervisor-metric-value { color: #1F7A4C; }
-.supervisor-metric[data-tone="accent"] .supervisor-metric-value { color: #0B4A8F; }
+.supervisor-metric[data-tone="danger"] .supervisor-metric-value { color: #DC3545; }
+.supervisor-metric[data-tone="yellow"] .supervisor-metric-value { color: #D97706; }
+.supervisor-metric[data-tone="green"] .supervisor-metric-value { color: #15945A; }
+.supervisor-metric[data-tone="accent"] .supervisor-metric-value { color: #0D9488; }
 .supervisor-metric[data-tone="blue"] { background: var(--supervisor-surface); color: var(--supervisor-ink); }
-.supervisor-metric[data-tone="blue"] .supervisor-metric-value { color: #0B4A8F; }
+.supervisor-metric[data-tone="blue"] .supervisor-metric-value { color: #2563EB; }
 a.supervisor-metric:hover, button.supervisor-metric:hover { box-shadow: inset 0 -2px 0 currentColor; }
 .supervisor-metric.is-active { box-shadow: inset 0 -3px 0 currentColor; }
-.dark .supervisor-metric[data-tone="danger"] .supervisor-metric-value { color: #EE8C9B; }
-.dark .supervisor-metric[data-tone="yellow"] .supervisor-metric-value { color: #DDBB70; }
-.dark .supervisor-metric[data-tone="green"] .supervisor-metric-value { color: #78CAA1; }
-.dark .supervisor-metric[data-tone="accent"] .supervisor-metric-value { color: #73ACE3; }
+.dark .supervisor-metric-label { color: #CBD5E1; }
+.dark .supervisor-metric-description { color: #94A3B8; }
+.dark .supervisor-metric[data-tone="danger"] .supervisor-metric-value { color: #F87171; }
+.dark .supervisor-metric[data-tone="yellow"] .supervisor-metric-value { color: #FCD34D; }
+.dark .supervisor-metric[data-tone="green"] .supervisor-metric-value { color: #4ADE80; }
+.dark .supervisor-metric[data-tone="accent"] .supervisor-metric-value { color: #5EEAD4; }
+.dark .supervisor-metric[data-tone="blue"] .supervisor-metric-value { color: #60A5FA; }
+
+/* Dark mode for PHN KPI section */
+.dark .phn-kpi-white .supervisor-metric-grid { 
+  background: #1E293B !important;
+  border-color: #334155 !important;
+}
+.dark .phn-kpi-white .supervisor-metric { 
+  background: #1E293B !important;
+  border-right-color: #334155 !important;
+}
+.dark .phn-kpi-white .supervisor-metric-label { color: #E2E8F0 !important; }
+.dark .phn-kpi-white .supervisor-metric-description { color: #CBD5E1 !important; }
+
+/* PHN-specific white background override with refined styling */
+.phn-kpi-white .supervisor-metric-grid { 
+  background: #FFFFFF !important; 
+  border-color: #E2E8F0 !important;
+  box-shadow: none;
+}
+.phn-kpi-white .supervisor-metric { 
+  background: #FFFFFF !important; 
+  border-right-color: #E2E8F0 !important;
+}
+.phn-kpi-white .supervisor-metric[data-tone="blue"] { background: #FFFFFF !important; }
+.phn-kpi-white .supervisor-metric-label { color: #25364A !important; font-size: 0.7rem !important; }
+.phn-kpi-white .supervisor-metric-description { color: #718096 !important; font-size: 0.65rem !important; }
+
 
 @media (max-width: 767px) {
   .supervisor-shell .ui-page-header h1 { font-size: 1.25rem; }
@@ -1701,3 +1734,420 @@ a.supervisor-metric:hover, button.supervisor-metric:hover { box-shadow: inset 0 
   .hs-activity-info p { line-height: 1rem; }
   .hs-followup-performance dl { gap: 1rem; flex-wrap: wrap; }
 }
+
+@layer utilities {
+  /* ===========================================================================
+     KALUSAGAP v20 - SYSTEM-WIDE RESPONSIVE UTILITIES
+     ---------------------------------------------------------------------------
+     Comprehensive responsive patterns for tables, forms, modals, and touch
+     targets. Applied consistently across all 7 user roles.
+     =========================================================================== */
+
+/* ---------- Responsive Table Patterns ---------- */
+
+/* Generic responsive table - shows table on desktop, cards on mobile */
+.responsive-table-wrapper {
+  @apply min-w-0 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card;
+}
+
+.dark .responsive-table-wrapper {
+  @apply bg-card border-border;
+}
+
+/* Generic mobile card layout for tables */
+.mobile-table-cards {
+  @apply divide-y divide-slate-200;
+}
+
+.dark .mobile-table-cards {
+  @apply divide-border;
+}
+
+.mobile-table-cards > li,
+.mobile-table-cards > div {
+  @apply p-4 hover:bg-slate-50/70 transition-colors;
+}
+
+.dark .mobile-table-cards > li,
+.dark .mobile-table-cards > div {
+  @apply hover:bg-hover;
+}
+
+.mobile-table-cards dl {
+  @apply grid grid-cols-1 gap-3;
+}
+
+.mobile-table-cards dt {
+  @apply text-xs font-semibold uppercase tracking-wide text-slate-500;
+}
+
+.dark .mobile-table-cards dt {
+  @apply text-slate-400;
+}
+
+.mobile-table-cards dd {
+  @apply text-sm text-slate-700 break-words;
+}
+
+.dark .mobile-table-cards dd {
+  @apply text-slate-300;
+}
+
+/* ---------- Responsive Form Layouts ---------- */
+
+/* Form grid that collapses from multi-column to single column on mobile */
+.form-grid-responsive {
+  @apply grid gap-4;
+}
+
+.form-grid-2col {
+  @apply grid-cols-1 md:grid-cols-2;
+}
+
+.form-grid-3col {
+  @apply grid-cols-1 md:grid-cols-2 lg:grid-cols-3;
+}
+
+.form-grid-4col {
+  @apply grid-cols-1 sm:grid-cols-2 lg:grid-cols-4;
+}
+
+/* Form field group with responsive label positioning */
+.form-field-responsive {
+  @apply flex flex-col gap-1.5;
+}
+
+.form-field-horizontal {
+  @apply flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4;
+}
+
+.form-field-horizontal label {
+  @apply sm:min-w-[140px] sm:max-w-[200px];
+}
+
+/* Form section spacing */
+.form-section-responsive {
+  @apply space-y-4 md:space-y-5;
+}
+
+/* Form actions - stack on mobile, inline on desktop */
+.form-actions-responsive {
+  @apply flex flex-col sm:flex-row gap-3 sm:gap-4;
+}
+
+.form-actions-responsive button,
+.form-actions-responsive a {
+  @apply w-full sm:w-auto;
+}
+
+/* ---------- Responsive Modal and Dialog Patterns ---------- */
+
+/* Modal container - constrained width on desktop, full-width on mobile */
+.modal-responsive {
+  @apply w-full max-w-full mx-4;
+}
+
+.modal-responsive.modal-sm {
+  @apply sm:max-w-md;
+}
+
+.modal-responsive.modal-md {
+  @apply sm:max-w-lg md:max-w-2xl;
+}
+
+.modal-responsive.modal-lg {
+  @apply sm:max-w-2xl md:max-w-4xl;
+}
+
+.modal-responsive.modal-xl {
+  @apply sm:max-w-4xl md:max-w-6xl;
+}
+
+/* Modal content with responsive padding */
+.modal-content-responsive {
+  @apply p-4 sm:p-6;
+}
+
+.modal-header-responsive {
+  @apply flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-200;
+}
+
+.dark .modal-header-responsive {
+  @apply border-border;
+}
+
+.modal-header-responsive h2 {
+  @apply text-lg sm:text-xl font-semibold;
+}
+
+/* Modal footer with responsive button layout */
+.modal-footer-responsive {
+  @apply flex flex-col-reverse sm:flex-row gap-3 sm:gap-4 pt-4 sm:pt-6 border-t border-slate-200;
+}
+
+.dark .modal-footer-responsive {
+  @apply border-border;
+}
+
+.modal-footer-responsive button,
+.modal-footer-responsive a {
+  @apply w-full sm:w-auto;
+}
+
+/* ---------- Touch Target Sizing ---------- */
+
+/* Minimum 44x44px touch targets for mobile accessibility */
+.touch-target {
+  @apply min-h-[44px] min-w-[44px];
+}
+
+/* Button touch targets */
+.btn-touch {
+  @apply min-h-[44px] px-4;
+}
+
+.btn-touch-sm {
+  @apply min-h-[40px] px-3;
+}
+
+.btn-touch-lg {
+  @apply min-h-[48px] px-6;
+}
+
+/* Icon button touch targets */
+.icon-btn-touch {
+  @apply w-11 h-11 flex items-center justify-center;
+}
+
+.icon-btn-touch-sm {
+  @apply w-10 h-10 flex items-center justify-center;
+}
+
+/* Link touch targets with adequate padding */
+.link-touch {
+  @apply inline-flex items-center min-h-[44px] py-2;
+}
+
+/* ---------- Responsive Content Containers ---------- */
+
+/* Content wrapper with responsive padding */
+.content-wrapper-responsive {
+  @apply px-3 py-4 sm:px-4 sm:py-5 md:px-6 md:py-6;
+}
+
+/* Card with responsive padding */
+.card-responsive {
+  @apply p-4 sm:p-5 md:p-6;
+}
+
+/* Section with responsive spacing */
+.section-responsive {
+  @apply space-y-4 sm:space-y-5 md:space-y-6;
+}
+
+/* ---------- Responsive Typography ---------- */
+
+/* Heading scale for mobile */
+.heading-responsive-xl {
+  @apply text-2xl sm:text-3xl md:text-4xl;
+}
+
+.heading-responsive-lg {
+  @apply text-xl sm:text-2xl md:text-3xl;
+}
+
+.heading-responsive-md {
+  @apply text-lg sm:text-xl md:text-2xl;
+}
+
+.heading-responsive-sm {
+  @apply text-base sm:text-lg md:text-xl;
+}
+
+/* ---------- Responsive Spacing Utilities ---------- */
+
+.gap-responsive {
+  @apply gap-3 sm:gap-4 md:gap-5 lg:gap-6;
+}
+
+.gap-responsive-sm {
+  @apply gap-2 sm:gap-3 md:gap-4;
+}
+
+.gap-responsive-lg {
+  @apply gap-4 sm:gap-5 md:gap-6 lg:gap-8;
+}
+
+/* ---------- Responsive Grid Patterns ---------- */
+
+/* Auto-fit grid that adjusts columns based on content */
+.grid-responsive-auto {
+  @apply grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4;
+}
+
+.grid-responsive-auto-3 {
+  @apply grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3;
+}
+
+.grid-responsive-auto-2 {
+  @apply grid gap-4 grid-cols-1 sm:grid-cols-2;
+}
+
+/* ---------- Responsive Flexbox Patterns ---------- */
+
+/* Flex row that wraps and stacks on mobile */
+.flex-responsive {
+  @apply flex flex-col sm:flex-row gap-3 sm:gap-4;
+}
+
+.flex-responsive-center {
+  @apply flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4;
+}
+
+.flex-responsive-between {
+  @apply flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4;
+}
+
+/* ---------- Responsive List Patterns ---------- */
+
+/* List with responsive item sizing */
+.list-responsive {
+  @apply space-y-2 sm:space-y-3;
+}
+
+.list-responsive-lg {
+  @apply space-y-3 sm:space-y-4 md:space-y-5;
+}
+
+/* ---------- Responsive Overflow Handling ---------- */
+
+/* Horizontal scroll with shadow hint on mobile */
+.scroll-responsive {
+  @apply overflow-x-auto;
+  scrollbar-width: thin;
+  scrollbar-color: #c3cedc transparent;
+}
+
+@media (max-width: 767px) {
+  .scroll-responsive {
+    -webkit-overflow-scrolling: touch;
+    box-shadow: inset -10px 0 12px -14px rgba(18, 38, 63, 0.7);
+  }
+}
+
+/* ---------- Responsive Visibility Utilities ---------- */
+
+/* Show only on mobile */
+.mobile-only {
+  @apply block md:hidden;
+}
+
+/* Show only on tablet and up */
+.tablet-up {
+  @apply hidden md:block;
+}
+
+/* Show only on desktop */
+.desktop-only {
+  @apply hidden lg:block;
+}
+
+/* ---------- Responsive Image and Media ---------- */
+
+/* Responsive image container */
+.img-responsive {
+  @apply w-full h-auto;
+}
+
+/* Responsive aspect ratio containers */
+.aspect-responsive-16-9 {
+  @apply aspect-video;
+}
+
+.aspect-responsive-4-3 {
+  @apply aspect-[4/3];
+}
+
+.aspect-responsive-square {
+  @apply aspect-square;
+}
+
+/* ---------- Responsive Status Indicators ---------- */
+
+/* Badge that adjusts text size on mobile */
+.badge-responsive {
+  @apply text-xs sm:text-sm px-2 py-1 sm:px-2.5 sm:py-1;
+}
+
+/* ---------- Responsive Navigation Patterns ---------- */
+
+/* Tab navigation that scrolls horizontally on mobile */
+.tabs-responsive {
+  @apply flex overflow-x-auto;
+  scrollbar-width: none;
+}
+
+.tabs-responsive::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs-responsive button {
+  @apply whitespace-nowrap flex-shrink-0;
+}
+
+/* Breadcrumb that truncates on mobile */
+.breadcrumb-responsive {
+  @apply flex items-center gap-2 overflow-x-auto;
+  scrollbar-width: none;
+}
+
+.breadcrumb-responsive::-webkit-scrollbar {
+  display: none;
+}
+
+.breadcrumb-responsive > * {
+  @apply flex-shrink-0;
+}
+
+/* ---------- Responsive Alert and Notification Patterns ---------- */
+
+/* Alert with responsive padding and text */
+.alert-responsive {
+  @apply p-3 sm:p-4 text-sm sm:text-base;
+}
+
+/* ---------- Responsive Search and Filter Patterns ---------- */
+
+/* Search bar that stacks with filters on mobile */
+.search-filters-responsive {
+  @apply flex flex-col sm:flex-row gap-3 sm:gap-4;
+}
+
+.search-filters-responsive input {
+  @apply w-full sm:flex-1;
+}
+
+/* ---------- Responsive Stat Cards ---------- */
+
+  /* Stat card grid */
+  .stat-grid-responsive {
+    @apply grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4;
+  }
+
+/* ---------- Print Media Query ---------- */
+
+@media print {
+  /* Hide non-printable elements */
+  .no-print {
+    display: none !important;
+  }
+  
+  /* Expand containers for print */
+  .print-full-width {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
+
+} /* End @layer utilities */

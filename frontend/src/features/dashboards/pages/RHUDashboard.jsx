@@ -1,7 +1,7 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import { Card } from "@/components/common/Card";
 import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -91,6 +91,15 @@ export default function RHUDashboard() {
     refresh,
   } = usePhnWorkflow({ source: consultationStation ? "queue" : "intake" });
 
+  // Auto-refresh dashboard statistics every 60 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void refresh();
+    }, 60000); // 60 seconds
+
+    return () => clearInterval(interval);
+  }, [refresh]);
+
   // Only surface the quick actions the signed-in station can actually use.
   const quickActions = useMemo(
     () =>
@@ -151,15 +160,15 @@ export default function RHUDashboard() {
 
   const stats = consultationStation
     ? [
-        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "yellow" },
+        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "amber" },
         { icon: "Stethoscope", label: "In Consultation", value: loading ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
         { icon: "CheckCircle2", label: "Completed Consultations", value: loading ? "—" : counts.completed.toLocaleString(), tone: "green" },
       ]
     : [
-        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "yellow" },
+        { icon: "CalendarClock", label: "Waiting for Consultation", value: loading ? "—" : counts.waiting.toLocaleString(), tone: "amber" },
         { icon: "Stethoscope", label: "In Consultation", value: loading ? "—" : counts.inCheckup.toLocaleString(), tone: "blue" },
         { icon: "CheckCircle2", label: "Completed Consultations", value: loading ? "—" : counts.completed.toLocaleString(), tone: "green" },
-        { icon: "ClipboardList", label: "Triage Screenings Today", value: loading ? "—" : visitsToday.length.toLocaleString(), tone: "accent" },
+        { icon: "ClipboardList", label: "Triage Screenings Today", value: loading ? "—" : visitsToday.length.toLocaleString(), tone: "slate" },
       ];
 
   const columns = [
@@ -246,17 +255,17 @@ export default function RHUDashboard() {
           )}
         </div>
 
-        <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${stats.length === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
+        <KpiHorizontal count={stats.length}>
           {stats.map((stat, index) => (
-            <StatCard
+            <KpiHorizontal.Item
               key={stat.label}
-              {...stat}
-              index={index}
-              compact
-              indicator
+              label={stat.label.toUpperCase()}
+              value={stat.value}
+              tone={stat.tone}
+              description={stat.description}
             />
           ))}
-        </div>
+        </KpiHorizontal>
       </section>
 
       <section aria-labelledby="quick-actions-heading">

@@ -160,7 +160,7 @@ export default function HouseholdRiskDetail() {
   if (phase === "loading") {
     return (
       <>
-        <PageHeader crumbs={["Households", "Household Details"]} title="Household Risk Profile" subtitle="Loading household information..." />
+        <PageHeader crumbs={["Community Risk", "Household Risk Overview", "Household Details"]} title="Household Risk Profile" subtitle="Loading household information..." />
         <div className="h-40 animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />
         <div className="mt-4 h-72 animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />
       </>
@@ -171,7 +171,7 @@ export default function HouseholdRiskDetail() {
   if (phase === "notfound" || (phase === "ready" && !household)) {
     return (
       <>
-        <PageHeader crumbs={["Households", "Household Details"]} title="Household Risk Profile" subtitle="Household record" />
+        <PageHeader crumbs={["Community Risk", "Household Risk Overview", "Household Details"]} title="Household Risk Profile" subtitle="Household record" />
         <Card className="p-10 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-danger/10">
             <Home className="h-7 w-7 text-brand-danger" />
@@ -192,7 +192,7 @@ export default function HouseholdRiskDetail() {
   if (phase === "error") {
     return (
       <>
-        <PageHeader crumbs={["Households", "Household Details"]} title="Household Risk Profile" subtitle="Household record" />
+        <PageHeader crumbs={["Community Risk", "Household Risk Overview", "Household Details"]} title="Household Risk Profile" subtitle="Household record" />
         <Card className="p-10 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-danger/10">
             <RefreshCw className="h-7 w-7 text-brand-danger" />
@@ -228,9 +228,20 @@ export default function HouseholdRiskDetail() {
         title={`${h.head} Household`}
         subtitle={`${h.id} · Barangay ${h.barangay}`}
         action={
-          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-gray dark:border-border dark:bg-card dark:text-slate-300">
-            <Activity className="h-3.5 w-3.5 text-brand-blue" /> Household Risk Profile
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setAction("followup")} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-dark">
+              <PhoneCall className="h-4 w-4" /> Record Household Follow-up
+            </button>
+            <button onClick={() => setAction("assign")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
+              <UserPlus className="h-4 w-4" /> Assign Health Worker
+            </button>
+            <button onClick={() => setAction("escalate")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card">
+              <ArrowUpRight className="h-4 w-4" /> Escalate
+            </button>
+            <Link to={backPath} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
+              <ChevronRight className="h-4 w-4 rotate-180" /> Back to Risk Overview
+            </Link>
+          </div>
         }
       />
 
@@ -427,24 +438,6 @@ export default function HouseholdRiskDetail() {
             ) : (
               <p className="text-sm text-brand-gray">No interventions recorded yet.</p>
             )}
-          </div>
-        </Card>
-
-        {/* Actions */}
-        <Card className="p-5">
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => setAction("followup")} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-              <PhoneCall className="h-4 w-4" /> Record Household Follow-up
-            </button>
-            <button onClick={() => setAction("assign")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
-              <UserPlus className="h-4 w-4" /> Assign Health Worker
-            </button>
-            <button onClick={() => setAction("escalate")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card">
-              <ArrowUpRight className="h-4 w-4" /> Escalate
-            </button>
-            <Link to={backPath} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
-              <ChevronRight className="h-4 w-4 rotate-180" /> Back to Risk Overview
-            </Link>
           </div>
         </Card>
       </div>

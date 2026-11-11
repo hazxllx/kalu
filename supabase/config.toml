@@ -236,7 +236,9 @@ secure_password_change = false
 # mirrors this value; see frontend NewResidentRegistration resend flow.
 max_frequency = "60s"
 # Number of characters used in the email OTP.
-otp_length = 4
+# CORRECTED: Changed from 4 to 6 to match frontend expectation (REGISTRATION_OTP_LENGTH = 6).
+# This fixes the OTP verification mismatch discovered in Phase 5A.1.
+otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 300
 

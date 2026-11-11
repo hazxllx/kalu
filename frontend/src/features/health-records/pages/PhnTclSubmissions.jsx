@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import {
   Search,
   RefreshCw,
@@ -339,13 +340,6 @@ export default function PhnTclSubmissions() {
     setRemarks("");
   };
 
-  const summaryCards = [
-    { label: "Submitted Documents", value: summary.total, icon: FileText, tone: "bg-brand-blue/10 text-brand-blue" },
-    { label: "Barangays with Submissions", value: summary.barangaysWith, icon: Building2, tone: "bg-brand-sky/15 text-brand-accent" },
-    { label: "Pending PHN Review", value: summary.pending, icon: ClipboardCheck, tone: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400" },
-    { label: "Recently Submitted (7 days)", value: summary.recent, icon: Clock, tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400" },
-  ];
-
   // Compact row-action buttons (View + optional Review) reused by both views.
   const RowActions = ({ s }) => (
     <div className="flex items-center justify-end gap-2">
@@ -362,7 +356,7 @@ export default function PhnTclSubmissions() {
     <>
       <PageHeader
         dense
-        crumbs={["Records"]}
+        crumbs={["Clinical Care", "TCL"]}
         title="Target Client Lists"
         subtitle="Monitor submitted health program records across barangays."
       />
@@ -373,19 +367,34 @@ export default function PhnTclSubmissions() {
         </div>
       )}
 
-      {/* Summary cards — compact, dynamically computed from real submissions. */}
-      <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {summaryCards.map((c) => (
-          <Card key={c.label} className="flex items-center gap-3 p-3">
-            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-btn ${c.tone}`}>
-              <c.icon className="h-[18px] w-[18px]" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-brand-gray">{c.label}</p>
-              <p className="font-stat text-xl font-semibold text-brand-ink">{loading ? "—" : c.value}</p>
-            </div>
-          </Card>
-        ))}
+      {/* Summary cards — Standardized KPI Design */}
+      <div className="mb-3 phn-kpi-white">
+        <KpiHorizontal count={4}>
+          <KpiHorizontal.Item
+            label="SUBMITTED DOCUMENTS"
+            value={loading ? "—" : summary.total}
+            tone="blue"
+            description="Total submitted TCL documents"
+          />
+          <KpiHorizontal.Item
+            label="BARANGAYS WITH SUBMISSIONS"
+            value={loading ? "—" : summary.barangaysWith}
+            tone="teal"
+            description="Barangays that submitted records"
+          />
+          <KpiHorizontal.Item
+            label="PENDING PHN REVIEW"
+            value={loading ? "—" : summary.pending}
+            tone="amber"
+            description="Documents awaiting review"
+          />
+          <KpiHorizontal.Item
+            label="RECENTLY SUBMITTED (7 DAYS)"
+            value={loading ? "—" : summary.recent}
+            tone="green"
+            description="Submissions in the past week"
+          />
+        </KpiHorizontal>
       </div>
 
       {/* Filter toolbar — compact, single card with two rows. */}

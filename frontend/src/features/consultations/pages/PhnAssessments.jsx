@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
 import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
@@ -242,7 +242,7 @@ export default function PhnCheckups() {
       label: "Waiting for PHN",
       value: stats.waiting,
       icon: "Users",
-      tone: "accent",
+      tone: "blue",
       active: statusFilter === CHECKUP_STATUS.WAITING,
       onClick: () => toggleStatus(CHECKUP_STATUS.WAITING),
     },
@@ -258,7 +258,7 @@ export default function PhnCheckups() {
       label: "Priority Cases",
       value: stats.priority,
       icon: "AlertTriangle",
-      tone: "danger",
+      tone: "red",
       active: riskFilter === "High",
       onClick: () => toggleRisk("High"),
     },
@@ -266,7 +266,7 @@ export default function PhnCheckups() {
       label: "Total Today",
       value: stats.today,
       icon: "CalendarDays",
-      tone: "blue",
+      tone: "indigo",
       active: todayOnly,
       onClick: toggleToday,
     },
@@ -279,7 +279,7 @@ export default function PhnCheckups() {
     <>
       <PageHeader
         dense
-        crumbs={["PHN Check-ups"]}
+        crumbs={["Clinical Care", "PHN Check-ups"]}
         title="PHN Check-ups"
         subtitle="Conduct and manage patient check-ups and assessments."
       />
@@ -294,21 +294,18 @@ export default function PhnCheckups() {
 
       <div className="space-y-4">
         {/* KPI cards */}
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-          {kpis.map((stat, i) => (
-            <StatCard
-              key={stat.label}
-              compact
-              indicator
-              label={stat.label}
-              value={stat.value}
-              icon={stat.icon}
-              tone={stat.tone}
-              index={i}
-              active={stat.active}
-              onClick={stat.onClick}
-            />
-          ))}
+        <div className="phn-kpi-white">
+          <KpiHorizontal count={4}>
+            {kpis.map((stat, i) => (
+              <KpiHorizontal.Item
+                key={stat.label}
+                label={stat.label.toUpperCase()}
+                value={stat.value}
+                tone={stat.tone}
+                description=""
+              />
+            ))}
+          </KpiHorizontal>
         </div>
 
         {/* Search + filters toolbar */}

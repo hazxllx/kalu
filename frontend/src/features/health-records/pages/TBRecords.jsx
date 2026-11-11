@@ -320,7 +320,7 @@ export default function TBRecords() {
   return (
     <>
       <PageHeader
-        crumbs={["Records", "TB Records"]}
+        crumbs={["Clinical Care", "TB Records"]}
         title="TB Records"
         subtitle={
           scope && scope.level === HS_SCOPE.BARANGAY

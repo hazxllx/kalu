@@ -1093,7 +1093,7 @@ export default function MidwifeFollowUp() {
   return (
     <div className={supervisor ? "supervisor-module" : "contents"}>
       <PageHeader
-        crumbs={["Follow-ups"]}
+        crumbs={supervisor ? ["Health Operations", "Follow-ups"] : ["Care Coordination", "Follow-ups"]}
         title={supervisor ? "Follow-up Monitoring" : "Follow-up Management"}
         subtitle={
           assignedBarangay

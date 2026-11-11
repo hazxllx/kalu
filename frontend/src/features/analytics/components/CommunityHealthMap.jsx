@@ -220,6 +220,7 @@ export default function CommunityHealthMap({
   const plotted = useMemo(() => barangays.filter(hasValidCoordinates), [barangays]);
   const missing = useMemo(() => barangays.filter((b) => !hasValidCoordinates(b)), [barangays]);
   const points = useMemo(() => plotted.map((b) => [b.latitude, b.longitude]), [plotted]);
+  
   const markerData = useMemo(() => {
     const selected = Array.isArray(visibleConditions) ? new Set(visibleConditions) : null;
     const counts = plotted.map((barangay) => ({
@@ -241,14 +242,20 @@ export default function CommunityHealthMap({
         : item.intensity ?? 0,
     }));
   }, [plotted, visibleConditions, showCountLabels, dashboard, displayMetric]);
+  
   const metricUnavailable = dashboard && markerData.some((row) => !Number.isSafeInteger(row.displayedCaseCount) || row.displayedCaseCount < 0);
+  
   // Forward-compatible authoritative purok geometry. Only a validated GeoJSON
   // FeatureCollection of Polygon/MultiPolygon with barangay_id + purok is
   // rendered; invalid/absent data renders nothing (current behavior unchanged).
   const purokFeatures = validPurokGeoJson(purokLayer);
-  const visibleMarkers = showCountLabels && !supervisor
-    ? markerData.filter((item) => item.displayedCaseCount > 0)
-    : markerData;
+  
+  const visibleMarkers = useMemo(() => {
+    return showCountLabels && !supervisor
+      ? markerData.filter((item) => item.displayedCaseCount > 0)
+      : markerData;
+  }, [markerData, showCountLabels, supervisor]);
+  
   const centerPoint = hasValidCoordinates({ ...center, hasCoordinates: true })
     ? [Number(center.latitude), Number(center.longitude)]
     : points[0];
@@ -455,7 +462,7 @@ export default function CommunityHealthMap({
  * opened via `detailsHref` (or, when absent, via `onSelect` for consumers that
  * render their own detail panel). Values come from the live aggregate record.
  */
-function BarangayPopup({ barangay: b, onSelect, detailsHref }) {
+const BarangayPopup = React.memo(function BarangayPopup({ barangay: b, onSelect, detailsHref }) {
   return (
     <div className="health-map-popup-body">
       <h3 className="health-map-popup-title">{b.name}</h3>
@@ -482,4 +489,4 @@ function BarangayPopup({ barangay: b, onSelect, detailsHref }) {
       )}
     </div>
   );
-}
+});

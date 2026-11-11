@@ -123,18 +123,18 @@ export default function SearchableSelect({
   return (
     <div>
       {label && (
-        <label className="text-sm font-medium text-brand-ink">
+        <label className="text-sm font-medium text-brand-ink dark:text-foreground">
           {label}
-          {required && <span className="text-brand-danger"> *</span>}
+          {required && <span className="text-brand-danger dark:text-red-400"> *</span>}
         </label>
       )}
       <div ref={wrapRef} className="relative mt-1.5">
         <div
-          className={`flex w-full items-center gap-2 rounded-input border bg-white px-3.5 py-2.5 transition-colors focus-within:border-brand-blue ${
-            error ? "border-brand-danger bg-red-50/40" : "border-brand-border"
+          className={`flex w-full items-center gap-2 rounded-input border bg-white dark:bg-input px-3.5 py-2.5 min-h-[44px] sm:min-h-0 transition-colors focus-within:border-brand-blue dark:focus-within:border-blue-500 ${
+            error ? "border-brand-danger dark:border-red-500 bg-red-50/40 dark:bg-red-950/30" : "border-brand-border dark:border-border"
           }`}
         >
-          <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+          <Search className="h-4 w-4 shrink-0 text-brand-gray dark:text-muted-foreground" aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
@@ -156,13 +156,13 @@ export default function SearchableSelect({
               setOpen(true);
             }}
             onKeyDown={onKeyDown}
-            className="w-full min-w-0 bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/70"
+            className="w-full min-w-0 bg-transparent text-sm text-brand-ink dark:text-foreground outline-none placeholder:text-brand-gray/70 dark:placeholder:text-muted-foreground/70"
           />
           {(value || query) && (
             <button
               type="button"
               onClick={clear}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-brand-gray transition-colors hover:text-brand-ink"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-brand-gray dark:text-muted-foreground transition-colors hover:text-brand-ink dark:hover:text-foreground touch-target-sm"
               aria-label="Clear selection"
             >
               <X className="h-3.5 w-3.5" />
@@ -171,9 +171,9 @@ export default function SearchableSelect({
         </div>
 
         {open && (
-          <div className="absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-btn border border-brand-border bg-white shadow-float">
+          <div className="absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-btn border border-brand-border dark:border-border bg-white dark:bg-popover shadow-float max-w-full">
             {results.length === 0 ? (
-              <p className="px-3 py-3 text-sm text-brand-gray">{emptyText}</p>
+              <p className="px-3 py-3 text-sm text-brand-gray dark:text-muted-foreground">{emptyText}</p>
             ) : (
               <ul id="searchable-select-listbox" role="listbox" className="max-h-64 overflow-y-auto py-1">
                 {results.slice(0, maxResults).map((o, i) => (
@@ -182,13 +182,13 @@ export default function SearchableSelect({
                       type="button"
                       onMouseEnter={() => setHighlighted(i)}
                       onClick={() => select(o)}
-                      className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors ${
-                        i === highlighted ? "bg-brand-light" : "hover:bg-brand-bg"
+                      className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 min-h-[44px] sm:min-h-0 text-left transition-colors ${
+                        i === highlighted ? "bg-brand-light dark:bg-card-nested" : "hover:bg-brand-bg dark:hover:bg-hover"
                       }`}
                     >
-                      <span className="truncate text-sm font-medium text-brand-ink">{o.label}</span>
+                      <span className="truncate text-sm font-medium text-brand-ink dark:text-foreground">{o.label}</span>
                       {o.value === value && (
-                        <Check className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
+                        <Check className="h-3.5 w-3.5 shrink-0 text-brand-blue dark:text-blue-400" aria-hidden="true" />
                       )}
                     </button>
                   </li>
@@ -198,7 +198,7 @@ export default function SearchableSelect({
           </div>
         )}
       </div>
-      {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
+      {error && <p className="mt-1 text-xs text-brand-danger dark:text-red-400">{error}</p>}
     </div>
   );
 }

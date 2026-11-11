@@ -7,7 +7,7 @@ import {
 import { TrendingUp, TrendingDown, Activity, Send, MapPin, CalendarDays, ChevronDown } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import EmptyState from "@/components/common/EmptyState";
 import { PageSkeleton } from "@/components/common/Skeleton";
 import ErrorState from "@/components/common/ErrorState";
@@ -141,14 +141,36 @@ export default function HealthTrends() {
   const muniLoading = resource.loading;
   const muniError = resource.error;
   const loadMunicipality = resource.refresh;
-  const base = healthTrendScope(muniEW, period === "3m" ? 3 : period === "6m" ? 6 : period === "quarterly" ? 3 : period === "yearly" ? 12 : period === "monthly" ? 1 : 12);
+  
+  const periodMonths = useMemo(() => {
+    return period === "3m" ? 3 : period === "6m" ? 6 : period === "quarterly" ? 3 : period === "yearly" ? 12 : period === "monthly" ? 1 : 12;
+  }, [period]);
+  
+  const base = useMemo(() => {
+    return healthTrendScope(muniEW, periodMonths);
+  }, [muniEW, periodMonths]);
+  
   const conditionPalette = supervisor ? SUPERVISOR_CONDITION_PALETTE : CONDITION_PALETTE;
   const riskPalette = supervisor ? SUPERVISOR_RISK_COLORS : RISK_COLORS;
-  const scopedData = base && { ...base, diseaseDistribution: base.diseaseDistribution.map((row, index) => ({ ...row, color: conditionPalette[index % conditionPalette.length] })), riskDistribution: muniEW.riskDistribution.map((row) => ({ ...row, color: riskPalette[row.name] || "#94A3B8" })) };
+  
+  const scopedData = useMemo(() => {
+    if (!base) return null;
+    return {
+      ...base,
+      diseaseDistribution: base.diseaseDistribution.map((row, index) => ({
+        ...row,
+        color: conditionPalette[index % conditionPalette.length]
+      })),
+      riskDistribution: muniEW.riskDistribution.map((row) => ({
+        ...row,
+        color: riskPalette[row.name] || "#94A3B8"
+      }))
+    };
+  }, [base, muniEW.riskDistribution, conditionPalette, riskPalette]);
 
-  if (resource.error) return <><PageHeader crumbs={["Analytics", "Health Trends"]} title="Health Trends" subtitle="Authorized recorded health activity." /><Card className="p-5"><ErrorState compact={supervisor} title="Health trends unavailable" message={resource.error} onRetry={resource.refresh} /></Card></>;
-  if (supervisor && !assignedBarangay) return <><PageHeader crumbs={["Health Trends"]} title="Health Trends" subtitle="Barangay assignment required" /><Card><ErrorState compact title="Health trends unavailable" message="No valid barangay assignment is available for this account. Municipal coverage is not available to an unassigned Health Supervisor." /></Card></>;
-  if (assignedBarangay && !scopedData) return <><PageHeader crumbs={["Analytics", "Health Trends"]} title={`Brgy. ${assignedBarangay} Health Trends`} /><PageSkeleton /></>;
+  if (resource.error) return <><PageHeader crumbs={supervisor ? ["Monitoring", "Health Trends"] : ["Analytics", "Health Trends"]} title="Health Trends" subtitle="Authorized recorded health activity." /><Card className="p-5"><ErrorState compact={supervisor} title="Health trends unavailable" message={resource.error} onRetry={resource.refresh} /></Card></>;
+  if (supervisor && !assignedBarangay) return <><PageHeader crumbs={["Monitoring", "Health Trends"]} title="Health Trends" subtitle="Barangay assignment required" /><Card><ErrorState compact title="Health trends unavailable" message="No valid barangay assignment is available for this account. Municipal coverage is not available to an unassigned Health Supervisor." /></Card></>;
+  if (assignedBarangay && !scopedData) return <><PageHeader crumbs={supervisor ? ["Monitoring", "Health Trends"] : ["Analytics", "Health Trends"]} title={`Brgy. ${assignedBarangay} Health Trends`} /><PageSkeleton /></>;
 
   /* ------------------------------------------------------------------ */
   /* Barangay-scoped view (Health Supervisor assigned to one barangay)   */
@@ -157,7 +179,11 @@ export default function HealthTrends() {
     const s = scopedData;
     const completionRows = s.followUpCompletion;
     const completionAvailable = Array.isArray(completionRows) && completionRows.length > 0 && completionRows.every((row) => Number.isSafeInteger(row.numerator) && Number.isSafeInteger(row.denominator) && row.numerator >= 0 && row.numerator <= row.denominator);
-    const serviceEntry = (name) => optionalSeries(muniEW, name, period === "3m" ? 3 : period === "6m" ? 6 : 12, [assignedBarangay])?.find((row) => row.name === assignedBarangay);
+    
+    const serviceEntry = useCallback((name) => {
+      return optionalSeries(muniEW, name, periodMonths, [assignedBarangay])?.find((row) => row.name === assignedBarangay);
+    }, [muniEW, periodMonths, assignedBarangay]);
+    
     const enrollment = s.programCompliance?.find((row) => row.name === assignedBarangay);
     const participation = serviceEntry("programParticipation");
     const immunizations = serviceEntry("vaccinationCoverage");
@@ -176,7 +202,7 @@ export default function HealthTrends() {
       <div className={supervisor ? "supervisor-module" : "contents"}>
         {/* Compact Header */}
         <PageHeader
-           crumbs={["Health Trends"]}
+           crumbs={supervisor ? ["Monitoring", "Health Trends"] : ["Health Trends"]}
            title="Health Trends"
            subtitle={`Recorded health activity and risk monitoring for Barangay ${assignedBarangay}`}
         />
@@ -281,23 +307,12 @@ export default function HealthTrends() {
         ) : (
         <>
         {supervisor ? <div className="supervisor-metric-grid mb-6">
-          {cards.map((card, index) => <StatCard key={card.label} variant="ledger" label={card.label} value={card.value} description={index === 2 ? `${card.change}; all recorded consultations` : card.change} tone={["blue", "yellow", "accent", "danger"][index]} />)}
-        </div> : <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-          {cards.map((c) => (
-            <div key={c.label} className="rounded-lg border border-brand-border bg-white p-4 shadow-sm">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${c.tone}`}>
-                <c.icon className="w-5 h-5" strokeWidth={1.8} />
-              </div>
-              <p className="mt-3 text-xs text-brand-gray uppercase tracking-wide font-semibold">{c.label}</p>
-              <div className="mt-2 flex items-baseline gap-1.5">
-                <p className="text-2xl font-bold text-brand-ink">{c.value}</p>
-                <span className={`text-xs font-medium ${c.up ? "text-brand-green" : "text-brand-danger"} flex items-center gap-0.5`}>
-                  {c.up !== null && (c.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />)} {c.change}
-                </span>
-              </div>
-            </div>
+          {cards.map((card, index) => <KpiHorizontal.Item key={card.label} label={card.label.toUpperCase()} value={card.value} tone={["blue", "amber", "blue", "red"][index]} description={index === 2 ? `${card.change}; all recorded consultations` : card.change} />)}
+        </div> : <KpiHorizontal count={4} className="mb-6">
+          {cards.map((c, i) => (
+            <KpiHorizontal.Item key={c.label} label={c.label.toUpperCase()} value={c.value} tone={["blue", "amber", "blue", "red"][i]} description="" />
           ))}
-        </div>}
+        </KpiHorizontal>}
 
 {/* Trends + Disease Distribution */}
         <div className={`grid lg:grid-cols-3 ${supervisor ? "gap-4 mb-6" : "gap-4 mb-6"}`}>

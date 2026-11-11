@@ -81,7 +81,7 @@ export default function MedicalCertificates() {
   return (
     <>
       <PageHeader
-        crumbs={["Medical Certificates"]}
+        crumbs={user?.role === "phn" ? ["Documents & Reports", "Medical Certificates"] : ["Medical Certificates"]}
         title="Medical Certificates"
         subtitle={isReviewer ? "Review, approve, and issue medical certificates for your scope." : canInitiate ? "Initiate medical certificate requests; the PHN / MHO review and issue them." : "Medical certificate register for your authorized scope."}
         action={canInitiate && (

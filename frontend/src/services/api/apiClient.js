@@ -7,6 +7,7 @@ import {
 } from '../offline/mutationPolicy.js';
 import { invalidateVerifiedPermissions } from '../accessControl/permissionCache.js';
 import { captureOwnerGuard, assertCurrentOwner, getOfflineOwnerId } from '../offline/db.js';
+import { performanceMonitor } from '../../utils/performanceMonitor.js';
 
 /**
  * Centralized HTTP client for the KALUSAGAP backend (see `backend/`).
@@ -37,7 +38,11 @@ const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.en
  * @property {AbortSignal} [signal]
  * @property {'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY'} [offlineMutationType]
  * @property {string} [ownerId] Authenticated account whose queued operation this request belongs to.
+ * @property {number} [timeout] Request timeout in milliseconds (default: 30000)
  */
+
+// Request deduplication map: maps request key to pending promise
+const pendingRequests = new Map();
 
 class ApiError extends Error {
   /**
@@ -73,54 +78,101 @@ function buildUrl(path, params) {
 }
 
 /**
+ * Generate a cache key for request deduplication.
+ * Only GET requests without custom headers/bodies are deduplicated.
+ */
+function getRequestKey(path, method, params, body) {
+  if (method !== 'GET') return null;
+  const url = buildUrl(path, params);
+  return `${method}:${url}`;
+}
+
+/**
+ * Create an AbortController with timeout.
+ */
+function createTimeoutController(timeoutMs, existingSignal) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
+  
+  if (existingSignal) {
+    existingSignal.addEventListener('abort', () => {
+      clearTimeout(timeoutId);
+      controller.abort(existingSignal.reason);
+    });
+  }
+  
+  // Clean up timeout on completion
+  controller.signal.addEventListener('abort', () => clearTimeout(timeoutId));
+  
+  return controller;
+}
+
+/**
  * @param {string} path
  * @param {RequestOptions} options
  */
 async function request(
   path,
-  { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, ...rest } = {},
+  { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, timeout = 30000, signal, ...rest } = {},
 ) {
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase());
   const mutationType = offlineMutationType || MUTATION_TIER.ONLINE_ONLY;
   if (isMutation) requireOnlineForMutation(mutationType);
 
-  const expectedOwnerId = ownerId === null ? getOfflineOwnerId() : ownerId;
-  const ownerGuard = expectedOwnerId !== null ? captureOwnerGuard(expectedOwnerId) : null;
-  if (ownerGuard) assertCurrentOwner(ownerGuard);
-  const { token, userId, expiresAt } = await getAuthIdentity();
-  if (ownerGuard) {
-    assertCurrentOwner(ownerGuard);
-    if (!token || userId !== expectedOwnerId || (expiresAt && expiresAt * 1000 <= Date.now())) {
-      throw new ApiError('Your session changed or expired. Sign in to the original account before synchronizing.', 401, null);
-    }
+  // Request deduplication for GET requests
+  const requestKey = getRequestKey(path, method, params, body);
+  if (requestKey && pendingRequests.has(requestKey)) {
+    return pendingRequests.get(requestKey);
   }
 
-  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
-  const isJsonBody = body !== undefined && body !== null && !isFormData && typeof body !== 'string' && !(body instanceof URLSearchParams);
-  const requestBody = isJsonBody ? JSON.stringify(body) : body;
-
-  let response;
-  try {
+  const executeRequest = async () => {
+    const expectedOwnerId = ownerId === null ? getOfflineOwnerId() : ownerId;
+    const ownerGuard = expectedOwnerId !== null ? captureOwnerGuard(expectedOwnerId) : null;
     if (ownerGuard) assertCurrentOwner(ownerGuard);
-    response = await fetch(buildUrl(path, params), {
-      method,
-      credentials: 'include',
-      headers: {
-        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...headers,
-      },
-      ...(requestBody !== undefined && requestBody !== null ? { body: requestBody } : {}),
-      ...rest,
-    });
-  } catch (error) {
-    if (error?.status === 401 || error?.code === 'auth') throw error;
-    if (isMutation && mutationType === MUTATION_TIER.ONLINE_ONLY) {
-      if (error?.name === 'AbortError') throw error;
-      throw new OfflineActionRequiredError();
+    const { token, userId, expiresAt } = await getAuthIdentity();
+    if (ownerGuard) {
+      assertCurrentOwner(ownerGuard);
+      if (!token || userId !== expectedOwnerId || (expiresAt && expiresAt * 1000 <= Date.now())) {
+        throw new ApiError('Your session changed or expired. Sign in to the original account before synchronizing.', 401, null);
+      }
     }
-    throw error;
-  }
+
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    const isJsonBody = body !== undefined && body !== null && !isFormData && typeof body !== 'string' && !(body instanceof URLSearchParams);
+    const requestBody = isJsonBody ? JSON.stringify(body) : body;
+
+    // Setup timeout
+    const timeoutController = timeout > 0 ? createTimeoutController(timeout, signal) : null;
+    const effectiveSignal = timeoutController ? timeoutController.signal : signal;
+
+    let response;
+    const startTime = performance.now();
+    try {
+      if (ownerGuard) assertCurrentOwner(ownerGuard);
+      response = await fetch(buildUrl(path, params), {
+        method,
+        credentials: 'include',
+        headers: {
+          ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...headers,
+        },
+        ...(requestBody !== undefined && requestBody !== null ? { body: requestBody } : {}),
+        ...(effectiveSignal ? { signal: effectiveSignal } : {}),
+        ...rest,
+      });
+      
+      // Record API performance metric
+      const duration = performance.now() - startTime;
+      performanceMonitor.recordApiMetric(path, method, duration, response.status);
+    } catch (error) {
+      if (error?.status === 401 || error?.code === 'auth') throw error;
+      if (isMutation && mutationType === MUTATION_TIER.ONLINE_ONLY) {
+        if (error?.name === 'AbortError') throw error;
+        throw new OfflineActionRequiredError();
+      }
+      throw error;
+    }
 
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = isJson ? await response.json() : await response.text();
@@ -147,6 +199,20 @@ async function request(
   }
 
   return isJson && payload && 'data' in payload ? payload.data : payload;
+  };
+
+  // Store promise for deduplication
+  if (requestKey) {
+    const promise = executeRequest();
+    pendingRequests.set(requestKey, promise);
+    promise
+      .finally(() => {
+        pendingRequests.delete(requestKey);
+      });
+    return promise;
+  }
+
+  return executeRequest();
 }
 
 /** @param {RequestOptions} options */
