@@ -200,6 +200,21 @@ export const PERMISSION_MODULES = Object.freeze([
     ],
   },
   {
+    id: 'certificates',
+    label: 'Medical Certificates',
+    short: 'Certificates',
+    icon: 'FileText',
+    description: 'Medical certificate requests and review workflow.',
+    permissions: [
+      {
+        id: 'certificates.request',
+        label: 'Request medical certificates',
+        action: ACTION.CREATE,
+        description: 'Search authorized residents and submit a medical certificate request.',
+      },
+    ],
+  },
+  {
     id: 'triage',
     label: 'Triage',
     short: 'Triage',
@@ -706,6 +721,7 @@ const DEFAULT_GRANTS = Object.freeze({
   [ROLE.MHO]: [
     'residents.directory.view',
     'residents.profile.view',
+    'certificates.request',
     'residents.create',
     'accounts.create',
     'residents.transfer.approve',
@@ -773,6 +789,7 @@ const DEFAULT_GRANTS = Object.freeze({
   [ROLE.PHN]: [
     'residents.directory.view',
     'residents.profile.view',
+    'certificates.request',
     'residents.create',
     'residents.edit',
     'accounts.create',
@@ -813,10 +830,8 @@ const DEFAULT_GRANTS = Object.freeze({
     'accounts.personnel.approve',
   ],
 
-  // Triage intake and case routing at the RHU. RHU Personnel do NOT have access
-  // to the resident directory — resident records are owned by the barangay
-  // Health Supervisor / municipal roles. Their triage flow only ever searches
-  // residents as a reference and never opens the directory page.
+  // Triage intake, resident lookup, and case routing at the RHU. Directory
+  // results remain server-scoped to the authenticated account.
   // Referral responses are limited to explicitly assigned recipients at their
   // current facility/station. RHU never gains general referral creation/assignment.
   [ROLE.RHU_PERSONNEL]: [
@@ -826,7 +841,9 @@ const DEFAULT_GRANTS = Object.freeze({
     'consultation.history.view',
     'residents.create',
     'residents.edit',
+    'residents.directory.view',
     'residents.profile.view',
+    'certificates.request',
     'triage.view',
     'triage.perform',
     'triage.assessment.update',

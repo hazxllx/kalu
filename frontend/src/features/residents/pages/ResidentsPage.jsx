@@ -197,7 +197,7 @@ const accountStatusClass = (status) => {
 const AccountStatusPill = ({ status }) => {
   const key = status || "none";
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${accountStatusClass(key)}`}>
+    <span className={`ui-status-badge inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${accountStatusClass(key)}`}>
       {ACCOUNT_STATUS_LABELS[key] || "No Account"}
     </span>
   );
@@ -950,17 +950,17 @@ export default function ResidentsPage() {
       )}
 
       {supervisor ? (
-        <Card className="supervisor-toolbar mb-4 flex flex-wrap items-end gap-3">
+        <Card className="clinical-toolbar supervisor-toolbar mb-4 flex flex-wrap items-end gap-3">
           <label htmlFor="resident-search" className="min-w-[12rem] flex-1 text-caption font-medium text-brand-gray">
             Search Residents
-            <div className="supervisor-input mt-1 flex items-center gap-2">
+            <div className="clinical-search supervisor-input mt-1 flex items-center gap-2">
               <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
               <input id="resident-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, health record no. or contact" className="min-w-0 w-full bg-transparent outline-none" />
             </div>
           </label>
           {showZoneFilter && <label htmlFor="resident-zone-filter" className="text-caption font-medium text-brand-gray">
             Zone
-            <select id="resident-zone-filter" value={zoneFilter} onChange={(e) => setZoneFilter(e.target.value)} disabled={geographicOptionsLoading} className="supervisor-input mt-1 block w-full sm:w-48">
+            <select id="resident-zone-filter" value={zoneFilter} onChange={(e) => setZoneFilter(e.target.value)} disabled={geographicOptionsLoading} className="clinical-filter supervisor-input mt-1 block w-full sm:w-48">
               <option value="">All Zones</option>
               {(geographicOptions?.zones || []).map((zone) => <option key={zone} value={String(zone)}>Zone {zone}</option>)}
               {geographicOptions?.hasUnassigned && <option value="unassigned">Unassigned</option>}
@@ -969,25 +969,25 @@ export default function ResidentsPage() {
           </label>}
           <label htmlFor="resident-risk" className="text-caption font-medium text-brand-gray">
             Recorded Risk
-            <select id="resident-risk" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} className="supervisor-input mt-1 block w-full sm:w-40">
+            <select id="resident-risk" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} className="clinical-filter supervisor-input mt-1 block w-full sm:w-40">
               {RISK_FILTERS.map((risk) => <option key={risk} value={risk}>{risk === "All" ? "All risk levels" : risk === "Unassessed" ? "Not assessed" : risk}</option>)}
             </select>
           </label>
           {(q || riskFilter !== "All" || zoneFilter) && <button type="button" className="supervisor-button is-quiet" onClick={() => { setQ(""); setRiskFilter("All"); setZoneFilter(""); }}>Clear filters</button>}
         </Card>
-      ) : <Card className="p-4 mb-5 flex flex-col lg:flex-row gap-3">
-        <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 flex-1">
+      ) : <Card className="clinical-toolbar p-4 mb-5 flex flex-col lg:flex-row gap-3">
+        <div className="clinical-search flex items-center gap-2 px-3 py-2 flex-1">
           <Search className="w-4 h-4 text-brand-gray" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search by name, health record no., PhilHealth, or contact..."
-            className="bg-transparent text-sm outline-none w-full"
+            className="w-full bg-transparent text-sm outline-none"
           />
         </div>
         {showBarangayFilter && <label htmlFor="resident-barangay-filter" className="text-sm font-medium text-brand-ink lg:w-60">
           Barangay
-          <select id="resident-barangay-filter" value={barangayFilter} onChange={(e) => setBarangayFilter(e.target.value)} disabled={geographicOptionsLoading} className={inputClass(false)}>
+          <select id="resident-barangay-filter" value={barangayFilter} onChange={(e) => setBarangayFilter(e.target.value)} disabled={geographicOptionsLoading}           className={`${inputClass(false)} clinical-filter`}>
             <option value="">All Barangays</option>
             {(geographicOptions?.barangays || []).map((barangay) => <option key={barangay.id} value={barangay.id}>{barangay.name}</option>)}
           </select>
@@ -1050,9 +1050,10 @@ export default function ResidentsPage() {
       {!loadError && !loading && visibleRows.length > 0 && (
         <>
           <DataTable
-            className="resident-directory-table"
-            tableClassName="resident-directory-grid"
+            className="clinical-data-table resident-directory-table"
+            tableClassName="clinical-table resident-directory-grid"
             fitContainer
+            mobileCards={false}
             dense={supervisor}
             columns={columns}
             rows={pageRows}

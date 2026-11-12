@@ -18,6 +18,7 @@ import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { api, consultationsApi, residentsApi, healthServicesApi } from "@/services/api";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
 import DateRangePicker from "@/features/consultations/components/DateRangePicker";
+import { formatLongDate } from "@/lib/dateUtils";
 import { classifyBloodPressure as classifyBp } from "@/features/consultations/utils/bpClassification";
 import {
   saveConsultationOffline,
@@ -208,10 +209,7 @@ const toResidentOption = (r) => ({
 
 /** Keep the record list readable: strip time for the table. */
 const formatDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatLongDate(iso) || "—";
 };
 
 const formatVitalLabel = (key) => ({

@@ -17,6 +17,7 @@ import TclEmptyState from "../components/TclEmptyState";
 import { TclToolbar } from "../components/TclToolbar";
 import { TclListSkeleton } from "../components/TclSkeletons";
 import TclPageHeader from "../components/TclPageHeader";
+import { formatClinicalDate } from "@/lib/dateUtils";
 
 // Program icon mapping
 const programIconMap = {
@@ -38,10 +39,7 @@ const labelCls = "text-sm font-medium text-brand-ink";
 const errorCls = "mt-1 text-xs text-brand-danger";
 
 const formatDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatClinicalDate(iso);
 };
 
 function TclCard({ record, onView }) {

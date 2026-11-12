@@ -38,6 +38,7 @@ const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.en
  * @property {AbortSignal} [signal]
  * @property {'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY'} [offlineMutationType]
  * @property {string} [ownerId] Authenticated account whose queued operation this request belongs to.
+ * @property {string} [dedupeKey] Optional caller-supplied scope key for GET deduplication.
  * @property {number} [timeout] Request timeout in milliseconds (default: 30000)
  */
 
@@ -81,10 +82,10 @@ function buildUrl(path, params) {
  * Generate a cache key for request deduplication.
  * Only GET requests without custom headers/bodies are deduplicated.
  */
-function getRequestKey(path, method, params, body) {
+function getRequestKey(path, method, params, body, dedupeKey) {
   if (method !== 'GET') return null;
   const url = buildUrl(path, params);
-  return `${method}:${url}`;
+  return `${method}:${url}:${dedupeKey || ''}`;
 }
 
 /**
@@ -113,14 +114,14 @@ function createTimeoutController(timeoutMs, existingSignal) {
  */
 async function request(
   path,
-  { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, timeout = 30000, signal, ...rest } = {},
+  { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, timeout = 30000, signal, dedupeKey, ...rest } = {},
 ) {
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase());
   const mutationType = offlineMutationType || MUTATION_TIER.ONLINE_ONLY;
   if (isMutation) requireOnlineForMutation(mutationType);
 
   // Request deduplication for GET requests
-  const requestKey = getRequestKey(path, method, params, body);
+  const requestKey = getRequestKey(path, method, params, body, dedupeKey);
   if (requestKey && pendingRequests.has(requestKey)) {
     return pendingRequests.get(requestKey);
   }

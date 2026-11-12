@@ -111,17 +111,37 @@ export default function CertificateComposer() {
   // Real resident directory, scoped by the API to the caller's
   // barangay/municipality. No browser-local resident list.
   useEffect(() => {
+    const controller = new AbortController();
     let active = true;
+    setResidents([]);
+    setResidentsError("");
     residentsApi
-      .list({ limit: 500 })
+      .list(
+        { limit: 500 },
+        {
+          signal: controller.signal,
+          dedupeKey: [
+            user?.id,
+            user?.role,
+            user?.municipalityId,
+            user?.barangayId,
+            user?.facilityId,
+          ].map((value) => String(value || "")).join(":"),
+        },
+      )
       .then((payload) => {
         if (active) setResidents(payload?.rows || payload?.records || []);
       })
-      .catch((err) => active && setResidentsError(err?.message || "The resident directory could not be loaded."));
+      .catch((err) => {
+        if (active && err?.name !== "AbortError") {
+          setResidentsError(err?.message || "The resident directory could not be loaded.");
+        }
+      });
     return () => {
       active = false;
+      controller.abort();
     };
-  }, []);
+  }, [user?.id, user?.role, user?.municipalityId, user?.barangayId, user?.facilityId]);
 
   // Authorized healthcare personnel only — the route already sits inside the
   // role's protected area; this guard is a second line of defense.

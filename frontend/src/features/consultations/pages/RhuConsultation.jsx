@@ -10,6 +10,7 @@ import {
   filterConsultationPatients,
 } from "@/features/consultations/lib/consultationQueue";
 import { Search, CheckCircle2, Stethoscope, RefreshCw, AlertCircle } from "lucide-react";
+import { formatClinicalDateTime } from "@/lib/dateUtils";
 
 // Statuses that keep a patient in the ACTIVE consultation queue. Sourced from
 // the shared status model so there is a single source of truth at the call site.
@@ -50,10 +51,8 @@ const initials = (name) =>
     .toUpperCase();
 
 const formatTime = (iso) => {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const formatted = formatClinicalDateTime(iso);
+  return formatted.date === "—" ? "" : `${formatted.date}${formatted.time === "—" ? "" : ` · ${formatted.time}`}`;
 };
 
 export default function RhuConsultation() {

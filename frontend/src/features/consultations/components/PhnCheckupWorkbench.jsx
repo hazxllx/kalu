@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import MedicalCertificateModal from "@/features/certificates/components/MedicalCertificateModal";
 import MedicineSelector from "@/features/consultations/components/MedicineSelector";
+import { formatClinicalDateTime } from "@/lib/dateUtils";
 
 export const CHECKUP_STATUS_TONES = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
@@ -50,6 +51,17 @@ const InfoItem = ({ label, value, fallback = "—" }) => (
     <p className="text-sm font-medium text-brand-ink">{value || fallback}</p>
   </div>
 );
+
+const DateTimeItem = ({ label, value }) => {
+  const formatted = formatClinicalDateTime(value);
+  return (
+    <div>
+      <p className="text-xs text-brand-gray mb-1">{label}</p>
+      <p className="text-sm font-medium text-brand-ink">{formatted.date}</p>
+      {formatted.time !== "—" ? <p className="text-xs text-brand-gray">{formatted.time}</p> : null}
+    </div>
+  );
+};
 
 const SectionTitle = ({ step, title }) => (
   <div className="flex items-center gap-2 mb-3">
@@ -274,7 +286,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                 <InfoItem label="Patient Name" value={patient?.patient} />
                 <InfoItem label="Age" value={patient?.age !== undefined && patient?.age !== null ? `${patient.age} yrs` : null} />
                 <InfoItem label="Sex" value={patient?.sex} />
-                <InfoItem label="Date of Visit" value={patient?.visitDate} />
+                <DateTimeItem label="Date of Visit" value={patient?.visitDate} />
                 <InfoItem label="Barangay" value={residenceBarangay} />
                 <InfoItem label="Consultation Location" value={consultationLocation} />
               </div>
@@ -296,7 +308,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                     <InfoItem label="O2 Saturation" value={`${patient.triage.oxygenSaturation} %`} />
                   ) : null}
                   {patient?.triage?.weight ? <InfoItem label="Weight" value={`${patient.triage.weight} kg`} /> : null}
-                  {patient?.triage?.date ? <InfoItem label="Triage Date" value={patient.triage.date} /> : null}
+                  <DateTimeItem label="Triage Date" value={patient?.triage?.date} />
                   <InfoItem label="Triage Personnel" value={patient?.triage?.personnel} />
                 </div>
                 {patient?.triage?.notes ? (

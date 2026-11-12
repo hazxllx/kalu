@@ -32,6 +32,7 @@ import {
 import { residentsApi, visitPlansApi } from "@/services/api";
 import { downloadHealthRecordPdf } from "@/features/health-records/lib/healthRecordPdf";
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
+import { formatLongDate } from "@/lib/dateUtils";
 
 // These sections are sourced from separate modules (immunization, laboratory)
 // that are not part of the consultation record. They intentionally render an
@@ -44,10 +45,7 @@ const MEDICAL_HISTORY = {};
 const dash = (value) => (value === null || value === undefined || value === "" ? "—" : value);
 
 const formatDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatLongDate(iso) || "—";
 };
 
 /** Build the vital-sign display from the consultation's backend-validated values. */

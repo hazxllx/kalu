@@ -1083,6 +1083,101 @@
   .overflow-x-auto { -webkit-overflow-scrolling: touch; }
 }
 
+/* Shared clinical list treatment used by Health Records and Resident
+   Directory. Keep the table dense, readable, and visually quiet. */
+.clinical-toolbar {
+  border: 1px solid #D6DEE8;
+  border-radius: 4px;
+  background: #FFFFFF;
+  box-shadow: none;
+}
+.clinical-search,
+.clinical-filter {
+  height: 2.5rem;
+  border: 1px solid #D6DEE8;
+  border-radius: 4px;
+  background: #FFFFFF;
+}
+.clinical-search:focus-within,
+.clinical-filter:focus {
+  border-color: #0B4A8F;
+  outline: 2px solid rgb(11 74 143 / 12%);
+  outline-offset: -1px;
+}
+.clinical-table-card,
+.clinical-data-table {
+  border: 1px solid #D6DEE8;
+  border-radius: 4px;
+  box-shadow: none;
+}
+.clinical-table {
+  color: #2A3747;
+}
+.clinical-table thead {
+  background: #EDF3FA;
+}
+.clinical-table th {
+  padding: 0.6875rem 1rem;
+  border-bottom: 1px solid #D6DEE8;
+  color: #54637A;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.clinical-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #E7ECF1;
+  color: #2A3747;
+  line-height: 1.25rem;
+  vertical-align: middle;
+}
+.clinical-table tbody tr {
+  height: 4rem;
+  background: #FFFFFF;
+  transition: background-color 150ms ease;
+}
+.clinical-table tbody tr:hover {
+  background: #F7F9FC;
+}
+.clinical-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.clinical-table .ui-status-badge,
+.clinical-table .clinical-badge {
+  border-radius: 999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1rem;
+}
+.clinical-action {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #D6DEE8;
+  border-radius: 4px;
+  color: #54637A;
+  background: #FFFFFF;
+}
+.clinical-action:hover {
+  color: #0B4A8F;
+  border-color: #0B4A8F;
+  background: #EDF3FA;
+}
+.clinical-pagination {
+  border-radius: 4px;
+  box-shadow: none;
+}
+.clinical-data-table .clinical-table th,
+.clinical-data-table .clinical-table td {
+  white-space: normal;
+}
+.clinical-data-table .clinical-table td:last-child {
+  text-align: right;
+}
+
 /* ===========================================================================
    REPORTS — full report preview print
    ---------------------------------------------------------------------------

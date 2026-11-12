@@ -14,13 +14,15 @@ import { followUpsApi } from "@/services/api";
 import { captureOwnerGuard } from "@/services/offline/db";
 import { saveConsultationOffline, listConsultationsOffline, listConsultationResidentsOffline, submitConsultationDraft, restoreConsultationDraft } from "@/services/offline/consultationOfflineService";
 import { loadServerRows } from "@/lib/serverRows";
+import { formatClinicalDate } from "@/lib/dateUtils";
 import { normalizeResident } from "../lib/tclData";
 import { clinicalPayload, clinicalErrors, consultationForm, requireServerConsultation } from "../lib/phnRecords";
 import { filterRowsByScope } from "@/lib/phnScope";
 import { manilaDateKey, followUpNeedsAttention, isHighRiskResident } from "@/lib/phnDashboard";
 import PhnCheckupWorkbench from "@/features/consultations/components/PhnCheckupWorkbench";
 import { Search, Plus, Eye, Edit2, Trash2, X, ClipboardCheck, MoreVertical } from "lucide-react";
-import { formatStatusLabel, getStatusColor, formatRiskLabel, getRiskColor, getCheckupStatus, getCheckupIndicatorColor } from "@/lib/statusFormatter";
+import { formatStatusLabel, getStatusColor, formatRiskLabel, getRiskColor } from "@/lib/statusFormatter";
+import TablePagination from "@/components/tables/TablePagination";
 
 const inputCls = "w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue focus:border-2";
 const fieldNames = {
@@ -67,13 +69,18 @@ export default function PhnHealthRecords() {
   const [notice, setNotice] = useState(null);
   const [pendingView, setPendingView] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [recordsPage, setRecordsPage] = useState(1);
+  const [recordsPageSize, setRecordsPageSize] = useState(8);
   const registry = resource.data?.residents || [];
   const residentById = useMemo(() => new Map(registry.map((resident) => [String(resident.id), resident])), [registry]);
   const records = useMemo(() => filterRowsByScope((resource.data?.consultations || []).map((record) => ({ ...record, barangay: record.resident?.barangay || "", consultationLocation: record.facilityName || "" })), user, coverage), [resource.data, user, coverage]);
   const patientsByVisit = useMemo(() => new Map((queue.patients || []).filter((patient) => patient.source !== "submitted").map((patient) => [String(patient.id), patient])), [queue.patients]);
   const selectedResident = residentById.get(String(form.residentId)) || original?.resident || null;
   const filtered = records.filter((record) => (status === "All" || record.status === status) && `${record.resident?.name || ""} ${record.diagnosis || ""} ${record.id}`.toLowerCase().includes(query.toLowerCase()));
+  const pageRecords = filtered.slice((recordsPage - 1) * recordsPageSize, recordsPage * recordsPageSize);
   const statuses = [...new Set(records.map((record) => record.status).filter(Boolean))];
+  useEffect(() => { setRecordsPage(1); }, [query, status]);
+  useEffect(() => { setRecordsPage((page) => Math.min(page, Math.max(1, Math.ceil(filtered.length / recordsPageSize)))); }, [filtered.length, recordsPageSize]);
   
   // Calculate PHN-focused KPIs
   const kpiMetrics = useMemo(() => {
@@ -210,34 +217,34 @@ export default function PhnHealthRecords() {
           />
         </KpiHorizontal>
       </div>
-       <Card className="mb-5 p-5 bg-white border-e2e8f0">
+       <Card className="clinical-toolbar mb-5 p-4">
          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-           <div className="relative flex-1">
-             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-718096" />
+           <div className="clinical-search relative flex-1">
+           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-gray" />
              <input 
                value={query} 
                onChange={(event) => setQuery(event.target.value)} 
                placeholder="Search resident, barangay or program..." 
-               className="w-full rounded-btn border border-e2e8f0 bg-white py-2 pl-10 pr-3 text-sm text-25364a outline-none focus:border-315f91 focus:border-2 focus:ring-1 focus:ring-315f91/20" 
+               className="w-full bg-transparent py-2 pl-10 pr-3 text-sm text-brand-ink outline-none"
              />
            </div>
            <select 
              value={status} 
              onChange={(event) => setStatus(event.target.value)} 
-             className="rounded-btn border border-e2e8f0 bg-white px-3 py-2 text-sm text-25364a outline-none focus:border-315f91 focus:border-2 focus:ring-1 focus:ring-315f91/20 sm:w-48"
+             className="clinical-filter rounded-btn px-3 py-2 text-sm text-brand-ink outline-none sm:w-48"
            >
              <option value="All">All Status</option>
              {statuses.map((item) => <option key={item}>{formatStatusLabel(item)}</option>)}
            </select>
          </div>
-         <div className="text-xs text-718096">
+         <div className="text-xs text-brand-gray">
            Showing {filtered.length} of {records.length} records
          </div>
        </Card>
-        <Card className="p-0 overflow-hidden">
+        <Card className="clinical-table-card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm border-collapse">
-              <thead className="border-b border-e2e8f0 bg-f3f6fa sticky top-0">
+            <table className="clinical-table w-full text-left text-sm border-collapse">
+              <thead>
                 <tr>
                   <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-25364a" style={{ width: '24%', minWidth: '180px' }}>Resident</th>
                   <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-25364a" style={{ width: '13%', minWidth: '100px' }}>Barangay</th>
@@ -248,16 +255,16 @@ export default function PhnHealthRecords() {
                   <th className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-25364a text-center" style={{ width: '17%', minWidth: '80px' }}>Actions</th>
                 </tr>
               </thead>
-              <tbody className="bg-white">
-                {filtered.map((record, rowIndex) => {
+              <tbody>
+                {pageRecords.map((record) => {
                   const resident = record.resident || {};
                   const initials = (resident.name || "??").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
                   const riskLevel = record.riskLevel || "low";
                   const isMenuOpen = openMenuId === record.id;
                   
                   return (
-                    <tr key={record.id} className="border-b border-e2e8f0 hover:bg-f5f7fa transition-colors">
-                      <td className="px-4 py-4 align-middle" style={{ width: '24%' }}>
+                    <tr key={record.id}>
+                      <td className="align-middle" style={{ width: '24%' }}>
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-e2e8f0 text-sm font-semibold text-25364a">
                             {initials}
@@ -270,33 +277,33 @@ export default function PhnHealthRecords() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-4 align-middle text-sm text-25364a" style={{ width: '13%' }}>
+                      <td className="align-middle text-sm text-brand-ink" style={{ width: '13%' }}>
                         <p className="truncate">{resident.barangay || "Not recorded"}</p>
                       </td>
-                      <td className="px-4 py-4 align-middle text-sm text-25364a" style={{ width: '11%' }}>
+                      <td className="align-middle text-sm text-brand-ink" style={{ width: '11%' }}>
                         <p className="truncate">{record.program || record.serviceName || "General"}</p>
                       </td>
-                      <td className="px-4 py-4 align-middle text-sm text-25364a" style={{ width: '13%' }}>
-                        <p className="truncate">{record.consultationDate || "Not recorded"}</p>
-                        {record.consultationTime && <p className="text-xs text-718096 truncate">{record.consultationTime}</p>}
+                      <td className="align-middle text-sm text-brand-ink" style={{ width: '13%' }}>
+                        <p>{record.consultationDate ? formatClinicalDate(record.consultationDate) : "Not recorded"}</p>
+                        {record.consultationTime && <p className="text-xs text-brand-gray">{record.consultationTime}</p>}
                       </td>
-                      <td className="px-4 py-4 align-middle" style={{ width: '9%' }}>
+                      <td className="align-middle" style={{ width: '9%' }}>
                         <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium gap-1.5 whitespace-nowrap ${getRiskColor(riskLevel)}`}>
                           <span aria-hidden="true" className="w-1.5 h-1.5 flex-shrink-0 rounded-full bg-current opacity-60" />
                           {formatRiskLabel(riskLevel)}
                         </span>
                       </td>
-                      <td className="px-4 py-4 align-middle" style={{ width: '13%' }}>
+                      <td className="align-middle" style={{ width: '13%' }}>
                         <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium gap-1.5 whitespace-nowrap ${getStatusColor(record.status)}`}>
                           <span aria-hidden="true" className="w-1.5 h-1.5 flex-shrink-0 rounded-full bg-current opacity-60" />
                           {formatStatusLabel(record.status)}
                         </span>
                       </td>
-                      <td className="px-4 py-4 text-center align-middle relative" style={{ width: '17%' }}>
+                      <td className="relative align-middle text-center" style={{ width: '17%' }}>
                         <button
                           disabled={busy}
                           onClick={() => setOpenMenuId(isMenuOpen ? null : record.id)}
-                          className="inline-flex items-center justify-center w-8 h-8 rounded hover:bg-f5f8fc disabled:opacity-50 transition-colors"
+                          className="clinical-action inline-flex items-center justify-center disabled:opacity-50"
                           title="Actions"
                           type="button"
                         >
@@ -370,7 +377,7 @@ export default function PhnHealthRecords() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center text-sm text-718096">
+                    <td colSpan={7} className="py-10 text-center text-sm text-brand-gray">
                       No persisted consultations match this scope and filter.
                     </td>
                   </tr>
@@ -379,6 +386,14 @@ export default function PhnHealthRecords() {
             </table>
           </div>
         </Card>
+        <TablePagination
+          total={filtered.length}
+          page={recordsPage}
+          pageSize={recordsPageSize}
+          onPageChange={setRecordsPage}
+          onPageSizeChange={(size) => { setRecordsPageSize(size); setRecordsPage(1); }}
+          className="clinical-pagination mt-4"
+        />
     </>}
     {editor && <Modal title={editor === "edit" ? "Edit Persisted Consultation" : "New Clinical Consultation"} onClose={() => setEditor(null)} busy={busy}>
       {failure && <p role="alert" className="mb-4 text-sm text-brand-danger">{failure}</p>}

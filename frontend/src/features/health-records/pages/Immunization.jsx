@@ -8,6 +8,7 @@ import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { immunizationsApi, residentsApi } from "@/services/api";
 import { X, Plus, CheckCircle2, Search, Syringe, Pencil } from "lucide-react";
+import { formatClinicalDate } from "@/lib/dateUtils";
 
 const VACCINES = [
   "BCG", "Hepatitis B", "Pentavalent (DPT-HepB-Hib)", "OPV", "IPV", "PCV", "MMR", "Measles",
@@ -18,10 +19,7 @@ const STATUSES = ["Due", "Completed", "Missed"];
 const NOTES_MAX = 500;
 
 const formatDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatClinicalDate(iso);
 };
 
 const todayIso = () => new Date().toISOString().slice(0, 10);

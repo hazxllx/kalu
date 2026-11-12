@@ -34,11 +34,14 @@ import asyncHandler from '../utils/asyncHandler.js';
  */
 const router = Router();
 
-const read = [authenticate, authorize(FEATURE_ROLES.certificateRequest)];
+const read = [
+  authenticate,
+  authorize(FEATURE_ROLES.certificateRequest, { permission: 'certificates.request' }),
+];
 const decision = [authenticate, authorize(FEATURE_ROLES.certificates)];
 const request = [
   authenticate,
-  authorize(FEATURE_ROLES.certificateRequest),
+  authorize(FEATURE_ROLES.certificateRequest, { permission: 'certificates.request' }),
   authorizeStation(RHU_STATIONS.TRIAGE),
 ];
 const idParam = validate(certificateIdParamValidator, 'params');

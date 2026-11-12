@@ -715,8 +715,27 @@ export const listResidents = async ({
   if (role === 'rhu_personnel' && !municipalityId) {
     throw ApiError.forbidden('A valid municipality assignment is required to access the resident directory.');
   }
+  if (role === 'rhu_personnel' && !user?.facilityId) {
+    throw ApiError.forbidden('A valid RHU facility assignment is required to access the resident directory.');
+  }
 
   let effectiveBarangayId = null;
+  let facilityBarangayId = null;
+  if (role === 'rhu_personnel') {
+    const facilities = await repository.listFacilities({ municipalityId });
+    const facility = facilities.find((item) =>
+      String(item.id) === String(user.facilityId)
+      && String(item.type || '').toLowerCase() === 'rhu'
+      && String(item.municipalityId) === String(municipalityId),
+    );
+    if (!facility) {
+      throw ApiError.forbidden('A valid RHU facility assignment is required to access the resident directory.');
+    }
+    // A facility associated with a barangay is limited to that barangay;
+    // municipality-level RHUs retain their municipality-wide resident scope.
+    facilityBarangayId = facility.barangayId || null;
+    effectiveBarangayId = facilityBarangayId;
+  }
   if (scope) {
     const barangayRows = await repository.listBarangays({ municipalityId });
     const assignedRow = barangayRows.find((row) =>
@@ -726,11 +745,17 @@ export const listResidents = async ({
     if (!assignedRow || String(assignedRow.status).toLowerCase() !== 'active' || !isApprovedBarangayName(assignedRow.name)) {
       throw ApiError.forbidden('A valid active barangay assignment is required to access residents.');
     }
+    if (facilityBarangayId && String(assignedRow.id) !== String(facilityBarangayId)) {
+      throw ApiError.forbidden('Your RHU facility is assigned to a different barangay.');
+    }
     effectiveBarangayId = assignedRow.id;
     if (requestedBarangayId && requestedBarangayId !== String(effectiveBarangayId)) {
       throw ApiError.forbidden('Your account is assigned to Barangay ' + scope + ' only');
     }
   } else if (requestedBarangayId) {
+    if (facilityBarangayId && requestedBarangayId !== String(facilityBarangayId)) {
+      throw ApiError.forbidden('Your RHU facility is assigned to a different barangay.');
+    }
     const barangayRows = await repository.listBarangays({ municipalityId });
     const selected = barangayRows.find((row) => String(row.id) === requestedBarangayId);
     if (!selected || String(selected.status).toLowerCase() !== 'active' || !isApprovedBarangayName(selected.name)) {
@@ -767,8 +792,17 @@ export const listResidents = async ({
     );
   }
 
-  const effectiveBarangay =
-    scope || requested || null;
+  if (facilityBarangayId && requested) {
+    const barangayRows = await repository.listBarangays({ municipalityId });
+    const selected = barangayRows.find((row) =>
+      String(row.name || '').trim().toLowerCase() === requested.toLowerCase(),
+    );
+    if (!selected || String(selected.id) !== String(facilityBarangayId)) {
+      throw ApiError.forbidden('Your RHU facility is assigned to a different barangay.');
+    }
+  }
+
+  const effectiveBarangay = scope || requested || null;
 
   const parsedLimit = Math.min(
     parsePositiveInt(limit, 50),

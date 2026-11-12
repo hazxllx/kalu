@@ -794,49 +794,34 @@ export default function DashboardLayout({ roleKey }) {
             initial={isSupervisor ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: isSupervisor ? 0 : 0.3 }}
-          >
-            {routePermissions && !permissionsReady ? (
-              <section
-                className="mx-auto max-w-xl border border-brand-border bg-white p-6 text-center"
-                aria-live="polite"
-              >
-                <h1 className="text-base font-semibold text-brand-ink">
-                  {matrixLoadState.status === "loading"
-                    ? "Checking page access…"
-                    : matrixLoadState.failureKind === "auth"
-                      ? "Your session needs attention"
-                      : matrixLoadState.failureKind === "forbidden"
-                        ? "Access was denied"
-                        : "Reconnect to verify page access"}
-                </h1>
-                <p className="mt-2 text-sm text-brand-gray">
-                  {matrixLoadState.status === "loading"
-                    ? "This page will open after access is verified."
-                    : matrixLoadState.error ||
-                      "No unexpired, previously verified permissions are available on this device. This page remains protected until access can be verified."}
-                </p>
-                {matrixLoadState.failureKind === "auth" ? (
-                  <button
-                    type="button"
-                    onClick={() => void logout()}
-                    className="mt-4 min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface"
-                  >
-                    Sign in again
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void recheckAccess()}
-                    disabled={feedback === "loading"}
-                    className="mt-4 min-h-9 border border-brand-border px-3 text-xs font-medium hover:bg-brand-surface disabled:opacity-50"
-                  >
-                    {feedback === "loading" ? "Checking…" : "Recheck access"}
-                  </button>
-                )}
-              </section>
-            ) : (
-              <Outlet />
-            )}
+           >
+             {routePermissions && matrixLoadState.status === "loading" ? (
+               <section
+                 className="mx-auto max-w-xl border border-brand-border bg-white p-6 text-center"
+                 aria-live="polite"
+               >
+                 <h1 className="text-base font-semibold text-brand-ink">
+                   Checking page access…
+                 </h1>
+                 <p className="mt-2 text-sm text-brand-gray">
+                   This page will open after access is verified.
+                 </p>
+               </section>
+             ) : routePermissions && permissionsReady && !routeAllowed ? (
+               <section
+                 className="mx-auto max-w-xl border border-brand-border bg-white p-6 text-center"
+                 aria-live="polite"
+               >
+                 <h1 className="text-base font-semibold text-brand-ink">
+                   Access was denied
+                 </h1>
+                 <p className="mt-2 text-sm text-brand-gray">
+                   You do not have permission to access this page. Contact an administrator if you believe this is an error.
+                 </p>
+               </section>
+             ) : (
+               <Outlet />
+             )}
           </motion.div>
         </main>
       </div>

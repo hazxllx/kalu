@@ -11,8 +11,9 @@ import { usePhnCoverage } from "@/context/PhnCoverageContext";
 import { riskOfPatient } from "@/lib/riskRules";
 import { matchesCheckupSearch, isScheduledToday } from "@/features/consultations/lib/consultationQueue";
 import { consultationLocationFor } from "@/lib/consultationLocations";
+import { formatClinicalDateTime } from "@/lib/dateUtils";
 import { useAuth } from "@/context/AuthContext";
-import { Search, CheckCircle2, Stethoscope, ClipboardCheck, Eye } from "lucide-react";
+import { Search, CheckCircle2, Stethoscope, ClipboardCheck, Eye, RefreshCw } from "lucide-react";
 
 const EMPTY_STATE = {
   "Waiting for PHN": "bg-brand-accent/10 text-brand-accent",
@@ -44,11 +45,11 @@ const RiskBadge = ({ level }) => (
 /** Format a stored visit date into a compact two-line schedule, or null. */
 const formatScheduled = (raw) => {
   if (!raw) return null;
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
+  const formatted = formatClinicalDateTime(raw);
+  if (formatted.date === "—") return null;
   return {
-    date: d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
-    time: d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
+    date: formatted.date,
+    time: formatted.time,
   };
 };
 
@@ -85,7 +86,7 @@ export default function PhnCheckups() {
   const location = useLocation();
   // BUG-008: the check-up pipeline is the persistent PHN queue (DB-backed), not
   // a browser store. Mutations persist to /phn and refresh from the database.
-  const { patients: workflowPatients, startCheckup, completeCheckup } =
+  const { patients: workflowPatients, loading, error, refresh, startCheckup, completeCheckup } =
     usePhnWorkflow({ source: "queue" });
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -448,10 +449,35 @@ export default function PhnCheckups() {
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && (
+                {loading && (
                   <tr>
                     <td colSpan={7} className="px-4 py-10 text-center text-sm text-brand-gray">
-                      No check-ups match the selected filters.
+                      Loading PHN check-ups...
+                    </td>
+                  </tr>
+                )}
+                {!loading && error && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center">
+                      <p className="text-sm font-medium text-brand-danger">Could not load PHN check-ups.</p>
+                      <p className="mt-1 text-xs text-brand-gray">{error}</p>
+                      <button
+                        type="button"
+                        onClick={() => void refresh()}
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-blue hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Try again
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {!loading && !error && filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-10 text-center text-sm text-brand-gray">
+                      {workflowPatients.length === 0
+                        ? "No check-ups have been sent to the PHN queue yet."
+                        : "No check-ups match the selected filters."}
                     </td>
                   </tr>
                 )}

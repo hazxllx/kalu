@@ -20,6 +20,7 @@ import { reportsApi } from "@/services/api";
 import { useBarangays } from "@/context/BarangaysContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import ReportSnapshotView from "@/features/reports/components/ReportSnapshotView";
+import { formatClinicalDate, formatClinicalDateTime } from "@/lib/dateUtils";
 
 /**
  * PHN — Target Client Lists (submission monitoring).
@@ -101,17 +102,12 @@ const deriveCategory = (report) => {
 const displayStatus = (raw) => STATUS_DISPLAY[raw] || raw || "Submitted";
 
 const formatDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatClinicalDate(iso);
 };
 
 const formatDateTime = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  const formatted = formatClinicalDateTime(iso);
+  return formatted.date === "—" ? "—" : `${formatted.date}${formatted.time === "—" ? "" : ` · ${formatted.time}`}`;
 };
 
 /** The YYYY-MM-DD portion of a submission's effective date (submitted, else created). */

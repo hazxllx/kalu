@@ -7,6 +7,7 @@ import { X, Search, Activity, User, MapPin, Stethoscope, Plus, CheckCircle2 } fr
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { tclApi, residentsApi } from "@/services/api";
+import { formatClinicalDate, formatClinicalDateTime } from "@/lib/dateUtils";
 
 // TB records are stored in the shared tcl_entries register. Every program value
 // below satisfies isTbProgram() so the record is listed as a TB record, and the
@@ -41,10 +42,7 @@ const TB_STATUSES = ["Active", "Inactive", "Completed", "Transferred"];
 const isTbProgram = (program) => /\btb\b|tuberculos/i.test(String(program || ""));
 
 const formatDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatClinicalDate(iso);
 };
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -57,10 +55,8 @@ const labelCls = "text-sm font-medium text-brand-ink";
 const errorCls = "mt-1 text-xs text-brand-danger";
 
 const formatDateTime = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const formatted = formatClinicalDateTime(iso);
+  return formatted.date === "—" ? "—" : `${formatted.date}${formatted.time === "—" ? "" : ` · ${formatted.time}`}`;
 };
 
 const ageFromBirth = (birthDate) => {

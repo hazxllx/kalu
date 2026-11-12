@@ -13,17 +13,21 @@
 // midnight (e.g. new Date(2026, 0, 1) in UTC+8) yields the PREVIOUS day in the
 // PREVIOUS year ("2025-12-31"), which was the source of the heatmap date bug.
 
-const MONTHS_LONG = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const MONTHS_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
 const pad2 = (n) => String(n).padStart(2, "0");
+export const PHILIPPINE_TIME_ZONE = "Asia/Manila";
+
+const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: PHILIPPINE_TIME_ZONE,
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
+
+const TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: PHILIPPINE_TIME_ZONE,
+  hour: "numeric",
+  minute: "2-digit",
+});
 
 /**
  * Format a Date into a "YYYY-MM-DD" string using its LOCAL calendar day.
@@ -60,13 +64,52 @@ export function currentYear(now = new Date()) {
  * that it represents the intended calendar day regardless of timezone. Any
  * other value is delegated to the Date constructor.
  */
-function parseLocal(value) {
+function parseDisplayDate(value) {
   if (value instanceof Date) return value;
   if (typeof value === "string") {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   }
   return new Date(value);
+}
+
+/**
+ * Safely parse and validate a display date, returning null for invalid input.
+ */
+function validDisplayDate(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const date = parseDisplayDate(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Human-readable long date, e.g. "September 27, 2026".
+ * Accepts a "YYYY-MM-DD" string or a Date. Returns "—" for invalid input.
+ */
+export function formatClinicalDate(value) {
+  const date = validDisplayDate(value);
+  return date ? DATE_FORMATTER.format(date) : "—";
+}
+
+/**
+ * Human-readable time, e.g. "3:45 PM".
+ * Accepts a "YYYY-MM-DD" string or a Date. Returns "—" for invalid input or date-only strings.
+ */
+export function formatClinicalTime(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return "—";
+  const date = validDisplayDate(value);
+  return date ? TIME_FORMATTER.format(date) : "—";
+}
+
+/**
+ * Format both date and time components of a clinical timestamp.
+ * Returns an object with `date` and `time` properties, each "—" for invalid input.
+ */
+export function formatClinicalDateTime(value) {
+  return {
+    date: formatClinicalDate(value),
+    time: formatClinicalTime(value),
+  };
 }
 
 /**
@@ -74,10 +117,8 @@ function parseLocal(value) {
  * Accepts a "YYYY-MM-DD" string or a Date. Returns "" for invalid input.
  */
 export function formatLongDate(value) {
-  if (!value) return "";
-  const d = parseLocal(value);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${MONTHS_LONG[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  const formatted = formatClinicalDate(value);
+  return formatted === "—" ? "" : formatted;
 }
 
 /**
@@ -85,10 +126,14 @@ export function formatLongDate(value) {
  * Accepts a "YYYY-MM-DD" string or a Date. Returns "" for invalid input.
  */
 export function formatShortDate(value) {
-  if (!value) return "";
-  const d = parseLocal(value);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  const date = validDisplayDate(value);
+  if (!date) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: PHILIPPINE_TIME_ZONE,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
 }
 
 /**

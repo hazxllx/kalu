@@ -2885,15 +2885,16 @@ export const supabaseRepository = {
 
   async listFacilities({ municipalityId = null } = {}) {
     const supabase = getServiceClient();
-    let query = supabase.from('facilities').select('id,name,type,municipality_id').order('name');
+    let query = supabase.from('facilities').select('id,name,type,municipality_id,barangay_id').order('name');
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
     const { data, error } = await query;
     throwOnError(error, 'Could not load facilities');
-    return (data || []).map(({ id, name, type, municipality_id }) => ({
+    return (data || []).map(({ id, name, type, municipality_id, barangay_id }) => ({
       id,
       name,
       type,
       municipalityId: municipality_id,
+      barangayId: barangay_id,
     }));
   },
 
