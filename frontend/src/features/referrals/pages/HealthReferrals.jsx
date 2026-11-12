@@ -1008,9 +1008,9 @@ export default function HealthReferrals() {
         </div>
       </Card>
 
-      <Card className="overflow-hidden">
+      <Card className="clinical-table-card overflow-hidden">
         <div>
-          <table className={`ui-table w-full referral-monitoring-grid ${isResident ? "referral-monitoring-grid-resident" : "referral-monitoring-grid-supervisor"}`}>
+          <table className={`clinical-table ui-table w-full referral-monitoring-grid ${isResident ? "referral-monitoring-grid-resident" : "referral-monitoring-grid-supervisor"}`}>
             <thead className="bg-brand-bg border-b border-brand-border">
               <tr>
                 {columns.map((h) => (
@@ -1054,7 +1054,7 @@ export default function HealthReferrals() {
                       <button
                         type="button"
                         onClick={(event) => toggleActionMenu(event, r.id)}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-brand-blue transition-colors hover:bg-brand-light hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+                        className="clinical-action inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
                         aria-label={`Actions for ${r.residentName}`}
                         aria-haspopup="menu"
                         aria-expanded={openActionMenu === r.id}

@@ -1061,7 +1061,7 @@ export default function ResidentsPage() {
               if (key === "name")
                 return (
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-xs font-semibold">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-blue text-xs font-semibold text-white">
                       {initialsOf(row.name)}
                     </div>
                     <div>
@@ -1102,7 +1102,7 @@ export default function ResidentsPage() {
               <article key={row.id} className="border-b border-brand-border p-3 last:border-b-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-light text-xs font-semibold text-brand-blue">{initialsOf(row.name)}</div>
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-blue text-xs font-semibold text-white">{initialsOf(row.name)}</div>
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-brand-ink">{row.name}</p>
                       <p className="truncate text-xs text-brand-gray">{row.cellphoneNo || "Contact not recorded"}</p>

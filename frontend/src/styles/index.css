@@ -1116,6 +1116,9 @@
 .clinical-table thead {
   background: #EDF3FA;
 }
+.clinical-table thead tr {
+  background: #EDF3FA;
+}
 .clinical-table th {
   padding: 0.6875rem 1rem;
   border-bottom: 1px solid #D6DEE8;
