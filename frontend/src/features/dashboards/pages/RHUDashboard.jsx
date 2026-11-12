@@ -15,7 +15,6 @@ import {
   ArrowRight,
   Bell,
   FileText,
-  RefreshCw,
 } from "lucide-react";
 
 // Shared shortcuts only. Station pages remain available from the role
@@ -127,14 +126,6 @@ export default function RHUDashboard() {
     };
   }, [patientList]);
 
-  const waitingPatients = useMemo(
-    () =>
-      patientList.filter(
-        (p) => p.status === CHECKUP_STATUS.WAITING,
-      ),
-    [patientList],
-  );
-
   const recent = useMemo(() => {
     return [...patientList]
       .sort((a, b) =>
@@ -221,17 +212,6 @@ export default function RHUDashboard() {
         subtitle={consultationStation
           ? "Review the consultation queue and track completed consultations."
           : "Review the triage workload, record resident screening, and hand patients off to consultation."}
-        action={(
-          <button
-            type="button"
-            onClick={() => { void refresh(); }}
-            disabled={loading}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-btn border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/15 disabled:opacity-50 md:w-auto"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        )}
       />
 
       {error && (
@@ -309,8 +289,8 @@ export default function RHUDashboard() {
         </div>
       </section>
 
-      <div className={`grid grid-cols-1 gap-4 sm:gap-5 ${triageStation ? "lg:grid-cols-3" : ""}`}>
-        <Card className={`p-4 sm:p-6 ${triageStation ? "lg:col-span-2" : ""}`}>
+      <div className="grid grid-cols-1 gap-4 sm:gap-5">
+        <Card className="p-4 sm:p-6">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-brand-ink sm:text-base">
               {consultationStation ? "Consultation Queue" : "Recent Screening Hand-offs"}
@@ -339,53 +319,6 @@ export default function RHUDashboard() {
             />
           )}
         </Card>
-
-        {triageStation && <Card className="h-fit p-4 sm:p-6">
-          <h3 className="mb-4 text-sm font-semibold text-brand-ink sm:text-base">
-            Consultation Queue
-          </h3>
-
-          {loading ? (
-            <SkeletonList rows={4} />
-          ) : waitingPatients.length === 0 ? (
-            <p className="py-6 text-center text-sm text-brand-gray">
-              No patients waiting for consultation.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {waitingPatients.slice(0, 5).map((patient) => (
-                <div
-                  key={patient.id}
-                  className="flex items-center justify-between border-b border-brand-border py-2 last:border-0"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-brand-ink">
-                      {patient.patient}
-                    </p>
-
-                    <p className="truncate text-xs text-brand-gray">
-                      {[
-                        patient.barangay,
-                        formatDate(patient.visitDate),
-                      ]
-                        .filter(Boolean)
-                        .join(" • ")}
-                    </p>
-                  </div>
-
-                  <StatusBadge value={patient.status} />
-                </div>
-              ))}
-            </div>
-          )}
-
-          <Link
-            to="/app/rhu_personnel/consultation"
-            className="mt-4 block w-full text-center text-sm font-medium text-brand-blue hover:underline"
-          >
-            View Consultation Queue
-          </Link>
-        </Card>}
       </div>
 
       <div>

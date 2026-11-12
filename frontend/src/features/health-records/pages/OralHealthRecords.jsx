@@ -6,6 +6,8 @@ import { RefreshCw, Download } from "lucide-react";
 import { oralHealthApi } from "@/services/api";
 import { PROGRAM_FORMS } from "../lib/programFormConfig";
 import { buildOralStatisticsCsv, downloadCsv } from "../lib/programFormExport";
+import { SkeletonTable } from "@/components/system/Skeleton";
+import TclTabs from "../components/TclTabs";
 
 const inputCls = "mt-1.5 w-full bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue";
 
@@ -32,13 +34,13 @@ function Statistics() {
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div>
-      <Card className="p-4 mb-4">
+    <div className="ui-tcl-statistics">
+      <Card className="mb-6 p-5">
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
           <div><label className="text-sm font-medium text-brand-ink">From</label><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} /></div>
           <div><label className="text-sm font-medium text-brand-ink">To</label><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} /></div>
           <div><label className="text-sm font-medium text-brand-ink">Total Population (optional)</label><input type="number" value={population} onChange={(e) => setPopulation(e.target.value)} placeholder="for targets" className={inputCls} /></div>
-          <button onClick={load} className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-dark transition-colors"><RefreshCw className="h-4 w-4" /> Recompute</button>
+          <button onClick={load} className="ui-tcl-control ui-tcl-control-primary"><RefreshCw className="h-4 w-4" /> Recompute</button>
         </div>
         <div className="mt-3 flex items-center justify-between gap-3">
           <p className="text-xs text-brand-gray">
@@ -48,7 +50,7 @@ function Statistics() {
           <button
             disabled={!data}
             onClick={() => data && downloadCsv(`oral-health-ST-${new Date().toISOString().slice(0, 10)}.csv`, buildOralStatisticsCsv(data))}
-            className="shrink-0 inline-flex items-center gap-2 border border-brand-border text-brand-ink px-3 py-2 rounded-btn text-sm font-medium hover:border-brand-blue hover:text-brand-blue transition-colors disabled:opacity-50"
+            className="ui-tcl-control ui-tcl-control-secondary shrink-0"
           >
             <Download className="h-4 w-4" /> Export CSV
           </button>
@@ -56,9 +58,14 @@ function Statistics() {
       </Card>
 
       {error ? (
-        <Card className="p-8 text-center"><p className="text-sm font-medium text-brand-danger">{error}</p></Card>
+        <Card className="p-8 text-center">
+          <p className="text-sm font-medium text-brand-danger">{error}</p>
+          <button onClick={load} className="mt-4 inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors">
+            <RefreshCw className="h-4 w-4" /> Retry
+          </button>
+        </Card>
       ) : loading || !data ? (
-        <p className="py-8 text-center text-sm text-brand-gray">Loading statistics…</p>
+        <SkeletonTable rows={8} cols={6} />
       ) : (
         <Card className="overflow-x-auto">
           <table className="min-w-[640px] w-full text-sm">
@@ -118,10 +125,12 @@ export default function OralHealthRecords() {
         title="Oral Health Care & Services"
         subtitle="Client-level Target Client List and the Basic Oral Health Care (BOHC) statistical table."
       />
-      <div className="mb-3 flex flex-wrap gap-2">
-        <button onClick={() => setTab("tcl")} className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${tab === "tcl" ? "bg-brand-blue text-white border-brand-blue" : "bg-white text-brand-gray border-brand-border hover:border-brand-blue"}`}>Target Client List</button>
-        <button onClick={() => setTab("st")} className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${tab === "st" ? "bg-brand-blue text-white border-brand-blue" : "bg-white text-brand-gray border-brand-border hover:border-brand-blue"}`}>Statistical Table (ST)</button>
-      </div>
+      <TclTabs
+        tabs={[{ value: "tcl", label: "Target Client List" }, { value: "st", label: "Statistical Table (ST)" }]}
+        active={tab}
+        onChange={setTab}
+        label="Oral Health sections"
+      />
       {tab === "tcl" ? <ProgramFormPage config={PROGRAM_FORMS["oral-health"]} /> : <Statistics />}
     </>
   );

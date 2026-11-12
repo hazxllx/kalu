@@ -102,10 +102,34 @@ export default function IncomingReports() {
     setDetailLoading(true);
     setDetailError("");
     setDetailContent(null);
+    
     reportsApi.get(detail.id)
-      .then((res) => { if (active) setDetailContent(res?.record || null); })
-      .catch((err) => { if (active) setDetailError(err?.message || "Could not load the submitted report."); })
-      .finally(() => { if (active) setDetailLoading(false); });
+      .then((res) => {
+        if (active) {
+          // Only update if the response contains a valid record with content
+          const record = res?.record || null;
+          if (record) {
+            setDetailContent(record);
+          } else {
+            setDetailError("The report content could not be retrieved.");
+          }
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          // Provide more specific error messages
+          const errorMsg = err?.response?.status === 403
+            ? "You do not have permission to view this report."
+            : err?.response?.status === 404
+            ? "This report was not found or has been deleted."
+            : err?.message || "Could not load the submitted report.";
+          setDetailError(errorMsg);
+        }
+      })
+      .finally(() => {
+        if (active) setDetailLoading(false);
+      });
+    
     return () => { active = false; };
   }, [detail]);
 
@@ -139,7 +163,21 @@ export default function IncomingReports() {
   }, [barangayFilter, periodFilter, search, sortedRows, statusFilter, typeFilter]);
 
   const act = async (report, status) => {
-    if (!canReview || user?.role !== report.recipientRole) return;
+    // Verify authorization before attempting to act
+    if (!canReview) {
+      showToast("You do not have permission to review reports.");
+      return;
+    }
+    if (user?.role !== report.recipientRole) {
+      showToast("You are not the intended recipient of this report.");
+      return;
+    }
+    // RHU Personnel: verify facility scope
+    if (user?.role === "rhu_personnel" && report.recipientFacilityId && user?.facilityId && report.recipientFacilityId !== user.facilityId) {
+      showToast("This report is routed to a different facility. You cannot act on it.");
+      return;
+    }
+    
     if (["Needs Revision", "Rejected"].includes(status) && !rejectReason.trim()) {
       showToast("An explanation is required.");
       return;

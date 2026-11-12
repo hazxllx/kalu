@@ -84,6 +84,13 @@ const RegistrationSuccess = publicPage(
     )
 );
 
+const StaffResidentRegistration = appPage(
+  () =>
+    import(
+      '@/features/registration/pages/StaffResidentRegistration'
+    )
+);
+
 const VerificationStatus = publicPage(
   () =>
     import(
@@ -940,6 +947,10 @@ const AppRoutes = () => (
         <Route
           path="residents"
           element={<ResidentsPage />}
+        />
+        <Route
+          path="residents/register"
+          element={<StaffResidentRegistration />}
         />
         <Route
           path="verifications"

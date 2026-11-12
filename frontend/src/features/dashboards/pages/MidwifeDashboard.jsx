@@ -40,7 +40,7 @@ export default function MidwifeDashboard() {
     { label: "Registered Residents", value: metricValue(metrics.totalResidents), icon: "Users", tone: "blue" },
     { label: "Consultations This Month", value: metricValue(metrics.consultationsThisMonth), icon: "Stethoscope", tone: "green" },
     { label: "Pending Referrals", value: metricValue(metrics.pendingReferrals), icon: "Send", tone: "amber" },
-    { label: "Active Follow-ups", value: metricValue(metrics.activeFollowUps), icon: "CalendarCheck", tone: "indigo" },
+    { label: "Active Follow-ups", value: metricValue(metrics.activeFollowUps), icon: "CalendarCheck", tone: "slate" },
     { label: "Active Maternal Cases", value: metricValue(metrics.activeMaternalCases), icon: "Heart", tone: "red" },
     { label: "Immunization Records", value: metricValue(metrics.immunizationRecords), icon: "Syringe", tone: "slate" },
   ] : [];

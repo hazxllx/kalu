@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
 import PageHeader from "@/components/common/PageHeader";
-import BackToTclButton from "@/features/health-records/components/BackToTclButton";
+import TclPageHeader from "@/features/health-records/components/TclPageHeader";
 import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
@@ -810,8 +810,6 @@ export default function M1Records() {
   const [countsLoading, setCountsLoading] = useState(false);
   const [countsError, setCountsError] = useState(null);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const cameFromTcl = isMaternalTclRoute || searchParams.get("from") === "tcl";
   const { startPrint, portal, brandingError } = useM1OfficialPrint();
   const { startPrint: startMaternalPrint, portal: maternalPrintPortal } = useMaternalRecordPrint();
 
@@ -1109,12 +1107,9 @@ export default function M1Records() {
 
   return (
     <>
-      {cameFromTcl && <BackToTclButton />}
       {isMaternalTclRoute ? (
-        <PageHeader
-          crumbs={cameFromTcl
-            ? ["Health Operations", "Records", { label: "TCL", to: "../tcls" }, "Prenatal and Postpartum"]
-            : ["Health Operations", "Records", "M1"]}
+        <TclPageHeader
+          crumb="Prenatal and Postpartum"
           title="Prenatal and Postpartum"
           subtitle={
             assignedBarangay
@@ -1283,29 +1278,25 @@ export default function M1Records() {
           {/* Maternal Care operational records (the Maternal Care service) */}
           {activeSection === "B" && (
           <>
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              {!isMaternalTclRoute && (
+          {!isMaternalTclRoute && (
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
                 <button onClick={() => setActiveSection(null)} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue">
                   <ChevronLeft className="h-4 w-4" /> Health Services
                 </button>
-              )}
-              <div>
-                <h3 className="font-semibold text-brand-ink">{isMaternalTclRoute ? "Prenatal and Postpartum Records" : "Maternal Care Records"}</h3>
-                <p className="text-xs text-brand-gray">
-                  {isMaternalTclRoute
-                    ? "Individual maternal cases with prenatal, delivery, and postpartum follow-up details."
-                    : "Individual maternal cases — the operational source for FHSIS Section B."}
-                </p>
+                <div>
+                  <h3 className="font-semibold text-brand-ink">Maternal Care Records</h3>
+                  <p className="text-xs text-brand-gray">Individual maternal cases — the operational source for FHSIS Section B.</p>
+                </div>
               </div>
+              <button
+                onClick={openCreate}
+                className="inline-flex min-h-11 items-center gap-2 rounded-btn bg-brand-blue px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-dark"
+              >
+                <Plus className="h-4 w-4" /> New Maternal Record
+              </button>
             </div>
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
-            >
-              <Plus className="h-4 w-4" /> New Maternal Record
-            </button>
-          </div>
+          )}
 
           {!isMaternalTclRoute && (
           <>
@@ -1356,7 +1347,7 @@ export default function M1Records() {
           )}
 
           {/* Participants table */}
-          <Card className="mt-6 overflow-hidden">
+          <Card className={`${isMaternalTclRoute ? "" : "mt-6"} overflow-hidden`}>
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-border px-5 py-4">
               <div>
                 <h3 className="font-semibold text-brand-ink">{isMaternalTclRoute ? "Prenatal and Postpartum Records" : "M1 / Maternal Participants"}</h3>
@@ -1384,6 +1375,14 @@ export default function M1Records() {
                   <option value="All">All Status</option>
                   {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
+                {isMaternalTclRoute && (
+                  <button
+                    onClick={openCreate}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-btn bg-brand-blue px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-dark"
+                  >
+                    <Plus className="h-4 w-4" /> New Maternal Record
+                  </button>
+                )}
               </div>
             </div>
 

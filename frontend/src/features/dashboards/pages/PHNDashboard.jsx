@@ -259,12 +259,12 @@ export default function PHNDashboard() {
             tone="amber"
             description={followUpsOverdue > 0 ? `${followUpsOverdue} overdue` : "Due today or overdue"}
           />
-          <KpiHorizontal.Item
-            label="PENDING REFERRALS"
-            value={referrals.loading ? "—" : referrals.error ? "—" : pendingReferrals}
-            tone="teal"
-            description="Assigned to you and awaiting acceptance"
-          />
+           <KpiHorizontal.Item
+             label="PENDING REFERRALS"
+             value={referrals.loading ? "—" : referrals.error ? "—" : pendingReferrals}
+             tone="blue"
+             description="Assigned to you and awaiting acceptance"
+           />
           <KpiHorizontal.Item
             label="HIGH-RISK CASES"
             value={residents.loading ? "—" : residents.error ? "—" : residents.total}

@@ -1,0 +1,202 @@
+/**
+ * Shared Target Client List presentation.
+ * Data, print renderers, and program-specific fields remain in their page
+ * components; this file only defines the common screen language.
+ */
+
+.ui-page-header-hs-tcl {
+  background: #102F53;
+}
+
+.ui-tcl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.ui-tcl-toolbar-search {
+  display: flex;
+  min-width: 14rem;
+  flex: 1 1 18rem;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.75rem;
+  border: 1px solid #D7E0EB;
+  border-radius: 6px;
+  background: #FFFFFF;
+  padding: 0 0.75rem;
+}
+
+.ui-tcl-toolbar-search:focus-within {
+  border-color: #124B86;
+  box-shadow: 0 0 0 2px rgb(18 75 134 / 12%);
+}
+
+.ui-tcl-toolbar-search input {
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.ui-tcl-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ui-tcl-control {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 6px;
+  padding: 0 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: background-color 150ms, border-color 150ms, color 150ms;
+}
+
+.ui-tcl-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ui-tcl-control-primary {
+  background: #124B86;
+  color: #FFFFFF;
+}
+
+.ui-tcl-control-primary:hover:not(:disabled) {
+  background: #0D3D70;
+}
+
+.ui-tcl-control-secondary {
+  border: 1px solid #D7E0EB;
+  background: #FFFFFF;
+  color: #172B45;
+}
+
+.ui-tcl-control-secondary:hover:not(:disabled) {
+  border-color: #124B86;
+  color: #124B86;
+}
+
+.ui-tcl-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #D7E0EB;
+}
+
+.ui-tcl-tab {
+  min-height: 2.75rem;
+  border-bottom: 2px solid transparent;
+  padding: 0 1rem;
+  color: #64748B;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.ui-tcl-tab:hover {
+  color: #124B86;
+}
+
+.ui-tcl-tab.active {
+  border-bottom-color: #124B86;
+  color: #124B86;
+}
+
+.ui-tcl-empty-state {
+  display: flex;
+  min-height: 16.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #D7E0EB;
+  border-radius: 6px;
+  background: #FFFFFF;
+  padding: 2rem 1.5rem;
+  text-align: center;
+}
+
+.ui-tcl-empty-state-icon {
+  display: flex;
+  height: 3.5rem;
+  width: 3.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(18 75 134 / 20%);
+  border-radius: 9999px;
+  background: #F3F6FA;
+  color: #124B86;
+}
+
+.ui-tcl-data-table {
+  overflow: hidden;
+  border-radius: 6px;
+  border-color: #D7E0EB;
+  box-shadow: none;
+}
+
+.ui-tcl-data-table thead tr {
+  background: #F7F9FC;
+}
+
+.ui-tcl-data-table th {
+  border-bottom: 1px solid #D7E0EB;
+  color: #475569;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  padding: 0.75rem 1rem;
+}
+
+.ui-tcl-data-table tbody tr {
+  border-color: #E2E8F0;
+}
+
+.ui-tcl-data-table tbody tr:hover {
+  background: #F3F6FA;
+}
+
+.ui-tcl-data-table td {
+  color: #172B45;
+  padding: 0.75rem 1rem;
+}
+
+.ui-tcl-statistics table thead tr {
+  background: #F7F9FC;
+}
+
+.ui-tcl-statistics table th {
+  border-bottom: 1px solid #D7E0EB;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 0.75rem 1rem;
+}
+
+.ui-tcl-statistics table tbody tr {
+  border-top: 1px solid #E2E8F0;
+}
+
+.ui-tcl-statistics table td {
+  color: #172B45;
+  padding: 0.75rem 1rem;
+}
+
+.ui-tcl-skeleton {
+  animation: tcl-pulse 1.8s ease-in-out infinite;
+  border-radius: 6px;
+  background: #D7E0EB;
+}
+
+@keyframes tcl-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}

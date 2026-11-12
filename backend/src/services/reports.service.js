@@ -126,6 +126,40 @@ const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
 };
 
+/**
+ * Verify that the authenticated staff member's account is approved and usable.
+ * This re-check is a defense-in-depth measure to complement RLS policies.
+ * For non-staff roles (residents), this is a no-op.
+ */
+const assertPersonnelApproved = async (supabase, user) => {
+  if (!user?.id) return; // Unauthenticated; other checks will catch this
+  if (![ROLES.RHU_PERSONNEL, ROLES.PHN, ROLES.MHO, ROLES.HEALTH_SUPERVISOR].includes(user?.role)) {
+    return; // Non-staff roles don't need approval status
+  }
+  
+  const { data, error } = await supabase
+    .from('personnel_accounts')
+    .select('approval_status, setup_required, suspended_at')
+    .eq('account_id', user.id)
+    .maybeSingle();
+  
+  throwOnError(error, 'Could not verify personnel account status');
+  
+  if (!data) {
+    throw ApiError.forbidden('Your staff account has not been provisioned. Ask an administrator to set it up.');
+  }
+  
+  if (data.approval_status !== 'approved') {
+    throw ApiError.forbidden(`Your account is not approved. Current status: ${data.approval_status}.`);
+  }
+  if (data.setup_required) {
+    throw ApiError.forbidden('Your account credentials have not been configured. Please complete setup.');
+  }
+  if (data.suspended_at) {
+    throw ApiError.forbidden('Your account is suspended. Ask an administrator for assistance.');
+  }
+};
+
 export const assertNoDuplicateSubmission = async (supabase, row) => {
   const { data, error } = await supabase
     .from(TABLE)
@@ -234,6 +268,9 @@ const assertStaff = (user) => {
  */
 export const list = async ({ user, box = 'incoming', status = null, limit = 200, offset = 0, includeTotal = false, supabase = getServiceClient() }) => {
   assertStaff(user);
+  // Defense-in-depth: verify approval status for staff members
+  await assertPersonnelApproved(supabase, user);
+  
   const pageLimit = Number(limit);
   const pageOffset = Number(offset);
   if (!Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 500 || !Number.isInteger(pageOffset) || pageOffset < 0) {
@@ -290,6 +327,9 @@ const inScope = (user, row) => {
 
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   assertStaff(user);
+  // Defense-in-depth: verify approval status for staff members
+  await assertPersonnelApproved(supabase, user);
+  
   const { data, error } = await supabase.from(TABLE).select(DETAIL_SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load report');
   if (!data || !inScope(user, data)) throw ApiError.notFound('Report not found.');
@@ -353,6 +393,9 @@ const recipientAuthUserIds = async (supabase, { recipientRole, municipalityId, b
 
 export const create = async ({ user, payload = {}, supabase = getServiceClient() }) => {
   assertStaff(user);
+  // Defense-in-depth: verify approval status for staff members
+  await assertPersonnelApproved(supabase, user);
+  
   const reportType = text(payload.reportType || payload.report_type);
   if (!reportType) throw ApiError.unprocessable('A report type is required.');
   const reportPeriod = text(payload.reportPeriod || payload.report_period);
@@ -493,6 +536,9 @@ export const submitDraft = async ({ user, id, supabase = getServiceClient() }) =
  */
 export const review = async ({ user, id, status, remarks = '', supabase = getServiceClient() }) => {
   assertStaff(user);
+  // Defense-in-depth: verify approval status for staff members
+  await assertPersonnelApproved(supabase, user);
+  
   const target = text(status);
   if (!RECIPIENT_DECISIONS.has(target)) {
     throw ApiError.unprocessable('Invalid report review status.');
@@ -542,6 +588,9 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
 /** Sender replaces a report marked Needs Revision and submits that same record. */
 export const resubmit = async ({ user, id, content, supabase = getServiceClient() }) => {
   assertStaff(user);
+  // Defense-in-depth: verify approval status for staff members
+  await assertPersonnelApproved(supabase, user);
+  
   const { data: existing, error: readError } = await supabase
     .from(TABLE)
     .select(DETAIL_SELECT)

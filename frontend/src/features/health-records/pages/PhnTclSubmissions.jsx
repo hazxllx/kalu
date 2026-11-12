@@ -4,7 +4,6 @@ import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
 import {
   Search,
-  RefreshCw,
   X,
   FileText,
   FileSpreadsheet,
@@ -15,7 +14,7 @@ import {
   ChevronRight,
   ChevronDown,
   Eye,
-  CalendarDays,
+  RefreshCw,
 } from "lucide-react";
 import { reportsApi } from "@/services/api";
 import { useBarangays } from "@/context/BarangaysContext";
@@ -50,10 +49,10 @@ const STATUS_DISPLAY = {
 };
 
 const STATUS_TONE = {
-  Submitted: "bg-brand-blue/10 text-brand-blue",
+  Submitted: "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400",
   "Under Review": "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
   Reviewed: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
-  Returned: "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
+  Returned: "bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400",
 };
 
 const STATUS_DOT = {
@@ -151,8 +150,6 @@ export default function PhnTclSubmissions() {
   const [view, setView] = useState("all"); // all | barangay
   const [barangayFilter, setBarangayFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState({}); // barangay -> bool (By Barangay view)
@@ -243,8 +240,6 @@ export default function PhnTclSubmissions() {
       .filter((s) => {
         if (barangayFilter !== "All" && s.barangayName !== barangayFilter) return false;
         if (categoryFilter !== "All" && s.category !== categoryFilter) return false;
-        if (fromDate && (!s.effectiveDate || s.effectiveDate < fromDate)) return false;
-        if (toDate && (!s.effectiveDate || s.effectiveDate > toDate)) return false;
         if (q) {
           const hay = `${s.documentName} ${s.reportType} ${s.title} ${s.senderName} ${s.barangayName} ${s.category}`.toLowerCase();
           if (!hay.includes(q)) return false;
@@ -256,10 +251,10 @@ export default function PhnTclSubmissions() {
         if (a.category !== b.category) return a.category.localeCompare(b.category);
         return String(b.effectiveIso).localeCompare(String(a.effectiveIso));
       });
-  }, [submissions, barangayFilter, categoryFilter, fromDate, toDate, query]);
+  }, [submissions, barangayFilter, categoryFilter, query]);
 
   // Reset to the first page whenever the filtered result set changes.
-  useEffect(() => { setPage(1); }, [barangayFilter, categoryFilter, fromDate, toDate, query, view]);
+  useEffect(() => { setPage(1); }, [barangayFilter, categoryFilter, query, view]);
 
   // ---- Summary cards ----
   // Computed from the currently FILTERED submissions so the counts update in
@@ -302,13 +297,11 @@ export default function PhnTclSubmissions() {
   );
 
   const hasActiveFilters =
-    barangayFilter !== "All" || categoryFilter !== "All" || Boolean(fromDate) || Boolean(toDate) || Boolean(query.trim());
+    barangayFilter !== "All" || categoryFilter !== "All" || Boolean(query.trim());
 
   const resetFilters = () => {
     setBarangayFilter("All");
     setCategoryFilter("All");
-    setFromDate("");
-    setToDate("");
     setQuery("");
   };
 
@@ -345,9 +338,11 @@ export default function PhnTclSubmissions() {
     <div className="flex items-center justify-end gap-2">
       <button
         onClick={() => { setDetail(s); setRemarks(""); }}
-        className="inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline"
+        className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue transition-colors"
+        title={`View ${s.documentName}`}
       >
-        <Eye className="h-3.5 w-3.5" /> View Document
+        <Eye className="h-3.5 w-3.5" />
+        <span>View</span>
       </button>
     </div>
   );
@@ -367,134 +362,90 @@ export default function PhnTclSubmissions() {
         </div>
       )}
 
-      {/* Summary cards — Standardized KPI Design */}
-      <div className="mb-3 phn-kpi-white">
-        <KpiHorizontal count={4}>
-          <KpiHorizontal.Item
-            label="SUBMITTED DOCUMENTS"
-            value={loading ? "—" : summary.total}
-            tone="blue"
-            description="Total submitted TCL documents"
-          />
-          <KpiHorizontal.Item
-            label="BARANGAYS WITH SUBMISSIONS"
-            value={loading ? "—" : summary.barangaysWith}
-            tone="teal"
-            description="Barangays that submitted records"
-          />
-          <KpiHorizontal.Item
-            label="PENDING PHN REVIEW"
-            value={loading ? "—" : summary.pending}
-            tone="amber"
-            description="Documents awaiting review"
-          />
-          <KpiHorizontal.Item
-            label="RECENTLY SUBMITTED (7 DAYS)"
-            value={loading ? "—" : summary.recent}
-            tone="green"
-            description="Submissions in the past week"
-          />
-        </KpiHorizontal>
-      </div>
+       {/* Summary cards — Standardized KPI Design */}
+       <div className="mb-3 phn-kpi-white">
+         <KpiHorizontal count={4}>
+           <KpiHorizontal.Item
+             label="SUBMITTED DOCUMENTS"
+             value={loading ? "—" : summary.total}
+             tone="blue"
+             description="Total submitted TCL documents"
+           />
+           <KpiHorizontal.Item
+             label="BARANGAYS WITH SUBMISSIONS"
+             value={loading ? "—" : summary.barangaysWith}
+             tone="blue"
+             description="Barangays that submitted records"
+           />
+           <KpiHorizontal.Item
+             label="PENDING PHN REVIEW"
+             value={loading ? "—" : summary.pending}
+             tone="amber"
+             description="Documents awaiting review"
+           />
+           <KpiHorizontal.Item
+             label="RECENTLY SUBMITTED (7 DAYS)"
+             value={loading ? "—" : summary.recent}
+             tone="green"
+             description="Submissions in the past week"
+           />
+         </KpiHorizontal>
+       </div>
 
-      {/* Filter toolbar — compact, single card with two rows. */}
-      <Card className="mb-3 p-3">
-        {/* Row 1 — primary filters */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* View toggle */}
-          <div className="inline-flex shrink-0 rounded-btn border border-brand-border p-0.5">
-            {[
-              { key: "all", label: "All Submissions" },
-              { key: "barangay", label: "By Barangay" },
-            ].map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setView(t.key)}
-                className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  view === t.key ? "bg-brand-blue text-white" : "bg-white text-brand-blue hover:text-brand-dark dark:bg-transparent"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+      {/* Filter toolbar — search, barangay, category dropdowns aligned horizontally */}
+       <Card className="mb-3 p-3">
+         <div className="flex flex-wrap items-center gap-2">
+           {/* Search by document */}
+           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-input border border-brand-border bg-white px-3 py-2 dark:bg-card sm:min-w-[200px]">
+             <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+             <input
+               value={query}
+               onChange={(e) => setQuery(e.target.value)}
+               placeholder="Search by document"
+               aria-label="Search submitted documents"
+               className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray"
+             />
+           </div>
 
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-input border border-brand-border bg-brand-bg/60 px-3 py-2 sm:min-w-[180px]">
-            <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by document"
-              aria-label="Search submitted documents"
-              className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray"
-            />
-          </div>
+           {/* All Barangays dropdown */}
+           <select
+             value={barangayFilter}
+             onChange={(e) => setBarangayFilter(e.target.value)}
+             aria-label="Filter by barangay"
+             className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card"
+           >
+             <option value="All">All Barangays</option>
+             {barangayOptions.map((b) => (
+               <option key={b} value={b}>{b}</option>
+             ))}
+           </select>
 
-          <select
-            value={barangayFilter}
-            onChange={(e) => setBarangayFilter(e.target.value)}
-            aria-label="Filter by barangay"
-            className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card"
-          >
-            <option value="All">All Barangays</option>
-            {barangayOptions.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
+           {/* All Categories dropdown */}
+           <select
+             value={categoryFilter}
+             onChange={(e) => setCategoryFilter(e.target.value)}
+             aria-label="Filter by health program category"
+             className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card"
+           >
+             <option value="All">All Categories</option>
+             {categoryOptions.map((c) => (
+               <option key={c} value={c}>{c}</option>
+             ))}
+           </select>
 
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            aria-label="Filter by health program category"
-            className="rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue dark:bg-card"
-          >
-            <option value="All">All Categories</option>
-            {categoryOptions.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-
-          {/* Submission date range — one compact control with a calendar icon. */}
-          <div className="flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-2.5 py-1.5 dark:bg-card">
-            <CalendarDays className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
-            <input
-              type="date"
-              value={fromDate}
-              max={toDate || undefined}
-              onChange={(e) => setFromDate(e.target.value)}
-              aria-label="Submitted from date"
-              className="bg-transparent text-sm text-brand-ink outline-none"
-            />
-            <span className="text-xs text-brand-gray">to</span>
-            <input
-              type="date"
-              value={toDate}
-              min={fromDate || undefined}
-              onChange={(e) => setToDate(e.target.value)}
-              aria-label="Submitted to date"
-              className="bg-transparent text-sm text-brand-ink outline-none"
-            />
-          </div>
-        </div>
-
-        {/* Row 2 — actions */}
-        <div className="mt-2.5 flex items-center gap-2 border-t border-brand-border pt-2.5">
-          <button
-            onClick={resetFilters}
-            disabled={!hasActiveFilters}
-            className="inline-flex items-center gap-1.5 rounded-btn bg-brand-bg px-3 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-light hover:text-brand-ink disabled:cursor-not-allowed disabled:opacity-50 dark:bg-card"
-          >
-            <X className="h-4 w-4" /> Reset
-          </button>
-
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue dark:bg-card"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </button>
-        </div>
-      </Card>
+           {/* Clear Filters action — visible only when filters are active */}
+           {hasActiveFilters && (
+             <button
+               onClick={resetFilters}
+               className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3 py-2 text-xs font-medium text-brand-ink hover:border-brand-danger hover:text-brand-danger transition-colors dark:bg-card"
+               title="Clear all active filters"
+             >
+               <X className="h-3.5 w-3.5" />
+               <span>Clear</span>
+             </button>
+           )}
+         </div>
+       </Card>
 
       {/* ---- Main content ---- */}
       {error ? (
@@ -521,38 +472,38 @@ export default function PhnTclSubmissions() {
             <p className="text-xs text-brand-gray">Documents submitted by barangays will appear here once received.</p>
           )}
         </Card>
-      ) : view === "all" ? (
+       ) : view === "all" ? (
         /* ---- All Submissions: one consolidated, dense table ---- */
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] border-collapse text-sm">
               <thead>
-                <tr className="bg-brand-bg text-left">
+                <tr className="bg-gray-50 text-left">
                   {["Barangay", "Health Program Category", "TCL Document", "Submitted By", "Date Submitted", "Status", "Action"].map((h, i) => (
                     <th
                       key={h || i}
-                      className={`border-b border-brand-border px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-brand-gray ${i === 6 ? "text-right" : ""}`}
+                      className={`border-b border-gray-200 px-4 py-3 text-xs font-semibold text-gray-700 ${i === 6 ? "text-right" : ""}`}
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-brand-border">
+              <tbody className="divide-y divide-gray-200">
                 {paged.map((s) => (
-                  <tr key={s.id} className="odd:bg-white even:bg-brand-bg/30 hover:bg-brand-light/50">
-                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-brand-ink">{s.barangayName}</td>
-                    <td className="px-4 py-2.5 text-brand-gray">{s.category}</td>
-                    <td className="px-4 py-2.5 text-brand-ink">
-                      <span className="block max-w-[280px] truncate" title={s.documentName}>{s.documentName}</span>
+                  <tr key={s.id} className="bg-white hover:bg-gray-50 transition-colors">
+                    <td className="whitespace-nowrap px-4 py-3 font-medium text-brand-ink">{s.barangayName}</td>
+                    <td className="px-4 py-3 text-gray-700">{s.category}</td>
+                    <td className="px-4 py-3 text-brand-ink">
+                      <span className="block max-w-xs truncate" title={s.documentName}>{s.documentName}</span>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <p className="text-brand-ink">{s.senderName || "—"}</p>
-                      <p className="text-[11px] text-brand-gray">{ROLE_LABELS[s.senderRole] || s.senderRole}</p>
+                    <td className="px-4 py-3">
+                      <p className="text-brand-ink font-medium">{s.senderName || "—"}</p>
+                      <p className="text-xs text-gray-600">{ROLE_LABELS[s.senderRole] || s.senderRole}</p>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-brand-gray">{formatDate(s.effectiveIso)}</td>
-                    <td className="px-4 py-2.5"><StatusBadge raw={s.status} /></td>
-                    <td className="px-4 py-2.5 text-right"><RowActions s={s} /></td>
+                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatDate(s.effectiveIso)}</td>
+                    <td className="px-4 py-3"><StatusBadge raw={s.status} /></td>
+                    <td className="px-4 py-3 text-right"><RowActions s={s} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -561,23 +512,23 @@ export default function PhnTclSubmissions() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between gap-3 border-t border-brand-border px-4 py-3 text-sm">
-              <p className="text-xs text-brand-gray">
+            <div className="flex items-center justify-between gap-3 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm">
+              <p className="text-xs text-gray-600">
                 Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
               </p>
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-ink disabled:opacity-50"
+                  className="rounded-btn border border-gray-300 px-3 py-1.5 text-xs font-medium text-brand-ink hover:bg-white disabled:opacity-50"
                 >
                   Previous
                 </button>
-                <span className="px-2 text-xs text-brand-gray">Page {page} of {totalPages}</span>
+                <span className="px-2 text-xs text-gray-600">Page {page} of {totalPages}</span>
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="rounded-btn border border-brand-border px-3 py-1.5 text-xs font-medium text-brand-ink disabled:opacity-50"
+                  className="rounded-btn border border-gray-300 px-3 py-1.5 text-xs font-medium text-brand-ink hover:bg-white disabled:opacity-50"
                 >
                   Next
                 </button>
@@ -585,7 +536,7 @@ export default function PhnTclSubmissions() {
             </div>
           )}
         </Card>
-      ) : (
+       ) : (
         /* ---- By Barangay: expandable sections, categories as sub-headers ---- */
         <div className="space-y-3">
           {groupedByBarangay.map((group) => {
@@ -607,36 +558,36 @@ export default function PhnTclSubmissions() {
                 </button>
 
                 {open && (
-                  <div className="divide-y divide-brand-border">
+                  <div className="divide-y divide-gray-200">
                     {group.categories.map(({ category, items }) => (
                       <section key={category}>
-                        <div className="flex items-center gap-2 bg-brand-light/60 px-4 py-1.5">
+                        <div className="flex items-center gap-2 bg-gray-50 px-4 py-2">
                           <Layers className="h-3.5 w-3.5 text-brand-blue" aria-hidden="true" />
-                          <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-blue">{category}</h3>
-                          <span className="text-[11px] text-brand-gray">· {items.length}</span>
+                          <h3 className="text-xs font-semibold text-gray-700">{category}</h3>
+                          <span className="text-xs text-gray-600">· {items.length}</span>
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full min-w-[640px] text-sm">
+                          <table className="w-full min-w-[640px] border-collapse text-sm">
                             <thead>
-                              <tr className="text-left">
+                              <tr className="bg-white text-left">
                                 {["TCL Document", "Submitted By", "Date Submitted", "Status", "Action"].map((h, i) => (
-                                  <th key={h || i} className={`px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-brand-gray ${i === 4 ? "text-right" : ""}`}>{h}</th>
+                                  <th key={h || i} className={`border-b border-gray-200 px-4 py-2.5 text-xs font-semibold text-gray-700 ${i === 4 ? "text-right" : ""}`}>{h}</th>
                                 ))}
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-brand-border">
+                            <tbody className="divide-y divide-gray-200">
                               {items.map((s) => (
-                                <tr key={s.id} className="hover:bg-brand-light/50">
-                                  <td className="px-4 py-2.5 text-brand-ink">
-                                    <span className="block max-w-[280px] truncate" title={s.documentName}>{s.documentName}</span>
+                                <tr key={s.id} className="bg-white hover:bg-gray-50 transition-colors">
+                                  <td className="px-4 py-3 text-brand-ink">
+                                    <span className="block max-w-xs truncate" title={s.documentName}>{s.documentName}</span>
                                   </td>
-                                  <td className="px-4 py-2.5">
-                                    <p className="text-brand-ink">{s.senderName || "—"}</p>
-                                    <p className="text-[11px] text-brand-gray">{ROLE_LABELS[s.senderRole] || s.senderRole}</p>
+                                  <td className="px-4 py-3">
+                                    <p className="text-brand-ink font-medium">{s.senderName || "—"}</p>
+                                    <p className="text-xs text-gray-600">{ROLE_LABELS[s.senderRole] || s.senderRole}</p>
                                   </td>
-                                  <td className="whitespace-nowrap px-4 py-2.5 text-brand-gray">{formatDate(s.effectiveIso)}</td>
-                                  <td className="px-4 py-2.5"><StatusBadge raw={s.status} /></td>
-                                  <td className="px-4 py-2.5 text-right"><RowActions s={s} /></td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatDate(s.effectiveIso)}</td>
+                                  <td className="px-4 py-3"><StatusBadge raw={s.status} /></td>
+                                  <td className="px-4 py-3 text-right"><RowActions s={s} /></td>
                                 </tr>
                               ))}
                             </tbody>

@@ -172,7 +172,6 @@ export default function ResidentFollowUps() {
           </div>
         ) : (
           <>
-          <TablePagination total={sorted.length} page={followUpPage} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="mb-3" />
           <div className="space-y-3">
             {pageRows.map((f, i) => {
               const actionable = isActionable(f);
@@ -248,6 +247,7 @@ export default function ResidentFollowUps() {
               );
             })}
           </div>
+          <TablePagination total={sorted.length} page={followUpPage} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="mt-4" />
           </>
         )}
       </Card>

@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import PageHeader from "@/components/common/PageHeader";
-import DataTable from "@/components/tables/DataTable";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
-import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope, RefreshCw } from "lucide-react";
+import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope, RefreshCw, ChevronRight, Microscope, Eye, Pill, Heart, Baby, Leaf, Users } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import useHouseholdWorkers from "@/hooks/useHouseholdWorkers";
@@ -13,9 +11,23 @@ import {
   TCL_PROGRAMS,
   TCL_STATUSES,
   TCL_PRIORITIES,
+  TCL_CATEGORIES,
 } from "@/services/local/tclStore";
+import TclEmptyState from "../components/TclEmptyState";
+import { TclToolbar } from "../components/TclToolbar";
+import { TclListSkeleton } from "../components/TclSkeletons";
+import TclPageHeader from "../components/TclPageHeader";
 
-const categories = ["All", ...TCL_PROGRAMS];
+// Program icon mapping
+const programIconMap = {
+  "Prenatal and Postpartum": Baby,
+  "NCD Risk Assessment": Heart,
+  "Cervical Cancer and Breast Mass Examination": Microscope,
+  "Visual Acuity and PPV": Eye,
+  "Oral Health": Pill,
+  "Household Environmental Masterlist": Leaf,
+  "Program Enrollment Register": Users,
+};
 
 const inputCls = (error) =>
   `mt-1.5 w-full bg-white border rounded-btn px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue ${
@@ -31,6 +43,63 @@ const formatDate = (iso) => {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
+
+function TclCard({ record, onView }) {
+  const Icon = programIconMap[record.program] || Stethoscope;
+  return (
+    <button
+      onClick={() => onView(record.id)}
+      className="flex items-center gap-3 w-full p-3 bg-white border border-brand-border rounded-btn hover:border-brand-blue hover:bg-brand-light transition-colors text-left group"
+    >
+      <div className="flex-shrink-0 w-8 h-8 rounded flex items-center justify-center bg-brand-light text-brand-blue">
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-brand-ink truncate">{record.resident?.name || "—"}</p>
+        <p className="text-xs text-brand-gray truncate">{record.resident?.barangay || ""}</p>
+      </div>
+      <div className="flex-shrink-0 flex items-center gap-2">
+        <StatusBadge value={record.status} />
+        <ChevronRight className="w-4 h-4 text-brand-gray group-hover:text-brand-blue transition-colors" />
+      </div>
+    </button>
+  );
+}
+
+function CategorySection({ category, programs, rowsByProgram, onViewRecord }) {
+  // Collect all records for this category's programs
+  const categoryRecords = programs.flatMap((prog) => rowsByProgram.get(prog) || []);
+
+  if (categoryRecords.length === 0) {
+    return null; // Hide empty categories
+  }
+
+  return (
+    <Card className="p-4">
+      <h3 className="text-sm font-semibold text-brand-ink mb-3">{category.name}</h3>
+      <div className="space-y-2">
+        {programs.map((program) => {
+          const programRecords = rowsByProgram.get(program) || [];
+          if (programRecords.length === 0) return null;
+          return (
+            <div key={program}>
+              <p className="text-xs font-medium text-brand-gray uppercase tracking-wide mb-2">{program}</p>
+              <div className="space-y-2">
+                {programRecords.map((record) => (
+                  <TclCard
+                    key={record.id}
+                    record={record}
+                    onView={onViewRecord}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
 
 function ModalShell({ title, subtitle, onClose, children }) {
   useEffect(() => {
@@ -136,7 +205,8 @@ export default function TCLS() {
     [allTcls, scopedBarangays, residentById, loadedOwner, user?.id]
   );
 
-  const [cat, setCat] = useState("All");
+  const [cat, setCat] = useState(null); // null = show all, or specific category ID
+  const [recordQuery, setRecordQuery] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [showView, setShowView] = useState(null); // TCL id
   const [showSchedule, setShowSchedule] = useState(null); // TCL id
@@ -168,6 +238,7 @@ export default function TCLS() {
     setShowView(null);
     setShowSchedule(null);
     setToast(null);
+    setCat(null);
     setForm({ residentId: "", program: "", bhw: "", priority: "Medium", status: "Active", lastVisit: "", nextVisit: "", nextVisitTime: "", notes: "" });
     setScheduleForm({ nextVisit: "", nextVisitTime: "", lastVisit: "", notes: "" });
     setResidentQuery("");
@@ -180,17 +251,27 @@ export default function TCLS() {
   };
 
   const rows = useMemo(() => {
-    const filtered = scopedTcls.filter((t) => cat === "All" || t.program === cat);
-    // TCL rows are enrollment records linked to an EXISTING resident. Resolve
-    // the resident from the live registry by residentId so the displayed name,
-    // age, sex, and barangay always come from the resident record (the stored
-    // snapshot is only a fallback if a resident was removed from the registry).
-    return filtered.map((t) => {
+    const filtered = cat === null
+      ? scopedTcls
+      : scopedTcls.filter((t) => {
+          const category = TCL_CATEGORIES.find((c) => c.programs.includes(t.program));
+          return category?.id === cat;
+        });
+    // Resolve resident from live registry and BHW from directory
+    const q = recordQuery.trim().toLowerCase();
+    return filtered.filter((t) => {
+      if (!q) return true;
+      return [t.program, t.resident?.name, t.resident?.barangay].filter(Boolean).join(" ").toLowerCase().includes(q);
+    }).map((t) => {
       const live = residentById.get(t.residentId);
       const worker = directory.rows.find((row) => row.id === t.bhwId);
-      return { ...t, resident: live || t.resident, bhw: worker?.name || t.bhw || (t.bhwId ? "Assigned worker unavailable" : "") };
+      return {
+        ...t,
+        resident: live || t.resident,
+        bhw: worker?.name || t.bhw || (t.bhwId ? "Assigned worker unavailable" : "")
+      };
     });
-  }, [scopedTcls, cat, residentById, directory.rows]);
+  }, [scopedTcls, cat, recordQuery, residentById, directory.rows]);
 
   const openAdd = () => {
     setForm({
@@ -304,35 +385,26 @@ export default function TCLS() {
   const viewRecord = rows.find((r) => r.id === showView) || null;
   const scheduleRecord = rows.find((r) => r.id === showSchedule) || null;
 
-  const columns = [
-    { key: "resident", label: "Resident" },
-    { key: "program", label: "Program" },
-    { key: "bhw", label: "Assigned BHW" },
-    { key: "lastVisit", label: "Last Visit" },
-    { key: "nextVisit", label: "Next Visit" },
-    { key: "priority", label: "Priority" },
-    { key: "status", label: "Status" },
-    { key: "actions", label: "" },
-  ];
+  // Group rows by program for rendering
+  const rowsByProgram = useMemo(() => {
+    const map = new Map();
+    TCL_PROGRAMS.forEach((p) => map.set(p, []));
+    rows.forEach((r) => {
+      const programs = map.get(r.program);
+      if (programs) programs.push(r);
+    });
+    return map;
+  }, [rows]);
 
   return (
     <>
-      <PageHeader
-        crumbs={["Clinical Care", { label: "TCL", to: "../tcls" }, "Program Enrollment"]}
+      <TclPageHeader
+        crumb="Program Enrollment"
         title="Target Client List"
         subtitle={
           scope && scope.level === HS_SCOPE.BARANGAY
             ? `Residents of Barangay ${scope.assignedBarangay} enrolled in community health programs.`
             : "Residents enrolled in community health programs."
-        }
-        action={
-          <button
-            onClick={openAdd}
-            disabled={loading || Boolean(loadError) || saving}
-            className="flex items-center gap-2 bg-brand-blue text-white px-4 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Add TCL
-          </button>
         }
       />
 
@@ -344,20 +416,18 @@ export default function TCLS() {
         </div>
       )}
 
-      {/* Program filters */}
-      <div className="flex flex-wrap gap-2 mb-5">
-        {categories.map((c) => (
-          <button
-            key={c}
-            onClick={() => setCat(c)}
-            className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
-              cat === c ? "bg-brand-blue text-white border-brand-blue" : "bg-white text-brand-gray border-brand-border hover:border-brand-blue"
-            }`}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
+      <TclToolbar
+        searchValue={recordQuery}
+        onSearch={setRecordQuery}
+        onFilter={(value) => setCat(value || null)}
+        filterValue={cat || ""}
+        filterOptions={TCL_CATEGORIES.map((category) => ({ value: category.id, label: category.name }))}
+        onRefresh={loadData}
+        onNew={openAdd}
+        newLabel="Add TCL"
+        showExport={false}
+        loading={loading || saving}
+      />
 
       {loadError ? (
         <Card className="p-10 text-center">
@@ -369,56 +439,62 @@ export default function TCLS() {
             <RefreshCw className="h-4 w-4" /> Retry
           </button>
         </Card>
+      ) : loading ? (
+        <TclListSkeleton rows={5} />
+      ) : rows.length === 0 ? (
+        <TclEmptyState
+          title={recordQuery || cat ? "No matching records found" : "No enrolled clients yet"}
+          description={recordQuery || cat ? "Try adjusting your search or filters." : "Residents enrolled in community health programs will appear here."}
+          type={recordQuery || cat ? "search" : "empty"}
+          action={!(recordQuery || cat) ? (
+            <button onClick={openAdd} className="ui-tcl-control ui-tcl-control-primary">
+              <Plus className="h-4 w-4" /> Add TCL
+            </button>
+          ) : (
+            <button onClick={() => { setRecordQuery(""); setCat(null); }} className="ui-tcl-control ui-tcl-control-secondary">
+              Clear Filters
+            </button>
+          )}
+        />
       ) : (
-        <>
-          <DataTable
-            columns={columns}
-            rows={rows}
-            renderCell={(key, row) => {
-              if (key === "resident")
-                return (
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-full bg-brand-light text-brand-blue flex items-center justify-center text-xs font-semibold shrink-0">
-                      {(row.resident?.name || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-brand-ink truncate">{row.resident?.name || "—"}</p>
-                      <p className="text-xs text-brand-gray">{row.resident?.barangay || ""}</p>
-                    </div>
-                  </div>
-                );
-              if (key === "program") return <span className="text-brand-ink">{row.program}</span>;
-              if (key === "bhw") return <span className="text-brand-gray">{row.bhw || "—"}</span>;
-              if (key === "lastVisit") return <span className="text-brand-gray">{formatDate(row.lastVisit)}</span>;
-              if (key === "nextVisit")
-                return row.nextVisit ? (
-                  <div>
-                    <p className="text-brand-ink">{formatDate(row.nextVisit)}</p>
-                    {row.nextVisitTime && <p className="text-xs text-brand-gray">{row.nextVisitTime}</p>}
-                  </div>
-                ) : (
-                  <span className="text-brand-gray">—</span>
-                );
-              if (key === "priority") return <StatusBadge value={row.priority} />;
-              if (key === "status") return <StatusBadge value={row.status} />;
-              if (key === "actions")
-                return (
-                  <div className="flex gap-3">
-                    <button onClick={() => setShowView(row.id)} className="text-brand-blue text-sm font-medium hover:underline">View</button>
-                    <button onClick={() => openSchedule(row)} className="text-brand-green text-sm font-medium hover:underline">Schedule</button>
-                  </div>
-                );
-              return row[key];
-            }}
-          />
-          {loading ? (
-            <p className="py-8 text-center text-sm text-brand-gray">Loading TCL records…</p>
-          ) : rows.length === 0 ? (
-            <p className="py-8 text-center text-sm text-brand-gray">
-              No TCL records found{cat === "All" ? "" : ` in ${cat}`}.
-            </p>
-          ) : null}
-        </>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          gap: '24px',
+          alignItems: 'start'
+        }}>
+          {/* LEFT COLUMN: Maternal, Environmental, Community */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+            <CategorySection
+              category={TCL_CATEGORIES[0]}
+              programs={TCL_CATEGORIES[0].programs}
+              rowsByProgram={rowsByProgram}
+              onViewRecord={setShowView}
+            />
+            <CategorySection
+              category={TCL_CATEGORIES[1]}
+              programs={TCL_CATEGORIES[1].programs}
+              rowsByProgram={rowsByProgram}
+              onViewRecord={setShowView}
+            />
+            <CategorySection
+              category={TCL_CATEGORIES[2]}
+              programs={TCL_CATEGORIES[2].programs}
+              rowsByProgram={rowsByProgram}
+              onViewRecord={setShowView}
+            />
+          </div>
+
+          {/* RIGHT COLUMN: Screening */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+            <CategorySection
+              category={TCL_CATEGORIES[3]}
+              programs={TCL_CATEGORIES[3].programs}
+              rowsByProgram={rowsByProgram}
+              onViewRecord={setShowView}
+            />
+          </div>
+        </div>
       )}
 
       {/* Add TCL */}

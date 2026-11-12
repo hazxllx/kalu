@@ -1009,7 +1009,6 @@ export default function HealthReferrals() {
       </Card>
 
       <Card className="overflow-hidden">
-        <TablePagination total={filtered.length} page={referralPage} pageSize={referralPageSize} onPageChange={setReferralPage} onPageSizeChange={(size) => { setReferralPageSize(size); setReferralPage(1); }} className="m-3" />
         <div>
           <table className={`ui-table w-full referral-monitoring-grid ${isResident ? "referral-monitoring-grid-resident" : "referral-monitoring-grid-supervisor"}`}>
             <thead className="bg-brand-bg border-b border-brand-border">
@@ -1082,6 +1081,7 @@ export default function HealthReferrals() {
             </tbody>
           </table>
         </div>
+        <TablePagination total={filtered.length} page={referralPage} pageSize={referralPageSize} onPageChange={setReferralPage} onPageSizeChange={(size) => { setReferralPageSize(size); setReferralPage(1); }} className="m-3" />
       </Card>
 
       {openActionMenu && typeof document !== "undefined" && createPortal(

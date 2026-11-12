@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import StatCard from "@/components/common/StatCard";
 import TablePagination from "@/components/tables/TablePagination";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
@@ -249,15 +248,58 @@ export default function RhuConsultation() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
-        {[
-          { label: "Waiting for Consultation", value: stats.waiting, icon: "ClipboardList", tone: "accent", index: 0 },
-          { label: "In Consultation", value: stats.inConsult, icon: "Stethoscope", tone: "blue", index: 1 },
-          { label: "Completed", value: stats.completed, icon: "CheckCircle2", tone: "green", index: 2 },
-        ].map((stat) => (
-          <StatCard key={stat.label} {...stat} />
-        ))}
-      </div>
+      <Card className="p-3 sm:p-4">
+        <div className="flex items-center gap-2 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setStatusFilter("All")}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+              statusFilter === "All"
+                ? "bg-brand-blue text-white"
+                : "bg-brand-bg border border-brand-border text-brand-ink hover:bg-brand-border/50"
+            }`}
+          >
+            All
+            <span className="text-xs opacity-75">({stats.waiting + stats.inConsult + stats.completed})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter(CHECKUP_STATUS.WAITING)}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+              statusFilter === CHECKUP_STATUS.WAITING
+                ? "bg-amber-100 text-amber-900"
+                : "bg-brand-bg border border-brand-border text-brand-ink hover:bg-brand-border/50"
+            }`}
+          >
+            Waiting for Consultation
+            <span className="text-xs opacity-75">({stats.waiting})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter(CHECKUP_STATUS.IN_CHECKUP)}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+              statusFilter === CHECKUP_STATUS.IN_CHECKUP
+                ? "bg-blue-100 text-blue-900"
+                : "bg-brand-bg border border-brand-border text-brand-ink hover:bg-brand-border/50"
+            }`}
+          >
+            In Consultation
+            <span className="text-xs opacity-75">({stats.inConsult})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter(CHECKUP_STATUS.COMPLETED)}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+              statusFilter === CHECKUP_STATUS.COMPLETED
+                ? "bg-green-100 text-green-900"
+                : "bg-brand-bg border border-brand-border text-brand-ink hover:bg-brand-border/50"
+            }`}
+          >
+            Completed
+            <span className="text-xs opacity-75">({stats.completed})</span>
+          </button>
+        </div>
+      </Card>
 
       <Card className="p-4">
         <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
@@ -318,7 +360,6 @@ export default function RhuConsultation() {
                 {active.length} active
               </span>
             </div>
-            <TablePagination total={active.length} page={activePage} pageSize={queuePageSize} onPageChange={setActivePage} onPageSizeChange={(size) => { setQueuePageSize(size); setActivePage(1); setCompletedPage(1); }} className="mx-3 mt-3" />
             {queueTable(activePageRows, {
               emptyIcon: <Stethoscope className="w-6 h-6 mx-auto mb-2 text-brand-gray/60" />,
               emptyText:
@@ -326,6 +367,7 @@ export default function RhuConsultation() {
                   ? "No encounters in the consultation queue yet."
                   : "No patients are awaiting consultation right now.",
             })}
+            {active.length > 0 && <TablePagination total={active.length} page={activePage} pageSize={queuePageSize} onPageChange={setActivePage} onPageSizeChange={(size) => { setQueuePageSize(size); setActivePage(1); setCompletedPage(1); }} className="mx-3 mt-3" />}
           </Card>
 
           {/* Already handled — kept for history, out of the active queue. */}
@@ -342,8 +384,8 @@ export default function RhuConsultation() {
                   {handled.length} done
                 </span>
               </div>
-              <TablePagination total={handled.length} page={completedPage} pageSize={queuePageSize} onPageChange={setCompletedPage} onPageSizeChange={(size) => { setQueuePageSize(size); setActivePage(1); setCompletedPage(1); }} className="mx-3 mt-3" />
               {queueTable(completedPageRows, { emptyText: "No completed consultations." })}
+              {handled.length > 0 && <TablePagination total={handled.length} page={completedPage} pageSize={queuePageSize} onPageChange={setCompletedPage} onPageSizeChange={(size) => { setQueuePageSize(size); setActivePage(1); setCompletedPage(1); }} className="mx-3 mt-3" />}
             </Card>
           )}
         </div>

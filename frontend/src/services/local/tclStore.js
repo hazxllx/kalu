@@ -16,16 +16,46 @@ import { registerWorkingSetReset } from "./accountWorkingSets";
  */
 
 export const TCL_PROGRAMS = [
-  "Pregnant Women",
-  "Senior Citizens",
-  "Diabetes",
-  "Family Planning",
-  "TB Patients",
+  "Prenatal and Postpartum",
+  "NCD Risk Assessment",
+  "Cervical Cancer and Breast Mass Examination",
+  "Visual Acuity and PPV",
+  "Oral Health",
+  "Household Environmental Masterlist",
+  "Program Enrollment Register",
 ];
 
 export const TCL_STATUSES = ["Active", "Monitoring", "Inactive"];
 
 export const TCL_PRIORITIES = ["High", "Medium", "Low"];
+
+export const TCL_CATEGORIES = [
+  {
+    id: "maternal",
+    name: "Maternal and Family Health",
+    programs: ["Prenatal and Postpartum"],
+  },
+  {
+    id: "environmental",
+    name: "Environmental Health",
+    programs: ["Household Environmental Masterlist"],
+  },
+  {
+    id: "community",
+    name: "Community Health Programs",
+    programs: ["Program Enrollment Register"],
+  },
+  {
+    id: "screening",
+    name: "Screening and Preventive Care",
+    programs: [
+      "NCD Risk Assessment",
+      "Cervical Cancer and Breast Mass Examination",
+      "Visual Acuity and PPV",
+      "Oral Health",
+    ],
+  },
+];
 
 /** Active BHW accounts that can be assigned as a target-client handler. */
 export const ACTIVE_BHWS = [];

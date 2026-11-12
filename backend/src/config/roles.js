@@ -69,8 +69,9 @@ export const FEATURE_ROLES = Object.freeze({
   households: [ROLES.BHW, ROLES.HEALTH_SUPERVISOR, ROLES.PHN],
   dataCollection: [ROLES.BHW],
 
-  // Resident directory + clinical records (NOT BHW)
-  residents: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO],
+   // Resident directory + clinical records (NOT BHW)
+   // RHU Personnel included for certificate request initialization (read-only, scoped by municipality)
+   residents: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
   healthRecords: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN],
   assessments: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN],
   verification: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN],

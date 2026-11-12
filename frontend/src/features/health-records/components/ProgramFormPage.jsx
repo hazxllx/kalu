@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import DataTable from "@/components/tables/DataTable";
 import { Card } from "@/components/common/Card";
-import { Plus, X, Search, CheckCircle2, RefreshCw, Pencil, Download, Loader2 } from "lucide-react";
+import { Plus, X, Search, CheckCircle2, RefreshCw, Pencil } from "lucide-react";
 import { residentsApi, householdsApi, programFormsApi } from "@/services/api";
 import ProgramFormModal from "./ProgramFormModal";
 import { fromRow } from "../lib/programFormConfig";
 import { buildProgramCsv, downloadCsv } from "../lib/programFormExport";
+import TclEmptyState from "./TclEmptyState";
+import { TclListSkeleton } from "./TclSkeletons";
+import { TclToolbar } from "./TclToolbar";
 
 const formatDate = (iso) => {
   if (!iso) return "—";
@@ -150,30 +153,20 @@ export default function ProgramFormPage({ config }) {
         </div>
       )}
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 focus-within:border-brand-blue sm:min-w-[12rem]">
-          <Search className="h-4 w-4 shrink-0 text-brand-gray" />
-          <input value={recordQuery} onChange={(e) => setRecordQuery(e.target.value)} placeholder="Search records" className="w-full bg-transparent text-sm outline-none" />
-        </div>
-        <button
-          onClick={() => {
-            if (!rows.length) { showToast("No records to export."); return; }
-            downloadCsv(`${config.kind}-${new Date().toISOString().slice(0, 10)}.csv`, buildProgramCsv(config.kind, rows));
-          }}
-          className="inline-flex items-center gap-2 rounded-btn border border-brand-border px-3 py-2 text-sm font-medium text-brand-ink transition-colors hover:border-brand-blue hover:text-brand-blue"
-        >
-          <Download className="h-4 w-4" /> Export CSV
-        </button>
-        <button onClick={() => { setPicking(true); setQuery(""); }} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark">
-          <Plus className="h-4 w-4" /> New Record
-        </button>
-      </div>
+      <TclToolbar
+        searchValue={recordQuery}
+        onSearch={setRecordQuery}
+        onRefresh={load}
+        onExport={() => {
+          if (!rows.length) { showToast("No records to export."); return; }
+          downloadCsv(`${config.kind}-${new Date().toISOString().slice(0, 10)}.csv`, buildProgramCsv(config.kind, rows));
+        }}
+        onNew={() => { setPicking(true); setQuery(""); }}
+        loading={loading}
+      />
 
       {loading ? (
-        <Card className="flex items-center justify-center gap-2 p-10 text-center">
-          <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
-          <span className="text-sm text-brand-gray">Loading records…</span>
-        </Card>
+        <TclListSkeleton rows={5} />
       ) : loadError ? (
         <Card className="p-8 text-center">
           <p className="text-sm font-semibold text-brand-ink">We couldn't load these records.</p>
@@ -187,19 +180,27 @@ export default function ProgramFormPage({ config }) {
           </details>
         </Card>
       ) : rows.length === 0 ? (
-        <Card className="p-8 text-center">
-          <p className="text-sm font-semibold text-brand-ink">No records yet</p>
-          <button onClick={() => { setPicking(true); setQuery(""); }} className="mt-3 inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors">
-            <Plus className="h-4 w-4" /> New Record
-          </button>
-        </Card>
+        <TclEmptyState
+          title={config.kind === "environmental" ? "No household assessments yet" : config.kind === "oral-health" ? "No oral health records yet" : "No screening records yet"}
+          description={config.kind === "environmental" ? "Household water, sanitation, and environmental assessments will appear here." : config.kind === "oral-health" ? "Client records and oral health services will appear here." : "Records for the selected screening category will appear here."}
+          action={
+            <button onClick={() => { setPicking(true); setQuery(""); }} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors">
+              <Plus className="h-4 w-4" /> New Record
+            </button>
+          }
+          type="empty"
+        />
       ) : visibleRows.length === 0 ? (
-        <Card className="p-8 text-center">
-          <p className="text-sm text-brand-gray">No records match “{recordQuery}”.</p>
-        </Card>
+        <TclEmptyState
+          title="No matching records found"
+          description="Try adjusting your search or filters."
+          type="search"
+        />
       ) : (
         <div className="overflow-x-auto">
           <DataTable
+            className="ui-tcl-data-table"
+            tableClassName="ui-tcl-table"
             columns={columns}
             rows={visibleRows}
             renderCell={(key, row) => {

@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import BackToTclButton from "./BackToTclButton";
 
 /**
  * Header shared by the individual TCL form pages. It keeps this area's
@@ -10,15 +11,18 @@ import { ArrowLeft, ChevronRight } from "lucide-react";
  * the existing `brand.*` palette, heading font, `tracking-gov`, `rounded-card`
  * and `shadow-card`; introduces no new tokens.
  */
-export default function TclPageHeader({ title, subtitle = "", crumb, backTo = "../tcls" }) {
+export default function TclPageHeader({ title, subtitle = "", crumb, backTo = "../tcls", action = null }) {
+  const headerAction = action || <BackToTclButton to={backTo} />;
+
   return (
-    <section
-      aria-label={typeof title === "string" ? `${title} header` : "Page header"}
-      className="ui-page-header-hs-tcl mb-6 overflow-hidden rounded-card border border-brand-deep bg-brand-dark text-white shadow-card"
-    >
+    <div className="mb-6">
+      <section
+        aria-label={typeof title === "string" ? `${title} header` : "Page header"}
+        className="ui-page-header-hs-tcl overflow-hidden rounded-card border border-brand-dark bg-brand-dark text-white shadow-card"
+      >
       <div aria-hidden="true" className="h-0.5 w-full bg-brand-gold/70" />
       <div className="flex flex-col gap-4 px-5 py-6 md:px-7">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <nav
             aria-label="Breadcrumb"
             className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] font-semibold uppercase tracking-gov"
@@ -33,13 +37,7 @@ export default function TclPageHeader({ title, subtitle = "", crumb, backTo = ".
             <ChevronRight className="h-3 w-3 shrink-0 text-white/40" aria-hidden="true" />
             <span className="truncate text-brand-goldlight">{crumb}</span>
           </nav>
-          <Link
-            to={backTo}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-white/80 transition-colors hover:text-white"
-            aria-label="Back to TCL List"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to TCL List
-          </Link>
+          <div className="shrink-0">{headerAction}</div>
         </div>
         <div className="min-w-0">
           <h1 className="break-words text-2xl font-semibold tracking-tight text-white md:text-3xl">
@@ -52,6 +50,7 @@ export default function TclPageHeader({ title, subtitle = "", crumb, backTo = ".
           )}
         </div>
       </div>
-    </section>
+      </section>
+    </div>
   );
 }

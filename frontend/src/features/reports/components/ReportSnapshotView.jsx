@@ -18,7 +18,9 @@ export default function ReportSnapshotView({ content }) {
         <FileText className="mx-auto h-7 w-7 text-brand-gray/40" />
         <p className="mt-2 text-sm font-medium text-brand-ink">Report content unavailable</p>
         <p className="mt-1 text-xs text-brand-gray">
-          This report was submitted before full content was captured, so its original contents cannot be displayed.
+          {!content
+            ? "The report content did not load. Please try again or contact support."
+            : "This report was submitted before full content was captured, so its original contents cannot be displayed."}
         </p>
       </div>
     );

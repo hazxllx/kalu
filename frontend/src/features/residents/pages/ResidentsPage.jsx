@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search, Plus, X, Eye, Pencil, CheckCircle2, ChevronDown, MoreVertical, Users } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
@@ -1049,7 +1049,6 @@ export default function ResidentsPage() {
 
       {!loadError && !loading && visibleRows.length > 0 && (
         <>
-          <TablePagination total={visibleRows.length} page={directoryPage} pageSize={directoryPageSize} onPageChange={setDirectoryPage} onPageSizeChange={(size) => { setDirectoryPageSize(size); setDirectoryPage(1); }} className="mb-2" />
           <DataTable
             className="resident-directory-table"
             tableClassName="resident-directory-grid"
@@ -1126,6 +1125,7 @@ export default function ResidentsPage() {
               </article>
             ))}
           </div>
+          <TablePagination total={visibleRows.length} page={directoryPage} pageSize={directoryPageSize} onPageChange={setDirectoryPage} onPageSizeChange={(size) => { setDirectoryPageSize(size); setDirectoryPage(1); }} className="mt-4" />
           <p className={supervisor ? "mt-2 text-caption text-brand-gray" : "mt-4 text-sm text-brand-gray"}>
             {supervisor ? `Showing ${visibleRows.length} of ${rows.length} loaded residents. The directory loads up to 100 server records per search; risk filters do not represent barangay totals.` : rows.length === 0
               ? "No residents found."
@@ -1139,125 +1139,159 @@ export default function ResidentsPage() {
       {/* Add Resident Modal */}
       {showAddModal && canCreate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Add Resident" className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto ${supervisor ? "supervisor-modal supervisor-form" : ""}`}>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="text-lg font-semibold text-brand-ink">Add Resident</h3>
-                <button onClick={closeAdd} className="text-brand-gray hover:text-brand-ink" aria-label="Close resident registration">
+          <div className="w-full max-w-2xl max-h-[90vh] bg-white rounded-card shadow-xl flex flex-col overflow-hidden">
+            {/* Fixed Header with blue accent */}
+            <div className="flex-shrink-0 border-b-2 border-brand-blue bg-white px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-brand-ink">Add Resident</h3>
+                  <p className="text-sm text-brand-gray mt-0.5">Register a new resident in the directory.</p>
+                </div>
+                <button onClick={closeAdd} className="text-brand-gray hover:text-brand-blue transition-colors" aria-label="Close resident registration">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <p className="text-sm text-brand-gray mb-5">Register a new resident in the directory.</p>
+            </div>
 
-              {formError && (
-                <div className="mb-4 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3.5 py-3 text-sm text-brand-danger">
-                  {formError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Field label="First Name" value={form.firstName} onChange={set("firstName")} placeholder="e.g. Maria" error={errors.firstName} />
-                <Field label="Middle Name" value={form.middleName} onChange={set("middleName")} placeholder="e.g. Santos" optional />
-                <Field label="Last Name" value={form.lastName} onChange={set("lastName")} placeholder="e.g. Dela Cruz" error={errors.lastName} />
-                <Select label="Suffix" value={form.suffix} onChange={set("suffix")} options={SUFFIX_OPTIONS.filter(Boolean)} placeholder="None" />
-
-                <Field label="Date of Birth" type="date" value={form.dob} onChange={onDobChange} error={errors.dob} />
-                <Field label="Age" value={form.age} onChange={() => {}} placeholder="Auto-calculated" readOnly optional />
-
-                <div>
-                  <label className={labelClass}>Sex</label>
-                  <ButtonSelectGroup name="sex" ariaLabel="Sex" options={SEX_OPTIONS} value={form.gender} onChange={set("gender")} error={Boolean(errors.gender)} />
-                  {errors.gender && <p className={errorClass}>{errors.gender}</p>}
-                </div>
-                <Select label="Civil Status" value={form.civilStatus} onChange={set("civilStatus")} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
-
-                <Field label="Contact Number" value={form.contact} onChange={onContactChange} placeholder="e.g. 09171234567" error={errors.contact} optional maxLength={11} />
-                <SearchableSelect
-                  label="Barangay"
-                  required
-                  value={form.barangay}
-                  onChange={set("barangay")}
-                  options={allowedBarangays}
-                  placeholder="Search barangay..."
-                  emptyText="No barangay found."
-                  error={errors.barangay}
-                />
-
-                <Field label="Purok/Zone" value={form.purok} onChange={set("purok")} placeholder="e.g. Purok 5" optional />
-                <Field label="Street / Sitio" value={form.street} onChange={set("street")} placeholder="Enter street or sitio" optional />
-                <Field label="House No." value={form.houseNo} onChange={set("houseNo")} placeholder="Enter house number" optional />
-              </div>
-
-              {/* Optional resident login account. A resident profile never
-                  requires an account; the health worker chooses whether to
-                  create one. When Yes, the account is created in Pending
-                  Activation and the resident sets their own password later. */}
-              {showLoginAccountOption && (
-                <div className="mt-5 rounded-2xl border border-slate-200 bg-brand-bg/40 p-4">
-                  <p className="text-sm font-medium text-brand-ink">Create Resident Login Account?</p>
-                  <p className="mt-0.5 text-xs text-brand-gray">
-                    Optional. The resident profile is created either way. Choose “Yes” only if this resident should be able to log in.
-                  </p>
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => set("createAccount")(false)}
-                      className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
-                        !form.createAccount ? "bg-brand-blue text-white" : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
-                      }`}
-                    >
-                      No
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => set("createAccount")(true)}
-                      disabled={!canCreateLoginAccountForResident}
-                      className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
-                        form.createAccount
-                          ? "bg-brand-blue text-white"
-                          : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
-                      } disabled:cursor-not-allowed disabled:opacity-50 ${
-                        !canCreateLoginAccountForResident ? "hover:bg-white" : ""
-                      }`}
-                    >
-                      Yes
-                    </button>
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 py-6 space-y-6">
+                {formError && (
+                  <div className="rounded-card border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger">
+                    {formError}
                   </div>
-                  {form.createAccount && (
-                    <div className="mt-4">
-                      <Field
-                        label="Email for login account"
-                        type="email"
-                        value={form.email}
-                        onChange={set("email")}
-                        placeholder="e.g. resident@example.com"
-                        error={errors.email}
-                      />
-                      <p className="mt-1 text-xs text-brand-gray">
-                        The account starts in Pending Activation. An invitation link is emailed to this address — the resident clicks it to set their own password and activate the account.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
 
-              <div className="flex justify-end gap-3 mt-6">
-                <button onClick={closeAdd} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">
+                {/* Personal Information Section */}
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="h-px flex-1 bg-brand-border"></div>
+                    <h4 className="text-sm font-semibold text-brand-ink uppercase tracking-wide">Personal Information</h4>
+                    <div className="h-px flex-1 bg-brand-border"></div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="First Name" value={form.firstName} onChange={set("firstName")} placeholder="e.g. Maria" error={errors.firstName} />
+                    <Field label="Middle Name" value={form.middleName} onChange={set("middleName")} placeholder="e.g. Santos" optional />
+                    <Field label="Last Name" value={form.lastName} onChange={set("lastName")} placeholder="e.g. Dela Cruz" error={errors.lastName} />
+                    <Select label="Suffix" value={form.suffix} onChange={set("suffix")} options={SUFFIX_OPTIONS.filter(Boolean)} placeholder="None" />
+                    <Field label="Date of Birth" type="date" value={form.dob} onChange={onDobChange} error={errors.dob} />
+                    <Field label="Age" value={form.age} onChange={() => {}} placeholder="Auto-calculated" readOnly optional />
+                    <div>
+                      <label className={labelClass}>Sex</label>
+                      <ButtonSelectGroup name="sex" ariaLabel="Sex" options={SEX_OPTIONS} value={form.gender} onChange={set("gender")} error={Boolean(errors.gender)} />
+                      {errors.gender && <p className={errorClass}>{errors.gender}</p>}
+                    </div>
+                    <Select label="Civil Status" value={form.civilStatus} onChange={set("civilStatus")} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
+                  </div>
+                </div>
+
+                {/* Contact and Address Section */}
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="h-px flex-1 bg-brand-border"></div>
+                    <h4 className="text-sm font-semibold text-brand-ink uppercase tracking-wide">Contact & Address</h4>
+                    <div className="h-px flex-1 bg-brand-border"></div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Contact Number" value={form.contact} onChange={onContactChange} placeholder="e.g. 09171234567" error={errors.contact} optional maxLength={11} />
+                    <SearchableSelect
+                      label="Barangay"
+                      required
+                      value={form.barangay}
+                      onChange={set("barangay")}
+                      options={allowedBarangays}
+                      placeholder="Search barangay..."
+                      emptyText="No barangay found."
+                      error={errors.barangay}
+                    />
+                    <Field label="Purok/Zone" value={form.purok} onChange={set("purok")} placeholder="e.g. Purok 5" optional />
+                    <Field label="Street / Sitio" value={form.street} onChange={set("street")} placeholder="Enter street or sitio" optional />
+                    <Field label="House No." value={form.houseNo} onChange={set("houseNo")} placeholder="Enter house number" optional />
+                  </div>
+                </div>
+
+                {/* Optional resident login account. A resident profile never
+                    requires an account; the health worker chooses whether to
+                    create one. When Yes, the account is created in Pending
+                    Activation and the resident sets their own password later. */}
+                {showLoginAccountOption && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="h-px flex-1 bg-brand-border"></div>
+                      <h4 className="text-sm font-semibold text-brand-ink uppercase tracking-wide">Login Account</h4>
+                      <div className="h-px flex-1 bg-brand-border"></div>
+                    </div>
+                    <div className="rounded-card border border-brand-light bg-brand-light/30 p-4">
+                      <p className="text-sm font-medium text-brand-ink">Create Resident Login Account?</p>
+                      <p className="mt-2 text-xs text-brand-gray">
+                        Optional. The resident profile is created either way. Choose "Yes" only if this resident should be able to log in.
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => set("createAccount")(false)}
+                          className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
+                            !form.createAccount 
+                              ? "bg-brand-blue text-white" 
+                              : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                          }`}
+                        >
+                          No
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => set("createAccount")(true)}
+                          disabled={!canCreateLoginAccountForResident}
+                          className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
+                            form.createAccount
+                              ? "bg-brand-blue text-white"
+                              : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                          } disabled:cursor-not-allowed disabled:opacity-50 ${
+                            !canCreateLoginAccountForResident ? "hover:bg-white" : ""
+                          }`}
+                        >
+                          Yes
+                        </button>
+                      </div>
+                      {form.createAccount && (
+                        <div className="mt-4">
+                          <Field
+                            label="Email for login account"
+                            type="email"
+                            value={form.email}
+                            onChange={set("email")}
+                            placeholder="e.g. resident@example.com"
+                            error={errors.email}
+                          />
+                          <p className="mt-2 text-xs text-brand-gray">
+                            The account starts in Pending Activation. An invitation link is emailed to this address — the resident clicks it to set their own password and activate the account.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Fixed Footer */}
+            <div className="flex-shrink-0 border-t border-brand-border bg-brand-bg px-6 py-4">
+              <div className="flex justify-end gap-3">
+                <button onClick={closeAdd} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray bg-white border border-brand-border hover:bg-brand-light transition-colors">
                   Cancel
                 </button>
                 <button
                   onClick={handleSubmit}
                   disabled={submitting}
-                  className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
+                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
                 >
                   {submitting ? "Saving..." : "Add Resident"}
                 </button>
               </div>
             </div>
-          </Card>
+          </div>
         </div>
       )}
-
       {/* View Resident Modal */}
       {showViewModal && selected && selectedOwner === user?.id && (!supervisor || (canViewProfile && assignedBarangay)) && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

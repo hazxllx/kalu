@@ -18,10 +18,13 @@ import asyncHandler from '../utils/asyncHandler.js';
 /**
  * Medical certificate register.
  *
- * READ + CREATE (`request` chain): PHN and MHO always; a Triage-station RHU
- * Personnel may additionally READ and INITIATE a certificate REQUEST — the
- * `authorizeStation(TRIAGE)` gate admits RHU only with the Triage station, and
- * the service forces the request status ('For Review') and withholds the
+ * READ operations (`read` chain): PHN, MHO, and RHU Personnel may read
+ * certificates in their municipality scope. No station gate on reads.
+ *
+ * CREATE/REQUEST operations (`request` chain): PHN and MHO always; a
+ * Triage-station RHU Personnel may INITIATE a certificate REQUEST via POST.
+ * The `authorizeStation(TRIAGE)` gate admits RHU only with the Triage station,
+ * and the service forces the request status ('For Review') and withholds the
  * signatory. A Consultation-only RHU account is refused here.
  *
  * REVIEW/EDIT (`decision` chain): PHN and MHO only. RHU Personnel can never
@@ -31,6 +34,7 @@ import asyncHandler from '../utils/asyncHandler.js';
  */
 const router = Router();
 
+const read = [authenticate, authorize(FEATURE_ROLES.certificateRequest)];
 const decision = [authenticate, authorize(FEATURE_ROLES.certificates)];
 const request = [
   authenticate,
@@ -40,11 +44,11 @@ const request = [
 const idParam = validate(certificateIdParamValidator, 'params');
 
 // Specific paths before '/:id'.
-router.get('/meta', ...request, asyncHandler(controller.meta));
-router.get('/next-reference', ...request, asyncHandler(controller.reference));
+router.get('/meta', ...read, asyncHandler(controller.meta));
+router.get('/next-reference', ...read, asyncHandler(controller.reference));
 
-router.get('/', ...request, asyncHandler(controller.list));
-router.get('/:id', ...request, idParam, asyncHandler(controller.get));
+router.get('/', ...read, asyncHandler(controller.list));
+router.get('/:id', ...read, idParam, asyncHandler(controller.get));
 
 router.post('/', ...request, validate(createCertificateValidator), asyncHandler(controller.create));
 router.put('/:id', ...decision, idParam, validate(updateCertificateValidator), asyncHandler(controller.update));

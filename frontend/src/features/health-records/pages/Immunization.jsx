@@ -379,7 +379,6 @@ export default function Immunization() {
       </Card>
 
       <Card className="overflow-hidden">
-        <TablePagination total={filtered.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} className="m-3" />
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-brand-bg border-b border-brand-border">
@@ -423,6 +422,7 @@ export default function Immunization() {
             </tbody>
           </table>
         </div>
+        <TablePagination total={filtered.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} className="m-3" />
       </Card>
 
       {/* Detail modal */}

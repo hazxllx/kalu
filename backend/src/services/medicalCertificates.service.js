@@ -314,6 +314,42 @@ const ownResidentId = async (supabase, user) => {
 };
 
 /**
+ * Verify that the authenticated staff member's account is approved and usable.
+ * This re-check is a defense-in-depth measure to complement RLS policies.
+ * For non-staff roles (residents), this is a no-op.
+ */
+const assertPersonnelApproved = async (supabase, user) => {
+  if (!user?.id) return; // Unauthenticated; other checks will catch this
+  if (RESIDENT_ROLES.has(user?.role)) return; // Residents don't need approval status
+  
+  const { data, error } = await supabase
+    .from('personnel_accounts')
+    .select('approval_status, setup_required, suspended_at')
+    .eq('account_id', user.id)
+    .maybeSingle();
+  
+  throwOnError(error, 'Could not verify personnel account status');
+  
+  if (!data) {
+    // No personnel_accounts row; staff members should have one
+    if ([ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL, ROLES.HEALTH_SUPERVISOR].includes(user?.role)) {
+      throw ApiError.forbidden('Your staff account has not been provisioned. Ask an administrator to set it up.');
+    }
+    return; // Other roles don't need personnel_accounts
+  }
+  
+  if (data.approval_status !== 'approved') {
+    throw ApiError.forbidden(`Your account is not approved. Current status: ${data.approval_status}.`);
+  }
+  if (data.setup_required) {
+    throw ApiError.forbidden('Your account credentials have not been configured. Please complete setup.');
+  }
+  if (data.suspended_at) {
+    throw ApiError.forbidden('Your account is suspended. Ask an administrator for assistance.');
+  }
+};
+
+/**
  * Next MC-YYYY-#### reference for the current year. Derived from the stored
  * references so the number is always allocated from real data.
  */
@@ -330,6 +366,9 @@ export const nextReference = async ({ supabase = getServiceClient() } = {}) => {
 
 /** Certificates visible to the caller, newest first. */
 export const list = async ({ user, status = null, residentId = null, supabase = getServiceClient() }) => {
+  // Defense-in-depth: verify approval status for staff members
+  await assertPersonnelApproved(supabase, user);
+  
   let query = supabase.from(TABLE).select(SELECT).order('created_at', { ascending: false }).limit(200);
 
   if (RESIDENT_ROLES.has(user?.role)) {
@@ -350,6 +389,9 @@ export const list = async ({ user, status = null, residentId = null, supabase = 
 
 /** One certificate plus its full decision history. */
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
+  // Defense-in-depth: verify approval status for staff members
+  await assertPersonnelApproved(supabase, user);
+  
   const { data, error } = await supabase.from(TABLE).select(SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load medical certificate');
   if (!data) throw ApiError.notFound('Medical certificate not found.');
@@ -413,6 +455,9 @@ const sanitizeWrite = (payload = {}) => {
 };
 
 export const create = async ({ user, payload = {}, supabase = getServiceClient() }) => {
+  // Defense-in-depth: verify approval status for staff members
+  await assertPersonnelApproved(supabase, user);
+  
   const isTriageRequest = REQUEST_ROLES.has(user?.role);
   if (!PREPARE_ROLES.has(user?.role) && !isTriageRequest) {
     throw ApiError.forbidden('You are not authorized to prepare medical certificates.');

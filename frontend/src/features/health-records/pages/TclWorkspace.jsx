@@ -15,6 +15,8 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 import { programFormsApi, maternalApi, tclApi } from "@/services/api";
+import TclEmptyState from "../components/TclEmptyState";
+import { TclDirectorySkeleton } from "../components/TclSkeletons";
 
 /**
  * Target Client List workspace — the single entry point reached from
@@ -22,6 +24,9 @@ import { programFormsApi, maternalApi, tclApi } from "@/services/api";
  * program, with a short description, a real record count (when it loads) and an
  * "Open TCL" action into the actual working form. Programs without a working
  * form yet are shown as not yet available, without any placeholder panel.
+ *
+ * REDESIGNED: Compact two-column directory with horizontal program cards,
+ * refined category headings, and consolidated search toolbar.
  */
 
 // countKey: how to fetch a real record count (null = no count shown).
@@ -75,6 +80,7 @@ const COUNT_FETCHERS = {
 
 export default function TclWorkspace() {
   const [counts, setCounts] = useState({}); // key -> number | 'error'
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const location = useLocation();
   const role = (location.pathname.match(/^\/app\/([^/]+)\//) || [])[1] || "";
@@ -95,6 +101,7 @@ export default function TclWorkspace() {
         }
       });
       setCounts(next);
+      setLoading(false);
     });
     return () => { active = false; };
   }, []);
@@ -108,6 +115,7 @@ export default function TclWorkspace() {
   }, [query]);
 
   const hasResults = groups.length > 0;
+  const totalPrograms = groups.reduce((sum, g) => sum + g.items.length, 0);
 
   // Record counts come from the role-scoped list APIs, so label them honestly.
   const scopeLabel = role === "health_supervisor"
@@ -123,89 +131,110 @@ export default function TclWorkspace() {
         subtitle="Access health program records, register clients, and manage follow-ups."
       />
 
-      <Card className="mb-4 p-3">
-        <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2">
+      {/* Search and Program Summary Toolbar */}
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 items-center gap-2 rounded-btn border border-brand-border bg-brand-paper px-3 py-2">
           <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search a Target Client List…"
+            placeholder="Search health programs or target client lists…"
             aria-label="Search Target Client Lists"
             className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray"
           />
         </div>
-        <p className="mt-1.5 text-[11px] text-brand-gray">Record counts reflect saved records {scopeLabel}.</p>
-      </Card>
+        {hasResults && (
+          <div className="flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-3 py-2 text-[11px] font-medium text-brand-gray whitespace-nowrap">
+            {totalPrograms} program{totalPrograms === 1 ? "" : "s"}
+          </div>
+        )}
+      </div>
 
       {!hasResults ? (
-        <Card className="flex flex-col items-center justify-center gap-1 px-6 py-10 text-center">
-          <p className="text-sm font-semibold text-brand-ink">No Target Client Lists match “{query}”.</p>
-          <p className="text-xs text-brand-gray">Try a different program name or clear the search.</p>
-        </Card>
+        <TclEmptyState
+          title="No Target Client Lists found"
+          description={`No programs match "${query}". Try a different search term or clear the filter.`}
+          type="search"
+        />
+      ) : loading ? (
+        <TclDirectorySkeleton count={6} />
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {groups.map((group) => (
             <section key={group.title}>
-              {/* Uppercase, letter-spaced label with a thin rule across the remaining width. */}
-              <div className="mb-2.5 flex items-center gap-3">
-                <h2 className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-gray">{group.title}</h2>
+              {/* Category Heading with divider */}
+              <div className="mb-3 flex items-center gap-3">
+                <h2 className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-ink">
+                  {group.title}
+                </h2>
                 <span className="h-px flex-1 bg-brand-border" aria-hidden="true" />
               </div>
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {/* Two-Column Grid Layout */}
+              <div className="grid gap-3 lg:grid-cols-2">
                 {group.items.map((it) => {
                   const count = it.countKey ? counts[it.countKey] : undefined;
                   const gatedOut = it.requiresRole && role !== it.requiresRole;
                   const unavailable = it.status === "unavailable" || gatedOut;
-                  // Gated items keep their short "where to open it" guidance; truly
-                  // unavailable programs just read as not yet available (no workbook
-                  // notice, no placeholder panel).
                   const note = gatedOut
                     ? "Open from Health Supervisor › Records › M1 · Maternal Record."
                     : "Not yet available";
                   const Icon = it.icon || FileSpreadsheet;
+
                   return (
-                    <Card key={it.id} className="flex h-full flex-col p-3.5 transition-colors hover:border-brand-rule">
-                      {/* Icon + count badge (counts only — no workbook/status badge) */}
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn bg-brand-light text-brand-blue">
-                          <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
-                        </span>
+                    <Link
+                      key={it.id}
+                      to={unavailable ? "#" : it.to}
+                      className={`group flex items-center gap-3 rounded-btn border px-3.5 py-3 transition-all ${
+                        unavailable
+                          ? "cursor-not-allowed border-brand-border bg-brand-paper"
+                          : "border-brand-border bg-brand-paper hover:border-brand-rule hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+                      }`}
+                      onClick={(e) => {
+                        if (unavailable) e.preventDefault();
+                      }}
+                      aria-label={`Open ${it.name} Target Client List`}
+                    >
+                      {/* Left: Icon Container */}
+                      <span
+                        className={`flex shrink-0 items-center justify-center rounded-btn h-10 w-10 ${
+                          unavailable ? "bg-brand-light text-brand-gray" : "bg-brand-light text-brand-blue"
+                        }`}
+                        aria-hidden="true"
+                      >
+                        <Icon className="h-[18px] w-[18px]" />
+                      </span>
+
+                      {/* Middle: Program Info */}
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-semibold leading-tight text-brand-ink">
+                          {it.name}
+                        </h3>
+                        <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-brand-gray">
+                          {unavailable ? note : it.desc}
+                        </p>
+                      </div>
+
+                      {/* Right: Count Badge and Arrow */}
+                      <div className="flex shrink-0 items-center gap-2">
                         {!unavailable && typeof count === "number" ? (
                           <span
-                            className="inline-flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-2 py-0.5 text-[11px] font-medium font-stat text-brand-gray"
+                            className="inline-flex items-center rounded-btn border border-brand-border bg-brand-paper px-1.5 py-0.5 text-[10px] font-medium font-stat text-brand-gray"
                             title={`Saved records ${scopeLabel}`}
                           >
-                            {count} record{count === 1 ? "" : "s"}
+                            {count}
                           </span>
                         ) : !unavailable && count === "error" ? (
-                          <span className="inline-flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-2 py-0.5 text-[11px] font-medium text-brand-gray">
-                            Count unavailable
+                          <span className="inline-flex items-center text-[10px] font-medium text-brand-gray">
+                            —
                           </span>
                         ) : null}
-                      </div>
-
-                      {/* Title + description */}
-                      <h3 className="mt-2.5 text-sm font-semibold leading-snug text-brand-ink">{it.name}</h3>
-                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-brand-gray">{it.desc}</p>
-
-                      {/* Primary action / not-yet-available note, aligned to the bottom */}
-                      <div className="mt-auto pt-3">
-                        {unavailable ? (
-                          <span className="text-[11px] font-medium leading-snug text-brand-gray">{note}</span>
-                        ) : (
-                          <Link
-                            to={it.to}
-                            aria-label={`Open ${it.name} Target Client List`}
-                            className="group inline-flex items-center gap-1.5 rounded-btn text-sm font-semibold text-brand-blue transition-colors hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-                          >
-                            Open TCL
-                            <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-                          </Link>
+                        {!unavailable && (
+                          <ArrowRight className="h-3.5 w-3.5 text-brand-blue transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
                         )}
                       </div>
-                    </Card>
+                    </Link>
                   );
                 })}
               </div>
@@ -213,6 +242,11 @@ export default function TclWorkspace() {
           ))}
         </div>
       )}
+
+      {/* Scope Information */}
+      <p className="mt-6 text-[11px] text-brand-gray">
+        Record counts reflect saved records {scopeLabel}.
+      </p>
     </>
   );
 }

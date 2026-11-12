@@ -1384,7 +1384,6 @@ export default function TreatmentConsultation() {
           </div>
         ) : (
           <>
-            {!focusedId && filteredRecordRows.length > 0 && <TablePagination total={filteredRecordRows.length} page={recordPage} pageSize={recordPageSize} onPageChange={setRecordPage} onPageSizeChange={(size) => { setRecordPageSize(size); setRecordPage(1); }} className="mb-3" />}
             <DataTable
               className="consultation-records-table"
               tableClassName="consultation-records-grid"
@@ -1444,6 +1443,7 @@ export default function TreatmentConsultation() {
                 return row[key];
               }}
             />
+            {!focusedId && filteredRecordRows.length > 0 && <TablePagination total={filteredRecordRows.length} page={recordPage} pageSize={recordPageSize} onPageChange={setRecordPage} onPageSizeChange={(size) => { setRecordPageSize(size); setRecordPage(1); }} className="mt-3" />}
             {focusedId ? null : loading ? (
               <p className="py-10 text-center text-sm text-brand-gray">Loading consultations...</p>
             ) : filteredRecordRows.length === 0 ? (

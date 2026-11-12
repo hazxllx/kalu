@@ -310,13 +310,13 @@ export default function M1Fhsis() {
 
       {/* Summary cards (monthly) */}
       {tab === "monthly" && (
-        <>
-          <div className="no-print mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-            <StatCard icon="Activity" tone="blue" index={0} label="Total Services (month)" value={loading ? "…" : summary.participants} />
-            <StatCard icon="HeartPulse" tone="accent" index={1} label="Family Planning" value={loading ? "…" : summary.fp} />
-            <StatCard icon="Baby" tone="green" index={2} label="Maternal Care" value={loading ? "…" : summary.maternal} />
-            <StatCard icon="Users" tone="yellow" index={3} label="Child Care" value={loading ? "…" : summary.child} />
-          </div>
+         <>
+           <div className="no-print mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+             <StatCard icon="Activity" tone="blue" index={0} label="Total Services (month)" value={loading ? "…" : summary.participants} />
+             <StatCard icon="HeartPulse" tone="green" index={1} label="Family Planning" value={loading ? "…" : summary.fp} />
+             <StatCard icon="Baby" tone="green" index={2} label="Maternal Care" value={loading ? "…" : summary.maternal} />
+             <StatCard icon="Users" tone="amber" index={3} label="Child Care" value={loading ? "…" : summary.child} />
+           </div>
           {/* Sex disaggregation — mirrors the Male/Female columns of the
               printed FHSIS M1 form, so screen and paper always agree. */}
           <Card className="no-print mb-6 p-4">

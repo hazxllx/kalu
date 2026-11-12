@@ -7,6 +7,8 @@ import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
 import TablePagination from "@/components/tables/TablePagination";
 import StatusBadge from "@/components/common/StatusBadge";
+import PriorityBadge from "@/features/follow-ups/components/PriorityBadge";
+import FollowUpStatusBadge from "@/features/follow-ups/components/FollowUpStatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import TimePicker from "@/components/common/TimePicker";
 import { Search, Plus, Calendar, MapPin, User, X, CheckCircle2, MoreVertical, AlertTriangle } from "lucide-react";
@@ -173,17 +175,6 @@ const mergeFollowUpRecord = (current, record) => {
   };
 };
 
-const STATUS_COLORS = {
-  Scheduled: "bg-brand-blue/10 text-brand-blue",
-  Today: "bg-brand-accent/10 text-brand-accent",
-  Completed: "bg-brand-green/10 text-brand-green",
-  Missed: "bg-brand-danger/10 text-brand-danger",
-  Upcoming: "bg-brand-gray/10 text-brand-gray",
-  Ongoing: "bg-brand-purple/10 text-brand-purple",
-  Cancelled: "bg-brand-gray/10 text-brand-gray",
-  Rejected: "bg-brand-danger/10 text-brand-danger",
-};
-
 const CLOSED_FOLLOW_UP_STATUSES = new Set(["Completed", "Cancelled", "Rejected"]);
 const TERMINAL_FOLLOW_UP_STATUSES = new Set(["Completed", "Missed", "Cancelled", "Rejected"]);
 const isOverdue = (row) => {
@@ -201,12 +192,6 @@ const FOLLOW_UP_STATUS_FILTERS = [
   "Cancelled",
   "Rejected",
 ];
-
-const PRIORITY_COLORS = {
-  High: "bg-brand-danger/10 text-brand-danger",
-  Medium: "bg-brand-yellow/15 text-[#B07E00]",
-  Low: "bg-brand-green/10 text-brand-green",
-};
 
 export default function MidwifeFollowUp() {
   const { user } = useAuth();
@@ -1149,14 +1134,14 @@ export default function MidwifeFollowUp() {
         </div>
       )}
 
-      {/* Summary Cards */}
-      {supervisor ? (
-       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-         <StatCard variant="ledger" label="LOADED FOLLOW-UPS" value={loading || loadError ? "Unavailable" : stats.total} description={followUpSource?.source === "cache" ? "Saved records on this device" : "Authorized follow-up records"} tone="blue" />
-         <StatCard variant="ledger" label="DUE TODAY" value={loading || loadError ? "Unavailable" : stats.today} description="Scheduled today, Manila time" tone="blue" />
-         <StatCard variant="ledger" label="OVERDUE" value={loading || loadError ? "Unavailable" : overdueCount} description="Past due; closed visits excluded" tone="danger" onClick={() => setStatusFilter(statusFilter === "Overdue" ? "All" : "Overdue")} active={statusFilter === "Overdue"} />
-         <StatCard variant="ledger" label="COMPLETED" value={loading || loadError ? "Unavailable" : stats.completed} description="Persisted completed visits" tone="green" />
-       </div>
+       {/* Summary Cards */}
+       {supervisor ? (
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard variant="ledger" label="LOADED FOLLOW-UPS" value={loading || loadError ? "Unavailable" : stats.total} description={followUpSource?.source === "cache" ? "Saved records on this device" : "Authorized follow-up records"} tone="blue" />
+          <StatCard variant="ledger" label="DUE TODAY" value={loading || loadError ? "Unavailable" : stats.today} description="Scheduled today, Manila time" tone="blue" />
+          <StatCard variant="ledger" label="OVERDUE" value={loading || loadError ? "Unavailable" : overdueCount} description="Past due; closed visits excluded" tone="red" onClick={() => setStatusFilter(statusFilter === "Overdue" ? "All" : "Overdue")} active={statusFilter === "Overdue"} />
+          <StatCard variant="ledger" label="COMPLETED" value={loading || loadError ? "Unavailable" : stats.completed} description="Persisted completed visits" tone="green" />
+        </div>
        ) : null}
 
        {/* Search & Filters */}
@@ -1203,24 +1188,23 @@ export default function MidwifeFollowUp() {
         </div>
       </Card>}
 
-      {/* Follow-up Table */}
-      <Card className="overflow-hidden" aria-busy={loading}>
-        {supervisor && <div className="supervisor-section-heading border-b border-brand-border px-3 py-2"><h2 className="text-section font-semibold text-brand-ink">Follow-up Register</h2></div>}
-        <TablePagination total={filteredFollowUps.length} page={followUpPage} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="m-3" />
-        <div className="overflow-x-auto">
-          <table className={`w-full follow-up-monitoring-grid ${supervisor ? "ui-table" : ""}`}>
-            <thead className="bg-brand-bg border-b border-brand-border">
-              <tr>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Resident</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Purpose</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Assigned</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Scheduled</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5 min-w-[200px]">Location</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Priority</th>
-                <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Status</th>
-                <th className="text-right text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Actions</th>
-              </tr>
-            </thead>
+       {/* Follow-up Table */}
+       <Card className="overflow-hidden" aria-busy={loading}>
+         {supervisor && <div className="supervisor-section-heading border-b border-brand-border px-3 py-2"><h2 className="text-section font-semibold text-brand-ink">Follow-up Register</h2></div>}
+         <div className="w-full overflow-x-auto">
+           <table className={`w-full follow-up-monitoring-grid ${supervisor ? "ui-table" : ""}`}>
+             <thead className="bg-brand-bg border-b border-brand-border">
+               <tr>
+                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Resident</th>
+                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Purpose</th>
+                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Assigned</th>
+                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Scheduled</th>
+                 <th className="text-left text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Location</th>
+                 <th className="text-center text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Priority</th>
+                 <th className="text-center text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Status</th>
+                 <th className="text-right text-xs font-semibold text-brand-gray uppercase tracking-wide px-3 py-2.5">Actions</th>
+               </tr>
+             </thead>
             <tbody>
               {pageFollowUps.map((f) => (
                 <tr key={f.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
@@ -1244,25 +1228,23 @@ export default function MidwifeFollowUp() {
                     <div className="text-sm text-brand-ink">{supervisor ? formatDate(f.scheduledDateRaw, true) : f.scheduledDate}</div>
                     <div className="text-xs text-brand-gray">{f.scheduledTime}</div>
                   </td>
-                  <td data-label="Location" className="px-3 py-2.5 text-sm text-brand-ink min-w-[200px]">
-                    <div className="flex items-start gap-1.5">
-                      <MapPin className="w-3 h-3 mt-0.5 text-brand-gray shrink-0" />
-                      <span className="min-w-0 whitespace-normal break-words leading-snug">
-                        {f.location || "Not specified"}
-                      </span>
-                    </div>
-                  </td>
-                  <td data-label="Priority" className="px-3 py-2.5">
-                    {supervisor ? <StatusBadge value={f.priority || "Not specified"} /> : <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${PRIORITY_COLORS[f.priority]}`}>
-                      {f.priority}
-                    </span>}
-                  </td>
-                  <td data-label="Status" className="px-3 py-2.5">
-                    {supervisor ? <StatusBadge value={isOverdue(f) ? "Overdue" : f.status} /> : <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${STATUS_COLORS[f.status]}`}>
-                      {f.status}
-                    </span>}
-                    {supervisor && f.syncStatus && <p className="mt-1 text-caption text-amber-800">{f.syncStatus}</p>}
-                  </td>
+                   <td data-label="Location" className="px-3 py-2.5 text-sm text-brand-ink">
+                     <div className="flex items-start gap-1.5">
+                       <MapPin className="w-3 h-3 mt-0.5 text-brand-gray shrink-0" />
+                       <span className="min-w-0 whitespace-normal break-words leading-snug">
+                         {f.location || "Not specified"}
+                       </span>
+                     </div>
+                   </td>
+                   <td data-label="Priority" className="px-3 py-2.5 text-center">
+                     <PriorityBadge value={f.priority || "Medium"} />
+                   </td>
+                   <td data-label="Status" className="px-3 py-2.5 text-center">
+                     <div>
+                       <FollowUpStatusBadge value={isOverdue(f) ? "Overdue" : f.status} />
+                       {supervisor && f.syncStatus && <p className="mt-1 text-caption text-amber-800">{f.syncStatus}</p>}
+                     </div>
+                   </td>
                   <td data-label="Actions" className="px-3 py-2.5 text-right">
                     <ActionsDropdown followUp={f} />
                   </td>
@@ -1283,6 +1265,7 @@ export default function MidwifeFollowUp() {
             </tbody>
           </table>
         </div>
+        <TablePagination total={filteredFollowUps.length} page={followUpPage} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="m-3" />
       </Card>
 
       {/* Schedule Follow-up Modal */}

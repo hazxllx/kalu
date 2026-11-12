@@ -698,7 +698,7 @@ export const listResidents = async ({
   riskLevel = '',
 } = {}) => {
   const role = String(user?.role || '').toLowerCase();
-  if (!['health_supervisor', 'phn', 'mho'].includes(role)) {
+  if (!['health_supervisor', 'phn', 'mho', 'rhu_personnel'].includes(role)) {
     throw ApiError.forbidden('You are not permitted to view the resident directory.');
   }
   const scope = assignedBarangay(user);
@@ -711,6 +711,9 @@ export const listResidents = async ({
   }
   if (role === 'health_supervisor' && !scope) {
     throw ApiError.forbidden('A valid barangay assignment is required to access the resident directory.');
+  }
+  if (role === 'rhu_personnel' && !municipalityId) {
+    throw ApiError.forbidden('A valid municipality assignment is required to access the resident directory.');
   }
 
   let effectiveBarangayId = null;
@@ -739,7 +742,7 @@ export const listResidents = async ({
   let zoneFilter = null;
   const requestedZone = String(zone ?? '').trim();
   if (requestedZone) {
-    if (role !== 'health_supervisor') {
+    if (!['health_supervisor'].includes(role)) {
       throw ApiError.badRequest('Zone filtering is available only to Health Supervisors.');
     }
     if (requestedZone === 'unassigned') zoneFilter = 'unassigned';

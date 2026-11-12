@@ -1,4 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+@import './kpi-horizontal.css';
+@import './tcl.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -351,7 +353,11 @@
   }
 
   .verification-table thead {
-    @apply border-b border-brand-border bg-brand-bg/70 dark:border-border dark:bg-card-nested;
+    @apply border-b border-brand-border bg-brand-bg/70;
+  }
+
+  :is(.dark) .verification-table thead {
+    @apply border-border bg-card-nested;
   }
 
   .verification-table th {
@@ -372,7 +378,11 @@
   }
 
   .verification-table tbody {
-    @apply divide-y divide-brand-border dark:divide-border;
+    @apply divide-y divide-brand-border;
+  }
+
+  :is(.dark) .verification-table tbody {
+    @apply divide-border;
   }
 
   .verification-table tbody tr {
@@ -403,16 +413,28 @@
   /* Mobile stacked request cards. Rendered in place of the table on small
      screens so a wide table is never forced into a narrow viewport. */
   .verification-cards {
-    @apply divide-y divide-brand-border dark:divide-border;
+    @apply divide-y divide-brand-border;
+  }
+
+  :is(.dark) .verification-cards {
+    @apply divide-border;
   }
   .verification-cards > li {
-    @apply grid grid-cols-2 gap-x-3 gap-y-2 px-4 py-3.5 transition-colors hover:bg-brand-bg/40 dark:hover:bg-card-nested;
+    @apply grid grid-cols-2 gap-x-3 gap-y-2 px-4 py-3.5 transition-colors hover:bg-brand-bg/40;
+  }
+
+  :is(.dark) .verification-cards > li {
+    @apply hover:bg-card-nested;
   }
   .verification-cards dt {
     @apply text-[11px] font-semibold uppercase tracking-wide text-brand-gray;
   }
   .verification-cards dd {
-    @apply mt-0.5 min-w-0 text-[13px] text-brand-ink dark:text-foreground;
+    @apply mt-0.5 min-w-0 text-[13px] text-brand-ink;
+  }
+
+  :is(.dark) .verification-cards dd {
+    @apply text-foreground;
   }
   .verification-cards dd.is-mono,
   .verification-cards .is-monospace {
@@ -1224,37 +1246,91 @@
 .supervisor-shell .referral-monitoring-grid-resident th:nth-child(7),
 .supervisor-shell .referral-monitoring-grid-resident td:nth-child(7) { width: 4%; text-align: center; }
 .follow-up-monitoring-grid {
-  table-layout: fixed;
+  table-layout: auto;
+  width: 100%;
+  border-collapse: collapse;
 }
 .follow-up-monitoring-grid th,
 .follow-up-monitoring-grid td {
   vertical-align: middle;
+  white-space: normal;
 }
+/* Resident column */
 .follow-up-monitoring-grid th:nth-child(1),
-.follow-up-monitoring-grid td:nth-child(1) { width: 19%; }
+.follow-up-monitoring-grid td:nth-child(1) { 
+  min-width: 150px;
+  width: 18%;
+}
+/* Purpose column */
 .follow-up-monitoring-grid th:nth-child(2),
-.follow-up-monitoring-grid td:nth-child(2) { width: 15%; }
+.follow-up-monitoring-grid td:nth-child(2) { 
+  min-width: 140px;
+  width: 14%;
+}
+/* Assigned column */
 .follow-up-monitoring-grid th:nth-child(3),
-.follow-up-monitoring-grid td:nth-child(3) { width: 15%; }
+.follow-up-monitoring-grid td:nth-child(3) { 
+  min-width: 130px;
+  width: 14%;
+}
+/* Scheduled column */
 .follow-up-monitoring-grid th:nth-child(4),
-.follow-up-monitoring-grid td:nth-child(4) { width: 13%; }
+.follow-up-monitoring-grid td:nth-child(4) { 
+  min-width: 120px;
+  width: 12%;
+}
+/* Location column */
 .follow-up-monitoring-grid th:nth-child(5),
-.follow-up-monitoring-grid td:nth-child(5) { width: 15%; }
+.follow-up-monitoring-grid td:nth-child(5) { 
+  min-width: 180px;
+  width: 16%;
+}
+/* Priority column */
 .follow-up-monitoring-grid th:nth-child(6),
-.follow-up-monitoring-grid td:nth-child(6) { width: 8%; }
+.follow-up-monitoring-grid td:nth-child(6) { 
+  min-width: 100px;
+  width: 11%;
+  text-align: center;
+}
+/* Status column */
 .follow-up-monitoring-grid th:nth-child(7),
-.follow-up-monitoring-grid td:nth-child(7) { width: 9%; }
+.follow-up-monitoring-grid td:nth-child(7) { 
+  min-width: 110px;
+  width: 12%;
+  text-align: center;
+}
+/* Actions column */
 .follow-up-monitoring-grid th:nth-child(8),
-.follow-up-monitoring-grid td:nth-child(8) { width: 6%; text-align: center; }
+.follow-up-monitoring-grid td:nth-child(8) { 
+  min-width: 60px;
+  width: 7%;
+  text-align: right;
+  flex-shrink: 0;
+}
 .follow-up-monitoring-grid td:nth-child(2) p {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.follow-up-monitoring-grid td:nth-child(2) p {
   white-space: nowrap;
 }
 .follow-up-monitoring-grid td:nth-child(5) span {
   display: block;
+}
+/* Responsive: on smaller screens, allow horizontal scrolling only in table container */
+@media (max-width: 1024px) {
+  .follow-up-monitoring-grid {
+    table-layout: auto;
+  }
+  .follow-up-monitoring-grid th:nth-child(1),
+  .follow-up-monitoring-grid td:nth-child(1) { min-width: 140px; }
+  .follow-up-monitoring-grid th:nth-child(5),
+  .follow-up-monitoring-grid td:nth-child(5) { min-width: 160px; }
+}
+@media (max-width: 768px) {
+  .follow-up-monitoring-grid th,
+  .follow-up-monitoring-grid td {
+    padding: 0.5rem 0.625rem;
+    font-size: 0.75rem;
+  }
 }
 .resident-directory-mobile { display: none; }
 @media (max-width: 767px) {

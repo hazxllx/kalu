@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import ProgramFormPage from "../components/ProgramFormPage";
 import TclPageHeader from "../components/TclPageHeader";
 import { PROGRAM_FORMS } from "../lib/programFormConfig";
+import TclTabs from "../components/TclTabs";
 
 const TABS = [
   PROGRAM_FORMS["ncd-risk"],
@@ -30,19 +31,7 @@ export default function NcdRecords() {
         title="NCD Target Client Lists"
         subtitle="Risk-assessed adults, cervical cancer & breast mass examination, and visual acuity & PPV for senior citizens."
       />
-      <div className="mb-3 flex flex-wrap gap-2">
-        {TABS.map((t) => (
-          <button
-            key={t.kind}
-            onClick={() => setActive(t.kind)}
-            className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
-              active === t.kind ? "bg-brand-blue text-white border-brand-blue" : "bg-white text-brand-gray border-brand-border hover:border-brand-blue"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <TclTabs tabs={TABS.map((t) => ({ value: t.kind, label: t.label }))} active={active} onChange={setActive} label="NCD sections" />
       <ProgramFormPage key={config.kind} config={config} />
     </>
   );

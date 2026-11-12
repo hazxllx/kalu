@@ -123,29 +123,44 @@ const [showPreview, setShowPreview] = useState(false);
 const [showIssueConfirm, setShowIssueConfirm] = useState(false);
 const [savedId, setSavedId] = useState(null);
 
-useEffect(() => {
-  let active = true;
-  setRecord(certificate);
-  setDetailError("");
-  if (!certificate?.id || mode === "create") {
-    setDetailLoading(false);
+  useEffect(() => {
+    let active = true;
+    setRecord(certificate);
+    setDetailError("");
+    if (!certificate?.id || mode === "create") {
+      setDetailLoading(false);
+      return () => { active = false; };
+    }
+
+    setDetailLoading(true);
+    medicalCertificatesApi.get(certificate.id)
+      .then((payload) => {
+        if (active) {
+          const record = payload?.record || payload;
+          if (record) {
+            setRecord(record);
+          } else {
+            setDetailError("Certificate details could not be loaded.");
+          }
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          // Provide specific error messages based on the error type
+          const errorMsg = error?.response?.status === 403
+            ? "You do not have permission to view this certificate. Your account may not be approved."
+            : error?.response?.status === 404
+            ? "This certificate was not found or has been deleted."
+            : error?.message || "Certificate details and review history could not be loaded.";
+          setDetailError(errorMsg);
+        }
+      })
+      .finally(() => {
+        if (active) setDetailLoading(false);
+      });
+
     return () => { active = false; };
-  }
-
-  setDetailLoading(true);
-  medicalCertificatesApi.get(certificate.id)
-    .then((payload) => {
-      if (active) setRecord(payload?.record || payload);
-    })
-    .catch((error) => {
-      if (active) setDetailError(error?.message || "Certificate details and review history could not be loaded.");
-    })
-    .finally(() => {
-      if (active) setDetailLoading(false);
-    });
-
-  return () => { active = false; };
-}, [certificate, mode]);
+  }, [certificate, mode]);
 
   const isCreate = mode === "create";
   const isEdit = mode === "edit";
