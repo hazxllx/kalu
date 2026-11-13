@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Route, Routes, Navigate } from 'react-router-dom';
 import DashboardLayout from '@/layouts/DashboardLayout';
 import NavTabsLayout from '@/layouts/NavTabsLayout';
@@ -7,6 +7,42 @@ import UnauthorizedPage from '@/pages/UnauthorizedPage';
 import ProtectedRoute from '@/routes/ProtectedRoute';
 import { FullPageSkeleton, PageSkeleton } from '@/components/common/Skeleton';
 import { ROUTE_ROLES } from '@/lib/roles';
+
+class RouteErrorBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('Route failed to render.', error, info);
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false });
+  };
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+
+    return (
+      <section className="mx-auto w-full max-w-xl rounded-card border border-brand-border bg-white p-8 text-center shadow-card" role="alert">
+        <h1 className="text-lg font-semibold text-brand-ink">This page could not be displayed</h1>
+        <p className="mt-2 text-sm text-brand-gray">
+          The page encountered an unexpected error. Try loading it again.
+        </p>
+        <button
+          type="button"
+          onClick={this.handleRetry}
+          className="mt-5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+        >
+          Try again
+        </button>
+      </section>
+    );
+  }
+}
 
 // Landing + login are the public entry points and load eagerly so the first
 // paint never waits on a chunk fetch.
@@ -36,7 +72,9 @@ const appPage = (loader) => {
   return function LazyAppPage(props) {
     return (
       <Suspense fallback={<PageSkeleton />}>
-        <Page {...props} />
+        <RouteErrorBoundary>
+          <Page {...props} />
+        </RouteErrorBoundary>
       </Suspense>
     );
   };
@@ -48,7 +86,9 @@ const publicPage = (loader) => {
   return function LazyPublicPage(props) {
     return (
       <Suspense fallback={<FullPageSkeleton />}>
-        <Page {...props} />
+        <RouteErrorBoundary>
+          <Page {...props} />
+        </RouteErrorBoundary>
       </Suspense>
     );
   };

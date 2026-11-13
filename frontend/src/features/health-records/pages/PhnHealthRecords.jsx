@@ -266,7 +266,7 @@ export default function PhnHealthRecords() {
                     <tr key={record.id}>
                       <td className="align-middle" style={{ width: '24%' }}>
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-e2e8f0 text-sm font-semibold text-25364a">
+                          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-blue text-sm font-semibold text-white">
                             {initials}
                           </div>
                           <div className="min-w-0 flex-1">
