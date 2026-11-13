@@ -2547,3 +2547,46 @@ a.supervisor-metric:hover, button.supervisor-metric:hover { box-shadow: inset 0 
   background-image: linear-gradient(145deg, #174b86 0%, #103966 52%, #0b2d55 100%), var(--auth-pattern-guilloche);
   background-blend-mode: normal, overlay;
 }
+
+/* Referral monitoring uses the legacy clinical-table styles, whose fixed
+   light surfaces otherwise override the shared dark-mode tokens. */
+.dark .kalusagap-shell .clinical-table-card {
+  border-color: hsl(var(--border));
+  background-color: hsl(var(--card));
+}
+
+.dark .kalusagap-shell .clinical-table {
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--card));
+}
+
+.dark .kalusagap-shell .clinical-table thead,
+.dark .kalusagap-shell .clinical-table thead tr {
+  background-color: hsl(var(--card-nested)) !important;
+}
+
+.dark .kalusagap-shell .clinical-table th {
+  border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+.dark .kalusagap-shell .clinical-table td {
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+
+.dark .kalusagap-shell .clinical-table tbody tr {
+  background-color: hsl(var(--card)) !important;
+}
+
+.dark .kalusagap-shell .clinical-table tbody tr:hover {
+  background-color: hsl(var(--hover)) !important;
+}
+
+.dark .kalusagap-shell .clinical-table td .text-brand-ink {
+  color: hsl(var(--foreground)) !important;
+}
+
+.dark .kalusagap-shell .clinical-table td .text-brand-gray {
+  color: hsl(var(--muted-foreground)) !important;
+}
