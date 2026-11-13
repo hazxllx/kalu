@@ -349,7 +349,7 @@ export default function DashboardLayout({ roleKey }) {
                   [it.label]: !openGroup,
                 }))
               }
-              className={`supervisor-nav-item group flex ${rowSize} w-full ${itemPadding} items-center rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue`}
+              className={`supervisor-nav-item group flex ${rowSize} w-full ${itemPadding} items-center rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-[color,background-color,padding,gap] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue`}
             >
               <Icon
                 name={it.icon}
@@ -357,7 +357,19 @@ export default function DashboardLayout({ roleKey }) {
                 strokeWidth={1.8}
               />
 
-              <span className={collapsed ? "sr-only" : "flex-1 text-left truncate"}>{it.label}</span>
+              <AnimatePresence initial={false}>
+                {!collapsed && (
+                  <motion.span
+                    initial={{ opacity: 0, x: -5 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -5 }}
+                    transition={{ duration: 0.16, ease: "easeOut" }}
+                    className="flex-1 text-left truncate"
+                  >
+                    {it.label}
+                  </motion.span>
+                )}
+              </AnimatePresence>
 
               {!collapsed && (
                 <ChevronDown
@@ -398,7 +410,7 @@ export default function DashboardLayout({ roleKey }) {
           aria-label={collapsed ? it.label : undefined}
           aria-current={active ? "page" : undefined}
           title={collapsed || !adminNav ? it.label : undefined}
-          className={`app-nav-item supervisor-nav-item group flex w-full min-w-0 ${rowSize} ${itemPadding} items-center rounded-md text-sm leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
+          className={`app-nav-item supervisor-nav-item group flex w-full min-w-0 ${rowSize} ${itemPadding} items-center rounded-md text-sm leading-5 transition-[color,background-color,padding,gap] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
             active
               ? adminNav
                 ? "bg-brand-light text-brand-blue font-medium dark:bg-brand-blue/20"
@@ -411,12 +423,28 @@ export default function DashboardLayout({ roleKey }) {
             className="w-[18px] h-[18px] shrink-0"
             strokeWidth={1.8}
           />
-          <span className={collapsed ? "sr-only" : adminNav ? "min-w-0 flex-1 whitespace-normal break-words" : "truncate"}>{it.label}</span>
+          <AnimatePresence initial={false}>
+            {!collapsed && (
+              <motion.span
+                initial={{ opacity: 0, x: -5 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -5 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className={adminNav ? "min-w-0 flex-1 whitespace-normal break-words" : "truncate"}
+              >
+                {it.label}
+              </motion.span>
+            )}
+          </AnimatePresence>
         </Link>
       );
     };
 
-    const visibleItems = items.filter((item) => !item.hidden);
+    // Keep account destinations in the fixed footer so they remain easy to
+    // reach without interrupting the role-specific feature navigation.
+    const visibleItems = items.filter(
+      (item) => !item.hidden && item.path !== profilePath && item.path !== settingsPath,
+    );
     const blocks = visibleItems.reduce((acc, it) => {
       const last = acc[acc.length - 1];
 
@@ -484,15 +512,62 @@ export default function DashboardLayout({ roleKey }) {
         className={`${collapsed || roleKey === "admin" ? "h-8 w-8" : "h-9 w-auto"} shrink-0 object-contain`}
       />
 
-      {!collapsed && <div className={roleKey === "admin" ? "min-w-0 flex-1" : "min-w-0"}>
-        <p className="font-display text-[15px] font-bold leading-tight tracking-[0.03em] text-brand-dark dark:text-foreground">
-          KALUSAGAP
-        </p>
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            initial={{ opacity: 0, x: -5 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -5 }}
+            transition={{ duration: 0.16, ease: "easeOut" }}
+            className={roleKey === "admin" ? "min-w-0 flex-1" : "min-w-0"}
+          >
+            <p className="font-display text-[15px] font-bold leading-tight tracking-[0.03em] text-brand-dark dark:text-foreground">
+              KALUSAGAP
+            </p>
+            <p className={`mt-0.5 font-medium uppercase leading-tight text-brand-gray dark:text-slate-400 ${roleKey === "admin" ? "text-[10px] tracking-[0.03em]" : "truncate text-[9.5px] tracking-[0.12em]"}`}>
+              {isSupervisor ? "Municipal Health Office" : "Community Health System"}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 
-        <p className={`mt-0.5 font-medium uppercase leading-tight text-brand-gray dark:text-slate-400 ${roleKey === "admin" ? "text-[10px] tracking-[0.03em]" : "truncate text-[9.5px] tracking-[0.12em]"}`}>
-          {isSupervisor ? "Municipal Health Office" : "Community Health System"}
-        </p>
-      </div>}
+  const SidebarAccountLinks = ({ collapsed = false } = {}) => (
+    <div className="space-y-1">
+      {[
+        { label: "Profile", path: profilePath, IconComponent: User },
+        { label: "Settings", path: settingsPath, IconComponent: Settings },
+      ].map(({ label, path, IconComponent }) => {
+        const active = location.pathname === path || location.pathname.startsWith(`${path}/`);
+        return (
+          <Link
+            key={label}
+            to={path}
+            onClick={() => {
+              setOpen(false);
+              setMenuOpen(false);
+            }}
+            aria-label={collapsed ? label : undefined}
+            title={collapsed ? label : undefined}
+            className={`w-full min-h-10 flex items-center rounded-md py-2 text-sm transition-[color,background-color,padding,gap] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${collapsed ? "justify-center px-0" : "gap-2.5 px-3"} ${active ? "bg-brand-blue/10 font-semibold text-brand-blue dark:bg-brand-blue/15 dark:text-blue-300" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-hover dark:hover:text-foreground"}`}
+          >
+            <IconComponent className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} />
+            <AnimatePresence initial={false}>
+              {!collapsed && (
+                <motion.span
+                  initial={{ opacity: 0, x: -5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -5 }}
+                  transition={{ duration: 0.16, ease: "easeOut" }}
+                >
+                  {label}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </Link>
+        );
+      })}
     </div>
   );
 
@@ -531,6 +606,7 @@ export default function DashboardLayout({ roleKey }) {
 
          {/* Fixed account footer */}
          <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
+           <SidebarAccountLinks collapsed={sidebarCollapsed} />
            <button
             onClick={() => logout()}
             aria-label={sidebarCollapsed ? "Log out" : undefined}
@@ -565,7 +641,7 @@ export default function DashboardLayout({ roleKey }) {
               aria-label="Mobile navigation"
               className="app-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col bg-white dark:bg-sidebar lg:hidden"
             >
-              <div className={`shrink-0 flex items-center justify-between border-b border-slate-200 dark:border-border ${roleKey === "admin" ? "h-[72px] gap-2 px-4" : isSupervisor ? "h-16 gap-3 px-4" : "h-20 gap-3 px-5"}`}>
+              <div className={`shrink-0 flex h-16 items-center justify-between border-b border-slate-200 dark:border-border ${roleKey === "admin" ? "gap-2 px-4" : "gap-3 px-4"}`}>
                 <SidebarBrand />
 
                 <button
@@ -586,6 +662,7 @@ export default function DashboardLayout({ roleKey }) {
               </nav>
 
               <div className="shrink-0 p-2 border-t border-slate-200 dark:border-border bg-white dark:bg-sidebar">
+                <SidebarAccountLinks />
                 <button
                   onClick={() => logout()}
                   className="w-full min-h-9 flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-hover hover:text-slate-900 dark:hover:text-foreground transition-colors"
