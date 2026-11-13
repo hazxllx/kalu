@@ -47,7 +47,7 @@ export default function KpiHorizontal({
   loading = false,
   error = null 
 }) {
-  const gridClass = `kpi-horizontal-grid ${count === 3 ? "is-three" : ""} ${loading ? "is-loading" : ""} ${className}`;
+  const gridClass = `kpi-horizontal-grid ${count === 3 ? "is-three" : ""} ${count === 5 ? "is-five" : ""} ${loading ? "is-loading" : ""} ${className}`;
   
   if (error) {
     return (

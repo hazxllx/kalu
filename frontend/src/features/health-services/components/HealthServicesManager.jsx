@@ -16,8 +16,8 @@ import DocumentUploadField from "./DocumentUploadField";
 import { filterHealthServices } from "../lib/filterHealthServices";
 import {
   Plus, X, CheckCircle2, Search, Users, MapPin, Building2, Activity, UserPlus, UserMinus,
-  ClipboardList, UserCheck, UserX, CalendarDays, MoreVertical, Pencil, Trash2, Power, AlertTriangle,
-  ListChecks, CalendarClock, Layers, FileText, RefreshCw,
+  UserCheck, UserX, CalendarDays, MoreVertical, Pencil, Trash2, Power, AlertTriangle,
+  FileText, RefreshCw,
 } from "lucide-react";
 
 /**
@@ -855,9 +855,9 @@ export default function HealthServicesManager({ subtitle }) {
                const status = deriveStatus(s);
                const personnelList = s.assignedPersonnel || [];
                return (
-                 <div key={s.id} className="flex flex-col h-full bg-white border border-[#E4DED2] rounded" style={{ borderColor: '#E4DED2' }}>
+                 <div key={s.id} className="health-service-card flex flex-col h-full bg-white border border-[#E4DED2] rounded dark:bg-card dark:border-border">
                     {/* Header — Horizontal layout with image on left */}
-                    <div className="flex gap-5 p-6 border-b border-[#E4DED2]" style={{ minHeight: '150px' }}>
+                    <div className="health-service-card-header flex gap-5 p-6 border-b border-[#E4DED2] dark:border-border" style={{ minHeight: '150px' }}>
                       {/* Left: Service Image Thumbnail */}
                       <div className="shrink-0">
                         {s.attachments?.pubmat ? (
@@ -881,11 +881,11 @@ export default function HealthServicesManager({ subtitle }) {
                      <div className="flex-1 flex flex-col justify-between min-w-0">
                        <div>
                          {/* Category */}
-                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F]" style={{ color: '#89939F', letterSpacing: '0.8px' }}>
+                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400" style={{ letterSpacing: '0.8px' }}>
                            {CATEGORY_LABELS[s.category] || s.category}
                          </p>
                          {/* Service Title — Serif font */}
-                         <h3 className="mt-1 text-2xl font-medium text-[#243447]" style={{ fontFamily: 'Georgia, serif', color: '#243447', fontSize: '26px' }}>
+                         <h3 className="mt-1 text-2xl font-medium text-brand-ink dark:text-foreground" style={{ fontFamily: 'Georgia, serif', fontSize: '26px' }}>
                            {s.name}
                          </h3>
                        </div>
@@ -922,20 +922,20 @@ export default function HealthServicesManager({ subtitle }) {
                      <div className="space-y-5">
                        {/* Facility */}
                        <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Facility</p>
-                         <p className="text-sm font-medium text-[#243447]" style={{ color: '#243447' }}>{s.facilityMeta?.label || s.facility || "—"}</p>
+                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Facility</p>
+                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{s.facilityMeta?.label || s.facility || "—"}</p>
                        </div>
 
                        {/* Schedule */}
                        <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Schedule</p>
-                         <p className="text-sm font-medium text-[#243447]" style={{ color: '#243447' }}>{scheduleSummary(s.schedule) || "—"}</p>
+                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Schedule</p>
+                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{scheduleSummary(s.schedule) || "—"}</p>
                        </div>
 
                        {/* Register By — only when applicable */}
                        {deadlineSummary(s.schedule) && (
                          <div>
-                           <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Register By</p>
+                           <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Register By</p>
                            <p className="text-sm font-semibold text-[#C54040]" style={{ color: '#C54040' }}>{deadlineSummary(s.schedule)}</p>
                          </div>
                        )}
@@ -945,31 +945,31 @@ export default function HealthServicesManager({ subtitle }) {
                      <div className="space-y-5">
                        {/* Coverage */}
                        <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Coverage</p>
-                         <p className="text-sm font-medium text-[#243447]" style={{ color: '#243447' }}>{s.barangay === null || s.barangay === "" ? "Municipality-wide" : s.barangay || "—"}</p>
+                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Coverage</p>
+                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{s.barangay === null || s.barangay === "" ? "Municipality-wide" : s.barangay || "—"}</p>
                        </div>
 
                        {/* Personnel */}
                        <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-[#89939F] mb-1.5" style={{ color: '#89939F', letterSpacing: '0.8px' }}>Personnel</p>
-                         <p className="text-sm font-medium text-[#243447]" style={{ color: '#243447' }}>{personnelList.length ? personnelList.map((person) => person.name).filter(Boolean).join(", ") : "—"}</p>
+                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Personnel</p>
+                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{personnelList.length ? personnelList.map((person) => person.name).filter(Boolean).join(", ") : "—"}</p>
                        </div>
                      </div>
                    </div>
 
                     {/* Footer — Separate section */}
-                    <div className="border-t border-[#E4DED2] px-6 py-4 flex items-center justify-between" style={{ borderColor: '#E4DED2', minHeight: '48px' }}>
+                    <div className="border-t border-[#E4DED2] px-6 py-4 flex items-center justify-between dark:border-border" style={{ minHeight: '48px' }}>
                       <button
                         onClick={() => openRegistrations(s)}
-                        className="text-xs font-medium uppercase tracking-wide text-[#245B89] hover:text-[#173653] transition-colors"
-                        style={{ letterSpacing: '0.8px', color: '#245B89' }}
+                        className="text-xs font-medium uppercase tracking-wide text-brand-blue transition-colors hover:underline dark:text-blue-300"
+                        style={{ letterSpacing: '0.8px' }}
                       >
                         Registrations {s.registrationCount !== undefined && `(${s.registrationCount})`}
                       </button>
                       {canEdit && <button
                         onClick={() => setManageTarget(s)}
-                        className="text-xs font-medium uppercase tracking-wide text-[#6D927B] hover:text-[#4C5F5A] transition-colors"
-                        style={{ letterSpacing: '0.8px', color: '#6D927B' }}
+                        className="text-xs font-medium uppercase tracking-wide text-brand-green transition-colors hover:underline dark:text-emerald-300"
+                        style={{ letterSpacing: '0.8px' }}
                       >
                         Assign
                       </button>}

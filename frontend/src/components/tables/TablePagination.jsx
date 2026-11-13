@@ -33,7 +33,7 @@ export default function TablePagination({
   
   return (
     <div 
-      className={`flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-xl border border-brand-border dark:border-border bg-white dark:bg-card px-3 py-3 sm:py-2 text-xs text-brand-gray dark:text-muted-foreground ${className}`}
+      className={`flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-lg border border-brand-border dark:border-border bg-white dark:bg-card px-3 py-3 sm:py-2 text-xs text-brand-gray dark:text-muted-foreground ${className}`}
       aria-label="List pagination"
     >
       {/* Results summary */}

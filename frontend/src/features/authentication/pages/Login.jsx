@@ -82,7 +82,7 @@ export default function Login() {
     });
 
   return (
-    <div className="relative flex min-h-dvh w-full flex-col items-center justify-center gov-navy-panel px-4 py-5 sm:py-7">
+    <div className="login-page relative flex min-h-dvh w-full flex-col items-center justify-center gov-navy-panel px-4 py-5 sm:py-7">
       <div className="pointer-events-none absolute inset-0 gov-guilloche opacity-50" aria-hidden="true" />
       <div
         className="pointer-events-none absolute inset-0"
@@ -106,15 +106,15 @@ export default function Login() {
         </div>
 
         {/* Split card */}
-        <div className="overflow-hidden rounded-2xl bg-white shadow-[0_24px_70px_-30px_rgba(3,20,45,0.65)] ring-1 ring-white/10">
+        <div className="login-card overflow-hidden rounded-2xl bg-white shadow-[0_24px_70px_-30px_rgba(3,20,45,0.65)] ring-1 ring-white/10 dark:bg-[#121b29] dark:ring-white/15">
           <div className="grid lg:grid-cols-[1.08fr_0.92fr]">
             {/* LEFT — login form */}
-            <div className="px-6 py-6 sm:px-8 sm:py-7">
-              <p className="gov-kicker text-brand-blue">Secure Health Portal</p>
-              <h1 className="mt-2 font-display text-[23px] font-bold text-brand-dark sm:text-[25px]">
+            <div className="login-form-panel px-6 py-6 sm:px-8 sm:py-7">
+              <p className="gov-kicker text-brand-blue dark:text-[#4da3ff]">Secure Health Portal</p>
+              <h1 className="mt-2 font-display text-[23px] font-bold text-brand-dark sm:text-[25px] dark:text-white">
                 Sign in to the portal
               </h1>
-              <p className="mt-1.5 text-[13px] text-brand-gray">
+              <p className="mt-1.5 text-[13px] text-brand-gray dark:text-slate-300">
                 Access your KALUSAGAP account to continue.
               </p>
 
@@ -149,15 +149,15 @@ export default function Login() {
                 )}
 
                 <div>
-                  <label htmlFor="login-email" className="text-[12.5px] font-bold text-brand-ink">
+                  <label htmlFor="login-email" className="text-[12.5px] font-bold text-brand-ink dark:text-slate-100">
                     Email address <span className="font-normal text-brand-danger">*</span>
                   </label>
                   <div
-                    className={`mt-1.5 flex items-center gap-3 rounded-lg border bg-white px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-brand-blue/20 ${
+                    className={`login-input mt-1.5 flex items-center gap-3 rounded-lg border bg-white px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-brand-blue/20 dark:bg-[#151f2e] dark:focus-within:ring-[#1682ed]/30 ${
                       fieldErrors.email ? "border-brand-danger" : "border-brand-border focus-within:border-brand-blue"
                     }`}
                   >
-                    <Mail className="h-4 w-4 shrink-0 text-brand-gray" strokeWidth={2} />
+                    <Mail className="h-4 w-4 shrink-0 text-brand-gray dark:text-slate-400" strokeWidth={2} />
                     <input
                       id="login-email"
                       ref={emailRef}
@@ -172,22 +172,22 @@ export default function Login() {
                       aria-invalid={Boolean(fieldErrors.email)}
                       aria-describedby={fieldErrors.email ? "login-email-error" : undefined}
                       placeholder="your@email.gov.ph"
-                      className="w-full bg-transparent text-[14px] text-brand-ink outline-none placeholder:text-brand-gray/50"
+                      className="w-full bg-transparent text-[14px] text-brand-ink outline-none placeholder:text-brand-gray/50 dark:text-slate-100 dark:placeholder:text-slate-500"
                     />
                   </div>
                   <FieldError id="login-email-error" error={fieldErrors.email} />
                 </div>
 
                 <div>
-                  <label htmlFor="login-password" className="text-[12.5px] font-bold text-brand-ink">
+                  <label htmlFor="login-password" className="text-[12.5px] font-bold text-brand-ink dark:text-slate-100">
                     Password <span className="font-normal text-brand-danger">*</span>
                   </label>
                   <div
-                    className={`mt-1.5 flex items-center gap-3 rounded-lg border bg-white px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-brand-blue/20 ${
+                    className={`login-input mt-1.5 flex items-center gap-3 rounded-lg border bg-white px-3.5 py-2.5 transition-all focus-within:ring-2 focus-within:ring-brand-blue/20 dark:bg-[#151f2e] dark:focus-within:ring-[#1682ed]/30 ${
                       fieldErrors.password ? "border-brand-danger" : "border-brand-border focus-within:border-brand-blue"
                     }`}
                   >
-                    <Lock className="h-4 w-4 shrink-0 text-brand-gray" strokeWidth={2} />
+                    <Lock className="h-4 w-4 shrink-0 text-brand-gray dark:text-slate-400" strokeWidth={2} />
                     <input
                       id="login-password"
                       ref={passwordRef}
@@ -202,13 +202,13 @@ export default function Login() {
                       aria-invalid={Boolean(fieldErrors.password)}
                       aria-describedby={fieldErrors.password ? "login-password-error" : undefined}
                       placeholder="••••••••"
-                      className="w-full bg-transparent text-[14px] text-brand-ink outline-none placeholder:text-brand-gray/50"
+                      className="w-full bg-transparent text-[14px] text-brand-ink outline-none placeholder:text-brand-gray/50 dark:text-slate-100 dark:placeholder:text-slate-500"
                     />
                     <button
                       type="button"
                       onClick={() => setShow(!show)}
                       aria-label={show ? "Hide password" : "Show password"}
-                      className="text-brand-gray transition-colors hover:text-brand-blue"
+                      className="text-brand-gray transition-colors hover:text-brand-blue dark:text-slate-400 dark:hover:text-[#4da3ff]"
                     >
                       {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -219,7 +219,7 @@ export default function Login() {
                 <div className="flex items-center justify-end">
                   <Link
                     to="/forgot-password"
-                    className="text-[12px] font-medium text-brand-blue underline decoration-brand-rule underline-offset-4 hover:decoration-brand-blue"
+                    className="text-[12px] font-medium text-brand-blue underline decoration-brand-rule underline-offset-4 hover:decoration-brand-blue dark:text-[#4da3ff] dark:decoration-slate-500 dark:hover:decoration-[#4da3ff]"
                   >
                     Forgot password?
                   </Link>
@@ -243,11 +243,11 @@ export default function Login() {
                   )}
                 </button>
 
-                <p className="text-center text-[13px] text-brand-gray">
+                <p className="text-center text-[13px] text-brand-gray dark:text-slate-300">
                   Don&apos;t have an account?{" "}
                   <Link
                     to="/register"
-                    className="font-semibold text-brand-blue underline decoration-brand-rule underline-offset-4 hover:decoration-brand-blue"
+                    className="font-semibold text-brand-blue underline decoration-brand-rule underline-offset-4 hover:decoration-brand-blue dark:text-[#4da3ff] dark:decoration-slate-500 dark:hover:decoration-[#4da3ff]"
                   >
                     Register here
                   </Link>
@@ -272,7 +272,7 @@ export default function Login() {
             </div>
 
             {/* RIGHT — KALUSAGAP visual panel (desktop) */}
-            <div className="relative hidden flex-col overflow-hidden gov-navy-panel gov-guilloche text-white lg:flex">
+            <div className="login-brand-panel relative hidden flex-col overflow-hidden gov-navy-panel gov-guilloche text-white lg:flex">
               <div className="flex min-h-0 flex-1 flex-col justify-center px-9 py-8">
                 <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[9.5px] font-bold uppercase tracking-gov text-brand-goldlight">
                   <ShieldCheck className="h-3 w-3" strokeWidth={2.2} />

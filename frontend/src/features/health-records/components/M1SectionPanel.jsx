@@ -297,24 +297,24 @@ export default function M1SectionPanel({ sectionKey, sectionTitle, descriptor, p
 function GroupPanel({ g, byCode, edits, setEdit, isMonthly, periodLabel, sectionKey, onEditManual, navigate, collapsedGroups, toggleGroup }) {
   const groupCollapsed = collapsedGroups.has(g.key);
   return (
-    <section className="overflow-hidden rounded-btn border border-brand-border bg-white">
+    <section className="overflow-hidden rounded-btn border border-brand-border bg-white dark:border-border dark:bg-card">
       {/* Colored group header */}
       <button
         type="button"
         onClick={() => toggleGroup(g.key)}
         aria-expanded={!groupCollapsed}
-        className="flex w-full items-center gap-2 border-b border-brand-border bg-brand-light px-3 py-2 text-left transition-colors hover:bg-brand-light/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30"
+        className="flex w-full items-center gap-2 border-b border-brand-border bg-brand-light px-3 py-2 text-left transition-colors hover:bg-brand-light/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 dark:border-border dark:bg-card-nested dark:hover:bg-hover"
       >
         {groupCollapsed
           ? <ChevronRight className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />
           : <ChevronDown className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />}
-        <span className="truncate text-[13px] font-semibold text-brand-dark">{g.label}</span>
-        <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-brand-blue">
+        <span className="truncate text-[13px] font-semibold text-brand-dark dark:text-foreground">{g.label}</span>
+        <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-brand-blue dark:bg-card dark:text-blue-300">
           {g.indicators.length}
         </span>
-        <span className="ml-auto flex shrink-0 items-baseline gap-1.5 pr-0.5 text-[11px] font-medium uppercase tracking-wide text-brand-blue/80">
+          <span className="ml-auto flex shrink-0 items-baseline gap-1.5 pr-0.5 text-[11px] font-medium uppercase tracking-wide text-brand-blue/80 dark:text-blue-300">
           Subtotal
-          <span className="font-stat text-sm font-bold tabular-nums text-brand-dark">{g.subtotal}</span>
+          <span className="font-stat text-sm font-bold tabular-nums text-brand-dark dark:text-foreground">{g.subtotal}</span>
         </span>
       </button>
 
@@ -322,7 +322,7 @@ function GroupPanel({ g, byCode, edits, setEdit, isMonthly, periodLabel, section
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-[13px]">
             <thead>
-              <tr className="border-b border-brand-border bg-brand-bg/60 text-left text-[10px] uppercase tracking-wide text-brand-gray">
+              <tr className="border-b border-brand-border bg-brand-bg/60 text-left text-[10px] uppercase tracking-wide text-brand-gray dark:border-border dark:bg-card dark:text-muted-foreground">
                 <th className="w-9 px-2 py-1.5 text-center font-semibold">No.</th>
                 <th className="w-20 px-2 py-1.5 font-semibold">Code</th>
                 <th className="px-2 py-1.5 font-semibold">Indicator</th>
@@ -340,11 +340,11 @@ function GroupPanel({ g, byCode, edits, setEdit, isMonthly, periodLabel, section
                 return (
                   <tr
                     key={ind.code}
-                    className="border-b border-brand-border/50 last:border-0 odd:bg-white even:bg-brand-bg/20 hover:bg-brand-bg/40"
+                    className="border-b border-brand-border/50 last:border-0 odd:bg-white even:bg-brand-bg/20 hover:bg-brand-bg/40 dark:border-border/60 dark:odd:bg-card dark:even:bg-card-nested dark:hover:bg-hover"
                   >
-                    <td className="px-2 py-1 text-center tabular-nums text-brand-gray">{i + 1}</td>
-                    <td className="px-2 py-1 font-mono text-[11px] text-brand-gray">{ind.code}</td>
-                    <td className="px-2 py-1 leading-snug text-brand-ink">{ind.name}</td>
+                    <td className="px-2 py-1 text-center tabular-nums text-brand-gray dark:text-muted-foreground">{i + 1}</td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-brand-gray dark:text-muted-foreground">{ind.code}</td>
+                    <td className="px-2 py-1 leading-snug text-brand-ink dark:text-foreground">{ind.name}</td>
                     <td className="px-2 py-1 text-right align-middle">
                       {editableInline ? (
                         <input
@@ -354,10 +354,10 @@ function GroupPanel({ g, byCode, edits, setEdit, isMonthly, periodLabel, section
                           value={inputVal}
                           onChange={(e) => setEdit(ind.code, e.target.value)}
                           aria-label={`${ind.name} value for ${periodLabel}`}
-                          className="w-16 rounded border border-brand-border bg-white px-1.5 py-0.5 text-right font-stat text-[13px] font-bold tabular-nums text-brand-ink outline-none focus:border-brand-blue"
+                          className="w-16 rounded border border-brand-border bg-white px-1.5 py-0.5 text-right font-stat text-[13px] font-bold tabular-nums text-brand-ink outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
                         />
                       ) : (
-                        <span className="font-stat text-sm font-bold tabular-nums text-brand-ink">{value}</span>
+                        <span className="font-stat text-sm font-bold tabular-nums text-brand-ink dark:text-foreground">{value}</span>
                       )}
                     </td>
                     <td className="px-2 py-1 text-right align-middle">

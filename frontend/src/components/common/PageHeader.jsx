@@ -64,7 +64,7 @@ export default function PageHeader({
   return (
     <section
       aria-label={typeof title === "string" ? `${title} header` : "Page header"}
-      className={`ui-page-header ${dense ? "mb-4" : "mb-6"} overflow-hidden rounded-card border border-brand-deep bg-brand-dark text-white shadow-card`}
+      className={`ui-page-header ${dense ? "mb-4" : "mb-6"} overflow-hidden rounded-lg border border-brand-deep bg-brand-dark text-white shadow-card`}
     >
       {/* Hairline gold rule — the official accent token, no gradient. */}
       <div aria-hidden="true" className="ui-page-header-rule h-0.5 w-full bg-brand-gold/70" />
@@ -73,18 +73,18 @@ export default function PageHeader({
           <div className="ui-page-header-eyebrow flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
               {isReport && (
-                <span className="inline-flex items-center rounded-[2px] border border-white/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-gov text-white/85">
+                <span className="inline-flex items-center rounded-sm border border-white/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white/85">
                   Official Record
                 </span>
               )}
               {eyebrow ? (
-                <span className="text-[10px] font-semibold uppercase tracking-gov text-brand-goldlight">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-goldlight">
                   {eyebrow}
                 </span>
               ) : hasCrumbs ? (
                 <nav
                   aria-label="Breadcrumb"
-                  className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] font-semibold uppercase tracking-gov"
+                  className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] font-semibold uppercase tracking-[0.08em]"
                 >
                   {crumbs.map((crumb, i) => {
                     const isCurrent = i === crumbs.length - 1;

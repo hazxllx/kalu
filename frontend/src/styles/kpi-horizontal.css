@@ -19,7 +19,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid #E2E8F0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #FFFFFF;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
   transition: border-color 200ms, box-shadow 200ms;
@@ -36,13 +36,34 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+/* Five MHO dashboard metrics stay on one row on wide screens and use a more
+   compact type/padding scale so labels remain easy to scan. */
+.kpi-horizontal-grid.is-five .kpi-metric {
+  padding: 0.875rem 1rem;
+}
+
+.kpi-horizontal-grid.is-five .kpi-metric-label {
+  font-size: 0.6875rem;
+  line-height: 1.1rem;
+  letter-spacing: 0.04em;
+}
+
+.kpi-horizontal-grid.is-five .kpi-metric-value[data-numeric="true"] {
+  font-size: 1.75rem;
+  line-height: 2.125rem;
+}
+
+.kpi-horizontal-grid.is-five > *:last-child .kpi-metric {
+  border-right: none;
+}
+
 /* Individual KPI Metric Item */
 .kpi-metric {
   display: block;
   min-width: 0;
   padding: 1rem 1.25rem;
   border-right: 1px solid #E2E8F0;
-  border-top: 3px solid #2563EB;
+  border-top: 3px solid #124B86;
   background: #FFFFFF;
   color: #12263F;
   text-align: left;
@@ -79,7 +100,7 @@
 }
 
 .kpi-metric-interactive:focus {
-  outline: 2px solid #2563EB;
+  outline: 2px solid #124B86;
   outline-offset: -2px;
 }
 
@@ -137,11 +158,11 @@
 
 /* Tone-specific value colors */
 .kpi-metric[data-tone="blue"] .kpi-metric-value {
-  color: #2563EB;
+  color: #124B86;
 }
 
 .kpi-metric[data-tone="green"] .kpi-metric-value {
-  color: #15945A;
+  color: #15805D;
 }
 
 .kpi-metric[data-tone="yellow"] .kpi-metric-value {
@@ -219,6 +240,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .kpi-horizontal-grid.is-five {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .kpi-metric {
     border-right: 1px solid #E2E8F0;
   }
@@ -236,6 +261,22 @@
     border-right: none;
     border-bottom: none;
   }
+
+  .kpi-horizontal-grid.is-five > *:nth-child(3n) .kpi-metric {
+    border-right: none;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .kpi-horizontal-grid.is-five {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .kpi-horizontal-grid.is-five {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 /* Mobile: 2-column or stacked layout */
@@ -245,6 +286,10 @@
   }
 
   .kpi-horizontal-grid.is-three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .kpi-horizontal-grid.is-five {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -273,6 +318,15 @@
     border-bottom: none;
   }
 
+  .kpi-horizontal-grid.is-five > *:nth-child(odd) .kpi-metric {
+    border-right: 1px solid #E2E8F0;
+  }
+
+  .kpi-horizontal-grid.is-five > *:nth-child(even) .kpi-metric,
+  .kpi-horizontal-grid.is-five > *:last-child .kpi-metric {
+    border-right: none;
+  }
+
   .kpi-metric-label {
     font-size: 0.7rem;
   }
@@ -297,7 +351,8 @@
 /* Small mobile: Single column or compact 2-column */
 @media (max-width: 479px) {
   .kpi-horizontal-grid,
-  .kpi-horizontal-grid.is-three {
+  .kpi-horizontal-grid.is-three,
+  .kpi-horizontal-grid.is-five {
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 
@@ -308,6 +363,10 @@
 
   .kpi-metric:last-child {
     border-bottom: none;
+  }
+
+  .kpi-horizontal-grid.is-five > * .kpi-metric {
+    border-right: none !important;
   }
 
   .kpi-metric-value[data-numeric="true"] {

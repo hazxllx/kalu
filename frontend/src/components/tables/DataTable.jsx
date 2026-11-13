@@ -32,13 +32,13 @@ export default function DataTable({
   mobileCards = true 
 }) {
   return (
-    <div className={`ui-data-table table-scroll min-w-0 overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:bg-card dark:border-border shadow-card ${className}`}>
+    <div className={`ui-data-table table-scroll min-w-0 overflow-x-auto rounded-lg border border-slate-200 bg-white dark:bg-card dark:border-border shadow-card ${className}`}>
       {/* Desktop Table View */}
       <table className={`${mobileCards ? "hidden md:table" : ""} ${fitContainer ? "min-w-0 w-full" : "min-w-[640px]"} text-sm ${tableClassName}`}>
         <thead>
-          <tr className="bg-slate-50 dark:bg-card-nested text-left">
+          <tr className="bg-slate-50/80 dark:bg-card-nested text-left">
             {columns.map((c) => (
-              <th key={c.key} className="px-5 py-3.5 font-semibold text-slate-600 dark:text-slate-400 text-xs uppercase tracking-[0.2em] whitespace-nowrap">
+              <th key={c.key} className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400 text-[11px] uppercase tracking-[0.08em] whitespace-nowrap">
                 {c.label}
               </th>
             ))}
@@ -54,7 +54,7 @@ export default function DataTable({
               className="border-t border-slate-200 dark:border-border hover:bg-slate-50/70 dark:hover:bg-hover transition-colors"
             >
               {columns.map((c) => (
-                <td key={c.key} className="px-5 py-4 text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                <td key={c.key} className="px-4 py-3.5 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                   {renderCell ? renderCell(c.key, row) : row[c.key]}
                 </td>
               ))}

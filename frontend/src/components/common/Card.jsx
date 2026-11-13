@@ -25,7 +25,7 @@ export function Card({ className = "", padding = "none", children, ...props }) {
 
   return (
     <div 
-      className={`ui-card rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card shadow-card ${paddingClasses[padding]} ${className}`} 
+      className={`ui-card rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-card shadow-card ${paddingClasses[padding]} ${className}`}
       {...props}
     >
       {children}

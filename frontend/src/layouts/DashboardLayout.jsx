@@ -398,7 +398,7 @@ export default function DashboardLayout({ roleKey }) {
           aria-label={collapsed ? it.label : undefined}
           aria-current={active ? "page" : undefined}
           title={collapsed || !adminNav ? it.label : undefined}
-          className={`supervisor-nav-item group flex w-full min-w-0 ${rowSize} ${itemPadding} items-center rounded-md text-sm leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
+          className={`app-nav-item supervisor-nav-item group flex w-full min-w-0 ${rowSize} ${itemPadding} items-center rounded-md text-sm leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
             active
               ? adminNav
                 ? "bg-brand-light text-brand-blue font-medium dark:bg-brand-blue/20"
@@ -497,9 +497,9 @@ export default function DashboardLayout({ roleKey }) {
   );
 
   return (
-    <div className={`min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""}`}>
+    <div className={`kalusagap-shell min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""}`}>
       <aside
-        className={`hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : isSupervisor ? "w-64" : "w-72"}`}
+        className={`app-sidebar hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : isSupervisor ? "w-64" : "w-72"}`}
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
       >
         {/* Brand header — fixed */}
@@ -563,7 +563,7 @@ export default function DashboardLayout({ roleKey }) {
               exit={{ x: -280 }}
               transition={{ type: "spring", damping: 26, stiffness: 240 }}
               aria-label="Mobile navigation"
-              className="fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col bg-white dark:bg-sidebar lg:hidden"
+              className="app-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col bg-white dark:bg-sidebar lg:hidden"
             >
               <div className={`shrink-0 flex items-center justify-between border-b border-slate-200 dark:border-border ${roleKey === "admin" ? "h-[72px] gap-2 px-4" : isSupervisor ? "h-16 gap-3 px-4" : "h-20 gap-3 px-5"}`}>
                 <SidebarBrand />
@@ -603,7 +603,7 @@ export default function DashboardLayout({ roleKey }) {
       </AnimatePresence>
 
       <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : isSupervisor ? "lg:pl-64" : "lg:pl-72"}`}>
-        <header className="sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 md:px-6">
+        <header className="app-header sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 md:px-6">
           <button
             onClick={() => setOpen(true)}
             type="button"
@@ -744,7 +744,7 @@ export default function DashboardLayout({ roleKey }) {
           </div>
         </header>
 
-        <main className={`mx-auto min-w-0 ${isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
+        <main className={`app-main mx-auto min-w-0 ${isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
           {notice && (!routePermissions || permissionsReady) && (
             <div
               className={`mb-4 flex flex-wrap items-center justify-between gap-3 border px-4 py-2 text-xs ${permissionsReady ? "border-amber-300 bg-amber-50 text-amber-950" : "border-brand-danger/30 bg-white text-brand-ink"}`}

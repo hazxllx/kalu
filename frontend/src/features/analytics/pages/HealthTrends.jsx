@@ -4,7 +4,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
-import { TrendingUp, TrendingDown, Activity, Send, MapPin, CalendarDays, ChevronDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, Send, MapPin, CalendarDays } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
@@ -12,6 +12,7 @@ import EmptyState from "@/components/common/EmptyState";
 import { PageSkeleton } from "@/components/common/Skeleton";
 import ErrorState from "@/components/common/ErrorState";
 import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/context/ThemeContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import { getAssignedBarangay } from "@/lib/barangayScope";
@@ -20,7 +21,13 @@ import { authorizedViewsApi } from "@/services/api/authorizedViewsApi";
 import useAuthorizedData from "@/hooks/useAuthorizedData";
 import { healthTrendScope, metricValue, lastActivityPeriod, optionalSeries } from "@/lib/legacyAnalytics";
 
-const tooltipStyle = { fontSize: "12px", borderRadius: "8px", border: "1px solid #E5EAF1" };
+const tooltipStyle = (darkMode) => ({
+  fontSize: "12px",
+  borderRadius: "8px",
+  border: `1px solid ${darkMode ? "#334155" : "#E5EAF1"}`,
+  backgroundColor: darkMode ? "#172334" : "#FFFFFF",
+  color: darkMode ? "#E2E8F0" : "#12263F",
+});
 
 const SUMMARY_ICONS = [
   { icon: Activity, tone: "bg-brand-blue/10 text-brand-blue" },
@@ -36,7 +43,12 @@ const SUPERVISOR_CONDITION_PALETTE = ["#0B4A8F", "#457BA3", "#83A8BC", "#A78234"
 
 export default function HealthTrends() {
   const { user } = useAuth();
+  const { resolved } = useTheme();
   const { can } = usePermissions();
+  const darkMode = resolved === "dark";
+  const chartTooltipStyle = tooltipStyle(darkMode);
+  const chartInk = darkMode ? "#CBD5E1" : "#5B6472";
+  const chartGrid = darkMode ? "#334155" : "#E5EAF1";
   const supervisor = user?.role === "health_supervisor";
   const supervisorScope = getSupervisorScope(user);
   const canViewAnalytics = can("reports.analytics.view");
@@ -145,6 +157,10 @@ export default function HealthTrends() {
   const periodMonths = useMemo(() => {
     return period === "3m" ? 3 : period === "6m" ? 6 : period === "quarterly" ? 3 : period === "yearly" ? 12 : period === "monthly" ? 1 : 12;
   }, [period]);
+
+  const serviceEntry = useCallback((name) => {
+    return optionalSeries(muniEW, name, periodMonths, [assignedBarangay])?.find((row) => row.name === assignedBarangay);
+  }, [muniEW, periodMonths, assignedBarangay]);
   
   const base = useMemo(() => {
     return healthTrendScope(muniEW, periodMonths);
@@ -154,7 +170,7 @@ export default function HealthTrends() {
   const riskPalette = supervisor ? SUPERVISOR_RISK_COLORS : RISK_COLORS;
   
   const scopedData = useMemo(() => {
-    if (!base) return null;
+    if (!base || !muniEW) return null;
     return {
       ...base,
       diseaseDistribution: base.diseaseDistribution.map((row, index) => ({
@@ -166,7 +182,7 @@ export default function HealthTrends() {
         color: riskPalette[row.name] || "#94A3B8"
       }))
     };
-  }, [base, muniEW.riskDistribution, conditionPalette, riskPalette]);
+  }, [base, muniEW?.riskDistribution, conditionPalette, riskPalette]);
 
   if (resource.error) return <><PageHeader crumbs={supervisor ? ["Monitoring", "Health Trends"] : ["Analytics", "Health Trends"]} title="Health Trends" subtitle="Authorized recorded health activity." /><Card className="p-5"><ErrorState compact={supervisor} title="Health trends unavailable" message={resource.error} onRetry={resource.refresh} /></Card></>;
   if (supervisor && !assignedBarangay) return <><PageHeader crumbs={["Monitoring", "Health Trends"]} title="Health Trends" subtitle="Barangay assignment required" /><Card><ErrorState compact title="Health trends unavailable" message="No valid barangay assignment is available for this account. Municipal coverage is not available to an unassigned Health Supervisor." /></Card></>;
@@ -179,10 +195,6 @@ export default function HealthTrends() {
     const s = scopedData;
     const completionRows = s.followUpCompletion;
     const completionAvailable = Array.isArray(completionRows) && completionRows.length > 0 && completionRows.every((row) => Number.isSafeInteger(row.numerator) && Number.isSafeInteger(row.denominator) && row.numerator >= 0 && row.numerator <= row.denominator);
-    
-    const serviceEntry = useCallback((name) => {
-      return optionalSeries(muniEW, name, periodMonths, [assignedBarangay])?.find((row) => row.name === assignedBarangay);
-    }, [muniEW, periodMonths, assignedBarangay]);
     
     const enrollment = s.programCompliance?.find((row) => row.name === assignedBarangay);
     const participation = serviceEntry("programParticipation");
@@ -317,14 +329,14 @@ export default function HealthTrends() {
 {/* Trends + Disease Distribution */}
         <div className={`grid lg:grid-cols-3 ${supervisor ? "gap-4 mb-6" : "gap-4 mb-6"}`}>
           <Card className={supervisor ? "lg:col-span-2 p-4" : "lg:col-span-2 p-5"}>
-            <h3 className="text-sm font-semibold text-brand-ink mb-1">Consultation & Referral Trends</h3>
-            <p className="text-xs text-brand-gray mb-3">{activityCaption} — monthly recorded counts</p>
+            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground mb-1">Consultation & Referral Trends</h3>
+            <p className="text-xs text-brand-gray dark:text-muted-foreground mb-3">{activityCaption} — monthly recorded counts</p>
             {s.consultationTrends.some((row) => row.consultations > 0 || row.referrals > 0) ? <ResponsiveContainer width="100%" height={260}>
               <LineChart data={s.consultationTrends} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={tooltipStyle} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={chartTooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="consultations" name="Consultations" stroke={supervisor ? "#0B4A8F" : "#0B5CAD"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="referrals" name="Referrals" stroke="#F5B400" strokeWidth={2} dot={{ r: 3 }} />
@@ -333,22 +345,22 @@ export default function HealthTrends() {
           </Card>
 
           <Card className={supervisor ? "p-4" : "p-5"}>
-            <h3 className="text-sm font-semibold text-brand-ink mb-1">{supervisor ? "Recorded Conditions" : "Disease Distribution"}</h3>
-            <p className="text-xs text-brand-gray mb-3">{supervisor ? "Classified recorded complaints" : "Condition counts"}</p>
+            <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground mb-1">{supervisor ? "Recorded Conditions" : "Disease Distribution"}</h3>
+            <p className="text-xs text-brand-gray dark:text-muted-foreground mb-3">{supervisor ? "Classified recorded complaints" : "Condition counts"}</p>
             {s.diseaseDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie isAnimationActive={!supervisor} data={s.diseaseDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={2}>
                   {s.diseaseDistribution.map((d) => <Cell key={d.name} fill={d.color} />)}
                 </Pie>
-                <Tooltip contentStyle={tooltipStyle} />
+                <Tooltip contentStyle={chartTooltipStyle} />
               </PieChart>
             </ResponsiveContainer> : <EmptyState compact title="No recorded conditions" description="No condition counts available." />}
             <div className="space-y-1 mt-3 max-h-24 overflow-y-auto">
               {s.diseaseDistribution.map((d) => (
                 <div key={d.name} className="flex items-center gap-2 text-xs">
                   <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: d.color }} />
-                  <span className="flex-1 text-brand-ink">{d.name}</span>
-                  <span className="text-brand-gray font-semibold">{d.value}</span>
+                  <span className="flex-1 text-brand-ink dark:text-foreground">{d.name}</span>
+                  <span className="text-brand-gray dark:text-muted-foreground font-semibold">{d.value}</span>
                 </div>
               ))}
             </div>
@@ -362,10 +374,10 @@ export default function HealthTrends() {
             <p className="text-xs text-brand-gray mb-3">Unique residents with maternal records, {activityCaption}</p>
             {Array.isArray(s.maternalTrend) && s.maternalTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={220}>
               <LineChart data={s.maternalTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={tooltipStyle} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={chartTooltipStyle} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="count" name="Residents" stroke="#0B4A8F" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer> : <EmptyState compact title="No recorded maternal activity" description="No maternal records for the selected period." />}
@@ -376,10 +388,10 @@ export default function HealthTrends() {
             <p className="text-xs text-brand-gray mb-3">Unique residents aged 60+, {activityCaption}</p>
             {Array.isArray(s.seniorTrend) && s.seniorTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={220}>
               <LineChart data={s.seniorTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={tooltipStyle} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={chartTooltipStyle} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="count" name="Residents" stroke="#28B463" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer> : <EmptyState compact title="No recorded senior activity" description="No senior consultations for the selected period." />}
@@ -406,7 +418,7 @@ export default function HealthTrends() {
                 <Pie isAnimationActive={!supervisor} data={s.riskDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
                   {s.riskDistribution.map((d) => <Cell key={d.name} fill={d.color} />)}
                 </Pie>
-                <Tooltip contentStyle={tooltipStyle} />
+                <Tooltip contentStyle={chartTooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
               </PieChart>
             </ResponsiveContainer> : <EmptyState compact title="No resident risk distribution" description="No consultation-based resident assessment counts available." />}
@@ -427,10 +439,10 @@ export default function HealthTrends() {
             <p className="text-xs text-brand-gray mb-3">Enrolled residents in {s.programCompliance?.[0]?.month || "the latest month"}</p>
             {Array.isArray(s.programCompliance) && s.programCompliance.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={220}>
               <BarChart data={s.programCompliance} layout="vertical" margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: "#5B6472" }} axisLine={false} tickLine={false} width={75} />
-                <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#F8FBFF" }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: chartInk }} axisLine={false} tickLine={false} width={75} />
+                <Tooltip contentStyle={chartTooltipStyle} cursor={{ fill: darkMode ? "#263548" : "#F8FBFF" }} />
                 <Bar isAnimationActive={!supervisor} dataKey="value" name="Residents" fill="#0B5CAD" radius={[0, 4, 4, 0]} barSize={20} />
               </BarChart>
             </ResponsiveContainer> : <EmptyState compact title="No recorded TCL enrollments" description="No enrolled residents available." />}
@@ -477,6 +489,71 @@ export default function HealthTrends() {
   };
 
   const consultationsByBarangay = mapBarangays.map((b) => ({ barangay: b.name, consultations: b.caseCount || 0 }));
+
+  const periodSelect = (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="sr-only" htmlFor="municipal-health-trends-period">Reporting period</label>
+      <select
+        id="municipal-health-trends-period"
+        value={period}
+        onChange={(event) => setPeriod(event.target.value)}
+        className="min-h-9 rounded-md border border-brand-border bg-white px-3 py-1.5 text-sm font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30"
+      >
+        <option value="monthly">Monthly</option>
+        <option value="quarterly">Quarterly</option>
+        <option value="yearly">Yearly</option>
+        <option value="3m">Last 3 Months</option>
+        <option value="6m">Last 6 Months</option>
+        <option value="12m">Last 12 Months</option>
+      </select>
+      {period === "monthly" && (
+        <input
+          type="month"
+          value={selectedMonth}
+          onChange={(event) => setSelectedMonth(event.target.value)}
+          aria-label="Select reporting month"
+          className="min-h-9 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-sm text-brand-ink"
+        />
+      )}
+      {period === "quarterly" && (
+        <>
+          <label className="sr-only" htmlFor="municipal-health-trends-quarter">Quarter</label>
+          <select
+            id="municipal-health-trends-quarter"
+            value={selectedQuarter.quarter}
+            onChange={(event) => setSelectedQuarter((current) => ({ ...current, quarter: Number(event.target.value) }))}
+            className="min-h-9 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-sm text-brand-ink"
+          >
+            {[1, 2, 3, 4].map((quarter) => <option key={quarter} value={quarter}>Q{quarter}</option>)}
+          </select>
+          <label className="sr-only" htmlFor="municipal-health-trends-year">Reporting year</label>
+          <input
+            id="municipal-health-trends-year"
+            type="number"
+            min="2020"
+            max="2099"
+            value={selectedQuarter.year}
+            onChange={(event) => setSelectedQuarter((current) => ({ ...current, year: Number(event.target.value) }))}
+            className="min-h-9 w-24 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-sm text-brand-ink"
+          />
+        </>
+      )}
+      {period === "yearly" && (
+        <>
+          <label className="sr-only" htmlFor="municipal-health-trends-year-only">Reporting year</label>
+          <input
+            id="municipal-health-trends-year-only"
+            type="number"
+            min="2020"
+            max="2099"
+            value={selectedYear}
+            onChange={(event) => setSelectedYear(Number(event.target.value))}
+            className="min-h-9 w-24 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-sm text-brand-ink"
+          />
+        </>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -545,10 +622,10 @@ export default function HealthTrends() {
               {trendsHaveData ? (
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={trends} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={tooltipStyle} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={chartTooltipStyle} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
                     <Line type="monotone" dataKey="consultations" name="Consultations" stroke="#0B5CAD" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                     <Line type="monotone" dataKey="referrals" name="Referrals" stroke="#F5B400" strokeWidth={2} dot={{ r: 3 }} />
@@ -571,7 +648,7 @@ export default function HealthTrends() {
                       <Pie data={disease} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2}>
                         {disease.map((dist) => <Cell key={dist.name} fill={dist.color} />)}
                       </Pie>
-                      <Tooltip contentStyle={tooltipStyle} />
+                      <Tooltip contentStyle={chartTooltipStyle} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="space-y-1.5 mt-2">
@@ -599,10 +676,10 @@ export default function HealthTrends() {
               {consultationsByBarangay.length > 0 ? (
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={consultationsByBarangay} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF1" />
-                    <XAxis dataKey="barangay" tick={{ fontSize: 10, fill: "#5B6472" }} axisLine={{ stroke: "#E5EAF1" }} tickLine={false} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5B6472" }} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#F8FBFF" }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                    <XAxis dataKey="barangay" tick={{ fontSize: 10, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={chartTooltipStyle} cursor={{ fill: darkMode ? "#263548" : "#F8FBFF" }} />
                     <Bar dataKey="consultations" name="Consultations" fill="#0B5CAD" radius={[4, 4, 0, 0]} barSize={40} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -622,7 +699,7 @@ export default function HealthTrends() {
                     <Pie data={risk} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
                       {risk.map((dist) => <Cell key={dist.name} fill={dist.color} />)}
                     </Pie>
-                    <Tooltip contentStyle={tooltipStyle} />
+                    <Tooltip contentStyle={chartTooltipStyle} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                   </PieChart>
                 </ResponsiveContainer>

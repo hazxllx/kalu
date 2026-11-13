@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Card } from "@/components/common/Card";
 import PageHeader from "@/components/common/PageHeader";
 import {
   ArrowRight,
@@ -133,7 +132,7 @@ export default function TclWorkspace() {
 
       {/* Search and Program Summary Toolbar */}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 items-center gap-2 rounded-btn border border-brand-border bg-brand-paper px-3 py-2">
+        <div className="flex flex-1 items-center gap-2 rounded-btn border border-brand-border bg-brand-paper px-3 py-2 dark:border-border dark:bg-card">
           <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
           <input
             type="search"
@@ -141,11 +140,11 @@ export default function TclWorkspace() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search health programs or target client lists…"
             aria-label="Search Target Client Lists"
-            className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray"
+            className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray dark:text-foreground dark:placeholder:text-muted-foreground"
           />
         </div>
         {hasResults && (
-          <div className="flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-3 py-2 text-[11px] font-medium text-brand-gray whitespace-nowrap">
+          <div className="flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-3 py-2 text-[11px] font-medium text-brand-gray whitespace-nowrap dark:border-border dark:bg-card dark:text-muted-foreground">
             {totalPrograms} program{totalPrograms === 1 ? "" : "s"}
           </div>
         )}
@@ -188,8 +187,8 @@ export default function TclWorkspace() {
                       to={unavailable ? "#" : it.to}
                       className={`group flex items-center gap-3 rounded-btn border px-3.5 py-3 transition-all ${
                         unavailable
-                          ? "cursor-not-allowed border-brand-border bg-brand-paper"
-                          : "border-brand-border bg-brand-paper hover:border-brand-rule hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+                          ? "cursor-not-allowed border-brand-border bg-brand-paper dark:bg-card"
+                          : "border-brand-border bg-brand-paper hover:border-brand-rule hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-card dark:hover:bg-card-nested"
                       }`}
                       onClick={(e) => {
                         if (unavailable) e.preventDefault();
@@ -208,10 +207,10 @@ export default function TclWorkspace() {
 
                       {/* Middle: Program Info */}
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-semibold leading-tight text-brand-ink">
+                        <h3 className="text-sm font-semibold leading-tight text-brand-ink dark:text-foreground">
                           {it.name}
                         </h3>
-                        <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-brand-gray">
+                        <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-brand-gray dark:text-muted-foreground">
                           {unavailable ? note : it.desc}
                         </p>
                       </div>
@@ -220,7 +219,7 @@ export default function TclWorkspace() {
                       <div className="flex shrink-0 items-center gap-2">
                         {!unavailable && typeof count === "number" ? (
                           <span
-                            className="inline-flex items-center rounded-btn border border-brand-border bg-brand-paper px-1.5 py-0.5 text-[10px] font-medium font-stat text-brand-gray"
+                            className="inline-flex items-center rounded-btn border border-brand-border bg-brand-paper px-1.5 py-0.5 text-[10px] font-medium font-stat text-brand-gray dark:border-border dark:bg-card-nested dark:text-slate-300"
                             title={`Saved records ${scopeLabel}`}
                           >
                             {count}
