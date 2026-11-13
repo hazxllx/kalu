@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
@@ -977,37 +978,19 @@ export default function Households() {
       )}
 
       {!loading && householdTotal > HOUSEHOLD_PAGE_SIZE && (
-        <Card className="mt-5 flex items-center justify-between gap-3 p-4">
-          <span className="text-sm text-brand-gray">
-            Page {page + 1} of {Math.ceil(householdTotal / HOUSEHOLD_PAGE_SIZE)}
-          </span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={page === 0}
-              onClick={() => {
-                const nextPage = page - 1;
-                setPage(nextPage);
-                load(search.trim(), nextPage);
-              }}
-              className="rounded-btn border border-brand-border px-3 py-1.5 text-sm text-brand-ink disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              disabled={(page + 1) * HOUSEHOLD_PAGE_SIZE >= householdTotal}
-              onClick={() => {
-                const nextPage = page + 1;
-                setPage(nextPage);
-                load(search.trim(), nextPage);
-              }}
-              className="rounded-btn border border-brand-border px-3 py-1.5 text-sm text-brand-ink disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Next
-            </button>
-          </div>
-        </Card>
+        <TablePagination
+          total={householdTotal}
+          page={page + 1}
+          pageSize={HOUSEHOLD_PAGE_SIZE}
+          onPageChange={(nextPage) => {
+            const nextOffsetPage = nextPage - 1;
+            setPage(nextOffsetPage);
+            load(search.trim(), nextOffsetPage);
+          }}
+          showPageSize={false}
+          itemLabel="households"
+          className="mt-5"
+        />
       )}
 
       {/* Household detail modal — info + member management */}

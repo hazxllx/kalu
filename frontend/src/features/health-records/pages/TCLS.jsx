@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope, RefreshCw, ChevronRight, Microscope, Eye, Pill, Heart, Baby, Leaf, Users } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
@@ -41,6 +42,7 @@ const errorCls = "mt-1 text-xs text-brand-danger";
 const formatDate = (iso) => {
   return formatClinicalDate(iso);
 };
+const TCL_PAGE_SIZE = 12;
 
 function TclCard({ record, onView }) {
   const Icon = programIconMap[record.program] || Stethoscope;
@@ -205,6 +207,7 @@ export default function TCLS() {
 
   const [cat, setCat] = useState(null); // null = show all, or specific category ID
   const [recordQuery, setRecordQuery] = useState("");
+  const [recordPage, setRecordPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [showView, setShowView] = useState(null); // TCL id
   const [showSchedule, setShowSchedule] = useState(null); // TCL id
@@ -270,6 +273,14 @@ export default function TCLS() {
       };
     });
   }, [scopedTcls, cat, recordQuery, residentById, directory.rows]);
+
+  useEffect(() => {
+    setRecordPage(1);
+  }, [cat, recordQuery]);
+
+  useEffect(() => {
+    setRecordPage((page) => Math.min(page, Math.max(1, Math.ceil(rows.length / TCL_PAGE_SIZE))));
+  }, [rows.length]);
 
   const openAdd = () => {
     setForm({
@@ -382,17 +393,18 @@ export default function TCLS() {
 
   const viewRecord = rows.find((r) => r.id === showView) || null;
   const scheduleRecord = rows.find((r) => r.id === showSchedule) || null;
+  const visibleRows = rows.slice((recordPage - 1) * TCL_PAGE_SIZE, recordPage * TCL_PAGE_SIZE);
 
   // Group rows by program for rendering
   const rowsByProgram = useMemo(() => {
     const map = new Map();
     TCL_PROGRAMS.forEach((p) => map.set(p, []));
-    rows.forEach((r) => {
+    visibleRows.forEach((r) => {
       const programs = map.get(r.program);
       if (programs) programs.push(r);
     });
     return map;
-  }, [rows]);
+  }, [visibleRows]);
 
   return (
     <>
@@ -493,6 +505,17 @@ export default function TCLS() {
             />
           </div>
         </div>
+      )}
+      {!loadError && !loading && rows.length > TCL_PAGE_SIZE && (
+        <TablePagination
+          total={rows.length}
+          page={recordPage}
+          pageSize={TCL_PAGE_SIZE}
+          onPageChange={setRecordPage}
+          showPageSize={false}
+          itemLabel="TCL records"
+          className="mt-4"
+        />
       )}
 
       {/* Add TCL */}

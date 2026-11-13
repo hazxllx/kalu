@@ -6,11 +6,12 @@ import {
 import PageHeader from "@/components/common/PageHeader";
 import TclPageHeader from "@/features/health-records/components/TclPageHeader";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import StatusBadge from "@/components/common/StatusBadge";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { ButtonSelectGroup as SelectButtonGroup } from "@/components/system";
 import {
-  Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, ChevronRight, Trash2, Printer,
+  Baby, Plus, X, Pencil, CheckCircle2, Search, Download, ChevronLeft, Trash2, Printer,
 } from "lucide-react";
 import { maternalApi, residentsApi, referralsApi, m1Api } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
@@ -1457,25 +1458,15 @@ export default function M1Records() {
                   </table>
                 </div>
                 {totalPages > 1 && (
-                  <div className="flex items-center justify-between border-t border-brand-border px-5 py-3 text-sm">
-                    <span className="text-brand-gray">Page {pageSafe} of {totalPages}</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        disabled={pageSafe <= 1}
-                        className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-3 py-1.5 font-medium text-brand-ink disabled:opacity-40"
-                      >
-                        <ChevronLeft className="h-4 w-4" /> Prev
-                      </button>
-                      <button
-                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                        disabled={pageSafe >= totalPages}
-                        className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-3 py-1.5 font-medium text-brand-ink disabled:opacity-40"
-                      >
-                        Next <ChevronRight className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
+                  <TablePagination
+                    total={participants.length}
+                    page={pageSafe}
+                    pageSize={PAGE_SIZE}
+                    onPageChange={setPage}
+                    showPageSize={false}
+                    itemLabel="records"
+                    className="rounded-none border-0 border-t px-5"
+                  />
                 )}
               </>
             )}

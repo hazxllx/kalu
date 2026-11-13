@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Download, MapPin, Send, Stethoscope, UserRound } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, Download, MapPin, Send, Stethoscope, UserRound } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
+import TablePagination from "@/components/tables/TablePagination";
 import StatusBadge from "@/components/common/StatusBadge";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
@@ -219,7 +220,18 @@ export default function HealthSupervisorDashboard() {
               return <li key={item.key}>{clickable ? <Link to={item.href} aria-label={`${item.action} for ${item.resident}`}>{content}</Link> : <article>{content}</article>}</li>;
             })}</ul> : <EmptyState compact title={priorityErrors.length ? "No cases in the available sources" : !prioritySources.length ? "Monitoring access unavailable" : "No cases match this filter"} description={priorityErrors.length ? "Retry the unavailable sources to complete this list." : "Cases requiring clinical or supervisory review appear here."} />}
           </motion.div></AnimatePresence>
-          <footer className="hs-case-pagination"><span>{filteredCases.length ? `Showing ${page * PAGE_SIZE + 1}-${Math.min((page + 1) * PAGE_SIZE, filteredCases.length)} of ${filteredCases.length}${priorityErrors.length ? " available records" : " records"}` : prioritiesLoading ? "Checking records" : priorityErrors.length ? "Some record sources are unavailable" : !prioritySources.length ? "Register access is unavailable" : "0 matching records"}</span><div><button type="button" className="hs-page-button" aria-label="Previous case page" disabled={page === 0} onClick={() => setAttentionPage(page - 1)}><ChevronLeft aria-hidden="true" /></button><span>{page + 1} / {pageCount}</span><button type="button" className="hs-page-button" aria-label="Next case page" disabled={page === pageCount - 1} onClick={() => setAttentionPage(page + 1)}><ChevronRight aria-hidden="true" /></button></div></footer>
+          {filteredCases.length ? (
+            <TablePagination
+              total={filteredCases.length}
+              page={page + 1}
+              pageSize={PAGE_SIZE}
+              onPageChange={(nextPage) => setAttentionPage(nextPage - 1)}
+              showPageSize={false}
+              itemLabel={priorityErrors.length ? "available records" : "records"}
+            />
+          ) : (
+            <footer className="hs-case-pagination">{prioritiesLoading ? "Checking records" : priorityErrors.length ? "Some record sources are unavailable" : !prioritySources.length ? "Register access is unavailable" : "0 matching records"}</footer>
+          )}
         </motion.section>
 
         <div className="hs-main-sidebar">

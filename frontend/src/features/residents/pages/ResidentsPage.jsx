@@ -975,8 +975,8 @@ export default function ResidentsPage() {
           </label>
           {(q || riskFilter !== "All" || zoneFilter) && <button type="button" className="supervisor-button is-quiet" onClick={() => { setQ(""); setRiskFilter("All"); setZoneFilter(""); }}>Clear filters</button>}
         </Card>
-      ) : <Card className="clinical-toolbar p-4 mb-5 flex flex-col lg:flex-row gap-3">
-        <div className="clinical-search flex items-center gap-2 px-3 py-2 flex-1">
+      ) : <Card className="clinical-toolbar p-4 mb-5 flex flex-col gap-3 lg:flex-row lg:items-end">
+        <div className="clinical-search flex min-h-[50px] flex-1 items-center gap-2 px-3 py-2">
           <Search className="w-4 h-4 text-brand-gray" />
           <input
             value={q}

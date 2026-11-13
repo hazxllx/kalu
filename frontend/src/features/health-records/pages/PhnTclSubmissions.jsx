@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
+import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
 import {
@@ -508,28 +509,15 @@ export default function PhnTclSubmissions() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between gap-3 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm">
-              <p className="text-xs text-gray-600">
-                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
-              </p>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  className="rounded-btn border border-gray-300 px-3 py-1.5 text-xs font-medium text-brand-ink hover:bg-white disabled:opacity-50"
-                >
-                  Previous
-                </button>
-                <span className="px-2 text-xs text-gray-600">Page {page} of {totalPages}</span>
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  className="rounded-btn border border-gray-300 px-3 py-1.5 text-xs font-medium text-brand-ink hover:bg-white disabled:opacity-50"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+            <TablePagination
+              total={filtered.length}
+              page={page}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+              showPageSize={false}
+              itemLabel="submissions"
+              className="rounded-none border-0 border-t px-4"
+            />
           )}
         </Card>
        ) : (

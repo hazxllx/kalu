@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
+import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
@@ -151,9 +152,6 @@ export default function PhnCheckups() {
     () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [filtered, page]
   );
-
-  const rangeStart = filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const rangeEnd = Math.min(page * PAGE_SIZE, filtered.length);
 
   // Allow other pages (e.g. the PHN dashboard "Start Check-up" action) to
   // deep-open the consultation workbench for a patient.
@@ -487,35 +485,15 @@ export default function PhnCheckups() {
 
           {/* Pagination */}
           {filtered.length > 0 && pageCount > 1 && (
-            <nav
-              aria-label="Check-ups pagination"
-              className="flex flex-col gap-3 border-t border-brand-border px-4 py-3 text-xs text-brand-gray sm:flex-row sm:items-center sm:justify-between"
-            >
-              <span>
-                Showing {rangeStart}–{rangeEnd} of {filtered.length} check-ups
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="rounded-btn border border-brand-border px-3 py-1.5 font-medium text-brand-blue hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Previous
-                </button>
-                <span aria-current="page" className="min-w-9 rounded-btn bg-brand-blue px-3 py-1.5 text-center font-semibold text-white">
-                  {page}
-                </span>
-                <button
-                  type="button"
-                  disabled={page >= pageCount}
-                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                  className="rounded-btn border border-brand-border px-3 py-1.5 font-medium text-brand-blue hover:bg-brand-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Next
-                </button>
-              </div>
-            </nav>
+            <TablePagination
+              total={filtered.length}
+              page={page}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+              showPageSize={false}
+              itemLabel="check-ups"
+              className="rounded-none border-0 border-t px-4 sm:px-5"
+            />
           )}
         </Card>
       </div>

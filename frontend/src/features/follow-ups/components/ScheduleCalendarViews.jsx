@@ -1,4 +1,5 @@
 import React from "react";
+import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
 import { CalendarDays, Check, Clock, MapPin, User, X } from "lucide-react";
@@ -64,14 +65,15 @@ function ActivityPagination({ page, total, pageSize, onChange }) {
   const pages = Math.ceil(total / pageSize);
   if (pages <= 1) return null;
   return (
-    <nav aria-label="Activity pages" className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-brand-border pt-3">
-      <span className="text-caption text-brand-gray">{page * pageSize + 1}-{Math.min((page + 1) * pageSize, total)} of {total} activities</span>
-      <div className="flex items-center gap-2">
-        <button type="button" className="supervisor-button" disabled={page === 0} onClick={() => onChange(page - 1)} aria-label="Previous activity page">Previous</button>
-        <span className="text-caption text-brand-gray">{page + 1} / {pages}</span>
-        <button type="button" className="supervisor-button" disabled={page + 1 >= pages} onClick={() => onChange(page + 1)} aria-label="Next activity page">Next</button>
-      </div>
-    </nav>
+    <TablePagination
+      total={total}
+      page={page + 1}
+      pageSize={pageSize}
+      onPageChange={(nextPage) => onChange(nextPage - 1)}
+      showPageSize={false}
+      itemLabel="activities"
+      className="mt-4"
+    />
   );
 }
 

@@ -503,7 +503,7 @@ export default function DashboardLayout({ roleKey }) {
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
       >
         {/* Brand header — fixed */}
-        <div className={`relative shrink-0 flex items-center border-b border-slate-200 dark:border-border ${roleKey === "admin" ? `h-[72px] ${sidebarCollapsed ? "justify-center px-2 pt-4" : "px-4 pr-11"}` : `${isSupervisor ? "h-16" : "h-20"} ${sidebarCollapsed ? "justify-center gap-0 px-2" : isSupervisor ? "justify-between gap-3 px-4" : "justify-between gap-3 px-5"}`}`}>
+        <div className={`relative shrink-0 flex h-16 items-center border-b border-slate-200 dark:border-border ${roleKey === "admin" ? `${sidebarCollapsed ? "justify-center px-2" : "px-4 pr-11"}` : `${sidebarCollapsed ? "justify-center gap-0 px-2" : isSupervisor ? "justify-between gap-3 px-4" : "justify-between gap-3 px-5"}`}`}>
           <div className={sidebarCollapsed ? "flex min-w-0 justify-center" : "min-w-0 flex-1"}>
             <SidebarBrand collapsed={sidebarCollapsed} />
           </div>
