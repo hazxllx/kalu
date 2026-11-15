@@ -121,6 +121,27 @@ test('environmental exposes complete catalog G and current scoped household stoc
   assert.match(result.warnings[0], /not a historical snapshot/);
 });
 
+test('environmental summary counts unique households instead of overlapping parent and child totals', async () => {
+  const households = [
+    row('level1', { water_source: 'level1', water_treated: false, toilet_type: 'ws_own' }),
+    row('level2-a', { water_source: 'level2', water_treated: false, toilet_type: 'ws_own' }),
+    row('level2-b', { water_source: 'level2', water_treated: false, toilet_type: 'ws_own' }),
+    row('level3-a', { water_source: 'level3', water_treated: false, toilet_type: 'ws_own' }),
+    row('level3-b', { water_source: 'level3', water_treated: false, toilet_type: 'ws_own' }),
+    row('outside', { barangay_id: 'b2', water_source: 'level1', water_treated: true, toilet_type: 'ws_own' }),
+  ];
+  const result = await program(database({ households }), 'environmental');
+
+  assert.equal(result.count.indicators, 12);
+  assert.equal(result.count.contributingRecords, 5);
+  assert.deepEqual(result.summary, {
+    label: 'Unique contributing households',
+    total: 5,
+    note: 'Counts each household once even when it contributes to parent and child indicators.',
+  });
+  assert.equal(Object.values(result.indicators).reduce((sum, indicator) => sum + indicator.total, 0), 25);
+});
+
 test('missing canonical tables and permission errors remain failures, not empty successes', async () => {
   for (const code of ['PGRST205', '42501']) {
     await assert.rejects(program(database({}, { oral_health_records: { code, message: 'store unavailable' } }), 'oral'), (e) => e.statusCode === 500 && e.details.code === code);

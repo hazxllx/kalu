@@ -152,3 +152,36 @@ test('invalid periods fail instead of silently widening maternal retrieval', asy
   }
   await assert.rejects(drilldown({ user: hs, indicatorCode: 'B3_28', period: 'quarterly', year: 2026, quarter: 0, supabase: database() }), (error) => error.statusCode === 422);
 });
+
+test('environmental drilldown returns only qualifying households in the assigned barangay', async () => {
+  const result = await drilldown({
+    user: hs,
+    indicatorCode: 'G_1_1',
+    period: 'monthly',
+    year: 2026,
+    month: 11,
+    supabase: database({ households: [
+      { id: 'level-1', barangay_id: 'b1', water_source: 'level1', toilet_type: 'ws_own', head_name: 'Scoped household' },
+      { id: 'level-2', barangay_id: 'b1', water_source: 'level2', toilet_type: 'ws_own', head_name: 'Other source' },
+      { id: 'outside', barangay_id: 'b2', water_source: 'level1', toilet_type: 'ws_own', head_name: 'Outside household' },
+    ] }),
+  });
+
+  assert.equal(result.indicator.code, 'G_1_1');
+  assert.equal(result.count, 1);
+  assert.deepEqual(result.records.map((record) => record.id), ['level-1']);
+  assert.equal(result.records[0].detail.water_source, 'level1');
+
+  await assert.rejects(
+    drilldown({
+      user: hs,
+      indicatorCode: 'G_1_1',
+      period: 'monthly',
+      year: 2026,
+      month: 11,
+      barangayId: 'b2',
+      supabase: database(),
+    }),
+    (error) => error.statusCode === 403,
+  );
+});

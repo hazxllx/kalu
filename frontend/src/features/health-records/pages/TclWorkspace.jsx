@@ -1,10 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Card } from "@/components/common/Card";
-import PageHeader from "@/components/common/PageHeader";
+import React, { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
-  ArrowRight,
-  Search,
   HeartPulse,
   Activity,
   Ribbon,
@@ -12,11 +8,9 @@ import {
   Smile,
   Home,
   ClipboardList,
-  FileSpreadsheet,
 } from "lucide-react";
 import { programFormsApi, maternalApi, tclApi } from "@/services/api";
-import TclEmptyState from "../components/TclEmptyState";
-import { TclDirectorySkeleton } from "../components/TclSkeletons";
+import HealthProgramDirectory from "../components/HealthProgramDirectory";
 
 /**
  * Target Client List workspace — the single entry point reached from
@@ -25,8 +19,7 @@ import { TclDirectorySkeleton } from "../components/TclSkeletons";
  * "Open TCL" action into the actual working form. Programs without a working
  * form yet are shown as not yet available, without any placeholder panel.
  *
- * REDESIGNED: Compact two-column directory with horizontal program cards,
- * refined category headings, and consolidated search toolbar.
+ * The directory uses the same compact program-card surface as M1.
  */
 
 // countKey: how to fetch a real record count (null = no count shown).
@@ -81,7 +74,6 @@ const COUNT_FETCHERS = {
 export default function TclWorkspace() {
   const [counts, setCounts] = useState({}); // key -> number | 'error'
   const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState("");
   const location = useLocation();
   const role = (location.pathname.match(/^\/app\/([^/]+)\//) || [])[1] || "";
 
@@ -106,147 +98,42 @@ export default function TclWorkspace() {
     return () => { active = false; };
   }, []);
 
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return GROUPS;
-    return GROUPS
-      .map((g) => ({ ...g, items: g.items.filter((it) => it.name.toLowerCase().includes(q) || it.desc.toLowerCase().includes(q)) }))
-      .filter((g) => g.items.length);
-  }, [query]);
-
-  const hasResults = groups.length > 0;
-  const totalPrograms = groups.reduce((sum, g) => sum + g.items.length, 0);
-
   // Record counts come from the role-scoped list APIs, so label them honestly.
   const scopeLabel = role === "health_supervisor"
     ? "in your assigned barangay"
     : (role === "phn" || role === "mho") ? "in your municipality" : "you can access";
 
+  const programs = GROUPS.flatMap((group) => group.items.map((item) => {
+    const recordCount = item.countKey ? counts[item.countKey] : undefined;
+    const gatedOut = item.requiresRole && role !== item.requiresRole;
+    const disabled = item.status === "unavailable" || gatedOut;
+
+    return {
+      id: item.id,
+      name: item.name,
+      description: item.desc,
+      category: group.title,
+      icon: item.icon,
+      to: item.to,
+      disabled,
+      disabledReason: gatedOut
+        ? "Available from the Health Supervisor program directory."
+        : "This program is not yet available.",
+      recordCount,
+      countState: loading && recordCount == null
+        ? "loading"
+        : typeof recordCount === "number"
+          ? "ready"
+          : "error",
+    };
+  }));
+
   return (
-    <>
-      <PageHeader
-        dense
-        crumbs={["Clinical Care", "TCL"]}
-        title="Target Client Lists"
-        subtitle="Access health program records, register clients, and manage follow-ups."
-      />
-
-      {/* Search and Program Summary Toolbar */}
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 items-center gap-2 rounded-btn border border-brand-border bg-brand-paper px-3 py-2">
-          <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search health programs or target client lists…"
-            aria-label="Search Target Client Lists"
-            className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray"
-          />
-        </div>
-        {hasResults && (
-          <div className="flex shrink-0 items-center rounded-btn border border-brand-border bg-brand-paper px-3 py-2 text-[11px] font-medium text-brand-gray whitespace-nowrap">
-            {totalPrograms} program{totalPrograms === 1 ? "" : "s"}
-          </div>
-        )}
-      </div>
-
-      {!hasResults ? (
-        <TclEmptyState
-          title="No Target Client Lists found"
-          description={`No programs match "${query}". Try a different search term or clear the filter.`}
-          type="search"
-        />
-      ) : loading ? (
-        <TclDirectorySkeleton count={6} />
-      ) : (
-        <div className="space-y-6">
-          {groups.map((group) => (
-            <section key={group.title}>
-              {/* Category Heading with divider */}
-              <div className="mb-3 flex items-center gap-3">
-                <h2 className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-ink">
-                  {group.title}
-                </h2>
-                <span className="h-px flex-1 bg-brand-border" aria-hidden="true" />
-              </div>
-
-              {/* Two-Column Grid Layout */}
-              <div className="grid gap-3 lg:grid-cols-2">
-                {group.items.map((it) => {
-                  const count = it.countKey ? counts[it.countKey] : undefined;
-                  const gatedOut = it.requiresRole && role !== it.requiresRole;
-                  const unavailable = it.status === "unavailable" || gatedOut;
-                  const note = gatedOut
-                    ? "Open from Health Supervisor › Records › M1 · Maternal Record."
-                    : "Not yet available";
-                  const Icon = it.icon || FileSpreadsheet;
-
-                  return (
-                    <Link
-                      key={it.id}
-                      to={unavailable ? "#" : it.to}
-                      className={`group flex items-start gap-3 rounded-btn border px-3.5 py-3 transition-all ${
-                        unavailable
-                          ? "cursor-not-allowed border-brand-border bg-brand-paper"
-                          : "border-brand-border bg-brand-paper hover:border-brand-rule hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-                      }`}
-                      onClick={(e) => {
-                        if (unavailable) e.preventDefault();
-                      }}
-                      aria-label={`Open ${it.name} Target Client List`}
-                    >
-                      {/* Left: Icon Container */}
-                      <span
-                        className={`flex shrink-0 items-center justify-center rounded-btn h-10 w-10 ${
-                          unavailable ? "bg-brand-light text-brand-gray" : "bg-brand-light text-brand-blue"
-                        }`}
-                        aria-hidden="true"
-                      >
-                        <Icon className="h-[18px] w-[18px]" />
-                      </span>
-
-                      {/* Middle: Program Info */}
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-semibold leading-tight text-brand-ink">
-                          {it.name}
-                        </h3>
-                        <p className="mt-0.5 text-xs leading-tight text-brand-gray">
-                          {unavailable ? note : it.desc}
-                        </p>
-                      </div>
-
-                      {/* Right: Count Badge and Arrow */}
-                      <div className="flex shrink-0 items-center gap-2">
-                        {!unavailable && typeof count === "number" ? (
-                          <span
-                            className="inline-flex items-center rounded-btn border border-brand-border bg-brand-paper px-1.5 py-0.5 text-[10px] font-medium font-stat text-brand-gray"
-                            title={`Saved records ${scopeLabel}`}
-                          >
-                            {count}
-                          </span>
-                        ) : !unavailable && count === "error" ? (
-                          <span className="inline-flex items-center text-[10px] font-medium text-brand-gray">
-                            —
-                          </span>
-                        ) : null}
-                        {!unavailable && (
-                          <ArrowRight className="h-3.5 w-3.5 text-brand-blue transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-                        )}
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
-
-      {/* Scope Information */}
-      <p className="mt-6 text-[11px] text-brand-gray">
-        Record counts reflect saved records {scopeLabel}.
-      </p>
-    </>
+    <HealthProgramDirectory
+      programs={programs}
+      crumbs={["Clinical Care", "TCL"]}
+      subtitle="Review target client lists and program records within your authorized service area."
+      countNote={`Record counts reflect saved records ${scopeLabel}.`}
+    />
   );
 }

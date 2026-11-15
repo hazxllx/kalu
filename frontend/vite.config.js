@@ -4,19 +4,27 @@ import { defineConfig, loadEnv } from 'vite'
 import { resolve } from 'path'
 import { VitePWA } from 'vite-plugin-pwa'
 import { publicSupabaseConfigurationError } from '../shared/authConnectivity.js'
+import { normalizeApiBaseUrl } from './src/services/api/apiBaseUrl.js'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, 'VITE_')
-  if (mode === 'production') {
-    const missing = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY']
-      .filter((key) => !env[key]?.trim())
+  const required = [
+    'VITE_API_URL',
+    ...(mode === 'production' ? ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] : []),
+  ]
+  const missing = required.filter((key) => !env[key]?.trim())
 
-    if (missing.length) {
-      throw new Error(
-        `Production frontend configuration is incomplete. Missing required environment variable(s): ${missing.join(', ')}`,
-      )
-    }
+  if (missing.length) {
+    throw new Error(
+      `${mode} frontend configuration is incomplete. Missing required environment variable(s): ${missing.join(', ')}`,
+    )
+  }
+
+  try {
+    normalizeApiBaseUrl(env.VITE_API_URL)
+  } catch (error) {
+    throw new Error(`Frontend API configuration is invalid. ${error.message}`)
   }
 
   // Stop before a browser bundle can expose a misconfigured server credential.

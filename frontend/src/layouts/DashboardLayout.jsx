@@ -143,6 +143,12 @@ export default function DashboardLayout({ roleKey }) {
     window.addEventListener("focus", refreshPermissions);
     return () => window.removeEventListener("focus", refreshPermissions);
   }, [refreshMatrix]);
+  // Entries that declare a permission disappear once an administrator removes
+  // that privilege from the role; everything else behaves exactly as before.
+  const items = useMemo(
+    () => filterNavByPermission(NAV[roleKey] || [], can, user),
+    [roleKey, can, user]
+  );
   // the tab strip mounted instead of replaying the page transition.
   const activeItem = items.find((item) => navItemIsActive(item, location.pathname));
   const pageTransitionKey = activeItem?.tabs

@@ -28,8 +28,17 @@ app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxy);
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
-// CORS is restricted to the origins listed in CLIENT_URL — never a wildcard.
-app.use(cors({ origin: env.clientUrls, credentials: true }));
+// CORS runs before body parsing, rate limiting, routing, and authentication so
+// browser preflight requests complete without being challenged for a token.
+// Credentialed requests use an exact-origin allowlist, never a wildcard.
+app.use(cors({
+  origin: env.clientUrls,
+  credentials: true,
+  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'If-Match'],
+  maxAge: 600,
+  optionsSuccessStatus: 204,
+}));
 
 app.use(express.json({ limit: env.requestBodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: env.requestBodyLimit }));

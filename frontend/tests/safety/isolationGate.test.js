@@ -15,6 +15,8 @@ const LOCAL = Object.freeze({
   E2E_BASE_URL: "http://localhost:5173",
   E2E_API_URL: "http://localhost:5000/api",
   E2E_SUPABASE_URL: "http://127.0.0.1:54321",
+  VITE_API_URL: "http://localhost:5000/api",
+  VITE_SUPABASE_URL: "http://127.0.0.1:54321",
 });
 
 test("a complete local configuration is accepted", () => {
@@ -39,6 +41,22 @@ test("E2E_API_URL absent fails closed (backend target must be explicit)", () => 
   const r = evaluateIsolation({ ...LOCAL, E2E_API_URL: undefined });
   assert.equal(r.ok, false);
   assert.ok(r.reasons.some((m) => /E2E_API_URL is required/.test(m)));
+});
+
+test("E2E_SUPABASE_URL and the frontend Vite targets are required", () => {
+  assert.equal(evaluateIsolation({ ...LOCAL, E2E_SUPABASE_URL: undefined }).ok, false);
+  assert.equal(evaluateIsolation({ ...LOCAL, VITE_API_URL: undefined }).ok, false);
+  assert.equal(evaluateIsolation({ ...LOCAL, VITE_SUPABASE_URL: undefined }).ok, false);
+});
+
+test("declared targets must match the frontend bundle targets", () => {
+  const apiMismatch = evaluateIsolation({ ...LOCAL, VITE_API_URL: "http://127.0.0.1:5000/api" });
+  assert.equal(apiMismatch.ok, false);
+  assert.ok(apiMismatch.reasons.some((m) => /VITE_API_URL must exactly match/.test(m)));
+
+  const supabaseMismatch = evaluateIsolation({ ...LOCAL, VITE_SUPABASE_URL: "http://localhost:54321" });
+  assert.equal(supabaseMismatch.ok, false);
+  assert.ok(supabaseMismatch.reasons.some((m) => /VITE_SUPABASE_URL must exactly match/.test(m)));
 });
 
 test("a production *.supabase.co target is rejected by default (not allowlisted)", () => {
@@ -83,11 +101,14 @@ test("a dedicated staging host is accepted ONLY when explicitly allowlisted", ()
     E2E_ISOLATED: "1",
     E2E_BASE_URL: "https://staging-app.example.test",
     E2E_API_URL: "https://staging-api.example.test/api",
+    E2E_SUPABASE_URL: "https://staging-db.example.test",
+    VITE_API_URL: "https://staging-api.example.test/api",
+    VITE_SUPABASE_URL: "https://staging-db.example.test",
   };
   assert.equal(evaluateIsolation(base).ok, false, "not allowlisted => rejected");
   const allowed = {
     ...base,
-    E2E_ALLOWED_HOSTS: "staging-app.example.test, staging-api.example.test",
+    E2E_ALLOWED_HOSTS: "staging-app.example.test, staging-api.example.test, staging-db.example.test",
   };
   assert.equal(evaluateIsolation(allowed).ok, true);
 });
@@ -96,7 +117,7 @@ test("invalid URLs fail closed", () => {
   assert.equal(evaluateIsolation({ ...LOCAL, E2E_BASE_URL: "not a url" }).ok, false);
 });
 
-test("optional E2E_SUPABASE_URL is validated when present", () => {
+test("required E2E_SUPABASE_URL is validated", () => {
   const r = evaluateIsolation({ ...LOCAL, E2E_SUPABASE_URL: "https://lblawqeoixojyytkmfqy.supabase.co" });
   assert.equal(r.ok, false);
   assert.ok(r.reasons.some((m) => /E2E_SUPABASE_URL host .* not a verified isolated host/.test(m)));

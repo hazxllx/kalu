@@ -8,6 +8,10 @@
 import * as barangaysService from '../services/barangays.service.js';
 import { sendData } from '../utils/apiResponse.js';
 
+export const listPublicBarangays = async (_req, res) => {
+  sendData(res, await barangaysService.listPublicBarangays());
+};
+
 export const listBarangays = async (req, res) => {
   const result = await barangaysService.listBarangays({
     q: req.query.q,
@@ -53,6 +57,7 @@ export const updateBarangayStatus = async (req, res) => {
 };
 
 export default {
+  listPublicBarangays,
   listBarangays,
   getBarangayOptions,
   getBarangay,

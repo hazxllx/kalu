@@ -9,7 +9,7 @@ import TclEmptyState from "./TclEmptyState";
 import { formatDetailsStructured } from "../lib/m1DetailFormatter";
 
 const PAGE_SIZE = 20;
-const recordDate = (record) => record.service_date || record.completion_date || record.assessment_date
+const recordDate = (record) => record.date || record.service_date || record.completion_date || record.assessment_date
   || record.consultation_date || record.enrollment_date || record.next_visit || record.created_at?.slice(0, 10) || "Not recorded";
 const fullName = (record) => record ? [record.firstName || record.first_name, record.middleName || record.middle_name, record.lastName || record.last_name].filter(Boolean).join(" ") : "";
 

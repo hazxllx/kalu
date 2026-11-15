@@ -6,6 +6,8 @@
 //
 //   E2E_ISOLATED=1            — explicit opt-in that the target is NOT production
 //   E2E_BASE_URL=http://...   — the running app under test (an isolated instance)
+//   E2E_API_URL=http://...    — the isolated backend (must match VITE_API_URL)
+//   E2E_SUPABASE_URL=http://... — isolated Auth/DB (must match VITE_SUPABASE_URL)
 //   E2E_<ROLE>_EMAIL/PASSWORD — synthetic test-account credentials (never hardcoded)
 //
 // Nothing here contains secrets or production URLs; all of that is read from the

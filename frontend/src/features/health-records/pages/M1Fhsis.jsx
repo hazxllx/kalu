@@ -12,6 +12,7 @@ import M1IndicatorTable from "@/features/health-records/components/M1IndicatorTa
 import { useM1OfficialPrint } from "@/features/health-records/components/M1OfficialForm";
 import M1PageHeader from "@/features/health-records/components/M1PageHeader";
 import M1ReportingPeriod from "@/features/health-records/components/M1ReportingPeriod";
+import TclTabs from "@/features/health-records/components/TclTabs";
 import TclEmptyState from "@/features/health-records/components/TclEmptyState";
 import { TclToolbar } from "@/features/health-records/components/TclToolbar";
 import { HEALTH_SERVICE_TITLES } from "@/features/health-records/lib/healthServicesConfig";
@@ -206,107 +207,149 @@ export default function M1Fhsis() {
 
   return (
     <div className="min-w-0">
-      <M1PageHeader title="Consolidated FHSIS Form M1" subtitle="Review municipal health-service indicators and case-level activity by reporting period." crumb="Consolidated Report" />
-      <M1ReportingPeriod period={period} year={year} month={month} quarter={quarter} years={years} onPeriodChange={changePeriod} onYearChange={changeYear} onMonthChange={changeMonth} onQuarterChange={changeQuarter} />
+      <M1PageHeader
+        title="Consolidated FHSIS Form M1"
+        subtitle="Review municipal health-service indicators and case-level activity by reporting period."
+        crumb="Consolidated Report"
+      />
+      <M1ReportingPeriod
+        period={period}
+        year={year}
+        month={month}
+        quarter={quarter}
+        years={years}
+        onPeriodChange={changePeriod}
+        onYearChange={changeYear}
+        onMonthChange={changeMonth}
+        onQuarterChange={changeQuarter}
+      />
       {brandingError && <Card role="alert" className="mb-4 p-3 text-sm text-brand-danger">{brandingError}</Card>}
 
       {loading ? <SkeletonTable rows={8} cols={4} className="ui-tcl-data-table" />
         : error ? <Card><ErrorState title="Unable to load the M1 report" message={error} onRetry={() => setRetry((value) => value + 1)} /></Card>
           : indicatorRows.length === 0 ? <TclEmptyState compact title="No M1 indicators" description={`No reporting data is available for ${periodLabel}.`} />
             : <>
-              {/* Compact KPI summary */}
-              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div className="rounded-lg border border-brand-border bg-brand-bg/50 p-3">
-                  <p className="text-xs font-medium text-brand-gray">Indicators</p>
-                  <p className="mt-1 text-lg font-semibold text-brand-ink">{indicatorRows.length}</p>
-                </div>
-                <div className="rounded-lg border border-brand-border bg-green-50 p-3">
-                  <p className="text-xs font-medium text-brand-gray">With Values</p>
-                  <p className="mt-1 text-lg font-semibold text-green-700">{activeIndicators}</p>
-                </div>
-                <div className="rounded-lg border border-brand-border bg-teal-50 p-3">
-                  <p className="text-xs font-medium text-brand-gray">Sections</p>
-                  <p className="mt-1 text-lg font-semibold text-teal-700">{sections.length}</p>
-                </div>
-                <div className="rounded-lg border border-brand-border bg-slate-50 p-3">
-                  <p className="text-xs font-medium text-brand-gray">Period</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-700">{periodLabel}</p>
-                </div>
+              {/* Slim inline KPI summary strip — no cards, just text with separators */}
+              <div className="mb-0 flex flex-wrap items-center gap-x-1 border-b border-[#DDE3EC] py-2 text-[12px] text-[#4B5A6E]">
+                <span className="font-mono font-semibold tabular-nums text-[#1A3A5C]">{indicatorRows.length}</span>
+                <span className="text-[#9AA5B4]">indicators</span>
+                <span className="mx-1.5 text-[#DDE3EC]">·</span>
+                <span className="font-mono font-semibold tabular-nums text-[#1A3A5C]">{activeIndicators}</span>
+                <span className="text-[#9AA5B4]">with values</span>
+                <span className="mx-1.5 text-[#DDE3EC]">·</span>
+                <span className="font-mono font-semibold tabular-nums text-[#1A3A5C]">{sections.length}</span>
+                <span className="text-[#9AA5B4]">sections</span>
+                <span className="mx-1.5 text-[#DDE3EC]">·</span>
+                <span className="text-[#4B5A6E]">{periodLabel}</span>
               </div>
 
-              {/* Tab navigation for sections */}
-              <div className="mb-4 flex flex-wrap gap-2">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.value}
-                    type="button"
-                    onClick={() => setActiveTab(tab.value)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === tab.value
-                        ? "bg-brand-blue text-white"
-                        : "bg-brand-bg text-brand-ink border border-brand-border hover:bg-brand-light"
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+              {/* Tab nav + Print button — same line */}
+              <div className="flex items-center justify-between gap-2 border-b border-brand-border bg-brand-bg/70 px-2 py-1">
+                <TclTabs
+                  tabs={tabs}
+                  active={selectedTab?.value}
+                  onChange={setActiveTab}
+                  label="FHSIS report sections"
+                  className="!mb-0 !border-b-0 gap-1 flex-nowrap overflow-x-auto"
+                  idPrefix="fhsis-sections"
+                />
                 <button
                   type="button"
                   onClick={printReport}
                   disabled={printing || loading || Boolean(error)}
-                  className="ml-auto ui-tcl-control ui-tcl-control-primary !text-xs"
+                  className="mr-2 flex shrink-0 items-center gap-1.5 rounded-sm border border-[#DDE3EC] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1A3A5C] transition-colors hover:border-[#1A3A5C] disabled:opacity-50"
                 >
                   <Download className="h-3.5 w-3.5" />
-                  {printing ? "Preparing..." : "Print"}
+                  {printing ? "Preparing…" : "Print"}
                 </button>
               </div>
 
-              {/* Content panels */}
-              <div className="space-y-3">
-                {selectedTab.value === "daily" ? (
+              {/* Content panel — no white card wrapper, just border-t */}
+              <div className="pt-3">
+                {selectedTab?.value === "daily" ? (
                   <>
-                    <div className="rounded-lg bg-white border border-brand-border p-4">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <h3 className="text-sm font-semibold text-brand-ink">Daily Health-Service Activity</h3>
-                          <p className="mt-0.5 text-xs text-brand-gray">{filteredDailyRows.length} records</p>
-                        </div>
-                        <label className="flex items-center gap-2 text-xs font-medium text-brand-gray">
-                          Date
-                          <input type="date" min={dailyDateMin} max={dailyDateMax} value={dailyDate} onChange={(event) => changeDailyDate(event.target.value)} className="ui-tcl-control ui-tcl-control-secondary" />
-                        </label>
-                      </div>
-                      <TclToolbar onSearch={setSearch} searchValue={search} showFilter={false} showExport={false} showRefresh={false} />
-                      {filteredDailyRows.length === 0 ? <TclEmptyState compact type={search ? "search" : "empty"} title="No daily activity" description={`No M1 activity records were found for ${dailyDate}.`} /> : <>
-                        <DataTable rows={pagedDailyRows} dense compact striped mobileCards stickyHeader maxHeight="clamp(20rem, calc(100dvh - 18rem), 60vh)" className="ui-tcl-data-table !rounded-lg !shadow-none border border-brand-border" tableClassName="min-w-[56rem]" columns={[
-                          { key: "date", label: "Date" },
-                          { key: "residentName", label: "Resident", wrap: true },
-                          { key: "section", label: "Section" },
-                          { key: "indicatorCode", label: "Code", render: (row) => row.indicatorCode || "—" },
-                          { key: "indicator", label: "Service / Indicator", wrap: true },
-                          { key: "status", label: "Status", render: (row) => row.status ? <StatusBadge value={row.status} /> : "—" },
-                        ]} />
-                        {filteredDailyRows.length > pageSize && <TablePagination total={filteredDailyRows.length} page={safePage} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} className="mt-3" />}
-                      </>}
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                      <span className="text-[11px] font-semibold uppercase tracking-widest text-[#6B7A8F]">
+                        Daily Health-Service Activity
+                        <span className="ml-2 font-mono font-normal normal-case tabular-nums text-[#9AA5B4]">{filteredDailyRows.length} records</span>
+                      </span>
+                      <label className="flex items-center gap-2 text-[11px] font-medium text-[#6B7A8F]">
+                        Date
+                        <input
+                          type="date"
+                          min={dailyDateMin}
+                          max={dailyDateMax}
+                          value={dailyDate}
+                          onChange={(event) => changeDailyDate(event.target.value)}
+                          className="ui-tcl-control ui-tcl-control-secondary"
+                        />
+                      </label>
                     </div>
+                    <TclToolbar onSearch={setSearch} searchValue={search} showFilter={false} showExport={false} showRefresh={false} />
+                    {filteredDailyRows.length === 0
+                      ? <TclEmptyState compact type={search ? "search" : "empty"} title="No daily activity" description={`No M1 activity records were found for ${dailyDate}.`} />
+                      : <>
+                        <DataTable
+                          rows={pagedDailyRows}
+                          dense
+                          compact
+                          striped
+                          mobileCards
+                          stickyHeader
+                          maxHeight="clamp(20rem, calc(100dvh - 18rem), 60vh)"
+                          className="ui-tcl-data-table !rounded-sm !shadow-none border border-[#DDE3EC]"
+                          tableClassName="min-w-[56rem]"
+                          columns={[
+                            { key: "date", label: "Date" },
+                            { key: "residentName", label: "Resident", wrap: true },
+                            { key: "section", label: "Section" },
+                            { key: "indicatorCode", label: "Code", render: (row) => row.indicatorCode || "—" },
+                            { key: "indicator", label: "Service / Indicator", wrap: true },
+                            { key: "status", label: "Status", render: (row) => row.status ? <StatusBadge value={row.status} /> : "—" },
+                          ]}
+                        />
+                        {filteredDailyRows.length > pageSize && (
+                          <TablePagination
+                            total={filteredDailyRows.length}
+                            page={safePage}
+                            pageSize={pageSize}
+                            onPageChange={setPage}
+                            onPageSizeChange={(value) => { setPageSize(value); setPage(1); }}
+                            className="mt-3"
+                          />
+                        )}
+                      </>
+                    }
                   </>
                 ) : (
                   <>
-                    <div className="rounded-lg bg-white border border-brand-border p-4 space-y-3">
-                      <div className="flex items-baseline justify-between gap-4">
-                        <div>
-                          <h3 className="text-base font-semibold text-brand-ink">{selectedTab.label}</h3>
-                          <p className="mt-0.5 text-xs text-brand-gray">{sectionRows.length} indicator{sectionRows.length !== 1 ? "s" : ""}</p>
-                        </div>
-                        <Link to={`/app/health_supervisor/m1-section/${selectedTab.value}?${sectionQuery}`} className="ui-tcl-control ui-tcl-control-secondary !min-h-8 !px-2.5 !text-xs">Details</Link>
-                      </div>
-                      <M1IndicatorTable rows={sectionRows} onView={setSelectedIndicator} />
+                    <div className="mb-2 flex items-baseline justify-between gap-4">
+                      <span className="text-[11px] font-semibold uppercase tracking-widest text-[#6B7A8F]">
+                        {selectedTab?.label}
+                        <span className="ml-2 font-mono font-normal normal-case tabular-nums text-[#9AA5B4]">
+                          {sectionRows.length} indicator{sectionRows.length !== 1 ? "s" : ""}
+                        </span>
+                      </span>
+                      <Link
+                        to={`/app/health_supervisor/m1-section/${selectedTab?.value}?${sectionQuery}`}
+                        className="ui-tcl-control ui-tcl-control-secondary !min-h-8 !px-2.5 !text-xs"
+                      >
+                        Details
+                      </Link>
                     </div>
+                    <M1IndicatorTable rows={sectionRows} onView={setSelectedIndicator} />
                   </>
                 )}
               </div>
             </>}
-      <M1DrilldownDialog indicator={selectedIndicator} periodLabel={periodLabel} records={drilldown} error={drilldownError} onRetry={() => setDrillRetry((value) => value + 1)} onClose={() => setSelectedIndicator(null)} />
+      <M1DrilldownDialog
+        indicator={selectedIndicator}
+        periodLabel={periodLabel}
+        records={drilldown}
+        error={drilldownError}
+        onRetry={() => setDrillRetry((value) => value + 1)}
+        onClose={() => setSelectedIndicator(null)}
+      />
       {portal}
     </div>
   );

@@ -56,7 +56,11 @@ test('production accepts CLIENT_URL alone and does not add development origins',
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout.trim()), ['https://app.example.test']);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), [
+    'https://app.example.test',
+    'https://kalusagap-frontend.onrender.com',
+    'https://kalusagap.vercel.app',
+  ]);
 });
 
 test('production accepts CORS_ORIGIN as the documented fallback alias', () => {
@@ -69,5 +73,28 @@ test('production accepts CORS_ORIGIN as the documented fallback alias', () => {
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout.trim()), ['https://app.example.test']);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), [
+    'https://app.example.test',
+    'https://kalusagap-frontend.onrender.com',
+    'https://kalusagap.vercel.app',
+  ]);
+});
+
+test('origin configuration rejects paths, credentials, and non-http protocols', () => {
+  for (const CLIENT_URL of [
+    'https://app.example.test/path',
+    'https://user:secret@app.example.test',
+    'file:///tmp/app',
+  ]) {
+    const result = loadEnv({
+      NODE_ENV: 'development',
+      CLIENT_URL,
+      CORS_ORIGIN: '',
+      SUPABASE_URL: '',
+      SUPABASE_ANON_KEY: '',
+      SUPABASE_SERVICE_ROLE_KEY: '',
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Invalid browser origin configuration/);
+  }
 });

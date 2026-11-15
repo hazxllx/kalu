@@ -9,6 +9,14 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const personnelIntervalSeconds = Number(process.env.PERSONNEL_NOTIFICATION_INTERVAL_SECONDS || 60);
+const DEVELOPMENT_CLIENT_URLS = Object.freeze([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]);
+const PRODUCTION_CLIENT_URLS = Object.freeze([
+  'https://kalusagap-frontend.onrender.com',
+  'https://kalusagap.vercel.app',
+]);
 
 if (isProduction) {
   const missing = [];
@@ -23,17 +31,30 @@ if (isProduction) {
   }
 }
 
+const parseHttpOrigin = (value) => {
+  const url = new URL(value);
+  if (!['http:', 'https:'].includes(url.protocol)
+    || url.username
+    || url.password
+    || (url.pathname && url.pathname !== '/')
+    || url.search
+    || url.hash) {
+    throw new Error(`Invalid browser origin configuration: ${value}`);
+  }
+  return url.origin;
+};
+
 const configuredClientUrls = [
   ...new Set(
     [
       clientUrlValue,
       corsOriginValue,
-      ...(isProduction ? [] : ['http://localhost:5173', 'http://127.0.0.1:5173']),
+      ...(isProduction ? PRODUCTION_CLIENT_URLS : DEVELOPMENT_CLIENT_URLS),
     ]
       .flatMap((value) => value.split(','))
       .map((origin) => origin.trim())
       .filter(Boolean)
-      .map((origin) => new URL(origin).origin),
+      .map(parseHttpOrigin),
   ),
 ];
 
@@ -65,11 +86,10 @@ const env = {
   authRateLimitWindowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
   authRateLimitMaxRequests: Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS) || 10,
 
-  // Browser origins allowed to call this API. Comma-separated so a staging or
-  // preview URL can be added without a code change. `CLIENT_URL` is the
-  // canonical name; `CORS_ORIGIN` is accepted as a fallback alias. Development
-  // always permits both loopback hostnames because browsers treat them as
-  // distinct origins even though they resolve to the same machine.
+  // Browser origins allowed to call this API. `CLIENT_URL` is the canonical
+  // deployment URL; `CORS_ORIGIN` adds comma-separated staging/preview URLs.
+  // Documented production frontends and both development loopback hostnames
+  // are centralized above. No wildcard origin is permitted.
   clientUrls: configuredClientUrls,
   // Mail redirects require an explicitly configured canonical CLIENT_URL, not
   // one of the implicit development CORS origins.

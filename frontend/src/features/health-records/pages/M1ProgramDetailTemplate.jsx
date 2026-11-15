@@ -50,6 +50,7 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
     const [month, setMonth] = useState(() => monthFromQuery(searchParams.get("month"), now.getMonth()));
     const [quarter, setQuarter] = useState(() => quarterFromQuery(searchParams.get("quarter"), quarterOfMonth0(now.getMonth())));
     const [indicatorData, setIndicatorData] = useState(null);
+    const [indicatorSummary, setIndicatorSummary] = useState(null);
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -86,6 +87,7 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
       setLoading(true);
       setError(null);
       setIndicatorData(null);
+      setIndicatorSummary(null);
       setRecords([]);
       setSelectedIndicator(null);
       const load = async () => {
@@ -99,26 +101,30 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
           for (const [code, row] of Object.entries(result.indicators)) {
             // Validate response structure
             if (row?.code !== code) {
-              throw new Error(`Invalid indicator response for ${code}: code mismatch`);
+              throw new Error(`Manual review required: Invalid indicator response for ${code}: code mismatch`);
             }
             if (typeof row.name !== "string" || !row.name.trim() || /^Indicator\s+\S+$/i.test(row.name.trim())) {
-              throw new Error(`Catalog definition unavailable for ${code}: missing or invalid name`);
+              throw new Error(`Manual review required: Catalog definition unavailable for ${code}: missing or invalid name`);
             }
             if (typeof row.subsection !== "string" || !row.subsection.trim()) {
-              throw new Error(`Catalog definition unavailable for ${code}: missing subsection`);
+              throw new Error(`Manual review required: Catalog definition unavailable for ${code}: missing subsection`);
             }
             if (program.fhsisSection && !(program.catalogSections || [program.fhsisSection]).includes(row.section)) {
-              throw new Error(`Catalog definition unavailable for ${code}: section ${row.section} not in program`);
+              throw new Error(`Manual review required: Catalog definition unavailable for ${code}: section ${row.section} not in program`);
             }
             if (!Number.isFinite(row.total)) {
-              throw new Error(`Reporting value unavailable for ${code}: total is not a number`);
+              throw new Error(`Manual review required: Reporting value unavailable for ${code}: total is not a number`);
             }
             if (programId === "prenatal" && !program.subsections.some((item) => item.catalogSubsection === row.subsection)) {
-              throw new Error(`Catalog definition unavailable for ${code}: subsection "${row.subsection}" does not match program configuration`);
+              throw new Error(`Manual review required: Catalog definition unavailable for ${code}: subsection "${row.subsection}" does not match program configuration`);
             }
+          }
+          if (result.summary != null && (!Number.isFinite(result.summary.total) || typeof result.summary.label !== "string")) {
+            throw new Error("Invalid program summary response. Please try again.");
           }
           if (!active) return;
           setIndicatorData(result.indicators);
+          setIndicatorSummary(result.summary || null);
           setRecords(result.records);
         } catch (loadError) {
           if (active) setError(loadError?.message || "Unable to load program data");
@@ -185,7 +191,10 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
 
     return (
       <div className="min-w-0">
+        {/* Compact page header */}
         <M1PageHeader title={program.title} subtitle={program.description} crumb={program.title} />
+
+        {/* Slim period bar — border-b separator, no card box */}
         <M1ReportingPeriod
           period={period}
           year={year}
@@ -204,8 +213,14 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
           <Card><ErrorState title="Unable to load M1 data" message={error} onRetry={() => setRetry((value) => value + 1)} /></Card>
         ) : programId === "enrollment" ? (
           <section aria-labelledby="enrollment-register-heading">
-            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-              <div><h2 id="enrollment-register-heading" className="text-base font-semibold text-brand-ink">Program Enrollment Register</h2><p className="mt-0.5 text-xs text-brand-gray">{filteredEnrollmentRows.length} records · {selectedPeriodLabel}</p></div>
+            {/* Compact single-line enrollment toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DDE3EC] bg-[#F7F8FA] px-0 py-2">
+              <span id="enrollment-register-heading" className="text-[11px] font-semibold uppercase tracking-widest text-[#6B7A8F]">
+                Program Enrollment Register
+              </span>
+              <span className="font-mono text-[11px] tabular-nums text-[#4B5A6E]">
+                {filteredEnrollmentRows.length} records · {selectedPeriodLabel}
+              </span>
             </div>
             <TclToolbar
               onSearch={setRecordSearch}
@@ -246,20 +261,38 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
           <TclEmptyState title="No indicator data" description={`No ${program.title.toLowerCase()} indicators are available for ${selectedPeriodLabel}.`} compact />
         ) : (
           <>
+            {/* Tabs immediately after the period bar — the tab IS the section heading */}
             {tabs.length > 1 && (
-              <TclTabs tabs={tabs} active={selectedTab.value} onChange={setActiveTab} label={`${program.title} categories`} className="flex-nowrap overflow-x-auto rounded-t-card bg-brand-bg/70 px-1 pt-1" idPrefix={`${programId}-categories`} panelId={`${programId}-panel`} />
+              <TclTabs
+                tabs={tabs}
+                active={selectedTab.value}
+                onChange={setActiveTab}
+                label={`${program.title} categories`}
+                className="flex-nowrap overflow-x-auto rounded-t-card bg-brand-bg/70 px-1 pt-1 !mb-3"
+                idPrefix={`${programId}-categories`}
+                panelId={`${programId}-panel`}
+              />
             )}
-            <section role="tabpanel" id={`${programId}-panel`} aria-labelledby={tabs.length > 1 ? `${programId}-categories-${tabs.indexOf(selectedTab)}` : undefined} tabIndex={0}>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-brand-ink">{selectedTab?.label || program.title}</h2>
-                <span className="text-xs text-brand-gray">{visibleRows.length} indicators</span>
-              </div>
-              <M1IndicatorTable rows={visibleRows} onView={showIndicator} />
+            {/* Indicator table — no redundant h2+count row between tabs and table */}
+            <section
+              role="tabpanel"
+              id={`${programId}-panel`}
+              aria-labelledby={tabs.length > 1 ? `${programId}-categories-${tabs.indexOf(selectedTab)}` : undefined}
+              tabIndex={0}
+            >
+              <M1IndicatorTable rows={visibleRows} summary={indicatorSummary} onView={showIndicator} />
             </section>
           </>
         )}
 
-        <M1DrilldownDialog indicator={selectedIndicator} periodLabel={selectedPeriodLabel} records={drilldown?.records ?? null} error={drilldownError} onRetry={() => setDrillRetry((value) => value + 1)} onClose={() => setSelectedIndicator(null)} />
+        <M1DrilldownDialog
+          indicator={selectedIndicator}
+          periodLabel={selectedPeriodLabel}
+          records={drilldown?.records ?? null}
+          error={drilldownError}
+          onRetry={() => setDrillRetry((value) => value + 1)}
+          onClose={() => setSelectedIndicator(null)}
+        />
       </div>
     );
   };

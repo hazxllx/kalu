@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const read = (relative) => readFile(new URL(`../../src/${relative}`, import.meta.url), 'utf8');
-const [records, report, section, template, modules, header, period, drilldown, officialForm, dataTable] = await Promise.all([
+const [records, report, section, template, modules, header, period, drilldown, officialForm, dataTable, directory, tclWorkspace] = await Promise.all([
   read('features/health-records/pages/M1Records.jsx'),
   read('features/health-records/pages/M1Fhsis.jsx'),
   read('features/health-records/pages/M1SectionDetail.jsx'),
@@ -14,13 +14,20 @@ const [records, report, section, template, modules, header, period, drilldown, o
   read('features/health-records/components/M1DrilldownDialog.jsx'),
   read('features/health-records/components/M1OfficialForm.jsx'),
   read('components/tables/DataTable.jsx'),
+  read('features/health-records/components/HealthProgramDirectory.jsx'),
+  read('features/health-records/pages/TclWorkspace.jsx'),
 ]);
 
-test('M1 overview reuses the Dashboard masthead and shared reporting-period controls', () => {
-  assert.match(header, /HealthSupervisorPageHeader/);
-  assert.match(records, /variant="overview"/);
-  assert.match(records, /M1ReportingPeriod variant="header"/);
+test('M1 and TCL directories reuse one compact program-directory surface', () => {
+  assert.match(modules, /HealthProgramDirectory/);
+  assert.match(tclWorkspace, /HealthProgramDirectory/);
+  assert.match(directory, /PageHeader/);
+  assert.doesNotMatch(directory, /type="search"|role="search"|searchPlaceholder/);
+  assert.match(directory, /program\.category/);
+  assert.match(records, /variant="directory"/);
+  assert.match(records, /subtitle="Review M1 program records and indicators\."/);
   assert.match(records, /query=\{moduleQuery\}/);
+  assert.doesNotMatch(records, /Open Consolidated Report|m1-fhsis/);
   assert.doesNotMatch(modules, /#[0-9A-Fa-f]{3,8}/);
 });
 

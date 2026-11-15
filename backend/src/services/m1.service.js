@@ -13,6 +13,7 @@ import {
   fpMethodToIndicatorCodes,
 } from '../config/m1Catalog.js';
 import {
+  getWorkbookIndicator,
   WORKBOOK_M1_SECTION_TITLES,
 } from '../config/workbookM1Catalog.js';
 import {
@@ -1551,7 +1552,8 @@ export const getRecordsByProgram = async (params, supabase = getServiceClient())
     ncd: {
       section: 'F',
       indicatorCodes: [
-        ...M1_INDICATORS.filter((indicator) => ['E', 'F'].includes(indicator.section)).map((indicator) => indicator.code),
+        ...M1_INDICATORS.filter((indicator) => indicator.section === 'E').map((indicator) => indicator.code),
+        'F_1', 'F_2', 'F_3', 'F_4', 'F_9', 'F_10',
       ],
       table: SCHEMAS['ncd-risk'].table,
       dateColumn: 'assessment_date',
@@ -1641,12 +1643,28 @@ export const getRecordsByProgram = async (params, supabase = getServiceClient())
     });
   }
 
+  const summary = programId === 'environmental' ? {
+    label: 'Unique contributing households',
+    total: new Set(
+      (records || [])
+        .filter((record) => M1_INDICATORS.some(
+          (indicator) => indicator.section === 'G'
+            && indicator.source === 'households'
+            && matchHousehold(record, indicator.match),
+        ))
+        .map((record) => record.id)
+        .filter(Boolean),
+    ).size,
+    note: 'Counts each household once even when it contributes to parent and child indicators.',
+  } : null;
+
   return {
     program: programId,
     section: program.section,
     period: { type: period, year, month, quarter },
     records: records || [],
     indicators,
+    summary,
     ...(programId === 'prenatal' ? {
       warnings: [
         'Legacy catalog measures retain 4 prenatal check-ups and 2 postpartum check-ups; they are not approved mappings to workbook 8ANC/4PNC measures.',
@@ -1662,6 +1680,7 @@ export const getRecordsByProgram = async (params, supabase = getServiceClient())
     count: {
       records: (records || []).length,
       indicators: Object.keys(indicators).length,
+      ...(summary ? { contributingRecords: summary.total } : {}),
     },
   };
 };

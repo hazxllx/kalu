@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import TclPageHeader from "@/features/health-records/components/TclPageHeader";
-import M1PageHeader from "@/features/health-records/components/M1PageHeader";
 import M1ReportingPeriod from "@/features/health-records/components/M1ReportingPeriod";
 import { TclToolbar } from "@/features/health-records/components/TclToolbar";
 import TclEmptyState from "@/features/health-records/components/TclEmptyState";
@@ -735,19 +734,67 @@ export default function M1Records() {
                 {participants.length > PAGE_SIZE && <TablePagination total={participants.length} page={pageSafe} pageSize={PAGE_SIZE} onPageChange={setPage} className="mt-3" />}
               </>}
             </section>}
-      </> : <>
-        <M1PageHeader
-          variant="overview"
-          eyebrow="M1 Health Programs"
-          title="Municipal Health Services Reporting"
-          subtitle={`Consolidated recording of barangay health-service delivery for FHSIS Form M1 statutory reporting${assignedBarangay ? ` — Brgy. ${assignedBarangay}` : ""}.`}
-          action={<div className="flex flex-wrap items-center justify-end gap-2"><M1ReportingPeriod variant="header" period={period} year={year} month={month} quarter={quarter} years={yearsList} onPeriodChange={changePeriod} onYearChange={changeYear} onMonthChange={changeMonth} onQuarterChange={changeQuarter} /><button type="button" onClick={handleExport} disabled={exporting} title={`Export the official FHSIS Form M1 for ${periodLabel} (Save as PDF)`} className="hs-button hs-button-primary"><Download className="h-4 w-4" />{exporting ? "Preparing..." : exportLabel}</button></div>}
+      </> : (
+        <M1ModuleGrid
+          countsByModule={moduleCounts}
+          loading={moduleCountsLoading}
+          countError={moduleCountsError}
+          query={moduleQuery}
+          crumbs={["Clinical Care", "M1"]}
+          subtitle="Review M1 program records and indicators."
+          context={(
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <M1ReportingPeriod
+                variant="directory"
+                period={period}
+                year={year}
+                month={month}
+                quarter={quarter}
+                years={yearsList}
+                onPeriodChange={changePeriod}
+                onYearChange={changeYear}
+                onMonthChange={changeMonth}
+                onQuarterChange={changeQuarter}
+              />
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={exporting}
+                title={`Export the official FHSIS Form M1 for ${periodLabel} (Save as PDF)`}
+                className="ui-tcl-control ui-tcl-control-primary shrink-0"
+              >
+                <Download className="h-4 w-4" />
+                {exporting ? "Preparing..." : exportLabel}
+              </button>
+            </div>
+          )}
+          notices={(brandingError || moduleCountsError) ? (
+            <>
+              {brandingError && (
+                <div role="alert" className="border border-brand-danger/30 bg-brand-paper px-4 py-3 text-sm text-brand-danger dark:bg-card">
+                  {brandingError}
+                </div>
+              )}
+              {moduleCountsError && (
+                <div role="alert" className="flex flex-col gap-3 border border-brand-border bg-brand-paper px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-border dark:bg-card">
+                  <div>
+                    <p className="font-semibold text-brand-ink dark:text-foreground">Program counts unavailable</p>
+                    <p className="mt-0.5 text-xs text-brand-gray dark:text-muted-foreground">{moduleCountsError}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setModuleCountsRetry((value) => value + 1)}
+                    className="shrink-0 border border-brand-border bg-white px-3 py-2 text-xs font-semibold text-brand-blue hover:border-brand-blue dark:border-border dark:bg-card dark:text-primary"
+                  >
+                    Retry counts
+                  </button>
+                </div>
+              )}
+            </>
+          ) : null}
+          countNote="Record counts are supplied by each program's scoped data source."
         />
-        {brandingError && <Card role="alert" className="mb-4 p-3 text-sm text-brand-danger">{brandingError}</Card>}
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-base font-semibold text-brand-ink">Health Program Directory</h2><p className="mt-0.5 text-xs text-brand-gray">Select a program to review {periodLabel} records and indicators.</p></div><div className="flex items-center gap-2"><span className="text-xs font-medium text-brand-gray">7 programs</span><Link to={`/app/health_supervisor/m1-fhsis?${moduleQuery}`} className="ui-tcl-control ui-tcl-control-secondary !min-h-9 !text-xs">Open Consolidated Report</Link></div></div>
-        {moduleCountsError && <Card><ErrorState compact title="Program counts unavailable" message={moduleCountsError} onRetry={() => setModuleCountsRetry((value) => value + 1)} /></Card>}
-        <M1ModuleGrid countsByModule={moduleCounts} loading={moduleCountsLoading} query={moduleQuery} />
-      </>}
+      )}
 
       {toast && <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg"><CheckCircle2 className="h-4 w-4 text-brand-green" /><span className="text-sm">{toast}</span></div>}
 

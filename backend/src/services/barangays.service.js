@@ -57,6 +57,27 @@ const toRecord = (row) => {
   };
 };
 
+/** Public registration/dropdown projection. Never exposes management fields. */
+export const listPublicBarangays = async () => {
+  const { data, error } = await supabase()
+    .from('barangays')
+    .select('id, name, status, municipality_id, created_at, municipality:municipalities(name)')
+    .eq('status', 'Active')
+    .order('name', { ascending: true });
+  throwOnError(error, 'Could not load the public barangay registry');
+
+  return (data || [])
+    .filter((row) => isApprovedBarangayName(row.name))
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      municipalityId: row.municipality_id,
+      municipality: (Array.isArray(row.municipality) ? row.municipality[0] : row.municipality)?.name || '',
+      createdAt: row.created_at,
+    }));
+};
+
 const recordAudit = async ({ actorId, action, entityId, municipalityId, barangayId, metadata }) => {
   const { error } = await supabase()
     .from('health_audit_logs')

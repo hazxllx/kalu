@@ -14,11 +14,22 @@ export default function M1PageHeader({
   backLabel = "Back to M1 Programs",
 }) {
   if (variant === "overview") {
-    return <HealthSupervisorPageHeader dense eyebrow={eyebrow} title={title} subtitle={subtitle} action={action} />;
+    // Overview: delegate to HealthSupervisorPageHeader with dense/compact styling
+    return (
+      <HealthSupervisorPageHeader
+        dense
+        eyebrow={eyebrow}
+        title={title}
+        subtitle={subtitle}
+        action={action}
+      />
+    );
   }
 
+  // Detail: compact single-line breadcrumb + back button via TclPageHeader
   return (
     <TclPageHeader
+      dense
       title={title}
       subtitle={subtitle}
       crumb={crumb}

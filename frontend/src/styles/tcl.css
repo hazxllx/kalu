@@ -90,26 +90,30 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   border-bottom: 1px solid #D7E0EB;
 }
 
 .ui-tcl-tab {
-  min-height: 2.75rem;
+  min-height: 2.25rem;
   border-bottom: 2px solid transparent;
-  padding: 0 1rem;
+  padding: 0 0.875rem;
   color: #64748B;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 600;
+  border-radius: 4px 4px 0 0;
+  transition: all 0.15s ease-in-out;
 }
 
 .ui-tcl-tab:hover {
   color: #124B86;
+  background-color: rgba(243, 246, 250, 0.6);
 }
 
 .ui-tcl-tab.active {
   border-bottom-color: #124B86;
   color: #124B86;
+  background-color: #FFFFFF;
 }
 
 .ui-tcl-empty-state {

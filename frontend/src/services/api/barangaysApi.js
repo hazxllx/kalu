@@ -20,6 +20,14 @@ import { memoryCache } from '../../utils/memoryCache';
 const BARANGAY_OPTIONS_TTL = 10 * 60 * 1000; // 10 minutes
 
 export const barangaysApi = {
+  publicList: ({ force = false, ...options } = {}) => {
+    if (force) memoryCache.invalidate('barangays:public');
+    return memoryCache.getOrFetch(
+      'barangays:public',
+      () => api.get('/barangays/public', options),
+      BARANGAY_OPTIONS_TTL
+    );
+  },
   list: (params, options) => api.get('/barangays', { ...options, params }),
   options: (options) => {
     return memoryCache.getOrFetch(
@@ -31,16 +39,19 @@ export const barangaysApi = {
   get: (id, options) => api.get(`/barangays/${id}`, options),
   create: (barangay, options) => {
     memoryCache.invalidate('barangays:options');
+    memoryCache.invalidate('barangays:public');
     return api.post('/barangays', barangay, options);
   },
   update: (id, barangay) => {
     memoryCache.invalidate('barangays:options');
+    memoryCache.invalidate('barangays:public');
     return api.put(`/barangays/${id}`, barangay);
   },
   // Dedicated status change (Active <-> Inactive). Inactive barangays keep all
   // their residents/records but are hidden from new selections.
   setStatus: (id, status) => {
     memoryCache.invalidate('barangays:options');
+    memoryCache.invalidate('barangays:public');
     return api.patch(`/barangays/${id}/status`, { status });
   },
 };

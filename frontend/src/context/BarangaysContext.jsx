@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { supabase } from "@/lib/supabase";
+import { barangaysApi } from "@/services/api/barangaysApi";
 import {
   BARANGAYS,
   setBarangayNames,
@@ -16,9 +16,9 @@ import {
  * supplies their stable ids and municipality metadata. A `refresh()` reloads
  * those records after administrative changes.
  *
- * public.barangays is public-readable (anon + authenticated) via RLS, so this
- * works on the public registration pages too. If the read is unavailable the
- * canonical fallback names remain so no selector renders empty.
+ * The backend exposes a read-only active-name projection for public pages, so
+ * every application-data request still follows the centralized API client. If
+ * the read is unavailable, canonical fallback names keep selectors usable.
  */
 
 /**
@@ -53,35 +53,12 @@ export function BarangaysProvider({ children }) {
     };
   }, []);
 
-  const load = useCallback(async () => {
-    if (!supabase) {
-      // Supabase not configured: keep the fallback registry, stop loading.
-      setBarangayNames();
-      setLoading(false);
-      setError(null);
-      return;
-    }
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: queryError } = await supabase
-        .from("barangays")
-        .select("id, name, status, municipality_id, created_at, municipalities(name)")
-        .eq("status", "Active")
-        .order("name", { ascending: true });
-      if (queryError) throw queryError;
-      const rows = Array.isArray(data) ? data : [];
-      const mapped = rows.map((r) => {
-        const muni = Array.isArray(r.municipalities) ? r.municipalities[0] : r.municipalities;
-        return {
-          id: r.id,
-          name: r.name,
-          status: r.status,
-          municipalityId: r.municipality_id,
-          municipality: muni?.name || "",
-          createdAt: r.created_at,
-        };
-      });
+      const response = await barangaysApi.publicList({ force });
+      const mapped = Array.isArray(response) ? response : [];
       if (!mounted.current) return;
       const approved = mapped.filter((record) => BARANGAYS.includes(record.name));
       setRecords(approved);
@@ -110,7 +87,7 @@ export function BarangaysProvider({ children }) {
       records,
       loading,
       error,
-      refresh: load,
+      refresh: () => load(true),
     }),
     [names, records, loading, error, load],
   );

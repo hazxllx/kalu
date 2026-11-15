@@ -19,9 +19,9 @@ import {
  * Every route authenticates the Supabase token and then requires the `admin`
  * role (`FEATURE_ROLES.barangays`). The role is resolved server-side from the
  * `profiles` table by `authenticate`; it is never taken from the client. Any
- * non-admin receives 403; an unauthenticated caller receives 401. Public,
- * read-only barangay dropdowns do NOT use these endpoints — they read
- * public.barangays directly through the Supabase public-read policy.
+ * non-admin receives 403; an unauthenticated caller receives 401. The one
+ * exception is GET /public, a deliberately minimal active-name projection for
+ * public registration dropdowns so browsers still use the centralized API.
  *
  * Barangays are managed by STATUS, not by deletion (permanent delete was
  * removed): setting a barangay Inactive keeps every resident, household,
@@ -37,6 +37,7 @@ import {
  */
 const router = Router();
 
+router.get('/public', asyncHandler(controller.listPublicBarangays));
 router.use(authenticate, authorize(FEATURE_ROLES.barangays));
 
 const idParam = validate(barangayIdParamValidator, 'params');

@@ -7,11 +7,17 @@
 //
 // Design principle: FAIL CLOSED. `E2E_ISOLATED=1` is treated as a declaration,
 // never as proof. A target is only accepted when every destination (frontend,
-// backend, and — when provided — Supabase) resolves to a verified-local or an
+// backend, and Supabase) resolves to a verified-local or an
 // explicitly allowlisted host, and no destination matches a production denylist.
 // A hosted `*.supabase.co` / public target is rejected by default.
 
 const LOCAL_HOST_RE = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?|.*\.local)$/i;
+const BUILT_IN_PRODUCTION_REFS = Object.freeze([
+  'kalusagap.onrender.com',
+  'kalusagap-frontend.onrender.com',
+  'kalusagap.vercel.app',
+  'lblawqeoixojyytkmfqy',
+]);
 
 /** Parse a hostname from a URL string, or null when it is not a valid URL. */
 export function hostOf(url) {
@@ -50,19 +56,21 @@ export function evaluateIsolation(env = {}) {
   }
 
   const allowed = splitList(env.E2E_ALLOWED_HOSTS);
-  const denied = splitList(env.E2E_PRODUCTION_REFS);
+  const denied = [...BUILT_IN_PRODUCTION_REFS, ...splitList(env.E2E_PRODUCTION_REFS)];
 
-  // Required, explicit destinations: frontend AND backend must both be given,
-  // so a run can never implicitly inherit the production API.
+  // Both the declared E2E destinations and the frontend's actual Vite targets
+  // are required, so a safe declaration cannot conceal a production bundle.
   const targets = [
     ['E2E_BASE_URL', env.E2E_BASE_URL, true],
     ['E2E_API_URL', env.E2E_API_URL, true],
-    ['E2E_SUPABASE_URL', env.E2E_SUPABASE_URL, false], // optional, validated if present
+    ['E2E_SUPABASE_URL', env.E2E_SUPABASE_URL, true],
+    ['VITE_API_URL', env.VITE_API_URL, true],
+    ['VITE_SUPABASE_URL', env.VITE_SUPABASE_URL, true],
   ];
 
   for (const [name, url, required] of targets) {
     if (!url) {
-      if (required) reasons.push(`${name} is required (the ${name === 'E2E_BASE_URL' ? 'frontend' : 'backend'} target must be explicit).`);
+      if (required) reasons.push(`${name} is required so every browser destination is explicit.`);
       continue;
     }
     const host = hostOf(url);
@@ -81,6 +89,27 @@ export function evaluateIsolation(env = {}) {
     if (denied.some((ref) => ref && lower.includes(ref))) {
       reasons.push(`${name} matches a denylisted production target (E2E_PRODUCTION_REFS).`);
     }
+  }
+
+  const comparableUrl = (value) => {
+    try {
+      const parsed = new URL(String(value));
+      parsed.hash = '';
+      parsed.search = '';
+      return parsed.toString().replace(/\/+$/, '').toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+  const declaredApi = comparableUrl(env.E2E_API_URL);
+  const bundledApi = comparableUrl(env.VITE_API_URL);
+  if (declaredApi && bundledApi && declaredApi !== bundledApi) {
+    reasons.push('VITE_API_URL must exactly match E2E_API_URL.');
+  }
+  const declaredSupabase = comparableUrl(env.E2E_SUPABASE_URL);
+  const bundledSupabase = comparableUrl(env.VITE_SUPABASE_URL);
+  if (declaredSupabase && bundledSupabase && declaredSupabase !== bundledSupabase) {
+    reasons.push('VITE_SUPABASE_URL must exactly match E2E_SUPABASE_URL.');
   }
 
   return { ok: reasons.length === 0, reasons };

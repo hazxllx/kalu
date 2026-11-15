@@ -11,7 +11,7 @@ import BackToTclButton from "./BackToTclButton";
  * the existing `brand.*` palette, heading font, `tracking-gov`, `rounded-card`
  * and `shadow-card`; introduces no new tokens.
  */
-export default function TclPageHeader({ title, subtitle = "", crumb, backTo = "../tcls", action = null, crumbs = null }) {
+export default function TclPageHeader({ title, subtitle = "", crumb, backTo = "../tcls", action = null, crumbs = null, dense = false }) {
   const headerAction = action || <BackToTclButton to={backTo} />;
   const breadcrumbItems = crumbs || [
     { label: "Records", to: backTo },
@@ -20,13 +20,13 @@ export default function TclPageHeader({ title, subtitle = "", crumb, backTo = ".
   ];
 
   return (
-    <div className="mb-6">
+    <div className={dense ? "mb-3.5" : "mb-6"}>
       <section
         aria-label={typeof title === "string" ? `${title} header` : "Page header"}
         className="ui-page-header-hs-tcl overflow-hidden rounded-card border border-brand-dark bg-brand-dark text-white shadow-card"
       >
       <div aria-hidden="true" className="h-0.5 w-full bg-brand-gold/70" />
-      <div className="flex flex-col gap-4 px-5 py-6 md:px-7">
+      <div className={`flex flex-col ${dense ? "gap-2 px-4 py-3.5 md:px-6" : "gap-4 px-5 py-6 md:px-7"}`}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <nav
             aria-label="Breadcrumb"
@@ -49,11 +49,11 @@ export default function TclPageHeader({ title, subtitle = "", crumb, backTo = ".
           <div className="shrink-0">{headerAction}</div>
         </div>
         <div className="min-w-0">
-          <h1 className="break-words text-2xl font-semibold tracking-tight text-white md:text-3xl">
+          <h1 className={`break-words font-semibold tracking-tight text-white ${dense ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"}`}>
             {title}
           </h1>
           {subtitle && (
-            <p className="mt-2 max-w-prose break-words text-sm leading-relaxed text-white/70">
+            <p className={`max-w-prose break-words leading-relaxed text-white/70 ${dense ? "mt-1 text-xs" : "mt-2 text-sm"}`}>
               {subtitle}
             </p>
           )}
