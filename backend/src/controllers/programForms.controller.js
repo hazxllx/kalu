@@ -1,3 +1,10 @@
+/**
+ * Health program form endpoints (TCL, NCD, oral health assessments).
+ *
+ * Manages structured data collection forms for specific health programs.
+ * Forms are scoped by resident or household and can be filtered by date range.
+ * Form schemas are defined in config/programFormSchemas.js and validated server-side.
+ */
 import * as service from '../services/programForms.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
 

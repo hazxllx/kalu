@@ -1,3 +1,10 @@
+/**
+ * Operational tracking endpoints (visit plans, queue items, notifications).
+ *
+ * Manages operational records scoped by resident and filterable by status and date range.
+ * Supports CRUD operations on various operational entities. Timestamps are enforced
+ * server-side; client timestamps are never trusted.
+ */
 import * as service from '../services/operational.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
 

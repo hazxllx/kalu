@@ -1,3 +1,17 @@
+/**
+ * Maternal health endpoints for pregnancy, prenatal care, delivery, and postpartum tracking.
+ *
+ * Comprehensive maternal care workflow including:
+ * - Pregnancy registration and status tracking
+ * - Prenatal encounters (vitals, assessments, referrals)
+ * - Prenatal services (immunizations, screening, etc)
+ * - Delivery records (type, location, complications, newborn status)
+ * - Postpartum encounters (recovery assessment, complications, family planning)
+ * - Postpartum follow-up schedules and milestones
+ *
+ * All endpoints perform authorization and scope checks in the service layer.
+ * Timestamps are managed server-side; all data is transformed to camelCase for the frontend.
+ */
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import * as kalusagapService from '../services/kalusagap.service.js';

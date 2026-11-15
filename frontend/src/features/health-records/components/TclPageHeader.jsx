@@ -11,8 +11,13 @@ import BackToTclButton from "./BackToTclButton";
  * the existing `brand.*` palette, heading font, `tracking-gov`, `rounded-card`
  * and `shadow-card`; introduces no new tokens.
  */
-export default function TclPageHeader({ title, subtitle = "", crumb, backTo = "../tcls", action = null }) {
+export default function TclPageHeader({ title, subtitle = "", crumb, backTo = "../tcls", action = null, crumbs = null }) {
   const headerAction = action || <BackToTclButton to={backTo} />;
+  const breadcrumbItems = crumbs || [
+    { label: "Records", to: backTo },
+    { label: "TCL", to: backTo },
+    { label: crumb },
+  ];
 
   return (
     <div className="mb-6">
@@ -27,15 +32,19 @@ export default function TclPageHeader({ title, subtitle = "", crumb, backTo = ".
             aria-label="Breadcrumb"
             className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] font-semibold uppercase tracking-gov"
           >
-            <Link to={backTo} className="truncate text-white/70 transition-colors hover:text-white">
-              Records
-            </Link>
-            <ChevronRight className="h-3 w-3 shrink-0 text-white/40" aria-hidden="true" />
-            <Link to={backTo} className="truncate text-white/70 transition-colors hover:text-white">
-              TCL
-            </Link>
-            <ChevronRight className="h-3 w-3 shrink-0 text-white/40" aria-hidden="true" />
-            <span className="truncate text-brand-goldlight">{crumb}</span>
+            {breadcrumbItems.map((item, index) => {
+              const current = index === breadcrumbItems.length - 1;
+              return (
+                <React.Fragment key={`${item.label}-${index}`}>
+                  {index > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-white/40" aria-hidden="true" />}
+                  {current || !item.to ? (
+                    <span className={`truncate ${current ? "text-brand-goldlight" : "text-white/70"}`}>{item.label}</span>
+                  ) : (
+                    <Link to={item.to} className="truncate text-white/70 transition-colors hover:text-white">{item.label}</Link>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </nav>
           <div className="shrink-0">{headerAction}</div>
         </div>

@@ -8,11 +8,13 @@ import { ArrowLeft } from "lucide-react";
  * `to` defaults to the sibling `tcls` route (works for every role area, e.g.
  * /app/health_supervisor/ncd -> /app/health_supervisor/tcls).
  */
+export const TCL_BACK_BUTTON_CLASS = "inline-flex min-h-10 items-center gap-2 rounded-btn border border-white/25 bg-white/5 px-3.5 text-sm font-semibold text-white transition-colors hover:border-white/40 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50";
+
 export default function BackToTclButton({ to = "../tcls" }) {
   return (
     <Link
       to={to}
-      className="inline-flex min-h-10 items-center gap-2 rounded-btn border border-white/25 bg-white/5 px-3.5 text-sm font-semibold text-white transition-colors hover:border-white/40 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+      className={TCL_BACK_BUTTON_CLASS}
       aria-label="Back to TCL List"
     >
       <ArrowLeft className="h-4 w-4" aria-hidden="true" />

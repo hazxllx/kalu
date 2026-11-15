@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { Route, Routes, Navigate } from 'react-router-dom';
+import { Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import DashboardLayout from '@/layouts/DashboardLayout';
 import NavTabsLayout from '@/layouts/NavTabsLayout';
 import NotFoundPage from '@/pages/NotFoundPage';
@@ -8,6 +8,24 @@ import ProtectedRoute from '@/routes/ProtectedRoute';
 import { FullPageSkeleton, PageSkeleton } from '@/components/common/Skeleton';
 import { ROUTE_ROLES } from '@/lib/roles';
 
+/**
+ * Redirect the legacy M1 report path to the canonical M1 Records page.
+ * Preserves query parameters (e.g., reporting period) so existing bookmarks
+ * maintain their context when the reporting UI was restructured.
+ */
+const M1ReportRedirect = () => {
+  const location = useLocation();
+  return <Navigate to={{ pathname: '/app/health_supervisor/m1', search: location.search }} replace />;
+};
+
+/**
+ * Error boundary for route rendering.
+ *
+ * Catches errors during page component render (not during data loading—
+ * each page handles its own data loading state). Provides a retry button
+ * so the user can recover without a full page reload. Errors are logged
+ * for debugging.
+ */
 class RouteErrorBoundary extends React.Component {
   state = { hasError: false };
 
@@ -51,20 +69,21 @@ import Landing from '@/features/landing/pages/Landing';
 import Login from '@/features/authentication/pages/Login';
 
 /**
- * Code-split the rest of the route table.
+ * Code-split page loaders.
  *
- * Every page below is loaded on demand. While its chunk is being fetched the
- * route shows a skeleton — PageSkeleton inside the dashboard shell (so the
- * sidebar/header stay mounted) and FullPageSkeleton for the standalone
- * public/registration pages. This is the only loading state the router adds;
- * individual pages still show their own skeletons while their API data loads.
+ * Every application page (except Landing and Login) is loaded on demand via
+ * dynamic import. While a chunk is being fetched, a skeleton loading state
+ * is shown — PageSkeleton inside the dashboard layout (preserving the sidebar/
+ * header context) or FullPageSkeleton for public/registration pages.
  *
- * Props given to the route element are forwarded to the page. Pages such as
- * SettingsPage, NotificationsPage, ReportsPage, Referrals and
- * SystemManagementPage are configured per role through props (roleKey /
- * variant), so dropping them would silently give every role the default
- * configuration — for example a staff Settings page rendering the resident
- * account view.
+ * This keeps the initial bundle small and improves Time to Interactive.
+ * Individual pages still handle their own API data loading with page-specific
+ * skeletons.
+ *
+ * Props passed to route elements are forwarded to pages. Some pages (Settings,
+ * Notifications, Reports, etc.) accept a `roleKey` or `variant` prop to render
+ * role-specific UI. Dropping these props would silently render the default
+ * configuration for all roles—a common source of bugs.
  */
 const appPage = (loader) => {
   const Page = lazy(loader);
@@ -358,6 +377,69 @@ const M1Records = appPage(
     )
 );
 
+const M1Fhsis = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1Fhsis'
+    )
+);
+
+const M1SectionDetail = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1SectionDetail'
+    )
+);
+
+const M1PrenatalDetail = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1PrenatalDetail'
+    )
+);
+
+const M1NcdDetail = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1NcdDetail'
+    )
+);
+
+const M1CervicalDetail = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1CervicalDetail'
+    )
+);
+
+const M1VisualDetail = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1VisualDetail'
+    )
+);
+
+const M1OralDetail = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1OralDetail'
+    )
+);
+
+const M1EnvironmentalDetail = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1EnvironmentalDetail'
+    )
+);
+
+const M1EnrollmentDetail = appPage(
+  () =>
+    import(
+      '@/features/health-records/pages/M1EnrollmentDetail'
+    )
+);
+
 const Immunization = appPage(
   () =>
     import(
@@ -557,26 +639,40 @@ const StaffAccountApprovals = appPage(
 /**
  * Central route table for KALUSAGAP.
  *
- * Public routes sit at the top level. Every authenticated area is nested under
- * /app/<role> and wrapped in <ProtectedRoute allow={ROUTE_ROLES[role]}>, so
- * access is enforced by the router (not merely hidden in the UI). The role
- * comes from the authenticated account (see AuthContext); users never pick it.
+ * Structure:
+ *   - Public routes (landing, login, password recovery, registration) are at
+ *     the top level and accessible without authentication.
+ *   - Authenticated routes are nested under /app/<role> and wrapped in
+ *     <ProtectedRoute allow={ROUTE_ROLES[role]}> to enforce RBAC at the
+ *     routing level. Access is denied before the page renders, preventing
+ *     unauthorized users from accessing role-specific features even if they
+ *     navigate directly to the URL. The backend (authenticate + authorize
+ *     middleware, RLS policies) is the authoritative enforcement layer;
+ *     this frontend guard is a UX layer that prevents wrong-role navigation.
+ *
+ * The authenticated user's role comes from the auth profile (resolved from
+ * the backend `profiles` table in AuthContext). Users never pick a role.
  *
  * Role areas (KALUSAGAP role brief):
- *   admin             — accounts / roles / access / system
- *   mho               — municipal monitoring, reports, referral monitoring
- *   phn               — health records, assessments, referrals, follow-ups
- *   health_supervisor — barangay nurse/midwife: verification, directory,
- *                        records, consultation, referrals, follow-ups,
- *                        barangay monitoring
- *   rhu_personnel     — triage and operational dashboard
- *   bhw               — DATA COLLECTION ONLY (household profiling /
- *                        community data)
- *   resident          — own profile, records, services, notifications
+ *   admin             — accounts / roles / access control / system settings
+ *   mho               — municipal monitoring, health trends, referral tracking
+ *   phn               — public health nurse: health records, assessments,
+ *                       referrals, follow-ups, account approval authority
+ *   health_supervisor — barangay nurse/midwife: household profiling, resident
+ *                       verification, consultations, TCL/M1 records,
+ *                       follow-ups, referrals, account approval authority
+ *   rhu_personnel     — RHU (Rural Health Unit) triage, consultation, incoming
+ *                       referral triage (station-assigned)
+ *   bhw               — Barangay Health Worker: DATA COLLECTION ONLY
+ *                       (household profiling and community data)
+ *   resident          — own profile, health records, services, referrals,
+ *                       follow-ups, notifications
+ *   resident-limited  — resident pending verification: limited features
+ *                       until identity is verified by Health Supervisor
  */
 const AppRoutes = () => (
   <Routes>
-    {/* Public routes */}
+    {/* Public routes — no authentication required */}
     <Route path="/" element={<Landing />} />
     <Route path="/login" element={<Login />} />
     <Route
@@ -1027,17 +1123,28 @@ const AppRoutes = () => (
         <Route path="tcls" element={<TclWorkspace />} />
         <Route path="tcl-register" element={<TCLS />} />
         <Route path="m1" element={<M1Records />} />
+        <Route path="m1-fhsis" element={<M1Fhsis />} />
+        <Route path="m1-section/:section" element={<M1SectionDetail />} />
         <Route path="maternal-tcl" element={<M1Records />} />
+
+        {/* Program-specific M1 detail pages */}
+        <Route path="m1/prenatal-detail" element={<M1PrenatalDetail />} />
+        <Route path="m1/ncd-detail" element={<M1NcdDetail />} />
+        <Route path="m1/cervical-detail" element={<M1CervicalDetail />} />
+        <Route path="m1/visual-detail" element={<M1VisualDetail />} />
+        <Route path="m1/oral-detail" element={<M1OralDetail />} />
+        <Route path="m1/environmental-detail" element={<M1EnvironmentalDetail />} />
+        <Route path="m1/enrollment-detail" element={<M1EnrollmentDetail />} />
 
         {/*
           "Maternal Monitoring" (the standalone FHSIS M1 report page) was merged
-          into the canonical Maternal Record page (./m1). The old path redirects
-          so existing bookmarks keep working. Official M1 reporting stays
-          available from Maternal Record via "Export Monthly".
+          into the canonical M1 Health Programs page. Preserve reporting-period
+          query parameters so existing monthly, quarterly, and annual bookmarks
+          keep their selected reporting context.
         */}
         <Route
           path="m1-report"
-          element={<Navigate to="../m1" replace />}
+          element={<M1ReportRedirect />}
         />
 
         <Route

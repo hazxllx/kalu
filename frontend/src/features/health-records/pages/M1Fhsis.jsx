@@ -1,737 +1,313 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import PageHeader from "@/components/common/PageHeader";
+import React, { useEffect, useMemo, useState } from "react";
+import { Download } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Card } from "@/components/common/Card";
-import StatCard from "@/components/common/StatCard";
-import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
+import ErrorState from "@/components/common/ErrorState";
+import StatusBadge from "@/components/common/StatusBadge";
+import DataTable from "@/components/tables/DataTable";
+import TablePagination from "@/components/tables/TablePagination";
+import { SkeletonTable } from "@/components/system/Skeleton";
+import M1DrilldownDialog from "@/features/health-records/components/M1DrilldownDialog";
+import M1IndicatorTable from "@/features/health-records/components/M1IndicatorTable";
+import { useM1OfficialPrint } from "@/features/health-records/components/M1OfficialForm";
+import M1PageHeader from "@/features/health-records/components/M1PageHeader";
+import M1ReportingPeriod from "@/features/health-records/components/M1ReportingPeriod";
+import TclEmptyState from "@/features/health-records/components/TclEmptyState";
+import { TclToolbar } from "@/features/health-records/components/TclToolbar";
+import { HEALTH_SERVICE_TITLES } from "@/features/health-records/lib/healthServicesConfig";
 import {
-  Plus, X, Search, Printer, ChevronRight, ChevronDown, ChevronLeft, AlertCircle,
-} from "lucide-react";
-import { m1Api, residentsApi } from "@/services/api";
+  PERIOD_TYPES,
+  fhsisPeriodLabel,
+  periodLabel as makePeriodLabel,
+  quarterOfMonth0,
+  reportingYearOptions,
+  toReportParams,
+} from "@/features/health-records/lib/reportingPeriod";
 import { useAuth } from "@/context/AuthContext";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
-import M1PrintDocument from "@/features/health-records/components/M1PrintDocument";
-import { useM1Print } from "@/features/health-records/components/useM1Print";
+import { m1Api } from "@/services/api";
 
-/**
- * FHSIS M1 — complete monthly service-coverage report.
- *
- * This is the READABLE digital interface over the M1 data (NOT a copy of the
- * paper form). Every total shown is computed by the backend from underlying
- * records and is clickable to reveal exactly which residents/records produced
- * it (drill-down). The separate print view renders the compact, official-style
- * M1 form. The report barangay is resolved automatically from the authenticated
- * user's scope; a barangay-scoped user can never widen it.
- */
-
-const SECTION_TITLES = {
-  A: "Family Planning Services",
-  B: "Maternal Care and Services",
-  C: "Child Care and Services",
-  D: "Oral Care and Services",
-  E: "Infectious Disease Prevention & Control",
-  F: "Non-Communicable Disease Prevention & Control",
-  G: "Environmental Health and Sanitation",
-  H: "Mortality and Natality",
+const PAGE_SIZE = 20;
+const validYear = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 2000 && parsed <= 2100 ? parsed : fallback;
 };
-const SECTION_ORDER = ["A", "B", "C", "D", "E", "F", "G", "H"];
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const fullName = (r) =>
-  r ? [r.firstName || r.first_name, r.middleName || r.middle_name, r.lastName || r.last_name].filter(Boolean).join(" ") : "";
-
-const todayStr = () => new Date().toISOString().slice(0, 10);
-const shiftDate = (d, days) => {
-  const dt = new Date(`${d}T00:00:00`);
-  dt.setDate(dt.getDate() + days);
-  return dt.toISOString().slice(0, 10);
+const validMonth = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 12 ? parsed - 1 : fallback;
 };
-
-// ---------------------------------------------------------------------------
-// Group a flat indicator array into ordered sections -> subsections.
-// ---------------------------------------------------------------------------
-const groupBySection = (indicators = []) => {
-  const map = new Map();
-  for (const it of indicators) {
-    if (!map.has(it.section)) map.set(it.section, new Map());
-    const subs = map.get(it.section);
-    if (!subs.has(it.subsection)) subs.set(it.subsection, []);
-    subs.get(it.subsection).push(it);
-  }
-  return SECTION_ORDER.filter((s) => map.has(s)).map((s) => ({
-    section: s,
-    title: SECTION_TITLES[s] || s,
-    subsections: [...map.get(s).entries()].map(([subsection, items]) => ({ subsection, items })),
-  }));
+const validQuarter = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 4 ? parsed : fallback;
 };
 
 export default function M1Fhsis() {
   const { user } = useAuth();
-  const { startPrint, portal, brandingError } = useM1Print();
-  const supervisor = isHealthSupervisor(user);
-  const scope = supervisor ? getSupervisorScope(user) : null;
-  const assignedBarangay = scope && scope.level === "barangay" ? scope.assignedBarangay : (user?.barangay || null);
-
+  const [searchParams, setSearchParams] = useSearchParams();
   const now = new Date();
-  const [tab, setTab] = useState("monthly"); // daily | monthly | annual | print
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [date, setDate] = useState(todayStr());
-
-  const [catalog, setCatalog] = useState(null);
-  const [residents, setResidents] = useState([]);
-
-  const [monthly, setMonthly] = useState(null);
-  const [annual, setAnnual] = useState(null);
-  const [daily, setDaily] = useState(null);
-  const [meta, setMeta] = useState(null);
-
+  const [period, setPeriod] = useState(() => PERIOD_TYPES.includes(searchParams.get("period")) ? searchParams.get("period") : "monthly");
+  const [year, setYear] = useState(() => validYear(searchParams.get("year"), now.getFullYear()));
+  const [month, setMonth] = useState(() => validMonth(searchParams.get("month"), now.getMonth()));
+  const [quarter, setQuarter] = useState(() => validQuarter(searchParams.get("quarter"), quarterOfMonth0(now.getMonth())));
+  const initialDate = searchParams.get("date");
+  const [dailyDate, setDailyDate] = useState(() => /^\d{4}-\d{2}-\d{2}$/.test(initialDate || "")
+    ? initialDate
+    : year === now.getFullYear() && month === now.getMonth() ? now.toISOString().slice(0, 10) : `${year}-${String(month + 1).padStart(2, "0")}-01`);
+  const [report, setReport] = useState(null);
+  const [dailyRows, setDailyRows] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState(() => new Set(["A", "B"]));
-
-  const [drill, setDrill] = useState(null); // { code, name } for drilldown modal
-  const [drillData, setDrillData] = useState(null);
-  const [drillLoading, setDrillLoading] = useState(false);
-
-  const [recordOpen, setRecordOpen] = useState(false);
+  const [error, setError] = useState(null);
+  const [retry, setRetry] = useState(0);
+  const [activeTab, setActiveTab] = useState(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [selectedIndicator, setSelectedIndicator] = useState(null);
+  const [drilldown, setDrilldown] = useState(null);
+  const [drilldownError, setDrilldownError] = useState(null);
+  const [drillRetry, setDrillRetry] = useState(0);
+  const [printing, setPrinting] = useState(false);
+  const { startPrint, portal, brandingError } = useM1OfficialPrint();
+  const scope = isHealthSupervisor(user) ? getSupervisorScope(user) : null;
+  const assignedBarangay = scope?.level === "barangay" ? scope.assignedBarangay : null;
+  const descriptor = useMemo(() => ({ period, year, month, quarter }), [period, year, month, quarter]);
+  const periodLabel = makePeriodLabel(descriptor);
+  const years = useMemo(() => reportingYearOptions(year), [year]);
 
-  // -- initial reference data ------------------------------------------------
+  const syncQuery = (next) => {
+    const params = toReportParams({ ...descriptor, ...next });
+    const updated = new URLSearchParams(searchParams);
+    updated.set("period", params.period);
+    updated.set("year", String(params.year));
+    if (params.period === "monthly") updated.set("month", String(params.month));
+    else updated.delete("month");
+    if (params.period === "quarterly") updated.set("quarter", String(params.quarter));
+    else updated.delete("quarter");
+    if (params.period === "monthly") updated.set("date", next.dailyDate || dailyDate);
+    else updated.delete("date");
+    setSearchParams(updated, { replace: true });
+  };
+  const changePeriod = (value) => {
+    setPeriod(value);
+    const nextDate = !dailyDate.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`) ? `${year}-${String(month + 1).padStart(2, "0")}-01` : dailyDate;
+    if (value === "monthly") setDailyDate(nextDate);
+    syncQuery({ period: value, dailyDate: nextDate });
+  };
+  const changeYear = (value) => {
+    setYear(value);
+    const nextDate = `${value}-${String(month + 1).padStart(2, "0")}-01`;
+    if (period === "monthly") setDailyDate(nextDate);
+    syncQuery({ year: value, dailyDate: nextDate });
+  };
+  const changeMonth = (value) => {
+    setMonth(value);
+    const monthPrefix = `${year}-${String(value + 1).padStart(2, "0")}`;
+    const nextDate = dailyDate.startsWith(monthPrefix) ? dailyDate : `${monthPrefix}-01`;
+    setDailyDate(nextDate);
+    syncQuery({ month: value, dailyDate: nextDate });
+  };
+  const changeQuarter = (value) => { setQuarter(value); syncQuery({ quarter: value }); };
+  const changeDailyDate = (value) => {
+    setDailyDate(value);
+    const updated = new URLSearchParams(searchParams);
+    updated.set("date", value);
+    setSearchParams(updated, { replace: true });
+  };
+
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const [cat, res] = await Promise.all([
-          m1Api.catalog(),
-          residentsApi.list({ limit: 300, verified: true }).catch(() => ({ rows: [] })),
-        ]);
-        if (!alive) return;
-        setCatalog(cat);
-        const rows = (res?.rows || res || []).map((r) => ({
-          id: r.id,
-          name: fullName(r) || r.name || "",
-          barangay: r.barangay,
-          age: (r.birthDate || r.birth_date) ? Math.floor((Date.now() - new Date(r.birthDate || r.birth_date).getTime()) / 31557600000) : undefined,
-          sex: r.sex,
-          birth_date: r.birthDate || r.birth_date,
-        })).filter((r) => r.name);
-        setResidents(assignedBarangay ? rows.filter((r) => !r.barangay || r.barangay === assignedBarangay) : rows);
-      } catch (e) {
-        if (alive) setError(e?.message || "Failed to load M1 catalog.");
-      }
-    })();
-    return () => { alive = false; };
-  }, [assignedBarangay]);
-
-  // -- period / tab data -----------------------------------------------------
-  const loadData = useCallback(async () => {
+    let active = true;
     setLoading(true);
-    setError("");
+    setError(null);
+    setReport(null);
+    setDailyRows(null);
+    setSelectedIndicator(null);
+    Promise.all([
+      m1Api.report(toReportParams(descriptor)),
+      period === "monthly" ? m1Api.daily(dailyDate) : Promise.resolve({ participants: [] }),
+    ])
+      .then(([reportResult, dailyResult]) => {
+        if (!reportResult?.byCode || typeof reportResult.byCode !== "object" || !Array.isArray(dailyResult?.participants)) {
+          throw new Error("Invalid M1 report response. Please try again.");
+        }
+        if (!active) return;
+        setReport(reportResult);
+        setDailyRows(dailyResult.participants);
+      })
+      .catch((loadError) => { if (active) setError(loadError?.message || "Unable to load the M1 report."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [descriptor, period, dailyDate, retry, user?.id]);
+
+  useEffect(() => {
+    if (!selectedIndicator) return undefined;
+    let active = true;
+    setDrilldown(null);
+    setDrilldownError(null);
+    m1Api.drilldown(selectedIndicator.code, toReportParams(descriptor))
+      .then((result) => {
+        if (!Array.isArray(result?.records)) throw new Error("Invalid underlying-record response.");
+        if (active) setDrilldown(result.records);
+      })
+      .catch((loadError) => { if (active) setDrilldownError(loadError?.message || "Unable to load underlying records."); });
+    return () => { active = false; };
+  }, [selectedIndicator, descriptor, drillRetry]);
+
+  useEffect(() => { setPage(1); }, [activeTab, search, pageSize, dailyRows]);
+
+  const indicatorRows = Object.values(report?.byCode || {});
+  const sections = [...new Set(indicatorRows.map((row) => row.section).filter(Boolean))];
+  const tabs = [
+    ...(period === "monthly" ? [{ value: "daily", label: "Daily Activity" }] : []),
+    ...sections.map((section) => ({ value: section, label: `${section}. ${HEALTH_SERVICE_TITLES[section] || "Health Services"}` })),
+  ];
+  const selectedTab = tabs.find((tab) => tab.value === activeTab) || tabs[0];
+  const sectionRows = selectedTab?.value === "daily" ? [] : indicatorRows.filter((row) => row.section === selectedTab?.value);
+  const filteredDailyRows = (dailyRows || []).filter((row) => {
+    const query = search.trim().toLowerCase();
+    const resident = Array.isArray(row.resident) ? row.resident[0] : row.resident;
+    return !query || [resident?.first_name, resident?.last_name, row.indicator, row.indicatorCode, row.status]
+      .some((value) => String(value || "").toLowerCase().includes(query));
+  }).map((row) => {
+    const resident = Array.isArray(row.resident) ? row.resident[0] : row.resident;
+    return { ...row, residentName: [resident?.first_name, resident?.middle_name, resident?.last_name].filter(Boolean).join(" ") || "Not recorded" };
+  });
+  const totalPages = Math.max(1, Math.ceil(filteredDailyRows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedDailyRows = filteredDailyRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const activeIndicators = indicatorRows.filter((row) => Number(row.total) > 0).length;
+  const sectionQuery = new URLSearchParams(toReportParams(descriptor)).toString();
+  const dailyDateMin = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const dailyDateMax = `${year}-${String(month + 1).padStart(2, "0")}-${String(new Date(year, month + 1, 0).getDate()).padStart(2, "0")}`;
+
+  const printReport = async () => {
+    if (printing) return;
+    setPrinting(true);
     try {
-      if (tab === "monthly" || tab === "print") {
-        const [m, mt] = await Promise.all([
-          m1Api.monthly({ year, month }),
-          m1Api.getMeta({ year, month }).catch(() => null),
-        ]);
-        setMonthly(m);
-        setMeta(mt);
-      } else if (tab === "annual") {
-        setAnnual(await m1Api.annual({ year }));
-      } else if (tab === "daily") {
-        setDaily(await m1Api.daily({ date }));
-      }
-    } catch (e) {
-      setError(e?.message || "Failed to load M1 data.");
+      const [freshReport, metaData] = await Promise.all([
+        m1Api.report(toReportParams(descriptor)),
+        m1Api.getMeta({ year, month: period === "monthly" ? month + 1 : period === "quarterly" ? (quarter - 1) * 3 + 1 : 1 }).catch(() => null),
+      ]);
+      await startPrint({
+        data: freshReport?.byCode || {},
+        header: {
+          periodLabel: fhsisPeriodLabel(descriptor), year,
+          municipality: metaData?.municipality || "", province: metaData?.province || "",
+          projectedPopulation: metaData?.meta?.projected_population ?? "",
+          barangay: metaData?.barangay?.name || assignedBarangay || "",
+          preparedBy: metaData?.meta?.prepared_by || "",
+        },
+      });
+    } catch (printError) {
+      setError(printError?.message || "Unable to prepare the official M1 report.");
     } finally {
-      setLoading(false);
-    }
-  }, [tab, year, month, date]);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  const toggle = (key) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
-
-  const openDrill = async (ind) => {
-    setDrill({ code: ind.code, name: ind.name });
-    setDrillLoading(true);
-    setDrillData(null);
-    try {
-      setDrillData(await m1Api.drilldown(ind.code, { year, month: tab === "annual" ? undefined : month }));
-    } catch (e) {
-      setDrillData({ error: e?.message || "Failed to load records." });
-    } finally {
-      setDrillLoading(false);
+      setPrinting(false);
     }
   };
 
-  const monthlyGroups = useMemo(
-    () => groupBySection(monthly?.indicators || []),
-    [monthly],
-  );
-  const annualGroups = useMemo(
-    () => groupBySection(annual?.indicators || []),
-    [annual],
-  );
-
-  const summary = useMemo(() => {
-    if (!monthly) return { participants: 0, male: 0, female: 0, fp: 0, maternal: 0, child: 0 };
-    const by = monthly.byCode || {};
-    const sum = (codes) => codes.reduce((s, c) => s + (by[c]?.total || 0), 0);
-    const sectionSum = (sec) =>
-      (monthly.indicators || []).filter((i) => i.section === sec).reduce((s, i) => s + (i.total || 0), 0);
-    // Sex split across the indicators that are disaggregated by sex — the same
-    // Male/Female figures the printed FHSIS M1 form shows in its columns.
-    const sexSplit = (monthly.indicators || []).reduce(
-      (acc, i) => (i.sexBreakdown && i.bySex
-        ? { male: acc.male + (i.bySex.Male || 0), female: acc.female + (i.bySex.Female || 0) }
-        : acc),
-      { male: 0, female: 0 },
-    );
-    return {
-      participants: (monthly.indicators || []).reduce((s, i) => s + (i.total || 0), 0),
-      male: sexSplit.male,
-      female: sexSplit.female,
-      fp: sectionSum("A"),
-      maternal: sectionSum("B"),
-      child: sectionSum("C"),
-    };
-  }, [monthly]);
-
-  const periodLabel = `${MONTHS[month - 1]} ${year}`;
-
-  // Print always uses freshly fetched data for the selected period (never a
-  // stale snapshot), then hands it to the print portal. The preview tab shows
-  // the same data, so what prints and what is previewed are identical.
-  const handlePrint = useCallback(async () => {
-    setTab("print");
-    setError("");
-    setLoading(true);
-    try {
-      const [m, mt] = await Promise.all([
-        m1Api.monthly({ year, month }),
-        m1Api.getMeta({ year, month }).catch(() => null),
-      ]);
-      setMonthly(m);
-      setMeta(mt);
-      startPrint({
-        groups: groupBySection(m?.indicators || []),
-        meta: mt,
-        periodLabel: `${MONTHS[month - 1]} ${year}`,
-        barangay: assignedBarangay,
-      });
-    } catch (e) {
-      setError(e?.message || "Failed to load M1 data.");
-    } finally {
-      setLoading(false);
-    }
-  }, [year, month, assignedBarangay, startPrint]);
-
   return (
-    <div className="pb-16">
-      <PageHeader
-        crumbs={["Monitoring", "Maternal & Family Health Report"]}
-        title="Maternal & Family Health Report"
-        subtitle={`FHSIS — MONTHLY FORM M1${assignedBarangay ? ` — Barangay ${assignedBarangay}` : ""}`}
-        meta={
-          <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white">
-            {tab === "annual" ? `Year ${year}` : tab === "daily" ? date : periodLabel}
-          </span>
-        }
-        action={
-          <div className="flex gap-2">
-            <button
-              onClick={() => setRecordOpen(true)}
-              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90"
-            >
-              <Plus className="h-4 w-4" /> Record M1 Activity
-            </button>
-            <button
-              onClick={handlePrint}
-              className="inline-flex items-center gap-2 rounded-btn border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <Printer className="h-4 w-4" /> Print M1 Report
-            </button>
-          </div>
-        }
-      />
-
+    <div className="min-w-0">
+      <M1PageHeader title="Consolidated FHSIS Form M1" subtitle="Review municipal health-service indicators and case-level activity by reporting period." crumb="Consolidated Report" />
+      <M1ReportingPeriod period={period} year={year} month={month} quarter={quarter} years={years} onPeriodChange={changePeriod} onYearChange={changeYear} onMonthChange={changeMonth} onQuarterChange={changeQuarter} />
       {brandingError && <Card role="alert" className="mb-4 p-3 text-sm text-brand-danger">{brandingError}</Card>}
 
-      {/* Controls */}
-      <div className="no-print mb-6 flex flex-wrap items-center gap-3">
-        <div className="inline-flex rounded-btn border border-slate-200 bg-white p-1">
-          {["daily", "monthly", "annual", "print"].map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded-md px-3 py-1.5 text-sm font-semibold capitalize transition ${
-                tab === t ? "bg-brand-blue text-white" : "text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-
-        {tab === "daily" ? (
-          <div className="inline-flex items-center gap-1">
-            <button onClick={() => setDate((d) => shiftDate(d, -1))} className="rounded-md border border-slate-200 p-2 hover:bg-slate-50"><ChevronLeft className="h-4 w-4" /></button>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded-md border border-slate-200 px-3 py-1.5 text-sm" />
-            <button onClick={() => setDate((d) => shiftDate(d, 1))} className="rounded-md border border-slate-200 p-2 hover:bg-slate-50"><ChevronRight className="h-4 w-4" /></button>
-            <button onClick={() => setDate(todayStr())} className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-semibold hover:bg-slate-50">Today</button>
-          </div>
-        ) : (
-          <div className="inline-flex items-center gap-2">
-            {tab !== "annual" && (
-              <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="rounded-md border border-slate-200 px-3 py-1.5 text-sm">
-                {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-              </select>
-            )}
-            <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="rounded-md border border-slate-200 px-3 py-1.5 text-sm">
-              {Array.from({ length: 6 }, (_, i) => now.getFullYear() - i).map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <div className="no-print mb-6 flex items-center gap-2 rounded-lg border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger">
-          <AlertCircle className="h-4 w-4" /> {error}
-        </div>
-      )}
-
-      {/* Summary cards (monthly) */}
-      {tab === "monthly" && (
-         <>
-           <div className="no-print mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-             <StatCard icon="Activity" tone="blue" index={0} label="Total Services (month)" value={loading ? "…" : summary.participants} />
-             <StatCard icon="HeartPulse" tone="green" index={1} label="Family Planning" value={loading ? "…" : summary.fp} />
-             <StatCard icon="Baby" tone="green" index={2} label="Maternal Care" value={loading ? "…" : summary.maternal} />
-             <StatCard icon="Users" tone="amber" index={3} label="Child Care" value={loading ? "…" : summary.child} />
-           </div>
-          {/* Sex disaggregation — mirrors the Male/Female columns of the
-              printed FHSIS M1 form, so screen and paper always agree. */}
-          <Card className="no-print mb-6 p-4">
-            <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
-              <p className="text-sm font-semibold text-brand-ink">Sex breakdown (this month)</p>
-              <p className="text-sm text-brand-gray">
-                Male <span className="font-semibold text-brand-ink">{loading ? "…" : summary.male}</span>
-              </p>
-              <p className="text-sm text-brand-gray">
-                Female <span className="font-semibold text-brand-ink">{loading ? "…" : summary.female}</span>
-              </p>
-            </div>
-          </Card>
-        </>
-      )}
-
-      {/* Body */}
-      {loading ? (
-        <Card className="p-10 text-center text-sm text-slate-500">Loading M1 data…</Card>
-      ) : tab === "daily" ? (
-        <DailyView daily={daily} search={search} setSearch={setSearch} date={date} />
-      ) : tab === "monthly" ? (
-        <MonthlyView groups={monthlyGroups} byCode={monthly?.byCode || {}} expanded={expanded} toggle={toggle} openDrill={openDrill} />
-      ) : tab === "annual" ? (
-        <AnnualView groups={annualGroups} expanded={expanded} toggle={toggle} openDrill={openDrill} year={year} />
-      ) : (
-        <div>
-          <div className="no-print mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-slate-600">
-              Print preview — this is the exact FHSIS M1 form that will be printed or saved as PDF (A4).
-            </p>
-            <button
-              onClick={() => startPrint({ groups: monthlyGroups, meta, periodLabel, barangay: assignedBarangay })}
-              className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90"
-            >
-              <Printer className="h-4 w-4" /> Print / Save as PDF
-            </button>
-          </div>
-          <div className="m1-preview overflow-x-auto rounded-card border border-slate-200 bg-slate-100 p-4">
-            <M1PrintDocument groups={monthlyGroups} meta={meta} periodLabel={periodLabel} barangay={assignedBarangay} />
-          </div>
-        </div>
-      )}
-
-      {drill && (
-        <DrilldownModal
-          drill={drill}
-          data={drillData}
-          loading={drillLoading}
-          onClose={() => { setDrill(null); setDrillData(null); }}
-        />
-      )}
-
-      {recordOpen && catalog && (
-        <RecordModal
-          catalog={catalog}
-          residents={residents}
-          onClose={() => setRecordOpen(false)}
-          onSaved={() => { setRecordOpen(false); loadData(); }}
-        />
-      )}
-
-      {portal}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Daily participants
-// ---------------------------------------------------------------------------
-function DailyView({ daily, search, setSearch, date }) {
-  const rows = (daily?.participants || []).filter((p) => {
-    if (!search) return true;
-    const n = fullName(p.resident).toLowerCase();
-    return n.includes(search.toLowerCase()) || (p.indicator || "").toLowerCase().includes(search.toLowerCase());
-  });
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-        <h3 className="font-semibold text-slate-900">M1 Activity for {date}</h3>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search resident / indicator" className="rounded-md border border-slate-200 py-1.5 pl-8 pr-3 text-sm" />
-        </div>
-      </div>
-      {rows.length === 0 ? (
-        <div className="px-5 py-12 text-center text-sm text-slate-500">No M1 activity recorded for {date}.</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-5 py-3">Resident</th>
-                <th className="px-5 py-3">Section</th>
-                <th className="px-5 py-3">Indicator / Service</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Source</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.map((p) => (
-                <tr key={`${p.source}-${p.id}`} className="hover:bg-slate-50">
-                  <td className="px-5 py-3 font-medium text-slate-900">{fullName(p.resident) || "—"}</td>
-                  <td className="px-5 py-3 text-slate-600">{p.subsection || p.section}</td>
-                  <td className="px-5 py-3 text-slate-700">{p.indicator}</td>
-                  <td className="px-5 py-3"><span className="rounded-full bg-brand-green/10 px-2 py-0.5 text-xs font-semibold text-brand-green">{p.status}</span></td>
-                  <td className="px-5 py-3 text-xs text-slate-400">{p.source}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Monthly — expandable sections
-// ---------------------------------------------------------------------------
-/**
- * @param {{groups: any[], expanded: Set<string>, toggle: (key: string) => void, openDrill: (indicator: any) => void, byCode?: any}} props
- */
-function MonthlyView({ groups, expanded, toggle, openDrill }) {
-  if (!groups.length) return <Card className="p-10 text-center text-sm text-slate-500">No indicators.</Card>;
-  return (
-    <div className="space-y-3">
-      {groups.map((g) => (
-        <Card key={g.section} className="overflow-hidden">
-          <button onClick={() => toggle(g.section)} className="flex w-full items-center justify-between bg-brand-blue px-5 py-3 text-left text-white">
-            <span className="font-semibold">SECTION {g.section} — {g.title}</span>
-            {expanded.has(g.section) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-          </button>
-          {expanded.has(g.section) && (
-            <div className="divide-y divide-slate-100">
-              {g.subsections.map((sub) => (
-                <div key={sub.subsection} className="px-5 py-3">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{sub.subsection}</p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <tbody className="divide-y divide-slate-50">
-                        {sub.items.map((it) => (
-                          <tr key={it.code} className="hover:bg-slate-50">
-                            <td className="py-2 pr-3 text-slate-700">{it.name}</td>
-                            <td className="w-40 py-2 text-right text-xs text-slate-500">
-                              {it.sexBreakdown && it.bySex ? (
-                                <span>M {it.bySex.Male} · F {it.bySex.Female}</span>
-                              ) : it.ageGroups?.length > 1 ? (
-                                <span>{it.ageGroups.map((a) => `${a}:${it.byAge?.[a] ?? 0}`).join(" · ")}</span>
-                              ) : null}
-                            </td>
-                            <td className="w-20 py-2 text-right">
-                              <button
-                                onClick={() => openDrill(it)}
-                                className="rounded-md px-2 py-1 font-stat text-base font-bold text-brand-blue hover:bg-brand-blue/10"
-                                title="View underlying records"
-                              >
-                                {it.total}
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+      {loading ? <SkeletonTable rows={8} cols={4} className="ui-tcl-data-table" />
+        : error ? <Card><ErrorState title="Unable to load the M1 report" message={error} onRetry={() => setRetry((value) => value + 1)} /></Card>
+          : indicatorRows.length === 0 ? <TclEmptyState compact title="No M1 indicators" description={`No reporting data is available for ${periodLabel}.`} />
+            : <>
+              {/* Compact KPI summary */}
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border border-brand-border bg-brand-bg/50 p-3">
+                  <p className="text-xs font-medium text-brand-gray">Indicators</p>
+                  <p className="mt-1 text-lg font-semibold text-brand-ink">{indicatorRows.length}</p>
                 </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      ))}
-    </div>
-  );
-}
+                <div className="rounded-lg border border-brand-border bg-green-50 p-3">
+                  <p className="text-xs font-medium text-brand-gray">With Values</p>
+                  <p className="mt-1 text-lg font-semibold text-green-700">{activeIndicators}</p>
+                </div>
+                <div className="rounded-lg border border-brand-border bg-teal-50 p-3">
+                  <p className="text-xs font-medium text-brand-gray">Sections</p>
+                  <p className="mt-1 text-lg font-semibold text-teal-700">{sections.length}</p>
+                </div>
+                <div className="rounded-lg border border-brand-border bg-slate-50 p-3">
+                  <p className="text-xs font-medium text-brand-gray">Period</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-700">{periodLabel}</p>
+                </div>
+              </div>
 
-// ---------------------------------------------------------------------------
-// Annual — month matrix per section
-// ---------------------------------------------------------------------------
-function AnnualView({ groups, expanded, toggle, openDrill, year }) {
-  if (!groups.length) return <Card className="p-10 text-center text-sm text-slate-500">No indicators.</Card>;
-  return (
-    <div className="space-y-3">
-      {groups.map((g) => (
-        <Card key={g.section} className="overflow-hidden">
-          <button onClick={() => toggle(g.section)} className="flex w-full items-center justify-between bg-brand-blue px-5 py-3 text-left text-white">
-            <span className="font-semibold">SECTION {g.section} — {g.title}</span>
-            {expanded.has(g.section) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-          </button>
-          {expanded.has(g.section) && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 text-slate-500">
-                  <tr>
-                    <th className="sticky left-0 bg-slate-50 px-3 py-2 text-left">Indicator ({year})</th>
-                    {MONTHS.map((m) => <th key={m} className="px-2 py-2 text-right">{m.slice(0, 3)}</th>)}
-                    <th className="px-3 py-2 text-right font-bold">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {g.subsections.flatMap((sub) => sub.items).map((it) => (
-                    <tr key={it.code} className="hover:bg-slate-50">
-                      <td className="sticky left-0 bg-white px-3 py-2 text-left text-slate-700">{it.name}</td>
-                      {it.months.map((v, i) => <td key={i} className="px-2 py-2 text-right text-slate-600">{v || ""}</td>)}
-                      <td className="px-3 py-2 text-right">
-                        <button onClick={() => openDrill(it)} className="font-stat font-bold text-brand-blue hover:underline">{it.annual}</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      ))}
-    </div>
-  );
-}
+              {/* Tab navigation for sections */}
+              <div className="mb-4 flex flex-wrap gap-2">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    onClick={() => setActiveTab(tab.value)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                      activeTab === tab.value
+                        ? "bg-brand-blue text-white"
+                        : "bg-brand-bg text-brand-ink border border-brand-border hover:bg-brand-light"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={printReport}
+                  disabled={printing || loading || Boolean(error)}
+                  className="ml-auto ui-tcl-control ui-tcl-control-primary !text-xs"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {printing ? "Preparing..." : "Print"}
+                </button>
+              </div>
 
-// ---------------------------------------------------------------------------
-// Drill-down modal
-// ---------------------------------------------------------------------------
-function DrilldownModal({ drill, data, loading, onClose }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <div>
-            <h3 className="font-semibold text-slate-900">Underlying records</h3>
-            <p className="text-sm text-slate-500">{drill.name}</p>
-          </div>
-          <button onClick={onClose} className="rounded-md p-1.5 hover:bg-slate-100"><X className="h-5 w-5" /></button>
-        </div>
-        <div className="max-h-[70vh] overflow-y-auto p-5">
-          {loading ? (
-            <p className="py-8 text-center text-sm text-slate-500">Loading records…</p>
-          ) : data?.error ? (
-            <p className="py-8 text-center text-sm text-brand-danger">{data.error}</p>
-          ) : !data || data.count === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-500">No underlying records for this period.</p>
-          ) : (
-            <>
-              <p className="mb-3 text-sm text-slate-600">
-                <strong>{data.count}</strong> record(s) produced this total.
-              </p>
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2">Resident / Household</th>
-                    <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Age / Sex</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Detail</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {data.records.map((r) => (
-                    <tr key={r.id}>
-                      <td className="px-3 py-2 font-medium text-slate-800">
-                        {fullName(r.resident) || r.member?.name || r.household?.head_name || r.household_id || "—"}
-                      </td>
-                      <td className="px-3 py-2 text-slate-600">{r.date || "—"}</td>
-                      <td className="px-3 py-2 text-slate-600">{[r.ageGroup, r.sex].filter(Boolean).join(" / ") || "—"}</td>
-                      <td className="px-3 py-2 text-slate-600">{r.status || "—"}</td>
-                      <td className="px-3 py-2 text-xs text-slate-500">
-                        {r.detail && Object.keys(r.detail).length ? JSON.stringify(r.detail) : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Record M1 activity modal
-// ---------------------------------------------------------------------------
-function RecordModal({ catalog, residents, onClose, onSaved }) {
-  const recordable = useMemo(
-    () => (catalog.indicators || []).filter((i) => i.source === "m1_records"),
-    [catalog],
-  );
-  const sections = useMemo(() => {
-    const set = new Set(recordable.map((i) => i.section));
-    return SECTION_ORDER.filter((s) => set.has(s));
-  }, [recordable]);
-
-  const [section, setSection] = useState(sections[0] || "A");
-  const sectionInds = recordable.filter((i) => i.section === section);
-  const [code, setCode] = useState(sectionInds[0]?.code || "");
-  const [resident, setResident] = useState(null);
-  const [recordDate, setRecordDate] = useState(todayStr());
-  const [value, setValue] = useState("1");
-  const [sex, setSex] = useState("");
-  const [ageGroup, setAgeGroup] = useState("");
-  const [remarks, setRemarks] = useState("");
-  const [measure, setMeasure] = useState("current_end");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    const list = recordable.filter((i) => i.section === section);
-    setCode(list[0]?.code || "");
-  }, [section, recordable]);
-
-  const indicator = recordable.find((i) => i.code === code);
-  const isFp = indicator?.dataType === "fp_method" || indicator?.dataType === "fp_total";
-
-  const submit = async () => {
-    setErr("");
-    if (!code) { setErr("Select an indicator."); return; }
-    setSaving(true);
-    try {
-      const detail = isFp ? { measure } : {};
-      await m1Api.createRecord({
-        indicator_code: code,
-        residentId: resident?.id || null,
-        record_date: recordDate,
-        value: Number(value) || 1,
-        sex: sex || "",
-        age_group: ageGroup || "",
-        remarks,
-        detail,
-      });
-      onSaved();
-    } catch (e) {
-      setErr(e?.message || "Failed to save record.");
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <h3 className="font-semibold text-slate-900">Record M1 Activity</h3>
-          <button onClick={onClose} className="rounded-md p-1.5 hover:bg-slate-100"><X className="h-5 w-5" /></button>
-        </div>
-        <div className="space-y-4 p-5">
-          {err && <div className="rounded-lg bg-brand-danger/10 px-3 py-2 text-sm text-brand-danger">{err}</div>}
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-600">Section</span>
-              <select value={section} onChange={(e) => setSection(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-                {sections.map((s) => <option key={s} value={s}>{s} — {SECTION_TITLES[s]}</option>)}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-600">Indicator</span>
-              <select value={code} onChange={(e) => setCode(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-                {sectionInds.map((i) => <option key={i.code} value={i.code}>{i.name}</option>)}
-              </select>
-            </label>
-          </div>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-600">Resident (optional for barangay-level indicators)</span>
-            <ResidentSearchSelect residents={residents} value={resident} onChange={setResident} showId={false} />
-          </label>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-600">Date</span>
-              <input type="date" value={recordDate} onChange={(e) => setRecordDate(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-600">Value / Count</span>
-              <input type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
-            </label>
-          </div>
-
-          {isFp && (
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-600">FP Measure</span>
-              <select value={measure} onChange={(e) => setMeasure(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-                {(catalog.fpMeasures || []).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-              </select>
-            </label>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-600">Sex (override)</span>
-              <select value={sex} onChange={(e) => setSex(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-                <option value="">Auto (from resident)</option>
-                <option>Male</option>
-                <option>Female</option>
-                <option>Other</option>
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-600">Age group (override)</span>
-              <select value={ageGroup} onChange={(e) => setAgeGroup(e.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-                <option value="">Auto (from birth date)</option>
-                {(indicator?.ageGroups || []).map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </label>
-          </div>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-600">Remarks</span>
-            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-          <button onClick={onClose} className="rounded-btn border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
-          <button onClick={submit} disabled={saving} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90 disabled:opacity-60">
-            {saving ? "Saving…" : "Save Record"}
-          </button>
-        </div>
-      </div>
+              {/* Content panels */}
+              <div className="space-y-3">
+                {selectedTab.value === "daily" ? (
+                  <>
+                    <div className="rounded-lg bg-white border border-brand-border p-4">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-brand-ink">Daily Health-Service Activity</h3>
+                          <p className="mt-0.5 text-xs text-brand-gray">{filteredDailyRows.length} records</p>
+                        </div>
+                        <label className="flex items-center gap-2 text-xs font-medium text-brand-gray">
+                          Date
+                          <input type="date" min={dailyDateMin} max={dailyDateMax} value={dailyDate} onChange={(event) => changeDailyDate(event.target.value)} className="ui-tcl-control ui-tcl-control-secondary" />
+                        </label>
+                      </div>
+                      <TclToolbar onSearch={setSearch} searchValue={search} showFilter={false} showExport={false} showRefresh={false} />
+                      {filteredDailyRows.length === 0 ? <TclEmptyState compact type={search ? "search" : "empty"} title="No daily activity" description={`No M1 activity records were found for ${dailyDate}.`} /> : <>
+                        <DataTable rows={pagedDailyRows} dense compact striped mobileCards stickyHeader maxHeight="clamp(20rem, calc(100dvh - 18rem), 60vh)" className="ui-tcl-data-table !rounded-lg !shadow-none border border-brand-border" tableClassName="min-w-[56rem]" columns={[
+                          { key: "date", label: "Date" },
+                          { key: "residentName", label: "Resident", wrap: true },
+                          { key: "section", label: "Section" },
+                          { key: "indicatorCode", label: "Code", render: (row) => row.indicatorCode || "—" },
+                          { key: "indicator", label: "Service / Indicator", wrap: true },
+                          { key: "status", label: "Status", render: (row) => row.status ? <StatusBadge value={row.status} /> : "—" },
+                        ]} />
+                        {filteredDailyRows.length > pageSize && <TablePagination total={filteredDailyRows.length} page={safePage} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} className="mt-3" />}
+                      </>}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="rounded-lg bg-white border border-brand-border p-4 space-y-3">
+                      <div className="flex items-baseline justify-between gap-4">
+                        <div>
+                          <h3 className="text-base font-semibold text-brand-ink">{selectedTab.label}</h3>
+                          <p className="mt-0.5 text-xs text-brand-gray">{sectionRows.length} indicator{sectionRows.length !== 1 ? "s" : ""}</p>
+                        </div>
+                        <Link to={`/app/health_supervisor/m1-section/${selectedTab.value}?${sectionQuery}`} className="ui-tcl-control ui-tcl-control-secondary !min-h-8 !px-2.5 !text-xs">Details</Link>
+                      </div>
+                      <M1IndicatorTable rows={sectionRows} onView={setSelectedIndicator} />
+                    </div>
+                  </>
+                )}
+              </div>
+            </>}
+      <M1DrilldownDialog indicator={selectedIndicator} periodLabel={periodLabel} records={drilldown} error={drilldownError} onRetry={() => setDrillRetry((value) => value + 1)} onClose={() => setSelectedIndicator(null)} />
+      {portal}
     </div>
   );
 }

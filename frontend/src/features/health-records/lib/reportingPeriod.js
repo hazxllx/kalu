@@ -45,13 +45,20 @@ export const QUARTER_RANGE_LABEL = {
   4: "October–December",
 };
 
-const MONTH_NAMES = [
+export const MONTH_LABELS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 
 /** Quarter (1-4) that a 0-based month belongs to. */
 export const quarterOfMonth0 = (month0) => Math.floor((Number(month0) || 0) / 3) + 1;
+
+export const reportingYearOptions = (selectedYear = new Date().getFullYear(), lookback = 10) => {
+  const current = new Date().getFullYear();
+  return [...new Set([Number(selectedYear), ...Array.from({ length: lookback + 1 }, (_, index) => current - index)])]
+    .filter(Number.isInteger)
+    .sort((a, b) => b - a);
+};
 
 /** 0-based months of a quarter (defaults to Q1 for an invalid quarter). */
 export const quarterMonths0 = (quarter) => QUARTER_MONTHS_0[Number(quarter)] || QUARTER_MONTHS_0[1];
@@ -102,7 +109,7 @@ export const inReportingPeriod = (dateValue, descriptor) => {
 export const periodLabel = (descriptor = {}) => {
   const type = typeOf(descriptor);
   const year = descriptor.year;
-  if (type === "monthly") return `${MONTH_NAMES[Number(descriptor.month) || 0]} ${year}`;
+  if (type === "monthly") return `${MONTH_LABELS[Number(descriptor.month) || 0]} ${year}`;
   if (type === "quarterly") {
     const q = Number(descriptor.quarter) || 1;
     return `Q${q} ${year} · ${QUARTER_RANGE_LABEL[q]}`;
@@ -119,7 +126,7 @@ export const periodLabel = (descriptor = {}) => {
  */
 export const fhsisPeriodLabel = (descriptor = {}) => {
   const type = typeOf(descriptor);
-  if (type === "monthly") return MONTH_NAMES[Number(descriptor.month) || 0];
+  if (type === "monthly") return MONTH_LABELS[Number(descriptor.month) || 0];
   if (type === "quarterly") {
     const q = Number(descriptor.quarter) || 1;
     return `${quarterOrdinal(q)} Quarter (${QUARTER_RANGE_LABEL[q]})`;
@@ -149,6 +156,7 @@ export default {
   QUARTER_MONTHS_0,
   QUARTER_RANGE_LABEL,
   quarterOfMonth0,
+  reportingYearOptions,
   quarterMonths0,
   quarterOrdinal,
   periodRange,

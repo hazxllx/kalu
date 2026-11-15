@@ -1,3 +1,12 @@
+/**
+ * Document upload and verification endpoints (government ID, resident documents, screening).
+ *
+ * Handles document upload for registration verification and clinical records.
+ * Includes pre-screening (no persistence), persistent upload with verification queue,
+ * and verification review workflows. All file uploads are validated for type, size,
+ * and file signature authenticity. OCR results are cached server-side for identity
+ * cross-checking without retransmitting sensitive data.
+ */
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/authenticate.js';

@@ -1,3 +1,11 @@
+/**
+ * Authentication endpoints (sign-in, password setup, session status).
+ *
+ * Supports email/password authentication with Supabase Auth backend.
+ * Includes rate limiting on login attempts and password setup to prevent brute force.
+ * Session status endpoint allows clients to check auth state without triggering
+ * full authentication middleware.
+ */
 import { Router } from 'express';
 
 import env from '../config/env.js';

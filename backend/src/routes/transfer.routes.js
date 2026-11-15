@@ -1,3 +1,13 @@
+/**
+ * Resident transfer workflow endpoints (barangay-to-barangay movement).
+ *
+ * Two-phase workflow:
+ * 1. Resident self-service: initiate request, upload documents, submit to Health Supervisor
+ * 2. Health personnel review: accept/reject and route to destination barangay PHN/MHO
+ *
+ * Permissions are dynamically enforced: residents can only modify their own requests,
+ * staff can only review requests for residents in their scope.
+ */
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';

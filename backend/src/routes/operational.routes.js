@@ -1,3 +1,11 @@
+/**
+ * Operational tracking endpoints (follow-ups, TCL forms, maternal visits, immunizations, notifications).
+ *
+ * Generic CRUD routes for various operational record types scoped by resident.
+ * Permissions are determined dynamically based on the record kind and operation.
+ * All records are scoped to the caller's barangay assignment (if applicable) or
+ * municipality-wide for MHO/PHN/Admin.
+ */
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';

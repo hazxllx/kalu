@@ -1,3 +1,9 @@
+/**
+ * Health check endpoint (public, no authentication required).
+ *
+ * Returns server readiness status including database connectivity.
+ * Used by deployment health probes and load balancers.
+ */
 import { Router } from 'express';
 
 import * as healthController from '../controllers/health.controller.js';

@@ -64,6 +64,8 @@ export const drilldown = async (req, res) =>
   sendData(res, await service.drilldown({
     user: req.user,
     indicatorCode: req.params.code,
+    period: req.query.period || undefined,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
     year: num(req.query.year, now().getFullYear()),
     month: req.query.month != null ? num(req.query.month) : null,
     barangayId: req.query.barangayId || null,
@@ -131,8 +133,88 @@ export const saveRemarks = async (req, res) => {
   }));
 };
 
+// Program-specific record retrieval endpoints
+export const getPrenatalRecords = async (req, res) =>
+  sendData(res, await service.getRecordsByProgram({
+    user: req.user,
+    programId: 'prenatal',
+    period: req.query.period || 'monthly',
+    year: num(req.query.year, now().getFullYear()),
+    month: req.query.month != null ? num(req.query.month) : null,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
+    barangayId: req.query.barangayId || null,
+  }));
+
+export const getNcdRecords = async (req, res) =>
+  sendData(res, await service.getRecordsByProgram({
+    user: req.user,
+    programId: 'ncd',
+    period: req.query.period || 'monthly',
+    year: num(req.query.year, now().getFullYear()),
+    month: req.query.month != null ? num(req.query.month) : null,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
+    barangayId: req.query.barangayId || null,
+  }));
+
+export const getCervicalRecords = async (req, res) =>
+  sendData(res, await service.getRecordsByProgram({
+    user: req.user,
+    programId: 'cervical',
+    period: req.query.period || 'monthly',
+    year: num(req.query.year, now().getFullYear()),
+    month: req.query.month != null ? num(req.query.month) : null,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
+    barangayId: req.query.barangayId || null,
+  }));
+
+export const getVisualRecords = async (req, res) =>
+  sendData(res, await service.getRecordsByProgram({
+    user: req.user,
+    programId: 'visual',
+    period: req.query.period || 'monthly',
+    year: num(req.query.year, now().getFullYear()),
+    month: req.query.month != null ? num(req.query.month) : null,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
+    barangayId: req.query.barangayId || null,
+  }));
+
+export const getOralRecords = async (req, res) =>
+  sendData(res, await service.getRecordsByProgram({
+    user: req.user,
+    programId: 'oral',
+    period: req.query.period || 'monthly',
+    year: num(req.query.year, now().getFullYear()),
+    month: req.query.month != null ? num(req.query.month) : null,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
+    barangayId: req.query.barangayId || null,
+  }));
+
+export const getEnvironmentalRecords = async (req, res) =>
+  sendData(res, await service.getRecordsByProgram({
+    user: req.user,
+    programId: 'environmental',
+    period: req.query.period || 'monthly',
+    year: num(req.query.year, now().getFullYear()),
+    month: req.query.month != null ? num(req.query.month) : null,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
+    barangayId: req.query.barangayId || null,
+  }));
+
+export const getEnrollmentRecords = async (req, res) =>
+  sendData(res, await service.getRecordsByProgram({
+    user: req.user,
+    programId: 'enrollment',
+    period: req.query.period || 'monthly',
+    year: num(req.query.year, now().getFullYear()),
+    month: req.query.month != null ? num(req.query.month) : null,
+    quarter: req.query.quarter != null ? num(req.query.quarter) : null,
+    barangayId: req.query.barangayId || null,
+  }));
+
 export default {
   catalog, syncCatalog, daily, monthly, annual, report, drilldown,
   createRecord, updateRecord, removeRecord, getMeta, saveMeta, saveRemarks,
   listManual, saveManual,
+  getPrenatalRecords, getNcdRecords, getCervicalRecords, getVisualRecords,
+  getOralRecords, getEnvironmentalRecords, getEnrollmentRecords,
 };

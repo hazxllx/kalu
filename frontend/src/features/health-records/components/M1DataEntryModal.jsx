@@ -1,6 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { X, CheckCircle2, Save, ClipboardList } from "lucide-react";
-import { Card } from "@/components/common/Card";
+import ErrorState from "@/components/common/ErrorState";
+import { SkeletonTable } from "@/components/system/Skeleton";
+import TclEmptyState from "./TclEmptyState";
+import { MONTH_LABELS, reportingYearOptions } from "../lib/reportingPeriod";
 import { m1Api } from "@/services/api";
 
 /**
@@ -19,11 +22,6 @@ import { m1Api } from "@/services/api";
  * immunizations, households, mortality) never appear here, so no value is ever
  * counted twice.
  */
-
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
 
 const SECTION_TITLES = {
   A: "A. Family Planning",
@@ -76,16 +74,32 @@ export default function M1DataEntryModal({ onClose, onSaved, initialSection, ini
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [savedNote, setSavedNote] = useState("");
+  const dialogRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
-  const years = useMemo(() => {
-    const y = now.getFullYear();
-    return [y + 1, y, y - 1, y - 2, y - 3];
-  }, [now]);
+  const years = useMemo(() => reportingYearOptions(year), [year]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.focus();
+    const onKeyDown = (event) => { if (event.key === "Escape") onCloseRef.current(); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
   // Load the manual indicator catalog + stored figures for the selected month.
   const loadMonth = React.useCallback(() => {
     setLoading(true);
     setError(null);
+    setIndicators([]);
+    setEntries([]);
+    setRemarksMap({});
     return m1Api
       .listManual({ year, month })
       .then((res) => {
@@ -158,7 +172,7 @@ export default function M1DataEntryModal({ onClose, onSaved, initialSection, ini
         remarks,
       });
       await loadMonth();
-      setSavedNote(`Saved ${current.code} for ${MONTHS[month - 1]} ${year}.`);
+      setSavedNote(`Saved ${current.code} for ${MONTH_LABELS[month - 1]} ${year}.`);
       if (onSaved) onSaved();
     } catch (e) {
       setError(e?.message || "Could not save the M1 data.");
@@ -168,12 +182,12 @@ export default function M1DataEntryModal({ onClose, onSaved, initialSection, ini
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="m1-entry-title" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-card border border-brand-border bg-white shadow-card outline-none">
         <div className="p-6">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
-              <h3 className="flex items-center gap-2 text-lg font-semibold text-brand-ink">
+              <h3 id="m1-entry-title" className="flex items-center gap-2 text-lg font-semibold text-brand-ink">
                 <ClipboardList className="h-5 w-5 text-brand-blue" /> Record M1 Data
               </h3>
               <p className="mt-0.5 text-sm text-brand-gray">
@@ -196,7 +210,7 @@ export default function M1DataEntryModal({ onClose, onSaved, initialSection, ini
             <div>
               <label className="text-sm font-medium text-brand-ink">Reporting Month</label>
               <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className={`${inputCls} cursor-pointer`}>
-                {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                {MONTH_LABELS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
               </select>
             </div>
             <div>
@@ -213,10 +227,10 @@ export default function M1DataEntryModal({ onClose, onSaved, initialSection, ini
             </div>
           </div>
 
-          {error && <p className="mt-4 rounded-btn bg-brand-danger/10 px-3.5 py-2.5 text-sm text-brand-danger">{error}</p>}
+          {error && <ErrorState compact title="Unable to load reporting figures" message={error} onRetry={loadMonth} />}
 
           {loading ? (
-            <p className="py-10 text-center text-sm text-brand-gray">Loading…</p>
+            <SkeletonTable rows={4} cols={3} className="mt-4" />
           ) : current ? (
             <div className="mt-5">
               <div className="rounded-btn bg-brand-bg px-3.5 py-3">
@@ -262,21 +276,21 @@ export default function M1DataEntryModal({ onClose, onSaved, initialSection, ini
               )}
             </div>
           ) : (
-            <p className="py-10 text-center text-sm text-brand-gray">No manual indicators found for this section.</p>
+            <TclEmptyState compact title="No manual indicators" description="Every indicator in this section is derived from operational records." />
           )}
 
           <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
-            <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Close</button>
+            <button onClick={onClose} className="ui-tcl-control ui-tcl-control-secondary">Close</button>
             <button
               disabled={saving || loading || !current}
               onClick={handleSave}
-              className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+              className="ui-tcl-control ui-tcl-control-primary"
             >
               <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save M1 Data"}
             </button>
           </div>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

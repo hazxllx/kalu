@@ -119,12 +119,12 @@ export default function PageHeader({
           </div>
         )}
         <div className={`ui-page-header-main flex flex-col md:flex-row md:items-end md:justify-between ${dense ? "gap-3" : "gap-4"}`}>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 w-full flex-1 md:w-auto">
             <h1 className={`break-words font-semibold tracking-tight text-white ${dense ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"}`}>
               {title}
             </h1>
             {subtitle && (
-              <p className={`max-w-prose break-words text-sm leading-relaxed text-white/70 ${dense ? "mt-1.5" : "mt-2"}`}>
+              <p className={`break-words text-sm leading-relaxed text-white/70 ${dense ? "mt-1.5" : "mt-2 max-w-prose"}`}>
                 {subtitle}
               </p>
             )}

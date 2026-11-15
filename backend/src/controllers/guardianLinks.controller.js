@@ -1,3 +1,11 @@
+/**
+ * Guardian link endpoints for minor residents.
+ *
+ * Manages the relationship verification workflow between minors and their guardians.
+ * Includes staff-initiated links, resident-initiated requests, verification reviews,
+ * and corrections. Guardian access to records is NOT granted by any link here;
+ * that requires a separate explicit authorization policy.
+ */
 import * as guardianLinksService from '../services/guardianLinks.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
 

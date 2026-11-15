@@ -1,3 +1,11 @@
+/**
+ * Consultation endpoints (vitals, assessments, treatment, referrals).
+ *
+ * Handles consultation CRUD with server-side validation of vitals and clinical data.
+ * Idempotency keys ensure offline clients can safely retry without duplicates.
+ * Scope is enforced by barangay assignment (Health Supervisor / PHN) or municipality (MHO).
+ * Resident self-service allows viewing their own consultation history.
+ */
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';

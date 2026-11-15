@@ -1,3 +1,13 @@
+/**
+ * Resident registration and account activation endpoints.
+ *
+ * Handles two registration workflows:
+ * 1. New resident registration (self-service or staff-initiated)
+ * 2. Existing resident account activation (linking a login to an existing barangay record)
+ *
+ * Authorization and scope checks are performed in the service layer.
+ * All registration forms require identity verification and validation.
+ */
 import * as registrationService from '../services/registration.service.js';
 import { sendCreated, sendData } from '../utils/apiResponse.js';
 

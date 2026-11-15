@@ -186,7 +186,7 @@ export default function TclWorkspace() {
                     <Link
                       key={it.id}
                       to={unavailable ? "#" : it.to}
-                      className={`group flex items-center gap-3 rounded-btn border px-3.5 py-3 transition-all ${
+                      className={`group flex items-start gap-3 rounded-btn border px-3.5 py-3 transition-all ${
                         unavailable
                           ? "cursor-not-allowed border-brand-border bg-brand-paper"
                           : "border-brand-border bg-brand-paper hover:border-brand-rule hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
@@ -211,7 +211,7 @@ export default function TclWorkspace() {
                         <h3 className="text-sm font-semibold leading-tight text-brand-ink">
                           {it.name}
                         </h3>
-                        <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-brand-gray">
+                        <p className="mt-0.5 text-xs leading-tight text-brand-gray">
                           {unavailable ? note : it.desc}
                         </p>
                       </div>

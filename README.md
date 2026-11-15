@@ -2,92 +2,125 @@
 
 ## Community Health Risk Monitoring and Early Intervention System
 
-KALUSAGAP is a web application for the Municipal Health Office of Pili,
-Camarines Sur. It supports residents and authorized municipal health personnel
-with resident registration, household and community monitoring, health-risk
-workflows, referrals, follow-up, and municipality-level analytics.
+KALUSAGAP is a web-based health information system for the Municipal Health Office of Pili, Camarines Sur. It helps residents and municipal health personnel manage resident registration, household and community health monitoring, clinical workflows, risk assessment, referrals, follow-ups, and municipality-level analytics for early intervention and data-driven decisions.
 
-The system is intended for residents, barangay health workers, RHU personnel,
-public health nurses, health supervisors, the Municipal Health Officer, and
-system administrators. It brings community health information and follow-up
-workflows into one role-scoped application while limiting access to personal
-and clinical records.
+The system serves residents, barangay health workers (BHW), Rural Health Unit (RHU) personnel, public health nurses (PHN), health supervisors, the Municipal Health Officer (MHO), and system administrators. It brings community health data and clinical workflows into one role-scoped, secure application with strict access controls on personal and clinical data.
 
-## System Overview
+---
 
-The repository contains a React frontend, an Express API, and Supabase/PostgreSQL
-migrations. The API validates requests, derives authorization and geographic
-scope from the authenticated profile, and returns aggregate analytics without
-exposing resident-level details in map summaries.
+## Purpose
 
-The implemented application includes:
+- **Resident Registration and Verification:** Onboarding with document submission, automated screening, and staff review
+- **Household Profiling:** Family grouping, member health tracking, and risk assessment
+- **Clinical Workflows:** Triage, consultations, vital signs, health services, and appointments
+- **Referral Management:** Coordinated referrals between BHWs, RHU personnel, and hospitals
+- **Follow-up Tracking:** Scheduled and case-based follow-ups with outcome recording
+- **Health Risk Monitoring:** Risk assessment using validated clinical indicators
+- **Health Records:** FHSIS M1 monthly reporting, maternal/postpartum health, NCD tracking, oral health, and TB case listing
+- **Early Warning and Analytics:** Municipality and barangay dashboards with geographic mapping
+- **Offline-First Capability:** Local draft storage and conflict resolution for areas with weak connectivity
+- **Audit and Compliance:** Audit trail of business events and system request logging
 
-- Supabase Auth sign-in with server-side role and profile checks
-- Resident registration, document submission, manual verification, and transfer
-  requests
-- Household profiling, household-member health profiles, and barangay review
-- RHU intake and PHN submission processing
-- Consultation, referral, and follow-up workflows
-- Notifications and operational records
-- FHSIS M1 reporting
-- Early-warning analytics and a barangay community health map
-- Resident, household, and document APIs with scope-aware access
+---
 
-The actual behavior available in a deployment depends on its Supabase
-configuration and applied migrations. The migration state of any linked remote
-project must be checked separately.
+## Community Health Context
+
+- **FHSIS M1 Compliance:** Aligns with Field Health Services Information System monthly indicators
+- **DOH Workflows:** Follows Department of Health standards for maternal health, communicable disease, and health services
+- **BHW Integration:** Supports community data collection by barangay health workers
+- **RHU Coordination:** Facilitates intake, triage, and referral processing
+- **Geographic Scope:** Operates at the barangay level with municipal aggregation for planning
+
+---
 
 ## User Roles
 
-The canonical role identifiers are defined in `backend/src/config/roles.js` and
-mirrored by the frontend.
+| Role | Primary Responsibilities |
+|------|--------------------------|
+| **Resident** | Register, verify identity, view own health records, book appointments |
+| **Barangay Health Worker (BHW)** | Collect household and health data, conduct intake, enter permitted M1 indicators |
+| **RHU Personnel** | Process intake, triage, consultations, medicine dispensing, referrals, certificate approval, report submission |
+| **Public Health Nurse (PHN)** | Clinical case management, verification, referral processing, follow-up oversight, M1 review |
+| **Health Supervisor** | Barangay-level resident and household management, verification, clinical oversight, analytics |
+| **Municipal Health Officer (MHO)** | Municipality-wide access, referral oversight, M1 and report approval, community analytics |
+| **Admin** | Account management, role assignment, system configuration, access control |
 
-| Role | Main responsibilities |
-| --- | --- |
-| `admin` | User, role, and system administration |
-| `mho` | Municipality-wide resident, referral, reporting, M1, and community analytics access |
-| `phn` | Clinical workflows, resident verification, referrals, follow-up, intake processing, and municipality-wide analytics |
-| `health_supervisor` | Barangay-scoped resident, household, verification, clinical, intake, triage, referral, follow-up, and analytics workflows |
-| `rhu_personnel` | RHU intake, triage, and authorized reporting workflows |
-| `bhw` | Household and community data collection, intake, and permitted M1 data entry |
-| `resident` | Own profile, registration and verification status, and authorized resident self-service |
+---
 
-`resident-limited` is a restricted account state for residents awaiting
-verification, not a separate staff role.
+## Key Features
+
+1. **Authentication and Access Control:** Email/password sign-in via Supabase Auth, password recovery, JWT sessions, and server-side role resolution
+2. **Resident Registration and Verification:** Demographics, guardian linking for minors, document upload, automated screening, staff review, and barangay transfers
+3. **Household Profiling:** Household creation, member management, health status tracking, and risk scoring
+4. **Clinical Consultations and Triage:** Vital signs, blood pressure classification, assessments, medicine dispensing, and status tracking
+5. **Health Records:** M1 FHSIS reporting (150+ indicators), maternal health, NCD records, oral health, TB case listing, and environmental health assessments
+6. **Referral Management:** Referral creation, recipient acceptance, outcome tracking, and lab result integration
+7. **Follow-Up Workflows:** Scheduling, BHW task assignment, status tracking, and decision recording
+8. **Medical Certificates:** Request, RHU triage, approval or denial, and certificate directory
+9. **Health Services and Appointments:** Program scheduling, staff assignment, resident booking, and attendance tracking
+10. **Municipal Reports:** Role-based templates, multi-level review (RHU → MHO → regional), version control, and deduplication
+11. **Analytics and Early Warning:** Risk clustering, geospatial mapping, trend analysis, and barangay comparison (aggregated, no individual data exposed)
+12. **Resident Risk Assessment:** Risk scoring by clinical indicators, stratification (low to critical), and risk-based follow-up recommendations
+13. **Offline Sync:** IndexedDB drafts, automatic sync on reconnection, and conflict resolution
+14. **Notifications:** Event-triggered, role-scoped alerts with deduplication
+15. **User Management:** Staff registration, approval workflows, role changes, and RHU station assignments
+16. **Role-Based Access Control:** Seven roles with feature-level, permission-level, and geographic scope enforcement
+17. **Document Management:** Private storage, automated screening (file type, readability, OCR), and manual review
+18. **Barangay Management:** Approved barangay list, GeoJSON boundaries, and barangay-level data filtering
+19. **Audit Trail and System Logs:** Business event logging and request logging with no PII
+
+---
 
 ## Technology Stack
 
-- **Frontend:** React 18, JavaScript, Vite, Tailwind CSS, React Router, React
-  Query, Recharts, React Leaflet, and Lucide React
-- **Backend:** Node.js 22+, JavaScript ES modules, Express, Multer, Nodemailer,
-  and the Supabase JavaScript client
-- **Database and identity:** Supabase Auth and PostgreSQL, with versioned SQL
-  migrations and Row Level Security policies
-- **Validation:** Node.js built-in test runner, ESLint, TypeScript type
-  checking, and the Vite production build
+**Frontend:** React 18, Vite 5, Tailwind CSS 3, Radix UI, shadcn/ui, React Router 7, TanStack React Query 5, React Hook Form, Zod, Recharts, React Leaflet 4, Framer Motion, Lucide React, Dexie.js 4 (IndexedDB), Workbox (PWA), Supabase JS Client 2.48+, date-fns
 
-## Repository Structure
+**Backend:** Node.js 22+, Express 4.22, Supabase JS Client 2.48+, Multer 1.4, Nodemailer 6, Tesseract.js 4 (OCR), Helmet 7, CORS, Express Rate Limit
 
-```text
-frontend/   React application, feature pages, and API clients
-backend/    Express API, services, and repositories
-supabase/   Supabase configuration, seed data, and ordered SQL migrations
-docs/       Database, backend, and integration documentation
-```
+**Database and Auth:** Supabase (PostgreSQL 15+, Auth, Storage), Row Level Security
 
-The Express API is organized by route, controller, service, and repository.
-Frontend feature modules call backend endpoints through shared API clients.
+**PDF and Reporting:** jsPDF, html2canvas, papaparse
+
+**Development and Deployment:** npm, ESLint, TypeScript (checkJs), Supabase CLI, Nodemon, Vercel (frontend), Render (backend)
+
+---
+
+## System Architecture
+
+**Frontend:** React SPA with lazy-loaded feature modules, TanStack Query for server state, context providers for auth and permissions, and an offline layer built on IndexedDB and a service worker.
+
+**Backend:** Express API with a middleware pipeline covering security headers, CORS, rate limiting, idempotency, authentication, role authorization, and scope enforcement. Routes map to controllers, which call services. Repositories handle data access through Supabase.
+
+**Database:** PostgreSQL on Supabase with Row Level Security policies on every data table, enforcing role and geographic scope as a second layer of control beside backend authorization.
+
+**Request Flow:**
+
+1. The user signs in through Supabase Auth and receives a JWT.
+2. The backend verifies the token and loads the user's profile.
+3. The backend checks the role against the endpoint's allowlist and any granular permissions.
+4. Barangay or facility scope is applied to queries, and RLS enforces it again at the database.
+
+---
+
+## Access Control Summary
+
+- **Server-side enforcement** is authoritative for all data access.
+- **Database RLS** provides a second, independent control.
+- **Frontend route guards** are for convenience only and are not a security boundary.
+
+---
 
 ## Setup
 
-### Requirements
+### Prerequisites
 
-- Node.js 22 or newer (the locked Supabase client dependencies require Node 22+)
+- Node.js 22 or newer
 - npm
-- A Supabase project for authentication and database-backed workflows
-- Supabase CLI for linking a project and applying migrations
+- Git
+- A Supabase account
+- Supabase CLI (`npm install -g supabase`)
 
-### Install
+### Installation
 
 ```bash
 git clone <repository-url>
@@ -95,56 +128,40 @@ cd KALUSAGAP
 npm run install:all
 ```
 
-`install:all` installs both the frontend and backend dependencies.
+### Environment Configuration
 
-### Configure environment
-
-Copy the safe templates:
-
-```powershell
-Copy-Item frontend\.env.example frontend\.env
-Copy-Item backend\.env.example backend\.env
-```
-
-Set the API base URL and public Supabase values in `frontend/.env`:
-
+**Frontend (`frontend/.env`):**
 ```env
 VITE_API_URL=http://localhost:5000/api
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<public-anon-key>
+VITE_ANALYTICS_ENABLED=false
 ```
 
-Set the matching project URL and server credentials in `backend/.env`:
-
+**Backend (`backend/.env`):**
 ```env
 PORT=5000
-CLIENT_URL=http://localhost:5173
 NODE_ENV=development
+CLIENT_URL=http://localhost:5173
 TRUST_PROXY=loopback
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<public-anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+SMTP_HOST=<smtp-host>
+SMTP_PORT=587
+SMTP_USER=<email>
+SMTP_PASSWORD=<app-password>
+SMTP_FROM=noreply@kalusagap.local
+USE_LOCAL_FILE_STORE=false
+LOCAL_FILE_STORE_PATH=./data
 ```
 
-The development API permits both `http://localhost:5173` and
-`http://127.0.0.1:5173`; browsers treat those hostnames as different origins.
-In production, set `CLIENT_URL` to the deployed frontend origin. `CORS_ORIGIN`
-is an optional alias/additional-origin setting, not a second required variable.
+**Security Notes:**
+- Never commit `.env` files.
+- Never expose `SUPABASE_SERVICE_ROLE_KEY` to the frontend or as a `VITE_` variable. It bypasses RLS and must stay server-side.
+- Use separate credentials for staging and production.
 
-Optional backend variables support a local JSON data directory for development
-without Supabase; the full, annotated templates are in
-[frontend/.env.example](frontend/.env.example) and
-[backend/.env.example](backend/.env.example).
-
-Never place the service-role key in frontend configuration or in a `VITE_`
-variable. Real `.env` files are local and ignored by Git; only blank templates
-belong in the repository. Supabase-backed sign-in and protected workflows
-require the frontend and backend to use the same project.
-
-### Apply database migrations
-
-From the repository root, link the intended Supabase project and review its
-migration state before applying changes:
+### Database Setup
 
 ```bash
 supabase link --project-ref <project-ref>
@@ -152,179 +169,111 @@ supabase migration list --linked
 supabase db push
 ```
 
-`supabase db push` applies files in `supabase/migrations/` in version order; it
-does not apply `supabase/seed.sql`. The seed file is for local database resets
-and must not be run against production. Do not remove or reorder migration
-history. The database and migration guide is in
-[docs/database/README.md](docs/database/README.md); the manual resident-verification
-workflow is documented in
-[docs/integration/manual-resident-verification.md](docs/integration/manual-resident-verification.md).
+- Migrations are applied in timestamp order. Do not remove or reorder migration history.
+- Do not run `supabase db reset` or `supabase db seed` against production.
 
-### Run the applications
+---
 
-Start the API and frontend in separate terminals from the repository root:
+## Running the Application
 
+**Frontend** (http://localhost:5173):
 ```bash
-npm run dev:backend
 npm run dev:frontend
 ```
 
-The API defaults to `http://localhost:5000`; Vite defaults to
-`http://localhost:5173`.
-
-## Development Commands
-
-Run these from the repository root:
-
+**Backend** (http://localhost:5000):
 ```bash
-npm run dev:frontend
 npm run dev:backend
-npm run build
-npm run preview
-npm run lint
+```
+
+**Production backend:**
+```bash
 npm run start:backend
 ```
 
-## Validation
+**Health check:** `GET http://localhost:5000/api/health`
 
-Run lint, type-check, or build with:
-
-```bash
-npm run lint --prefix frontend
-npm run typecheck --prefix frontend
-npm run build --prefix frontend
-```
-
-The Vite production build provides the frontend production check; the backend
-has no separate lint step. The `typecheck` script runs `tsc` in `checkJs` mode
-over the JavaScript sources as an advisory diagnostic — the sources are plain
-JavaScript, so it reports type-inference notices rather than gating the build.
-
-## Security
-
-- Supabase Auth identifies users; the backend resolves application roles and
-  scope from the server-side profile, never from client input.
-- Backend authorization and database Row Level Security are separate controls;
-  frontend route guards are not security boundaries.
-- The Supabase service-role key stays on the server. It bypasses RLS and must
-  never be exposed to the browser.
-- Analytics are aggregated by municipality or barangay and must not return
-  resident-level personally identifiable information.
-- Request logging omits query strings, bodies, headers, tokens, and health data.
-- Registration documents live in a private storage bucket and are served only
-  through backend-mediated signed URLs.
+---
 
 ## Deployment
 
-The frontend is a static Vite single-page application. `vercel.json` configures
-Vercel to install the frontend from its lockfile, build it, serve
-`frontend/dist`, and rewrite client-side routes to `index.html`.
+| Service | Platform | Notes |
+|---------|----------|-------|
+| Frontend | Vercel | Static SPA build from `frontend/dist`, with SPA rewrites to `index.html` |
+| Backend | Render | Node.js 22.x service, start with `npm run start --prefix backend` |
+| Database | Supabase | Apply migrations with `supabase db push` |
 
-The Express API in `backend/` is a separate Node.js service and is deployed and
-scaled independently of the frontend. Set the frontend `VITE_API_URL` to the
-deployed API origin **including `/api`** (for example,
-`https://kalusagap.onrender.com/api`); the Express app mounts all routes under
-`/api`, including `/api/auth/me` and `/api/roles/permissions`. The frontend also
-normalizes a bare API origin by appending `/api`, but including the mount in the
-deployment setting makes the contract explicit. Set the backend's `CLIENT_URL`
-to the deployed frontend origin so CORS permits it. For the current deployment,
-configure the hosting dashboards as follows. These settings are instructions
-only; this repository change does not update either live service.
+**Post-deployment checks:**
+1. Frontend loads and the sign-in page displays.
+2. Backend health check returns 200 at `/api/health`.
+3. Migrations are applied and RLS policies are active.
+4. Sign in, load the resident directory, and submit a test consultation.
 
-### Vercel
+---
 
-- Set the project root to the repository root and use Node.js 22.x.
-- The checked-in `vercel.json` runs `npm ci --prefix frontend`,
-  `npm run build --prefix frontend`, serves `frontend/dist`, and keeps SPA
-  route rewrites.
-- Set these variables for the **Production** environment:
+## API Overview
 
-  ```env
-  VITE_API_URL=https://kalusagap.onrender.com/api
-  VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-  VITE_SUPABASE_ANON_KEY=<public-anon-key>
-  ```
+All endpoints except `/api/health` and authentication endpoints require `Authorization: Bearer <jwt>`.
 
-  `VITE_API_URL` has a code fallback to the Render API, but setting it
-  explicitly avoids an accidental build against an unintended API. Supabase
-  URL and anon key must belong to the same project as Render. The anon key is
-  public; **never** set `SUPABASE_SERVICE_ROLE_KEY` or any database credential
-  in Vercel or a `VITE_` variable. A production Vite build now fails early if
-  either Supabase value is missing. Use separate non-production credentials
-  for Preview deployments if previews are enabled.
+| Area | Base Endpoint | Purpose |
+|------|---------------|---------|
+| Auth | `/api/auth` | Sign-up, sign-in, password reset, current user |
+| Residents | `/api/residents` | Resident records, verification, risk scores |
+| Households | `/api/households` | Household records and members |
+| Consultations | `/api/consultations` | Clinical visits and submissions |
+| M1 Reports | `/api/m1/reports` | FHSIS monthly reports |
+| Reports | `/api/reports` | Municipal reports and review |
+| Health Records | `/api/health-records` | Maternal, NCD, oral health, and TB records |
+| Referrals | `/api/referrals` | Referral creation and outcomes |
+| Follow-ups | `/api/follow-ups` | Follow-up scheduling and outcomes |
+| Certificates | `/api/medical-certificates` | Certificate requests and decisions |
+| Health Services | `/api/health-services` | Program scheduling and slots |
+| Appointments | `/api/appointments` | Resident bookings |
+| Analytics | `/api/analytics` | Municipality and barangay analytics |
+| Users | `/api/users` | User management (admin) |
+| Roles | `/api/roles`, `/api/access-control` | Permissions and access checks |
 
-### Render
+**Standard response format:**
+```json
+{
+  "success": true,
+  "data": {},
+  "error": null
+}
+```
 
-- Create/use a Node web service with repository root as its root directory,
-  Node.js 22.x, build command `npm ci --prefix backend`, and start command
-  `npm run start --prefix backend`.
-- Set the health-check path to `/api/health`. Render supplies `PORT`; do not
-  hard-code a production port.
-- Set these runtime variables:
+---
 
-  ```env
-  NODE_ENV=production
-  CLIENT_URL=https://kalu-zeta.vercel.app
-  TRUST_PROXY=1
-  SUPABASE_URL=https://<project-ref>.supabase.co
-  SUPABASE_ANON_KEY=<public-anon-key>
-  SUPABASE_SERVICE_ROLE_KEY=<server-only-service-role-key>
-  ```
+## Project Structure
 
-  `TRUST_PROXY=1` trusts the single Render edge proxy hop so Express can use
-  the client IP for rate limits. Do not use `true` or a larger hop count unless
-  the full proxy chain is verified and strips client-supplied forwarding
-  headers. Add `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` if the
-  transfer-OTP email workflow is configured.
+```
+KALUSAGAP/
+├── frontend/     React SPA (features, components, services, offline engine)
+├── backend/      Express API (routes, controllers, services, middleware, config)
+├── supabase/     SQL migrations, seed files, and Supabase configuration
+├── shared/       Shared utilities (e.g., barangay list)
+├── docs/         Backend, database, and integration documentation
+└── README.md
+```
 
-### Supabase dashboard and database
-
-- In **Authentication → URL Configuration**, set the Site URL to
-  `https://kalu-zeta.vercel.app` and allow the exact redirect URLs
-  `https://kalu-zeta.vercel.app` and
-  `https://kalu-zeta.vercel.app/reset-password`. Add any separately deployed
-  custom frontend domain explicitly.
-- Use the same Supabase project URL and matching anon/service-role keys across
-  the two services. Store the service-role key only as a Render secret.
-- Before rollout, review `supabase migration list --linked` against the
-  intended project and back up/review pending SQL. Applying migrations with
-  `supabase db push` changes the remote database; do that only with explicit
-  authorization and the project's approved change procedure. No production
-  migration or data operation is performed by these deployment instructions.
-
-After setting dashboard values, trigger deployments and verify Vercel's
-production build, `https://kalusagap.onrender.com/api/health`, browser sign-in,
-role-scoped pages, CORS requests, and the approved database workflows. The
-health endpoint only confirms the API process is responding; it does not prove
-that Supabase connectivity, migrations, credentials, or user workflows are
-healthy. The API URL also has a frontend production fallback, but explicitly
-setting it in Vercel is recommended. Do not treat a cold-start response or a
-successful health check as an end-to-end verification.
+---
 
 ## Scope and Limitations
 
-- Selected workflows support encrypted offline drafts and owner-scoped
-  synchronization in IndexedDB. Authentication, server-authoritative reads,
-  and mutations not explicitly marked safe for offline synchronization still
-  require a network connection; this is not a full offline application.
-- Access is strictly role-scoped and enforced server-side. Frontend route guards
-  hide navigation but are not the security boundary.
-- Resident and personnel onboarding is by application plus manual review; there
-  is no self-service account provisioning that bypasses verification.
-- Community and map analytics are aggregated by municipality or barangay and do
-  not expose resident-level personally identifiable information.
-- The user-facing "Household Risk Clusters" view has been removed; household
-  profiling and the retained household risk overview/detail pages remain.
-- Resident document uploads pass through **rule-based automated document
-  screening** (allowed file type, readable-image and text checks) before queued
-  manual review. This is a readability pre-check only — it is **not AI document
-  authentication** and **not automatic government ID verification**. Final
-  document and identity verification always remains with authorized KALUSAGAP
-  personnel, and an automated flag never prevents a staff member from reviewing
-  a document.
+- **Offline support** covers selected workflows only (consultations, household data, and the submission outbox). Authentication and server-authoritative reads still require a network connection.
+- **Document screening** is automated checking only. It is not AI-based identity authentication, and final verification is always done by authorized personnel.
+- **Analytics** are aggregated at the municipality and barangay levels. No individual resident data is exposed.
 
+---
 
+## Documentation
 
-- [Database and migrations](docs/database/README.md)
-- [Backend overview](docs/backend/README.md)
-- [Manual resident verification](docs/integration/manual-resident-verification.md)
+- Backend overview: `docs/backend/README.md`
+- Database schema: `docs/database/README.md`
+- Resident verification workflow: `docs/integration/manual-resident-verification.md`
+
+---
+
+## License
+
+Refer to the LICENSE file in the repository.

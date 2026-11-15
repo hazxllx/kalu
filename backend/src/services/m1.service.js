@@ -1,6 +1,7 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { assignedBarangay } from '../config/scope.js';
+import { SCHEMAS } from '../config/programFormSchemas.js';
 import {
   M1_INDICATORS,
   getIndicator,
@@ -11,6 +12,9 @@ import {
   FP_MEASURES,
   fpMethodToIndicatorCodes,
 } from '../config/m1Catalog.js';
+import {
+  WORKBOOK_M1_SECTION_TITLES,
+} from '../config/workbookM1Catalog.js';
 import {
   countQualifyingPeopleByAge,
   countPeopleByMethod,
@@ -164,6 +168,20 @@ const quarterRange = (year, quarter) => {
   return { start: `${year}-${pad(firstMonth)}-01`, end: `${year}-${pad(lastMonth)}-${pad(endDate.getUTCDate())}`, months };
 };
 
+const reportingRange = ({ period, year, month, quarter }) => {
+  if (!Number.isInteger(Number(year)) || year < 2000 || year > 2100) {
+    throw ApiError.unprocessable('Invalid reporting year.');
+  }
+  if (period === 'annual') return { ...yearRange(year), months: Object.values(QUARTER_MONTHS).flat() };
+  if (period === 'quarterly' && Number.isInteger(Number(quarter)) && quarter >= 1 && quarter <= 4) {
+    return quarterRange(year, Number(quarter));
+  }
+  if (period === 'monthly' && Number.isInteger(Number(month)) && month >= 1 && month <= 12) {
+    return { ...monthRange(year, Number(month)), months: [Number(month)] };
+  }
+  throw ApiError.unprocessable('Invalid reporting period, month, or quarter.');
+};
+
 /** Whole-year age in years at the reference date. */
 const ageYearsAt = (birthDate, refDate) => {
   if (!birthDate) return null;
@@ -248,11 +266,20 @@ export const ensureCatalog = async ({ supabase = getServiceClient() } = {}) => {
 };
 
 export const listCatalog = () => ({
-  sections: catalogTree(),
+  sections: WORKBOOK_M1_SECTION_TITLES,
   indicators: M1_INDICATORS,
+  historicalIndicators: M1_INDICATORS,
   fpMeasures: FP_MEASURES,
-  manual: manualIndicators(),
-  sourceMapping: sourceMapping(),
+  manual: [],
+  sourceMapping: Object.fromEntries(M1_INDICATORS.map((indicator) => [
+    indicator.code,
+    {
+      source: indicator.source,
+      match: indicator.match,
+      derive: indicator.derive,
+      name: indicator.name,
+    },
+  ])),
 });
 
 // ---------------------------------------------------------------------------
@@ -540,6 +567,15 @@ const maternalKeyDate = (derive, row) => {
   return row[derive.dateField] || null;
 };
 
+const loadMaternalRecords = async (supabase, scope) => {
+  const { data, error } = await applyScope(
+    supabase.from(MATERNAL).select(`*, resident:residents(${RESIDENT_SELECT})`).limit(50000),
+    scope,
+  );
+  throwOnError(error, 'Could not load maternal records');
+  return data || [];
+};
+
 /**
  * Aggregate every M1 indicator over an arbitrary date range, filtered to the
  * caller's scope. This is the ONE aggregation path shared by the monthly,
@@ -617,13 +653,7 @@ const aggregateOverRange = async ({ scope, start, end, year, months, supabase })
   // not pre-filtered by date, because each derived indicator keys off a
   // different maternal date (delivery / supplementation / postpartum check-up);
   // computeIndicator filters each row to [start, end] by its own key date.
-  let matQ = supabase
-    .from(MATERNAL)
-    .select('*, resident:residents(birth_date, sex)')
-    .limit(50000);
-  matQ = applyScope(matQ, scope);
-  const { data: maternal, error: matErr } = await matQ;
-  throwOnError(matErr, 'Could not load maternal records');
+  const maternal = await loadMaternalRecords(supabase, scope);
 
   // Target-client (TCL) program enrollments (Section E / F derivation). Loaded
   // for the whole scope; the reporting-month attribution keys off created_at
@@ -712,7 +742,8 @@ export const monthlyReport = async ({ user, year, month, barangayId = null, supa
  * resolveScope + applyScope on every query, exactly like monthlyReport.
  */
 export const periodReport = async ({ user, period = 'monthly', year, month = null, quarter = null, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = await resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId, supabase);
+  reportingRange({ period, year, month: month ?? 1, quarter: quarter ?? 1 });
   let range;
   let months;
   let periodObj;
@@ -821,6 +852,9 @@ const computeIndicator = (ind, sets) => {
         breakdown.bySex[s === 'Male' || s === 'Female' || s === 'Other' ? s : 'Unknown'] += val;
       }
     }
+  } else if (ind.source === 'workbook_unmapped') {
+    // Workbook definitions are authoritative for presentation. Existing
+    // application records are intentionally not mapped into them.
   } else {
     // m1_records
     if (ind.dataType === 'fp_method' || ind.dataType === 'fp_total') {
@@ -915,6 +949,9 @@ const computeIndicator = (ind, sets) => {
 
   return {
     code: ind.code,
+    sourceIdentifier: ind.sourceIdentifier || null,
+    sourceWorksheet: ind.sourceWorksheet || null,
+    sourceRow: ind.sourceRow || null,
     section: ind.section,
     subsection: ind.subsection,
     name: ind.name,
@@ -936,7 +973,7 @@ const computeIndicator = (ind, sets) => {
 // ---------------------------------------------------------------------------
 
 export const annualSummary = async ({ user, year, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = await resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId, supabase);
   const { start, end } = yearRange(year);
 
   let recQ = supabase
@@ -1057,6 +1094,8 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
       for (const row of maternal || []) {
         if (!matchMaternalFilter(row, ind.derive?.filter)) continue;
         const key = maternalKeyDate(ind.derive, row);
+        const date = key ? String(key).slice(0, 10) : '';
+        if (!date || date < start || date > end) continue;
         const m = monthOf(key);
         if (!m) continue;
         months[m - 1] += 1;
@@ -1158,14 +1197,22 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
 // Drill-down (spec PART 20 / 32): which records produced a total?
 // ---------------------------------------------------------------------------
 
-export const drilldown = async ({ user, indicatorCode, year, month = null, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = await resolveScope(user, barangayId);
-  const ind = getIndicator(indicatorCode);
+export const drilldown = async ({ user, indicatorCode, year, month = null, quarter = null, period = month ? 'monthly' : 'annual', barangayId = null, supabase = getServiceClient() }) => {
+  const scope = await resolveScope(user, barangayId, supabase);
+  const ind = getWorkbookIndicator(indicatorCode) || getIndicator(indicatorCode);
   if (!ind) throw ApiError.notFound(`Unknown indicator: ${indicatorCode}`);
-  const { start, end } = month ? monthRange(year, month) : yearRange(year);
+  const { start, end, months } = reportingRange({ period, year, month, quarter });
 
   const records = [];
 
+  if (ind.source === 'workbook_unmapped') {
+    return {
+      indicator: { code: ind.code, sourceIdentifier: ind.sourceIdentifier, name: ind.name },
+      period: { year, month, quarter, period },
+      scope: { level: scope.level, barangayId: scope.barangayId },
+      records: [],
+    };
+  }
   if (ind.source === 'immunizations') {
     const aliases = (ind.match?.aliases || [ind.match?.vaccine || ind.name]).map((a) => text(a).toLowerCase());
     let q = supabase.from('immunizations').select(`*, resident:residents(${RESIDENT_SELECT})`)
@@ -1231,7 +1278,7 @@ export const drilldown = async ({ user, indicatorCode, year, month = null, baran
     }
   } else if (ind.source === 'm1_manual') {
     let q = supabase.from(MANUAL).select('*').eq('indicator_code', indicatorCode).eq('period_year', year);
-    if (month) q = q.eq('period_month', month);
+    q = q.in('period_month', months);
     q = applyScope(q, scope);
     const { data, error } = await q;
     if (error && isMissingRelation(error)) warnManualMissing();
@@ -1262,7 +1309,7 @@ export const drilldown = async ({ user, indicatorCode, year, month = null, baran
 
   return {
     indicator: { code: ind.code, name: ind.name, section: ind.section, subsection: ind.subsection, source: ind.source },
-    period: month ? { year, month } : { year },
+    period: period === 'quarterly' ? { period, year, quarter } : period === 'monthly' ? { year, month } : { year },
     count: records.length,
     records,
   };
@@ -1471,6 +1518,154 @@ export const saveManualEntry = async ({ user, year, month, indicatorCode, values
   return { indicatorCode: code, period: { year: yr, month: mo }, barangayId: targetBarangay, entries: saved };
 };
 
+/**
+ * Get records for a specific M1 program.
+ * Used by program detail pages to retrieve program-specific records and indicators.
+ *
+ * @param {object} params - Request parameters
+ * @param {object} params.user - Authenticated user
+ * @param {string} params.programId - Program identifier (prenatal, ncd, cervical, visual, oral, environmental, enrollment)
+ * @param {string} params.period - Reporting period (monthly, quarterly, annual)
+ * @param {number} params.year - Reporting year
+ * @param {number|null} params.month - Reporting month (1-12, null if not monthly)
+ * @param {number|null} params.quarter - Quarter (1-4, null if not quarterly)
+ * @param {string|null} params.barangayId - Optional barangay override
+ * @returns {Promise<object>} Records and indicators for the program
+ */
+export const getRecordsByProgram = async (params, supabase = getServiceClient()) => {
+  const { user, programId, period = 'monthly', year, month = null, quarter = null, barangayId } = params;
+
+  // Resolve scope
+  const scope = await resolveScope(user, barangayId, supabase);
+  const targetBarangay = scope.barangayId;
+
+  // Map program ID to FHSIS section and indicator codes
+  // Use legacy M1_INDICATORS (not workbook codes) to maintain consistency with
+  // frontend program config subsection definitions and reporting value lookups.
+  const programMap = {
+    prenatal: {
+      section: 'B',
+      indicatorCodes: M1_INDICATORS.filter((indicator) => indicator.section === 'B').map((indicator) => indicator.code),
+      table: MATERNAL,
+    },
+    ncd: {
+      section: 'F',
+      indicatorCodes: [
+        ...M1_INDICATORS.filter((indicator) => ['E', 'F'].includes(indicator.section)).map((indicator) => indicator.code),
+      ],
+      table: SCHEMAS['ncd-risk'].table,
+      dateColumn: 'assessment_date',
+    },
+    cervical: {
+      section: 'F',
+      indicatorCodes: ['F_5', 'F_6', 'F_7', 'F_8'],
+      table: SCHEMAS['ncd-cervical'].table,
+      dateColumn: 'assessment_date',
+    },
+    visual: {
+      section: 'F',
+      indicatorCodes: ['F_11', 'F_12', 'F_13', 'F_14'],
+      table: SCHEMAS['ncd-visual'].table,
+      dateColumn: 'assessment_date',
+    },
+    oral: {
+      section: 'D',
+      indicatorCodes: M1_INDICATORS.filter((indicator) => indicator.section === 'D').map((indicator) => indicator.code),
+      table: SCHEMAS['oral-health'].table,
+      dateColumn: 'consultation_date',
+    },
+    environmental: {
+      section: 'G',
+      indicatorCodes: M1_INDICATORS.filter((indicator) => indicator.section === 'G').map((indicator) => indicator.code),
+      table: 'households',
+    },
+    enrollment: {
+      section: null,
+      indicatorCodes: [],
+      table: 'tcl_entries',
+      dateColumn: 'created_at',
+    },
+  };
+
+  const program = programMap[programId];
+  if (!program) {
+    throw ApiError.badRequest(`Unknown program: ${programId}`);
+  }
+
+  const { start: fromDate, end: toDate } = reportingRange({ period, year, month, quarter });
+  let records;
+  if (programId === 'prenatal') {
+    const maternal = await loadMaternalRecords(supabase, scope);
+    const derived = M1_INDICATORS.filter((indicator) => indicator.section === 'B' && indicator.source === MATERNAL);
+    // Manual figures have no case-level attribution. Include only cases that
+    // contribute a derived event in this period, regardless of creation date.
+    records = maternal.filter((row) => derived.some((indicator) => {
+      const key = maternalKeyDate(indicator.derive, row);
+      const date = key ? String(key).slice(0, 10) : '';
+      return date >= fromDate && date <= toDate && matchMaternalFilter(row, indicator.derive?.filter);
+    }));
+  } else {
+    const select = programId === 'environmental' ? '*'
+      : '*, resident:residents(id, first_name, middle_name, last_name, barangay, sex, birth_date)';
+    let query = applyScope(supabase.from(program.table).select(select), scope);
+    if (program.dateColumn === 'created_at') {
+      const nextDay = new Date(`${toDate}T00:00:00.000Z`);
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      query = query.gte('created_at', `${fromDate}T00:00:00.000Z`).lt('created_at', nextDay.toISOString());
+    } else if (program.dateColumn) {
+      query = query.gte(program.dateColumn, fromDate).lte(program.dateColumn, toDate);
+    }
+    query = query.order(program.dateColumn || 'created_at', { ascending: false });
+    const { data, error } = await query;
+    throwOnError(error, `Could not fetch ${programId} records`);
+    records = data || [];
+  }
+
+  // Fetch indicator values from M1 aggregation
+  const reportData = program.indicatorCodes.length ? await periodReport({
+    user,
+    period,
+    year,
+    month,
+    quarter,
+    barangayId: targetBarangay,
+    supabase,
+  }) : null;
+
+  const indicators = {};
+  if (reportData && reportData.byCode) {
+    Object.entries(reportData.byCode).forEach(([code, row]) => {
+      if (program.indicatorCodes.includes(code)) {
+        indicators[code] = row;
+      }
+    });
+  }
+
+  return {
+    program: programId,
+    section: program.section,
+    period: { type: period, year, month, quarter },
+    records: records || [],
+    indicators,
+    ...(programId === 'prenatal' ? {
+      warnings: [
+        'Legacy catalog measures retain 4 prenatal check-ups and 2 postpartum check-ups; they are not approved mappings to workbook 8ANC/4PNC measures.',
+        'Records include maternal cases contributing derived events in this period; manual aggregate figures have no case-level attribution.',
+      ],
+    } : {
+      warnings: [programId === 'enrollment'
+        ? 'Records are existing TCL enrollments attributed by created_at, not a separate M1 indicator or count of currently active clients.'
+        : programId === 'environmental'
+          ? 'Household records reflect current scoped WASH data, not a historical snapshot of the reporting period.'
+          : 'Records are existing TCL service records for this period; M1 totals retain their catalog sources and are not automatically derived from these TCL rows.'],
+    }),
+    count: {
+      records: (records || []).length,
+      indicators: Object.keys(indicators).length,
+    },
+  };
+};
+
 export default {
   resolveScope,
   ensureCatalog,
@@ -1488,4 +1683,5 @@ export default {
   saveIndicatorRemarks,
   listManualEntries,
   saveManualEntry,
+  getRecordsByProgram,
 };

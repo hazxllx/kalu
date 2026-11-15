@@ -1,3 +1,10 @@
+/**
+ * Document branding endpoints (official logos for certificates, referrals, etc).
+ *
+ * Administrators upload and manage municipal logos that appear on official documents.
+ * All staff roles can retrieve branding for document rendering.
+ * Logo uploads are validated for type, size, and content authenticity.
+ */
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';

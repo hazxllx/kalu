@@ -321,11 +321,17 @@ export const NAV = {
               label: "TCL",
               icon: "ClipboardList",
               path: "/app/health_supervisor/tcls",
+              activePaths: ["/app/health_supervisor/maternal-tcl"],
             },
             {
               label: "M1",
               icon: "FileHeart",
               path: "/app/health_supervisor/m1",
+              activePaths: [
+                "/app/health_supervisor/m1-fhsis",
+                "/app/health_supervisor/m1-section",
+                "/app/health_supervisor/m1-report",
+              ],
             },
             {
               label: "Immunization",

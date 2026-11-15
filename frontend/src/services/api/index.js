@@ -28,6 +28,9 @@ export {
 } from './programFormsApi';
 export { residentFollowUpsApi } from './residentFollowUpsApi';
 export { m1Api } from './m1Api';
+export {
+  m1PrenatalApi, m1NcdApi, m1CervicalApi, m1VisualApi, m1OralApi, m1EnvironmentalApi, m1EnrollmentApi, m1ProgramsApi, loadM1ProgramCounts,
+} from './m1ProgramsApi';
 export { reportsApi } from './reportsApi';
 export { healthServicesApi } from './healthServicesApi';
 export { appointmentsApi } from './appointmentsApi';

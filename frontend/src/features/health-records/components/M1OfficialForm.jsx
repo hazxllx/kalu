@@ -47,7 +47,6 @@ const CSS = `
 .m1of-head .fields .row { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 8.5px; }
 .m1of-head .fields .row .lab { color: #334A63; }
 .m1of-head .fields .row .val { font-weight: 700; min-width: 70px; border-bottom: 1px solid #10243B; padding: 0 6px; }
-.m1of-head .rhu { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #10243B; white-space: nowrap; }
 
 /* ---------- section bar ---------- */
 .m1of-sec { background: #0B3D7A; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .3px; padding: 3px 7px; margin: 7px 0 0; text-transform: uppercase; break-after: avoid; page-break-after: avoid; break-inside: avoid; }
@@ -212,8 +211,6 @@ function Blocks({ blocks = [], data }) {
  * @property {string} [province]
  * @property {number} [projectedPopulation]
  * @property {string} [barangay]
- * @property {string} [bhs]
- * @property {string} [rhu]
  */
 
 /**
@@ -250,11 +247,10 @@ export default function M1OfficialForm({ data = {}, header = {}, template = M1_F
             <span className="val">{h.projectedPopulation ?? ""}</span>
           </div>
           <div className="row">
-            <span className="lab">Barangay / BHS</span>
-            <span className="val">{[h.barangay, h.bhs].filter(Boolean).join(" / ") || ""}</span>
+            <span className="lab">Barangay</span>
+            <span className="val">{h.barangay || ""}</span>
           </div>
         </div>
-        <div className="rhu">{h.rhu || ""}</div>
       </div>
 
       <Blocks blocks={template} data={data} />
@@ -264,7 +260,7 @@ export default function M1OfficialForm({ data = {}, header = {}, template = M1_F
 
 // ---------------------------------------------------------------------------
 // Print hook — browser print dialog ("Save as PDF"), dedicated to this form.
-// Mirrors useM1Print: portal to <body>, print-only stylesheet hides app chrome.
+// Portal to <body>; print-only stylesheet hides the application chrome.
 // ---------------------------------------------------------------------------
 const PRINT_CSS = `
 @media print {

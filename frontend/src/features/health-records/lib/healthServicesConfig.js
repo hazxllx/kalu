@@ -113,7 +113,10 @@ export const HEALTH_SERVICES = Object.freeze([
 
 /** FHSIS section title lookup (longer official name used by section panels). */
 export const HEALTH_SERVICE_TITLES = Object.freeze(
-  Object.fromEntries(HEALTH_SERVICES.map((s) => [s.key, s.name])),
+  {
+    ...Object.fromEntries(HEALTH_SERVICES.map((s) => [s.key, s.name])),
+    C_VITAL: "Vital Statistics",
+  },
 );
 
 /** Standardized source label shown in the summary. */

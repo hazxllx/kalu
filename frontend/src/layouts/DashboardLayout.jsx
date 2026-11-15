@@ -33,6 +33,28 @@ import { hasValidPermissionSnapshot, permissionNotice, routePermissionsAllowed }
 import { isNavigatorOnline } from "@/services/offline/connectivity";
 import { getSupervisorScope } from "@/lib/supervisorScope";
 
+/**
+ * Main application shell for authenticated users.
+ *
+ * Renders the role-specific navigation sidebar + header + main content outlet.
+ * Key responsibilities:
+ *   - Navigation: builds the sidebar menu from NAV config, filtered by role
+ *     permissions and station assignments. Highlights the current route.
+ *   - Permissions: displays cached/offline permission status, offers "Recheck
+ *     Access" to refresh from server while online.
+ *   - Offline awareness: shows connectivity status and sync engine state.
+ *   - Notifications: loads and displays unread count.
+ *   - Account menu: profile, settings, logout.
+ *   - Sidebar collapsing: persists user preference in localStorage.
+ *
+ * The layout does NOT render content pages directly; child routes are rendered
+ * via <Outlet />, so the layout stays mounted across route changes (preserving
+ * sidebar state and the navigation context).
+ *
+ * @param {Object} props
+ * @param {string} props.roleKey - Role identifier (e.g., 'health_supervisor', 'phn')
+ *   used to filter nav items and permissions
+ */
 export default function DashboardLayout({ roleKey }) {
   const role = ROLES[roleKey];
   const location = useLocation();
@@ -42,6 +64,7 @@ export default function DashboardLayout({ roleKey }) {
   const isSupervisor = roleKey === "health_supervisor";
   const assignedBarangay = getSupervisorScope(user)?.assignedBarangay;
 
+  // Persist sidebar collapsed/expanded preference per user and role
   const sidebarPreferenceKey = `kalusagap.sidebar.collapsed.v1:${user?.id || roleKey}`;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -52,13 +75,16 @@ export default function DashboardLayout({ roleKey }) {
   });
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Expanded submenu groups (e.g., "User & Personnel Management" expanded state)
   const [expandedGroups, setExpandedGroups] = useState({});
   const menuRef = useRef(null);
   const [online, setOnline] = useState(isNavigatorOnline);
+  // Feedback for the "Recheck Access" manual permission refresh
   const [recheckFeedback, setRecheckFeedback] = useState(null);
   const recheckInFlight = useRef(false);
   const recheckRequestRef = useRef(0);
 
+  // Track online/offline status for connectivity indicator
   useEffect(() => {
     const updateOnline = () => setOnline(isNavigatorOnline());
     window.addEventListener("online", updateOnline);
@@ -69,8 +95,15 @@ export default function DashboardLayout({ roleKey }) {
     };
   }, []);
 
+  // Cancel pending access rechecks when user changes (sign out/switch account)
   useEffect(() => () => { recheckRequestRef.current += 1; }, [user?.id]);
 
+  /**
+   * Manually refresh permissions from the server (online only).
+   * Used by the "Recheck Access" button when permissions might have changed
+   * (e.g., admin grants a new permission, or access is restored after being
+   * revoked). Shows success/failure feedback to the user.
+   */
   const recheckAccess = async () => {
     if (recheckInFlight.current) return;
     recheckInFlight.current = true;
@@ -90,6 +123,7 @@ export default function DashboardLayout({ roleKey }) {
     }
   };
 
+  // Persist sidebar collapsed state to localStorage
   useEffect(() => {
     try {
       window.localStorage.setItem(sidebarPreferenceKey, String(sidebarCollapsed));
@@ -98,6 +132,8 @@ export default function DashboardLayout({ roleKey }) {
     }
   }, [sidebarCollapsed, sidebarPreferenceKey]);
 
+  // Refresh permissions when window regains focus (user may have been away,
+  // and admin might have changed their access in the meantime)
   useEffect(() => {
     const refreshPermissions = () => {
       if (document.visibilityState === "visible") {
@@ -107,17 +143,6 @@ export default function DashboardLayout({ roleKey }) {
     window.addEventListener("focus", refreshPermissions);
     return () => window.removeEventListener("focus", refreshPermissions);
   }, [refreshMatrix]);
-
-  // BHW gathers community/household data only, so the resident/record lookup
-  // is not exposed to that role. Every other role keeps it.
-
-  // Entries that declare a permission disappear once an administrator removes
-  // that privilege from the role; everything else behaves exactly as before.
-  const items = useMemo(
-    () => filterNavByPermission(NAV[roleKey] || [], can, user),
-    [roleKey, can, user]
-  );
-  // Tab switches inside a merged item (e.g. User & Personnel Management) keep
   // the tab strip mounted instead of replaying the page transition.
   const activeItem = items.find((item) => navItemIsActive(item, location.pathname));
   const pageTransitionKey = activeItem?.tabs

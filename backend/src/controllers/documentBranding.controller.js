@@ -1,6 +1,18 @@
+/**
+ * Official document branding endpoints (logos for certificates, referrals, etc).
+ *
+ * Authorized administrators upload and manage the municipal logos that appear
+ * on official documents. The service retrieves the configured logos for each
+ * document type (medical certificate, referral, etc) and caches them to minimize
+ * repetitive database queries.
+ */
 import * as branding from '../services/documentBranding.service.js';
 import { sendData } from '../utils/apiResponse.js';
 
+/**
+ * Retrieve current logo configuration for all document types (admin view).
+ * Shows uploaded logos and their file metadata.
+ */
 export const getAdminLogos = async (req, res) => {
   sendData(res, await branding.getAdminLogoSettings({ user: req.user }));
 };

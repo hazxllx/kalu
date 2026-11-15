@@ -45,7 +45,7 @@ export default function TablePagination({
       {/* Pagination controls */}
       <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2 sm:gap-3">
         {/* Page size selector */}
-        <label className="flex items-center gap-1.5">
+        {onPageSizeChange && <label className="flex items-center gap-1.5">
           <span className="hidden sm:inline">Rows</span>
           <span className="sm:hidden">Show</span>
           <select
@@ -60,7 +60,7 @@ export default function TablePagination({
               </option>
             ))}
           </select>
-        </label>
+        </label>}
         
         {/* Page indicator */}
         <span className="whitespace-nowrap hidden sm:inline">

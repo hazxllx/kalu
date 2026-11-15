@@ -1,3 +1,15 @@
+/**
+ * Resident transfer workflow endpoints (barangay-to-barangay movement).
+ *
+ * Manages the complete transfer request lifecycle:
+ * - Resident self-service request initiation and document upload
+ * - Health Supervisor submission and approval workflow
+ * - PHN/MHO review and acceptance/rejection
+ * - Resubmission requests when corrections are needed
+ *
+ * Transfer requests are scoped by source barangay and reviewed by destination staff.
+ * All file uploads are validated for type and size server-side.
+ */
 import * as transferService from '../services/transfer.service.js';
 import { sendCreated, sendData } from '../utils/apiResponse.js';
 

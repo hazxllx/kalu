@@ -26,6 +26,15 @@ const writers = { permission: 'reports.generate' };
 router.get('/catalog', authorize(READ, readers), asyncHandler(controller.catalog));
 router.post('/catalog/sync', authorize(['admin'], { permission: 'system.settings.manage' }), asyncHandler(controller.syncCatalog));
 
+// Program-specific record retrieval
+router.get('/programs/prenatal/records', authorize(READ, readers), asyncHandler(controller.getPrenatalRecords));
+router.get('/programs/ncd/records', authorize(READ, readers), asyncHandler(controller.getNcdRecords));
+router.get('/programs/cervical/records', authorize(READ, readers), asyncHandler(controller.getCervicalRecords));
+router.get('/programs/visual/records', authorize(READ, readers), asyncHandler(controller.getVisualRecords));
+router.get('/programs/oral/records', authorize(READ, readers), asyncHandler(controller.getOralRecords));
+router.get('/programs/environmental/records', authorize(READ, readers), asyncHandler(controller.getEnvironmentalRecords));
+router.get('/programs/enrollment/records', authorize(READ, readers), asyncHandler(controller.getEnrollmentRecords));
+
 // Views
 router.get('/daily', authorize(READ, readers), asyncHandler(controller.daily));
 router.get('/monthly', authorize(READ, readers), asyncHandler(controller.monthly));
