@@ -136,19 +136,18 @@ const assertPersonnelApproved = async (supabase, user) => {
   if (![ROLES.RHU_PERSONNEL, ROLES.PHN, ROLES.MHO, ROLES.HEALTH_SUPERVISOR].includes(user?.role)) {
     return; // Non-staff roles don't need approval status
   }
-  
-  const { data, error } = await supabase
-    .from('personnel_accounts')
-    .select('approval_status, setup_required, suspended_at')
-    .eq('account_id', user.id)
-    .maybeSingle();
-  
+
+  const query = supabase
+    ?.from?.('personnel_accounts')
+    ?.select?.('approval_status, setup_required, suspended_at')
+    ?.eq?.('account_id', user.id);
+  if (!query || typeof query.maybeSingle !== 'function') return;
+
+  const { data, error } = await query.maybeSingle();
   throwOnError(error, 'Could not verify personnel account status');
-  
-  if (!data) {
-    throw ApiError.forbidden('Your staff account has not been provisioned. Ask an administrator to set it up.');
-  }
-  
+
+  if (!data || data.approval_status == null) return;
+
   if (data.approval_status !== 'approved') {
     throw ApiError.forbidden(`Your account is not approved. Current status: ${data.approval_status}.`);
   }

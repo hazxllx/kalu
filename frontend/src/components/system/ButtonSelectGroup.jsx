@@ -53,6 +53,12 @@ const VARIANTS = {
     unselectedError: "bg-white text-brand-ink hover:border-slate-300 border-brand-danger",
     unselected: "bg-white text-brand-ink hover:border-slate-300 border-slate-200",
   },
+  compact: {
+    base: "h-11 min-w-0 flex-1 rounded-btn border px-3 text-sm font-medium outline-none transition-colors focus-visible:border-[#2563EB] focus-visible:ring-2 focus-visible:ring-[#2563EB]/15 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-60",
+    selected: "border-brand-blue bg-brand-blue text-white hover:bg-brand-dark",
+    unselectedError: "border-brand-danger bg-white text-brand-ink hover:border-brand-blue",
+    unselected: "border-[#CBD5E1] bg-white text-brand-ink hover:border-brand-blue hover:bg-brand-light",
+  },
 };
 
 export default function ButtonSelectGroup({

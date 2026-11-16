@@ -134,6 +134,7 @@ export default function TclWorkspace() {
       crumbs={["Clinical Care", "TCL"]}
       subtitle="Review target client lists and program records within your authorized service area."
       countNote={`Record counts reflect saved records ${scopeLabel}.`}
+      showSectionSummary={false}
     />
   );
 }

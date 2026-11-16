@@ -13,11 +13,11 @@ import { CheckCircle, AlertTriangle, CalendarClock, FileCheck, UserPlus, ShieldA
 const ICONS = { CheckCircle, AlertTriangle, CalendarClock, FileCheck, UserPlus, ShieldAlert, Activity, Send, Clock, ShieldCheck, Database, Lock, Baby, Syringe, FileText, TrendingUp };
 
 const CATEGORIES = {
-  information: { label: "Information", color: "bg-brand-blue/10 text-brand-blue", icon: "Activity" },
-  reminder: { label: "Reminder", color: "bg-brand-yellow/15 text-[#B07E00]", icon: "Clock" },
-  alert: { label: "Alert", color: "bg-brand-danger/10 text-brand-danger", icon: "AlertTriangle" },
-  success: { label: "Success", color: "bg-brand-green/10 text-brand-green", icon: "CheckCircle" },
-  warning: { label: "Warning", color: "bg-brand-accent/10 text-brand-accent", icon: "ShieldAlert" },
+  information: { label: "Information", color: "bg-blue-50 text-[#2563EB] dark:bg-blue-500/15 dark:text-blue-300", icon: "Activity" },
+  reminder: { label: "Reminder", color: "bg-violet-50 text-[#7C3AED] dark:bg-violet-500/15 dark:text-violet-300", icon: "Clock" },
+  alert: { label: "Alert", color: "bg-rose-50 text-[#DC2626] dark:bg-rose-500/15 dark:text-rose-300", icon: "AlertTriangle" },
+  success: { label: "Success", color: "bg-emerald-50 text-[#059669] dark:bg-emerald-500/15 dark:text-emerald-300", icon: "CheckCircle" },
+  warning: { label: "Warning", color: "bg-amber-50 text-[#D97706] dark:bg-amber-400/15 dark:text-amber-200", icon: "ShieldAlert" },
 };
 
 export const NOTIFICATIONS = {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, CheckCircle2, Pencil, Trash2, Printer } from "lucide-react";
+import { X, CheckCircle2, Pencil, Trash2, Printer, Calendar, Baby } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup as SelectButtonGroup } from "@/components/system";
 import StatusBadge from "@/components/common/StatusBadge";
@@ -8,10 +8,7 @@ const inputCls = "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 te
 const selectCls = `${inputCls} cursor-pointer`;
 const textareaCls = `${inputCls} resize-none`;
 
-const YES_NO_OPTS = [
-  { value: false, label: "No" },
-  { value: true, label: "Yes" },
-];
+const yesNoLabel = (value) => value == null ? "Not recorded" : value ? "Yes" : "No";
 
 const DELIVERY_TYPES = [
   { value: "Vaginal", label: "Vaginal" },
@@ -85,11 +82,6 @@ const CBC_RESULTS = [
   { value: "-", label: "No anemia detected" },
 ];
 
-const IRON_GIVEN_OPTS = [
-  { value: true, label: "Yes" },
-  { value: false, label: "No" },
-];
-
 /**
  * MaternalRecordEditor — Unified read-only / edit-mode maternal record viewer
  * 
@@ -102,11 +94,16 @@ function MaternalRecordEditor({
   onDelete,
   onPrint,
   onEditMode,
+  onRecordEncounter,
+  onRecordDelivery,
+  onRecordPostpartum,
+  visitLoadError,
   saving,
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [errors, setErrors] = useState({});
+  const [activeSection, setActiveSection] = useState("overview");
 
   useEffect(() => {
     if (detail && !form) {
@@ -130,9 +127,9 @@ function MaternalRecordEditor({
         td3Date: detail.td3Date || "",
         td4Date: detail.td4Date || "",
         td5Date: detail.td5Date || "",
-        fimStatus: detail.fimStatus || false,
-        prenatalIronFolicTablets: detail.prenatalIronFolicTablets || "",
-        calciumTablets: detail.calciumTablets || "",
+        fimStatus: detail.fimStatus == null ? "" : String(detail.fimStatus),
+        prenatalIronFolicTablets: detail.prenatalIronFolicTablets ?? "",
+        calciumTablets: detail.calciumTablets ?? "",
         iodineGivenDate: detail.iodineGivenDate || "",
         dewormingDate: detail.dewormingDate || "",
         syphilisScreenDate: detail.syphilisScreenDate || "",
@@ -144,7 +141,7 @@ function MaternalRecordEditor({
         gdmResult: detail.gdmResult || "",
         cbcScreenDate: detail.cbcScreenDate || "",
         cbcResult: detail.cbcResult || "",
-        cbcIronGiven: detail.cbcIronGiven || false,
+        cbcIronGiven: detail.cbcIronGiven == null ? "" : String(detail.cbcIronGiven),
 
         // Delivery Information
         deliveryDate: detail.deliveryDate || "",
@@ -168,10 +165,10 @@ function MaternalRecordEditor({
         vitaminAGivenDate: detail.vitaminAGivenDate || "",
 
         // Maternal Health & Lifestyle
-        smokingHistory: detail.smokingHistory || false,
-        bingeAlcohol: detail.bingeAlcohol || false,
-        insufficientPhysicalActivity: detail.insufficientPhysicalActivity || false,
-        unhealthyDiet: detail.unhealthyDiet || false,
+        smokingHistory: detail.smokingHistory == null ? "" : String(detail.smokingHistory),
+        bingeAlcohol: detail.bingeAlcohol == null ? "" : String(detail.bingeAlcohol),
+        insufficientPhysicalActivity: detail.insufficientPhysicalActivity == null ? "" : String(detail.insufficientPhysicalActivity),
+        unhealthyDiet: detail.unhealthyDiet == null ? "" : String(detail.unhealthyDiet),
         bmi: detail.bmi || "",
         notes: detail.notes || "",
       });
@@ -191,13 +188,13 @@ function MaternalRecordEditor({
   };
 
   const calculateBMI = () => {
-    const w = parseFloat(form?.weight);
-    const h = parseFloat(form?.height);
+    const w = Number(detail?.latestWeightKg);
+    const h = Number(detail?.latestHeightCm);
     if (w && h && h > 0) {
       const heightM = h / 100;
       return (w / (heightM * heightM)).toFixed(1);
     }
-    return form?.bmi || "—";
+    return detail?.bmi ? String(detail.bmi) : "Not available";
   };
 
   const handleSave = async () => {
@@ -221,7 +218,7 @@ function MaternalRecordEditor({
       gravida: form.gravida === "" ? null : Number(form.gravida),
       para: form.para === "" ? null : Number(form.para),
       birthWeight: form.birthWeight === "" ? "" : String(form.birthWeight),
-      bmi: form.bmi === "" ? null : Number(form.bmi),
+      bmi: calculateBMI() === "Not available" ? (detail.bmi || null) : Number(calculateBMI()),
     });
 
     setIsEditing(false);
@@ -264,9 +261,32 @@ function MaternalRecordEditor({
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto">
+          <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-6 py-3">
+            <nav aria-label="Maternal record sections" className="flex gap-2 overflow-x-auto">
+              {[
+                ["overview", "Overview"],
+                ["prenatal", "Prenatal Services & Screening"],
+                ["delivery", "Delivery Information"],
+                ["postpartum", "Postpartum Care"],
+                ["lifestyle", "Maternal Health & Lifestyle Profile"],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-current={activeSection === key ? "page" : undefined}
+                  onClick={() => setActiveSection(key)}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                    activeSection === key ? "bg-brand-blue text-white" : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+          </div>
           <div className="px-6 py-5 space-y-6">
             {/* Quick Summary */}
-            {!isEditing && (
+            {!isEditing && activeSection === "overview" && (
               <>
                 <div className="grid grid-cols-2 gap-4 md:grid-cols-5 text-center">
                   {[
@@ -287,7 +307,7 @@ function MaternalRecordEditor({
             )}
 
             {/* Section A: Pregnancy Information */}
-            <section>
+            <section className={activeSection === "overview" ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Pregnancy Information</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -369,10 +389,10 @@ function MaternalRecordEditor({
               </div>
             </section>
 
-            <hr className="border-gray-200" />
+            {activeSection === "overview" && <hr className="border-gray-200" />}
 
             {/* Section B: Prenatal Services & Screening (Abbreviated for space) */}
-            <section>
+            <section className={activeSection === "prenatal" ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Prenatal Services & Screening</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -385,12 +405,9 @@ function MaternalRecordEditor({
                     ))}
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">FIM Status</label>
-                      <SelectButtonGroup
-                        ariaLabel="FIM Status"
-                        options={YES_NO_OPTS}
-                        value={form.fimStatus}
-                        onChange={set("fimStatus")}
-                      />
+                      <select aria-label="FIM Status" value={form.fimStatus} onChange={(e) => set("fimStatus")(e.target.value)} className={selectCls}>
+                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Iron + Folic Acid (tablets)</label>
@@ -466,21 +483,22 @@ function MaternalRecordEditor({
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Iron Given (if anemic)</label>
-                      <SelectButtonGroup
-                        ariaLabel="Iron Given"
-                        options={IRON_GIVEN_OPTS}
-                        value={form.cbcIronGiven}
-                        onChange={set("cbcIronGiven")}
-                      />
+                      <select aria-label="Iron Given" value={form.cbcIronGiven} onChange={(e) => set("cbcIronGiven")(e.target.value)} className={selectCls}>
+                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                      </select>
                     </div>
                   </>
                 ) : (
                   <>
                     {[
-                      ["Td/TT Doses", detail.td1Date || detail.td2Date || detail.td3Date || detail.td4Date || detail.td5Date ? "Recorded" : "Not recorded"],
-                      ["FIM Status", detail.fimStatus ? "Yes" : "No"],
-                      ["Iron + Folic Acid", detail.prenatalIronFolicTablets ? `${detail.prenatalIronFolicTablets} tablets` : "Not recorded"],
-                      ["Calcium Tablets", detail.calciumTablets ? `${detail.calciumTablets} tablets` : "Not recorded"],
+                      ["Td/TT Dose 1", detail.td1Date || "Not recorded"],
+                      ["Td/TT Dose 2", detail.td2Date || "Not recorded"],
+                      ["Td/TT Dose 3", detail.td3Date || "Not recorded"],
+                      ["Td/TT Dose 4", detail.td4Date || "Not recorded"],
+                      ["Td/TT Dose 5", detail.td5Date || "Not recorded"],
+                      ["FIM Status", yesNoLabel(detail.fimStatus)],
+                      ["Iron + Folic Acid", detail.prenatalIronFolicTablets != null && detail.prenatalIronFolicTablets !== "" ? `${detail.prenatalIronFolicTablets} tablets` : "Not recorded"],
+                      ["Calcium Tablets", detail.calciumTablets != null && detail.calciumTablets !== "" ? `${detail.calciumTablets} tablets` : "Not recorded"],
                       ["Iodine Given", detail.iodineGivenDate || "Not recorded"],
                       ["Deworming Date", detail.dewormingDate || "Not recorded"],
                       ["Syphilis Screen", detail.syphilisScreenDate ? `${detail.syphilisScreenDate} (${detail.syphilisResult || "—"})` : "Not recorded"],
@@ -488,7 +506,7 @@ function MaternalRecordEditor({
                       ["HIV Screen", detail.hivScreenDate || "Not recorded"],
                       ["GDM Screen", detail.gdmScreenDate ? `${detail.gdmScreenDate} (${detail.gdmResult || "—"})` : "Not recorded"],
                       ["CBC Screen", detail.cbcScreenDate ? `${detail.cbcScreenDate} (${detail.cbcResult || "—"})` : "Not recorded"],
-                      ["Iron Given (if anemic)", detail.cbcIronGiven ? "Yes" : "No"],
+                      ["Iron Given (if anemic)", yesNoLabel(detail.cbcIronGiven)],
                     ].map(([label, value]) => (
                       <div key={label}>
                         <p className="text-xs font-medium text-gray-500 uppercase">{label}</p>
@@ -500,10 +518,10 @@ function MaternalRecordEditor({
               </div>
             </section>
 
-            <hr className="border-gray-200" />
+            {activeSection === "prenatal" && <hr className="border-gray-200" />}
 
             {/* Section C: Delivery Information */}
-            <section>
+            <section className={activeSection === "delivery" ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Delivery Information</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -600,10 +618,10 @@ function MaternalRecordEditor({
               </div>
             </section>
 
-            <hr className="border-gray-200" />
+            {activeSection === "delivery" && <hr className="border-gray-200" />}
 
             {/* Section D: Postpartum Care */}
-            <section>
+            <section className={activeSection === "postpartum" ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Postpartum Care Milestones</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
@@ -653,63 +671,53 @@ function MaternalRecordEditor({
               </div>
             </section>
 
-            <hr className="border-gray-200" />
+            {activeSection === "postpartum" && <hr className="border-gray-200" />}
 
             {/* Section E: Maternal Health & Lifestyle */}
-            <section>
+            <section className={activeSection === "lifestyle" ? "" : "hidden"}>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">Maternal Health & Lifestyle Profile</h3>
               <div className="grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-8">
                 {isEditing ? (
                   <>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Smoking History</label>
-                      <SelectButtonGroup
-                        ariaLabel="Smoking History"
-                        options={YES_NO_OPTS}
-                        value={form.smokingHistory}
-                        onChange={set("smokingHistory")}
-                      />
+                      <select aria-label="Smoking History" value={form.smokingHistory} onChange={(e) => set("smokingHistory")(e.target.value)} className={selectCls}>
+                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Binge Alcohol</label>
-                      <SelectButtonGroup
-                        ariaLabel="Binge Alcohol"
-                        options={YES_NO_OPTS}
-                        value={form.bingeAlcohol}
-                        onChange={set("bingeAlcohol")}
-                      />
+                      <select aria-label="Binge Alcohol" value={form.bingeAlcohol} onChange={(e) => set("bingeAlcohol")(e.target.value)} className={selectCls}>
+                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Insufficient Physical Activity</label>
-                      <SelectButtonGroup
-                        ariaLabel="Insufficient Physical Activity"
-                        options={YES_NO_OPTS}
-                        value={form.insufficientPhysicalActivity}
-                        onChange={set("insufficientPhysicalActivity")}
-                      />
+                      <select aria-label="Insufficient Physical Activity" value={form.insufficientPhysicalActivity} onChange={(e) => set("insufficientPhysicalActivity")(e.target.value)} className={selectCls}>
+                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Unhealthy Diet</label>
-                      <SelectButtonGroup
-                        ariaLabel="Unhealthy Diet"
-                        options={YES_NO_OPTS}
-                        value={form.unhealthyDiet}
-                        onChange={set("unhealthyDiet")}
-                      />
+                      <select aria-label="Unhealthy Diet" value={form.unhealthyDiet} onChange={(e) => set("unhealthyDiet")(e.target.value)} className={selectCls}>
+                        <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">BMI (Asia Pacific)</label>
-                      <input type="number" step="0.1" min={0} value={form.bmi} onChange={(e) => set("bmi")(e.target.value)} className={inputCls} />
-                      {errors.bmi && <p className="mt-1 text-xs text-brand-danger">{errors.bmi}</p>}
+                      <div className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                        {calculateBMI()}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Calculated from the latest recorded height and weight.</p>
                     </div>
                   </>
                 ) : (
                   <>
                     {[
-                      ["Smoking History", detail.smokingHistory ? "Yes" : "No"],
-                      ["Binge Alcohol", detail.bingeAlcohol ? "Yes" : "No"],
-                      ["Insufficient Physical Activity", detail.insufficientPhysicalActivity ? "Yes" : "No"],
-                      ["Unhealthy Diet", detail.unhealthyDiet ? "Yes" : "No"],
+                      ["Smoking History", yesNoLabel(detail.smokingHistory)],
+                      ["Binge Alcohol", yesNoLabel(detail.bingeAlcohol)],
+                      ["Insufficient Physical Activity", yesNoLabel(detail.insufficientPhysicalActivity)],
+                      ["Unhealthy Diet", yesNoLabel(detail.unhealthyDiet)],
                       ["BMI (Asia Pacific)", detail.bmi ? String(detail.bmi) : "Not recorded"],
                     ].map(([label, value]) => (
                       <div key={label}>
@@ -723,7 +731,7 @@ function MaternalRecordEditor({
             </section>
 
             {/* Clinical Notes */}
-            {isEditing || detail.notes ? (
+            {activeSection === "overview" && (isEditing || detail.notes) ? (
               <>
                 <hr className="border-gray-200" />
                 <section>
@@ -736,6 +744,112 @@ function MaternalRecordEditor({
                 </section>
               </>
             ) : null}
+
+            {activeSection === "prenatal" && (
+              <section aria-label="Prenatal encounter history">
+                <h3 className="mb-3 text-sm font-semibold text-gray-900">Prenatal Encounter History</h3>
+                {visitLoadError ? <p role="alert" className="text-sm text-brand-danger">{visitLoadError}</p>
+                  : (detail.visits || []).filter((visit) => visit.visit_type === "prenatal").length === 0
+                    ? <p className="text-sm text-gray-500">No prenatal encounters recorded.</p>
+                    : <ol className="space-y-3">
+                      {(detail.visits || []).filter((visit) => visit.visit_type === "prenatal").map((visit) => {
+                        const prenatal = visit.clinical_data?.prenatal || {};
+                        const recordedServices = [
+                          ...[1, 2, 3, 4, 5].filter((dose) => prenatal[`td${dose}Date`]).map((dose) => [`Td/TT dose ${dose}`, prenatal[`td${dose}Date`]]),
+                          ["FIM Status", prenatal.fimStatus === "" || prenatal.fimStatus == null ? "" : prenatal.fimStatus === "true" ? "Yes" : "No"],
+                          ["Iron + Folic Acid", prenatal.ironFolicTablets || ""],
+                          ["Calcium Tablets", prenatal.calciumTablets || ""],
+                          ["Iodine Given", prenatal.iodineGivenDate],
+                          ["Deworming", prenatal.dewormingDate],
+                          ["Syphilis Screen", [prenatal.syphilisScreenDate, prenatal.syphilisResult].filter(Boolean).join(" ")],
+                          ["Hepatitis B Screen", [prenatal.hepbScreenDate, prenatal.hepbResult].filter(Boolean).join(" ")],
+                          ["HIV Screen", prenatal.hivScreenDate],
+                          ["GDM Screen", [prenatal.gdmScreenDate, prenatal.gdmResult].filter(Boolean).join(" ")],
+                          ["CBC Screen", [prenatal.cbcScreenDate, prenatal.cbcResult].filter(Boolean).join(" ")],
+                          ["Iron Given", prenatal.cbcIronGiven === "" || prenatal.cbcIronGiven == null ? "" : prenatal.cbcIronGiven === "true" ? "Yes" : "No"],
+                        ].filter(([, value]) => value !== "");
+                        return (
+                          <li key={visit.id} className="rounded-lg border border-gray-200 p-3">
+                            <div className="flex flex-wrap justify-between gap-2 text-sm">
+                              <span className="font-medium text-gray-900">{visit.visit_date}</span>
+                              <span className="text-gray-600">{visit.provider || visit.provider_name || "Health personnel"}</span>
+                            </div>
+                            <p className="mt-1 text-xs text-gray-600">
+                              {[visit.blood_pressure ? `BP ${visit.blood_pressure}` : "", visit.weight != null ? `${visit.weight} kg` : "", visit.height_cm != null ? `${visit.height_cm} cm` : ""].filter(Boolean).join(" · ") || "No measurements recorded"}
+                            </p>
+                            {recordedServices.length > 0 && (
+                              <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                {recordedServices.map(([label, value]) => (
+                                  <div key={label}>
+                                    <dt className="text-xs text-gray-500">{label}</dt>
+                                    <dd className="text-sm text-gray-800">{value}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            )}
+                            {visit.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">{visit.notes}</p>}
+                          </li>
+                        );
+                      })}
+                    </ol>}
+              </section>
+            )}
+            {activeSection === "delivery" && (
+              <section aria-label="Delivery encounter history">
+                <h3 className="mb-3 text-sm font-semibold text-gray-900">Delivery History</h3>
+                {(detail.visits || []).filter((visit) => visit.visit_type === "intrapartum").map((visit) => {
+                  const delivery = visit.clinical_data?.delivery || {};
+                  return (
+                    <div key={visit.id} className="mb-3 rounded-lg border border-gray-200 p-3">
+                      <p className="text-sm font-medium text-gray-900">
+                        {delivery.deliveryDate || visit.visit_date}
+                        {delivery.deliveryTime ? ` · ${delivery.deliveryTime}` : ""}
+                      </p>
+                      <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {[
+                          ["Delivery Outcome", delivery.deliveryOutcome],
+                          ["Type of Delivery", delivery.typeOfDelivery],
+                          ["Place of Delivery", delivery.placeOfDelivery],
+                          ["Birth Attendant", delivery.birthAttendant],
+                          ["Birth Weight", delivery.birthWeight ? `${delivery.birthWeight} kg` : ""],
+                          ["Birth Weight Classification", delivery.birthWeightClass],
+                          ["Pregnancy Outcome", delivery.pregnancyOutcome],
+                          ["Date Terminated", delivery.pregnancyOutcomeDate],
+                          ["Newborn Sex", delivery.newbornSex],
+                        ].filter(([, value]) => value).map(([label, value]) => (
+                          <div key={label}>
+                            <dt className="text-xs text-gray-500">{label}</dt>
+                            <dd className="text-sm text-gray-800">{value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                      {visit.notes && <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{visit.notes}</p>}
+                    </div>
+                  );
+                })}
+                {!(detail.visits || []).some((visit) => visit.visit_type === "intrapartum") && <p className="text-sm text-gray-500">No delivery visit history recorded.</p>}
+              </section>
+            )}
+            {activeSection === "postpartum" && (
+              <section aria-label="Postpartum encounter history">
+                <h3 className="mb-3 text-sm font-semibold text-gray-900">Postpartum Visit History</h3>
+                {visitLoadError ? <p role="alert" className="text-sm text-brand-danger">{visitLoadError}</p>
+                  : (detail.visits || []).filter((visit) => visit.visit_type === "postpartum").length === 0
+                    ? <p className="text-sm text-gray-500">No postpartum visits recorded.</p>
+                    : <ol className="space-y-3">
+                      {(detail.visits || []).filter((visit) => visit.visit_type === "postpartum").map((visit) => (
+                        <li key={visit.id} className="rounded-lg border border-gray-200 p-3">
+                          <p className="text-sm font-medium text-gray-900">{visit.visit_date} · {visit.clinical_data?.postpartum?.milestone || "Postpartum visit"}</p>
+                          <p className="mt-1 text-xs text-gray-600">
+                            Iron/Folic: {yesNoLabel(visit.clinical_data?.postpartum?.ironFolicCompleted)}
+                            {" · "}Vitamin A: {yesNoLabel(visit.clinical_data?.postpartum?.vitaminAGiven)}
+                          </p>
+                          {visit.notes && <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{visit.notes}</p>}
+                        </li>
+                      ))}
+                    </ol>}
+              </section>
+            )}
           </div>
         </div>
 
@@ -767,6 +881,27 @@ function MaternalRecordEditor({
               </>
             ) : (
               <>
+                <button
+                  type="button"
+                  onClick={() => onRecordEncounter?.(detail)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                >
+                  <Calendar className="h-4 w-4" /> Prenatal Encounter
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRecordDelivery?.(detail)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                >
+                  <Baby className="h-4 w-4" /> Delivery
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRecordPostpartum?.(detail)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                >
+                  <Calendar className="h-4 w-4" /> Postpartum Visit
+                </button>
                 <button
                   onClick={() => onPrint?.(detail)}
                   className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 hover:bg-gray-100 rounded-lg transition-colors"

@@ -35,10 +35,7 @@ export function TclToolbarSkeleton() {
  */
 export function TclListSkeleton({ rows = 5 }) {
   return (
-    <div className="space-y-4">
-      <TclToolbarSkeleton />
-      <SkeletonTable rows={rows} cols={5} />
-    </div>
+    <SkeletonTable rows={rows} cols={5} />
   );
 }
 

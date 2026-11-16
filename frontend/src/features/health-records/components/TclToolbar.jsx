@@ -1,22 +1,19 @@
 import React from "react";
-import { Plus, Search, Download, RefreshCw } from "lucide-react";
+import { Download, Plus, Search } from "lucide-react";
 
 /**
  * Unified TCL toolbar component used across all TCL pages.
  * Standardizes: search field, status/category filters, export action, new record button.
  */
 export function TclToolbar({
-  onSearch,
+  onSearch = undefined,
   searchValue = "",
-  onFilter,
+  onFilter = undefined,
   filterValue = "",
   filterOptions = [],
-  onRefresh,
-  onExport,
-  onNew,
+  onExport = undefined,
+  onNew = undefined,
   newLabel = "New Record",
-  showExport = true,
-  showRefresh = true,
   loading = false,
 }) {
   return (
@@ -25,33 +22,25 @@ export function TclToolbar({
         {/* Search field */}
         <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
         <input
-            type="search"
-            value={searchValue}
-            onChange={(e) => onSearch && onSearch(e.target.value)}
-            placeholder="Search records…"
-            aria-label="Search records"
-            className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray"
+          type="search"
+          value={searchValue}
+          onChange={(e) => onSearch?.(e.target.value)}
+          placeholder="Search Records"
+          aria-label="Search records"
+          className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray"
         />
       </div>
 
-        {/* Actions */}
+      {/* Actions */}
+      {(onExport || onNew) && (
         <div className="ui-tcl-toolbar-actions">
-          {showRefresh && (
+          {onExport && (
             <button
-              onClick={onRefresh}
-              disabled={loading}
-              className="ui-tcl-control ui-tcl-control-secondary"
-              title="Refresh"
-            >
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            </button>
-          )}
-          {showExport && onExport && (
-            <button
+              type="button"
               onClick={onExport}
               disabled={loading}
               className="ui-tcl-control ui-tcl-control-secondary"
-              title="Export"
+              title="Export records"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
               <span>Export</span>
@@ -59,21 +48,24 @@ export function TclToolbar({
           )}
           {onNew && (
             <button
+              type="button"
               onClick={onNew}
               disabled={loading}
               className="ui-tcl-control ui-tcl-control-primary"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
-              {newLabel}
+              <span>{newLabel}</span>
             </button>
           )}
         </div>
+      )}
 
       {/* Status/filter selector if provided */}
       {filterOptions.length > 0 && onFilter && (
         <div className="flex w-full flex-wrap gap-2">
           {filterOptions.map((option) => (
             <button
+              type="button"
               key={option.value}
               onClick={() => onFilter(option.value)}
               className={`rounded-btn border px-3.5 py-2 text-sm font-semibold transition-colors ${

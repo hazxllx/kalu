@@ -145,14 +145,104 @@ const escapeCsv = (value) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+const buildCsv = (columns, rows) => {
+  const header = columns.map(([label]) => escapeCsv(label)).join(',');
+  const body = (rows || []).map((row, index) => (
+    columns.map(([, get]) => escapeCsv(get(row, index))).join(',')
+  ));
+  return [header, ...body].join('\r\n');
+};
+
+const yesNo = (value) => (value === true ? 'Yes' : value === false ? 'No' : '');
+
 /** Build a CSV string for a kind from the full record set. */
 export const buildProgramCsv = (kind, rows) => {
   const cols = COLUMNS[kind];
   if (!cols) throw new Error(`No export columns defined for ${kind}`);
-  const header = cols.map(([h]) => escapeCsv(h)).join(',');
-  const body = (rows || []).map((row, i) => cols.map(([, get]) => escapeCsv(get(row, i))).join(','));
-  return [header, ...body].join('\r\n');
+  return buildCsv(cols, rows);
 };
+
+/** Build the general community-program enrollment TCL CSV. */
+export const buildTclCsv = (rows) => buildCsv([
+  ['Record ID', (row) => row.id],
+  ['Resident ID', (row) => row.residentId],
+  ['Resident Name', (row) => row.resident?.name],
+  ['Barangay', (row) => row.resident?.barangay],
+  ['Program', (row) => row.program],
+  ['Assigned BHW', (row) => row.bhw],
+  ['Priority', (row) => row.priority],
+  ['Status', (row) => row.status],
+  ['Last Visit', (row) => row.lastVisit],
+  ['Next Visit', (row) => row.nextVisit],
+  ['Next Visit Time', (row) => row.nextVisitTime],
+  ['Notes', (row) => row.notes],
+], rows);
+
+/** Build the full Prenatal and Postpartum client-list CSV from mapped records. */
+export const buildMaternalCsv = (rows) => buildCsv([
+  ['Record ID', (row) => row.id],
+  ['Date of Registration', (row) => row.dateOfRegistration],
+  ['Family Serial No.', (row) => row.familySerialNo],
+  ['Resident ID', (row) => row.residentId],
+  ['Resident Name', (row) => row.residentName],
+  ['Barangay', (row) => row.barangay],
+  ['Date of Birth', (row) => row.residentBirthDate],
+  ['Sex', (row) => row.residentSex],
+  ['Socioeconomic Status', (row) => row.socioEconomicStatus],
+  ['Gravida', (row) => row.gravida],
+  ['Para', (row) => row.para],
+  ['Risk', (row) => row.risk],
+  ['Status', (row) => row.status],
+  ['LMP', (row) => row.lmp],
+  ['EDD', (row) => row.edd],
+  ['Prenatal Visits', (row) => row.prenatalVisits],
+  ['Td1 Date', (row) => row.td1Date],
+  ['Td2 Date', (row) => row.td2Date],
+  ['Td3 Date', (row) => row.td3Date],
+  ['Td4 Date', (row) => row.td4Date],
+  ['Td5 Date', (row) => row.td5Date],
+  ['Fully Immunized Mother', (row) => yesNo(row.fimStatus)],
+  ['Prenatal Iron/Folic Tablets', (row) => row.prenatalIronFolicTablets],
+  ['Calcium Tablets', (row) => row.calciumTablets],
+  ['Iodine Given Date', (row) => row.iodineGivenDate],
+  ['Deworming Date', (row) => row.dewormingDate],
+  ['Syphilis Screen Date', (row) => row.syphilisScreenDate],
+  ['Syphilis Result', (row) => row.syphilisResult],
+  ['Hepatitis B Screen Date', (row) => row.hepbScreenDate],
+  ['Hepatitis B Result', (row) => row.hepbResult],
+  ['HIV Screen Date', (row) => row.hivScreenDate],
+  ['GDM Screen Date', (row) => row.gdmScreenDate],
+  ['GDM Result', (row) => row.gdmResult],
+  ['CBC Screen Date', (row) => row.cbcScreenDate],
+  ['CBC Result', (row) => row.cbcResult],
+  ['CBC Iron Given', (row) => yesNo(row.cbcIronGiven)],
+  ['Pregnancy Outcome', (row) => row.pregnancyOutcome],
+  ['Pregnancy Outcome Date', (row) => row.pregnancyOutcomeDate],
+  ['Newborn Sex', (row) => row.newbornSex],
+  ['Delivery Date', (row) => row.deliveryDate],
+  ['Delivery Time', (row) => row.deliveryTime],
+  ['Type of Delivery', (row) => row.typeOfDelivery],
+  ['Delivery Outcome', (row) => row.deliveryOutcome],
+  ['Birth Weight', (row) => row.birthWeight],
+  ['Birth Weight Class', (row) => row.birthWeightClass],
+  ['Place of Delivery', (row) => row.placeOfDelivery],
+  ['Birth Attendant', (row) => row.birthAttendant],
+  ['Postpartum Checkup Within 24 Hours', (row) => row.ppCheckup24h],
+  ['Postpartum Checkup Day 3', (row) => row.ppCheckupDay3],
+  ['Postpartum Checkup 7-14 Days', (row) => row.ppCheckup7to14d],
+  ['Postpartum Checkup 6 Weeks', (row) => row.ppCheckup6wk],
+  ['Iron/Folic Completed Date', (row) => row.ironFolicCompletedDate],
+  ['Vitamin A Given Date', (row) => row.vitaminAGivenDate],
+  ['Smoking History', (row) => yesNo(row.smokingHistory)],
+  ['Binge Alcohol', (row) => yesNo(row.bingeAlcohol)],
+  ['Insufficient Physical Activity', (row) => yesNo(row.insufficientPhysicalActivity)],
+  ['Unhealthy Diet', (row) => yesNo(row.unhealthyDiet)],
+  ['BMI', (row) => row.bmi],
+  ['Provider', (row) => row.provider],
+  ['Notes', (row) => row.notes],
+  ['First Recorded', (row) => row.recordedAt],
+  ['Latest Update', (row) => row.updatedAt],
+], rows);
 
 /** Build the Oral Health ST (statistical table) CSV from the statistics payload. */
 export const buildOralStatisticsCsv = (stats) => {
@@ -178,4 +268,4 @@ export const downloadCsv = (filename, csv) => {
   URL.revokeObjectURL(url);
 };
 
-export default { buildProgramCsv, buildOralStatisticsCsv, downloadCsv };
+export default { buildProgramCsv, buildTclCsv, buildMaternalCsv, buildOralStatisticsCsv, downloadCsv };

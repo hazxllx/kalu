@@ -18,6 +18,7 @@ import TclEmptyState from "../components/TclEmptyState";
 import { TclToolbar } from "../components/TclToolbar";
 import { TclListSkeleton } from "../components/TclSkeletons";
 import TclPageHeader from "../components/TclPageHeader";
+import { buildTclCsv, downloadCsv } from "../lib/programFormExport";
 import { formatClinicalDate } from "@/lib/dateUtils";
 
 // Program icon mapping
@@ -274,6 +275,14 @@ export default function TCLS() {
     });
   }, [scopedTcls, cat, recordQuery, residentById, directory.rows]);
 
+  const exportRecords = () => {
+    if (!rows.length) {
+      showToast("No records to export.");
+      return;
+    }
+    downloadCsv(`target-client-list-${new Date().toISOString().slice(0, 10)}.csv`, buildTclCsv(rows));
+  };
+
   useEffect(() => {
     setRecordPage(1);
   }, [cat, recordQuery]);
@@ -432,10 +441,8 @@ export default function TCLS() {
         onFilter={(value) => setCat(value || null)}
         filterValue={cat || ""}
         filterOptions={TCL_CATEGORIES.map((category) => ({ value: category.id, label: category.name }))}
-        onRefresh={loadData}
+        onExport={exportRecords}
         onNew={openAdd}
-        newLabel="Add TCL"
-        showExport={false}
         loading={loading || saving}
       />
 

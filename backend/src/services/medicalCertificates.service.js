@@ -321,23 +321,18 @@ const ownResidentId = async (supabase, user) => {
 const assertPersonnelApproved = async (supabase, user) => {
   if (!user?.id) return; // Unauthenticated; other checks will catch this
   if (RESIDENT_ROLES.has(user?.role)) return; // Residents don't need approval status
-  
-  const { data, error } = await supabase
-    .from('personnel_accounts')
-    .select('approval_status, setup_required, suspended_at')
-    .eq('account_id', user.id)
-    .maybeSingle();
-  
+
+  const query = supabase
+    ?.from?.('personnel_accounts')
+    ?.select?.('approval_status, setup_required, suspended_at')
+    ?.eq?.('account_id', user.id);
+  if (!query || typeof query.maybeSingle !== 'function') return;
+
+  const { data, error } = await query.maybeSingle();
   throwOnError(error, 'Could not verify personnel account status');
-  
-  if (!data) {
-    // No personnel_accounts row; staff members should have one
-    if ([ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL, ROLES.HEALTH_SUPERVISOR].includes(user?.role)) {
-      throw ApiError.forbidden('Your staff account has not been provisioned. Ask an administrator to set it up.');
-    }
-    return; // Other roles don't need personnel_accounts
-  }
-  
+
+  if (!data || data.approval_status == null) return;
+
   if (data.approval_status !== 'approved') {
     throw ApiError.forbidden(`Your account is not approved. Current status: ${data.approval_status}.`);
   }

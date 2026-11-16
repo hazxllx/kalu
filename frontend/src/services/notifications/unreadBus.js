@@ -3,21 +3,21 @@
  *
  * The notification bell/badge lives in the shared DashboardLayout while the
  * read/unread actions happen inside the NotificationsPage (a routed child).
- * They do not share React state, so after marking a notification read the badge
- * would otherwise only refresh on the next navigation. This bus lets the page
- * tell the badge to re-sync immediately, keeping the dropdown entry point, the
- * full page, and the unread count consistent.
- *
- * It carries no payload — listeners re-fetch the authoritative count from the
- * server so the badge always reflects persisted state, never an optimistic
- * guess that could drift on failure.
+ * This bus immediately synchronizes the badge and can request an authoritative
+ * refresh after a mutation settles.
  */
 const EVENT_NAME = "kalusagap:notifications-unread-changed";
 
-/** Announce that the unread set may have changed (mark read / mark all read). */
-export const notifyUnreadChanged = () => {
+/**
+ * Announce an unread count change. An optimistic count can be supplied so the
+ * shared badge updates immediately; listeners may then refresh after the
+ * mutation settles to reconcile against the server.
+ */
+export const notifyUnreadChanged = (unreadCount, { refresh = true } = {}) => {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(EVENT_NAME));
+  window.dispatchEvent(new CustomEvent(EVENT_NAME, {
+    detail: { unreadCount, refresh },
+  }));
 };
 
 /**

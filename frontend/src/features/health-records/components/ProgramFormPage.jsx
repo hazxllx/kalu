@@ -154,7 +154,6 @@ export default function ProgramFormPage({ config }) {
       <TclToolbar
         searchValue={recordQuery}
         onSearch={setRecordQuery}
-        onRefresh={load}
         onExport={() => {
           if (!rows.length) { showToast("No records to export."); return; }
           downloadCsv(`${config.kind}-${new Date().toISOString().slice(0, 10)}.csv`, buildProgramCsv(config.kind, rows));

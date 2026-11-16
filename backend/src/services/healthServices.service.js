@@ -923,9 +923,9 @@ const resolveScope = async (user, payload, supabase) => {
     barangayId = supervisorBarangayId;
   }
 
-  // A new facility label typed by a Health Supervisor is a barangay facility
-  // label, so its service remains scoped to the supervisor's own barangay.
-  if (isSupervisor && customLocation) barangayId = supervisorBarangayId;
+  // A free-typed custom location is only a label for the service; it does not
+  // create a facility row and does not derive barangay scope.
+  if (isSupervisor && customLocation) barangayId = null;
 
   return { municipalityId, facilityId: facility ? facility.id : null, customLocation, barangayId };
 };

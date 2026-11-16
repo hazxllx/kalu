@@ -32,7 +32,8 @@ const throwOnError = (error, fallback) => { if (error) throw Object.assign(new E
 /** Local "YYYY-MM-DD" format check (same rule the health-services validator uses). */
 const dateIsDateOnly = (value) =>
   typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
-  && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`));
+  && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`))
+  && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 
 /**
  * Follow-up lifecycle guard (enforced on the server).
@@ -226,11 +227,87 @@ export const validateMaternalVisit = (payload = {}) => {
   if (row.blood_pressure != null && text(row.blood_pressure) && !/^\d{2,3}\/\d{2,3}$/.test(text(row.blood_pressure))) {
     throw ApiError.unprocessable('Blood pressure must be in the format SYSTOLIC/DIASTOLIC.');
   }
-  if (row.weight != null && text(row.weight) && Number.isNaN(Number(row.weight))) {
-    throw ApiError.unprocessable('Visit weight must be numeric when supplied.');
+  if (row.weight != null && text(row.weight)
+    && (!Number.isFinite(Number(row.weight)) || Number(row.weight) <= 0)) {
+    throw ApiError.unprocessable('Visit weight must be a positive number when supplied.');
+  }
+  if (row.height_cm != null && text(row.height_cm)
+    && (!Number.isFinite(Number(row.height_cm)) || Number(row.height_cm) <= 0)) {
+    throw ApiError.unprocessable('Visit height must be a positive number when supplied.');
   }
   if (row.gestational_age_weeks != null && text(row.gestational_age_weeks) && Number.isNaN(Number(row.gestational_age_weeks))) {
     throw ApiError.unprocessable('Gestational age weeks must be numeric when supplied.');
+  }
+  if (row.clinical_data !== undefined) {
+    if (!row.clinical_data || typeof row.clinical_data !== 'object' || Array.isArray(row.clinical_data)) {
+      throw ApiError.unprocessable('Maternal encounter details must be an object.');
+    }
+    if (Buffer.byteLength(JSON.stringify(row.clinical_data), 'utf8') > 30000) {
+      throw ApiError.unprocessable('Maternal encounter details are too large.');
+    }
+  }
+  return row;
+};
+
+const MATERNAL_DATE_FIELDS = new Set([
+  'lmp', 'edd', 'date_of_registration', 'iodine_given_date', 'deworming_date',
+  'syphilis_screen_date', 'hepb_screen_date', 'hiv_screen_date',
+  'gdm_screen_date', 'cbc_screen_date', 'pregnancy_outcome_date',
+  'delivery_date', 'pp_checkup_24h', 'pp_checkup_day3', 'pp_checkup_7_14d',
+  'pp_checkup_6wk', 'iron_folic_completed_date', 'vitamin_a_given_date',
+]);
+const MATERNAL_COUNT_FIELDS = new Set(['prenatal_visits', 'gravida', 'para']);
+const MATERNAL_BOOLEAN_FIELDS = new Set([
+  'fim_status', 'cbc_iron_given', 'smoking_history', 'binge_alcohol',
+  'insufficient_physical_activity', 'unhealthy_diet',
+]);
+
+export const validateMaternalRecord = (payload = {}) => {
+  const row = { ...payload };
+  for (const field of MATERNAL_DATE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(row, field) || row[field] == null || row[field] === '') continue;
+    if (!dateIsDateOnly(text(row[field]))) {
+      throw ApiError.unprocessable(`Maternal record ${field.replaceAll('_', ' ')} must be a valid date.`);
+    }
+  }
+  for (const field of MATERNAL_COUNT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(row, field) || row[field] == null || row[field] === '') continue;
+    if (!Number.isInteger(Number(row[field])) || Number(row[field]) < 0) {
+      throw ApiError.unprocessable(`Maternal record ${field.replaceAll('_', ' ')} must be a non-negative whole number.`);
+    }
+    row[field] = Number(row[field]);
+  }
+  if (Object.prototype.hasOwnProperty.call(row, 'bmi') && row.bmi != null && row.bmi !== '') {
+    if (!Number.isFinite(Number(row.bmi)) || Number(row.bmi) <= 0) {
+      throw ApiError.unprocessable('Maternal record BMI must be a positive number.');
+    }
+    row.bmi = Number(row.bmi);
+  }
+  for (const field of MATERNAL_BOOLEAN_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(row, field) && row[field] != null && typeof row[field] !== 'boolean') {
+      throw ApiError.unprocessable(`Maternal record ${field.replaceAll('_', ' ')} must be true or false.`);
+    }
+  }
+  for (const field of ['tt_td_doses', 'prenatal_micronutrients', 'pp_iron_folic']) {
+    if (Object.prototype.hasOwnProperty.call(row, field)
+      && (!row[field] || typeof row[field] !== 'object' || Array.isArray(row[field]))) {
+      throw ApiError.unprocessable(`Maternal record ${field.replaceAll('_', ' ')} must be an object.`);
+    }
+  }
+  if (row.tt_td_doses) {
+    for (const date of Object.values(row.tt_td_doses)) {
+      if (date && !dateIsDateOnly(text(date))) {
+        throw ApiError.unprocessable('Td/TT dose dates must be valid dates.');
+      }
+    }
+  }
+  if (row.prenatal_micronutrients) {
+    for (const field of ['iron_folic_tablets', 'calcium_tablets']) {
+      const count = row.prenatal_micronutrients[field];
+      if (count != null && count !== '' && (!Number.isInteger(Number(count)) || Number(count) < 0)) {
+        throw ApiError.unprocessable('Prenatal supplement counts must be non-negative whole numbers.');
+      }
+    }
   }
   return row;
 };
@@ -333,7 +410,7 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
   }
   const select = selectFor(normalizedKind);
   let query = supabase.from(tableName).select(select).order('created_at', { ascending: false });
-  if (!['followups', 'tcl'].includes(normalizedKind)) query = query.limit(FOLLOW_UP_PAGE_SIZE);
+  if (!['followups', 'tcl', 'maternalvisits'].includes(normalizedKind)) query = query.limit(FOLLOW_UP_PAGE_SIZE);
   if (user.role === 'health_supervisor') {
     if (!user.barangayId) return [];
     query = query.eq('barangay_id', user.barangayId);
@@ -351,8 +428,12 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
     if (from) query = query.gte('visit_date', from);
     if (to) query = query.lte('visit_date', to);
   }
-  if (normalizedKind === 'followups' || normalizedKind === 'tcl') {
-    query = query.order('id', { ascending: true });
+  if (normalizedKind === 'followups' || normalizedKind === 'tcl' || normalizedKind === 'maternalvisits') {
+    if (normalizedKind === 'maternalvisits') {
+      query = query.order('visit_date', { ascending: false }).order('id', { ascending: false });
+    } else {
+      query = query.order('id', { ascending: true });
+    }
     const rows = [];
     for (let offset = 0; ; offset += FOLLOW_UP_PAGE_SIZE) {
       const { data, error } = await query.range(offset, offset + FOLLOW_UP_PAGE_SIZE - 1);
@@ -360,7 +441,9 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
       rows.push(...(data || []));
       if (!data || data.length < FOLLOW_UP_PAGE_SIZE) break;
     }
-    return normalizedKind === 'followups' ? rows.map((row) => withScheduleState(row)) : rows.map(withTclWorker);
+    if (normalizedKind === 'followups') return rows.map((row) => withScheduleState(row));
+    if (normalizedKind === 'tcl') return rows.map(withTclWorker);
+    return rows;
   }
   const { data, error } = await query;
   throwOnError(error, `Could not load ${normalizedKind}`);
@@ -434,6 +517,8 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   delete row.client_operation_key;
 
   if (normalizedKind === 'tcl') await normalizeTclWorker({ row, user, resident, supabase });
+
+  if (normalizedKind === 'maternal') Object.assign(row, validateMaternalRecord(row));
 
   if (normalizedKind === 'followups' && idempotencyKey) {
     const existing = await findFollowUpByOperationKey({ supabase, idempotencyKey, user, resident });
@@ -603,6 +688,7 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
   delete row.resident_decision_reason;
   delete row.requires_resident_response;
   delete row.requiresResidentResponse;
+  if (normalizedKind === 'maternal') Object.assign(row, validateMaternalRecord(row));
   if (normalizedKind === 'followups' && text(row.status) === 'Completed' && !existing.completed_at) {
     row.completed_at = new Date().toISOString();
   }

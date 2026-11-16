@@ -17,6 +17,8 @@
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';
 
+const NOTIFICATION_PRIORITIES = new Set(['emergency', 'critical']);
+
 /**
  * Create a notification for a resident.
  *
@@ -27,6 +29,7 @@ import { getServiceClient } from '../config/supabase.js';
  * @param {string} [params.message]
  * @param {string} [params.relatedType]
  * @param {string} [params.relatedId]
+ * @param {'emergency'|'critical'} [params.priority] reserved for explicitly classified high-priority events
  * @returns {Promise<boolean>} true when a row was written
  */
 export const notifyResident = async ({
@@ -36,9 +39,14 @@ export const notifyResident = async ({
   message = '',
   relatedType = '',
   relatedId = null,
+  priority = null,
 }) => {
   if (!env.isSupabaseConfigured) return false;
   if (!recipientAuthUserId || !title) return false;
+  if (priority !== null && !NOTIFICATION_PRIORITIES.has(priority)) {
+    console.error(`notifyResident: unsupported notification priority: ${priority}`);
+    return false;
+  }
   try {
     const supabase = getServiceClient();
     const { error } = await supabase.from('notifications').insert({
@@ -48,6 +56,7 @@ export const notifyResident = async ({
       message,
       related_type: relatedType,
       related_id: relatedId,
+      ...(priority ? { priority } : {}),
     });
     if (error) {
       console.error(`notifyResident: could not write notification: ${error.message}`);

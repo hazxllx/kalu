@@ -11,7 +11,7 @@ import DataTable from "@/components/tables/DataTable";
 import TablePagination from "@/components/tables/TablePagination";
 import { SkeletonTable } from "@/components/system/Skeleton";
 import {
-  Plus, Pencil, CheckCircle2, Download, Trash2,
+  Pencil, CheckCircle2, Download, Trash2,
 } from "lucide-react";
 import { maternalApi, maternalVisitsApi, residentsApi, m1Api, loadM1ProgramCounts } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
@@ -28,8 +28,11 @@ import {
   WorkflowSelector,
   RegisterPregnancyForm,
   RecordEncounterForm,
+  DeliveryRecordForm,
+  PostpartumFollowUpForm,
 } from "@/features/health-records/components/MaternalRecordWorkflow";
 import MaternalRecordEditor from "@/features/health-records/components/MaternalRecordEditor";
+import { buildMaternalCsv, downloadCsv } from "@/features/health-records/lib/programFormExport";
 
 const RISK_LEVELS = ["Low", "Moderate", "High"];
 const STATUSES = ["Active", "Delivered", "Transferred", "Inactive"];
@@ -71,6 +74,16 @@ const SES_OPTS = [
   { value: "NHTS", label: "1 - NHTS" },
   { value: "Non-NHTS", label: "2 - Non-NHTS" },
 ];
+
+const saveMaternalEncounter = async (recordId, recordPatch, visit) => {
+  await maternalApi.update(recordId, recordPatch);
+  try {
+    await maternalVisitsApi.create(visit);
+  } catch (error) {
+    const reason = error?.message ? ` ${error.message}` : "";
+    throw new Error(`The maternal record was updated, but encounter history was not saved.${reason}`);
+  }
+};
 
 // ---------------------------------------------------------------------------
 // FHSIS M1 export (official reporting-form layout).
@@ -122,7 +135,9 @@ const mapRecord = (row) => ({
   td3Date: row.tt_td_doses?.td3 || "",
   td4Date: row.tt_td_doses?.td4 || "",
   td5Date: row.tt_td_doses?.td5 || "",
-  fimStatus: Boolean(row.fim_status),
+  fimStatus: row.fim_status ?? null,
+  ttTdDoses: row.tt_td_doses || {},
+  prenatalMicronutrients: row.prenatal_micronutrients || {},
   // Micronutrient supplementation + deworming
   prenatalIronFolicTablets: row.prenatal_micronutrients?.iron_folic_tablets ?? "",
   calciumTablets: row.prenatal_micronutrients?.calcium_tablets ?? "",
@@ -139,7 +154,7 @@ const mapRecord = (row) => ({
   gdmResult: row.gdm_result || "",
   cbcScreenDate: row.cbc_screen_date || "",
   cbcResult: row.cbc_result || "",
-  cbcIronGiven: Boolean(row.cbc_iron_given),
+  cbcIronGiven: row.cbc_iron_given ?? null,
   // Pregnancy outcome
   pregnancyOutcome: row.pregnancy_outcome || "",
   pregnancyOutcomeDate: row.pregnancy_outcome_date || "",
@@ -159,10 +174,10 @@ const mapRecord = (row) => ({
   ppCheckup6wk: row.pp_checkup_6wk || "",
   ironFolicCompletedDate: row.iron_folic_completed_date || "",
   vitaminAGivenDate: row.vitamin_a_given_date || "",
-  smokingHistory: Boolean(row.smoking_history),
-  bingeAlcohol: Boolean(row.binge_alcohol),
-  insufficientPhysicalActivity: Boolean(row.insufficient_physical_activity),
-  unhealthyDiet: Boolean(row.unhealthy_diet),
+  smokingHistory: row.smoking_history ?? null,
+  bingeAlcohol: row.binge_alcohol ?? null,
+  insufficientPhysicalActivity: row.insufficient_physical_activity ?? null,
+  unhealthyDiet: row.unhealthy_diet ?? null,
   bmi: row.bmi ?? "",
 });
 
@@ -191,7 +206,7 @@ const EMPTY_FORM = () => ({
   td3Date: "",
   td4Date: "",
   td5Date: "",
-  fimStatus: false,
+  fimStatus: null,
   // Micronutrient supplementation (col 11) + deworming (col 13)
   prenatalIronFolicTablets: "",
   calciumTablets: "",
@@ -208,7 +223,7 @@ const EMPTY_FORM = () => ({
   gdmResult: "",
   cbcScreenDate: "",
   cbcResult: "",
-  cbcIronGiven: false,
+  cbcIronGiven: null,
   // Pregnancy outcome (col 16)
   pregnancyOutcome: "",
   pregnancyOutcomeDate: "",
@@ -227,10 +242,10 @@ const EMPTY_FORM = () => ({
   ppCheckup6wk: "",
   ironFolicCompletedDate: "",
   vitaminAGivenDate: "",
-  smokingHistory: false,
-  bingeAlcohol: false,
-  insufficientPhysicalActivity: false,
-  unhealthyDiet: false,
+  smokingHistory: null,
+  bingeAlcohol: null,
+  insufficientPhysicalActivity: null,
+  unhealthyDiet: null,
   bmi: "",
 });
 
@@ -268,6 +283,7 @@ export default function M1Records() {
   const [editingRecord, setEditingRecord] = useState(null); // For edit mode
   const [selectedResident, setSelectedResident] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [visitLoadError, setVisitLoadError] = useState(null);
   const [toast, setToast] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(null); // record pending delete confirmation
@@ -326,6 +342,27 @@ export default function M1Records() {
       .catch((err) => setLoadError(err?.message || "Unable to load maternal records. Please try again."))
       .finally(() => setLoading(false));
   }, [assignedBarangay]);
+
+  const openDetail = async (record) => {
+    setVisitLoadError(null);
+    setDetail({ ...record, visits: [] });
+    try {
+      const result = await maternalVisitsApi.list({ residentId: record.residentId });
+      const visits = (result?.rows || [])
+        .filter((visit) => visit.maternal_case_id === record.id)
+        .sort((a, b) => String(b.visit_date || "").localeCompare(String(a.visit_date || "")));
+      const latestWeightVisit = visits.find((visit) => visit.weight != null);
+      const latestHeightVisit = visits.find((visit) => visit.height_cm != null);
+      setDetail((current) => current?.id === record.id ? {
+        ...record,
+        visits,
+        latestWeightKg: latestWeightVisit?.weight ?? null,
+        latestHeightCm: latestHeightVisit?.height_cm ?? null,
+      } : current);
+    } catch (error) {
+      setVisitLoadError(error?.message || "Could not load maternal encounter history.");
+    }
+  };
 
   useEffect(() => {
     if (isMaternalTclRoute) load();
@@ -391,7 +428,15 @@ export default function M1Records() {
   const pageSafe = Math.min(page, totalPages);
   const pagedParticipants = participants.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
 
-   const ageOf = (birthDate) => {
+  const handleMaternalExport = () => {
+    if (!records.length) {
+      showToast("No records to export.");
+      return;
+    }
+    downloadCsv(`prenatal-postpartum-${new Date().toISOString().slice(0, 10)}.csv`, buildMaternalCsv(records));
+  };
+
+  const ageOf = (birthDate) => {
     if (!birthDate) return "—";
     const d = new Date(birthDate);
     if (Number.isNaN(d.getTime())) return "—";
@@ -457,6 +502,28 @@ export default function M1Records() {
     // For edit mode, we don't need selectedResident since it's already in the record
     setSelectedResident(null);
   };
+  const openMaternalWorkflow = (mode, record = null) => {
+    const resident = record
+      ? residents.find((candidate) => candidate.id === record.residentId)
+      : null;
+    if (record && !resident) {
+      showToast("Could not load the resident for this maternal record.");
+      return;
+    }
+    setWorkflowOpen(true);
+    setWorkflowMode(mode);
+    setFormMode("register");
+    setEditingRecord(record);
+    setSelectedResident(resident);
+    setDetail(null);
+  };
+  const closeMaternalWorkflow = () => {
+    setWorkflowOpen(false);
+    setWorkflowMode(null);
+    setFormMode("register");
+    setEditingRecord(null);
+    setSelectedResident(null);
+  };
   const handleWorkflowSelect = (mode) => {
     setWorkflowMode(mode); // 'register' | 'encounter'
   };
@@ -481,7 +548,7 @@ export default function M1Records() {
       gravida: form.gravida === "" || form.gravida === null ? null : Number(form.gravida),
       para: form.para === "" || form.para === null ? null : Number(form.para),
       tt_td_doses: {},
-      fim_status: false,
+      fim_status: null,
       prenatal_micronutrients: {},
       iodine_given_date: null,
       deworming_date: null,
@@ -494,7 +561,7 @@ export default function M1Records() {
       gdm_result: "",
       cbc_screen_date: null,
       cbc_result: "",
-      cbc_iron_given: false,
+      cbc_iron_given: null,
       pregnancy_outcome: "",
       pregnancy_outcome_date: null,
       newborn_sex: "",
@@ -512,10 +579,10 @@ export default function M1Records() {
       pp_checkup_6wk: null,
       iron_folic_completed_date: null,
       vitamin_a_given_date: null,
-      smoking_history: false,
-      binge_alcohol: false,
-      insufficient_physical_activity: false,
-      unhealthy_diet: false,
+      smoking_history: null,
+      binge_alcohol: null,
+      insufficient_physical_activity: null,
+      unhealthy_diet: null,
       bmi: null,
     };
     try {
@@ -544,7 +611,8 @@ export default function M1Records() {
 
   const handleRecordEncounter = async (form) => {
     if (!selectedResident) return;
-    const maternalCase = records.find((record) => record.residentId === selectedResident.id && record.status === "Active")
+    const maternalCase = records.find((record) => record.id === editingRecord?.id)
+      || records.find((record) => record.residentId === selectedResident.id && record.status === "Active")
       || records.find((record) => record.residentId === selectedResident.id);
     if (!maternalCase) {
       showToast("Register an active pregnancy before recording an encounter.");
@@ -557,23 +625,66 @@ export default function M1Records() {
       return;
     }
     const notes = [
-      form.height ? `Height: ${form.height} cm` : "",
       form.clinicalFindings ? `Clinical findings: ${form.clinicalFindings}` : "",
       form.assessment ? `Assessment: ${form.assessment}` : "",
       form.carePlan ? `Care plan: ${form.carePlan}` : "",
       form.nextVisitDate ? `Next visit: ${form.nextVisitDate}` : "",
     ].filter(Boolean).join("\n");
+    const doseUpdates = Object.fromEntries(
+      ["td1Date", "td2Date", "td3Date", "td4Date", "td5Date"]
+        .map((key, index) => [`td${index + 1}`, form[key]])
+        .filter(([, value]) => value),
+    );
+    const micronutrientUpdates = {
+      ...(form.ironFolicTablets !== "" ? { iron_folic_tablets: Number(form.ironFolicTablets) } : {}),
+      ...(form.calciumTablets !== "" ? { calcium_tablets: Number(form.calciumTablets) } : {}),
+    };
+    const maternalPatch = {
+      prenatal_visits: Number(maternalCase.prenatalVisits || 0) + 1,
+      ...(Object.keys(doseUpdates).length ? { tt_td_doses: { ...maternalCase.ttTdDoses, ...doseUpdates } } : {}),
+      ...(Object.keys(micronutrientUpdates).length ? {
+        prenatal_micronutrients: { ...maternalCase.prenatalMicronutrients, ...micronutrientUpdates },
+      } : {}),
+      ...(form.fimStatus !== "" ? { fim_status: form.fimStatus === "true" } : {}),
+      ...(form.iodineGivenDate ? { iodine_given_date: form.iodineGivenDate } : {}),
+      ...(form.dewormingDate ? { deworming_date: form.dewormingDate } : {}),
+      ...(form.syphilisScreenDate ? { syphilis_screen_date: form.syphilisScreenDate } : {}),
+      ...(form.syphilisResult ? { syphilis_result: form.syphilisResult } : {}),
+      ...(form.hepbScreenDate ? { hepb_screen_date: form.hepbScreenDate } : {}),
+      ...(form.hepbResult ? { hepb_result: form.hepbResult } : {}),
+      ...(form.hivScreenDate ? { hiv_screen_date: form.hivScreenDate } : {}),
+      ...(form.gdmScreenDate ? { gdm_screen_date: form.gdmScreenDate } : {}),
+      ...(form.gdmResult ? { gdm_result: form.gdmResult } : {}),
+      ...(form.cbcScreenDate ? { cbc_screen_date: form.cbcScreenDate } : {}),
+      ...(form.cbcResult ? { cbc_result: form.cbcResult } : {}),
+      ...(form.cbcIronGiven !== "" ? { cbc_iron_given: form.cbcIronGiven === "true" } : {}),
+    };
+    const weight = form.weight === "" ? null : Number(form.weight);
+    const height = form.height === "" ? null : Number(form.height);
+    const weightForBmi = weight ?? Number(editingRecord?.latestWeightKg);
+    const heightForBmi = height ?? Number(editingRecord?.latestHeightCm);
+    if (weightForBmi > 0 && heightForBmi > 0) {
+      maternalPatch.bmi = Math.round((weightForBmi / ((heightForBmi / 100) ** 2)) * 100) / 100;
+    }
 
     setSaving(true);
     try {
-      await maternalVisitsApi.create({
+      await saveMaternalEncounter(maternalCase.id, maternalPatch, {
         residentId: selectedResident.id,
         maternalCaseId: maternalCase.id,
         visit_date: form.encounterDate,
-        visit_type: form.encounterType,
+        visit_type: "prenatal",
         blood_pressure: hasSystolic && hasDiastolic ? `${hasSystolic}/${hasDiastolic}` : "",
-        weight: form.weight === "" ? null : Number(form.weight),
+        weight,
+        height_cm: height,
+        provider: user?.name || "",
         notes,
+        clinical_data: {
+          prenatal: {
+            ...form,
+            bmi: maternalPatch.bmi ?? null,
+          },
+        },
       });
       await load();
       showToast("Maternal encounter recorded.");
@@ -582,6 +693,103 @@ export default function M1Records() {
       setSelectedResident(null);
     } catch (err) {
       showToast(err?.message || "Could not record the maternal encounter.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRecordDelivery = async (form) => {
+    if (!selectedResident) return;
+    const maternalCase = records.find((record) => record.id === editingRecord?.id)
+      || records.find((record) => record.residentId === selectedResident.id && record.status === "Active")
+      || records.find((record) => record.residentId === selectedResident.id);
+    if (!maternalCase) {
+      showToast("Register a pregnancy before recording delivery.");
+      return;
+    }
+    const payload = {
+      delivery_date: form.deliveryDate,
+      delivery_time: form.deliveryTime || "",
+      delivery_outcome: form.deliveryOutcome,
+      type_of_delivery: form.typeOfDelivery || "",
+      place_of_delivery: form.placeOfDelivery || "",
+      birth_attendant: form.birthAttendant || "",
+      birth_weight: form.birthWeight || "",
+      birth_weight_class: form.birthWeightClass || "",
+      pregnancy_outcome: form.pregnancyOutcome || "",
+      pregnancy_outcome_date: form.pregnancyOutcomeDate || null,
+      newborn_sex: form.newbornSex || "",
+      status: "Delivered",
+    };
+    setSaving(true);
+    try {
+      await saveMaternalEncounter(maternalCase.id, payload, {
+        residentId: selectedResident.id,
+        maternalCaseId: maternalCase.id,
+        visit_date: form.deliveryDate,
+        visit_type: "intrapartum",
+        provider: user?.name || "",
+        notes: `Delivery outcome: ${form.deliveryOutcome}`,
+        clinical_data: { delivery: form },
+      });
+      await load();
+      showToast("Delivery recorded.");
+      setWorkflowOpen(false);
+      setWorkflowMode(null);
+      setSelectedResident(null);
+      setEditingRecord(null);
+    } catch (error) {
+      showToast(error?.message || "Could not record delivery information.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRecordPostpartum = async (form) => {
+    if (!selectedResident) return;
+    const maternalCase = records.find((record) => record.id === editingRecord?.id)
+      || records.find((record) => record.residentId === selectedResident.id && record.status === "Delivered")
+      || records.find((record) => record.residentId === selectedResident.id);
+    if (!maternalCase) {
+      showToast("Register a pregnancy before recording a postpartum visit.");
+      return;
+    }
+    const milestoneField = {
+      "24h": "pp_checkup_24h",
+      "3d": "pp_checkup_day3",
+      "7-14d": "pp_checkup_7_14d",
+      "6wk": "pp_checkup_6wk",
+    }[form.milestone];
+    const payload = {
+      [milestoneField]: form.encounterDate,
+      ...(form.ironFolicCompleted === "true" ? { iron_folic_completed_date: form.encounterDate } : {}),
+      ...(form.vitaminAGiven === "true" ? { vitamin_a_given_date: form.encounterDate } : {}),
+    };
+    setSaving(true);
+    try {
+      await saveMaternalEncounter(maternalCase.id, payload, {
+        residentId: selectedResident.id,
+        maternalCaseId: maternalCase.id,
+        visit_date: form.encounterDate,
+        visit_type: "postpartum",
+        provider: user?.name || "",
+        notes: form.notes || "",
+        clinical_data: {
+          postpartum: {
+            milestone: form.milestone,
+            ironFolicCompleted: form.ironFolicCompleted === "" ? null : form.ironFolicCompleted === "true",
+            vitaminAGiven: form.vitaminAGiven === "" ? null : form.vitaminAGiven === "true",
+          },
+        },
+      });
+      await load();
+      showToast("Postpartum visit recorded.");
+      setWorkflowOpen(false);
+      setWorkflowMode(null);
+      setSelectedResident(null);
+      setEditingRecord(null);
+    } catch (error) {
+      showToast(error?.message || "Could not record the postpartum visit.");
     } finally {
       setSaving(false);
     }
@@ -609,7 +817,7 @@ export default function M1Records() {
         ...(form.td4Date ? { td4: form.td4Date } : {}),
         ...(form.td5Date ? { td5: form.td5Date } : {}),
       },
-      fim_status: Boolean(form.fimStatus),
+      fim_status: form.fimStatus === "" || form.fimStatus == null ? null : form.fimStatus === "true" || form.fimStatus === true,
       prenatal_micronutrients: {
         ...(form.prenatalIronFolicTablets !== "" && form.prenatalIronFolicTablets != null ? { iron_folic_tablets: Number(form.prenatalIronFolicTablets) } : {}),
         ...(form.calciumTablets !== "" && form.calciumTablets != null ? { calcium_tablets: Number(form.calciumTablets) } : {}),
@@ -625,7 +833,7 @@ export default function M1Records() {
       gdm_result: form.gdmResult || "",
       cbc_screen_date: form.cbcScreenDate || null,
       cbc_result: form.cbcResult || "",
-      cbc_iron_given: Boolean(form.cbcIronGiven),
+      cbc_iron_given: form.cbcIronGiven === "" || form.cbcIronGiven == null ? null : form.cbcIronGiven === "true" || form.cbcIronGiven === true,
       pregnancy_outcome: form.pregnancyOutcome || "",
       pregnancy_outcome_date: form.pregnancyOutcomeDate || null,
       newborn_sex: form.newbornSex || "",
@@ -643,10 +851,10 @@ export default function M1Records() {
       pp_checkup_6wk: form.ppCheckup6wk || null,
       iron_folic_completed_date: form.ironFolicCompletedDate || null,
       vitamin_a_given_date: form.vitaminAGivenDate || null,
-      smoking_history: Boolean(form.smokingHistory),
-      binge_alcohol: Boolean(form.bingeAlcohol),
-      insufficient_physical_activity: Boolean(form.insufficientPhysicalActivity),
-      unhealthy_diet: Boolean(form.unhealthyDiet),
+      smoking_history: form.smokingHistory === "" || form.smokingHistory == null ? null : form.smokingHistory === "true" || form.smokingHistory === true,
+      binge_alcohol: form.bingeAlcohol === "" || form.bingeAlcohol == null ? null : form.bingeAlcohol === "true" || form.bingeAlcohol === true,
+      insufficient_physical_activity: form.insufficientPhysicalActivity === "" || form.insufficientPhysicalActivity == null ? null : form.insufficientPhysicalActivity === "true" || form.insufficientPhysicalActivity === true,
+      unhealthy_diet: form.unhealthyDiet === "" || form.unhealthyDiet == null ? null : form.unhealthyDiet === "true" || form.unhealthyDiet === true,
       bmi: form.bmi,
     };
 
@@ -692,19 +900,16 @@ export default function M1Records() {
         />
         {loading ? <SkeletonTable rows={8} cols={8} className="ui-tcl-data-table" />
           : loadError ? <Card><ErrorState title="Unable to load maternal records" message={loadError} onRetry={load} /></Card>
-            : <section aria-labelledby="maternal-records-heading">
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-                <div><h2 id="maternal-records-heading" className="text-base font-semibold text-brand-ink">Prenatal and Postpartum Records</h2><p className="mt-0.5 text-xs text-brand-gray">{participants.length} maternal record{participants.length === 1 ? "" : "s"} shown.</p></div>
-              </div>
+            : <section aria-label="Prenatal and postpartum records">
               <TclToolbar
                 onSearch={setSearch}
                 searchValue={search}
                 onFilter={setStatusFilter}
                 filterValue={statusFilter}
                 filterOptions={[{ value: "All", label: "All Status" }, ...STATUSES.map((status) => ({ value: status, label: status }))]}
-                showExport={false}
-                showRefresh={false}
-                actions={[{ label: "New Maternal Record", icon: <Plus className="h-4 w-4" />, onClick: openCreate }]}
+                onExport={handleMaternalExport}
+                onNew={openCreate}
+                loading={saving}
               />
               {participants.length === 0 ? (
                 <TclEmptyState
@@ -712,7 +917,7 @@ export default function M1Records() {
                   title="No prenatal or postpartum records found"
                   description={records.length === 0 ? (assignedBarangay ? `No maternal records have been recorded for Brgy. ${assignedBarangay} yet.` : "No maternal records have been recorded yet.") : "No maternal records match the selected filters."}
                   compact
-                  actions={(search.trim() || statusFilter !== "All") ? <button type="button" onClick={() => { setSearch(""); setStatusFilter("All"); }} className="ui-tcl-control ui-tcl-control-secondary">Reset filters</button> : null}
+                  action={(search.trim() || statusFilter !== "All") ? <button type="button" onClick={() => { setSearch(""); setStatusFilter("All"); }} className="ui-tcl-control ui-tcl-control-secondary">Reset filters</button> : null}
                 />
               ) : <>
                 <DataTable
@@ -721,14 +926,14 @@ export default function M1Records() {
                   className="ui-tcl-data-table !rounded-card !shadow-none"
                   tableClassName="min-w-[64rem]"
                   columns={[
-                    { key: "resident", label: "Resident", wrap: true, render: (record) => <button type="button" onClick={() => setDetail(record)} className="text-left"><span className="block font-medium text-brand-blue hover:underline">{record.residentName}</span><span className="block text-xs text-brand-gray">{record.residentId}</span></button> },
+                    { key: "resident", label: "Resident", wrap: true, render: (record) => <button type="button" onClick={() => openDetail(record)} className="text-left"><span className="block font-medium text-brand-blue hover:underline">{record.residentName}</span><span className="block text-xs text-brand-gray">{record.residentId}</span></button> },
                     { key: "age", label: "Age", render: (record) => ageOf(record.residentBirthDate) },
                     { key: "barangay", label: "Barangay", wrap: true, render: (record) => record.barangay || "Not recorded" },
                     { key: "status", label: "Status", render: (record) => <StatusBadge value={record.status} /> },
                     { key: "recordedAt", label: "First Recorded", render: (record) => String(record.recordedAt || "").slice(0, 10) || "Not recorded" },
                     { key: "updatedAt", label: "Latest Update", render: (record) => String(record.updatedAt || "").slice(0, 10) || "Not recorded" },
                     { key: "followUp", label: "Follow-up", wrap: true, render: followUpStatus },
-                    { key: "actions", label: "Actions", align: "right", render: (record) => <div className="flex justify-end gap-2"><button type="button" onClick={() => setDetail(record)} className="ui-tcl-control ui-tcl-control-secondary !min-h-9 !px-2.5 !text-xs">View</button><button type="button" onClick={() => openEdit(record)} className="ui-tcl-control ui-tcl-control-secondary !min-h-9 !px-2.5 !text-xs"><Pencil className="h-3.5 w-3.5" /> Edit</button></div> },
+                    { key: "actions", label: "Actions", align: "right", render: (record) => <div className="flex justify-end gap-2"><button type="button" onClick={() => openDetail(record)} className="ui-tcl-control ui-tcl-control-secondary !min-h-9 !px-2.5 !text-xs">View</button><button type="button" onClick={() => openEdit(record)} className="ui-tcl-control ui-tcl-control-secondary !min-h-9 !px-2.5 !text-xs"><Pencil className="h-3.5 w-3.5" /> Edit</button></div> },
                   ]}
                 />
                 {participants.length > PAGE_SIZE && <TablePagination total={participants.length} page={pageSafe} pageSize={PAGE_SIZE} onPageChange={setPage} className="mt-3" />}
@@ -802,10 +1007,14 @@ export default function M1Records() {
        {detail && (
          <MaternalRecordEditor
            detail={detail}
-           onClose={() => setDetail(null)}
+           onClose={() => { setDetail(null); setVisitLoadError(null); }}
            onDelete={(record) => setDeleting(record)}
            onPrint={(record) => startMaternalPrint(record)}
            onEditMode={handleFullRecordEdit}
+           onRecordEncounter={(record) => openMaternalWorkflow("encounter", record)}
+           onRecordDelivery={(record) => openMaternalWorkflow("delivery", record)}
+           onRecordPostpartum={(record) => openMaternalWorkflow("postpartum", record)}
+           visitLoadError={visitLoadError}
            saving={saving}
          />
        )}
@@ -817,7 +1026,9 @@ export default function M1Records() {
           loading={saving}
           onSelectRegister={() => handleWorkflowSelect("register")}
           onSelectEncounter={() => handleWorkflowSelect("encounter")}
-          onClose={() => { setWorkflowOpen(false); setWorkflowMode(null); setFormMode("register"); setEditingRecord(null); setSelectedResident(null); }}
+          onSelectDelivery={() => handleWorkflowSelect("delivery")}
+          onSelectPostpartum={() => handleWorkflowSelect("postpartum")}
+          onClose={closeMaternalWorkflow}
         />
       )}
 
@@ -828,7 +1039,7 @@ export default function M1Records() {
           resident={selectedResident}
           residents={residents}
           saving={saving}
-          onClose={() => { setWorkflowOpen(false); setWorkflowMode(null); setFormMode("register"); setEditingRecord(null); setSelectedResident(null); }}
+          onClose={closeMaternalWorkflow}
           onSave={handleRegisterPregnancy}
           onSelectResident={setSelectedResident}
         />
@@ -839,8 +1050,31 @@ export default function M1Records() {
           resident={selectedResident}
           residents={residents}
           saving={saving}
-          onClose={() => { setWorkflowOpen(false); setWorkflowMode(null); setFormMode("register"); setEditingRecord(null); setSelectedResident(null); }}
+          initialRecord={editingRecord}
+          onClose={closeMaternalWorkflow}
           onSave={handleRecordEncounter}
+          onSelectResident={setSelectedResident}
+        />
+      )}
+      {workflowOpen && workflowMode === "delivery" && (
+        <DeliveryRecordForm
+          resident={selectedResident}
+          residents={residents}
+          initialRecord={editingRecord}
+          saving={saving}
+          onClose={closeMaternalWorkflow}
+          onSave={handleRecordDelivery}
+          onSelectResident={setSelectedResident}
+        />
+      )}
+      {workflowOpen && workflowMode === "postpartum" && (
+        <PostpartumFollowUpForm
+          resident={selectedResident}
+          residents={residents}
+          initialRecord={editingRecord}
+          saving={saving}
+          onClose={closeMaternalWorkflow}
+          onSave={handleRecordPostpartum}
           onSelectResident={setSelectedResident}
         />
       )}

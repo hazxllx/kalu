@@ -254,9 +254,14 @@ export default function DashboardLayout({ roleKey }) {
 
     refreshUnread();
 
-    // Re-sync the badge the instant the Notifications page marks something read
-    // (or marks all read), without waiting for the next navigation.
-    const unsubscribe = onUnreadChanged(refreshUnread);
+    // Apply optimistic counts immediately, then allow the page to request an
+    // authoritative refresh after its write has settled.
+    const handleUnreadChanged = (event) => {
+      const count = event.detail?.unreadCount;
+      if (Number.isInteger(count) && count >= 0) setUnreadCount(count);
+      if (event.detail?.refresh !== false) refreshUnread();
+    };
+    const unsubscribe = onUnreadChanged(handleUnreadChanged);
 
     return () => {
       active = false;

@@ -602,7 +602,7 @@
     --dp-surface: #ffffff;
     --dp-surface-text: #0F2A44;
     --dp-muted-text: #64748B;
-    --dp-border: #E2E8F0;
+    --dp-border: #CBD5E1;
     --dp-accent: #12518F;
   }
   .kalusagap-datepicker .rdp {
@@ -2421,9 +2421,25 @@ a.supervisor-metric:hover, button.supervisor-metric:hover { box-shadow: inset 0 
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-.kalusagap-shell .app-main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select, textarea):focus {
-  border-color: #124B86;
-  box-shadow: 0 0 0 3px rgb(18 75 134 / 13%);
+.kalusagap-shell .app-main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([role="combobox"]), select, textarea):focus {
+  border-color: #2563EB;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 14%);
+}
+
+.kalusagap-shell .app-main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([role="combobox"]), select, textarea):focus[aria-invalid="true"] {
+  border-color: #DC2626;
+  box-shadow: 0 0 0 2px rgb(220 38 38 / 12%);
+}
+
+.dark .kalusagap-shell .app-main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([role="combobox"]), select, textarea):focus {
+  border-color: #60A5FA;
+  box-shadow: 0 0 0 2px rgb(96 165 250 / 18%);
+}
+
+.dark .kalusagap-shell .app-main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([role="combobox"]), select, textarea):focus[aria-invalid="true"] {
+  border-color: #F87171;
+  box-shadow: 0 0 0 2px rgb(248 113 113 / 16%);
 }
 
 .kalusagap-shell :is(button, a, input, select, textarea):focus-visible {

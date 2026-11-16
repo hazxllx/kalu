@@ -8,6 +8,7 @@ const approvedBarangayLookup = new Set(
   APPROVED_BARANGAYS.map((name) => name.toLocaleLowerCase("en")),
 );
 
+/** @param {unknown} value */
 export const isApprovedBarangayName = (value) =>
   typeof value === "string" &&
   approvedBarangayLookup.has(value.trim().toLocaleLowerCase("en"));

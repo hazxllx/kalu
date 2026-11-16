@@ -44,7 +44,8 @@
 
 .ui-tcl-toolbar-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   gap: 0.5rem;
 }
 
@@ -59,6 +60,11 @@
   font-size: 0.875rem;
   font-weight: 600;
   transition: background-color 150ms, border-color 150ms, color 150ms;
+}
+
+.ui-tcl-toolbar-actions .ui-tcl-control {
+  height: 2.75rem;
+  white-space: nowrap;
 }
 
 .ui-tcl-control:disabled {
@@ -84,6 +90,22 @@
 .ui-tcl-control-secondary:hover:not(:disabled) {
   border-color: #124B86;
   color: #124B86;
+}
+
+@media (max-width: 639px) {
+  .ui-tcl-toolbar-search {
+    width: 100%;
+    min-width: 0;
+    flex-basis: 100%;
+  }
+
+  .ui-tcl-toolbar-actions {
+    width: 100%;
+  }
+
+  .ui-tcl-toolbar-actions .ui-tcl-control {
+    flex: 1 1 0;
+  }
 }
 
 .ui-tcl-tabs {

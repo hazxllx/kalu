@@ -25,7 +25,15 @@ const SES_OPTS = [
  * WorkflowSelector — Compact, elegant action selection modal
  * Replaces the oversized four-tab form with a simple two-action choice.
  */
-function WorkflowSelector({ onSelectRegister, onSelectEncounter, onClose, residents, loading }) {
+function WorkflowSelector({
+  onSelectRegister,
+  onSelectEncounter,
+  onSelectDelivery,
+  onSelectPostpartum,
+  onClose,
+  residents,
+  loading,
+}) {
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
@@ -85,6 +93,34 @@ function WorkflowSelector({ onSelectRegister, onSelectEncounter, onClose, reside
               <p className="mt-0.5 text-xs text-gray-600">
                 Add a prenatal visit, lab result, or postpartum follow-up.
               </p>
+            </div>
+          </button>
+
+          <button
+            onClick={onSelectDelivery}
+            disabled={loading}
+            className="group flex items-start gap-4 rounded-lg border border-gray-200 p-4 text-left transition-all hover:border-brand-blue hover:bg-brand-blue/5 disabled:opacity-50"
+          >
+            <div className="mt-1 rounded-lg bg-brand-blue/10 p-2 text-brand-blue">
+              <Baby className="h-5 w-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-medium text-gray-900 group-hover:text-brand-blue">Record Delivery</h4>
+              <p className="mt-0.5 text-xs text-gray-600">Document delivery details and pregnancy outcome.</p>
+            </div>
+          </button>
+
+          <button
+            onClick={onSelectPostpartum}
+            disabled={loading}
+            className="group flex items-start gap-4 rounded-lg border border-gray-200 p-4 text-left transition-all hover:border-brand-blue hover:bg-brand-blue/5 disabled:opacity-50"
+          >
+            <div className="mt-1 rounded-lg bg-brand-blue/10 p-2 text-brand-blue">
+              <Calendar className="h-5 w-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-medium text-gray-900 group-hover:text-brand-blue">Record Postpartum Visit</h4>
+              <p className="mt-0.5 text-xs text-gray-600">Add a dated postpartum check-up and care milestone.</p>
             </div>
           </button>
         </div>
@@ -263,6 +299,7 @@ function RegisterPregnancyForm({
                     onChange={(e) => set("lmp")(e.target.value)}
                     className={inputCls()}
                   />
+                  {errors.weight && <p className="mt-1 text-xs text-brand-danger">{errors.weight}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -292,6 +329,7 @@ function RegisterPregnancyForm({
                     placeholder="Total pregnancies"
                     className={inputCls()}
                   />
+                  {errors.height && <p className="mt-1 text-xs text-brand-danger">{errors.height}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">Para (P)</label>
@@ -403,7 +441,15 @@ function RegisterPregnancyForm({
 /**
  * RecordEncounterForm — For existing pregnancies
  */
-function RecordEncounterForm({ resident, residents, saving, onClose, onSave, onSelectResident }) {
+function RecordEncounterForm({
+  resident,
+  residents,
+  saving,
+  onClose,
+  onSave,
+  onSelectResident,
+  initialRecord = null,
+}) {
   const [form, setForm] = useState({
     encounterDate: new Date().toISOString().split("T")[0],
     encounterType: "prenatal",
@@ -415,6 +461,26 @@ function RecordEncounterForm({ resident, residents, saving, onClose, onSave, onS
     assessment: "",
     carePlan: "",
     nextVisitDate: "",
+    td1Date: "",
+    td2Date: "",
+    td3Date: "",
+    td4Date: "",
+    td5Date: "",
+    fimStatus: "",
+    ironFolicTablets: "",
+    calciumTablets: "",
+    iodineGivenDate: "",
+    dewormingDate: "",
+    syphilisScreenDate: "",
+    syphilisResult: "",
+    hepbScreenDate: "",
+    hepbResult: "",
+    hivScreenDate: "",
+    gdmScreenDate: "",
+    gdmResult: "",
+    cbcScreenDate: "",
+    cbcResult: "",
+    cbcIronGiven: "",
   });
   const [errors, setErrors] = useState({});
 
@@ -436,6 +502,17 @@ function RecordEncounterForm({ resident, residents, saving, onClose, onSave, onS
   const validate = () => {
     const next = {};
     if (!resident) next.resident = "Please select a resident.";
+    if (!form.encounterDate) next.encounterDate = "Encounter date is required.";
+    for (const [field, label] of [["weight", "Weight"], ["height", "Height"]]) {
+      if (form[field] !== "" && (!Number.isFinite(Number(form[field])) || Number(form[field]) <= 0)) {
+        next[field] = `${label} must be a positive number.`;
+      }
+    }
+    for (const field of ["ironFolicTablets", "calciumTablets"]) {
+      if (form[field] !== "" && (!Number.isInteger(Number(form[field])) || Number(form[field]) < 0)) {
+        next[field] = "Enter a non-negative whole number.";
+      }
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -491,13 +568,20 @@ function RecordEncounterForm({ resident, residents, saving, onClose, onSave, onS
               <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 mb-3">
                 Patient Information
               </h4>
-              <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Resident <span className="text-brand-danger">*</span>
-                </label>
-                <ResidentSearchSelect residents={residents} value={resident} onChange={onSelectResident} />
-                {errors.resident && <p className="mt-1 text-xs text-brand-danger">{errors.resident}</p>}
-              </div>
+              {initialRecord ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                  <p className="text-xs uppercase text-gray-500">Resident</p>
+                  <p className="mt-1 font-medium text-gray-900">{initialRecord.residentName}</p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Resident <span className="text-brand-danger">*</span>
+                  </label>
+                  <ResidentSearchSelect residents={residents} value={resident} onChange={onSelectResident} />
+                  {errors.resident && <p className="mt-1 text-xs text-brand-danger">{errors.resident}</p>}
+                </div>
+              )}
             </div>
 
             {/* Encounter Details */}
@@ -514,6 +598,7 @@ function RecordEncounterForm({ resident, residents, saving, onClose, onSave, onS
                     onChange={(e) => set("encounterDate")(e.target.value)}
                     className={inputCls()}
                   />
+                  {errors.encounterDate && <p className="mt-1 text-xs text-brand-danger">{errors.encounterDate}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">Encounter Type</label>
@@ -523,9 +608,6 @@ function RecordEncounterForm({ resident, residents, saving, onClose, onSave, onS
                     className={`${inputCls()} cursor-pointer`}
                   >
                     <option value="prenatal">Prenatal Visit</option>
-                    <option value="postpartum">Postpartum Visit</option>
-                    <option value="intrapartum">Delivery</option>
-                    <option value="screening">Laboratory/Screening</option>
                   </select>
                 </div>
               </div>
@@ -646,6 +728,78 @@ function RecordEncounterForm({ resident, residents, saving, onClose, onSave, onS
                   />
                 </div>
               </div>
+
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 mb-3">
+                  Prenatal Services & Screening
+                </h4>
+                <p className="mb-4 text-xs text-gray-500">Only the information recorded during this visit will be updated.</p>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {["td1Date", "td2Date", "td3Date", "td4Date", "td5Date"].map((key, index) => (
+                      <div key={key}>
+                        <label className="block text-sm font-medium text-gray-900 mb-2">Td/TT Dose {index + 1}</label>
+                        <input type="date" value={form[key]} onChange={(e) => set(key)(e.target.value)} className={inputCls()} />
+                      </div>
+                    ))}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-2">FIM Status</label>
+                      <select value={form.fimStatus} onChange={(e) => set("fimStatus")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                        <option value="">Not recorded</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-2">Iron + Folic Acid tablets</label>
+                      <input type="number" min={0} step={1} value={form.ironFolicTablets} onChange={(e) => set("ironFolicTablets")(e.target.value)} className={inputCls()} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-2">Calcium tablets</label>
+                      <input type="number" min={0} step={1} value={form.calciumTablets} onChange={(e) => set("calciumTablets")(e.target.value)} className={inputCls()} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-2">Iodine Given</label>
+                      <input type="date" value={form.iodineGivenDate} onChange={(e) => set("iodineGivenDate")(e.target.value)} className={inputCls()} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-2">Deworming Date</label>
+                      <input type="date" value={form.dewormingDate} onChange={(e) => set("dewormingDate")(e.target.value)} className={inputCls()} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {[
+                      ["Syphilis", "syphilisScreenDate", "syphilisResult"],
+                      ["Hepatitis B", "hepbScreenDate", "hepbResult"],
+                      ["GDM", "gdmScreenDate", "gdmResult"],
+                      ["CBC", "cbcScreenDate", "cbcResult"],
+                    ].map(([label, dateKey, resultKey]) => (
+                      <div key={dateKey} className="rounded-lg border border-gray-200 p-3">
+                        <p className="mb-2 text-sm font-medium text-gray-900">{label} Screen</p>
+                        <input aria-label={`${label} screen date`} type="date" value={form[dateKey]} onChange={(e) => set(dateKey)(e.target.value)} className={inputCls()} />
+                        <select aria-label={`${label} result`} value={form[resultKey]} onChange={(e) => set(resultKey)(e.target.value)} className={`${inputCls()} mt-2 cursor-pointer`}>
+                          <option value="">Result not recorded</option>
+                          <option value="+">Positive / Reactive</option>
+                          <option value="-">Negative / Non-reactive</option>
+                        </select>
+                      </div>
+                    ))}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-2">HIV Screen Date</label>
+                      <input type="date" value={form.hivScreenDate} onChange={(e) => set("hivScreenDate")(e.target.value)} className={inputCls()} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-2">Iron Given (if anemic)</label>
+                      <select value={form.cbcIronGiven} onChange={(e) => set("cbcIronGiven")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
+                        <option value="">Not recorded</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -677,8 +831,211 @@ function RecordEncounterForm({ resident, residents, saving, onClose, onSave, onS
   );
 }
 
+function ResidentSummary({ resident, initialRecord, residents, onSelectResident, errors }) {
+  if (initialRecord) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+        <p className="text-xs uppercase text-gray-500">Resident</p>
+        <p className="mt-1 font-medium text-gray-900">{initialRecord.residentName}</p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-900 mb-2">
+        Resident <span className="text-brand-danger">*</span>
+      </label>
+      <ResidentSearchSelect residents={residents} value={resident} onChange={onSelectResident} />
+      {errors?.resident && <p className="mt-1 text-xs text-brand-danger">{errors.resident}</p>}
+    </div>
+  );
+}
+
+function DeliveryRecordForm({ resident, residents, initialRecord = null, saving, onClose, onSave, onSelectResident }) {
+  const [form, setForm] = useState({
+    deliveryDate: initialRecord?.deliveryDate || "",
+    deliveryTime: initialRecord?.deliveryTime || "",
+    deliveryOutcome: initialRecord?.deliveryOutcome || "",
+    typeOfDelivery: initialRecord?.typeOfDelivery || "",
+    placeOfDelivery: initialRecord?.placeOfDelivery || "",
+    birthAttendant: initialRecord?.birthAttendant || "",
+    birthWeight: initialRecord?.birthWeight ?? "",
+    birthWeightClass: initialRecord?.birthWeightClass || "",
+    pregnancyOutcome: initialRecord?.pregnancyOutcome || "",
+    pregnancyOutcomeDate: initialRecord?.pregnancyOutcomeDate || "",
+    newbornSex: initialRecord?.newbornSex || "",
+  });
+  const [errors, setErrors] = useState({});
+  const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event) => { if (event.key === "Escape") onClose?.(); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const submit = () => {
+    const next = {};
+    if (!resident) next.resident = "Please select a resident.";
+    if (!form.deliveryDate) next.deliveryDate = "Delivery date is required.";
+    if (!form.deliveryOutcome) next.deliveryOutcome = "Delivery outcome is required.";
+    if (form.birthWeight && (!Number.isFinite(Number(form.birthWeight)) || Number(form.birthWeight) <= 0)) {
+      next.birthWeight = "Enter a positive birth weight in kilograms.";
+    }
+    setErrors(next);
+    if (Object.keys(next).length) return;
+    onSave(form);
+  };
+
+  const field = (label, key, type = "text", options = null) => (
+    <div key={key}>
+      <label className="block text-sm font-medium text-gray-900 mb-2">{label}</label>
+      {options ? (
+        <select value={form[key]} onChange={(event) => set(key)(event.target.value)} className={`${inputCls()} cursor-pointer`}>
+          <option value="">Select...</option>
+          {options.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+        </select>
+      ) : (
+        <input type={type} step={key === "birthWeight" ? "0.01" : undefined} min={key === "birthWeight" ? "0" : undefined}
+          value={form[key]} onChange={(event) => set(key)(event.target.value)} className={inputCls()} />
+      )}
+      {errors[key] && <p className="mt-1 text-xs text-brand-danger">{errors[key]}</p>}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Record delivery">
+      <Card className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl !p-0 shadow-xl max-h-[90vh]">
+        <div className="border-b border-gray-200 px-6 py-4">
+          <div className="flex items-start justify-between">
+            <div><h3 className="text-lg font-semibold text-gray-900">Record Delivery</h3><p className="mt-1 text-sm text-gray-600">Document delivery and pregnancy outcome.</p></div>
+            <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100"><X className="h-5 w-5" /></button>
+          </div>
+        </div>
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <ResidentSummary resident={resident} initialRecord={initialRecord} residents={residents} onSelectResident={onSelectResident} errors={errors} />
+          <section><h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-700">Delivery Details</h4>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {field("Date of Delivery *", "deliveryDate", "date")}
+              {field("Time of Delivery", "deliveryTime", "time")}
+              {field("Delivery Outcome *", "deliveryOutcome", "text", [["Live Birth", "Live Birth"], ["Fetal Death", "Fetal Death"]])}
+              {field("Type of Delivery", "typeOfDelivery", "text", [["Vaginal", "Vaginal"], ["Cesarean", "Cesarean"]])}
+              {field("Place of Delivery", "placeOfDelivery", "text", [["Public Facility", "Public Facility"], ["Private Facility", "Private Facility"], ["Home / Non-Facility", "Home / Non-Facility"]])}
+              {field("Birth Attendant", "birthAttendant", "text", [["Doctor", "Doctor"], ["Nurse", "Nurse"], ["Midwife", "Midwife"], ["Hilot/TBA", "Hilot/TBA"], ["Other", "Other"]])}
+              {field("Birth Weight (kg)", "birthWeight", "number")}
+              {field("Birth Weight Classification", "birthWeightClass", "text", [["low", "Low (< 2,500 g)"], ["normal", "Normal (≥ 2,500 g)"], ["unknown", "Unknown"]])}
+              {field("Pregnancy Outcome", "pregnancyOutcome", "text", [["FT", "FT - Full Term"], ["PT", "PT - Pre-term"], ["FD", "FD - Fetal Death"], ["AB", "AB - Abortion/Miscarriage"]])}
+              {field("Date Terminated", "pregnancyOutcomeDate", "date")}
+              {field("Newborn Sex", "newbornSex", "text", [["M", "Male"], ["F", "Female"]])}
+            </div>
+          </section>
+        </div>
+        <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3">
+          <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-gray-700 hover:bg-gray-200">Cancel</button>
+          <button type="button" disabled={saving} onClick={submit} className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+            <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : "Save Delivery"}
+          </button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function PostpartumFollowUpForm({ resident, residents, initialRecord = null, saving, onClose, onSave, onSelectResident }) {
+  const [form, setForm] = useState({
+    encounterDate: new Date().toISOString().slice(0, 10),
+    milestone: "",
+    ironFolicCompleted: "",
+    vitaminAGiven: "",
+    notes: "",
+  });
+  const [errors, setErrors] = useState({});
+  const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event) => { if (event.key === "Escape") onClose?.(); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const submit = () => {
+    const next = {};
+    if (!resident) next.resident = "Please select a resident.";
+    if (!form.encounterDate) next.encounterDate = "Visit date is required.";
+    if (!form.milestone) next.milestone = "Select the postpartum milestone.";
+    setErrors(next);
+    if (Object.keys(next).length) return;
+    onSave(form);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Record postpartum visit">
+      <Card className="flex w-full max-w-xl flex-col overflow-hidden rounded-2xl !p-0 shadow-xl max-h-[90vh]">
+        <div className="border-b border-gray-200 px-6 py-4">
+          <div className="flex items-start justify-between">
+            <div><h3 className="text-lg font-semibold text-gray-900">Record Postpartum Visit</h3><p className="mt-1 text-sm text-gray-600">Each visit is saved as a separate dated encounter.</p></div>
+            <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-gray-400 hover:bg-gray-100"><X className="h-5 w-5" /></button>
+          </div>
+        </div>
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <ResidentSummary resident={resident} initialRecord={initialRecord} residents={residents} onSelectResident={onSelectResident} errors={errors} />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-900">Visit Date</label>
+              <input type="date" value={form.encounterDate} onChange={(event) => set("encounterDate")(event.target.value)} className={inputCls()} />
+              {errors.encounterDate && <p className="mt-1 text-xs text-brand-danger">{errors.encounterDate}</p>}
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-900">Postpartum Milestone</label>
+              <select value={form.milestone} onChange={(event) => set("milestone")(event.target.value)} className={`${inputCls()} cursor-pointer`}>
+                <option value="">Select...</option><option value="24h">Within 24 hours</option><option value="3d">Day 3</option>
+                <option value="7-14d">7–14 days</option><option value="6wk">6 weeks after birth</option>
+              </select>
+              {errors.milestone && <p className="mt-1 text-xs text-brand-danger">{errors.milestone}</p>}
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-900">Iron/Folic Completed</label>
+              <select value={form.ironFolicCompleted} onChange={(event) => set("ironFolicCompleted")(event.target.value)} className={`${inputCls()} cursor-pointer`}>
+                <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-900">Vitamin A Given</label>
+              <select value={form.vitaminAGiven} onChange={(event) => set("vitaminAGiven")(event.target.value)} className={`${inputCls()} cursor-pointer`}>
+                <option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-900">Visit Notes</label>
+            <textarea rows={3} value={form.notes} onChange={(event) => set("notes")(event.target.value)} className={`${inputCls()} resize-none`} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3">
+          <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-gray-700 hover:bg-gray-200">Cancel</button>
+          <button type="button" disabled={saving} onClick={submit} className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+            <CheckCircle2 className="h-4 w-4" /> {saving ? "Saving..." : "Save Postpartum Visit"}
+          </button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 export {
   WorkflowSelector,
   RegisterPregnancyForm,
   RecordEncounterForm,
+  DeliveryRecordForm,
+  PostpartumFollowUpForm,
 };

@@ -27,6 +27,7 @@ import ResidentConflictReview from "../components/ResidentConflictReview";
 const CIVIL_STATUS_OPTIONS = ["Single", "Married", "Widowed", "Separated"];
 const SEX_OPTIONS = ["Female", "Male"];
 const SUFFIX_OPTIONS = ["", "Jr.", "Sr.", "II", "III", "IV"];
+const ZONE_OPTIONS = Array.from({ length: 8 }, (_, index) => String(index + 1));
 const RELIGION_OPTIONS = ["Roman Catholic", "Protestant", "Iglesia ni Cristo", "Born Again", "Muslim", "Other"];
 const RISK_FILTERS = ["All", "High", "Moderate", "Low", "Unassessed"];
 
@@ -39,6 +40,7 @@ const EMPTY_FORM = {
   age: "",
   gender: "",
   contact: "",
+  zone: "",
   purok: "",
   street: "",
   houseNo: "",
@@ -61,6 +63,7 @@ const EMPTY_FORM = {
  * @property {string} age
  * @property {string} gender
  * @property {string} contact
+ * @property {string} zone
  * @property {string} purok
  * @property {string} street
  * @property {string} houseNo
@@ -115,12 +118,12 @@ const EMPTY_FORM = {
 
 /** @param {boolean|string|undefined} invalid */
 const inputClass = (invalid) =>
-  `mt-1.5 w-full bg-white border px-3.5 py-2.5 text-sm outline-none transition-colors rounded-input ${
-    invalid ? "border-brand-danger focus:border-brand-danger" : "border-brand-border focus:border-brand-blue"
+  `mt-1.5 h-11 w-full rounded-input border bg-white px-3.5 text-sm text-brand-ink outline-none transition-colors dark:bg-input dark:text-foreground ${
+    invalid ? "border-brand-danger dark:border-red-500" : "border-[#CBD5E1] dark:border-border"
   }`;
 
-const labelClass = "text-sm font-medium text-brand-ink";
-const errorClass = "mt-1 text-xs text-brand-danger";
+const labelClass = "text-sm font-medium text-brand-ink dark:text-foreground";
+const errorClass = "mt-1 text-xs text-brand-danger dark:text-red-400";
 
 /** @param {string|null|undefined} dob */
 const calcAge = (dob) => {
@@ -162,7 +165,16 @@ const initialsOf = (name) =>
  * @param {ResidentForm} f
  */
 const composeAddress = (f) =>
-  [f.houseNo, f.street, f.purok ? `Purok ${f.purok}` : "", f.barangay, "Pili, Camarines Sur"]
+  [
+    f.houseNo,
+    f.street,
+    f.zone ? `Zone ${f.zone}` : "",
+    f.purok.trim()
+      ? (/^(?:purok|zone)\s+/i.test(f.purok.trim()) ? f.purok.trim() : `Purok ${f.purok.trim()}`)
+      : "",
+    f.barangay,
+    "Pili, Camarines Sur",
+  ]
     .filter(Boolean)
     .join(", ");
 
@@ -252,6 +264,7 @@ function Select({ label, value, onChange, options = [], placeholder = "", error 
         <select
           id={id}
           value={value}
+          aria-invalid={Boolean(error)}
           onChange={(e) => onChange(e.target.value)}
           className={`${inputClass(error)} appearance-none pr-9 cursor-pointer`}
         >
@@ -297,10 +310,11 @@ function Field({
         maxLength={maxLength}
         pattern={pattern}
         autoComplete={autoComplete}
+        aria-invalid={Boolean(error)}
         onChange={(e) => onChange(e.target.value)}
-        className={`${inputClass(error)} ${readOnly ? "bg-brand-bg text-brand-gray cursor-not-allowed" : ""}`}
+        className={`${inputClass(error)} ${readOnly ? "bg-brand-bg text-brand-gray cursor-not-allowed dark:bg-card-nested dark:text-muted-foreground" : ""}`}
       />
-      {optional && !error && <p className="mt-1 text-xs text-brand-gray">(Optional)</p>}
+      {optional && !error && <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">(Optional)</p>}
       {error && <p className={errorClass}>{error}</p>}
     </div>
   );
@@ -1139,38 +1153,52 @@ export default function ResidentsPage() {
 
       {/* Add Resident Modal */}
       {showAddModal && canCreate && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="w-full max-w-2xl max-h-[90vh] bg-white rounded-card shadow-xl flex flex-col overflow-hidden">
-            {/* Fixed Header with blue accent */}
-            <div className="flex-shrink-0 border-b-2 border-brand-blue bg-white px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-brand-ink">Add Resident</h3>
-                  <p className="text-sm text-brand-gray mt-0.5">Register a new resident in the directory.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-3 sm:p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-resident-title"
+            aria-describedby="add-resident-description"
+            className="flex min-h-0 max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-card bg-white shadow-xl sm:max-h-[calc(100dvh-2rem)] dark:bg-card"
+          >
+            <header className="relative isolate flex-shrink-0 overflow-hidden border-b border-brand-border bg-[#EFF6FF] px-5 py-4 dark:border-border dark:bg-[#14263A] sm:px-6">
+              <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-44 w-44 rounded-full border-[22px] border-brand-blue/10 dark:border-blue-300/10" />
+              <div className="relative z-10 flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span aria-hidden="true" className="mt-0.5 h-10 w-1 shrink-0 rounded-full bg-brand-blue" />
+                  <div className="min-w-0">
+                    <h2 id="add-resident-title" className="text-lg font-bold text-brand-ink dark:text-foreground">Add Resident</h2>
+                    <p id="add-resident-description" className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">
+                      Register a new resident in the directory.
+                    </p>
+                  </div>
                 </div>
-                <button onClick={closeAdd} className="text-brand-gray hover:text-brand-blue transition-colors" aria-label="Close resident registration">
-                  <X className="w-5 h-5" />
+                <button
+                  type="button"
+                  onClick={closeAdd}
+                  className="relative z-10 -mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray transition-colors hover:bg-white/70 hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:text-muted-foreground dark:hover:bg-card/70 dark:hover:text-foreground"
+                  aria-label="Close resident registration"
+                >
+                  <X className="h-5 w-5" />
                 </button>
               </div>
-            </div>
+            </header>
 
-            {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto">
-              <div className="px-6 py-6 space-y-6">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white dark:bg-card">
+              <div className="grid grid-cols-1 gap-y-4 px-5 py-4 sm:px-6 sm:py-5">
                 {formError && (
-                  <div className="rounded-card border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger">
+                  <div role="alert" className="rounded-card border border-brand-danger/30 bg-brand-danger/5 px-4 py-3 text-sm text-brand-danger dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300">
                     {formError}
                   </div>
                 )}
 
                 {/* Personal Information Section */}
                 <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="h-px flex-1 bg-brand-border"></div>
-                    <h4 className="text-sm font-semibold text-brand-ink uppercase tracking-wide">Personal Information</h4>
-                    <div className="h-px flex-1 bg-brand-border"></div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Personal Information</h3>
+                    <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
                     <Field label="First Name" value={form.firstName} onChange={set("firstName")} placeholder="e.g. Maria" error={errors.firstName} />
                     <Field label="Middle Name" value={form.middleName} onChange={set("middleName")} placeholder="e.g. Santos" optional />
                     <Field label="Last Name" value={form.lastName} onChange={set("lastName")} placeholder="e.g. Dela Cruz" error={errors.lastName} />
@@ -1179,7 +1207,15 @@ export default function ResidentsPage() {
                     <Field label="Age" value={form.age} onChange={() => {}} placeholder="Auto-calculated" readOnly optional />
                     <div>
                       <label className={labelClass}>Sex</label>
-                      <ButtonSelectGroup name="sex" ariaLabel="Sex" options={SEX_OPTIONS} value={form.gender} onChange={set("gender")} error={Boolean(errors.gender)} />
+                      <ButtonSelectGroup
+                        name="sex"
+                        ariaLabel="Sex"
+                        options={SEX_OPTIONS}
+                        value={form.gender}
+                        onChange={set("gender")}
+                        error={Boolean(errors.gender)}
+                        variant="compact"
+                      />
                       {errors.gender && <p className={errorClass}>{errors.gender}</p>}
                     </div>
                     <Select label="Civil Status" value={form.civilStatus} onChange={set("civilStatus")} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
@@ -1188,12 +1224,11 @@ export default function ResidentsPage() {
 
                 {/* Contact and Address Section */}
                 <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="h-px flex-1 bg-brand-border"></div>
-                    <h4 className="text-sm font-semibold text-brand-ink uppercase tracking-wide">Contact & Address</h4>
-                    <div className="h-px flex-1 bg-brand-border"></div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Contact &amp; Address</h3>
+                    <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
                     <Field label="Contact Number" value={form.contact} onChange={onContactChange} placeholder="e.g. 09171234567" error={errors.contact} optional maxLength={11} />
                     <SearchableSelect
                       label="Barangay"
@@ -1204,10 +1239,15 @@ export default function ResidentsPage() {
                       placeholder="Search barangay..."
                       emptyText="No barangay found."
                       error={errors.barangay}
+                      portalDropdown
                     />
-                    <Field label="Purok/Zone" value={form.purok} onChange={set("purok")} placeholder="e.g. Purok 5" optional />
+                    <div>
+                      <Select label="Zone" value={form.zone} onChange={set("zone")} options={ZONE_OPTIONS} placeholder="Select zone" />
+                      <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">(Optional)</p>
+                    </div>
+                    <Field label="Purok/Zone" value={form.purok} onChange={set("purok")} placeholder="Enter purok or zone" optional />
                     <Field label="Street / Sitio" value={form.street} onChange={set("street")} placeholder="Enter street or sitio" optional />
-                    <Field label="House No." value={form.houseNo} onChange={set("houseNo")} placeholder="Enter house number" optional />
+                    <Field label="House Number" value={form.houseNo} onChange={set("houseNo")} placeholder="Enter house number" optional />
                   </div>
                 </div>
 
@@ -1217,45 +1257,48 @@ export default function ResidentsPage() {
                     Activation and the resident sets their own password later. */}
                 {showLoginAccountOption && (
                   <div>
-                    <div className="flex items-center gap-2 mb-4">
-                      <div className="h-px flex-1 bg-brand-border"></div>
-                      <h4 className="text-sm font-semibold text-brand-ink uppercase tracking-wide">Login Account</h4>
-                      <div className="h-px flex-1 bg-brand-border"></div>
+                    <div className="mb-3 flex items-center gap-2">
+                      <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">Login Account</h3>
+                      <div className="h-px flex-1 bg-brand-border dark:bg-border" />
                     </div>
-                    <div className="rounded-card border border-brand-light bg-brand-light/30 p-4">
-                      <p className="text-sm font-medium text-brand-ink">Create Resident Login Account?</p>
-                      <p className="mt-2 text-xs text-brand-gray">
-                        Optional. The resident profile is created either way. Choose "Yes" only if this resident should be able to log in.
-                      </p>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => set("createAccount")(false)}
-                          className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
-                            !form.createAccount 
-                              ? "bg-brand-blue text-white" 
-                              : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
-                          }`}
-                        >
-                          No
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => set("createAccount")(true)}
-                          disabled={!canCreateLoginAccountForResident}
-                          className={`rounded-btn px-4 py-2 text-sm font-medium transition-colors ${
-                            form.createAccount
-                              ? "bg-brand-blue text-white"
-                              : "border border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
-                          } disabled:cursor-not-allowed disabled:opacity-50 ${
-                            !canCreateLoginAccountForResident ? "hover:bg-white" : ""
-                          }`}
-                        >
-                          Yes
-                        </button>
+                    <div className="rounded-card border border-brand-border bg-slate-50/70 p-3.5 dark:border-border dark:bg-card-nested">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-brand-ink dark:text-foreground">Create Resident Login Account?</p>
+                          <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
+                            Optional. The resident profile is created either way. Choose Yes only if this resident should be able to log in.
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => set("createAccount")(false)}
+                            aria-pressed={!form.createAccount}
+                            className={`min-w-14 rounded-btn px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]/20 ${
+                              !form.createAccount
+                                ? "bg-brand-blue text-white"
+                                : "border border-[#CBD5E1] bg-white text-brand-ink hover:bg-brand-bg dark:bg-input dark:text-foreground"
+                            }`}
+                          >
+                            No
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => set("createAccount")(true)}
+                            disabled={!canCreateLoginAccountForResident}
+                            aria-pressed={form.createAccount}
+                            className={`min-w-14 rounded-btn px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]/20 ${
+                              form.createAccount
+                                ? "bg-brand-blue text-white"
+                                : "border border-[#CBD5E1] bg-white text-brand-ink hover:bg-brand-bg dark:bg-input dark:text-foreground"
+                            } disabled:cursor-not-allowed disabled:opacity-50`}
+                          >
+                            Yes
+                          </button>
+                        </div>
                       </div>
                       {form.createAccount && (
-                        <div className="mt-4">
+                        <div className="mt-3 max-w-xl">
                           <Field
                             label="Email for login account"
                             type="email"
@@ -1264,7 +1307,7 @@ export default function ResidentsPage() {
                             placeholder="e.g. resident@example.com"
                             error={errors.email}
                           />
-                          <p className="mt-2 text-xs text-brand-gray">
+                          <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">
                             The account starts in Pending Activation. An invitation link is emailed to this address — the resident clicks it to set their own password and activate the account.
                           </p>
                         </div>
@@ -1275,21 +1318,21 @@ export default function ResidentsPage() {
               </div>
             </div>
 
-            {/* Fixed Footer */}
-            <div className="flex-shrink-0 border-t border-brand-border bg-brand-bg px-6 py-4">
+            <footer className="flex-shrink-0 border-t border-brand-border bg-white px-5 py-3.5 dark:border-border dark:bg-card sm:px-6">
               <div className="flex justify-end gap-3">
-                <button onClick={closeAdd} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray bg-white border border-brand-border hover:bg-brand-light transition-colors">
+                <button type="button" onClick={closeAdd} className="rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:border-border dark:bg-input dark:text-muted-foreground dark:hover:bg-hover">
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={handleSubmit}
                   disabled={submitting}
-                  className="px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
+                  className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {submitting ? "Saving..." : "Add Resident"}
                 </button>
               </div>
-            </div>
+            </footer>
           </div>
         </div>
       )}
@@ -1514,31 +1557,49 @@ export default function ResidentsPage() {
           Edits are limited to the fields the API permits for correction —
           identity fields (name, birth date, sex) are locked by design. */}
       {showEditModal && editTarget && canEdit && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Edit Resident" className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto ${supervisor ? "supervisor-modal supervisor-form" : ""}`}>
-            <div className="p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-brand-ink">Edit Resident</h3>
-                  <p className="text-sm text-brand-gray mt-0.5">
-                    {editTarget.id} · updates are limited to your assigned barangay.
-                  </p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-3 sm:p-4">
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-resident-title"
+            aria-describedby="edit-resident-description"
+            className={`flex w-full max-w-3xl min-h-0 max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden sm:max-h-[calc(100dvh-2rem)] ${supervisor ? "supervisor-modal" : ""}`}
+          >
+            <header className="relative isolate flex-shrink-0 overflow-hidden border-b border-brand-border bg-[#EFF6FF] px-5 py-4 dark:border-border dark:bg-[#14263A] sm:px-6 sm:py-5">
+              <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-44 w-44 rounded-full border-[22px] border-brand-blue/10 dark:border-blue-300/10" />
+              <div className="relative z-10 flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span aria-hidden="true" className="mt-0.5 h-10 w-1 shrink-0 rounded-full bg-brand-blue" />
+                  <div className="min-w-0">
+                    <h2 id="edit-resident-title" className="text-lg font-bold text-brand-ink dark:text-foreground">Edit Resident</h2>
+                    <p id="edit-resident-description" className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">
+                      <span className="font-medium text-brand-ink dark:text-foreground">{editTarget.id}</span>
+                      <span aria-hidden="true"> · </span>
+                      updates are limited to your assigned barangay.
+                    </p>
+                  </div>
                 </div>
-                <button onClick={() => setShowEditModal(false)} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
-                  <X className="w-5 h-5" />
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="relative z-10 -mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-btn text-brand-gray transition-colors hover:bg-white/70 hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:text-muted-foreground dark:hover:bg-card/70 dark:hover:text-foreground"
+                  aria-label="Close edit resident dialog"
+                >
+                  <X className="h-5 w-5" />
                 </button>
               </div>
+            </header>
 
-              {editError && (
-                <div className="mb-4 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3.5 py-3 text-sm text-brand-danger">
-                  {editError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white dark:bg-card">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 py-5 pl-5 pr-8 md:grid-cols-2 sm:py-6 sm:pl-6 sm:pr-10">
+                {editError && (
+                  <div role="alert" className="rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3.5 py-3 text-sm text-brand-danger dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300 md:col-span-2">
+                    {editError}
+                  </div>
+                )}
+                <div>
                   <Field label="Full Name" value={editTarget.name || ""} onChange={() => {}} placeholder="" readOnly optional />
-                  <p className="mt-1 text-xs text-brand-gray">Identity corrections go through an administrator.</p>
+                  <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">Identity corrections go through an administrator.</p>
                 </div>
                 <Field label="Contact Number" value={editForm.contact} onChange={(v) => { const digitsOnly = v.replace(/\D/g, ''); const truncated = digitsOnly.slice(0, 11); setEditForm((p) => ({ ...p, contact: truncated })); if (editErrors.contact) setEditErrors((p) => ({ ...p, contact: "" })); }} placeholder="e.g. 09171234567" error={editErrors.contact} optional maxLength={11} />
                 <Select label="Civil Status" value={editForm.civilStatus} onChange={(v) => setEditForm((p) => ({ ...p, civilStatus: v }))} options={CIVIL_STATUS_OPTIONS} placeholder="Select civil status" />
@@ -1551,6 +1612,7 @@ export default function ResidentsPage() {
                   placeholder="Search barangay..."
                   emptyText="No barangay found."
                   error={editErrors.barangay}
+                  portalDropdown
                 />
                 <Select label="Religion" value={editForm.religion} onChange={(v) => setEditForm((p) => ({ ...p, religion: v }))} options={RELIGION_OPTIONS} placeholder="Select religion" />
                 <Field label="Birth Place" value={editForm.birthPlace} onChange={(v) => setEditForm((p) => ({ ...p, birthPlace: v }))} placeholder="e.g. Pili, Camarines Sur" optional />
@@ -1558,24 +1620,27 @@ export default function ResidentsPage() {
                 <Field label="PhilHealth No." value={editForm.philhealthNo} onChange={(v) => setEditForm((p) => ({ ...p, philhealthNo: v }))} placeholder="e.g. 12-345678901-2" optional />
                 <Field label="Father's Name" value={editForm.fatherName} onChange={(v) => setEditForm((p) => ({ ...p, fatherName: v }))} placeholder="Enter father's name" optional />
                 <Field label="Mother's Name" value={editForm.motherName} onChange={(v) => setEditForm((p) => ({ ...p, motherName: v }))} placeholder="Enter mother's name" optional />
-                <div className="sm:col-span-2">
+                <div className="md:col-span-2">
                   <Field label="Address" value={editForm.currentAddress} onChange={(v) => setEditForm((p) => ({ ...p, currentAddress: v }))} placeholder="House no., street, purok, barangay" optional />
                 </div>
               </div>
+            </div>
 
-              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-brand-border">
-                <button onClick={() => setShowEditModal(false)} className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors">
+            <footer className="flex-shrink-0 border-t border-brand-border bg-white px-5 py-3.5 dark:border-border dark:bg-card sm:px-6">
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setShowEditModal(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:text-muted-foreground dark:hover:bg-hover">
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={handleEditSave}
                   disabled={editSubmitting}
-                  className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium bg-brand-blue text-white hover:bg-brand-dark transition-colors disabled:opacity-60"
+                  className="flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
                 >
                   <CheckCircle2 className="w-4 h-4" /> {editSubmitting ? "Saving..." : "Save Changes"}
                 </button>
               </div>
-            </div>
+            </footer>
           </Card>
         </div>
       )}

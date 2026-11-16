@@ -29,19 +29,6 @@ const isLocalDateTime = (value) => {
 // Comparable, lexicographically-ordered "YYYY-MM-DDTHH:MM" key.
 const atKey = (date, time) => `${date}T${time}`;
 
-const currentManilaDateTimeKey = (now = new Date()) => {
-  const values = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(now).map(({ type, value }) => [type, value]));
-  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
-};
-
 const isDateTime = (value) => value === null || (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Date.parse(value)));
 
 export const createServiceValidator = (input = {}) => {
@@ -98,13 +85,9 @@ export const createServiceValidator = (input = {}) => {
     }
   }
   if (!errors.registrationDeadline && registrationDeadline && !errors.startDate && !errors.startTime) {
-    if (registrationDeadline <= currentManilaDateTimeKey()) {
-      errors.registrationDeadline = 'The registration deadline must be a future date and time.';
-    } else if (registrationDeadline > atKey(startDate, startTime)) {
+    if (registrationDeadline > atKey(startDate, startTime)) {
       errors.registrationDeadline = 'The registration deadline cannot be after the service start.';
     }
-  } else if (!errors.registrationDeadline && registrationDeadline && registrationDeadline <= currentManilaDateTimeKey()) {
-    errors.registrationDeadline = 'The registration deadline must be a future date and time.';
   }
 
   if (Object.keys(errors).length) return invalid(errors);

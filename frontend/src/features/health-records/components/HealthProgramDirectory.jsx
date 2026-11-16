@@ -91,6 +91,7 @@ export default function HealthProgramDirectory({
   context = null,
   notices = null,
   countNote = "",
+  showSectionSummary = true,
 }) {
   const availablePrograms = programs.filter((program) => !program.disabled).length;
 
@@ -120,12 +121,14 @@ export default function HealthProgramDirectory({
       {notices && <div className="mb-4 space-y-3">{notices}</div>}
 
       <div>
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-2 border-b border-brand-border pb-2.5 dark:border-border">
-          <h2 className="text-sm font-semibold text-brand-ink dark:text-foreground">Programs</h2>
-          <p className="text-xs text-brand-gray dark:text-muted-foreground">
-            {programs.length} {programs.length === 1 ? "program" : "programs"}
-          </p>
-        </div>
+        {showSectionSummary && (
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2 border-b border-brand-border pb-2.5 dark:border-border">
+            <h2 className="text-sm font-semibold text-brand-ink dark:text-foreground">Programs</h2>
+            <p className="text-xs text-brand-gray dark:text-muted-foreground">
+              {programs.length} {programs.length === 1 ? "program" : "programs"}
+            </p>
+          </div>
+        )}
 
         {programs.length > 0 ? (
           <div className="grid auto-rows-fr grid-cols-1 gap-3.5 md:grid-cols-2 xl:grid-cols-3">

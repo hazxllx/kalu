@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, RefreshCw, ChevronRight } from "lucide-react";
+import { AlertTriangle, Bell, CheckCheck, ChevronRight } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
@@ -9,8 +9,7 @@ import { ICONS, CATEGORIES } from "@/services/local/notificationData";
 import { notificationsApi } from "@/services/api";
 import { notifyUnreadChanged } from "@/services/notifications/unreadBus";
 import { useAuth } from "@/context/AuthContext";
-
-const CATEGORY_FILTERS = ["information", "reminder", "alert", "success", "warning"];
+import { useToast } from "@/components/ui/use-toast";
 
 /** Relative "time ago" label from an ISO timestamp. */
 const relativeTime = (iso) => {
@@ -29,21 +28,33 @@ const relativeTime = (iso) => {
 };
 
 const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
+const PRIORITIES = new Set(["emergency", "critical"]);
 
 /** persisted notifications row → UI shape. */
-const mapNotification = (row) => ({
-  id: row.id,
-  category: row.category || "information",
-  title: row.title,
-  desc: row.message || "",
-  createdAt: row.created_at,
-  time: relativeTime(row.created_at),
-  read: Boolean(row.read_at),
-  // Kept so the card can deep-link to the related record (e.g. a saved
-  // consultation → My Health Records). Never contains clinical detail.
-  relatedType: row.related_type || "",
-  relatedId: row.related_id || null,
-});
+const mapNotification = (row) => {
+  const category = typeof row.category === "string" ? row.category : "";
+  const priorityValue = String(row.priority || "").toLowerCase();
+  const categoryPriority = category.toLowerCase();
+
+  return {
+    id: row.id,
+    category,
+    priority: PRIORITIES.has(priorityValue)
+      ? priorityValue
+      : PRIORITIES.has(categoryPriority)
+        ? categoryPriority
+        : "",
+    title: row.title,
+    desc: row.message || "",
+    createdAt: row.created_at,
+    time: relativeTime(row.created_at),
+    read: Boolean(row.read_at),
+    // Kept so the card can deep-link to the related record (e.g. a saved
+    // consultation → My Health Records). Never contains clinical detail.
+    relatedType: row.related_type || "",
+    relatedId: row.related_id || null,
+  };
+};
 
 /**
  * Resolve a notification's in-app destination from its related record.
@@ -91,10 +102,23 @@ const actionLabelFor = (notification, role) => {
 export default function NotificationsPage({ crumbs = ["Notifications"] }) {
   const navigate = useNavigate();
   const { role } = useAuth();
+  const { toast } = useToast();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [filter, setFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState("all");
+  const notificationsRef = useRef([]);
+  const pendingReadIds = useRef(new Set());
+  const markAllPending = useRef(false);
+
+  const updateNotifications = React.useCallback((updater) => {
+    const next = typeof updater === "function" ? updater(notificationsRef.current) : updater;
+    notificationsRef.current = next;
+    setNotifications(next);
+    return next;
+  }, []);
+
+  const unreadIn = (rows) => rows.filter((n) => !n.read).length;
 
   const load = React.useCallback(() => {
     setLoading(true);
@@ -103,71 +127,114 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
       .list()
       .then((result) => {
         const rows = result?.rows || result || [];
-        setNotifications(rows.map(mapNotification));
-        // Keep the shared bell badge aligned with the freshly loaded list.
-        notifyUnreadChanged();
+        const mappedRows = rows.map(mapNotification);
+        updateNotifications(mappedRows);
+        notifyUnreadChanged(unreadIn(mappedRows), { refresh: false });
       })
       .catch((err) => setLoadError(err?.message || "Unable to load notifications. Please try again."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [updateNotifications]);
 
   useEffect(() => { load(); }, [load]);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
-
-  const filteredNotifications = notifications.filter((n) => {
-    if (filter === "all") return true;
-    if (filter === "unread") return !n.read;
-    return n.category === filter;
-  });
+  const unreadCount = unreadIn(notifications);
+  const filteredNotifications = activeTab === "unread"
+    ? notifications.filter((n) => !n.read)
+    : notifications;
 
   const markAsRead = async (id) => {
-    // Already read → nothing to persist (avoids an unnecessary write/request).
-    const target = notifications.find((n) => n.id === id);
-    if (target && target.read) return;
-    // Optimistic — update the list and the shared bell badge immediately,
-    // revert on failure so the UI stays consistent with the server.
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-    notifyUnreadChanged();
+    const target = notificationsRef.current.find((n) => n.id === id);
+    if (!target) return false;
+    if (target.read) return true;
+    if (pendingReadIds.current.has(id) || markAllPending.current) return false;
+
+    pendingReadIds.current.add(id);
+    const optimisticRows = updateNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
+    );
+    notifyUnreadChanged(unreadIn(optimisticRows), { refresh: false });
+
     try {
-      await notificationsApi.markRead(id);
-    } catch {
-      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: false } : n)));
-      notifyUnreadChanged();
+      const result = await notificationsApi.markRead(id);
+      const row = result?.record || result;
+      if (String(row?.id) !== String(id) || !row?.read_at) {
+        throw new Error("The server did not confirm that this notification was marked as read.");
+      }
+      const reconciledRows = updateNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
+      );
+      notifyUnreadChanged(unreadIn(reconciledRows), { refresh: false });
+      return true;
+    } catch (err) {
+      const restoredRows = updateNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: false } : n)),
+      );
+      notifyUnreadChanged(unreadIn(restoredRows), { refresh: false });
+      toast({
+        variant: "destructive",
+        title: "Could not mark notification as read",
+        description: err?.message || "Please try again.",
+      });
+      return false;
+    } finally {
+      pendingReadIds.current.delete(id);
     }
   };
 
   const markAllAsRead = async () => {
-    const hadUnread = notifications.some((n) => !n.read);
-    if (!hadUnread) return;
-    const snapshot = notifications;
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    notifyUnreadChanged();
+    const snapshot = notificationsRef.current;
+    if (!snapshot.some((n) => !n.read) || markAllPending.current || pendingReadIds.current.size > 0) return;
+    markAllPending.current = true;
+    const optimisticRows = updateNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    notifyUnreadChanged(unreadIn(optimisticRows), { refresh: false });
     try {
       // One atomic server request marks every unread row read — no per-row race.
-      await notificationsApi.markAllRead();
-    } catch {
+      const result = await notificationsApi.markAllRead();
+      if (result?.updated === undefined) throw new Error("The server did not confirm the notifications update.");
+      const reconciledRows = updateNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      notifyUnreadChanged(unreadIn(reconciledRows), { refresh: false });
+    } catch (err) {
       // Restore the pre-click state, then reconcile with the server.
-      setNotifications(snapshot);
-      notifyUnreadChanged();
+      updateNotifications(snapshot);
+      notifyUnreadChanged(unreadIn(snapshot), { refresh: false });
+      toast({
+        variant: "destructive",
+        title: "Could not mark all notifications as read",
+        description: err?.message || "Please try again.",
+      });
       load();
+    } finally {
+      markAllPending.current = false;
     }
   };
 
   // Open a notification: mark it read (so the unread count updates), then
   // navigate to its related record when one is mapped. An already-read
   // notification still navigates but creates no extra update.
-  const openNotification = (n) => {
-    const destination = destinationFor(n, role);
-    if (!n.read) markAsRead(n.id);
+  const openNotification = async (n) => {
+    const current = notificationsRef.current.find((item) => item.id === n.id);
+    if (!current) return;
+    if (pendingReadIds.current.has(current.id)) return;
+    if (!current.read && !(await markAsRead(current.id))) return;
+    const destination = destinationFor(current, role);
     if (destination) navigate(destination);
   };
 
-  const getCategoryColor = (category) => CATEGORIES[category]?.color || "bg-brand-gray/10 text-brand-gray";
+  const hasPriority = (notification) => PRIORITIES.has(notification.priority);
+  const getCategoryColor = (notification) => hasPriority(notification)
+    ? "border border-[#FECACA] bg-[#FEF2F2] text-[#DC2626] dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
+    : CATEGORIES[notification.category]?.color || "bg-slate-100 text-slate-700 dark:bg-slate-700/50 dark:text-slate-200";
   const getCategoryIcon = (category) => {
     const iconName = CATEGORIES[category]?.icon || "Bell";
     return ICONS[iconName] || Bell;
   };
+  function getCategoryLabel(category) {
+    return CATEGORIES[category]?.label || category
+      .split(/[_-]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ") || "Other";
+  }
 
   const groupNotifications = (notifs) => {
     const groups = { today: [], yesterday: [], earlier: [] };
@@ -191,52 +258,44 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
 
   const toolbar = (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex flex-wrap items-center gap-2">
-        <div role="tablist" aria-label="Filter notifications" className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-0.5 dark:border-border dark:bg-card-nested">
+      <div className="flex flex-wrap items-center gap-3">
+        <div
+          role="tablist"
+          aria-label="Filter notifications"
+          className="inline-flex items-center gap-1 rounded-[14px] border border-[#E2E8F0] bg-[#F1F5F9] p-1 dark:border-slate-700 dark:bg-slate-800"
+        >
           {segmented.map((seg) => {
-            const active = filter === seg.id;
+            const active = activeTab === seg.id;
             return (
               <button
                 key={seg.id}
                 role="tab"
                 aria-selected={active}
-                onClick={() => setFilter(seg.id)}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                  active ? "bg-white text-brand-ink shadow-sm dark:bg-card dark:text-foreground" : "text-brand-gray hover:text-brand-ink dark:hover:text-foreground"
+                onClick={() => setActiveTab(seg.id)}
+                className={`flex h-8 items-center gap-2 rounded-[10px] px-3 text-sm font-medium transition-colors ${
+                  active
+                    ? "bg-[#164A82] text-white shadow-sm"
+                    : "bg-transparent text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700"
                 }`}
               >
                 {seg.label}
-                <span className={`rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${active ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-200/70 text-brand-gray dark:bg-slate-700/60 dark:text-slate-300"}`}>
+                <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-semibold tabular-nums ${
+                  active
+                    ? "bg-white/15 text-white"
+                    : "bg-[#E2E8F0] text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
                   {seg.count}
                 </span>
               </button>
             );
           })}
         </div>
-
-        <select
-          aria-label="Filter by category"
-          value={CATEGORY_FILTERS.includes(filter) ? filter : "all"}
-          onChange={(e) => setFilter(e.target.value)}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-brand-ink outline-none transition-colors hover:border-brand-blue focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
-        >
-          <option value="all">All categories</option>
-          {CATEGORY_FILTERS.map((c) => (
-            <option key={c} value={c}>{CATEGORIES[c]?.label || c}</option>
-          ))}
-        </select>
       </div>
 
-      <div className="flex items-center gap-2">
-        <button
-          onClick={load}
-          className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-slate-100 dark:hover:bg-hover"
-        >
-          <RefreshCw className="h-4 w-4" strokeWidth={1.9} /> Refresh
-        </button>
+      <div className="flex items-center justify-start gap-2 sm:justify-end">
         <button
           onClick={markAllAsRead}
-          disabled={unreadCount === 0}
+          disabled={unreadCount === 0 || markAllPending.current || pendingReadIds.current.size > 0}
           className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-blue/5 disabled:cursor-not-allowed disabled:text-slate-400 dark:disabled:text-slate-500"
         >
           <CheckCheck className="h-4 w-4" strokeWidth={1.9} /> Mark all as read
@@ -253,11 +312,7 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
         subtitle={
           loading
             ? "Loading notifications..."
-            : notifications.length === 0
-              ? "Stay updated on reminders, alerts, and advisories."
-              : unreadCount > 0
-                ? `You have ${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}.`
-                : "You're all caught up."
+            : `${notifications.length} total notification${notifications.length === 1 ? "" : "s"} · ${unreadCount} unread`
         }
       />
 
@@ -291,12 +346,15 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
               <EmptyState
                 icon={Bell}
                 title="No Notifications Found"
-                description="Try adjusting your filter to see more notifications."
-                action={
-                  <button onClick={() => setFilter("all")} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark">
+                description={activeTab === "unread" ? "You're all caught up." : "No notifications are available."}
+                action={activeTab === "unread" ? (
+                  <button
+                    onClick={() => setActiveTab("all")}
+                    className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+                  >
                     Show all notifications
                   </button>
-                }
+                ) : null}
               />
             </Card>
           ) : (
@@ -311,6 +369,7 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                     <div className="space-y-2">
                       {items.map((n, i) => {
                         const CategoryIcon = getCategoryIcon(n.category);
+                        const priority = hasPriority(n) ? n.priority : "";
                         const destination = destinationFor(n, role);
                         const navigates = Boolean(destination);
                         // The whole card is interactive: clicking it marks the
@@ -325,24 +384,28 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                         return (
                           <motion.div key={n.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
                             <div
-                              className={`flex items-start gap-3 p-3 rounded-btn transition-all hover:shadow-sm hover:bg-brand-light ${!n.read ? "bg-brand-blue/5" : ""} ${interactive ? "cursor-pointer" : ""}`}
-                              {...(interactive
-                                ? {
-                                    role: "button",
-                                    tabIndex: 0,
-                                    "aria-label": ariaLabel,
-                                    onClick: () => openNotification(n),
-                                    onKeyDown: (e) => {
-                                      if (e.key === "Enter" || e.key === " ") {
-                                        e.preventDefault();
-                                        openNotification(n);
-                                      }
-                                    },
-                                  }
-                                : {})}
+                              className={`flex items-start gap-3 rounded-btn p-3 transition-all ${
+                                priority
+                                  ? "border-l-2 border-l-[#FECACA] bg-[#FEF2F2]/60 hover:bg-[#FEF2F2] dark:border-l-red-800 dark:bg-red-950/20 dark:hover:bg-red-950/30"
+                                  : n.read
+                                    ? "hover:bg-slate-50 dark:hover:bg-hover"
+                                    : "bg-sky-50/70 hover:bg-sky-50 dark:bg-sky-500/5 dark:hover:bg-sky-500/10"
+                              } ${interactive ? "cursor-pointer" : ""}`}
+                              role={interactive ? "button" : undefined}
+                              tabIndex={interactive ? 0 : undefined}
+                              aria-label={interactive ? ariaLabel : undefined}
+                              onClick={interactive ? () => { void openNotification(n); } : undefined}
+                              onKeyDown={interactive ? (e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  void openNotification(n);
+                                }
+                              } : undefined}
                             >
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${getCategoryColor(n.category)}`}>
-                                <CategoryIcon className="w-4 h-4" strokeWidth={1.8} />
+                              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${getCategoryColor(n)}`}>
+                                {priority
+                                  ? <AlertTriangle className="h-4 w-4" strokeWidth={1.8} />
+                                  : <CategoryIcon className="h-4 w-4" strokeWidth={1.8} />}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-start justify-between gap-2">
@@ -351,32 +414,26 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                                       <p className={`text-sm font-medium text-brand-ink ${!n.read ? "font-semibold" : ""}`}>{n.title}</p>
                                       {!n.read && <span className="w-2 h-2 rounded-full bg-brand-blue shrink-0" aria-label="Unread" />}
                                     </div>
+                                    {priority && (
+                                      <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-[#FECACA] bg-[#FEF2F2] px-2 py-0.5 text-[10px] font-bold tracking-wide text-[#991B1B] dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
+                                        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                                        {priority.toUpperCase()}
+                                      </span>
+                                    )}
                                     <p className="text-xs text-brand-gray mt-0.5 line-clamp-2">{n.desc}</p>
                                   </div>
                                   <div className="flex flex-col items-end gap-1 shrink-0">
                                     <span className="text-xs text-brand-gray whitespace-nowrap">{n.time}</span>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${getCategoryColor(n.category)}`}>
-                                      {CATEGORIES[n.category]?.label || n.category}
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${getCategoryColor(n)}`}>
+                                      {getCategoryLabel(n.category)}
                                     </span>
                                   </div>
                                 </div>
                                 <div className="mt-2 flex items-center gap-4">
                                   {navigates && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); openNotification(n); }}
-                                      className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline"
-                                    >
+                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-brand-blue">
                                       {actionLabel} <ChevronRight className="h-3 w-3" />
-                                    </button>
-                                  )}
-                                  {!n.read && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
-                                      className="text-xs font-medium text-brand-blue hover:underline"
-                                    >
-                                      Mark as read
-                                    </button>
+                                    </span>
                                   )}
                                 </div>
                               </div>
