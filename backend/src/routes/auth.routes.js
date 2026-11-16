@@ -13,7 +13,7 @@ import * as authController from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/authenticate.js';
 import rateLimit from '../middleware/rateLimit.js';
 import validate from '../middleware/validate.js';
-import { signInValidator, personnelPasswordSetupValidator } from '../validators/auth.validators.js';
+import { signInValidator, passwordResetRequestValidator, personnelPasswordSetupValidator } from '../validators/auth.validators.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 const router = Router();
@@ -45,12 +45,18 @@ const passwordSetupLimiter = rateLimit({
   max: env.authRateLimitMaxRequests,
   message: 'Too many password setup attempts. Please try again later.',
 });
+const passwordResetRequestLimiter = rateLimit({
+  windowMs: env.authRateLimitWindowMs,
+  max: Math.min(5, env.authRateLimitMaxRequests),
+  message: 'Too many reset requests. Please wait before trying again.',
+});
 
 // These verify the real Supabase token inside the service, but deliberately do
 // not use the ordinary active-profile guard: approved invitees are not active
 // until their own password setup completes.
 router.get('/personnel/setup-status', setupStatusLimiter, asyncHandler(authController.personnelSetupStatus));
 router.post('/personnel/password-setup', passwordSetupLimiter, validate(personnelPasswordSetupValidator), asyncHandler(authController.personnelPasswordSetup));
+router.post('/forgot-password', passwordResetRequestLimiter, validate(passwordResetRequestValidator), asyncHandler(authController.forgotPassword));
 
 router.post('/login', loginLimiter, validate(signInValidator), asyncHandler(authController.login));
 router.get('/me', authenticate, asyncHandler(authController.me));

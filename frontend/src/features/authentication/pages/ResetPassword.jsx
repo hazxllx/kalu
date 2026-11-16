@@ -41,7 +41,9 @@ export default function ResetPassword() {
   const [setupStatus, setSetupStatus] = useState(null);
   const [completion, setCompletion] = useState(null);
   const [partialSaved, setPartialSaved] = useState(false);
+  const [verifyingLink, setVerifyingLink] = useState(false);
   const sessionRef = useRef(null);
+  const pendingVerifyRef = useRef(null);
   const inspectedToken = useRef(null);
   const setupSequence = useRef(0);
   const setupRequiredRef = useRef(false);
@@ -107,6 +109,22 @@ export default function ResetPassword() {
       return undefined;
     }
 
+    // Personnel setup links use a token hash that is exchanged only after the
+    // recipient clicks Continue. This prevents email security scanners from
+    // consuming the one-time link just by previewing it.
+    const params = new URLSearchParams(window.location.search);
+    const tokenHash = params.get("token_hash");
+    const verificationType = params.get("type");
+    if (tokenHash || verificationType) {
+      if (!tokenHash || !["invite", "recovery"].includes(verificationType)) {
+        setStatus("invalid");
+        return undefined;
+      }
+      pendingVerifyRef.current = { tokenHash, verificationType };
+      setStatus("awaiting_verification");
+      return undefined;
+    }
+
     // The PASSWORD_RECOVERY event fires once the recovery link's hash is parsed.
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active || submittingRef.current || finishedRef.current) return;
@@ -145,6 +163,38 @@ export default function ResetPassword() {
       setupSequence.current += 1;
     };
   }, [inspectSession]);
+
+  const verifySetupLink = async () => {
+    if (verifyingLink || !pendingVerifyRef.current || !supabase) return;
+    setVerifyingLink(true);
+    setError("");
+    try {
+      const { tokenHash, verificationType } = pendingVerifyRef.current;
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: verificationType,
+      });
+      if (verifyError) throw verifyError;
+      const session = data?.session;
+      if (!session?.access_token || !session?.user?.id) {
+        setStatus("invalid");
+        return;
+      }
+      pendingVerifyRef.current = null;
+      window.history.replaceState({}, document.title, window.location.pathname);
+      await inspectSession(session, true);
+    } catch (failure) {
+      const message = String(failure?.message || "").toLowerCase();
+      if (message.includes("fetch") || message.includes("network") || message.includes("timeout")) {
+        setStatus("awaiting_verification");
+        setError("We couldn't reach the secure verification service. Check your connection and try again. The link has not been confirmed as expired.");
+      } else {
+        setStatus("invalid");
+      }
+    } finally {
+      setVerifyingLink(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -203,20 +253,26 @@ export default function ResetPassword() {
       setPartialSaved(false);
       setNewPassword("");
       setConfirmPassword("");
-      setStatus("done");
       try {
         const { error: signOutError } = await supabase.auth.signOut();
         if (signOutError) throw signOutError;
       } catch {
-        setError("Your password was saved, but automatic sign-out could not be confirmed. Close this reset session before signing in again.");
+        // The password is already saved. Still move away from the consumed
+        // one-time link; an active session will be handled by AuthContext.
       }
+      window.location.replace(`${window.location.origin}/login?passwordSetupComplete=1`);
     } catch (failure) {
       const msg = String(failure?.message || "").toLowerCase();
       if (passwordWasSaved(failure)) {
         setPartialSaved(true);
         setError(`Your password was saved, but account setup or activation is incomplete. ${failure?.message || "The server could not confirm finalization."} You may retry account setup; do not assume sign-in is enabled.`);
       } else if ([401, 403].includes(failure?.status) || msg.includes("session") || msg.includes("expired") || msg.includes("jwt")) {
-        setStatus("invalid");
+        if (saving) {
+          setStatus("setup_error");
+          setError("The password request was submitted, but the server could not confirm the final result. Try signing in with the password you just chose. If sign-in fails, request a fresh reset link.");
+        } else {
+          setStatus("invalid");
+        }
       } else if (!saving && isManagedPersonnelSession(sessionRef.current)) {
         setStatus("setup_error");
         setError("We could not verify account setup with the server. No additional password change was attempted; account setup remains unconfirmed. Check again when the service is available.");
@@ -269,6 +325,23 @@ export default function ResetPassword() {
           <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">Account Setup Could Not Be Verified</h1>
           <p role="alert" className="mt-4 text-[13px] leading-relaxed text-slate-500">{error}</p>
           <button type="button" onClick={() => { if (sessionRef.current) void inspectSession(sessionRef.current, true); }} className={`${btnPrimary} mt-6`}>Check account setup again</button>
+          <p className="mt-4"><Link to="/login" className="text-sm font-semibold text-brand-blue underline">Back to Login</Link></p>
+        </div>
+      </RegistrationCard>
+    </RegistrationShell>;
+  }
+
+  if (status === "awaiting_verification") {
+    return <RegistrationShell footer={null}>
+      <RegistrationCard>
+        <div className="px-6 py-10 text-center sm:px-12 sm:py-12">
+          <CheckCircle2 className="mx-auto h-10 w-10 text-brand-green" />
+          <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">Continue Password Setup</h1>
+          <p className="mt-4 text-[13px] leading-relaxed text-slate-500">Your invitation is ready. Continue to securely verify it and choose your password.</p>
+          <button type="button" onClick={verifySetupLink} disabled={verifyingLink} className={`${btnPrimary} mt-6`}>
+            {verifyingLink ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying...</> : "Continue to Password Setup"}
+          </button>
+          {error && <p role="alert" className="mt-4 text-sm text-brand-danger">{error}</p>}
           <p className="mt-4"><Link to="/login" className="text-sm font-semibold text-brand-blue underline">Back to Login</Link></p>
         </div>
       </RegistrationCard>

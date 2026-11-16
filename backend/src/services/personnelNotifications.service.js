@@ -245,19 +245,18 @@ export const processPersonnelNotifications = ({
           if (generated?.user?.id !== job.account_id || emailOf(generated?.user?.email) !== emailOf(authUser.email)) {
             throw failure('AUTH_LINK_IDENTITY_MISMATCH');
           }
-          try {
-            const url = new URL(generated?.properties?.action_link);
-            if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-              || (url.protocol === 'http:' && (config.isProduction || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
-              || url.searchParams.get('type') !== type
-              || (!url.searchParams.get('token') && !url.searchParams.get('token_hash'))) {
-              throw failure('AUTH_LINK_INVALID');
-            }
-            if (url.searchParams.get('redirect_to') !== redirectTo) throw failure('AUTH_REDIRECT_MISMATCH');
-            actionLink = url.href;
-          } catch (error) {
-            throw failure(error?.code === 'AUTH_REDIRECT_MISMATCH' ? error.code : 'AUTH_LINK_INVALID');
+          // Send the token hash to our app instead of the Supabase action_link.
+          // Mail security scanners often pre-open action links, consuming their
+          // one-time token before the recipient does. The reset page asks the
+          // user to continue and only then calls verifyOtp with this hash.
+          const tokenHash = generated?.properties?.hashed_token;
+          if (typeof tokenHash !== 'string' || tokenHash.length < 16 || tokenHash.length > 2048) {
+            throw failure('AUTH_LINK_INVALID');
           }
+          const setupUrl = new URL('/reset-password', origin);
+          setupUrl.searchParams.set('token_hash', tokenHash);
+          setupUrl.searchParams.set('type', type);
+          actionLink = setupUrl.href;
         }
         message = buildMail({ job, account, profile, origin, actionLink, needsSetup, authConfirmed: Boolean(authUser.email_confirmed_at), config });
         const { data: begun, error: beginError } = await client.rpc('begin_personnel_notification_send', {

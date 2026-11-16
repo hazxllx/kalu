@@ -53,7 +53,43 @@ const trackInstalling = (registration) => {
  */
 export const registerServiceWorker = () => {
   if (!pwaSupported()) return;
-  if (!(import.meta.env && import.meta.env.PROD)) return;
+  if (!(import.meta.env && import.meta.env.PROD)) {
+    // A production PWA may already be registered for localhost from a previous
+    // preview/build. That worker can keep serving an old app shell while Vite is
+    // running, making local fixes appear not to take effect. Remove only this
+    // app's worker and its caches in development, then reload once so the page
+    // is no longer controlled by the stale worker.
+    navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+      const appRegistrations = registrations.filter((registration) => {
+        const worker = registration.active || registration.waiting || registration.installing;
+        if (!worker?.scriptURL) return false;
+        try {
+          const script = new URL(worker.scriptURL);
+          return script.origin === window.location.origin && script.pathname === '/sw.js';
+        } catch {
+          return false;
+        }
+      });
+      if (!appRegistrations.length) return;
+
+      await Promise.all(appRegistrations.map((registration) => registration.unregister()));
+      if ('caches' in window) {
+        const names = await caches.keys();
+        await Promise.all(names
+          .filter((name) => name.startsWith('kalusagap-') || name.startsWith('workbox-precache'))
+          .map((name) => caches.delete(name)));
+      }
+
+      const reloadKey = `kalusagap:dev-worker-cleared:${window.location.origin}`;
+      if (navigator.serviceWorker.controller && !sessionStorage.getItem(reloadKey)) {
+        sessionStorage.setItem(reloadKey, '1');
+        window.location.reload();
+      }
+    }).catch(() => {
+      // A stale local worker must never prevent the app itself from starting.
+    });
+    return;
+  }
 
   const start = () => {
     navigator.serviceWorker

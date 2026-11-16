@@ -4,6 +4,8 @@ import ApiError from '../utils/apiError.js';
 import repository from '../repositories/supabaseRepository.js';
 import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';
 import { AUTH_SERVICE_UNAVAILABLE_CODE, AUTH_SERVICE_UNAVAILABLE_MESSAGE, isAuthServiceUnavailable } from '../../../shared/authConnectivity.js';
+import env from '../config/env.js';
+import { sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service.js';
 
 /**
  * Authentication business logic (Supabase Auth + profiles).
@@ -108,6 +110,87 @@ export const signOut = async (accessToken) => {
   return { success: true };
 };
 
+/** Send password recovery through the backend SMTP account without exposing
+ * whether an email belongs to a KALUSAGAP account. */
+export const requestPasswordReset = async ({ email } = {}) => {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const supabase = getServiceClient();
+  let profileResult;
+  try {
+    profileResult = await supabase.from('profiles').select('id,email,role')
+      .eq('email', normalizedEmail).maybeSingle();
+  } catch {
+    throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  }
+  if (profileResult.error) throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  const profile = profileResult.data;
+  if (!profile?.id || !profile.email) return { accepted: true };
+
+  let authResult;
+  try {
+    authResult = await supabase.auth.admin.getUserById(profile.id);
+  } catch {
+    throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  }
+  const authUser = authResult?.data?.user;
+  if (authResult?.error) throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  if (!authUser?.id || authUser.id !== profile.id || !authUser.email
+    || authUser.email.trim().toLowerCase() !== normalizedEmail) {
+    return { accepted: true };
+  }
+
+  let actionType = 'recovery';
+  let isInitialPersonnelSetup = false;
+  if (!authUser.email_confirmed_at) {
+    // An unconfirmed, approved staff account cannot use a recovery token yet.
+    // Let the same Forgot Password form request a fresh invitation token
+    // instead of silently returning success while leaving the user with an
+    // old/consumed setup link. Other unconfirmed accounts remain undisclosed.
+    if (!['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(profile.role)) {
+      return { accepted: true };
+    }
+    let account;
+    try {
+      account = await repository.getPersonnelSetupAccount(profile.id);
+    } catch {
+      throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+    }
+    if (account?.setupRequired !== true || account.approvalStatus !== 'approved' || account.suspendedAt) {
+      return { accepted: true };
+    }
+    actionType = 'invite';
+    isInitialPersonnelSetup = true;
+  }
+
+  const frontendUrl = env.clientUrl || env.clientUrls?.[0];
+  if (!frontendUrl) throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  const redirectTo = `${new URL(frontendUrl).origin}/reset-password`;
+  let generated;
+  try {
+    generated = await supabase.auth.admin.generateLink({
+      type: actionType, email: authUser.email, options: { redirectTo },
+    });
+  } catch {
+    throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  }
+  const tokenHash = generated?.data?.properties?.hashed_token;
+  if (generated?.error || generated?.data?.user?.id !== authUser.id
+    || typeof tokenHash !== 'string' || tokenHash.length < 16 || tokenHash.length > 2048) {
+    throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  }
+
+  const resetUrl = new URL('/reset-password', new URL(frontendUrl).origin);
+  resetUrl.searchParams.set('token_hash', tokenHash);
+  resetUrl.searchParams.set('type', actionType);
+  try {
+    if (isInitialPersonnelSetup) await sendPasswordSetupEmail({ email: authUser.email, setupUrl: resetUrl.href });
+    else await sendPasswordResetEmail({ email: authUser.email, resetUrl: resetUrl.href });
+  } catch {
+    throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  }
+  return { accepted: true };
+};
+
 const verifySetupOwner = async (accessToken) => {
   if (!accessToken) throw ApiError.unauthorized('Missing Bearer access token');
   let result;
@@ -182,4 +265,4 @@ export const setupPersonnelPassword = async ({ accessToken, password } = {}) => 
   }
 };
 
-export default { signIn, getCurrentUser, signOut, getPersonnelSetupStatus, setupPersonnelPassword };
+export default { signIn, getCurrentUser, signOut, requestPasswordReset, getPersonnelSetupStatus, setupPersonnelPassword };

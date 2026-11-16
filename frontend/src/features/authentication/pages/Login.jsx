@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, AlertTriangle, Loader2 } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { homeForRole, landingFor } from "@/lib/roles";
 import GovSeal from "@/components/branding/GovSeal";
@@ -23,6 +23,8 @@ export default function Login() {
   const submittingRef = useRef(false);
   const fieldRefs = { email: emailRef, password: passwordRef };
   const authBusy = isSigningIn || isSigningOut || isLoadingAuth || !authChecked || isResolvingProfile;
+  const passwordSetupComplete = new URLSearchParams(location.search).get("passwordSetupComplete") === "1"
+    || location.state?.passwordSetupComplete === true;
 
   useEffect(() => {
     if (isAuthenticated && !authBusy && !submittingRef.current) {
@@ -117,6 +119,16 @@ export default function Login() {
               <p className="mt-1.5 text-[13px] text-brand-gray dark:text-slate-300">
                 Access your KALUSAGAP account to continue.
               </p>
+
+              {passwordSetupComplete && (
+                <div
+                  role="status"
+                  className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12.5px] text-emerald-800 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-200"
+                >
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>Your password has been set. Sign in using your new password.</span>
+                </div>
+              )}
 
               <form onSubmit={submit} className="mt-6 space-y-4">
                 {error && (

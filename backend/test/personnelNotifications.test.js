@@ -88,6 +88,7 @@ const fixture = (options = {}) => {
             user: options.generatedUser || state.authUser,
             properties: {
               action_link: options.actionLink || `https://project.example.test/auth/v1/verify?token=${TOKEN}&type=${args.type}&redirect_to=${encodeURIComponent(args.options.redirectTo)}`,
+              hashed_token: options.hashedToken === undefined ? TOKEN : options.hashedToken,
             },
           },
           error: options.linkError || null,
@@ -326,20 +327,22 @@ for (const generatedUser of [{ id: OTHER_ID, email: EMAIL }, { id: ACCOUNT_ID, e
   });
 }
 
-test('Supabase silently falling back to a different redirect fails transparently', async () => {
-  const f = fixture({ account: { setup_required: true }, actionLink: `https://project.example.test/auth/v1/verify?token=${TOKEN}&type=recovery&redirect_to=https%3A%2F%2Fapp.example.test%2F` });
+test('setup invitations use an app confirmation URL carrying the one-time token hash', async () => {
+  const f = fixture({ account: { setup_required: true } });
   await f.run();
-  assert.equal(f.state.jobs[0].last_error_code, 'AUTH_REDIRECT_MISMATCH');
-  assert.equal(f.state.messages.length, 0);
+  const link = new URL(f.state.messages[0].text.match(/Set Your Password: (\S+)/)[1]);
+  assert.equal(link.origin, 'https://app.example.test');
+  assert.equal(link.pathname, '/reset-password');
+  assert.equal(link.searchParams.get('token_hash'), TOKEN);
+  assert.equal(link.searchParams.get('type'), 'recovery');
+  assert.equal(link.searchParams.has('token'), false);
 });
 
-test('invalid generated links are never sent', async () => {
-  for (const actionLink of ['javascript:alert(1)', 'https://project.example.test/?redirect_to=https%3A%2F%2Fapp.example.test%2Freset-password']) {
-    const f = fixture({ account: { setup_required: true }, actionLink });
-    await f.run();
-    assert.equal(f.state.jobs[0].last_error_code, 'AUTH_LINK_INVALID');
-    assert.equal(f.state.messages.length, 0);
-  }
+test('missing generated token hashes are never sent', async () => {
+  const f = fixture({ account: { setup_required: true }, hashedToken: '' });
+  await f.run();
+  assert.equal(f.state.jobs[0].last_error_code, 'AUTH_LINK_INVALID');
+  assert.equal(f.state.messages.length, 0);
 });
 
 test('missing SMTP persists a diagnostic without generating a link or simulating acceptance', async () => {
