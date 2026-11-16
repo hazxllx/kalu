@@ -102,6 +102,8 @@ const STATUS_FILTERS = [
   [STATUS.COMPLETED, STATUS.COMPLETED],
   [STATUS.INACTIVE, STATUS.INACTIVE],
 ];
+const SERVICE_PAGE_SIZE = 8;
+const PUBMAT_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 72 100%22%3E%3Crect fill=%22%23E4DED2%22 width=%2272%22 height=%22100%22/%3E%3Ctext x=%2236%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 font-size=%2212%22 fill=%22%239CA3AF%22%3EHealth%3C/text%3E%3C/svg%3E";
 
 const inputCls = (error) =>
   `mt-1.5 w-full rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${
@@ -110,6 +112,19 @@ const inputCls = (error) =>
 
 // Comparable "YYYY-MM-DDTHH:MM" key for lexical date-time ordering.
 const atKey = (date, time) => `${date}T${time}`;
+
+const currentManilaDateTimeKey = () => {
+  const values = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date()).map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+};
 
 /**
  * Client-side schedule validation mirroring the backend rule set (the server
@@ -134,8 +149,11 @@ const validateSchedule = (form) => {
   const deadlineTime = form.registrationDeadlineTime;
   if ((deadlineDate && !deadlineTime) || (!deadlineDate && deadlineTime)) {
     errors.registrationDeadline = "Enter both a date and time for the registration deadline.";
-  } else if (deadlineDate && deadlineTime && form.startDate && form.startTime) {
-    if (atKey(deadlineDate, deadlineTime) > atKey(form.startDate, form.startTime)) {
+  } else if (deadlineDate && deadlineTime) {
+    const deadline = atKey(deadlineDate, deadlineTime);
+    if (deadline <= currentManilaDateTimeKey()) {
+      errors.registrationDeadline = "The registration deadline must be a future date and time.";
+    } else if (form.startDate && form.startTime && deadline > atKey(form.startDate, form.startTime)) {
       errors.registrationDeadline = "The registration deadline cannot be after the service start.";
     }
   }
@@ -198,6 +216,8 @@ export default function HealthServicesManager({ subtitle }) {
   const [personnel, setPersonnel] = useState([]);
   const [referenceState, setReferenceState] = useState({ loading: false, errors: [] });
   const serviceRequest = useRef(0);
+  const pubmatUrlRequest = useRef(0);
+  const [pubmatUrls, setPubmatUrls] = useState({});
   const referenceRequest = useRef(0);
   const registrationRequest = useRef(0);
 
@@ -206,6 +226,8 @@ export default function HealthServicesManager({ subtitle }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [scopeFilter, setScopeFilter] = useState("All");
+  const [page, setPage] = useState(1);
   const [toast, setToast] = useState(null);
 
   const [showForm, setShowForm] = useState(false);
@@ -321,13 +343,48 @@ export default function HealthServicesManager({ subtitle }) {
   }, [services]);
 
   const filtered = useMemo(() => {
-    return filterHealthServices(
+    const matches = filterHealthServices(
       services,
       { search, category: categoryFilter, status: statusFilter },
       deriveStatus,
       CATEGORY_LABELS,
     );
-  }, [services, search, categoryFilter, statusFilter]);
+    return matches.filter((service) => {
+      const isBarangay = Boolean(service.barangayId || service.barangay);
+      if (scopeFilter === "Municipality-wide") return !isBarangay;
+      if (scopeFilter === "Barangay-level") return isBarangay;
+      return true;
+    });
+  }, [services, search, categoryFilter, statusFilter, scopeFilter]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / SERVICE_PAGE_SIZE));
+  const pageServices = filtered.slice((page - 1) * SERVICE_PAGE_SIZE, page * SERVICE_PAGE_SIZE);
+  useEffect(() => {
+    const requestId = ++pubmatUrlRequest.current;
+    const servicesWithPubmats = pageServices.filter((service) => service.attachments?.pubmat?.storagePath);
+    if (!servicesWithPubmats.length) {
+      setPubmatUrls({});
+      return () => { if (pubmatUrlRequest.current === requestId) pubmatUrlRequest.current += 1; };
+    }
+
+    setPubmatUrls({});
+    Promise.all(servicesWithPubmats.map(async (service) => {
+      try {
+        const response = await healthServicesApi.getAttachmentSignedUrl(service.id, "pubmat");
+        return [service.id, response?.url || null];
+      } catch (err) {
+        console.warn("Could not load health service pubmat thumbnail.", service.id, err);
+        return [service.id, null];
+      }
+    })).then((entries) => {
+      if (requestId === pubmatUrlRequest.current) setPubmatUrls(Object.fromEntries(entries));
+    });
+
+    return () => {
+      if (pubmatUrlRequest.current === requestId) pubmatUrlRequest.current += 1;
+    };
+  }, [services, page, search, categoryFilter, statusFilter, scopeFilter]);
+  useEffect(() => setPage(1), [search, categoryFilter, statusFilter, scopeFilter]);
+  useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
 
   // Defensive dedupe by stable account id (the backend already excludes QA/test
   // accounts and returns one row per profile; this guarantees the picker never
@@ -360,12 +417,12 @@ export default function HealthServicesManager({ subtitle }) {
     return map;
   }, [barangays, assignedBarangay]);
 
-  // A barangay-scoped Health Supervisor only picks the municipality RHU or a
-  // facility in their own barangay (coverage is auto-applied, never selected).
+  // Barangay supervisors only create services at a BHS in their own barangay.
+  // RHU and municipality-wide services are created by PHN/MHO accounts.
   const facilityOptions = useMemo(() => {
     if (!isSupervisor) return facilities;
     const bId = assignedBarangay?.id || null;
-    return facilities.filter((f) => f.type === "rhu" || !f.barangayId || f.barangayId === bId);
+    return facilities.filter((f) => f.type === "barangay_health_station" && (!f.barangayId || f.barangayId === bId));
   }, [facilities, isSupervisor, assignedBarangay]);
 
   // Short, contextual explanation of the coverage the chosen facility implies.
@@ -386,7 +443,9 @@ export default function HealthServicesManager({ subtitle }) {
         ? `New Barangay Health Center will be added under your barangay${assignedBarangay?.name ? ` (${assignedBarangay.name})` : ""}.`
         : `New facility “${form.facilityName.trim()}” will be created (municipality-wide coverage).`;
     }
-    return "No specific facility — the service will cover the whole municipality.";
+    return isSupervisor
+      ? `Choose a facility in your assigned barangay${assignedBarangay?.name ? ` (${assignedBarangay.name})` : ""}.`
+      : "No specific facility — the service will cover the whole municipality.";
   }, [form, facilities, barangayNameById, assignedBarangay, isSupervisor]);
 
   const emptyForm = () => ({
@@ -484,6 +543,10 @@ export default function HealthServicesManager({ subtitle }) {
     const isEdit = Boolean(editingId);
     if (isEdit ? !canEdit : !canCreate) return;
     if (!form.name.trim()) { setFormError("A service name is required."); return; }
+    if (isSupervisor && (form.municipalityWide || (!form.facilityId && !form.facilityName.trim()))) {
+      setFormError("Select or enter a facility in your assigned barangay. RHU and municipality-wide services are managed by PHN.");
+      return;
+    }
     if (Object.keys(typingErrors).length > 0) {
       setFormError("Please correct the highlighted schedule fields.");
       return;
@@ -521,6 +584,9 @@ export default function HealthServicesManager({ subtitle }) {
         const created = await healthServicesApi.create(payload);
         serviceId = created?.record?.id;
         if (!serviceId) throw new Error("Service creation succeeded but no ID was returned.");
+        // If an optional attachment fails, keep this saved service as the edit
+        // target so retrying the form does not create a duplicate service.
+        setEditingId(serviceId);
       }
 
       // Upload attachments
@@ -704,8 +770,34 @@ export default function HealthServicesManager({ subtitle }) {
     }
   };
 
-  const hasFiltersActive = Boolean(search.trim() || categoryFilter !== "All" || statusFilter !== "All");
-  const clearFilters = () => { setSearch(""); setCategoryFilter("All"); setStatusFilter("All"); };
+  const saveServiceDelivery = async (reg, values) => {
+    if (!canEdit || !regTarget) return;
+    setAttBusy(reg.residentId);
+    try {
+      if (reg.attendance?.id) {
+        await healthServicesApi.updateAttendance(reg.attendance.id, { ...values, status: "attended" });
+      } else {
+        await healthServicesApi.createAttendance({
+          service_id: regTarget.id,
+          resident_id: reg.residentId,
+          scheduled_date: reg.plannedDate,
+          status: "attended",
+          ...values,
+        });
+      }
+      await loadRegistrations(regTarget.id);
+      showToast("Service delivery saved to the resident’s record.");
+      return true;
+    } catch (err) {
+      showToast(err?.message || "The service record could not be saved.", "error");
+      return false;
+    } finally {
+      setAttBusy("");
+    }
+  };
+
+  const hasFiltersActive = Boolean(search.trim() || categoryFilter !== "All" || statusFilter !== "All" || scopeFilter !== "All");
+  const clearFilters = () => { setSearch(""); setCategoryFilter("All"); setStatusFilter("All"); setScopeFilter("All"); setPage(1); };
   const categoryOptions = isSupervisor
     ? [["All", "All Categories"], ...[...new Set([...categories, ...services.map((service) => service.category).filter(Boolean)])].map((category) => [category, CATEGORY_LABELS[category] || category])]
     : CATEGORY_FILTERS;
@@ -714,9 +806,9 @@ export default function HealthServicesManager({ subtitle }) {
   return (
     <div className={isSupervisor ? "supervisor-module" : "contents"}>
       <PageHeader
-        crumbs={isSupervisor ? ["Health Operations", "Health Services"] : ["Clinical Care", "Health Services"]}
-        title="Health Services"
-        subtitle={subtitle || "Catalog of health services and their assigned personnel."}
+        crumbs={isSupervisor ? ["Health Operations", "Health Programs"] : ["Clinical Care", "Health Services"]}
+        title={isSupervisor ? "Health Programs" : "Health Services"}
+        subtitle={subtitle || (isSupervisor ? "Programs and services available to your barangay." : "Catalog of health services and their assigned personnel.")}
         action={canCreate ? (
           <button
             onClick={openCreate}
@@ -762,12 +854,12 @@ export default function HealthServicesManager({ subtitle }) {
 
       {/* Search, filters */}
       <Card className={`mb-4 p-3 ${isSupervisor ? "supervisor-toolbar" : ""}`}>
-        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-3 lg:items-end">
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 xl:items-end">
           {isSupervisor ? <label htmlFor="health-service-search" className="min-w-0 text-caption font-medium text-brand-gray">
             Search Services
             <div className="supervisor-input mt-1 flex items-center gap-2">
               <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <input id="health-service-search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Service name or category" className="w-full min-w-0 bg-transparent outline-none" />
+              <input id="health-service-search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, description, or category" className="w-full min-w-0 bg-transparent outline-none" />
             </div>
           </label> : <div className="flex h-10 min-w-0 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input">
             <Search className="h-4 w-4 text-brand-gray" />
@@ -776,11 +868,24 @@ export default function HealthServicesManager({ subtitle }) {
               aria-label="Search health services"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search service or category..."
+              placeholder="Search name, description, or category..."
               className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-brand-gray/70"
             />
           </div>}
 
+          <label htmlFor="health-service-scope" className="min-w-0 text-xs font-medium text-brand-gray">
+            Implementation Scope
+            <select
+              id="health-service-scope"
+              value={scopeFilter}
+              onChange={(e) => setScopeFilter(e.target.value)}
+              className={isSupervisor ? "supervisor-input mt-1 block w-full" : "mt-1 block h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm font-normal text-brand-ink outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 dark:border-border dark:bg-input dark:text-foreground"}
+            >
+              <option value="All">All Scopes</option>
+              <option value="Municipality-wide">Municipality-wide</option>
+              <option value="Barangay-level">Barangay-level</option>
+            </select>
+          </label>
           <label htmlFor="health-service-category" className="min-w-0 text-xs font-medium text-brand-gray">
             Category
             <select
@@ -811,7 +916,7 @@ export default function HealthServicesManager({ subtitle }) {
 
         <div className="mt-2 flex w-full items-center justify-between gap-3 border-t border-brand-border pt-2 dark:border-border">
           <p className="text-xs text-brand-gray" aria-live="polite" aria-atomic="true">
-            {loading ? "Loading the authorized catalog..." : error ? "Catalog unavailable" : `Showing ${filtered.length} of ${services.length} service${services.length === 1 ? "" : "s"}`}
+             {loading ? "Loading the authorized catalog..." : error ? "Catalog unavailable" : `Showing ${filtered.length} of ${services.length} authorized service${services.length === 1 ? "" : "s"}`}
           </p>
           {hasFiltersActive && (
             <button
@@ -851,9 +956,14 @@ export default function HealthServicesManager({ subtitle }) {
        ) : (
          <>
            <div className="grid sm:grid-cols-2 lg:grid-cols-2 gap-6 mb-6">
-             {filtered.map((s) => {
+             {pageServices.map((s) => {
                const status = deriveStatus(s);
                const personnelList = s.assignedPersonnel || [];
+               const creator = s.createdBy === user?.id
+                 ? user?.name || user?.email
+                 : personnel.find((person) => person.id === s.createdBy)?.name;
+               const createdDate = s.createdAt ? new Date(s.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+               const barangayLevel = Boolean(s.barangayId || s.barangay);
                return (
                  <div key={s.id} className="health-service-card flex flex-col h-full bg-white border border-[#E4DED2] rounded dark:bg-card dark:border-border">
                     {/* Header — Horizontal layout with image on left */}
@@ -862,14 +972,19 @@ export default function HealthServicesManager({ subtitle }) {
                       <div className="shrink-0">
                         {s.attachments?.pubmat ? (
                           <img
-                            src={`data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 72 100%22%3E%3Crect fill=%22%23E4DED2%22 width=%2272%22 height=%22100%22/%3E%3Ctext x=%2236%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 font-size=%2212%22 fill=%22%239CA3AF%22%3EPubmat%3C/text%3E%3C/svg%3E`}
+                            src={pubmatUrls[s.id] || PUBMAT_PLACEHOLDER}
                             alt={s.name}
                             className="w-[72px] h-[100px] object-cover rounded border border-[#D4CCBF]"
                             style={{ borderColor: '#D4CCBF' }}
+                            onError={(event) => {
+                              if (event.currentTarget.src !== PUBMAT_PLACEHOLDER) {
+                                setPubmatUrls((current) => ({ ...current, [s.id]: null }));
+                              }
+                            }}
                           />
                         ) : (
                           <img
-                            src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 72 100%22%3E%3Crect fill=%22%23E4DED2%22 width=%2272%22 height=%22100%22/%3E%3Ctext x=%2236%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 font-size=%2212%22 fill=%22%239CA3AF%22%3EHealth%3C/text%3E%3C/svg%3E"
+                            src={PUBMAT_PLACEHOLDER}
                             alt={s.name}
                             className="w-[72px] h-[100px] object-cover rounded border border-[#D4CCBF]"
                             style={{ borderColor: '#D4CCBF' }}
@@ -884,10 +999,19 @@ export default function HealthServicesManager({ subtitle }) {
                          <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400" style={{ letterSpacing: '0.8px' }}>
                            {CATEGORY_LABELS[s.category] || s.category}
                          </p>
+                         <span className="mt-1 inline-flex rounded-full bg-brand-blue/10 px-2 py-0.5 text-[11px] font-medium text-brand-blue dark:bg-brand-blue/20 dark:text-blue-300">
+                           {barangayLevel ? `Barangay-level${s.barangay ? ` · ${s.barangay}` : ""}` : "Municipality-wide"}
+                         </span>
                          {/* Service Title — Serif font */}
                          <h3 className="mt-1 text-2xl font-medium text-brand-ink dark:text-foreground" style={{ fontFamily: 'Georgia, serif', fontSize: '26px' }}>
                            {s.name}
                          </h3>
+                         {s.description && (
+                           <details className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                             <summary className="line-clamp-2 cursor-pointer list-none leading-5 hover:text-brand-blue dark:hover:text-blue-300">{s.description}</summary>
+                             <p className="mt-2 whitespace-pre-wrap border-l-2 border-brand-blue/30 pl-3 leading-5">{s.description}</p>
+                           </details>
+                         )}
                        </div>
                        
                        {/* Status Badge */}
@@ -954,6 +1078,14 @@ export default function HealthServicesManager({ subtitle }) {
                          <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Personnel</p>
                          <p className="text-sm font-medium text-brand-ink dark:text-foreground">{personnelList.length ? personnelList.map((person) => person.name).filter(Boolean).join(", ") : "—"}</p>
                        </div>
+                       <div>
+                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Date Created</p>
+                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{createdDate}</p>
+                       </div>
+                       {creator && <div>
+                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Created By</p>
+                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{creator}</p>
+                       </div>}
                      </div>
                    </div>
 
@@ -978,6 +1110,16 @@ export default function HealthServicesManager({ subtitle }) {
                );
              })}
            </div>
+           {pageCount > 1 && (
+             <div className="mb-6 flex flex-col gap-3 rounded-btn border border-brand-border bg-white px-4 py-3 text-sm dark:border-border dark:bg-card sm:flex-row sm:items-center sm:justify-between">
+               <p className="text-xs text-brand-gray" aria-live="polite">Showing {(page - 1) * SERVICE_PAGE_SIZE + 1}–{Math.min(page * SERVICE_PAGE_SIZE, filtered.length)} of {filtered.length} services</p>
+               <div className="flex items-center justify-end gap-2">
+                 <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1} className="rounded-btn border border-brand-border px-3 py-1.5 text-sm text-brand-ink transition-colors hover:border-brand-blue disabled:cursor-not-allowed disabled:opacity-50 dark:border-border dark:text-foreground">Previous</button>
+                 <span className="min-w-16 text-center text-xs text-brand-gray">Page {page} of {pageCount}</span>
+                 <button type="button" onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={page === pageCount} className="rounded-btn border border-brand-border px-3 py-1.5 text-sm text-brand-ink transition-colors hover:border-brand-blue disabled:cursor-not-allowed disabled:opacity-50 dark:border-border dark:text-foreground">Next</button>
+               </div>
+             </div>
+           )}
          </>
        )}
 
@@ -1045,6 +1187,7 @@ export default function HealthServicesManager({ subtitle }) {
                       facilities={facilityOptions}
                       value={{ facilityId: form.facilityId, facilityName: form.facilityName, municipalityWide: form.municipalityWide }}
                       onChange={(next) => setForm((f) => ({ ...f, ...next }))}
+                      allowMunicipalityWide={!isSupervisor}
                     />
                     <p className="mt-1.5 flex items-start gap-1.5 text-xs text-brand-gray">
                       <Building2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" />
@@ -1225,6 +1368,10 @@ export default function HealthServicesManager({ subtitle }) {
                              pubmatError: "",
                            }));
                          };
+                        reader.onerror = () => setForm((f) => ({
+                          ...f,
+                          pubmatError: "The selected image could not be previewed. Please choose the file again.",
+                        }));
                          reader.readAsDataURL(file);
                        }}
                        onRemove={() => {
@@ -1383,6 +1530,7 @@ export default function HealthServicesManager({ subtitle }) {
           attBusy={attBusy}
           onReload={() => loadRegistrations(regTarget.id)}
           onMark={markAttendance}
+          onSaveDelivery={saveServiceDelivery}
           onClose={() => setRegTarget(null)}
         />
       )}
@@ -1518,12 +1666,13 @@ const formatDateTime = (iso) => {
  * their registration status and timestamp, with attendance marking. Only active
  * (non-cancelled) registrations can be marked attended/missed.
  */
-function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark, onClose, supervisor = false }) {
+function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark, onSaveDelivery, onClose, supervisor = false }) {
   const { loading, error, registrations, counts } = state;
   const active = registrations.filter((r) => r.status !== "Cancelled");
   const cancelled = registrations.filter((r) => r.status === "Cancelled");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [deliveryTarget, setDeliveryTarget] = useState(null);
 
   // Filter registrations based on search and status
   const filtered = active.filter((reg) => {
@@ -1662,26 +1811,40 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
                       </div>
                       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${REG_STATUS_BADGE[label] || "bg-brand-gray/10 text-brand-gray"}`}>{label}</span>
                     </div>
+                    {reg.attendance?.status === "attended" && reg.attendance.serviceProvided && (
+                      <details className="mt-3 border-t border-brand-border pt-2.5 dark:border-border">
+                        <summary className="cursor-pointer text-xs font-medium text-brand-blue">View service record</summary>
+                        <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+                          <p><span className="font-semibold text-brand-ink">Provided:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.serviceProvided}</span></p>
+                          {reg.attendance.assessment && <p><span className="font-semibold text-brand-ink">Assessment:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.assessment}</span></p>}
+                          {reg.attendance.recommendations && <p><span className="font-semibold text-brand-ink">Recommendations:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.recommendations}</span></p>}
+                          {reg.attendance.immunization && <p><span className="font-semibold text-brand-ink">Immunization:</span> <span className="text-brand-gray">{reg.attendance.immunization.vaccine}{reg.attendance.immunization.dose ? ` · ${reg.attendance.immunization.dose}` : ""} · {reg.attendance.immunization.status}{reg.attendance.immunization.administeredDate ? ` · ${formatDate(reg.attendance.immunization.administeredDate)}` : ""}</span></p>}
+                          {reg.attendance.followUpRequired && <p><span className="font-semibold text-brand-ink">Follow-up:</span> <span className="text-brand-gray">{reg.attendance.followUpDate || "Required"}</span></p>}
+                          {reg.attendance.providedByName && <p><span className="font-semibold text-brand-ink">Recorded by:</span> <span className="text-brand-gray">{reg.attendance.providedByName}</span></p>}
+                          {reg.attendance.notes && <p><span className="font-semibold text-brand-ink">Notes:</span> <span className="whitespace-pre-line text-brand-gray">{reg.attendance.notes}</span></p>}
+                        </div>
+                      </details>
+                    )}
                     {canEdit && (
                       <div className="mt-3 flex items-center gap-2 border-t border-brand-border pt-2.5 dark:border-border">
                         <button
-                          onClick={() => onMark(reg, "attended")}
+                          onClick={() => setDeliveryTarget(reg)}
                           disabled={attBusy === reg.residentId}
-                          className={`inline-flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
-                            label === "Attended" ? "bg-brand-green text-white" : "border border-brand-green/40 text-brand-green hover:bg-brand-green/5"
-                          }`}
+                          className="inline-flex items-center gap-1.5 rounded-btn bg-brand-green px-3 py-1.5 text-xs font-medium text-white transition-colors hover:brightness-95 disabled:opacity-60"
                         >
-                          <UserCheck className="h-3.5 w-3.5" /> Attended
+                          <UserCheck className="h-3.5 w-3.5" /> {reg.attendance?.status === "attended" ? "Edit service record" : "Record service"}
                         </button>
-                        <button
-                          onClick={() => onMark(reg, "absent")}
-                          disabled={attBusy === reg.residentId}
-                          className={`inline-flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
-                            label === "Missed" ? "bg-brand-danger text-white" : "border border-brand-danger/40 text-brand-danger hover:bg-brand-danger/5"
-                          }`}
-                        >
-                          <UserX className="h-3.5 w-3.5" /> Missed
-                        </button>
+                        {reg.attendance?.status !== "attended" && (
+                          <button
+                            onClick={() => onMark(reg, "absent")}
+                            disabled={attBusy === reg.residentId}
+                            className={`inline-flex items-center gap-1.5 rounded-btn px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
+                              label === "Missed" ? "bg-brand-danger text-white" : "border border-brand-danger/40 text-brand-danger hover:bg-brand-danger/5"
+                            }`}
+                          >
+                            <UserX className="h-3.5 w-3.5" /> Missed
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1709,6 +1872,104 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
           </div>
         </div>
       </Card>
+      {deliveryTarget && (
+        <ServiceDeliveryModal
+          service={service}
+          registration={deliveryTarget}
+          busy={attBusy === deliveryTarget.residentId}
+          onClose={() => setDeliveryTarget(null)}
+          onSave={async (values) => {
+            const saved = await onSaveDelivery(deliveryTarget, values);
+            if (saved) setDeliveryTarget(null);
+          }}
+        />
+      )}
     </div>
   );
+}
+
+function ServiceDeliveryModal({ service, registration, busy, onClose, onSave }) {
+  const previous = registration.attendance || {};
+  const previousImmunization = previous.immunization || {};
+  const isImmunization = String(service.category || '').toLowerCase() === 'immunization';
+  const [form, setForm] = useState(() => ({
+    service_provided: previous.serviceProvided || "",
+    assessment: previous.assessment || "",
+    recommendations: previous.recommendations || "",
+    follow_up_required: Boolean(previous.followUpRequired),
+    follow_up_date: previous.followUpDate || "",
+    notes: previous.notes || "",
+    vaccine: previousImmunization.vaccine || "BCG",
+    dose: previousImmunization.dose || "",
+    administered_date: previousImmunization.administeredDate || registration.plannedDate || "",
+    next_dose: previousImmunization.nextDose || "",
+    immunization_status: previousImmunization.status || "Completed",
+  }));
+  const [error, setError] = useState("");
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.type === "checkbox" ? event.target.checked : event.target.value }));
+  const fieldClass = "w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-border dark:bg-input";
+  const submit = (event) => {
+    event.preventDefault();
+    if (isImmunization) {
+      if (!form.vaccine.trim()) { setError("Select the vaccine."); return; }
+      if (form.immunization_status === "Completed" && !form.administered_date) { setError("Enter the date administered."); return; }
+    } else {
+      if (!form.service_provided.trim()) { setError("Describe the service or care provided."); return; }
+      if (form.follow_up_required && !form.follow_up_date) { setError("Choose a follow-up date."); return; }
+    }
+    setError("");
+    onSave(isImmunization ? {
+      ...form,
+      service_provided: `Immunization: ${form.vaccine}${form.dose ? ` (${form.dose})` : ''}`,
+      follow_up_required: false,
+      follow_up_date: null,
+    } : { ...form, follow_up_date: form.follow_up_required ? form.follow_up_date : null });
+  };
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Record service delivery">
+      <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto">
+        <form onSubmit={submit} className="space-y-4 p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">Service delivery</p>
+              <h3 className="mt-1 text-lg font-semibold text-brand-ink">{registration.attendance?.serviceProvided ? "Update service record" : "Record delivered service"}</h3>
+              <p className="mt-1 text-sm text-brand-gray">{service.name} · {registration.residentName} · {registration.plannedDate ? formatDate(registration.plannedDate) : "Scheduled visit"}</p>
+            </div>
+            <button type="button" onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
+          </div>
+          <p className="rounded-btn bg-brand-bg p-3 text-xs text-brand-gray">{isImmunization ? "This uses the existing Immunization record workflow. The vaccine record will also appear in Immunization and M1; the provider is taken from your signed-in account." : "Saving records the completed service in the resident's Health Records. The logged-in staff account is recorded automatically."}</p>
+          {isImmunization ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <DeliveryField label="Vaccine" required><select value={form.vaccine} onChange={set("vaccine")} className={fieldClass}>{["BCG", "Hepatitis B", "Pentavalent (DPT-HepB-Hib)", "OPV", "IPV", "PCV", "MMR", "Measles", "Tetanus Toxoid", "COVID-19", "Influenza", "Other"].map((vaccine) => <option key={vaccine}>{vaccine}</option>)}</select></DeliveryField>
+              <DeliveryField label="Dose"><select value={form.dose} onChange={set("dose")} className={fieldClass}><option value="">Select dose…</option>{["1st dose", "2nd dose", "3rd dose", "Booster", "Annual", "Single dose", "Other"].map((dose) => <option key={dose}>{dose}</option>)}</select></DeliveryField>
+              <DeliveryField label="Immunization status" required><select value={form.immunization_status} onChange={set("immunization_status")} className={fieldClass}>{["Due", "Completed", "Missed"].map((status) => <option key={status}>{status}</option>)}</select></DeliveryField>
+              <DeliveryField label="Date administered" required={form.immunization_status === "Completed"}><input type="date" value={form.administered_date} onChange={set("administered_date")} className={fieldClass} /></DeliveryField>
+              <DeliveryField label="Next dose"><input type="date" value={form.next_dose} onChange={set("next_dose")} className={fieldClass} /></DeliveryField>
+              <p className="self-end text-xs text-brand-gray">Provider will be recorded from your signed-in account.</p>
+            </div>
+          ) : (
+            <>
+              <DeliveryField label="Service or care provided" required><textarea rows={3} maxLength={5000} value={form.service_provided} onChange={set("service_provided")} className={fieldClass} placeholder="Describe the program service, care, or procedure delivered." /></DeliveryField>
+              <DeliveryField label="Assessment / observations"><textarea rows={3} maxLength={5000} value={form.assessment} onChange={set("assessment")} className={fieldClass} placeholder="Record assessment findings or relevant observations." /></DeliveryField>
+              <DeliveryField label="Recommendations"><textarea rows={3} maxLength={5000} value={form.recommendations} onChange={set("recommendations")} className={fieldClass} placeholder="Add advice, instructions, or recommendations." /></DeliveryField>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-brand-ink"><input type="checkbox" checked={form.follow_up_required} onChange={set("follow_up_required")} className="h-4 w-4 accent-brand-blue" /> Follow-up required</label>
+                {form.follow_up_required && <DeliveryField label="Follow-up date" required><input type="date" value={form.follow_up_date} onChange={set("follow_up_date")} className={fieldClass} /></DeliveryField>}
+              </div>
+            </>
+          )}
+          <DeliveryField label="Additional notes"><textarea rows={2} maxLength={2000} value={form.notes} onChange={set("notes")} className={fieldClass} placeholder="Optional notes" /></DeliveryField>
+          {error && <p role="alert" className="text-sm text-brand-danger">{error}</p>}
+          <div className="flex justify-end gap-2 border-t border-brand-border pt-4 dark:border-border">
+            <button type="button" onClick={onClose} className="rounded-btn border border-brand-border px-4 py-2 text-sm text-brand-ink hover:bg-brand-bg">Cancel</button>
+            <button type="submit" disabled={busy} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:brightness-95 disabled:opacity-60">{busy ? "Saving…" : "Save service record"}</button>
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
+function DeliveryField({ label, required = false, children }) {
+  return <label className="block space-y-1.5 text-sm font-medium text-brand-ink">{label}{required && <span className="ml-1 text-brand-danger">*</span>}{children}</label>;
 }

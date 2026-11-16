@@ -27,12 +27,14 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { notifyResident } from './notifications.service.js';
+import * as storageService from './storage.service.js';
 
 const SERVICE_TABLE = 'health_services';
 const SCHEDULE_TABLE = 'appointment_schedules';
 const BLACKOUT_TABLE = 'appointment_blackouts';
 const PLAN_TABLE = 'visit_plans';
 const ATTENDANCE_TABLE = 'health_service_attendance';
+const ATTACHMENTS_TABLE = 'health_service_attachments';
 
 const PLAN_WINDOW_DAYS = 14; // the resident may plan a visit within the next two weeks
 
@@ -294,6 +296,8 @@ const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityN
     name: service.name,
     description: service.description || '',
     category: service.category || '',
+    pubmatUrl: service.pubmatUrl || null,
+    memo: service.memo || null,
     facilityType: facilityTypeOf(service, resident),
     facilityName,
     visitPolicy: service.visit_policy === 'by_notice' ? 'by_notice' : 'walk_in',
@@ -349,6 +353,40 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
   if (inScope.length === 0) return { facilities: [] };
 
   const ids = inScope.map((s) => s.id);
+  // Attachments are looked up only for services already restricted to this
+  // resident's municipality/barangay. Return short-lived signed URLs so the
+  // resident UI can view private Storage files without exposing object paths.
+  const { data: attachmentRows, error: attachmentsError } = await supabase
+    .from(ATTACHMENTS_TABLE)
+    .select('health_service_id, attachment_type, filename, mime_type, storage_path')
+    .in('health_service_id', ids);
+  const pubmatUrlByService = new Map();
+  const memoByService = new Map();
+  if (!attachmentsError) {
+    const signed = await Promise.all((attachmentRows || []).map(async (attachment) => {
+      try {
+        return { ...attachment, url: await storageService.getDocumentSignedUrl(attachment.storage_path) };
+      } catch {
+        return { ...attachment, url: null };
+      }
+    }));
+    for (const attachment of signed) {
+      if (attachment.attachment_type === 'pubmat') {
+        pubmatUrlByService.set(attachment.health_service_id, attachment.url);
+      } else if (attachment.attachment_type === 'memo' && attachment.url) {
+        memoByService.set(attachment.health_service_id, {
+          url: attachment.url,
+          filename: attachment.filename,
+          mimeType: attachment.mime_type,
+        });
+      }
+    }
+  }
+  for (const service of inScope) {
+    service.pubmatUrl = pubmatUrlByService.get(service.id) || null;
+    service.memo = memoByService.get(service.id) || null;
+  }
+
   const from = todayISO(now);
   // Load closures across the recurring two-week horizon AND every dated
   // service's own window, so a dated event beyond two weeks still has its

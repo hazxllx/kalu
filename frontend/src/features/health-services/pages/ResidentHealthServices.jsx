@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Clock, MapPin, Stethoscope, CheckCircle2, Loader2 } from "lucide-react";
+import { CalendarDays, Clock, MapPin, Stethoscope, CheckCircle2, Loader2, X, ZoomIn, FileText } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import ErrorState from "@/components/common/ErrorState";
 import { Skeleton } from "@/components/common/Skeleton";
+import TablePagination from "@/components/tables/TablePagination";
 import { useAuth } from "@/context/AuthContext";
 import { visitPlansApi } from "@/services/api";
 import VisitPlanModal from "../components/VisitPlanModal";
@@ -30,6 +31,10 @@ export default function ResidentHealthServices() {
   const [removeTarget, setRemoveTarget] = useState(null); // { serviceId, plan }
   const [removing, setRemoving] = useState(false);
   const [toast, setToast] = useState("");
+  const [previewPubmat, setPreviewPubmat] = useState(null);
+  const [previewMemo, setPreviewMemo] = useState(null);
+  const [availabilityFilter, setAvailabilityFilter] = useState("all");
+  const [scopeFilter, setScopeFilter] = useState("all");
 
   const showToast = useCallback((message) => {
     setToast(message);
@@ -55,6 +60,13 @@ export default function ResidentHealthServices() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!previewPubmat && !previewMemo) return undefined;
+    const closeOnEscape = (event) => { if (event.key === "Escape") setPreviewPubmat(null); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [previewPubmat, previewMemo]);
 
   // Replace the plan on one service across the grouped structure.
   const patchServicePlan = useCallback((serviceId, plan) => {
@@ -100,6 +112,15 @@ export default function ResidentHealthServices() {
   const bhc = useMemo(() => facilities.find((f) => f.type === "BHC") || null, [facilities]);
   const rhu = useMemo(() => facilities.find((f) => f.type === "RHU") || null, [facilities]);
   const barangayName = bhc?.name || user?.barangay || "";
+  const filterServices = useCallback((services = []) => services.filter((service) => {
+    if (availabilityFilter === "open" && !availabilityLine(service).open) return false;
+    if (availabilityFilter === "closed" && availabilityLine(service).open) return false;
+    return true;
+  }), [availabilityFilter]);
+  const bhcServices = useMemo(() => filterServices(bhc?.services || []), [filterServices, bhc]);
+  const rhuServices = useMemo(() => filterServices(rhu?.services || []), [filterServices, rhu]);
+  const hasScopeResults = (scopeFilter !== "rhu" && bhcServices.length > 0)
+    || (scopeFilter !== "bhc" && rhuServices.length > 0);
 
   return (
     <>
@@ -119,23 +140,59 @@ export default function ResidentHealthServices() {
 
       {state === "ready" && (
         <div className="space-y-5">
+          <section className="rounded-card border border-brand-border bg-white p-4 shadow-card md:p-5">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold text-brand-ink">Find health services</h2>
+              <p className="mt-0.5 text-xs text-brand-gray">Filter by availability and the facility offering the service.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5 text-xs font-medium text-brand-gray">
+                Availability
+                <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 rounded-btn border border-brand-border bg-white px-3 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                  <option value="all">All services</option>
+                  <option value="open">Open for registration</option>
+                  <option value="closed">Closed for registration</option>
+                </select>
+              </label>
+              <label className="grid gap-1.5 text-xs font-medium text-brand-gray">
+                Scope
+                <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 rounded-btn border border-brand-border bg-white px-3 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                  <option value="all">All facilities</option>
+                  <option value="bhc">Barangay Health Center</option>
+                  <option value="rhu">Rural Health Unit (RHU)</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          {!hasScopeResults && (
+            <div className="rounded-card border border-dashed border-brand-border bg-white px-5 py-8 text-center">
+              <p className="text-sm font-medium text-brand-ink">No services match these filters.</p>
+              <p className="mt-1 text-xs text-brand-gray">Try another availability or facility scope.</p>
+            </div>
+          )}
+
           {/* Barangay Health Center */}
-          <FacilitySection
+          {scopeFilter !== "rhu" && <FacilitySection
             title={`Barangay Health Center${barangayName ? ` — ${barangayName}` : ""}`}
             subtitle="Health services organized by your barangay for the community."
-            services={bhc?.services || []}
+            services={bhcServices}
             onRegister={(svc) => setRegisterModal(svc)}
             onCancel={(svc) => setRemoveTarget({ serviceId: svc.id, plan: svc.plan })}
-          />
+            onPreviewPubmat={setPreviewPubmat}
+            onPreviewMemo={setPreviewMemo}
+          />}
 
           {/* Rural Health Unit */}
-          <FacilitySection
+          {scopeFilter !== "bhc" && <FacilitySection
             title="Rural Health Unit (RHU)"
             subtitle="Health services provided by the Rural Health Unit for nearby barangays."
-            services={rhu?.services || []}
+            services={rhuServices}
             onRegister={(svc) => setRegisterModal(svc)}
             onCancel={(svc) => setRemoveTarget({ serviceId: svc.id, plan: svc.plan })}
-          />
+            onPreviewPubmat={setPreviewPubmat}
+            onPreviewMemo={setPreviewMemo}
+          />}
         </div>
       )}
 
@@ -146,6 +203,66 @@ export default function ResidentHealthServices() {
         onConfirmed={onConfirmed}
         showToast={showToast}
       />
+
+      {previewPubmat && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 sm:p-8"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${previewPubmat.name} publication material`}
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewPubmat(null); }}
+        >
+          <div className="relative flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-card bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-4 border-b border-brand-border px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold text-brand-ink">{previewPubmat.name}</h2>
+                <p className="text-xs text-brand-gray">Publication material</p>
+              </div>
+              <button type="button" onClick={() => setPreviewPubmat(null)} className="rounded-full p-2 text-brand-gray hover:bg-brand-bg hover:text-brand-ink" aria-label="Close image preview">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100 p-3 sm:p-6">
+              <img src={previewPubmat.url} alt={`${previewPubmat.name} publication material enlarged`} className="max-h-[75vh] max-w-full rounded object-contain" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewMemo && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${previewMemo.name} memorandum`}
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewMemo(null); }}
+        >
+          <div className="flex h-[86vh] max-h-[1100px] w-[94vw] max-w-[640px] flex-col overflow-hidden rounded-card bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-4 border-b border-brand-border px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold text-brand-ink">{previewMemo.name}</h2>
+                <p className="truncate text-xs text-brand-gray">{previewMemo.filename || "Memorandum"}</p>
+              </div>
+              <button type="button" onClick={() => setPreviewMemo(null)} className="rounded-full p-2 text-brand-gray hover:bg-brand-bg hover:text-brand-ink" aria-label="Close memorandum">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {previewMemo.mimeType === "application/pdf" ? (
+              <iframe
+                title={`${previewMemo.name} memorandum`}
+                src={`${previewMemo.url}#toolbar=0&navpanes=0&scrollbar=0`}
+                className="min-h-0 w-full flex-1 bg-slate-100"
+              />
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
+                <FileText className="h-10 w-10 text-brand-blue" aria-hidden="true" />
+                <p className="text-sm font-semibold text-brand-ink">This memorandum can’t be previewed in the portal.</p>
+                <p className="max-w-sm text-xs text-brand-gray">Please ask the health center to provide the memorandum as a PDF for in-page viewing.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {removeTarget && (
         <CancelRegistrationDialog
@@ -170,7 +287,13 @@ export default function ResidentHealthServices() {
 }
 
 /** A white container card for one facility (BHC or RHU) with its service list. */
-function FacilitySection({ title, subtitle, services, onRegister, onCancel }) {
+function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPreviewPubmat, onPreviewMemo }) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(8);
+  const pageCount = Math.max(1, Math.ceil(services.length / pageSize));
+  const visibleServices = services.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
+
   return (
     <section className="overflow-hidden rounded-card border border-brand-border bg-white shadow-card">
       <header className="border-b border-brand-border px-5 py-4 md:px-6">
@@ -182,15 +305,28 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel }) {
           <SectionEmpty />
         ) : (
           <div className="space-y-3">
-            {services.map((svc) => (
+            {visibleServices.map((svc) => (
               <ServiceCard
                 key={svc.id}
                 service={svc}
                 onRegister={() => onRegister(svc)}
                 onCancel={() => onCancel(svc)}
+                onPreviewPubmat={onPreviewPubmat}
+                onPreviewMemo={onPreviewMemo}
               />
             ))}
           </div>
+        )}
+        {services.length > 0 && (
+          <TablePagination
+            total={services.length}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+            itemLabel="services"
+            className="mt-4"
+          />
         )}
       </div>
     </section>
@@ -230,7 +366,9 @@ function StatusBadge({ status }) {
  * The action is a real Register button whose state reflects actual backend
  * availability and the resident's current registration.
  */
-function ServiceCard({ service, onRegister, onCancel }) {
+function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreviewMemo }) {
+  const [pubmatFailed, setPubmatFailed] = useState(false);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const schedule = formatWeekdays(service.weekdays);
   const window = formatWindow(service.windowStart, service.windowEnd);
   const serviceType = service.visitPolicy === "by_notice" ? "By notice" : "Walk-in";
@@ -246,11 +384,26 @@ function ServiceCard({ service, onRegister, onCancel }) {
 
   return (
     <div className="rounded-card border border-brand-border bg-white px-4 py-4 transition-colors hover:border-brand-blue/40 md:px-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-        {/* Icon */}
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-card bg-brand-blue/10 text-brand-blue">
-          <Stethoscope className="h-5 w-5" aria-hidden="true" />
-        </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-5">
+        {/* Publication material thumbnail, when the service has one. */}
+        {service.pubmatUrl && !pubmatFailed ? (
+          <button type="button" onClick={() => onPreviewPubmat?.({ url: service.pubmatUrl, name: service.name })} className="group relative flex aspect-[3/4] w-20 shrink-0 items-center justify-center overflow-hidden rounded-card border border-brand-border bg-slate-50 p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue" aria-label={`Enlarge ${service.name} publication material`} title="Click to enlarge publication material">
+            <img
+              src={service.pubmatUrl}
+              alt={`${service.name} publication material`}
+              loading="lazy"
+              className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.03]"
+              onError={() => setPubmatFailed(true)}
+            />
+            <span className="absolute bottom-1 right-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+              <ZoomIn className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+          </button>
+        ) : (
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-card bg-brand-blue/10 text-brand-blue sm:mt-1">
+            <Stethoscope className="h-5 w-5" aria-hidden="true" />
+          </div>
+        )}
 
         {/* Name + type + description */}
         <div className="min-w-0 lg:flex-1">
@@ -260,8 +413,30 @@ function ServiceCard({ service, onRegister, onCancel }) {
               {serviceType}
             </span>
           </div>
-          {service.description && (
-            <p className="mt-1 text-[13px] leading-relaxed text-brand-gray">{service.description}</p>
+          {(service.description || service.memo?.url) && (
+            <div className="mt-1 flex flex-col items-start gap-2">
+              {service.description && (
+                <>
+              <p className={`mt-1 text-[13px] leading-relaxed text-brand-gray ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
+              {service.description.length > 180 && (
+                <button type="button" aria-expanded={descriptionExpanded} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="inline-flex min-h-8 items-center text-xs font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
+                  {descriptionExpanded ? "View less" : "View more"}
+                </button>
+              )}
+                </>
+              )}
+              {service.memo?.url && (
+            <button
+              type="button"
+              onClick={() => onPreviewMemo?.({ ...service.memo, name: service.name })}
+              className="inline-flex max-w-full items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+              title={service.memo.filename || "View memorandum"}
+            >
+              <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
+            </button>
+              )}
+            </div>
           )}
         </div>
 

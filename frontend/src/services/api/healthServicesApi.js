@@ -78,9 +78,9 @@ export const healthServicesApi = {
   uploadAttachment: (serviceId, attachmentType, file) => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post(`/health-services/${serviceId}/attachments/${attachmentType}`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    // Let fetch set multipart/form-data with its generated boundary. Setting
+    // this header manually leaves the boundary out and Multer cannot parse it.
+    return api.post(`/health-services/${serviceId}/attachments/${attachmentType}`, formData);
   },
   // Get a signed URL for downloading an attachment.
   getAttachmentSignedUrl: (serviceId, attachmentType) => api.get(`/health-services/${serviceId}/attachments/${attachmentType}`),

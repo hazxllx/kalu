@@ -27,6 +27,7 @@ export default function DocumentUploadField({
 }) {
   const fileInputRef = useRef(null);
   const [dragActive, setDragActive] = useState(false);
+  const [validationError, setValidationError] = useState("");
 
   const acceptedTypes = type === "memo"
     ? ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -52,17 +53,32 @@ export default function DocumentUploadField({
       ? ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
       : ["image/jpeg", "image/png", "image/webp"];
 
-    if (!allowedTypes.includes(file.type)) {
-      // Show error but don't call onSelect
+    const extension = String(file.name || "").split(".").pop()?.toLowerCase();
+    const expectedType = type === "memo"
+      ? ({ pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })[extension]
+      : ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" })[extension];
+    const normalizedType = file.type === "image/jpg" ? "image/jpeg" : file.type;
+    if (!allowedTypes.includes(normalizedType) && !(expectedType && !normalizedType)) {
+      setValidationError(type === "memo" ? "Choose a PDF, DOC, or DOCX file." : "Choose a JPG, PNG, or WebP image.");
       return;
     }
 
     if (file.size > maxSize) {
-      // Show error but don't call onSelect
+      setValidationError(`File is too large. Maximum ${maxSizeMB} MB allowed.`);
+      return;
+    }
+    if (file.size === 0) {
+      setValidationError("The selected file is empty. Choose a different file.");
       return;
     }
 
-    onSelect(file);
+    setValidationError("");
+    const normalizedFile = normalizedType && normalizedType !== file.type
+      ? new File([file], file.name, { type: normalizedType, lastModified: file.lastModified })
+      : !normalizedType && expectedType
+        ? new File([file], file.name, { type: expectedType, lastModified: file.lastModified })
+        : file;
+    onSelect(normalizedFile);
   };
 
   const handleDrop = (e) => {
@@ -81,6 +97,8 @@ export default function DocumentUploadField({
     if (files && files.length > 0) {
       validateAndSelect(files[0]);
     }
+    // Allow choosing the same file again after a validation or upload failure.
+    if (e.currentTarget) e.currentTarget.value = "";
   };
 
   return (
@@ -164,15 +182,15 @@ export default function DocumentUploadField({
       )}
 
       {/* Error message */}
-      {error && (
+      {(validationError || error) && (
         <div className="flex items-start gap-2 rounded-btn border border-brand-danger/25 bg-brand-danger/5 px-3 py-2.5 text-xs text-brand-danger">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <span>{validationError || error}</span>
         </div>
       )}
 
       {/* Helper text */}
-      {!filename && !error && (
+      {!filename && !error && !validationError && (
         <p className="text-xs text-brand-gray">
           {type === "memo"
             ? "Drag and drop or click to select the official memorandum."

@@ -28,6 +28,7 @@ import { isUuid } from '../validators/common.js';
 import ApiError from '../utils/apiError.js';
 import { notifyResident } from './notifications.service.js';
 import * as storageService from './storage.service.js';
+import * as operationalService from './operational.service.js';
 
 const TABLE = 'health_services';
 const ASSIGN_TABLE = 'health_service_assignments';
@@ -113,7 +114,8 @@ const PERSONNEL_SELECT = 'id, full_name, email, role, status, municipality_id, b
 const FACILITY_EMBED = 'facility:facilities(name, type)';
 const BARANGAY_EMBED = 'barangay:barangays(name)';
 const ASSIGN_EMBED = `${ASSIGN_TABLE}(id, personnel_id, active, personnel:profiles!personnel_id(${PERSONNEL_SELECT}))`;
-const SELECT = `*, ${FACILITY_EMBED}, ${BARANGAY_EMBED}, ${ASSIGN_EMBED}`;
+const ATTACHMENTS_EMBED = `${ATTACHMENTS_TABLE}(id, attachment_type, filename, mime_type, file_size, storage_path, created_at)`;
+const SELECT = `*, ${FACILITY_EMBED}, ${BARANGAY_EMBED}, ${ASSIGN_EMBED}, ${ATTACHMENTS_EMBED}`;
 
 const personnelIsEligible = (profile, municipalityId) => {
   if (!profile || !isUuid(profile.id) || profile.status !== 'active' || !PERSONNEL_ROLES.has(profile.role)
@@ -187,7 +189,6 @@ const toService = (row) => {
     createdBy: row.created_by || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    // Attachments will be populated after migration is applied
     attachments: {
       memo: memoAttachment ? {
         id: memoAttachment.id,
@@ -376,6 +377,31 @@ const attendanceDate = (value) =>
   && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`))
   && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 
+const isImmunizationService = (service) => text(service?.category).toLowerCase() === 'immunization';
+
+const syncImmunizationForAttendance = async ({ user, attendanceId, residentId, payload, supabase }) => {
+  const vaccine = text(payload?.vaccine);
+  if (!vaccine) return null;
+  const { data: existing, error: lookupError } = await supabase.from('immunizations')
+    .select('id').eq('health_service_attendance_id', attendanceId).maybeSingle();
+  throwOnError(lookupError, 'Could not check the linked immunization record');
+  const record = {
+    residentId,
+    health_service_attendance_id: attendanceId,
+    vaccine,
+    dose: text(payload.dose),
+    administered_date: payload.administered_date || null,
+    next_dose: payload.next_dose || null,
+    provider: text(user.name) || text(user.email),
+    status: text(payload.immunization_status) || 'Completed',
+    notes: text(payload.notes),
+  };
+  if (existing?.id) {
+    return operationalService.update({ user, kind: 'immunizations', id: existing.id, payload: record, supabase });
+  }
+  return operationalService.create({ user, kind: 'immunizations', payload: record, supabase });
+};
+
 const applyAttendanceDateRange = (query, { from, to }) => {
   let ranged = query;
   if (from) ranged = ranged.gte('scheduled_date', from);
@@ -390,13 +416,22 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   const scheduledDate = text(payload.scheduled_date);
   const status = text(payload.status);
   const notes = text(payload.notes);
+  const serviceProvided = text(payload.service_provided);
+  const assessment = text(payload.assessment);
+  const recommendations = text(payload.recommendations);
+  const followUpRequired = payload.follow_up_required === true;
+  const followUpDate = text(payload.follow_up_date) || null;
   if (!serviceId) throw ApiError.unprocessable('A service is required.');
   if (!residentId) throw ApiError.unprocessable('A resident is required.');
   if (!attendanceDate(scheduledDate)) throw ApiError.unprocessable('Enter a valid scheduled date.');
   if (!ATTENDANCE_STATUSES.includes(status)) throw ApiError.unprocessable('Select a valid attendance status.');
   if (notes.length > 2000) throw ApiError.unprocessable('Notes must be 2000 characters or fewer.');
+  if (serviceProvided.length > 5000 || assessment.length > 5000 || recommendations.length > 5000) throw ApiError.unprocessable('Service details, assessment, and recommendations must be 5000 characters or fewer.');
+  if (status === 'attended' && !serviceProvided) throw ApiError.unprocessable('Describe the service provided before marking the resident attended.');
+  if (followUpDate && !attendanceDate(followUpDate)) throw ApiError.unprocessable('Enter a valid follow-up date.');
+  if (followUpRequired && !followUpDate) throw ApiError.unprocessable('Enter a follow-up date.');
 
-  await manageableService(user, serviceId, supabase);
+  const service = await manageableService(user, serviceId, supabase);
   const { data: resident, error: residentError } = await supabase
     .from('residents')
     .select('id, municipality_id, barangay_id, barangay')
@@ -406,6 +441,9 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   if (!resident) throw ApiError.unprocessable('The selected resident does not exist.');
 
   if (!residentVisibleTo(user, resident)) throw ApiError.notFound('Resident not found in your scope.');
+  if (status === 'attended' && isImmunizationService(service) && !payload.vaccine) {
+    throw ApiError.unprocessable('Select the vaccine and record its status before completing this immunization service.');
+  }
 
   const row = {
     service_id: serviceId,
@@ -415,9 +453,30 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
     notes,
     recorded_by: user.id,
     recorded_by_name: text(user.name),
+    service_provided: serviceProvided,
+    assessment,
+    recommendations,
+    follow_up_required: followUpRequired,
+    follow_up_date: followUpDate,
+    ...(status === 'attended' ? { attended_at: new Date().toISOString(), provided_by: user.id, provided_by_name: text(user.name) } : {}),
   };
-  const { data, error } = await supabase.from(ATTENDANCE_TABLE).insert(row).select('*').single();
-  throwOnError(error, 'Could not create health service attendance');
+  const { data: prior, error: priorError } = await supabase.from(ATTENDANCE_TABLE)
+    .select('id').eq('service_id', serviceId).eq('resident_id', residentId)
+    .eq('scheduled_date', scheduledDate).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  throwOnError(priorError, 'Could not check existing health service attendance');
+  let data;
+  if (prior?.id) {
+    const updated = await supabase.from(ATTENDANCE_TABLE).update(row).eq('id', prior.id).select('*').single();
+    throwOnError(updated.error, 'Could not update health service attendance');
+    data = updated.data;
+  } else {
+    const inserted = await supabase.from(ATTENDANCE_TABLE).insert(row).select('*').single();
+    throwOnError(inserted.error, 'Could not create health service attendance');
+    data = inserted.data;
+  }
+  if (status === 'attended' && isImmunizationService(service)) {
+    await syncImmunizationForAttendance({ user, attendanceId: data.id, residentId, payload, supabase });
+  }
   return data;
 };
 
@@ -530,7 +589,7 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
     .maybeSingle();
   throwOnError(currentError, 'Could not load health service attendance');
   if (!current) throw ApiError.notFound('Health service attendance not found.');
-  await manageableService(user, current.service_id, supabase);
+  const service = await manageableService(user, current.service_id, supabase);
   const { data: resident, error: residentError } = await supabase.from('residents')
     .select('id, municipality_id, barangay_id').eq('id', current.resident_id).maybeSingle();
   throwOnError(residentError, 'Could not verify resident');
@@ -541,7 +600,11 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
     const status = text(payload.status);
     if (!ATTENDANCE_STATUSES.includes(status)) throw ApiError.unprocessable('Select a valid attendance status.');
     patch.attendance_status = status;
-    if (status === 'attended' && payload.attended_at == null) patch.attended_at = new Date().toISOString();
+    if (status === 'attended' && payload.attended_at == null && current.attendance_status !== 'attended') {
+      patch.attended_at = new Date().toISOString();
+      patch.provided_by = user.id;
+      patch.provided_by_name = text(user.name);
+    }
   }
   if (payload.notes !== undefined) {
     if (typeof payload.notes !== 'string' || payload.notes.length > 2000) {
@@ -557,6 +620,35 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
       ? new Date().toISOString()
       : payload.attended_at;
   }
+  for (const [field, max, label] of [
+    ['service_provided', 5000, 'Service details'],
+    ['assessment', 5000, 'Assessment'],
+    ['recommendations', 5000, 'Recommendations'],
+  ]) {
+    if (payload[field] !== undefined) {
+      if (typeof payload[field] !== 'string' || payload[field].length > max) throw ApiError.unprocessable(`${label} must be a string of ${max} characters or fewer.`);
+      patch[field] = payload[field].trim();
+    }
+  }
+  if (payload.follow_up_required !== undefined) {
+    if (typeof payload.follow_up_required !== 'boolean') throw ApiError.unprocessable('Follow-up must be yes or no.');
+    patch.follow_up_required = payload.follow_up_required;
+  }
+  if (payload.follow_up_date !== undefined) {
+    const date = payload.follow_up_date === null || payload.follow_up_date === '' ? null : text(payload.follow_up_date);
+    if (date && !attendanceDate(date)) throw ApiError.unprocessable('Enter a valid follow-up date.');
+    patch.follow_up_date = date;
+  }
+  const willBeAttended = patch.attendance_status || current.attendance_status;
+  const resultingServiceProvided = patch.service_provided ?? current.service_provided ?? '';
+  const resultingFollowUp = patch.follow_up_required ?? current.follow_up_required ?? false;
+  const resultingFollowUpDate = patch.follow_up_date !== undefined ? patch.follow_up_date : current.follow_up_date;
+  if (willBeAttended === 'attended' && !text(resultingServiceProvided)) throw ApiError.unprocessable('Describe the service provided before marking the resident attended.');
+  if (willBeAttended === 'attended' && isImmunizationService(service) && !payload.vaccine) {
+    throw ApiError.unprocessable('Select the vaccine and record its status before completing this immunization service.');
+  }
+  if (resultingFollowUp && !resultingFollowUpDate) throw ApiError.unprocessable('Enter a follow-up date.');
+  if (patch.attendance_status === 'absent' && current.attendance_status === 'attended') throw ApiError.conflict('A delivered service record cannot be changed to missed.');
   if (Object.keys(patch).length === 0) throw ApiError.badRequest('Provide at least one attendance field to update.');
 
   const { data, error } = await supabase
@@ -566,6 +658,9 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
     .select('*')
     .single();
   throwOnError(error, 'Could not update health service attendance');
+  if (isImmunizationService(service) && payload.vaccine) {
+    await syncImmunizationForAttendance({ user, attendanceId: data.id, residentId: current.resident_id, payload, supabase });
+  }
   return data;
 };
 
@@ -611,18 +706,28 @@ export const listServiceRegistrations = async ({ user, serviceId, supabase = get
   const attendanceByResident = new Map();
   if (residentIds.length > 0) {
     const attendance = await readAllRows(supabase.from(ATTENDANCE_TABLE)
-      .select('id, resident_id, attendance_status, attended_at, scheduled_date')
+      .select('id, resident_id, attendance_status, attended_at, scheduled_date, service_provided, assessment, recommendations, follow_up_required, follow_up_date, notes, provided_by_name')
       .eq('service_id', serviceId).in('resident_id', residentIds)
       .order('scheduled_date', { ascending: false }).order('id'), 'Could not load attendance');
-    // Keep the most recent attendance record per resident (ordered desc above).
+    const attendanceIds = (attendance || []).map((row) => row.id);
+    const immunizationByAttendance = new Map();
+    if (attendanceIds.length) {
+      const linked = await readAllRows(supabase.from('immunizations')
+        .select('health_service_attendance_id, vaccine, dose, administered_date, next_dose, status')
+        .in('health_service_attendance_id', attendanceIds), 'Could not load linked immunization details');
+      for (const record of linked || []) immunizationByAttendance.set(record.health_service_attendance_id, record);
+    }
+    // Match attendance to the specific registered service date.
     for (const a of attendance || []) {
-      if (!attendanceByResident.has(a.resident_id)) attendanceByResident.set(a.resident_id, a);
+      a.immunization = immunizationByAttendance.get(a.id) || null;
+      const key = `${a.resident_id}|${a.scheduled_date}`;
+      if (!attendanceByResident.has(key)) attendanceByResident.set(key, a);
     }
   }
 
   const registrations = planRows.map((p) => {
     const resident = p.resident;
-    const att = attendanceByResident.get(p.resident_id) || null;
+    const att = attendanceByResident.get(`${p.resident_id}|${p.planned_date}`) || null;
     return {
       id: p.id,
       residentId: p.resident_id,
@@ -639,6 +744,23 @@ export const listServiceRegistrations = async ({ user, serviceId, supabase = get
             status: att.attendance_status,
             attendedAt: att.attended_at || null,
             scheduledDate: att.scheduled_date,
+            serviceProvided: att.service_provided || '',
+            assessment: att.assessment || '',
+            recommendations: att.recommendations || '',
+            followUpRequired: Boolean(att.follow_up_required),
+            followUpDate: att.follow_up_date || '',
+            notes: att.notes || '',
+            providedByName: att.provided_by_name || '',
+            immunization: att.immunization ? (() => {
+              const record = att.immunization;
+              return {
+                vaccine: record.vaccine || '',
+                dose: record.dose || '',
+                administeredDate: record.administered_date || '',
+                nextDose: record.next_dose || '',
+                status: record.status || 'Due',
+              };
+            })() : null,
           }
         : null,
     };
@@ -757,6 +879,10 @@ const resolveScope = async (user, payload, supabase) => {
   const facilityId = text(payload.facilityId || payload.facility_id) || null;
   const facilityName = text(payload.facilityName || payload.facility_name) || null;
 
+  if (isSupervisor && (municipalityWide || (!facilityId && !facilityName))) {
+    throw ApiError.forbidden('Health Supervisors can create services only for a facility in their assigned barangay. RHU and municipality-wide services are managed by PHN.');
+  }
+
   // Explicit municipality-wide, or nothing chosen: no facility, no barangay.
   if (municipalityWide || (!facilityId && !facilityName)) {
     return { municipalityId, facilityId: null, customLocation: null, barangayId: null };
@@ -777,6 +903,9 @@ const resolveScope = async (user, payload, supabase) => {
       throw ApiError.unprocessable('The selected facility is not in your municipality.');
     }
     facility = data;
+    if (isSupervisor && facility.type !== 'barangay_health_station') {
+      throw ApiError.forbidden('Health Supervisors can create services only for a Barangay Health Station in their assigned barangay.');
+    }
   } else if (facilityName) {
     // User entered a custom location name (not from registered facilities)
     customLocation = facilityName;
@@ -786,14 +915,17 @@ const resolveScope = async (user, payload, supabase) => {
   let barangayId = facility && facility.type === 'barangay_health_station' ? (facility.barangay_id || null) : null;
 
   if (isSupervisor && facility && facility.type === 'barangay_health_station') {
-    // A supervisor's BHS must be in their assigned barangay; a BHS with no
-    // barangay yet adopts theirs. (An RHU chosen by a supervisor stays
-    // barangay-less — an RHU-wide service, per the coverage rules.)
+    // A BHS with no barangay assignment adopts the authenticated supervisor's
+    // barangay; a facility assigned elsewhere is rejected.
     if (facility.barangay_id && facility.barangay_id !== supervisorBarangayId) {
       throw ApiError.unprocessable('That barangay health center is not in your assigned barangay.');
     }
     barangayId = supervisorBarangayId;
   }
+
+  // A new facility label typed by a Health Supervisor is a barangay facility
+  // label, so its service remains scoped to the supervisor's own barangay.
+  if (isSupervisor && customLocation) barangayId = supervisorBarangayId;
 
   return { municipalityId, facilityId: facility ? facility.id : null, customLocation, barangayId };
 };
@@ -1176,22 +1308,15 @@ export const uploadAttachment = async ({ user, serviceId, attachmentType, file, 
   // Verify service exists and user can manage it
   const service = await manageableService(user, serviceId, supabase);
 
-  // Delete existing attachment if present
-  const { data: existing } = await supabase
+  // Keep the currently referenced object until the replacement and its
+  // metadata have both been saved successfully.
+  const { data: existing, error: existingErr } = await supabase
     .from(ATTACHMENTS_TABLE)
     .select('storage_path')
     .eq('health_service_id', serviceId)
     .eq('attachment_type', attachmentType)
-    .single();
-
-  if (existing?.storage_path) {
-    try {
-      await storageService.deleteHealthServiceAttachment(existing.storage_path);
-    } catch (err) {
-      console.error('Failed to delete old attachment:', err);
-      // Continue anyway — the old file is orphaned but the upload proceeds
-    }
-  }
+    .maybeSingle();
+  throwOnError(existingErr, 'Could not retrieve the current attachment');
 
   // Upload to storage
   let uploadResult;
@@ -1202,7 +1327,12 @@ export const uploadAttachment = async ({ user, serviceId, attachmentType, file, 
       attachmentType,
     });
   } catch (err) {
-    throw ApiError.internal(`Upload failed: ${err.message}`);
+    console.error('[health-services] Storage upload failed', {
+      serviceId,
+      attachmentType,
+      message: err?.message || 'Unknown storage error',
+    });
+    throw new ApiError(502, `Upload failed: ${err?.message || 'The storage service could not accept the file.'}`);
   }
 
   // Upsert attachment record in DB
@@ -1223,7 +1353,24 @@ export const uploadAttachment = async ({ user, serviceId, attachmentType, file, 
     .select()
     .single();
 
-  throwOnError(error, 'Could not save attachment metadata');
+  if (error) {
+    try {
+      await storageService.deleteHealthServiceAttachment(uploadResult.storagePath);
+    } catch (cleanupErr) {
+      console.error('Failed to clean up the unreferenced replacement attachment:', cleanupErr);
+    }
+    throwOnError(error, 'Could not save attachment metadata');
+  }
+
+  if (existing?.storage_path && existing.storage_path !== uploadResult.storagePath) {
+    try {
+      await storageService.deleteHealthServiceAttachment(existing.storage_path);
+    } catch (cleanupErr) {
+      // The new attachment is already active. A failed cleanup only leaves an
+      // unreferenced old object and should not make the user retry the upload.
+      console.error('Failed to delete the replaced health service attachment:', cleanupErr);
+    }
+  }
 
   return attachment;
 };

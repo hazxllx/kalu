@@ -404,10 +404,57 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
     return {
       resident: null,
       consultations: [],
+      healthServiceRecords: [],
+      vaccinations: [],
     };
   }
 
   const supabase = getServiceClient();
+
+  // Delivered health services use the existing attendance row as the encounter
+  // record. Only completed deliveries are exposed in the resident's own chart.
+  const { data: deliveryRows, error: deliveryError } = await supabase
+    .from('health_service_attendance')
+    .select('id, scheduled_date, attended_at, service_provided, assessment, recommendations, follow_up_required, follow_up_date, notes, provided_by_name, service:health_services(name, category)')
+    .eq('resident_id', resident.id)
+    .eq('attendance_status', 'attended')
+    .not('service_provided', 'is', null)
+    .order('scheduled_date', { ascending: false });
+  // Keep the existing Health Record available if the deployment is awaiting
+  // the additive delivery-fields migration.
+  const healthServiceRecords = deliveryError
+    ? []
+    : (deliveryRows || []).filter((row) => row.service_provided).map((row) => ({
+        id: row.id,
+        date: row.scheduled_date,
+        attendedAt: row.attended_at || null,
+        serviceName: row.service?.name || 'Health Service',
+        serviceCategory: row.service?.category || '',
+        serviceProvided: row.service_provided,
+        assessment: row.assessment || '',
+        recommendations: row.recommendations || '',
+        followUpRequired: Boolean(row.follow_up_required),
+        followUpDate: row.follow_up_date || '',
+        notes: row.notes || '',
+        providedByName: row.provided_by_name || '',
+      }));
+
+  const { data: immunizationRows, error: immunizationError } = await supabase
+    .from('immunizations')
+    .select('id, vaccine, dose, administered_date, next_dose, provider, status, notes')
+    .eq('resident_id', resident.id)
+    .order('administered_date', { ascending: false })
+    .order('created_at', { ascending: false });
+  const vaccinations = immunizationError ? [] : (immunizationRows || []).map((row) => ({
+    id: row.id,
+    name: row.vaccine || 'Immunization',
+    dose: row.dose || '',
+    date: row.administered_date || '',
+    nextDose: row.next_dose || '',
+    provider: row.provider || '',
+    status: row.status || 'Due',
+    notes: row.notes || '',
+  }));
 
   const result = await repository.listVisits({
     residentId: resident.id,
@@ -497,6 +544,8 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
     riskLevel,
     lastConsultationDate,
     consultations: filteredConsultations,
+    healthServiceRecords,
+    vaccinations,
     total: filteredConsultations.length,
   };
 };

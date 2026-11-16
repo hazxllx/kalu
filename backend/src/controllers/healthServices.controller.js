@@ -1,5 +1,6 @@
 import * as service from '../services/healthServices.service.js';
 import { sendCreated, sendData } from '../utils/apiResponse.js';
+import ApiError from '../utils/ApiError.js';
 
 /**
  * Health service endpoints.
@@ -69,7 +70,7 @@ export const registrations = async (req, res) => {
 };
 
 export const uploadAttachment = async (req, res) => {
-  if (!req.file) throw new Error('No file provided');
+  if (!req.file) throw ApiError.unprocessable('No file was received. Please choose the publication image again.');
   const record = await service.uploadAttachment({
     user: req.user,
     serviceId: req.params.id,

@@ -1,5 +1,6 @@
 import { getServiceClient } from '../config/supabase.js';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const BUCKET = 'documents';
 
@@ -116,11 +117,14 @@ export const deleteDocument = async (storagePath) => {
 export const uploadHealthServiceAttachment = async ({ file, serviceId, attachmentType }) => {
   const supabase = getServiceClient();
   const ext = path.extname(String(file.name || '')).toLowerCase();
-  const fileName = `${attachmentType}${ext}`;
+  // Use a versioned object key so a failed replacement cannot overwrite the
+  // currently referenced pubmat before its metadata update succeeds.
+  const fileName = `${attachmentType}-${randomUUID()}${ext}`;
   const storagePath = `health-service-attachments/${serviceId}/${fileName}`;
 
-  // Convert buffer to Blob if needed
-  const fileData = file.buffer instanceof Buffer ? new Blob([file.buffer], { type: file.type }) : file;
+  // Pass Multer's Node Buffer directly to Supabase Storage. This avoids
+  // converting the request buffer into a Blob and preserves the original bytes.
+  const fileData = Buffer.isBuffer(file.buffer) ? file.buffer : file;
 
   const { error } = await supabase.storage.from(BUCKET).upload(storagePath, fileData, {
     cacheControl: '3600',

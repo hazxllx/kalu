@@ -30,6 +30,7 @@ export default function FacilityField({
   onChange,
   placeholder = "Search or type a facility name...",
   error = "",
+  allowMunicipalityWide = true,
 }) {
   const { facilityId = "", facilityName = "", municipalityWide = false } = value || {};
   const [query, setQuery] = useState("");
@@ -70,11 +71,11 @@ export default function FacilityField({
 
   // Ordered row model: [municipality-wide, ...matching facilities, create?]
   const rows = useMemo(() => {
-    const list = [{ kind: "muni", key: "muni" }];
+    const list = allowMunicipalityWide ? [{ kind: "muni", key: "muni" }] : [];
     for (const f of results) list.push({ kind: "facility", key: `f-${f.id}`, facility: f });
     if (canCreate) list.push({ kind: "create", key: "create", name: trimmedQuery });
     return list;
-  }, [results, canCreate, trimmedQuery]);
+  }, [results, canCreate, trimmedQuery, allowMunicipalityWide]);
 
   useEffect(() => setHighlighted(0), [query, facilities.length, open]);
 

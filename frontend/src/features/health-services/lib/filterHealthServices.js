@@ -8,10 +8,12 @@ export function filterHealthServices(
 
   return services.filter((service) => {
     const name = String(service?.name || "").toLowerCase();
+    const description = String(service?.description || "").toLowerCase();
     const serviceCategory = service?.category || "Other";
     if (
       query &&
       !name.includes(query) &&
+      !description.includes(query) &&
       !serviceCategory.toLowerCase().includes(query) &&
       !(categoryLabels[serviceCategory] || "").toLowerCase().includes(query)
     ) return false;

@@ -29,6 +29,19 @@ const isLocalDateTime = (value) => {
 // Comparable, lexicographically-ordered "YYYY-MM-DDTHH:MM" key.
 const atKey = (date, time) => `${date}T${time}`;
 
+const currentManilaDateTimeKey = (now = new Date()) => {
+  const values = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now).map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+};
+
 const isDateTime = (value) => value === null || (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Date.parse(value)));
 
 export const createServiceValidator = (input = {}) => {
@@ -85,9 +98,13 @@ export const createServiceValidator = (input = {}) => {
     }
   }
   if (!errors.registrationDeadline && registrationDeadline && !errors.startDate && !errors.startTime) {
-    if (registrationDeadline > atKey(startDate, startTime)) {
+    if (registrationDeadline <= currentManilaDateTimeKey()) {
+      errors.registrationDeadline = 'The registration deadline must be a future date and time.';
+    } else if (registrationDeadline > atKey(startDate, startTime)) {
       errors.registrationDeadline = 'The registration deadline cannot be after the service start.';
     }
+  } else if (!errors.registrationDeadline && registrationDeadline && registrationDeadline <= currentManilaDateTimeKey()) {
+    errors.registrationDeadline = 'The registration deadline must be a future date and time.';
   }
 
   if (Object.keys(errors).length) return invalid(errors);
@@ -172,14 +189,37 @@ export const createAttendanceValidator = (input = {}) => {
   const scheduledDate = text(input?.scheduled_date);
   const status = text(input?.status);
   const notes = text(input?.notes);
+  const serviceProvided = text(input?.service_provided);
+  const assessment = text(input?.assessment);
+  const recommendations = text(input?.recommendations);
+  const followUpRequired = input?.follow_up_required === true;
+  const followUpDate = text(input?.follow_up_date);
+  const vaccine = text(input?.vaccine);
+  const dose = text(input?.dose);
+  const administeredDate = input?.administered_date == null || input.administered_date === '' ? null : text(input.administered_date);
+  const nextDose = input?.next_dose == null || input.next_dose === '' ? null : text(input.next_dose);
+  const immunizationStatus = text(input?.immunization_status);
 
   if (!serviceId || !isUuid(serviceId)) errors.service_id = 'A valid service is required.';
   if (!residentId) errors.resident_id = 'A resident is required.';
   if (!isDateOnly(scheduledDate)) errors.scheduled_date = 'Enter a valid scheduled date.';
   if (!ATTENDANCE_STATUSES.includes(status)) errors.status = 'Select a valid attendance status.';
   if (notes.length > 2000) errors.notes = 'Notes must be 2000 characters or fewer.';
+  if (serviceProvided.length > 5000) errors.service_provided = 'Service details must be 5000 characters or fewer.';
+  if (assessment.length > 5000) errors.assessment = 'Assessment must be 5000 characters or fewer.';
+  if (recommendations.length > 5000) errors.recommendations = 'Recommendations must be 5000 characters or fewer.';
+  if (input?.follow_up_required !== undefined && typeof input.follow_up_required !== 'boolean') errors.follow_up_required = 'Follow-up must be yes or no.';
+  if (followUpDate && !isDateOnly(followUpDate)) errors.follow_up_date = 'Enter a valid follow-up date.';
+  if (status === 'attended' && !serviceProvided) errors.service_provided = 'Describe the service provided.';
+  if (followUpRequired && !followUpDate) errors.follow_up_date = 'Enter the follow-up date.';
+  if (vaccine.length > 200) errors.vaccine = 'Vaccine name must be 200 characters or fewer.';
+  if (dose.length > 100) errors.dose = 'Dose must be 100 characters or fewer.';
+  if (administeredDate && !isDateOnly(administeredDate)) errors.administered_date = 'Enter a valid administration date.';
+  if (nextDose && !isDateOnly(nextDose)) errors.next_dose = 'Enter a valid next-dose date.';
+  if (immunizationStatus && !['Due', 'Completed', 'Missed'].includes(immunizationStatus)) errors.immunization_status = 'Select a valid immunization status.';
+  if (vaccine && immunizationStatus === 'Completed' && !administeredDate) errors.administered_date = 'Date administered is required for a completed immunization.';
   if (Object.keys(errors).length) return invalid(errors);
-  return valid({ service_id: serviceId, resident_id: residentId, scheduled_date: scheduledDate, status, notes });
+  return valid({ service_id: serviceId, resident_id: residentId, scheduled_date: scheduledDate, status, notes, service_provided: serviceProvided, assessment, recommendations, follow_up_required: followUpRequired, follow_up_date: followUpDate || null, ...(vaccine ? { vaccine, dose, administered_date: administeredDate, next_dose: nextDose, immunization_status: immunizationStatus || 'Completed' } : {}) });
 };
 
 export const attendanceListQueryValidator = (query = {}) => {
@@ -216,6 +256,41 @@ export const updateAttendanceValidator = (input = {}) => {
   if (input?.attended_at !== undefined) {
     if (!isDateTime(input.attended_at)) errors.attended_at = 'Enter a valid attendance timestamp.';
     else value.attended_at = input.attended_at;
+  }
+  for (const [field, max, label] of [
+    ['service_provided', 5000, 'Service details'],
+    ['assessment', 5000, 'Assessment'],
+    ['recommendations', 5000, 'Recommendations'],
+  ]) {
+    if (input?.[field] !== undefined) {
+      if (typeof input[field] !== 'string' || input[field].length > max) errors[field] = `${label} must be a string of ${max} characters or fewer.`;
+      else value[field] = input[field].trim();
+    }
+  }
+  if (input?.follow_up_required !== undefined) {
+    if (typeof input.follow_up_required !== 'boolean') errors.follow_up_required = 'Follow-up must be yes or no.';
+    else value.follow_up_required = input.follow_up_required;
+  }
+  if (input?.follow_up_date !== undefined) {
+    const date = input.follow_up_date === null || input.follow_up_date === '' ? null : text(input.follow_up_date);
+    if (date && !isDateOnly(date)) errors.follow_up_date = 'Enter a valid follow-up date.';
+    else value.follow_up_date = date;
+  }
+  if (value.follow_up_required === true && !(value.follow_up_date || input.follow_up_date)) errors.follow_up_date = 'Enter the follow-up date.';
+  if (value.status === 'attended' && !(value.service_provided || text(input.service_provided))) errors.service_provided = 'Describe the service provided.';
+  if (input?.vaccine !== undefined) {
+    const vaccine = text(input.vaccine);
+    const dose = text(input.dose);
+    const administeredDate = input.administered_date == null || input.administered_date === '' ? null : text(input.administered_date);
+    const nextDose = input.next_dose == null || input.next_dose === '' ? null : text(input.next_dose);
+    const immunizationStatus = text(input.immunization_status || 'Completed');
+    if (!vaccine || vaccine.length > 200) errors.vaccine = 'Enter a vaccine name of 200 characters or fewer.';
+    if (dose.length > 100) errors.dose = 'Dose must be 100 characters or fewer.';
+    if (administeredDate && !isDateOnly(administeredDate)) errors.administered_date = 'Enter a valid administration date.';
+    if (nextDose && !isDateOnly(nextDose)) errors.next_dose = 'Enter a valid next-dose date.';
+    if (!['Due', 'Completed', 'Missed'].includes(immunizationStatus)) errors.immunization_status = 'Select a valid immunization status.';
+    if (immunizationStatus === 'Completed' && !administeredDate) errors.administered_date = 'Date administered is required for a completed immunization.';
+    Object.assign(value, { vaccine, dose, administered_date: administeredDate, next_dose: nextDose, immunization_status: immunizationStatus });
   }
   if (Object.keys(value).length === 0) errors._root = 'Provide at least one attendance field to update.';
   if (Object.keys(errors).length) return invalid(errors);

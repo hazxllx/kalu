@@ -34,15 +34,22 @@ import { downloadHealthRecordPdf } from "@/features/health-records/lib/healthRec
 import { shouldShowPregnancyStatus } from "@/features/health-records/lib/pregnancyVisibility";
 import { formatLongDate } from "@/lib/dateUtils";
 
-// These sections are sourced from separate modules (immunization, laboratory)
-// that are not part of the consultation record. They intentionally render an
-// empty state here until those data sources are wired to the resident view; the
-// consultation history + vitals below come from the live API.
-const vaccinations = [];
+// Laboratory and medical-history sections have no resident-facing data source
+// yet. Immunizations and consultations are loaded from their canonical records.
 const labs = [];
 const MEDICAL_HISTORY = {};
 
 const dash = (value) => (value === null || value === undefined || value === "" ? "—" : value);
+
+function ServiceRecordDetail({ label, value }) {
+  if (value === null || value === undefined || value === "") return null;
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</p>
+      <p className="mt-1 whitespace-pre-line break-words text-brand-ink">{value}</p>
+    </div>
+  );
+}
 
 const formatDate = (iso) => {
   return formatLongDate(iso) || "—";
@@ -117,6 +124,8 @@ const dateRangeError = (from, to) => {
 export default function HealthRecord() {
   const [resident, setResident] = useState(null);
   const [consultations, setConsultations] = useState([]);
+  const [vaccinations, setVaccinations] = useState([]);
+  const [healthServiceRecords, setHealthServiceRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
@@ -168,6 +177,8 @@ export default function HealthRecord() {
         setResident(data?.resident || null);
         const rows = Array.isArray(data?.consultations) ? data.consultations : [];
         setConsultations(rows);
+        setVaccinations(Array.isArray(data?.vaccinations) ? data.vaccinations : []);
+        setHealthServiceRecords(Array.isArray(data?.healthServiceRecords) ? data.healthServiceRecords : []);
         setHistoricalServiceOptions((current) => {
           const known = new Map(current.map((service) => [service.id, service]));
           for (const row of rows) {
@@ -186,6 +197,8 @@ export default function HealthRecord() {
       .catch((err) => {
         setError(err?.message || "Could not load your health record. Please try again.");
         setConsultations([]);
+        setVaccinations([]);
+        setHealthServiceRecords([]);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -304,8 +317,8 @@ export default function HealthRecord() {
       await downloadHealthRecordPdf({
         resident: resident || {},
         consultations,
-        // These sections have no resident-facing data source yet; the PDF
-        // renders them as empty / "Not available" rather than inventing values.
+        // Laboratory and medical-history data have no resident-facing source
+        // yet; the PDF renders them as empty / "Not available".
         vaccinations,
         labs,
         medicalHistory: MEDICAL_HISTORY,
@@ -324,10 +337,71 @@ export default function HealthRecord() {
     (consultationPage - 1) * consultationPageSize,
     consultationPage * consultationPageSize,
   );
+  const [serviceRecordPage, setServiceRecordPage] = useState(1);
+  const [serviceRecordPageSize, setServiceRecordPageSize] = useState(8);
+  const serviceRecordPageCount = Math.max(1, Math.ceil(healthServiceRecords.length / serviceRecordPageSize));
+  const visibleServiceRecords = healthServiceRecords.slice(
+    (serviceRecordPage - 1) * serviceRecordPageSize,
+    serviceRecordPage * serviceRecordPageSize,
+  );
 
   useEffect(() => {
     setConsultationPage((page) => Math.min(page, consultationPageCount));
   }, [consultationPageCount]);
+
+  useEffect(() => {
+    setServiceRecordPage((page) => Math.min(page, serviceRecordPageCount));
+  }, [serviceRecordPageCount]);
+
+  const renderHealthServiceHistory = () => (
+    <section aria-labelledby="health-service-history-title">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="health-service-history-title" className="text-lg font-semibold text-brand-ink">Health Service History</h2>
+          <p className="mt-1 text-sm text-brand-gray">Services delivered to you through health programs and scheduled services.</p>
+        </div>
+        <p className="text-sm text-brand-gray">{healthServiceRecords.length} completed service{healthServiceRecords.length === 1 ? "" : "s"}</p>
+      </div>
+      {healthServiceRecords.length === 0 ? (
+        <Card className="p-8 text-center text-sm text-brand-gray">No delivered health services have been recorded yet.</Card>
+      ) : (
+        <>
+          <div className="space-y-3">
+            {visibleServiceRecords.map((record) => (
+              <Card key={record.id} className="overflow-hidden p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-brand-border pb-3 dark:border-border">
+                  <div>
+                    <h3 className="font-semibold text-brand-ink">{record.serviceName}</h3>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-brand-gray">
+                      {record.serviceCategory && <span className="rounded-full bg-brand-bg px-2.5 py-1">{record.serviceCategory}</span>}
+                      <span>{formatDate(record.date)}</span>
+                      {record.providedByName && <span>Provided by {record.providedByName}</span>}
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-800">Completed</span>
+                </div>
+                <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                  <ServiceRecordDetail label="Service provided" value={record.serviceProvided} />
+                  <ServiceRecordDetail label="Assessment" value={record.assessment} />
+                  <ServiceRecordDetail label="Recommendations" value={record.recommendations} />
+                  <ServiceRecordDetail label="Follow-up" value={record.followUpRequired ? (record.followUpDate ? formatDate(record.followUpDate) : "Required") : "Not required"} />
+                  <ServiceRecordDetail label="Notes" value={record.notes} />
+                </div>
+              </Card>
+            ))}
+          </div>
+          <TablePagination
+            total={healthServiceRecords.length}
+            page={serviceRecordPage}
+            pageSize={serviceRecordPageSize}
+            onPageChange={setServiceRecordPage}
+            onPageSizeChange={(size) => { setServiceRecordPageSize(size); setServiceRecordPage(1); }}
+            className="mt-4"
+          />
+        </>
+      )}
+    </section>
+  );
 
   const renderConsultationHistory = () => (
     <section aria-labelledby="consultation-history-title">
@@ -627,6 +701,7 @@ export default function HealthRecord() {
             {[
               { key: "overview", label: "Overview" },
               { key: "consultations", label: "Consultation History" },
+              { key: "service-history", label: "Health Service History" },
             ].map((tab) => {
               const active = activeTab === tab.key;
               return (
@@ -648,7 +723,7 @@ export default function HealthRecord() {
             })}
           </div>
 
-          {activeTab === "overview" ? (
+          {activeTab === "consultations" ? renderConsultationHistory() : activeTab === "service-history" ? renderHealthServiceHistory() : (
             <>
               <div className="mb-2 flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-brand-gray uppercase tracking-wide">
@@ -690,8 +765,8 @@ export default function HealthRecord() {
                       <p className="text-sm text-brand-gray">No vaccinations recorded yet.</p>
                     ) : (
                       vaccinations.map((v) => (
-                        <div key={v.name} className="flex items-center justify-between text-sm border-b border-brand-border pb-3 last:border-0 last:pb-0">
-                          <div><p className="text-brand-ink font-medium">{v.name}</p><p className="text-brand-gray text-xs">{v.date}</p></div>
+                        <div key={v.id || `${v.name}-${v.date}`} className="flex items-center justify-between gap-3 border-b border-brand-border pb-3 text-sm last:border-0 last:pb-0">
+                          <div className="min-w-0"><p className="truncate font-medium text-brand-ink">{v.name}{v.dose ? ` · ${v.dose}` : ""}</p><p className="text-xs text-brand-gray">{v.date ? formatDate(v.date) : "Date not recorded"}{v.nextDose ? ` · Next dose ${formatDate(v.nextDose)}` : ""}</p></div>
                           <span className="text-xs text-brand-green bg-brand-green/10 px-2 py-1 rounded-full">{v.status}</span>
                         </div>
                       ))
@@ -716,8 +791,6 @@ export default function HealthRecord() {
                 </Card>
               </div>
             </>
-          ) : (
-            renderConsultationHistory()
           )}
         </>
       )}
