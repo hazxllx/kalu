@@ -49,7 +49,6 @@ export default function DataTable({
           <tr className="bg-slate-50 dark:bg-card-nested text-left">
             {columns.map((c) => (
               <th key={c.key} className={`${compact ? "px-3 py-2" : "px-5 py-3.5"} ${alignClass(c)} ${c.headerClassName || ""} font-semibold text-slate-600 dark:text-slate-400 text-xs uppercase tracking-[0.12em] whitespace-nowrap`}>
-              <th key={c.key} className={`${compact ? "px-3 py-2" : "px-5 py-3.5"} ${alignClass(c)} ${c.headerClassName || ""} font-semibold text-slate-600 dark:text-slate-400 text-xs uppercase tracking-[0.12em] whitespace-nowrap`}>
                 {c.label}
               </th>
             ))}
