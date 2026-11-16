@@ -44,7 +44,9 @@ export default function ResetPassword() {
   const [verifyingLink, setVerifyingLink] = useState(false);
   const sessionRef = useRef(null);
   const pendingVerifyRef = useRef(null);
+  const verifyingLinkRef = useRef(false);
   const inspectedToken = useRef(null);
+  const verificationTypeRef = useRef(null);
   const setupSequence = useRef(0);
   const setupRequiredRef = useRef(false);
   const submittingRef = useRef(false);
@@ -67,7 +69,10 @@ export default function ResetPassword() {
       setStatus(personnelSetupBlocked(result) ? "setup_blocked" : "ready");
     } catch (failure) {
       if (sequence !== setupSequence.current || finishedRef.current) return;
-      if ([401, 403].includes(failure?.status)) setStatus("invalid");
+      if ([401, 403].includes(failure?.status)) {
+        setError(`The link created a session, but the account setup check was rejected (HTTP ${failure.status}). Confirm the staff account is approved, then request a fresh link.`);
+        setStatus("invalid");
+      }
       else {
         setStatus("setup_error");
         setError("We could not verify your account's password-setup requirements. Setup cannot continue safely until the server confirms approval and activation. Try checking again.");
@@ -104,7 +109,9 @@ export default function ResetPassword() {
       );
     };
 
-    if (readUrlError()) {
+    const urlError = readUrlError();
+    if (urlError) {
+      setError(`The authentication service rejected this link (${String(urlError).slice(0, 80)}). Request a fresh link and use the newest email.`);
       setStatus("invalid");
       return undefined;
     }
@@ -115,8 +122,10 @@ export default function ResetPassword() {
     const params = new URLSearchParams(window.location.search);
     const tokenHash = params.get("token_hash");
     const verificationType = params.get("type");
+    verificationTypeRef.current = verificationType;
     if (tokenHash || verificationType) {
       if (!tokenHash || !["invite", "recovery"].includes(verificationType)) {
+        setError("The setup link is missing a valid verification token or link type. Request a fresh link.");
         setStatus("invalid");
         return undefined;
       }
@@ -146,14 +155,22 @@ export default function ResetPassword() {
     // `detectSessionInUrl` to process the hash before declaring the link invalid.
     supabase.auth.getSession().then(({ data, error: sessionError }) => {
       if (!active) return;
-      if (sessionError) setStatus("invalid");
+      if (sessionError) {
+        setError("The browser could not restore the verified setup session. Request a fresh link and open it in the same browser.");
+        setStatus("invalid");
+      }
       else if (data?.session) void inspectSession(data.session);
       else {
         timer = setTimeout(() => {
           if (active) setStatus((s) => (s === "checking" ? "invalid" : s));
         }, 1600);
       }
-    }).catch(() => { if (active) setStatus("invalid"); });
+    }).catch(() => {
+      if (active) {
+        setError("The browser could not check the verified setup session. Check your connection and request a fresh link if this continues.");
+        setStatus("invalid");
+      }
+    });
 
     return () => {
       active = false;
@@ -165,7 +182,11 @@ export default function ResetPassword() {
   }, [inspectSession]);
 
   const verifySetupLink = async () => {
-    if (verifyingLink || !pendingVerifyRef.current || !supabase) return;
+    // State updates render asynchronously. A fast double-click can otherwise
+    // submit the same one-time token twice; the second request receives
+    // otp_expired and could overwrite the first successful verification.
+    if (verifyingLinkRef.current || !pendingVerifyRef.current || !supabase) return;
+    verifyingLinkRef.current = true;
     setVerifyingLink(true);
     setError("");
     try {
@@ -177,6 +198,7 @@ export default function ResetPassword() {
       if (verifyError) throw verifyError;
       const session = data?.session;
       if (!session?.access_token || !session?.user?.id) {
+        setError("The verification service accepted the link but did not return a password setup session. Request a fresh link if this continues.");
         setStatus("invalid");
         return;
       }
@@ -189,9 +211,15 @@ export default function ResetPassword() {
         setStatus("awaiting_verification");
         setError("We couldn't reach the secure verification service. Check your connection and try again. The link has not been confirmed as expired.");
       } else {
+        const code = String(failure?.code || failure?.error_code || failure?.name || "verification_rejected").slice(0, 80);
+        const expired = /expired|otp_expired|invite_not_found|invalid_token/i.test(`${code} ${message}`);
+        setError(expired
+          ? `The verification service reports that this link is expired, already used, or invalid (${code}). Request a fresh link and open the newest email.`
+          : `The verification service rejected this link (${code}). Request a fresh link. If it happens again, share this code with support.`);
         setStatus("invalid");
       }
     } finally {
+      verifyingLinkRef.current = false;
       setVerifyingLink(false);
     }
   };
@@ -350,6 +378,8 @@ export default function ResetPassword() {
 
   /* --------------------------- invalid / expired -------------------------- */
   if (status === "invalid") {
+    const isSetupLink = verificationTypeRef.current === "invite"
+      || (typeof window !== "undefined" && window.location.pathname === "/setup-password");
     return (
       <RegistrationShell
         footer={
@@ -365,15 +395,18 @@ export default function ResetPassword() {
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-brand-danger/10 ring-8 ring-brand-danger/5">
               <AlertTriangle className="h-8 w-8 text-brand-danger" strokeWidth={1.8} />
             </div>
-            <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">Invalid or expired password reset link.</h1>
+            <h1 className="mt-5 font-display text-[22px] font-bold text-brand-dark">
+              {isSetupLink ? "Invalid or expired password setup link." : "Invalid or expired password reset link."}
+            </h1>
             <div className="mx-auto mt-2 h-[3px] w-14 rounded-full bg-brand-gold" aria-hidden="true" />
             <p className="mx-auto mt-4 max-w-md text-[13px] leading-relaxed text-slate-500">
-              This password reset link is missing, invalid, or has expired. Please request a new
-              reset link and try again.
+              {error || (isSetupLink
+                ? "This password setup invitation is missing, invalid, or has expired. Request a fresh link and use the newest email."
+                : "This password reset link is missing, invalid, or has expired. Please request a new reset link and try again.")}
             </p>
             <div className="mt-7">
               <Link to="/forgot-password" className={btnPrimary}>
-                Request a new reset link
+                {isSetupLink ? "Request a new setup link" : "Request a new reset link"}
               </Link>
             </div>
           </div>

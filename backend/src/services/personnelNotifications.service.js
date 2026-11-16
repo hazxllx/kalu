@@ -237,6 +237,8 @@ export const processPersonnelNotifications = ({
         let actionLink = null;
         if (needsSetup) {
           const type = authUser.email_confirmed_at ? 'recovery' : 'invite';
+          // Keep the redirect target on the already configured reset URL. The
+          // token-hash email itself points to the clearer setup-password route.
           const redirectTo = `${origin}/reset-password`;
           const { data: generated, error: linkError } = await client.auth.admin.generateLink({
             type, email: authUser.email, options: { redirectTo },
@@ -253,7 +255,7 @@ export const processPersonnelNotifications = ({
           if (typeof tokenHash !== 'string' || tokenHash.length < 16 || tokenHash.length > 2048) {
             throw failure('AUTH_LINK_INVALID');
           }
-          const setupUrl = new URL('/reset-password', origin);
+          const setupUrl = new URL('/setup-password', origin);
           setupUrl.searchParams.set('token_hash', tokenHash);
           setupUrl.searchParams.set('type', type);
           actionLink = setupUrl.href;

@@ -164,6 +164,9 @@ export const requestPasswordReset = async ({ email } = {}) => {
 
   const frontendUrl = env.clientUrl || env.clientUrls?.[0];
   if (!frontendUrl) throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
+  const passwordPath = actionType === 'invite' ? '/setup-password' : '/reset-password';
+  // The generated token hash is verified on our app route, so preserve the
+  // previously configured Supabase redirect target for compatibility.
   const redirectTo = `${new URL(frontendUrl).origin}/reset-password`;
   let generated;
   try {
@@ -179,7 +182,7 @@ export const requestPasswordReset = async ({ email } = {}) => {
     throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
   }
 
-  const resetUrl = new URL('/reset-password', new URL(frontendUrl).origin);
+  const resetUrl = new URL(passwordPath, new URL(frontendUrl).origin);
   resetUrl.searchParams.set('token_hash', tokenHash);
   resetUrl.searchParams.set('type', actionType);
   try {
