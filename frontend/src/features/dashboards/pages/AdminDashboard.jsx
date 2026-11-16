@@ -255,6 +255,7 @@ export default function AdminDashboard() {
   return (
     <>
       <PageHeader
+        management
         crumbs={["Dashboard"]}
         title="System Overview"
         subtitle="Platform health, accounts, and recent activity."

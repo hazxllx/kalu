@@ -114,6 +114,7 @@ export default function AuditTrail() {
   return (
     <>
       <PageHeader
+        management
         crumbs={["Audit Trail"]}
         title="Audit Trail"
         subtitle="Record of account approvals, clinical record changes and verification decisions."

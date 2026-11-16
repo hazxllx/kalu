@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
+import { NavTabs } from "@/layouts/NavTabsLayout";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup } from "@/components/system";
 import { AlertTriangle, Info, Pill, Plus, Save, Search, ShieldCheck, X } from "lucide-react";
@@ -76,16 +78,6 @@ const emptyMedicine = () => ({
   active: true,
 });
 
-const SourceBadge = ({ source }) => (
-  <span
-    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
-      source === "yakap" ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"
-    }`}
-  >
-    {source === "yakap" ? "YAKAP" : "Local"}
-  </span>
-);
-
 const RxBadge = ({ requirement }) => {
   const isRx = requirement === "rx";
   return (
@@ -130,6 +122,7 @@ function ConfirmDialog({ open, title, description, confirmLabel = "Confirm", onC
 }
 
 export default function MedicineCatalog() {
+  const { navItem } = useOutletContext() || {};
   const { toast } = useToast();
 
   // ---- BP thresholds ---------------------------------------------------
@@ -178,7 +171,6 @@ export default function MedicineCatalog() {
   // ---- Medicine catalog ------------------------------------------------
   const [medicines, setMedicines] = useState([]);
   const [query, setQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -190,12 +182,12 @@ export default function MedicineCatalog() {
   const loadMedicines = () => {
     setLoading(true);
     medicinesApi
-      .list({ includeInactive: true, ...(sourceFilter ? { source: sourceFilter } : {}) })
+      .list({ includeInactive: true })
       .then((res) => setMedicines(res?.medicines || []))
       .catch(() => setMedicines([]))
       .finally(() => setLoading(false));
   };
-  useEffect(loadMedicines, [sourceFilter]);
+  useEffect(loadMedicines, []);
 
   const filtered = useMemo(() => {
     let rows = medicines;
@@ -278,10 +270,12 @@ export default function MedicineCatalog() {
   return (
     <>
       <PageHeader
+        management
         crumbs={["Medicine & Clinical Settings"]}
         title="Medicine & Clinical Settings"
         subtitle="Manage the medicine catalog and blood-pressure classification thresholds."
       />
+      <NavTabs item={navItem} compact showIcons />
 
       <div className="space-y-5">
         {/* ============ BP Classification ============ */}
@@ -453,8 +447,7 @@ export default function MedicineCatalog() {
               <div className="min-w-0">
                 <h2 className="text-sm font-semibold text-slate-900">Medicine Catalog</h2>
                 <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
-                  Generic-first catalog, searchable by generic or brand name. YAKAP = PhilHealth Advisory 2026-0007; Local =
-                  facility catalog (not a guaranteed PhilHealth benefit).
+                  Generic-first catalog, searchable by generic or brand name.
                 </p>
               </div>
               <button
@@ -483,16 +476,6 @@ export default function MedicineCatalog() {
                 )}
               </div>
               <select
-                value={sourceFilter}
-                onChange={(e) => setSourceFilter(e.target.value)}
-                aria-label="Filter by source"
-                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-600 outline-none focus:border-brand-blue"
-              >
-                <option value="">All sources</option>
-                <option value="yakap">YAKAP</option>
-                <option value="local">Local</option>
-              </select>
-              <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 aria-label="Filter by status"
@@ -512,7 +495,7 @@ export default function MedicineCatalog() {
 
           {/* Table — page-level scroll only */}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="w-full min-w-[700px] text-sm">
               <thead>
                 <tr className="border-y border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
                   <th className="px-4 py-2.5 font-medium">Generic / Brand</th>
@@ -520,7 +503,6 @@ export default function MedicineCatalog() {
                   <th className="px-3 py-2.5 font-medium">Form</th>
                   <th className="px-3 py-2.5 font-medium">Category</th>
                   <th className="px-3 py-2.5 font-medium">Type</th>
-                  <th className="px-3 py-2.5 font-medium">Source</th>
                   <th className="px-3 py-2.5 font-medium">Status</th>
                   <th className="px-3 py-2.5 text-right font-medium">Actions</th>
                 </tr>
@@ -542,9 +524,6 @@ export default function MedicineCatalog() {
                     <td className="px-3 py-2.5 text-xs text-slate-500">{m.category || "—"}</td>
                     <td className="px-3 py-2.5">
                       <RxBadge requirement={m.prescriptionRequirement} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <SourceBadge source={m.source} />
                     </td>
                     <td className="px-3 py-2.5">
                       <span
@@ -579,7 +558,7 @@ export default function MedicineCatalog() {
               <p className="py-8 text-center text-sm text-slate-400">Loading catalog…</p>
             ) : filtered.length === 0 ? (
               <p className="py-8 text-center text-sm text-slate-400">
-                {query || sourceFilter || statusFilter ? "No medicines match the current search or filter." : "No medicines found."}
+                {query || statusFilter ? "No medicines match the current search or filter." : "No medicines found."}
               </p>
             ) : null}
           </div>
@@ -591,8 +570,6 @@ export default function MedicineCatalog() {
                 {medicines.some((m) => m.updatedAt || m.createdAt)
                   ? `Last updated: ${formatVerified(medicines[0]?.updatedAt || medicines[0]?.createdAt) || "—"}`
                   : ""}
-                {" · "}
-                {medicines.filter((m) => m.source === "yakap").length} YAKAP · {medicines.filter((m) => m.source === "local").length} Local
               </p>
             </div>
           )}
@@ -661,20 +638,6 @@ export default function MedicineCatalog() {
                       ]}
                       value={form.prescriptionRequirement}
                       onChange={(v) => setForm({ ...form, prescriptionRequirement: v })}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className={labelCls}>Source</label>
-                  <div className="mt-1">
-                    <ButtonSelectGroup
-                      ariaLabel="Source"
-                      options={[
-                        { value: "local", label: "Local / facility" },
-                        { value: "yakap", label: "YAKAP (PhilHealth)" },
-                      ]}
-                      value={form.source}
-                      onChange={(v) => setForm({ ...form, source: v })}
                     />
                   </div>
                 </div>

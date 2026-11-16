@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import PageHeader from "@/components/common/PageHeader";
 import TablePagination from "@/components/tables/TablePagination";
+import { NavTabs } from "@/layouts/NavTabsLayout";
 import DocumentPreviewCard from "@/features/verification/components/DocumentPreviewCard";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -15,8 +17,8 @@ import {
   stationAssignmentPatch, stationAssignmentError, coverageAssignmentPatch, lifecyclePayload, auditActorLabel,
 } from "../personnelLifecycle";
 import {
-  AlertTriangle, Ban, Building2, CheckCircle2, ChevronDown, Clock, Eye, Filter, KeyRound,
-  Loader2, Mail, MoreHorizontal, Pencil, Phone, Plus, RotateCcw, Search, ShieldCheck,
+  AlertTriangle, Ban, CheckCircle2, Clock, Eye, Filter, KeyRound,
+  Loader2, Mail, MoreVertical, Pencil, Plus, RotateCcw, Search, ShieldCheck,
   Trash2, UserCheck, UserCog, Users, UserX, X,
 } from "lucide-react";
 
@@ -54,6 +56,12 @@ const TONE_CLASSES = {
   rose: "bg-rose-50 text-rose-700 ring-1 ring-rose-600/20",
   slate: "bg-slate-100 text-slate-600 ring-1 ring-slate-500/20",
 };
+const TONE_DOTS = {
+  green: "bg-emerald-500",
+  amber: "bg-amber-500",
+  rose: "bg-rose-500",
+  slate: "bg-slate-400",
+};
 
 const formatTimestamp = (value) => {
   if (!value) return "Not recorded";
@@ -64,22 +72,23 @@ const formatTimestamp = (value) => {
 const stationsLabel = (stations, options = []) => Array.isArray(stations) && stations.length
   ? stations.map((id) => options.find((station) => station.id === id)?.name || id.replace(/_/g, " ")).join(" + ") : "None assigned";
 
-function StatusPill({ statusId }) {
-  const meta = statusMeta(statusId);
+function LifecyclePill({ account }) {
+  const state = personnelState(account);
+  const lifecycleMeta = state ? PERSONNEL_STATE_META[state] : null;
+  const accountMeta = statusMeta(account.statusId);
+  const tone = lifecycleMeta?.tone;
+  const badgeClass = tone ? TONE_CLASSES[tone] : accountMeta.badge;
+  const dotClass = tone ? TONE_DOTS[tone] || TONE_DOTS.slate : accountMeta.dot;
+  const label = lifecycleMeta?.label || accountMeta.label;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${meta.badge}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} aria-hidden="true" />
-      {meta.label}
+    <span
+      title={lifecycleMeta?.description}
+      className={`inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium leading-none ${badgeClass}`}
+    >
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
+      {label}
     </span>
   );
-}
-
-function LifecyclePill({ account, compact = false }) {
-  const state = personnelState(account);
-  if (!state) return <StatusPill statusId={account.statusId} />;
-  const meta = PERSONNEL_STATE_META[state];
-  const subtleTone = { green: "border-emerald-200 text-emerald-700", amber: "border-amber-200 text-amber-700", rose: "border-rose-200 text-rose-700", slate: "border-slate-200 text-brand-gray" };
-  return <span title={meta.description} className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${compact ? `border bg-white ${subtleTone[meta.tone] || subtleTone.slate}` : TONE_CLASSES[meta.tone]}`}>{meta.label}</span>;
 }
 
 function EmailState({ notification, detailed = false }) {
@@ -143,39 +152,31 @@ function Field({ label, htmlFor, required = false, hint = "", error = "", childr
 /* ------------------------------------------------------------------------- */
 
 const SUMMARY_CARDS = [
-  { key: "", label: "All accounts", metric: "total", icon: Users, tone: "text-brand-blue bg-brand-blue/10" },
-  { key: "active", label: "Active", metric: "active", icon: UserCheck, tone: "text-emerald-700 bg-emerald-50" },
-  { key: "pending_verification", label: "Pending verification", metric: "pending_verification", icon: Clock, tone: "text-amber-700 bg-amber-50" },
-  { key: "disabled", label: "Deactivated", metric: "disabled", icon: UserX, tone: "text-rose-700 bg-rose-50" },
+  { key: "", label: "All Accounts", metrics: ["total"], icon: Users, tone: "text-brand-blue bg-brand-blue/10" },
+  { key: "active", label: "Active", metrics: ["active"], icon: UserCheck, tone: "text-emerald-700 bg-emerald-50" },
+  { key: null, label: "Requires Attention", metrics: ["pending_verification", "disabled"], icon: Clock, tone: "text-amber-700 bg-amber-50" },
 ];
 
 const PERSONNEL_SUMMARY_CARDS = [
-  { key: "", label: "Total Personnel", metric: "total", icon: Users, tone: "text-brand-blue bg-brand-blue/10" },
-  { key: "active", label: "Active", metric: "active", icon: UserCheck, tone: "text-emerald-700 bg-emerald-50" },
-  { key: "pending", label: "Pending Approval", metric: "pendingApproval", icon: Clock, tone: "text-amber-700 bg-amber-50" },
-  { key: "awaiting_setup", label: "Awaiting Setup", metric: "awaitingSetup", icon: KeyRound, tone: "text-amber-700 bg-amber-50" },
-  { key: "approved_inactive", label: "Inactive", metric: "approvedInactive", icon: UserX, tone: "text-slate-600 bg-slate-100" },
-  { key: "suspended", label: "Suspended", metric: "suspended", icon: Ban, tone: "text-rose-700 bg-rose-50" },
+  { key: "", label: "Total Personnel", metrics: ["total"], icon: Users, tone: "text-brand-blue bg-brand-blue/10" },
+  { key: "active", label: "Active Accounts", metrics: ["active"], icon: UserCheck, tone: "text-emerald-700 bg-emerald-50" },
+  { key: null, label: "Requires Attention", metrics: ["pendingApproval", "awaitingSetup", "approvedInactive", "suspended"], icon: Clock, tone: "text-amber-700 bg-amber-50" },
 ];
 
 function SummaryCards({ summary, loading, error, activeStatus, onPick, personnelOnly }) {
   const cards = personnelOnly ? PERSONNEL_SUMMARY_CARDS : SUMMARY_CARDS;
   return (
-    <div className={`mb-4 grid grid-cols-2 gap-3 ${personnelOnly ? "sm:grid-cols-3" : "lg:grid-cols-4"}`}>
+    <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
       {cards.map((card) => {
-        const selected = activeStatus === card.key;
+        const selectable = card.key !== null;
+        const selected = selectable && activeStatus === card.key;
         const Icon = card.icon;
-        const value = summary ? summary[card.metric] ?? 0 : null;
-        return (
-          <button
-            key={card.label}
-            type="button"
-            onClick={() => onPick(card.key)}
-            aria-pressed={selected}
-            className={`flex items-center gap-3 rounded-xl border bg-white px-4 py-3 text-left shadow-card transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 ${
-              selected ? "border-brand-blue ring-1 ring-brand-blue/30" : "border-slate-200 hover:border-brand-blue/50"
-            }`}
-          >
+        const value = summary ? card.metrics.reduce((total, metric) => total + (summary[metric] ?? 0), 0) : null;
+        const className = `admin-kpi-card flex min-h-16 w-full items-center gap-3 rounded-xl border bg-white px-4 py-3 text-left shadow-sm transition-colors ${
+          selectable ? "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40" : ""
+        } ${selected ? "border-brand-blue ring-1 ring-brand-blue/30" : `border-slate-200 ${selectable ? "hover:border-brand-blue/50" : ""}`}`;
+        const content = (
+          <>
             <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${card.tone}`}>
               <Icon className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
             </span>
@@ -185,7 +186,12 @@ function SummaryCards({ summary, loading, error, activeStatus, onPick, personnel
               </span>
               <span className="block text-xs text-brand-gray">{card.label}</span>
             </span>
-          </button>
+          </>
+        );
+        return (
+          selectable
+            ? <button key={card.label} type="button" onClick={() => onPick(card.key)} aria-pressed={selected} className={className}>{content}</button>
+            : <div key={card.label} className={className}>{content}</div>
         );
       })}
     </div>
@@ -196,31 +202,31 @@ function SummaryCards({ summary, loading, error, activeStatus, onPick, personnel
 /* Actions dropdown menu                                                     */
 /* ------------------------------------------------------------------------- */
 
-function ActionsMenu({ items, buttonLabel = "Account actions", compact = false }) {
+function ActionsMenu({ items, buttonLabel = "Account actions" }) {
   const btnRef = useRef(null);
   const selected = useRef(false);
   const available = items.filter(Boolean);
   if (available.length === 0) return <span className="text-xs text-brand-gray">-</span>;
 
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild><button
         ref={btnRef}
         type="button"
         aria-label={buttonLabel}
-        className={`inline-flex h-9 items-center justify-center gap-1 rounded-btn border border-slate-200 bg-white text-sm font-medium text-brand-ink hover:bg-brand-bg focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:border-border ${compact ? "w-9" : "px-2.5"}`}
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-brand-ink shadow-none transition-colors hover:text-brand-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
       >
-        <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-        {!compact && <><span className="hidden sm:inline">Actions</span><ChevronDown className="hidden h-3.5 w-3.5 sm:inline" aria-hidden="true" /></>}
+        <MoreVertical className="h-5 w-5" strokeWidth={2.2} aria-hidden="true" />
       </button></DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           align="end"
+          side="bottom"
           sideOffset={6}
           collisionPadding={12}
           aria-label={buttonLabel}
           onCloseAutoFocus={(event) => { if (selected.current) event.preventDefault(); selected.current = false; }}
-          className="z-[95] w-56 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-border dark:bg-card"
+          className="z-[95] w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-border dark:bg-card"
         >
           {available.map((item) => (
             <DropdownMenu.Item
@@ -829,18 +835,119 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
 /* Account identity cell (shared desktop + mobile)                           */
 /* ------------------------------------------------------------------------- */
 
-function AccountIdentity({ row, compact = false }) {
+function AccountIdentity({ row }) {
   return (
-    <div className={`flex min-w-0 items-start ${compact ? "gap-2" : "gap-3"}`}>
-      <span className={`mt-0.5 flex shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-sm font-semibold uppercase text-brand-blue ${compact ? "h-8 w-8" : "h-9 w-9"}`}>
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E9EDF2] text-sm font-semibold uppercase text-brand-dark">
         {(row.name || "?").trim().charAt(0)}
       </span>
       <div className="min-w-0">
-        <p className="truncate font-medium text-brand-ink" title={row.name}>{row.name}</p>
-        <p className="truncate text-xs text-brand-gray" title={row.email}>{row.email}</p>
-        {personnelState(row) && <div className="mt-1"><EmailState notification={row.notification} /></div>}
+        <p className="truncate text-sm font-semibold leading-5 text-brand-ink" title={row.name}>{row.name}</p>
+        <p className="truncate text-xs leading-4 text-brand-gray" title={row.email}>{row.email}</p>
+        {personnelState(row) && <div className="mt-0.5 leading-4"><EmailState notification={row.notification} /></div>}
       </div>
     </div>
+  );
+}
+
+function EmptyDirectory({ hasActiveFilters, onReset }) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
+      <UserCog className="h-8 w-8 text-slate-300" aria-hidden="true" />
+      <p className="text-sm font-medium text-brand-ink">No accounts found</p>
+      <p className="text-sm text-brand-gray">
+        {hasActiveFilters ? "No accounts match these filters." : "No accounts have been created yet."}
+      </p>
+      {hasActiveFilters && <button onClick={onReset} className="mt-1 text-sm font-medium text-brand-blue hover:underline">Reset filters</button>}
+    </div>
+  );
+}
+
+function AccountDirectory({
+  rows,
+  loading,
+  showEmpty,
+  hasActiveFilters,
+  resetFilters,
+  personnelOnly,
+  buildActions,
+  options,
+  coverageOf,
+}) {
+  return (
+    <>
+      <div className="hidden overflow-hidden rounded-md border border-brand-border bg-white dark:border-border dark:bg-card xl:block">
+        <table className="w-full table-fixed text-[13px]">
+          <colgroup>
+            <col className="w-[28%]" /><col className="w-[16%]" /><col className="w-[18%]" />
+            <col className="w-[16%]" /><col className="w-[12%]" /><col className="w-[10%]" />
+          </colgroup>
+          <thead>
+            <tr className="h-[42px] border-b border-[#E5E7EB] bg-[#F1F2F4] text-left text-[11px] font-semibold uppercase tracking-wide text-[#586273]">
+              <th className="px-4 font-semibold">Account</th>
+              <th className="px-4 font-semibold">Role</th>
+              <th className="px-4 font-semibold">Coverage</th>
+              <th className="px-4 font-semibold">Contact</th>
+              <th className="px-4 font-semibold">{personnelOnly ? "Lifecycle" : "Status"}</th>
+              <th className="px-4 text-right font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#E5E7EB]">
+            {loading && rows.length === 0 && Array.from({ length: 6 }).map((_, index) => (
+              <tr key={`sk-${index}`} className="h-16">
+                <td className="px-4 py-3" colSpan={6}>
+                  <div className="h-9 w-full animate-pulse rounded bg-slate-100" />
+                </td>
+              </tr>
+            ))}
+            {!loading && rows.map((row) => (
+              <tr key={row.id} className="h-16 align-middle transition-colors hover:bg-slate-50/70">
+                <td className="px-4 py-1"><AccountIdentity row={row} /></td>
+                <td className="truncate px-4 py-1 text-brand-ink" title={row.role}>{row.role}</td>
+                <td className="px-4 py-1">
+                  <span className="block truncate text-brand-ink" title={coverageOf(row)}>{coverageOf(row)}</span>
+                  {row.rhuStations?.length > 0 && (
+                    <p className="truncate text-[11px] leading-4 text-brand-gray" title={stationsLabel(row.rhuStations, options.rhuStations)}>
+                      {stationsLabel(row.rhuStations, options.rhuStations)}
+                    </p>
+                  )}
+                </td>
+                <td className="truncate px-4 py-1 text-brand-ink" title={row.contact || "—"}>{row.contact || "—"}</td>
+                <td className="px-4 py-1"><LifecyclePill account={row} /></td>
+                <td className="px-4 py-1 text-right">
+                  <div className="flex justify-end">
+                    <ActionsMenu items={buildActions(row)} buttonLabel={`Actions for ${row.name}`} />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {showEmpty && <EmptyDirectory hasActiveFilters={hasActiveFilters} onReset={resetFilters} />}
+      </div>
+
+      <div className="space-y-3 xl:hidden">
+        {loading && rows.length === 0 && Array.from({ length: 4 }).map((_, index) => (
+          <Card key={`msk-${index}`} className="p-4"><div className="h-16 w-full animate-pulse rounded bg-slate-100" /></Card>
+        ))}
+        {!loading && rows.map((row) => (
+          <Card key={row.id} className="p-4">
+            <div className="flex items-center justify-between gap-2">
+              <AccountIdentity row={row} />
+              <ActionsMenu items={buildActions(row)} buttonLabel={`Actions for ${row.name}`} />
+            </div>
+            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <div><dt className="text-xs text-brand-gray">Role</dt><dd className="truncate text-brand-ink" title={row.role}>{row.role}</dd></div>
+              <div><dt className="text-xs text-brand-gray">{personnelOnly ? "Lifecycle" : "Status"}</dt><dd className="mt-0.5"><LifecyclePill account={row} /></dd></div>
+              <div className="min-w-0"><dt className="text-xs text-brand-gray">Coverage</dt><dd className="truncate text-brand-ink" title={coverageOf(row)}>{coverageOf(row)}</dd></div>
+              <div className="min-w-0"><dt className="text-xs text-brand-gray">Contact</dt><dd className="truncate text-brand-ink">{row.contact || "—"}</dd></div>
+              {row.rhuStations?.length > 0 && <div className="col-span-2"><dt className="text-xs text-brand-gray">RHU stations</dt><dd className="text-brand-ink">{stationsLabel(row.rhuStations, options.rhuStations)}</dd></div>}
+            </dl>
+          </Card>
+        ))}
+        {showEmpty && <Card className="p-0"><EmptyDirectory hasActiveFilters={hasActiveFilters} onReset={resetFilters} /></Card>}
+      </div>
+    </>
   );
 }
 
@@ -849,6 +956,9 @@ function AccountIdentity({ row, compact = false }) {
 /* ------------------------------------------------------------------------- */
 
 export default function UserManagement({ personnelOnly = false }) {
+  const { navItem } = /** @type {{ navItem?: { label: string, tabs: Array<{ label: string, icon: string, path: string }> } }} */ (
+    useOutletContext() || {}
+  );
   const { user: currentUser } = useAuth();
   const { can } = usePermissions();
   const isAdmin = currentUser?.role === "admin";
@@ -1136,16 +1246,28 @@ export default function UserManagement({ personnelOnly = false }) {
   return (
     <>
       <PageHeader
-        crumbs={[personnelOnly ? "Health Personnel Management" : "User Management"]}
+        management
+        crumbs={["Admin", personnelOnly ? "Health Personnel Management" : "User Management"]}
         title={personnelOnly ? "Health Personnel Management" : "User Management"}
-        subtitle={personnelOnly ? "Manage staff accounts, assignments, and approvals." : "Manage staff and resident accounts, roles, coverage, and access."}
+        subtitleClassName="text-[#C4D2E0]"
+        subtitle={
+          personnelOnly
+            ? "Manage staff accounts, assignments, and approvals."
+            : "Manage staff and resident accounts, roles, coverage, and access."
+        }
         meta={
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-medium text-white">
-            {personnelOnly ? <UserCog className="h-3.5 w-3.5" aria-hidden="true" /> : <Users className="h-3.5 w-3.5" aria-hidden="true" />}
-            {summary ? `${(summary.total ?? 0).toLocaleString()} ${personnelOnly ? "personnel accounts" : "total accounts"}` : "Accounts"}
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[11px] font-medium text-white">
+            {personnelOnly
+              ? <UserCog className="h-3.5 w-3.5" aria-hidden="true" />
+              : <Users className="h-3.5 w-3.5" aria-hidden="true" />}
+            {summary
+              ? `${(summary.total ?? 0).toLocaleString()} ${personnelOnly ? "personnel accounts" : "total accounts"}`
+              : "Accounts"}
           </span>
         }
       />
+
+      <NavTabs item={navItem} compact />
 
       {toast && (
         <div className="fixed bottom-4 left-4 right-4 z-[90] flex items-start gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg sm:left-auto sm:max-w-lg" role="status">
@@ -1163,15 +1285,19 @@ export default function UserManagement({ personnelOnly = false }) {
         personnelOnly={personnelOnly}
       />
 
-      {personnelOnly && <p className="mb-3 text-xs leading-relaxed text-brand-gray">Approval and password setup are separate steps; accounts stay inactive until activation.</p>}
+      {personnelOnly && (
+        <div className="mb-4 min-h-8 text-[11px] leading-4 text-brand-gray sm:min-h-4">
+          <p>Approval and password setup are separate steps; accounts stay inactive until activation.</p>
+        </div>
+      )}
 
       {/* Filter toolbar */}
       <div className="mb-4 rounded-md border border-brand-border bg-white p-2.5 dark:border-border dark:bg-card sm:p-3">
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex h-9 min-w-[10rem] flex-1 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 dark:border-border dark:bg-input">
+            <div className="flex h-10 min-w-[10rem] flex-1 items-center gap-2 rounded-btn border border-brand-border bg-white px-3 focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 dark:border-border dark:bg-input">
               <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
-              <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} placeholder="Search name or email…" className="min-w-0 w-full bg-transparent text-sm outline-none" aria-label={personnelOnly ? "Search personnel" : "Search user accounts"} />
+              <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} placeholder="Search name or email..." className="min-w-0 w-full bg-transparent text-sm outline-none" aria-label={personnelOnly ? "Search personnel" : "Search user accounts"} />
               {query && (
                 <button onClick={() => { setQuery(""); setPage(0); }} className="rounded p-0.5 text-brand-gray hover:bg-brand-bg" aria-label="Clear search">
                   <X className="h-3.5 w-3.5" />
@@ -1192,7 +1318,7 @@ export default function UserManagement({ personnelOnly = false }) {
               <button type="button" onClick={resetFilters} className="h-9 shrink-0 rounded-btn px-2 text-xs font-medium text-brand-blue hover:bg-brand-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/20">Clear filters</button>
             )}
             {canCreate && canManageRoles && (
-              <button onClick={() => { setActionError(""); setModalTarget({ isNew: true }); }} disabled={Boolean(optionsError) || options.roles.length === 0} className="ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-btn bg-brand-blue px-3 text-sm font-medium text-white hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 disabled:cursor-not-allowed disabled:opacity-60">
+              <button onClick={() => { setActionError(""); setModalTarget({ isNew: true }); }} disabled={Boolean(optionsError) || options.roles.length === 0} className="ml-auto inline-flex h-9 w-44 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-btn bg-brand-blue px-3 text-sm font-medium text-white hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 disabled:cursor-not-allowed disabled:opacity-60">
                 <Plus className="h-4 w-4" aria-hidden="true" /> {personnelOnly ? "Create Personnel" : "Create Account"}
               </button>
             )}
@@ -1263,92 +1389,17 @@ export default function UserManagement({ personnelOnly = false }) {
         </div>
       )}
 
-      {/* Desktop table */}
-      <div className={`hidden overflow-hidden border bg-white dark:bg-card ${personnelOnly ? "rounded-md border-brand-border xl:block dark:border-border" : "rounded-2xl border-slate-200 shadow-card md:block"}`}>
-        <table className={`w-full table-fixed ${personnelOnly ? "text-[13px]" : "text-sm"}`}>
-          <colgroup>
-            <col className="w-[28%]" /><col className="w-[16%]" /><col className="w-[18%]" />
-            <col className="w-[16%]" /><col className="w-[12%]" /><col className="w-[10%]" />
-          </colgroup>
-          <thead>
-            <tr className={`border-b border-slate-200 text-left text-slate-500 ${personnelOnly ? "bg-brand-bg/50 text-[11px] tracking-wide" : "bg-slate-50 text-xs uppercase tracking-wider"}`}>
-              <th className={`${personnelOnly ? "px-3 py-2.5" : "px-4 py-3"} font-semibold`}>Account</th>
-              <th className={`${personnelOnly ? "px-3 py-2.5" : "px-4 py-3"} font-semibold`}>Role</th>
-              <th className={`${personnelOnly ? "px-3 py-2.5" : "px-4 py-3"} font-semibold`}>Coverage</th>
-              <th className={`${personnelOnly ? "px-3 py-2.5" : "px-4 py-3"} font-semibold`}>Contact</th>
-              <th className={`${personnelOnly ? "px-3 py-2.5" : "px-4 py-3"} font-semibold`}>{personnelOnly ? "Lifecycle" : "Status"}</th>
-              <th className={`${personnelOnly ? "px-3 py-2.5" : "px-4 py-3"} text-right font-semibold`}>Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {loading && users.length === 0 && Array.from({ length: 6 }).map((_, index) => (
-              <tr key={`sk-${index}`}>
-                <td className="px-4 py-4" colSpan={6}>
-                  <div className="h-9 w-full animate-pulse rounded bg-slate-100" />
-                </td>
-              </tr>
-            ))}
-            {!loading && users.map((row) => (
-              <tr key={row.id} className="align-middle transition-colors hover:bg-slate-50/70">
-                <td className={personnelOnly ? "px-3 py-2" : "px-4 py-3"}><AccountIdentity row={row} compact={personnelOnly} /></td>
-                <td className={`${personnelOnly ? "px-3 py-2" : "px-4 py-3"} text-brand-ink`}>{row.role}</td>
-                <td className={personnelOnly ? "px-3 py-2" : "px-4 py-3"}>
-                  <span className="flex items-center gap-1.5 text-brand-gray">
-                    <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    <span className="truncate" title={coverageOf(row)}>{coverageOf(row)}</span>
-                  </span>
-                  {row.rhuStations?.length > 0 && <p className="mt-1 text-xs text-brand-gray">{stationsLabel(row.rhuStations, options.rhuStations)}</p>}
-                </td>
-                <td className={personnelOnly ? "px-3 py-2" : "px-4 py-3"}>
-                  {row.contact
-                    ? <span className="flex items-center gap-1.5 text-brand-ink"><Phone className="h-3.5 w-3.5 shrink-0 text-brand-gray" aria-hidden="true" /><span className="truncate">{row.contact}</span></span>
-                    : <span className="text-brand-gray">Not provided</span>}
-                </td>
-                <td className={personnelOnly ? "px-3 py-2" : "px-4 py-3"}><LifecyclePill account={row} compact={personnelOnly} /></td>
-                <td className={`${personnelOnly ? "px-3 py-2" : "px-4 py-3"} text-right`}><div className="flex justify-end"><ActionsMenu items={buildActions(row)} buttonLabel={`Actions for ${row.name}`} compact={personnelOnly} /></div></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {showEmpty && (
-          <div className="flex flex-col items-center gap-2 px-4 py-14 text-center">
-            <UserCog className="h-8 w-8 text-slate-300" aria-hidden="true" />
-            <p className="text-sm font-medium text-brand-ink">No accounts found</p>
-            <p className="text-sm text-brand-gray">{hasActiveFilters ? "No accounts match these filters." : "No accounts have been created yet."}</p>
-            {hasActiveFilters && <button onClick={resetFilters} className="mt-1 text-sm font-medium text-brand-blue hover:underline">Reset filters</button>}
-          </div>
-        )}
-      </div>
-
-      {/* Mobile cards */}
-      <div className={`space-y-3 ${personnelOnly ? "xl:hidden" : "md:hidden"}`}>
-        {loading && users.length === 0 && Array.from({ length: 4 }).map((_, index) => (
-          <Card key={`msk-${index}`} className="p-4"><div className="h-16 w-full animate-pulse rounded bg-slate-100" /></Card>
-        ))}
-        {!loading && users.map((row) => (
-          <Card key={row.id} className={personnelOnly ? "p-3" : "p-4"}>
-            <div className="flex items-start justify-between gap-2">
-              <AccountIdentity row={row} compact={personnelOnly} />
-              <ActionsMenu items={buildActions(row)} buttonLabel={`Actions for ${row.name}`} compact={personnelOnly} />
-            </div>
-            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-              <div><dt className="text-xs text-brand-gray">Role</dt><dd className="text-brand-ink">{row.role}</dd></div>
-              <div><dt className="text-xs text-brand-gray">{personnelOnly ? "Lifecycle" : "Status"}</dt><dd className="mt-0.5"><LifecyclePill account={row} compact={personnelOnly} /></dd></div>
-              <div className="min-w-0"><dt className="text-xs text-brand-gray">Coverage</dt><dd className="truncate text-brand-ink" title={coverageOf(row)}>{coverageOf(row)}</dd></div>
-              <div className="min-w-0"><dt className="text-xs text-brand-gray">Contact</dt><dd className="truncate text-brand-ink">{row.contact || "Not provided"}</dd></div>
-              {row.rhuStations?.length > 0 && <div className="col-span-2"><dt className="text-xs text-brand-gray">RHU stations</dt><dd className="text-brand-ink">{stationsLabel(row.rhuStations, options.rhuStations)}</dd></div>}
-            </dl>
-          </Card>
-        ))}
-        {showEmpty && (
-          <Card className="flex flex-col items-center gap-2 px-4 py-12 text-center">
-            <UserCog className="h-8 w-8 text-slate-300" aria-hidden="true" />
-            <p className="text-sm font-medium text-brand-ink">No accounts found</p>
-            <p className="text-sm text-brand-gray">{hasActiveFilters ? "No accounts match these filters." : "No accounts have been created yet."}</p>
-            {hasActiveFilters && <button onClick={resetFilters} className="mt-1 text-sm font-medium text-brand-blue hover:underline">Reset filters</button>}
-          </Card>
-        )}
-      </div>
+      <AccountDirectory
+        rows={users}
+        loading={loading}
+        showEmpty={showEmpty}
+        hasActiveFilters={hasActiveFilters}
+        resetFilters={resetFilters}
+        personnelOnly={personnelOnly}
+        buildActions={buildActions}
+        options={options}
+        coverageOf={coverageOf}
+      />
 
       {/* Pagination */}
       <TablePagination

@@ -11,7 +11,8 @@ import OfficialLogosSection from "@/features/settings/components/OfficialLogosSe
 import { fetchMyVerification } from "@/services/api/verificationsApi";
 import { residentsApi, authApi } from "@/services/api";
 import { supabase } from "@/lib/supabase";
-import { useLocation } from "react-router-dom";
+import { useLocation, useOutletContext } from "react-router-dom";
+import { NavTabs } from "@/layouts/NavTabsLayout";
 import {
   Lock, Eye, EyeOff, Check, ShieldCheck, Mail, FileText,
   Calendar, Monitor, LogOut, Sun, Moon, MonitorCog, Palette, RefreshCw,
@@ -37,6 +38,7 @@ function checkPasswordStrength(pw) {
 }
 
 export default function SettingsPage({ roleKey = "resident" }) {
+  const { navItem } = useOutletContext() || {};
   const location = useLocation();
   const isProfileRoute = location.pathname.endsWith("/profile");
   const role = ROLES[roleKey];
@@ -279,7 +281,8 @@ export default function SettingsPage({ roleKey = "resident" }) {
 
   return (
     <>
-      <PageHeader crumbs={[isProfileRoute ? "Profile" : "Settings"]} title={isProfileRoute ? "Profile" : "Settings"} subtitle={isProfileRoute ? "View and update your account information." : "Manage your account security and information."} />
+      <PageHeader management={roleKey === "admin"} crumbs={[isProfileRoute ? "Profile" : "Settings"]} title={isProfileRoute ? "Profile" : "Settings"} subtitle={isProfileRoute ? "View and update your account information." : "Manage your account security and information."} />
+      {roleKey === "admin" && <NavTabs item={navItem} compact showIcons />}
 
       <div className="space-y-5">
         {roleKey === "admin" && !isProfileRoute && <OfficialLogosSection />}

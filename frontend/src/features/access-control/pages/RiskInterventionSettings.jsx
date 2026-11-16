@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import {
   AlertCircle,
   AlertTriangle,
@@ -15,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
+import { NavTabs } from "@/layouts/NavTabsLayout";
 import { Card } from "@/components/common/Card";
 import ErrorState from "@/components/common/ErrorState";
 import { riskConfigApi } from "@/services/api";
@@ -80,7 +82,6 @@ const INDICATOR_TRIGGER = {
 const inputClass =
   "mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition-colors placeholder:text-slate-400 focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15";
 const labelClass = "text-xs font-medium text-slate-600";
-const sectionLabelClass = "text-xs font-medium text-slate-500 tracking-wide";
 
 const operatorLabel = (op) =>
   OPERATOR_OPTIONS.find((o) => o.value === op)?.label || op;
@@ -208,6 +209,7 @@ function IndicatorEditModal({ indicator, onSave, onClose }) {
 }
 
 export default function RiskInterventionSettings() {
+  const { navItem } = useOutletContext() || {};
   // ----- Resident risk (backend) state -----
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -516,86 +518,84 @@ export default function RiskInterventionSettings() {
   return (
     <>
       <PageHeader
+        management
         crumbs={["Admin", "Risk & Intervention Settings"]}
         title="Risk & Intervention Settings"
         subtitle="Configure resident risk classification, early intervention rules, and follow-up policies."
       />
+      <NavTabs item={navItem} compact showIcons />
 
       <div className="space-y-5">
         {/* ============ Section A: Risk Classification ============ */}
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-slate-900">Risk Classification</h2>
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
-                Each resident receives a total risk score — the sum of weights for criteria whose conditions are met by their
-                recorded health data. The score is then classified into Low, Moderate, or High using the thresholds below.
-                Adjusting thresholds immediately reclassifies all residents.
+                Each resident receives a total risk score based on recorded health criteria. Scores are classified as Low,
+                Moderate, or High using the configured thresholds.
               </p>
             </div>
             <button
               onClick={() => setConfirmRecalc(true)}
               disabled={busy || !residentRiskReady}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-brand-dark bg-white px-3 text-xs font-medium text-brand-dark hover:bg-slate-50 disabled:opacity-50"
             >
-              <RefreshCw className="h-3.5 w-3.5" /> Recalculate residents
+              <RefreshCw className="h-3.5 w-3.5" /> Recalculate Residents
             </button>
           </div>
 
           {loading ? (
-            <div className="mt-5 h-40 animate-pulse rounded-lg bg-slate-100" />
+            <div className="mt-4 h-28 animate-pulse rounded-md bg-slate-100" />
           ) : error ? (
-            <div className="mt-5">
+            <div className="mt-4">
               <ErrorState title="Unable to load risk settings" message={error} onRetry={load} />
             </div>
           ) : (
             <>
-              {/* Classification summary cards */}
-              <div className="mt-5">
-                <p className={sectionLabelClass + " mb-2"}>Current classification ranges</p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Low
+              <div className="mt-4">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="min-h-[104px] rounded-md border border-emerald-200 bg-emerald-50/30 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-emerald-700">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" /> Low
                       </span>
-                      <span className="font-stat text-sm font-semibold text-slate-900">0 – {Math.max(mod - 1, 0)}</span>
+                      <span className="font-stat text-[15px] font-semibold text-slate-900">0–{Math.max(mod - 1, 0)}</span>
                     </div>
-                    <p className="mt-2 text-xs leading-relaxed text-slate-500">Score below the moderate threshold. Routine monitoring.</p>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-600">Routine monitoring.</p>
                   </div>
-                  <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Moderate
+                  <div className="min-h-[104px] rounded-md border border-amber-200 bg-amber-50/30 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-amber-700">
+                        <span className="h-2 w-2 rounded-full bg-amber-500" /> Moderate
                       </span>
-                      <span className="font-stat text-sm font-semibold text-slate-900">
-                        {mod} – {Math.max(high - 1, mod)}
+                      <span className="font-stat text-[15px] font-semibold text-slate-900">
+                        {mod}–{Math.max(high - 1, mod)}
                       </span>
                     </div>
-                    <p className="mt-2 text-xs leading-relaxed text-slate-500">Score meets the moderate threshold. Follow-up recommended.</p>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-600">Follow-up recommended.</p>
                   </div>
-                  <div className="rounded-lg border border-rose-200 bg-rose-50/60 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">
-                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500" /> High
+                  <div className="min-h-[104px] rounded-md border border-rose-200 bg-rose-50/30 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-rose-700">
+                        <span className="h-2 w-2 rounded-full bg-rose-500" /> High
                       </span>
-                      <span className="font-stat text-sm font-semibold text-slate-900">{high}+</span>
+                      <span className="font-stat text-[15px] font-semibold text-slate-900">{high}+</span>
                     </div>
-                    <p className="mt-2 text-xs leading-relaxed text-slate-500">Score meets the high threshold. Priority review required.</p>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-600">Priority review required.</p>
                   </div>
                 </div>
-                <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400">
-                  <Info className="h-3 w-3 shrink-0" /> Boundaries are inclusive at the lower end. Example: a score of {mod} is Moderate.
+                <p className="mt-2 flex items-center gap-1.5 text-[11px] leading-4 text-slate-500">
+                  <Info className="h-3 w-3 shrink-0 text-slate-400" /> Boundaries are inclusive at the lower end. Example: a score of {mod} is Moderate.
                 </p>
               </div>
 
-              {/* Threshold inputs — visually separated from the summary */}
-              <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/50 p-4">
-                <h3 className="text-xs font-semibold text-slate-700">Edit thresholds</h3>
+              <div className="mt-4 border-t border-slate-200 pt-4">
+                <h3 className="text-sm font-semibold text-slate-900">Edit Thresholds</h3>
                 <p className="mt-1 text-xs text-slate-500">High must be greater than Moderate. Saving recomputes every resident.</p>
-                <div className="mt-3 grid max-w-lg gap-4 sm:grid-cols-2">
+                <div className="mt-3 grid max-w-[536px] gap-3 sm:grid-cols-2">
                   <div>
-                    <label className={labelClass} htmlFor="thresh-moderate">
+                    <label className="text-xs font-medium text-slate-700" htmlFor="thresh-moderate">
                       Moderate starts at
                     </label>
                     <input
@@ -609,12 +609,12 @@ export default function RiskInterventionSettings() {
                           moderateMin: e.target.value === "" ? "" : Number(e.target.value),
                         }))
                       }
-                      className={inputClass}
+                      className="mt-1 h-10 w-full max-w-[260px] rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
                     />
-                    <p className="mt-1 text-[11px] text-slate-400">Scores ≥ this value are Moderate or higher.</p>
+                    <p className="mt-1 text-[11px] leading-4 text-slate-500">Scores ≥ this value are Moderate or higher.</p>
                   </div>
                   <div>
-                    <label className={labelClass} htmlFor="thresh-high">
+                    <label className="text-xs font-medium text-slate-700" htmlFor="thresh-high">
                       High starts at
                     </label>
                     <input
@@ -628,18 +628,18 @@ export default function RiskInterventionSettings() {
                           highMin: e.target.value === "" ? "" : Number(e.target.value),
                         }))
                       }
-                      className={inputClass}
+                      className="mt-1 h-10 w-full max-w-[260px] rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
                     />
-                    <p className="mt-1 text-[11px] text-slate-400">Scores ≥ this value are High.</p>
+                    <p className="mt-1 text-[11px] leading-4 text-slate-500">Scores ≥ this value are High.</p>
                   </div>
                 </div>
-                <div className="mt-4">
+                <div className="mt-3">
                   <button
                     onClick={saveThresholds}
                     disabled={busy}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand-dark px-3 text-xs font-medium text-white hover:bg-brand-blue disabled:opacity-50"
                   >
-                    <Save className="h-4 w-4" /> Save thresholds
+                    <Save className="h-3.5 w-3.5" /> Save Thresholds
                   </button>
                 </div>
               </div>

@@ -34,6 +34,7 @@ import { ChevronRight } from "lucide-react";
  *     scales the title down one step. Default false keeps every existing call
  *     site identical; pages that need more room above the fold (e.g. the TCL
  *     workspace) can opt in without a separate header component.
+ *   - management: an opt-in compact layout for management page banners.
  */
 /**
  * @param {{
@@ -41,10 +42,13 @@ import { ChevronRight } from "lucide-react";
  *   eyebrow?: string,
  *   title: import("react").ReactNode,
  *   subtitle?: string,
+ *   subtitleClassName?: string,
  *   action?: import("react").ReactNode,
  *   meta?: import("react").ReactNode,
+ *   eyebrowClassName?: string,
  *   variant?: "default" | "report",
- *   dense?: boolean
+ *   dense?: boolean,
+ *   management?: boolean
  * }} props
  */
 export default function PageHeader({
@@ -54,21 +58,25 @@ export default function PageHeader({
   subtitle = "",
   action = null,
   meta = null,
+  eyebrowClassName = "text-brand-goldlight",
+  subtitleClassName = "text-white/70",
   variant = "default",
   dense = false,
+  management = false,
 }) {
   const isReport = variant === "report";
   const hasCrumbs = Array.isArray(crumbs) && crumbs.length > 0;
   const showEyebrowRow = isReport || Boolean(eyebrow) || hasCrumbs || Boolean(meta);
+  const breadcrumbRoutes = { Admin: "/app/admin/dashboard" };
 
   return (
     <section
       aria-label={typeof title === "string" ? `${title} header` : "Page header"}
-      className={`ui-page-header ${dense ? "mb-4" : "mb-6"} overflow-hidden rounded-lg border border-brand-deep bg-brand-dark text-white shadow-card`}
+      className={`ui-page-header ${management ? "admin-management-header mb-4 min-h-[140px]" : dense ? "mb-4" : "mb-6"} overflow-hidden rounded-lg border border-brand-deep bg-brand-dark text-white shadow-card`}
     >
       {/* Hairline gold rule — the official accent token, no gradient. */}
       <div aria-hidden="true" className="ui-page-header-rule h-0.5 w-full bg-brand-gold/70" />
-      <div className={`ui-page-header-body flex flex-col ${dense ? "gap-3 px-5 py-4 md:px-7" : "gap-4 px-5 py-6 md:px-7"}`}>
+      <div className={`ui-page-header-body flex flex-col ${management ? "min-h-[138px] justify-center gap-2 px-5 py-5 md:px-6" : dense ? "gap-3 px-5 py-4 md:px-7" : "gap-4 px-5 py-6 md:px-7"}`}>
         {showEyebrowRow && (
           <div className="ui-page-header-eyebrow flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
@@ -78,34 +86,38 @@ export default function PageHeader({
                 </span>
               )}
               {eyebrow ? (
-                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-goldlight">
+                <span className={`${management ? "text-[11px]" : "text-[10px]"} font-semibold uppercase tracking-[0.08em] ${eyebrowClassName}`}>
                   {eyebrow}
                 </span>
               ) : hasCrumbs ? (
                 <nav
                   aria-label="Breadcrumb"
-                  className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] font-semibold uppercase tracking-[0.08em]"
+                  className={`flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 font-body font-semibold uppercase leading-4 tracking-[0.5px] ${management ? "text-[11px]" : "text-xs"}`}
                 >
                   {crumbs.map((crumb, i) => {
                     const isCurrent = i === crumbs.length - 1;
                     const label = typeof crumb === "string" ? crumb : crumb.label;
-                    const to = typeof crumb === "object" && crumb !== null ? crumb.to : null;
+                    const to = !isCurrent && typeof crumb === "object" && crumb !== null
+                      ? crumb.to
+                      : !isCurrent && typeof crumb === "string"
+                        ? breadcrumbRoutes[crumb]
+                        : null;
                     return (
-                      <span key={i} className="flex min-w-0 items-center gap-1.5">
+                      <span key={`${label}-${i}`} className="flex min-w-0 items-center gap-2.5">
                         {i > 0 && (
-                          <ChevronRight className="h-3 w-3 shrink-0 text-white/40" aria-hidden="true" />
+                          <ChevronRight className="h-3 w-3 shrink-0 text-[#8FA6C0]" aria-hidden="true" />
                         )}
                         {isCurrent ? (
-                          <span className="truncate text-brand-goldlight">{label}</span>
+                          <span aria-current="page" className="truncate text-[#F59E0B]">{label}</span>
                         ) : to ? (
                           <Link
                             to={to}
-                            className="truncate text-white/70 transition-colors hover:text-white"
+                            className="truncate text-[#A9BCD3] transition-colors hover:text-white"
                           >
                             {label}
                           </Link>
                         ) : (
-                          <span className="truncate text-white/70">{label}</span>
+                          <span className="truncate text-[#A9BCD3]">{label}</span>
                         )}
                       </span>
                     );
@@ -118,13 +130,13 @@ export default function PageHeader({
             )}
           </div>
         )}
-        <div className={`ui-page-header-main flex flex-col md:flex-row md:items-end md:justify-between ${dense ? "gap-3" : "gap-4"}`}>
+        <div className={`ui-page-header-main flex flex-col md:flex-row md:items-end md:justify-between ${management || dense ? "gap-3" : "gap-4"}`}>
           <div className="min-w-0 w-full flex-1 md:w-auto">
-            <h1 className={`break-words font-semibold tracking-tight text-white ${dense ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"}`}>
+            <h1 className={`break-words font-heading font-semibold leading-tight tracking-tight text-white ${management ? "text-[26px]" : dense ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"}`}>
               {title}
             </h1>
             {subtitle && (
-              <p className={`break-words text-sm leading-relaxed text-white/70 ${dense ? "mt-1.5" : "mt-2 max-w-prose"}`}>
+              <p className={`break-words font-body text-sm font-normal leading-relaxed ${subtitleClassName} ${management || dense ? "mt-1.5" : "mt-2 max-w-prose"}`}>
                 {subtitle}
               </p>
             )}

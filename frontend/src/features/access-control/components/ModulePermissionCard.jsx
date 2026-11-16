@@ -21,9 +21,9 @@ export default function ModulePermissionCard({ module, role, permissions, onTogg
     <div className="border-t border-slate-200 bg-slate-50/50">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 sm:px-5">
         <div className="min-w-0">
-          <p className="text-xs leading-relaxed text-slate-500">{module.description}</p>
+        <p className="text-[13px] leading-5 text-slate-500">{module.description}</p>
           {filtered && (
-            <p className="mt-0.5 text-[11px] font-medium text-brand-amber">
+          <p className="mt-0.5 text-xs font-medium text-brand-amber">
               Showing {module.permissions.length} of {fullModule.permissions.length} permissions; bulk actions apply
               to the whole module.
             </p>
@@ -34,7 +34,7 @@ export default function ModulePermissionCard({ module, role, permissions, onTogg
             type="button"
             disabled={!canEnableAll}
             onClick={() => onBulk(module, true)}
-            className="inline-flex h-8 items-center gap-1 rounded border border-slate-300 bg-white px-2.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-brand-blue hover:text-brand-blue disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-9 items-center gap-1 rounded border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 transition-colors hover:border-brand-blue hover:text-brand-blue disabled:cursor-not-allowed disabled:opacity-40"
           >
             <CheckCheck className="h-3.5 w-3.5" strokeWidth={2} />
             Enable all
@@ -43,7 +43,7 @@ export default function ModulePermissionCard({ module, role, permissions, onTogg
             type="button"
             disabled={!canDisableAll}
             onClick={() => onBulk(module, false)}
-            className="inline-flex h-8 items-center gap-1 rounded border border-slate-300 bg-white px-2.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-brand-danger hover:text-brand-danger disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-9 items-center gap-1 rounded border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 transition-colors hover:border-brand-danger hover:text-brand-danger disabled:cursor-not-allowed disabled:opacity-40"
           >
             <XSquare className="h-3.5 w-3.5" strokeWidth={2} />
             Disable all

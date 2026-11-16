@@ -84,6 +84,13 @@ export default function DashboardLayout({ roleKey }) {
   const recheckInFlight = useRef(false);
   const recheckRequestRef = useRef(0);
 
+  useEffect(() => {
+    if (roleKey !== "admin") return undefined;
+
+    document.body.classList.add("admin-density");
+    return () => document.body.classList.remove("admin-density");
+  }, [roleKey]);
+
   // Track online/offline status for connectivity indicator
   useEffect(() => {
     const updateOnline = () => setOnline(isNavigatorOnline());
@@ -335,7 +342,7 @@ export default function DashboardLayout({ roleKey }) {
     const rowSize = collapsed
       ? "min-h-10"
       : adminNav
-        ? "min-h-10 py-2"
+        ? "min-h-10 py-1.5"
         : "min-h-9 py-1.5";
     const itemPadding = collapsed ? "justify-center px-0" : "gap-2.5 px-3";
 
@@ -608,9 +615,9 @@ export default function DashboardLayout({ roleKey }) {
   );
 
   return (
-    <div className={`kalusagap-shell min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""}`}>
+    <div className={`kalusagap-shell min-h-screen bg-[color:#f5f7fa] dark:bg-background ${isSupervisor ? "supervisor-shell" : ""} ${roleKey === "admin" ? "admin-shell" : ""}`}>
       <aside
-        className={`app-sidebar hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : isSupervisor ? "w-64" : "w-72"}`}
+        className={`app-sidebar hidden lg:flex fixed left-0 top-0 z-30 h-screen max-h-[100dvh] flex-col overflow-visible border-r border-slate-200 bg-white transition-[width] duration-200 ease-out dark:border-border dark:bg-sidebar ${sidebarCollapsed ? "w-20" : roleKey === "admin" || isSupervisor ? "w-64" : "w-72"}`}
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
       >
         {/* Brand header — fixed */}
@@ -715,8 +722,8 @@ export default function DashboardLayout({ roleKey }) {
         )}
       </AnimatePresence>
 
-      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : isSupervisor ? "lg:pl-64" : "lg:pl-72"}`}>
-        <header className="app-header sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 md:px-6">
+      <div className={`min-w-0 transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "lg:pl-20" : roleKey === "admin" || isSupervisor ? "lg:pl-64" : "lg:pl-72"}`}>
+        <header className={`app-header sticky top-0 z-30 h-16 bg-white/95 dark:bg-sidebar/95 backdrop-blur border-b border-slate-200 dark:border-border flex items-center gap-3 px-4 ${roleKey === "admin" ? "md:px-5" : "md:px-6"}`}>
           <button
             onClick={() => setOpen(true)}
             type="button"
@@ -727,15 +734,15 @@ export default function DashboardLayout({ roleKey }) {
             <Menu className="w-6 h-6" />
           </button>
 
-          <div className="ml-auto flex items-center gap-2 md:gap-4">
+          <div className={`ml-auto flex items-center gap-2 ${roleKey === "admin" ? "md:gap-3" : "md:gap-4"}`}>
             <OfflineStatusIndicator />
             <Link
               to={notificationsPath}
               aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
-              className="relative w-10 h-10 rounded-md hover:bg-slate-50 dark:hover:bg-hover flex items-center justify-center"
+              className={`relative flex items-center justify-center rounded-md hover:bg-slate-50 dark:hover:bg-hover ${roleKey === "admin" ? "h-9 w-9" : "h-10 w-10"}`}
             >
               <Bell
-                className="w-5 h-5 text-slate-600 dark:text-slate-300"
+                className={`${roleKey === "admin" ? "h-[18px] w-[18px]" : "w-5 h-5"} text-slate-600 dark:text-slate-300`}
                 strokeWidth={1.8}
               />
 
@@ -758,7 +765,7 @@ export default function DashboardLayout({ roleKey }) {
                 aria-haspopup="true"
                 className="flex items-center gap-2 rounded-md hover:bg-slate-50 dark:hover:bg-hover px-2 py-1.5 transition-colors"
               >
-                <div className="w-8 h-8 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-semibold font-heading">
+                <div className={`${roleKey === "admin" ? "h-9 w-9" : "w-8 h-8"} rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-semibold font-heading`}>
                   {initials}
                 </div>
 
@@ -786,7 +793,7 @@ export default function DashboardLayout({ roleKey }) {
                   >
                     <div className="px-4 py-4 border-b border-slate-200 dark:border-border bg-slate-50 dark:bg-card-nested">
                       <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-heading font-semibold">
+                        <div className={`${roleKey === "admin" ? "h-9 w-9" : "w-11 h-11"} rounded-full bg-brand-blue text-white flex items-center justify-center text-sm font-heading font-semibold`}>
                           {initials}
                         </div>
 
@@ -857,7 +864,7 @@ export default function DashboardLayout({ roleKey }) {
           </div>
         </header>
 
-        <main className={`app-main mx-auto min-w-0 ${isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
+        <main className={`app-main mx-auto min-w-0 ${roleKey === "admin" ? "admin-content max-w-content px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
           {notice && (!routePermissions || permissionsReady) && (
             <div
               className={`mb-4 flex flex-wrap items-center justify-between gap-3 border px-4 py-2 text-xs ${permissionsReady ? "border-amber-300 bg-amber-50 text-amber-950" : "border-brand-danger/30 bg-white text-brand-ink"}`}

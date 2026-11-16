@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import { NavTabs } from "@/layouts/NavTabsLayout";
 import { ButtonSelectGroup } from "@/components/system";
 import { useToast } from "@/components/ui/use-toast";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -376,6 +378,9 @@ function StatusDialog({ record, targetStatus, onClose, onChanged }) {
 /* ------------------------------------------------------------------------- */
 
 export default function BarangayManagement() {
+  const { navItem } = /** @type {{ navItem?: { label: string, tabs: Array<{ label: string, icon: string, path: string }> } }} */ (
+    useOutletContext() || {}
+  );
   const { can } = usePermissions();
   const { refresh: refreshBarangayRegistry } = useBarangays();
 
@@ -465,8 +470,10 @@ export default function BarangayManagement() {
   return (
     <>
       <PageHeader
+        management
         crumbs={["Admin", "Barangay Management"]}
         title="Barangay Management"
+        subtitleClassName="text-[#C4D2E0]"
         subtitle="Create and manage the barangays used across KALUSAGAP. Barangays are kept in the registry and managed by Active/Inactive status — existing records are never removed."
         action={
           canManage ? (
@@ -481,23 +488,25 @@ export default function BarangayManagement() {
         }
       />
 
+      <NavTabs item={navItem} compact />
+
       {/* Summary */}
       <div className="mb-4 grid grid-cols-3 gap-3">
-        <Card className="flex items-center gap-3 px-4 py-3">
+        <Card className="admin-kpi-card flex items-center gap-3 px-4 py-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-blue/10 text-brand-blue"><MapPin className="h-5 w-5" /></span>
           <span className="min-w-0">
             <span className="block text-xl font-semibold tabular-nums text-brand-ink">{loading ? "…" : counts.total}</span>
             <span className="block truncate text-xs text-brand-gray">Total barangays</span>
           </span>
         </Card>
-        <Card className="flex items-center gap-3 px-4 py-3">
+        <Card className="admin-kpi-card flex items-center gap-3 px-4 py-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700"><CheckCircle2 className="h-5 w-5" /></span>
           <span className="min-w-0">
             <span className="block text-xl font-semibold tabular-nums text-brand-ink">{loading ? "…" : counts.active}</span>
             <span className="block truncate text-xs text-brand-gray">Active</span>
           </span>
         </Card>
-        <Card className="flex items-center gap-3 px-4 py-3">
+        <Card className="admin-kpi-card flex items-center gap-3 px-4 py-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600"><Ban className="h-5 w-5" /></span>
           <span className="min-w-0">
             <span className="block text-xl font-semibold tabular-nums text-brand-ink">{loading ? "…" : counts.inactive}</span>

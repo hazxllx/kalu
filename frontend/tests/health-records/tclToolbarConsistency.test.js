@@ -34,6 +34,38 @@ test('the shared TCL toolbar keeps actions aligned and responsive', () => {
   assert.match(styles, /@media \(max-width: 639px\)[\s\S]*\.ui-tcl-toolbar-actions[\s\S]*width: 100%/);
 });
 
+test('Maternal TCL uses the accessible dropdown while other toolbar filters keep their button layout', () => {
+  assert.match(maternal, /filterVariant="dropdown"/);
+  assert.match(maternal, /filterLabel="Status"/);
+  assert.ok(maternal.includes('filterOptions={[{ value: "All", label: "All Status" }, ...STATUSES.map'));
+  assert.match(toolbar, /aria-haspopup="menu"/);
+  assert.match(toolbar, /role="menuitemradio"/);
+  assert.match(toolbar, /aria-checked=\{isSelected\}/);
+  assert.match(toolbar, /onFilter\(option\.value\)/);
+  assert.match(toolbar, /setFilterMenuOpen\(false\)/);
+  assert.match(toolbar, /Filter, Plus, Search/);
+  assert.match(toolbar, /ChevronDown/);
+  assert.match(toolbar, /Check/);
+  assert.match(toolbar, /event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"/);
+  assert.match(toolbar, /event\.key === "Home" \|\| event\.key === "End"/);
+  assert.match(toolbar, /event\.key === "Escape"/);
+  assert.match(toolbar, /addEventListener\("pointerdown"/);
+  assert.match(toolbar, /value === "Active".*bg-emerald-500/);
+  assert.match(toolbar, /value === "Delivered".*bg-blue-500/);
+  assert.match(toolbar, /value === "Transferred".*bg-violet-500/);
+  assert.match(toolbar, /value === "Inactive".*bg-gray-400/);
+  assert.match(styles, /\.ui-tcl-filter-trigger/);
+  assert.match(styles, /\.ui-tcl-filter-menu/);
+  assert.match(styles, /\.ui-tcl-toolbar--filter-dropdown[\s\S]*\.ui-tcl-filter-dropdown[\s\S]*flex: 1 1 100%/);
+  assert.match(toolbar, /filterVariant = "buttons"/);
+});
+
+test('maternal search, status filtering and pagination reset continue to use shared state', () => {
+  assert.match(maternal, /statusFilter === "All" \|\| r\.status === statusFilter/);
+  assert.match(maternal, /`\$\{r\.residentName\} \$\{r\.residentId\}`\.toLowerCase\(\)\.includes\(q\)/);
+  assert.match(maternal, /useEffect\(\(\) => \{ setPage\(1\); \}, \[period, year, month, quarter, search, statusFilter, isMaternalTclRoute\]\)/);
+});
+
 test('every client-record TCL variant uses a functional shared toolbar', () => {
   assert.match(programPage, /<TclToolbar/);
   assert.match(programPage, /onExport=/);

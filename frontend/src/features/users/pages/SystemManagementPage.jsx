@@ -30,6 +30,7 @@ const RolesOverview = () => {
   return (
     <>
       <PageHeader
+        management
         crumbs={["Roles"]}
         title="Roles"
         subtitle="System roles, their responsibilities and how much of the permission catalogue each one currently holds."
@@ -179,6 +180,7 @@ const SystemLogs = () => {
   return (
     <>
       <PageHeader
+        management
         crumbs={["Logs"]}
         title="System Logs"
         subtitle="Request-level runtime log — which endpoint was called, by whom, and with what result."

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import {
   RotateCcw,
   Save,
@@ -11,6 +12,7 @@ import {
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import Icon from "@/components/common/Icon";
+import { NavTabs } from "@/layouts/NavTabsLayout";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -79,15 +81,15 @@ const RolesOverviewSection = ({ permissionsForRole, selectedRoleId, onSelectRole
                   </div>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-brand-ink">{role.label}</p>
+                      <p className="text-sm font-semibold text-brand-ink">{role.label}</p>
                       {ROLE_POLICY[role.id] && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-goldpale px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-amber">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-goldpale px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-brand-amber">
                           <ShieldCheck className="h-3 w-3" strokeWidth={2.2} />
                           Guard-railed
                         </span>
                       )}
                       {isSelected && (
-                        <span className="rounded-full bg-brand-blue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                        <span className="rounded-full bg-brand-blue px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-white">
                           Selected
                         </span>
                       )}
@@ -102,7 +104,7 @@ const RolesOverviewSection = ({ permissionsForRole, selectedRoleId, onSelectRole
                           return (
                             <span
                               key={mod.id}
-                              className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600"
+                              className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600"
                             >
                               {mod.short} <span className="num text-slate-400">{on}/{modTotal}</span>
                             </span>
@@ -133,6 +135,9 @@ const RolesOverviewSection = ({ permissionsForRole, selectedRoleId, onSelectRole
  * into one coherent interface with a single sidebar entry.
  */
 export default function RoleAccessManagementPage() {
+  const { navItem } = /** @type {{ navItem?: { label: string, tabs: Array<{ label: string, icon: string, path: string }> } }} */ (
+    useOutletContext() || {}
+  );
   const { role: actorRole, user } = useAuth();
   const {
     permissionsForRole,
@@ -397,10 +402,13 @@ export default function RoleAccessManagementPage() {
     return (
       <>
         <PageHeader
-          crumbs={["Access Control", "Role & Access Management"]}
+          management
+          crumbs={[{ label: "Barangays & Access", to: "/app/admin/barangays" }, "Role & Access Management"]}
           title="Role & Access Management"
+          subtitleClassName="text-[#C4D2E0]"
           subtitle="Administrator-only area."
         />
+        <NavTabs item={navItem} compact />
         <Card className="p-10 text-center">
           <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-brand-danger/10 text-brand-danger">
             <ShieldAlert className="h-6 w-6" strokeWidth={1.8} />
@@ -421,10 +429,13 @@ export default function RoleAccessManagementPage() {
     return (
       <>
         <PageHeader
-          crumbs={["Access Control", "Role & Access Management"]}
+          management
+          crumbs={[{ label: "Barangays & Access", to: "/app/admin/barangays" }, "Role & Access Management"]}
           title="Role & Access Management"
+          subtitleClassName="text-[#C4D2E0]"
           subtitle="Manage roles and permissions for every system role."
         />
+        <NavTabs item={navItem} compact />
         <Card className="p-6">
           <p className={`text-sm ${matrixLoadState.status === "error" ? "text-brand-danger" : "text-slate-600"}`}>
             {!permissionsLoading && matrixLoadState.status === "error"
@@ -439,24 +450,27 @@ export default function RoleAccessManagementPage() {
   return (
     <>
       <PageHeader
-        crumbs={["Access Control", "Role & Access Management"]}
+        management
+        crumbs={[{ label: "Barangays & Access", to: "/app/admin/barangays" }, "Role & Access Management"]}
         title="Role & Access Management"
+        subtitleClassName="text-[#C4D2E0]"
         subtitle="Configure roles and manage access privileges for each system role."
       />
+      <NavTabs item={navItem} compact />
 
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex w-fit gap-1 rounded-lg border border-brand-border bg-white p-1">
           <button
             type="button"
             onClick={() => setActiveTab("overview")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${activeTab === "overview" ? "bg-brand-blue text-white" : "text-brand-gray hover:bg-slate-50 hover:text-brand-ink"}`}
+            className={`rounded-md px-4 py-1.5 text-[15px] font-medium transition-colors ${activeTab === "overview" ? "bg-brand-light text-brand-dark" : "text-brand-gray hover:bg-slate-50 hover:text-brand-ink"}`}
           >
             Roles Overview
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("permissions")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${activeTab === "permissions" ? "bg-brand-blue text-white" : "text-brand-gray hover:bg-slate-50 hover:text-brand-ink"}`}
+            className={`rounded-md px-4 py-1.5 text-[15px] font-medium transition-colors ${activeTab === "permissions" ? "bg-brand-light text-brand-dark" : "text-brand-gray hover:bg-slate-50 hover:text-brand-ink"}`}
           >
             Permission Matrix
           </button>
@@ -464,7 +478,7 @@ export default function RoleAccessManagementPage() {
 
         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
           {isDirty && (
-            <span className="mr-1 text-xs font-medium text-brand-amber" role="status">
+            <span className="mr-1 text-[13px] font-medium text-brand-amber" role="status">
               {changedIds.length} unsaved change{changedIds.length === 1 ? "" : "s"}
             </span>
           )}
@@ -490,7 +504,7 @@ export default function RoleAccessManagementPage() {
             type="button"
             onClick={handleSave}
             disabled={!isDirty || saving}
-            className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             <Save className="h-4 w-4" strokeWidth={1.9} />
             {saving ? "Saving..." : "Save Changes"}
@@ -526,7 +540,7 @@ export default function RoleAccessManagementPage() {
                   </button>
                 )}
               </div>
-              <label className="flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-600">
+              <label className="flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-[13px] font-medium text-slate-600">
                 <input
                   type="checkbox"
                   checked={sensitiveOnly}

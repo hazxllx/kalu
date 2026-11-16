@@ -907,6 +907,8 @@ export default function M1Records() {
                 onFilter={setStatusFilter}
                 filterValue={statusFilter}
                 filterOptions={[{ value: "All", label: "All Status" }, ...STATUSES.map((status) => ({ value: status, label: status }))]}
+                filterVariant="dropdown"
+                filterLabel="Status"
                 onExport={handleMaternalExport}
                 onNew={openCreate}
                 loading={saving}

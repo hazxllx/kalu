@@ -307,6 +307,7 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
   return (
     <>
       <PageHeader
+        management={roleKey === "admin"}
         crumbs={crumbs}
         title="Notifications"
         subtitle={

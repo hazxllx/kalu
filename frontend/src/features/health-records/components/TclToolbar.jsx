@@ -1,5 +1,5 @@
-import React from "react";
-import { Download, Plus, Search } from "lucide-react";
+import React, { useEffect, useId, useRef, useState } from "react";
+import { Check, ChevronDown, Download, Filter, Plus, Search } from "lucide-react";
 
 /**
  * Unified TCL toolbar component used across all TCL pages.
@@ -11,13 +11,74 @@ export function TclToolbar({
   onFilter = undefined,
   filterValue = "",
   filterOptions = [],
+  filterVariant = "buttons",
+  filterLabel = "Filter",
   onExport = undefined,
   onNew = undefined,
   newLabel = "New Record",
   loading = false,
 }) {
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const filterRootRef = useRef(null);
+  const filterTriggerRef = useRef(null);
+  const filterOptionRefs = useRef([]);
+  const filterMenuId = useId();
+  const selectedFilterIndex = Math.max(0, filterOptions.findIndex((option) => option.value === filterValue));
+  const selectedFilter = filterOptions[selectedFilterIndex] || { label: "All Status" };
+  const usesDropdown = filterVariant === "dropdown" && filterOptions.length > 0 && Boolean(onFilter);
+
+  useEffect(() => {
+    if (!filterMenuOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (!filterRootRef.current?.contains(event.target)) setFilterMenuOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setFilterMenuOpen(false);
+        filterTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [filterMenuOpen]);
+
+  useEffect(() => {
+    if (filterMenuOpen) filterOptionRefs.current[selectedFilterIndex]?.focus();
+  }, [filterMenuOpen, selectedFilterIndex]);
+
+  const focusFilterOption = (index) => {
+    filterOptionRefs.current[index]?.focus();
+  };
+
+  const handleFilterMenuKeyDown = (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const currentIndex = filterOptionRefs.current.findIndex((option) => option === document.activeElement);
+      const startIndex = currentIndex < 0 ? selectedFilterIndex : currentIndex;
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      focusFilterOption((startIndex + direction + filterOptions.length) % filterOptions.length);
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      focusFilterOption(event.key === "Home" ? 0 : filterOptions.length - 1);
+    } else if (event.key === "Tab") {
+      setFilterMenuOpen(false);
+    }
+  };
+
+  const statusIndicatorClass = (value) => {
+    if (value === "Active") return "bg-emerald-500";
+    if (value === "Delivered") return "bg-blue-500";
+    if (value === "Transferred") return "bg-violet-500";
+    if (value === "Inactive") return "bg-gray-400";
+    return "bg-brand-blue";
+  };
+
   return (
-    <div className="ui-tcl-toolbar">
+    <div className={`ui-tcl-toolbar${usesDropdown ? " ui-tcl-toolbar--filter-dropdown" : ""}`}>
       <div className="ui-tcl-toolbar-search">
         {/* Search field */}
         <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
@@ -30,6 +91,64 @@ export function TclToolbar({
           className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray"
         />
       </div>
+
+      {usesDropdown && (
+        <div className="ui-tcl-filter-dropdown" ref={filterRootRef}>
+          <button
+            ref={filterTriggerRef}
+            type="button"
+            className="ui-tcl-filter-trigger"
+            onClick={() => setFilterMenuOpen((open) => !open)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setFilterMenuOpen(true);
+              }
+            }}
+            aria-label={`${filterLabel}: ${selectedFilter.label}`}
+            aria-haspopup="menu"
+            aria-expanded={filterMenuOpen}
+            aria-controls={filterMenuId}
+          >
+            <Filter className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate text-left">{filterLabel}: {selectedFilter.label}</span>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-brand-gray${filterMenuOpen ? " rotate-180" : ""}`} aria-hidden="true" />
+          </button>
+          {filterMenuOpen && (
+            <div
+              id={filterMenuId}
+              role="menu"
+              aria-label={`${filterLabel} options`}
+              className="ui-tcl-filter-menu"
+              onKeyDown={handleFilterMenuKeyDown}
+            >
+              {filterOptions.map((option, index) => {
+                const isSelected = option.value === filterValue;
+                return (
+                  <button
+                    key={option.value}
+                    ref={(element) => { filterOptionRefs.current[index] = element; }}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={isSelected}
+                    tabIndex={isSelected ? 0 : -1}
+                    className={`ui-tcl-filter-option${isSelected ? " is-selected" : ""}`}
+                    onClick={() => {
+                      onFilter(option.value);
+                      setFilterMenuOpen(false);
+                      filterTriggerRef.current?.focus();
+                    }}
+                  >
+                    <span className={`ui-tcl-filter-indicator ${statusIndicatorClass(option.value)}`} aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                    {isSelected && <Check className="h-4 w-4 shrink-0 text-brand-blue" aria-hidden="true" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Actions */}
       {(onExport || onNew) && (
@@ -61,7 +180,7 @@ export function TclToolbar({
       )}
 
       {/* Status/filter selector if provided */}
-      {filterOptions.length > 0 && onFilter && (
+      {!usesDropdown && filterOptions.length > 0 && onFilter && (
         <div className="flex w-full flex-wrap gap-2">
           {filterOptions.map((option) => (
             <button
