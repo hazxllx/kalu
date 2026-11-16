@@ -421,7 +421,6 @@ children: [
       label: "Settings",
       icon: "Settings",
       path: "/app/health_supervisor/settings",
-      hidden: true,
     },
   ],
 

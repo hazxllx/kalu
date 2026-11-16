@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
+import TablePagination from "@/components/tables/TablePagination";
 import DocumentPreviewCard from "@/features/verification/components/DocumentPreviewCard";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
@@ -1127,7 +1128,6 @@ export default function UserManagement({ personnelOnly = false }) {
   const coverageOf = (row) =>
     row.barangay || row.facility || row.municipality || (row.roleId === "admin" ? "System-wide" : "—");
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const showEmpty = !loading && !loadError && users.length === 0;
 
 
@@ -1351,15 +1351,15 @@ export default function UserManagement({ personnelOnly = false }) {
       </div>
 
       {/* Pagination */}
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-brand-gray">
-        <span>
-          {loading ? "Loading accounts…" : `${total.toLocaleString()} account${total === 1 ? "" : "s"} · page ${page + 1} of ${totalPages}`}
-        </span>
-        <div className="flex gap-2">
-          <button onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0 || loading} className="rounded-btn border border-slate-200 px-3 py-1.5 disabled:opacity-50 dark:border-border">Previous</button>
-          <button onClick={() => setPage((value) => value + 1)} disabled={(page + 1) * pageSize >= total || loading} className="rounded-btn border border-slate-200 px-3 py-1.5 disabled:opacity-50 dark:border-border">Next</button>
-        </div>
-      </div>
+      <TablePagination
+        total={total}
+        page={page + 1}
+        pageSize={pageSize}
+        onPageChange={(nextPage) => setPage(nextPage - 1)}
+        showPageSize={false}
+        itemLabel="accounts"
+        className="mt-3"
+      />
 
       {modalTarget && (
         <AccountModal

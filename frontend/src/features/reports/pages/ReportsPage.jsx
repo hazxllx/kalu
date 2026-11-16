@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
+import TablePagination from "@/components/tables/TablePagination";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
 import ErrorState from "@/components/common/ErrorState";
@@ -150,6 +151,8 @@ export default function ReportsPage({ roleKey = "midwife" }) {
   );
   const [selectedReportType, setSelectedReportType] = useState("All");
   const [selectedPeriod, setSelectedPeriod] = useState("");
+  const [reportsPage, setReportsPage] = useState(1);
+  const reportsPageSize = 10;
   // Review step: a generated preview built from real source data, shown before
   // the report is submitted. Submission only happens from here.
   const [preview, setPreview] = useState(/** @type {any} */ (null));
@@ -316,6 +319,15 @@ export default function ReportsPage({ roleKey = "midwife" }) {
     const matchesType = selectedReportType === "All" || r.type === selectedReportType;
     return matchesType && (!supervisor || !selectedPeriod || r.period === selectedPeriod);
   });
+  const visibleReports = filteredReports.slice((reportsPage - 1) * reportsPageSize, reportsPage * reportsPageSize);
+
+  useEffect(() => {
+    setReportsPage(1);
+  }, [selectedReportType, selectedPeriod, coverage]);
+
+  useEffect(() => {
+    setReportsPage((page) => Math.min(page, Math.max(1, Math.ceil(filteredReports.length / reportsPageSize))));
+  }, [filteredReports.length]);
 
   // Validate real source data and save the draft snapshot before review.
   // Submission remains a separate, explicit action.
@@ -797,7 +809,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               </tr>
             </thead>
             <tbody>
-              {(supervisor && (loading || outgoingLoadError) ? [] : filteredReports).map((report) => (
+              {(supervisor && (loading || outgoingLoadError) ? [] : visibleReports).map((report) => (
                 <tr key={report.id} className="border-b border-brand-border hover:bg-brand-bg/50 transition-colors">
                   <td className="px-4 py-3 text-sm font-medium text-brand-ink">{report.name}</td>
                   <td className="px-4 py-3 text-sm text-brand-gray">{report.type}</td>
@@ -870,7 +882,18 @@ export default function ReportsPage({ roleKey = "midwife" }) {
             </tbody>
           </table>
         </div>
-        {supervisor && !loading && !outgoingLoadError && <p className="mt-2 text-caption text-brand-gray">Showing {filteredReports.length} of {scopedReports.length} loaded reports. History loads up to 200 records; these are not expected-submission totals.</p>}
+        {supervisor && !loading && !outgoingLoadError && <p className="mt-2 text-caption text-brand-gray">History loads up to 200 records; these are not expected-submission totals.</p>}
+        {!loading && !outgoingLoadError && filteredReports.length > reportsPageSize && (
+          <TablePagination
+            total={filteredReports.length}
+            page={reportsPage}
+            pageSize={reportsPageSize}
+            onPageChange={setReportsPage}
+            showPageSize={false}
+            itemLabel="reports"
+            className="mt-3"
+          />
+        )}
       </Card>
 
       {/* Review / Preview Modal — real-data summary before submission */}

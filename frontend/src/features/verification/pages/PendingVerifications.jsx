@@ -6,6 +6,7 @@ import VerificationBadge from "@/features/verification/components/VerificationBa
 import VerificationReviewDrawer from "@/features/verification/components/VerificationReviewDrawer";
 import VerificationQueueToolbar from "@/features/verification/components/VerificationQueueToolbar";
 import VerificationPagination from "@/features/verification/components/VerificationPagination";
+import TablePagination from "@/components/tables/TablePagination";
 import { SkeletonTable } from "@/components/common/Skeleton";
 import {
   approveResident,
@@ -15,7 +16,7 @@ import {
   rejectResident,
   requestResubmission,
 } from "@/services/api/verificationsApi";
-import { CheckCircle2, ChevronLeft, ChevronRight, History } from "lucide-react";
+import { CheckCircle2, ChevronRight, History } from "lucide-react";
 
 /**
  * Health Supervisor resident-verification page.
@@ -151,7 +152,6 @@ export default function PendingVerifications({
   };
 
   const filtered = rows;
-  const historyPageCount = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
   const visibleHistory = history.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
 
   const activeTab = TABS.find((t) => t.key === tab);
@@ -346,15 +346,17 @@ export default function PendingVerifications({
             </tbody>
           </table>
         </div>
-        <div className="flex items-center justify-between border-t border-brand-border px-6 py-3 text-sm text-brand-gray">
-          <button type="button" onClick={() => setHistoryPage((current) => Math.max(1, current - 1))} disabled={historyPage === 1} className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-3 py-1.5 font-medium text-brand-ink disabled:cursor-not-allowed disabled:opacity-40">
-            <ChevronLeft className="h-4 w-4" /> Previous
-          </button>
-          <span>Page {historyPage} of {historyPageCount}</span>
-          <button type="button" onClick={() => setHistoryPage((current) => Math.min(historyPageCount, current + 1))} disabled={historyPage >= historyPageCount} className="inline-flex items-center gap-1 rounded-btn border border-brand-border px-3 py-1.5 font-medium text-brand-ink disabled:cursor-not-allowed disabled:opacity-40">
-            Next <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+        {history.length > HISTORY_PAGE_SIZE && (
+          <TablePagination
+            total={history.length}
+            page={historyPage}
+            pageSize={HISTORY_PAGE_SIZE}
+            onPageChange={setHistoryPage}
+            showPageSize={false}
+            itemLabel="decisions"
+            className="rounded-none border-0 border-t px-6"
+          />
+        )}
       </Card>
 
       <AnimatePresence>

@@ -271,7 +271,7 @@ export default function MHODashboard() {
 
   return (
     <>
-      <PageHeader crumbs={["Dashboard"]} title="Municipal Health Dashboard" subtitle="Municipality of Pili, Camarines Sur" />
+      <PageHeader dense crumbs={["Dashboard"]} title="Municipal Health Dashboard" subtitle="Municipality of Pili, Camarines Sur" />
 
       {loadErrors.length > 0 && (
         <Card className="mb-4 flex items-start justify-between gap-3 border-brand-danger/30 bg-brand-danger/5 p-4">
@@ -303,25 +303,25 @@ export default function MHODashboard() {
         ))}
       </KpiHorizontal>
 
-      <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-card">
+      <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-card dark:border-border dark:bg-card">
         <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-semibold text-brand-ink">Health Heatmap</p>
-            <p className="text-xs text-brand-gray">Municipality of Pili · {periodLabel}</p>
+            <p className="text-sm font-semibold text-brand-ink dark:text-foreground">Health Heatmap</p>
+            <p className="text-xs text-brand-gray dark:text-muted-foreground">Municipality of Pili · {periodLabel}</p>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <label className="text-xs font-medium text-brand-gray">
+            <label className="text-xs font-medium text-brand-gray dark:text-muted-foreground">
               Condition
               <select
                 value={condition}
                 onChange={(event) => setCondition(event.target.value)}
-                className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink"
+                className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink dark:border-border dark:bg-card-nested dark:text-foreground"
               >
                 <option value="All">All conditions</option>
                 {conditionNames.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
             </label>
-            <label className="text-xs font-medium text-brand-gray">
+            <label className="text-xs font-medium text-brand-gray dark:text-muted-foreground">
               Barangay
               <select
                 value={barangayFilter}
@@ -330,31 +330,31 @@ export default function MHODashboard() {
                   setBarangayFilter(value);
                   setSelectedName(value === "All" ? null : value);
                 }}
-                className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink"
+                className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink dark:border-border dark:bg-card-nested dark:text-foreground"
               >
                 <option value="All">All barangays</option>
                 {barangays.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
               </select>
             </label>
-            <label className="text-xs font-medium text-brand-gray">
+            <label className="text-xs font-medium text-brand-gray dark:text-muted-foreground">
               Reporting period
               <select
                 value={mapPeriod}
                 onChange={(event) => setMapPeriod(event.target.value)}
-                className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink"
+                className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink dark:border-border dark:bg-card-nested dark:text-foreground"
               >
                 {MAP_PERIODS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
             {mapPeriod === "custom" && (
               <>
-                <label className="text-xs font-medium text-brand-gray">
+                <label className="text-xs font-medium text-brand-gray dark:text-muted-foreground">
                   From
-                  <input type="date" value={customRange.from} onChange={(event) => setCustomRange((range) => ({ ...range, from: event.target.value }))} className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink" />
+                  <input type="date" value={customRange.from} onChange={(event) => setCustomRange((range) => ({ ...range, from: event.target.value }))} className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink dark:border-border dark:bg-card-nested dark:text-foreground" />
                 </label>
-                <label className="text-xs font-medium text-brand-gray">
+                <label className="text-xs font-medium text-brand-gray dark:text-muted-foreground">
                   To
-                  <input type="date" value={customRange.to} onChange={(event) => setCustomRange((range) => ({ ...range, to: event.target.value }))} className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink" />
+                  <input type="date" value={customRange.to} onChange={(event) => setCustomRange((range) => ({ ...range, to: event.target.value }))} className="mt-1 block w-full rounded-input border border-brand-border bg-white px-3 py-2 text-sm text-brand-ink dark:border-border dark:bg-card-nested dark:text-foreground" />
                 </label>
               </>
             )}
@@ -419,12 +419,12 @@ export default function MHODashboard() {
             </div>
           </div>
           <div className="space-y-3">
-            <section className="rounded-xl border border-brand-border bg-white p-3">
-              <h3 className="text-sm font-semibold text-brand-ink">Barangay Summary (This Period)</h3>
+            <section className="rounded-xl border border-brand-border bg-white p-3 dark:border-border dark:bg-card">
+              <h3 className="text-sm font-semibold text-brand-ink dark:text-foreground">Barangay Summary (This Period)</h3>
               <div className="mt-2 overflow-hidden">
                 <table className="w-full table-fixed text-xs">
                   <thead>
-                    <tr className="border-b border-brand-border text-left text-[10px] uppercase tracking-wide text-brand-gray">
+                    <tr className="border-b border-brand-border text-left text-[10px] uppercase tracking-wide text-brand-gray dark:border-border dark:text-muted-foreground">
                       <th className="w-[40%] py-2 pr-1 font-semibold">Barangay</th>
                       <th className="w-[22%] py-2 px-1 text-right font-semibold">Total Cases</th>
                       <th className="w-[38%] py-2 pl-2 font-semibold">Top Condition</th>
@@ -433,17 +433,17 @@ export default function MHODashboard() {
                   <tbody>
                     {barangaySummaryRows.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="py-3 text-center text-brand-gray">
+                        <td colSpan={3} className="py-3 text-center text-brand-gray dark:text-muted-foreground">
                           {mapStatus.loading ? "Loading authorized barangays…" : mapStatus.error ? "Barangay data unavailable." : "No registered barangays in your map scope."}
                         </td>
                       </tr>
                     ) : barangaySummaryRows.map((row) => (
-                      <tr key={row.name} className="border-b border-brand-border last:border-0">
-                        <td className="truncate whitespace-nowrap py-2 pr-1 font-medium text-brand-ink" title={row.name}>{row.name}</td>
-                        <td className="py-2 px-1 text-right text-brand-ink">
+                      <tr key={row.name} className="border-b border-brand-border last:border-0 dark:border-border">
+                        <td className="truncate whitespace-nowrap py-2 pr-1 font-medium text-brand-ink dark:text-foreground" title={row.name}>{row.name}</td>
+                        <td className="py-2 px-1 text-right text-brand-ink dark:text-foreground">
                           {mapStatus.loading ? "…" : mapStatus.error || !row.registryAvailable ? "Unavailable" : row.totalCases}
                         </td>
-                        <td className="truncate whitespace-nowrap py-2 pl-2 text-brand-gray" title={row.topCondition?.name || "No recorded condition"}>
+                        <td className="truncate whitespace-nowrap py-2 pl-2 text-brand-gray dark:text-muted-foreground" title={row.topCondition?.name || "No recorded condition"}>
                           {mapStatus.loading ? "…" : mapStatus.error || !row.registryAvailable ? "Unavailable" : row.topCondition?.value > 0
                             ? `${row.topCondition.name} (${row.topCondition.value})`
                             : "No cases"}

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
+import TablePagination from "@/components/tables/TablePagination";
 import { householdsApi } from "@/services/api/householdsApi";
 import { householdRiskApi } from "@/services/api/householdRiskApi";
 import { toRiskCluster, daysSince } from "../lib/riskClusterAdapter";
@@ -734,31 +735,16 @@ export default function HouseholdRiskOverview() {
           )}
 
           {/* Pagination */}
-          {filtered.length > 0 && (
-            <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
-              <div className="text-sm text-slate-600">
-                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filtered.length)} of {filtered.length} records
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Previous
-                </button>
-                <span className="text-sm text-slate-600">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+          {filtered.length > 0 && totalPages > 1 && (
+            <TablePagination
+              total={filtered.length}
+              page={currentPage}
+              pageSize={itemsPerPage}
+              onPageChange={setCurrentPage}
+              showPageSize={false}
+              itemLabel="records"
+              className="mt-4"
+            />
           )}
         </div>
       </div>
