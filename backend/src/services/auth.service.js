@@ -1,5 +1,5 @@
 import { getServiceClient, createAuthClient } from '../config/supabase.js';
-import { loadActiveProfile, profileToSessionUser } from './profile.service.js';
+import { loadSessionProfile, profileToSessionUser } from './profile.service.js';
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/supabaseRepository.js';
 import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';
@@ -53,7 +53,7 @@ export const signIn = async ({ email, password }) => {
   // no usable token is left behind.
   let profileResult;
   try {
-    profileResult = await loadActiveProfile(data.user.id);
+    profileResult = await loadSessionProfile(data.user.id);
   } catch (err) {
     try {
       // Revocation uses the service-role admin API (never the anon auth
@@ -66,8 +66,12 @@ export const signIn = async ({ email, password }) => {
     throw err;
   }
 
-  const { profile, unavailable } = profileResult;
-  const user = profile ? profileToSessionUser(profile) : metadataUser(data.user);
+  const { profile, unavailable, error: profileError, passwordStatus } = profileResult;
+  if (profileError) throw new ApiError(503, 'Profile lookup failed. Please try again.');
+  if (unavailable) throw new ApiError(503, 'The account profile service is temporarily unavailable. Please try again shortly.');
+  const user = profile
+    ? { ...profileToSessionUser(profile), mustChangePassword: passwordStatus?.mustChangePassword === true }
+    : metadataUser(data.user);
 
   return {
     user,
@@ -94,8 +98,12 @@ export const getCurrentUser = async (accessToken) => {
   if (error || !data?.user) throw ApiError.unauthorized('Invalid or expired session');
 
   // Profile is the source of truth; metadata is the pre-migration fallback.
-  const { profile } = await loadActiveProfile(data.user.id);
-  return profile ? profileToSessionUser(profile) : metadataUser(data.user);
+  const { profile, unavailable, error: profileError, passwordStatus } = await loadSessionProfile(data.user.id);
+  if (profileError) throw new ApiError(503, 'Profile lookup failed. Please try again.');
+  if (unavailable) throw new ApiError(503, 'The account profile service is temporarily unavailable. Please try again shortly.');
+  return profile
+    ? { ...profileToSessionUser(profile), mustChangePassword: passwordStatus?.mustChangePassword === true }
+    : metadataUser(data.user);
 };
 
 export const signOut = async (accessToken) => {
@@ -164,7 +172,7 @@ export const requestPasswordReset = async ({ email } = {}) => {
 
   const frontendUrl = env.clientUrl || env.clientUrls?.[0];
   if (!frontendUrl) throw new ApiError(503, 'The reset email could not be sent right now. Please try again shortly.');
-  const passwordPath = actionType === 'invite' ? '/setup-password' : '/reset-password';
+  const passwordPath = '/reset-password';
   // The generated token hash is verified on our app route, so preserve the
   // previously configured Supabase redirect target for compatibility.
   const redirectTo = `${new URL(frontendUrl).origin}/reset-password`;
@@ -211,10 +219,13 @@ const verifySetupOwner = async (accessToken) => {
 
 const setupStatus = (account) => ({
   setupRequired: account?.setupRequired === true,
+  mustChangePassword: account?.mustChangePassword === true,
   approvalStatus: account?.approvalStatus ?? null,
   activationRequested: account?.activationRequested === true,
   suspended: Boolean(account?.suspendedAt),
   active: account?.status === 'active',
+  temporaryPasswordAssignedAt: account?.temporaryPasswordAssignedAt ?? null,
+  passwordChangedAt: account?.passwordChangedAt ?? null,
 });
 
 const loadSetupAccount = async (owner) => {
@@ -268,4 +279,51 @@ export const setupPersonnelPassword = async ({ accessToken, password } = {}) => 
   }
 };
 
-export default { signIn, getCurrentUser, signOut, requestPasswordReset, getPersonnelSetupStatus, setupPersonnelPassword };
+export const changeTemporaryPersonnelPassword = async ({ accessToken, password } = {}) => {
+  const validation = personnelPasswordSetupValidator({ password });
+  if (validation.error) throw ApiError.badRequest('Validation failed', validation.error);
+  const owner = await verifySetupOwner(accessToken);
+  const account = await loadSetupAccount(owner);
+  if (!account || account.lifecycleVersion === null || !account.mustChangePassword) {
+    throw ApiError.conflict('This account does not require a temporary-password change.');
+  }
+  if (account.approvalStatus !== 'approved' || account.suspendedAt) {
+    throw ApiError.forbidden('A permanent password can be created only after approval and while the account is not suspended.');
+  }
+
+  let result;
+  try {
+    result = await getServiceClient().auth.admin.updateUserById(owner.id, { password: validation.value.password });
+  } catch {
+    throw new ApiError(503, 'The password change could not be confirmed. Please retry.');
+  }
+  if (result.error || result.data?.user?.id !== owner.id) {
+    throw new ApiError(503, 'The password change could not be confirmed. Please retry.');
+  }
+
+  let completed;
+  try {
+    completed = await repository.completeTemporaryPasswordChange(owner.id);
+  } catch {
+    throw new ApiError(503, 'Your password was saved, but the password-change requirement could not be confirmed. Please retry.');
+  }
+  if (!completed || completed.mustChangePassword) {
+    throw new ApiError(503, 'Your password was saved, but the password-change requirement could not be confirmed. Please retry.');
+  }
+  return {
+    passwordChanged: true,
+    active: completed.status === 'active',
+    approvalStatus: completed.approvalStatus,
+    activationRequested: completed.activationRequested,
+  };
+};
+
+export default {
+  signIn,
+  getCurrentUser,
+  signOut,
+  requestPasswordReset,
+  getPersonnelSetupStatus,
+  setupPersonnelPassword,
+  changeTemporaryPersonnelPassword,
+};

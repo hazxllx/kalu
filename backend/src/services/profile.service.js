@@ -245,4 +245,29 @@ export const loadActiveProfile = async (userId) => {
   return result;
 };
 
-export default { loadProfile, loadActiveProfile, effectiveRole, isStaffRole, profileToSessionUser, updateOwnContact };
+/**
+ * Resolve a session that may authenticate only to change an administrator-
+ * assigned temporary password. All other account-state checks remain intact.
+ */
+export const loadSessionProfile = async (userId) => {
+  const result = await loadProfile(userId);
+  if (result.error || result.unavailable || !result.profile) {
+    return { ...result, passwordStatus: { mustChangePassword: false } };
+  }
+  const { data, error } = await getServiceClient().from('personnel_accounts')
+    .select('must_change_password,approval_status,activation_requested,suspended_at')
+    .eq('account_id', userId)
+    .maybeSingle();
+  if (error) return { profile: null, unavailable: false, error };
+
+  const passwordStatus = {
+    mustChangePassword: data?.must_change_password === true,
+    approvalStatus: data?.approval_status ?? null,
+    activationRequested: data?.activation_requested === true,
+    suspended: Boolean(data?.suspended_at),
+  };
+  if (!passwordStatus.mustChangePassword) assertAccountUsable(result.profile);
+  return { ...result, passwordStatus };
+};
+
+export default { loadProfile, loadActiveProfile, loadSessionProfile, effectiveRole, isStaffRole, profileToSessionUser, updateOwnContact };

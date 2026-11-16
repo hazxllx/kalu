@@ -181,12 +181,30 @@ test('approved but inactive existing accounts do not promise access or reset pas
   assert.equal(f.state.links.length, 0);
 });
 
+test('temporary-password approval email requires first-login change without sending a password or setup link', async () => {
+  const f = fixture({
+    account: { must_change_password: true, setup_required: true },
+    profile: { status: 'disabled' },
+  });
+  await f.run();
+  assert.equal(f.state.links.length, 0);
+  assert.match(f.state.messages[0].subject, /Health Personnel Account Approved/);
+  assert.match(f.state.messages[0].text, /temporary login credentials/);
+  assert.match(f.state.messages[0].text, /required to create your own permanent password the first time you sign in/);
+  assert.match(f.state.messages[0].text, /keep your credentials confidential/);
+  assert.doesNotMatch(f.state.messages[0].text, /Temporary9|password:\s*\S+|Set Your Password/);
+});
+
 test('an unconfirmed setup-required identity gets an expiring invite, never createUser', async () => {
   const f = fixture({ account: { setup_required: true }, profile: { status: 'pending_verification' }, authUser: { email_confirmed_at: null } });
   await f.run();
   assert.deepEqual(f.state.links, [{ type: 'invite', email: EMAIL, options: { redirectTo: 'https://app.example.test/reset-password' } }]);
   assert(f.state.events.indexOf('auth:read') < f.state.events.indexOf('auth:link'));
   assert(f.state.events.indexOf('auth:link') < f.state.events.indexOf('begin'));
+  const setupLink = new URL(f.state.messages[0].text.match(/Set Your Password: (\S+)/)[1]);
+  assert.equal(setupLink.pathname, '/reset-password');
+  assert.equal(setupLink.searchParams.get('type'), 'invite');
+  assert.equal(setupLink.searchParams.get('token_hash'), TOKEN);
   assert.match(f.state.messages[0].text, /account remains inactive until you complete password setup/);
   assert.match(f.state.messages[0].text, /Activation has been requested/);
   assert.match(f.state.messages[0].text, /expiring, one-time/);

@@ -1,6 +1,6 @@
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';
-import { loadActiveProfile, profileToSessionUser } from '../services/profile.service.js';
+import { loadSessionProfile, profileToSessionUser } from '../services/profile.service.js';
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
@@ -79,9 +79,9 @@ export const authenticate = asyncHandler(async (req, res, next) => {
 
   const { user } = data;
 
-  // Resolve the application profile. loadActiveProfile throws the 403s for
-  // disabled / pending-verification accounts described above.
-  const { profile, unavailable, error: profileError } = await loadActiveProfile(user.id);
+  // Temporary-password sessions may resolve their profile for the password
+  // challenge only. Every other account still passes the normal state gate.
+  const { profile, unavailable, error: profileError, passwordStatus } = await loadSessionProfile(user.id);
 
   // A broken/absent profile LAYER is a service problem, not a missing account.
   // Reporting it as "no profile" would tell a correctly provisioned user to
@@ -102,7 +102,8 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     throw ApiError.forbidden('Your account has no profile. Contact your administrator.');
   }
 
-  const sessionUser = profileToSessionUser(profile);
+  const mustChangePassword = passwordStatus?.mustChangePassword === true;
+  const sessionUser = { ...profileToSessionUser(profile), mustChangePassword };
   if (['health_supervisor', 'bhw'].includes(sessionUser.role)) {
     const assignment = profile.barangay;
     const validAssignment = Boolean(
@@ -126,6 +127,7 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     name: sessionUser.name,
     role: sessionUser.role,
     status: sessionUser.status,
+    mustChangePassword,
     municipalityId: sessionUser.municipalityId,
     municipality: sessionUser.municipality,
     barangayId: sessionUser.barangayId,
@@ -140,6 +142,14 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     accessToken: token,
     authMode: 'supabase',
   };
+  if (mustChangePassword) {
+    const path = String(req.originalUrl || '').split('?')[0];
+    const allowedChallengeOperation = (req.method === 'GET' && path === '/api/auth/me')
+      || (req.method === 'POST' && path === '/api/auth/logout');
+    if (!allowedChallengeOperation) {
+      throw ApiError.forbidden('Create a permanent password before accessing KALUSAGAP.').withCode('PASSWORD_CHANGE_REQUIRED');
+    }
+  }
   return next();
 });
 

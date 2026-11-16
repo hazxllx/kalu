@@ -24,7 +24,7 @@ import { FullPageSkeleton } from '@/components/common/Skeleton';
  * screen, so the shell never flashes empty or unstyled.
  */
 export default function ProtectedRoute({ allow = [] }) {
-  const { isAuthenticated, isLoadingAuth, authChecked, isResolvingProfile, isSigningIn, isSigningOut, role } = useAuth();
+  const { isAuthenticated, isLoadingAuth, authChecked, isResolvingProfile, isSigningIn, isSigningOut, role, user } = useAuth();
   const location = useLocation();
 
   // Wait for the initial session restore AND for any in-flight resolution of a
@@ -37,6 +37,10 @@ export default function ProtectedRoute({ allow = [] }) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  if (user?.mustChangePassword) {
+    return <Navigate to="/change-password" replace />;
   }
 
   if (allow.length > 0 && !allow.includes(role)) {

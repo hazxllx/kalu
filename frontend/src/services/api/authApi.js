@@ -18,6 +18,9 @@ export const authApi = {
   personnelPasswordSetup: (password, token) => api.post('/auth/personnel/password-setup', { password }, {
     headers: { Authorization: `Bearer ${token}` },
   }),
+  temporaryPersonnelPasswordChange: (password, token) => api.post('/auth/personnel/temporary-password-change', { password }, {
+    headers: { Authorization: `Bearer ${token}` },
+  }),
 };
 
 export default authApi;

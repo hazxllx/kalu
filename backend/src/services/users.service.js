@@ -237,6 +237,7 @@ export const createUser = async ({ actorId, input = {} } = {}) => {
   const status = accountStatus(input.status, 'active');
   const approvalStatus = input.approvalStatus;
   const activate = input.activate ?? (status === 'active');
+  const temporaryPassword = input.temporaryPassword || null;
   const assignment = await makeProfileAssignment({
     role,
     municipalityId: input.municipalityId ? String(input.municipalityId).trim() : null,
@@ -251,6 +252,7 @@ export const createUser = async ({ actorId, input = {} } = {}) => {
     status: approvalStatus === 'pending' ? 'pending_verification' : 'disabled',
     approval_status: approvalStatus,
     activation_requested: activate,
+    must_change_password: Boolean(temporaryPassword),
     rhu_stations: makeStationAssignment(role, input.rhuStations),
     contact: normalizeOptionalText(input.contact),
     position: normalizeOptionalText(input.position),
@@ -264,7 +266,12 @@ export const createUser = async ({ actorId, input = {} } = {}) => {
     throw new ApiError(503, 'Account reservation could not be confirmed. Retry with the same operation reference.');
   }
   if (!reservation.completed) {
-    const createdId = await repository.createManagedAuthAccount({ id: reservation.target_id, email, fullName });
+    const createdId = await repository.createManagedAuthAccount({
+      id: reservation.target_id,
+      email,
+      fullName,
+      ...(temporaryPassword ? { temporaryPassword } : {}),
+    });
     if (createdId !== reservation.target_id) throw new ApiError(502, 'Auth did not confirm the reserved account identity.');
   }
   // The SQL transaction also records approval and queues email. No mail is sent

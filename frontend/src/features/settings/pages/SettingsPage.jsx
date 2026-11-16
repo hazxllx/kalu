@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationBanner from "@/features/verification/components/VerificationBanner";
+import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import OfficialLogosSection from "@/features/settings/components/OfficialLogosSection";
 import { fetchMyVerification } from "@/services/api/verificationsApi";
 import { residentsApi, authApi } from "@/services/api";
@@ -280,7 +281,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
   };
 
   return (
-    <>
+    <div className={isResident && isProfileRoute ? "mx-auto w-full max-w-[1000px]" : undefined}>
       <PageHeader management={roleKey === "admin"} crumbs={[isProfileRoute ? "Profile" : "Settings"]} title={isProfileRoute ? "Profile" : "Settings"} subtitle={isProfileRoute ? "View and update your account information." : "Manage your account security and information."} />
       {roleKey === "admin" && <NavTabs item={navItem} compact showIcons />}
 
@@ -291,6 +292,35 @@ export default function SettingsPage({ roleKey = "resident" }) {
           <section aria-label="Verification Status">
             <VerificationBanner showVerificationMethod />
           </section>
+        )}
+        {isResident && isProfileRoute && <TransferStatusBanner />}
+
+        {isResident && isProfileRoute && (
+          <Card className="rounded-lg px-5 py-5 shadow-none">
+            <div className="mb-4">
+              <h2 className="font-display text-lg text-brand-ink">Resident details</h2>
+              <p className="mt-1 text-xs text-brand-gray">Your profile information held by the barangay health office.</p>
+            </div>
+            <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+              {[
+                { label: "Resident name", value: account?.name || displayName },
+                { label: "Barangay", value: account?.barangay },
+                { label: "Birthday", value: account?.birthDate ? formatAccountDate(account.birthDate) : null },
+                { label: "Age", value: account?.age },
+                { label: "Sex", value: account?.sex },
+                { label: "Email", value: displayEmail },
+                { label: "Contact number", value: account?.contactNumber },
+                { label: "Address", value: account?.address },
+              ].map((item) => (
+                <div key={item.label} className="min-w-0 border-b border-brand-border pb-3">
+                  <dt className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">{item.label}</dt>
+                  <dd className="mt-1.5 truncate text-[13px] text-brand-ink">
+                    {accountLoading ? "Loading…" : item.value || "—"}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
         )}
 
         {/* Profile Information */}
@@ -652,6 +682,6 @@ export default function SettingsPage({ roleKey = "resident" }) {
           )}
         </Card>
       </div>
-    </>
+    </div>
   );
 }

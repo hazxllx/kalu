@@ -864,7 +864,7 @@ export default function DashboardLayout({ roleKey }) {
           </div>
         </header>
 
-        <main className={`app-main mx-auto min-w-0 ${roleKey === "admin" ? "admin-content max-w-content px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
+        <main className={`app-main mx-auto min-w-0 ${roleKey === "admin" ? "admin-content max-w-content px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : isSupervisor ? "max-w-shell px-4 py-5 sm:px-5 md:px-6 md:py-6 xl:px-7" : ["resident", "resident-limited"].includes(roleKey) ? "max-w-[1180px] px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8" : "max-w-content px-3 py-5 sm:px-4 sm:py-6 md:px-8 md:py-8"}`}>
           {notice && (!routePermissions || permissionsReady) && (
             <div
               className={`mb-4 flex flex-wrap items-center justify-between gap-3 border px-4 py-2 text-xs ${permissionsReady ? "border-amber-300 bg-amber-50 text-amber-950" : "border-brand-danger/30 bg-white text-brand-ink"}`}

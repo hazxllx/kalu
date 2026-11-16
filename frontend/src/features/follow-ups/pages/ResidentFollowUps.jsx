@@ -2,15 +2,17 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import KpiHorizontal from "@/components/common/KpiHorizontal";
 import TablePagination from "@/components/tables/TablePagination";
 import { residentFollowUpsApi } from "@/services/api";
 import { ScheduleDetailModal } from "../components/ScheduleCalendarViews";
-import ScheduleStatusBadge, { ConfirmationBadge } from "../components/ScheduleStatusBadge";
+import ScheduleStatusBadge from "../components/ScheduleStatusBadge";
 import { formatTime } from "../lib/scheduleDates";
-import { followUpDisplayStatus } from "../lib/scheduleDates";
 import {
-  Calendar, CalendarDays, CheckCircle2, XCircle, Clock, MapPin, User, AlertCircle, Ban, X, CalendarClock,
+  getResidentFollowUpPresentation,
+  summarizeResidentFollowUps,
+} from "../lib/residentFollowUpPresentation";
+import {
+  CalendarDays, CheckCircle2, Clock, MapPin, User, AlertCircle, Ban, X,
 } from "lucide-react";
 
 /**
@@ -21,20 +23,13 @@ import {
  * ownership from the session, so only the signed-in resident's follow-ups are
  * ever returned (no client-side owner filtering).
  *
- * Confirm / Reject go through the existing secure endpoints
+ * Confirm / Can't Attend go through the existing secure endpoints
  * (`/resident/follow-ups/:id/approve|reject`); rejection requires a reason,
  * stored on the canonical follow-up. Residents never edit the appointment
  * itself (date/time/location/provider/instructions).
  */
 
-/** A follow-up the resident can still respond to (confirm/reject). */
-const isActionable = (f) =>
-  ["Scheduled", "Pending"].includes(f.status) &&
-  f.confirmationStatus !== "Confirmed" &&
-  f.confirmationStatus !== "Rejected";
-
-/** Statuses counted as "Upcoming" (a confirmed/scheduled future visit). */
-const UPCOMING_STATUSES = ["Scheduled", "Today"];
+const isActionable = (followUp) => getResidentFollowUpPresentation(followUp).actionable;
 
 /** Human date for a YYYY-MM-DD value, parsed at LOCAL midnight (no UTC shift). */
 const fmtDate = (d) => {
@@ -44,20 +39,41 @@ const fmtDate = (d) => {
 };
 
 /** Resident-safe follow-up (camelCase) → detail-modal schedule shape. */
-const mapToSchedule = (row) => ({
-  id: row.id,
-  date: row.scheduledDate || "",
-  time: row.scheduledTime || "",
-  location: row.location || "",
-  provider: row.assignedProvider || "",
-  instructions: row.instructions || "",
-  purpose: row.purpose || "",
-  status: followUpDisplayStatus(row.status, row.scheduledDate),
-  confirmationStatus: row.confirmationStatus || (row.requiresResidentResponse ? "Awaiting Confirmation" : null),
-  respondedAt: row.respondedAt || "",
-  rejectionReason: row.rejectionReason || "",
-  requiresResidentResponse: row.requiresResidentResponse,
-});
+const mapToSchedule = (row) => {
+  const presentation = getResidentFollowUpPresentation(row);
+  return {
+    id: row.id,
+    date: row.scheduledDate || "",
+    time: row.scheduledTime || "",
+    location: row.location || "",
+    provider: row.assignedProvider || "",
+    instructions: row.instructions || "",
+    purpose: row.purpose || "",
+    status: presentation.statusLabel,
+    statusDetail: presentation.statusDetail,
+    confirmationStatus: row.confirmationStatus || (presentation.awaitingResponse ? "Awaiting Confirmation" : null),
+    respondedAt: row.respondedAt || "",
+    rejectionReason: row.rejectionReason || "",
+    requiresResidentResponse: row.requiresResidentResponse,
+  };
+};
+
+function FollowUpStat({ label, value, hint, tone }) {
+  const accent = {
+    amber: "border-b-brand-gold",
+    blue: "border-b-brand-blue",
+    green: "border-b-brand-green",
+    red: "border-b-brand-danger",
+  }[tone];
+
+  return (
+    <div className={`flex min-h-[112px] flex-col gap-1 rounded-lg border border-brand-border border-b-2 bg-white px-4 py-3.5 ${accent}`}>
+      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-brand-gray">{label}</span>
+      <span className="font-display text-2xl leading-none text-brand-ink tabular-nums">{value}</span>
+      <span className="mt-auto pt-1 text-[11px] leading-snug text-brand-gray">{hint}</span>
+    </div>
+  );
+}
 
 export default function ResidentFollowUps() {
   const [rows, setRows] = useState([]);
@@ -88,18 +104,14 @@ export default function ResidentFollowUps() {
 
   const schedules = useMemo(() => rows.map(mapToSchedule), [rows]);
 
-  const stats = useMemo(() => ({
-    actionRequired: rows.filter(isActionable).length,
-    // Confirmed/scheduled visits that no longer need a response (mutually
-    // exclusive with Action Required so a follow-up is never counted twice).
-    upcoming: rows.filter((f) => UPCOMING_STATUSES.includes(followUpDisplayStatus(f.status, f.scheduledDate)) && !isActionable(f)).length,
-    completed: rows.filter((f) => f.status === "Completed").length,
-    cancelled: rows.filter((f) => f.status === "Cancelled").length,
-  }), [rows]);
+  const stats = useMemo(() => summarizeResidentFollowUps(rows), [rows]);
 
   const sorted = useMemo(
     () => [...rows].sort((a, b) => {
-      if (isActionable(a) !== isActionable(b)) return isActionable(a) ? -1 : 1; // action-required first
+      const priority = { actionRequired: 0, upcoming: 1, completed: 2, cancelled: 3 };
+      const aCategory = getResidentFollowUpPresentation(a).category;
+      const bCategory = getResidentFollowUpPresentation(b).category;
+      if (aCategory !== bCategory) return priority[aCategory] - priority[bCategory];
       return `${a.scheduledDate}${a.scheduledTime}`.localeCompare(`${b.scheduledDate}${b.scheduledTime}`);
     }),
     [rows]
@@ -140,22 +152,22 @@ export default function ResidentFollowUps() {
       <PageHeader
         crumbs={["Follow-ups"]}
         title="My Follow-ups"
-        subtitle="Review the follow-ups your health team scheduled for you, and confirm or reject the ones that need your response."
+        subtitle="Review the follow-ups your health team scheduled for you, and respond to appointments that need your attention."
       />
 
-      <KpiHorizontal count={4} className="mb-6">
-        <KpiHorizontal.Item label="ACTION REQUIRED" value={stats.actionRequired} tone="amber" description="Awaiting your response" />
-        <KpiHorizontal.Item label="UPCOMING" value={stats.upcoming} tone="blue" description="Confirmed / scheduled visits" />
-        <KpiHorizontal.Item label="COMPLETED" value={stats.completed} tone="green" description="Completed visits" />
-        <KpiHorizontal.Item label="CANCELLED" value={stats.cancelled} tone="red" description="Rejected / cancelled" />
-      </KpiHorizontal>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <FollowUpStat label="Action required" value={stats.actionRequired} hint="Awaiting response, overdue or missed" tone="amber" />
+        <FollowUpStat label="Upcoming" value={stats.upcoming} hint="Future appointments" tone="blue" />
+        <FollowUpStat label="Completed" value={stats.completed} hint="Finished visits" tone="green" />
+        <FollowUpStat label="Cancelled" value={stats.cancelled} hint="Rejected or cancelled" tone="red" />
+      </div>
 
-      <Card className="p-6">
-        <h3 className="font-semibold text-brand-ink mb-4">Your Follow-ups</h3>
+      <section className="flex flex-col gap-3">
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-brand-gray">Your follow-ups</h2>
 
         {loading ? (
           <div className="py-12 text-center">
-            <Calendar className="w-10 h-10 text-brand-gray/50 mx-auto mb-3 animate-pulse" />
+            <CalendarDays className="w-10 h-10 text-brand-gray/50 mx-auto mb-3 animate-pulse" />
             <p className="text-sm text-brand-gray">Loading your follow-ups…</p>
           </div>
         ) : loadError ? (
@@ -165,58 +177,56 @@ export default function ResidentFollowUps() {
             <button onClick={load} className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">Try Again</button>
           </div>
         ) : sorted.length === 0 ? (
-          <div className="text-center py-12">
-            <CalendarDays className="w-12 h-12 text-brand-gray/50 mx-auto mb-4" />
-            <p className="text-brand-gray">No follow-ups scheduled yet.</p>
-            <p className="mt-1 text-xs text-brand-gray">When your health team schedules a follow-up, it will appear here.</p>
-          </div>
+          <>
+            <div className="text-center py-12">
+              <CalendarDays className="w-10 h-10 text-brand-gray/50 mx-auto mb-3" />
+              <p className="text-sm text-brand-gray">No follow-ups scheduled yet.</p>
+              <p className="mt-1 text-xs text-brand-gray">When your health team schedules a follow-up, it will appear here.</p>
+            </div>
+            <TablePagination total={0} page={1} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="mt-4" />
+          </>
         ) : (
           <>
           <div className="space-y-3">
             {pageRows.map((f, i) => {
-              const actionable = isActionable(f);
+              const presentation = getResidentFollowUpPresentation(f);
+              const actionable = presentation.actionable;
               return (
                 <motion.div
                   key={f.id}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.04 }}
-                  className={`rounded-xl border p-4 transition-colors ${
-                    actionable ? "border-amber-300 bg-amber-50/60 dark:bg-amber-500/5" : "border-brand-border hover:border-brand-blue/30"
-                  }`}
+                  transition={{ delay: Math.min(i * 0.035, 0.2) }}
+                  className="rounded-lg border border-brand-border bg-white p-4 transition-colors hover:border-brand-blue/30"
                 >
-                  {actionable && (
-                    <div className="mb-3 flex items-center gap-2 rounded-btn bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
-                      <AlertCircle className="h-3.5 w-3.5" /> Action Required — please confirm or reject this follow-up
-                    </div>
-                  )}
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-brand-blue/10 flex items-center justify-center shrink-0">
-                          <Calendar className="w-5 h-5 text-brand-blue" />
-                        </div>
-                        <div className="flex-1">
-                          <button onClick={() => setSelected(f.id)} className="text-left font-medium text-brand-ink hover:text-brand-blue">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-brand-blue/10 bg-brand-blue/5">
+                        <CalendarDays className="h-4 w-4 text-brand-blue" aria-hidden="true" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <button onClick={() => setSelected(f.id)} className="text-left font-display text-base font-semibold leading-snug text-brand-ink hover:text-brand-blue">
                             {f.purpose || "Follow-up"}
-                          </button>
-                          <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-brand-gray">
-                            <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> {fmtDate(f.scheduledDate)}</span>
-                            {f.scheduledTime && <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {formatTime(f.scheduledTime)}</span>}
-                            {f.location && <span className="flex items-center gap-1"><MapPin className="w-4 h-4" /> {f.location}</span>}
-                            {f.assignedProvider && <span className="flex items-center gap-1"><User className="w-4 h-4" /> {f.assignedProvider}</span>}
-                          </div>
+                        </button>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-brand-gray">
+                          <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-brand-blue/70" />{fmtDate(f.scheduledDate)}</span>
+                          {f.scheduledTime && <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-brand-blue/70" />{formatTime(f.scheduledTime)}</span>}
+                          {f.location && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-brand-blue/70" />{f.location}</span>}
+                          {f.assignedProvider && <span className="inline-flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-brand-blue/70" />{f.assignedProvider}</span>}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 sm:flex-col sm:items-end">
-                      <ScheduleStatusBadge value={followUpDisplayStatus(f.status, f.scheduledDate)} />
-                      {f.confirmationStatus && <ConfirmationBadge value={f.confirmationStatus} />}
+                    <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                      <ScheduleStatusBadge value={presentation.statusLabel} />
+                      {presentation.statusDetail && <span className="max-w-[220px] text-left text-[11px] leading-snug text-brand-gray sm:text-right">{presentation.statusDetail}</span>}
                     </div>
                   </div>
 
                   {f.instructions && (
-                    <p className="mt-3 rounded-btn bg-brand-bg/60 px-3 py-2 text-sm text-brand-ink dark:bg-card-nested">{f.instructions}</p>
+                    <div className="mt-4 rounded-md border border-brand-border/70 bg-brand-bg/50 px-3.5 py-3">
+                      <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-brand-gray">Instructions from your care team</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-brand-ink">{f.instructions.trim()}</p>
+                    </div>
                   )}
 
                   {f.confirmationStatus === "Rejected" && f.rejectionReason && (
@@ -226,20 +236,20 @@ export default function ResidentFollowUps() {
                   )}
 
                   {actionable && (
-                    <div className="mt-4 flex flex-wrap gap-3 border-t border-amber-200/70 pt-3 dark:border-amber-500/20">
+                    <div className="mt-4 flex flex-wrap gap-2 border-t border-brand-border/70 pt-3">
                       <button
                         disabled={busy}
                         onClick={() => setConfirmTarget(f.id)}
                         className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
                       >
-                        <CheckCircle2 className="h-4 w-4" /> Confirm Follow-up
+                        <CheckCircle2 className="h-4 w-4" /> Confirm
                       </button>
                       <button
                         disabled={busy}
                         onClick={() => setRejectTarget(f.id)}
                         className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/40 bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 disabled:opacity-60 dark:bg-card"
                       >
-                        <Ban className="h-4 w-4" /> Reject
+                        <Ban className="h-4 w-4" /> Can't Attend
                       </button>
                     </div>
                   )}
@@ -250,7 +260,7 @@ export default function ResidentFollowUps() {
           <TablePagination total={sorted.length} page={followUpPage} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="mt-4" />
           </>
         )}
-      </Card>
+      </section>
 
       {/* Read-only details — residents confirm/reject but never edit the appointment. */}
       {selectedSchedule && (
@@ -265,13 +275,13 @@ export default function ResidentFollowUps() {
                   onClick={() => { setConfirmTarget(selectedSchedule.id); setSelected(null); }}
                   className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
                 >
-                  <CheckCircle2 className="h-4 w-4" /> Confirm Follow-up
+                  <CheckCircle2 className="h-4 w-4" /> Confirm
                 </button>
                 <button
                   onClick={() => { setRejectTarget(selectedSchedule.id); setSelected(null); }}
                   className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/30 bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card"
                 >
-                  <Ban className="h-4 w-4" /> Reject
+                  <Ban className="h-4 w-4" /> Can't Attend
                 </button>
               </>
             ) : null
@@ -298,7 +308,7 @@ export default function ResidentFollowUps() {
                 <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
                   <button onClick={() => setConfirmTarget(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
                   <button disabled={busy} onClick={() => approve(s.id)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">
-                    <CheckCircle2 className="h-4 w-4" /> Confirm Follow-up
+                    <CheckCircle2 className="h-4 w-4" /> Confirm
                   </button>
                 </div>
               </div>
@@ -307,7 +317,7 @@ export default function ResidentFollowUps() {
         );
       })()}
 
-      {/* Reject modal — reason required */}
+      {/* Can't-attend modal — reason required */}
       {rejectTarget && (() => {
         const s = schedules.find((x) => x.id === rejectTarget);
         if (!s) return null;
@@ -324,7 +334,7 @@ export default function ResidentFollowUps() {
   );
 }
 
-/** Rejection modal: reason required (trimmed) before the follow-up can be rejected. */
+/** The existing rejection workflow requires a reason before saving Can't Attend. */
 function RejectModal({ schedule, busy, onClose, onSubmit }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
@@ -339,21 +349,21 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
         <div className="p-6">
           <div className="mb-1 flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold text-brand-ink">Reject Follow-up</h3>
+              <h3 className="text-lg font-semibold text-brand-ink">Can't Attend</h3>
               <p className="mt-0.5 text-sm text-brand-gray">
                 {schedule.purpose || "Follow-up"} · {fmtDate(schedule.date)}{schedule.time ? ` · ${formatTime(schedule.time)}` : ""}
               </p>
             </div>
             <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
-          <p className="mt-2 text-sm text-brand-gray">Please provide a reason for rejecting this scheduled follow-up.</p>
+          <p className="mt-2 text-sm text-brand-gray">Please tell your health team why you can't attend.</p>
           <div className="mt-4">
-            <label className="text-sm font-medium text-brand-ink">Reason for rejection <span className="text-brand-danger">*</span></label>
+            <label className="text-sm font-medium text-brand-ink">Reason <span className="text-brand-danger">*</span></label>
             <textarea
               rows={4}
               value={reason}
               onChange={(e) => { setReason(e.target.value); if (error) setError(""); }}
-              placeholder="Let your health worker know why you cannot attend."
+              placeholder="Let your health worker know why you can't attend."
               className={`mt-1.5 w-full resize-none rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${error ? "border-brand-danger" : "border-slate-200 dark:border-border"}`}
             />
             {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
@@ -361,7 +371,7 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
           <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
             <button disabled={!canSubmit} onClick={submit} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-60 disabled:cursor-not-allowed">
-              <Ban className="h-4 w-4" /> Reject Follow-up
+              <Ban className="h-4 w-4" /> Submit
             </button>
           </div>
         </div>

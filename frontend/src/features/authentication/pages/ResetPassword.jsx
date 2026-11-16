@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
 
 import {
   RegistrationShell,
@@ -42,6 +42,8 @@ export default function ResetPassword() {
   const [completion, setCompletion] = useState(null);
   const [partialSaved, setPartialSaved] = useState(false);
   const [verifyingLink, setVerifyingLink] = useState(false);
+  const [requestLinkEmail, setRequestLinkEmail] = useState("");
+  const [requestLinkState, setRequestLinkState] = useState({ loading: false, success: "", error: "" });
   const sessionRef = useRef(null);
   const pendingVerifyRef = useRef(null);
   const verifyingLinkRef = useRef(false);
@@ -224,6 +226,48 @@ export default function ResetPassword() {
     }
   };
 
+  const passwordRequirements = [
+    { label: "At least 8 characters", valid: newPassword.length >= 8 },
+    { label: "No more than 200 characters", valid: newPassword.length <= 200 },
+    { label: "At least one uppercase letter (A–Z)", valid: /[A-Z]/.test(newPassword) },
+    { label: "At least one lowercase letter (a–z)", valid: /[a-z]/.test(newPassword) },
+    { label: "At least one number (0–9)", valid: /\d/.test(newPassword) },
+    { label: "At least one special character (!, @, #, $, %, etc.)", valid: /[^A-Za-z0-9\s]/.test(newPassword) },
+    { label: "Special characters must not be whitespace", valid: !/\s/.test(newPassword) || !/[^A-Za-z0-9\s]/.test(newPassword) },
+  ];
+  const passwordRequirementsMet = passwordRequirements.every((item) => item.valid);
+  const confirmPasswordMessage = confirmPassword.length > 0
+    ? newPassword === confirmPassword ? "Passwords match." : "Passwords do not match."
+    : "";
+  const confirmPasswordIsValid = confirmPassword.length > 0 && newPassword === confirmPassword;
+
+  const requestFreshLink = async (event) => {
+    event.preventDefault();
+    const email = requestLinkEmail.trim();
+    if (requestLinkState.loading) return;
+    if (!email) {
+      setRequestLinkState({ loading: false, success: "", error: "Please enter your email address to request a new link." });
+      return;
+    }
+
+    setRequestLinkState({ loading: true, success: "", error: "" });
+    try {
+      await authApi.requestPasswordReset(email);
+      setRequestLinkState({
+        loading: false,
+        success: "A fresh password link has been sent to your email. Use the newest message to continue.",
+        error: "",
+      });
+      setRequestLinkEmail("");
+    } catch (failure) {
+      const status = Number(failure?.status || 0);
+      const message = status === 429
+        ? "Too many requests. Please wait a moment before requesting another link."
+        : "We could not send a fresh link right now. Please try again in a moment.";
+      setRequestLinkState({ loading: false, success: "", error: message });
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     if (submittingRef.current || status !== "ready") return;
@@ -380,6 +424,8 @@ export default function ResetPassword() {
   if (status === "invalid") {
     const isSetupLink = verificationTypeRef.current === "invite"
       || (typeof window !== "undefined" && window.location.pathname === "/setup-password");
+    const requestTitle = isSetupLink ? "Request a new setup link" : "Request a new reset link";
+    const actionLabel = isSetupLink ? "Send a new setup link" : "Send a new reset link";
     return (
       <RegistrationShell
         footer={
@@ -401,12 +447,46 @@ export default function ResetPassword() {
             <div className="mx-auto mt-2 h-[3px] w-14 rounded-full bg-brand-gold" aria-hidden="true" />
             <p className="mx-auto mt-4 max-w-md text-[13px] leading-relaxed text-slate-500">
               {error || (isSetupLink
-                ? "This password setup invitation is missing, invalid, or has expired. Request a fresh link and use the newest email."
-                : "This password reset link is missing, invalid, or has expired. Please request a new reset link and try again.")}
+                ? "This password setup invitation is missing, invalid, already used, or has expired. Request a fresh link and use the newest email."
+                : "This password reset link is missing, invalid, already used, or has expired. Please request a new reset link and try again.")}
             </p>
-            <div className="mt-7">
-              <Link to="/forgot-password" className={btnPrimary}>
-                {isSetupLink ? "Request a new setup link" : "Request a new reset link"}
+
+            <form onSubmit={requestFreshLink} className="mx-auto mt-7 w-full max-w-md space-y-3 text-left">
+              <Field label="Email Address" required>
+                <input
+                  type="email"
+                  autoComplete="email"
+                  value={requestLinkEmail}
+                  disabled={requestLinkState.loading}
+                  onChange={(event) => {
+                    setRequestLinkEmail(event.target.value);
+                    if (requestLinkState.error) setRequestLinkState((previous) => ({ ...previous, error: "" }));
+                    if (requestLinkState.success) setRequestLinkState((previous) => ({ ...previous, success: "" }));
+                  }}
+                  placeholder="name@example.com"
+                  className={inputCls(Boolean(requestLinkState.error))}
+                />
+              </Field>
+
+              <button type="submit" disabled={requestLinkState.loading} className={`${btnPrimary} w-full`}>
+                {requestLinkState.loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Sending...
+                  </>
+                ) : actionLabel}
+              </button>
+
+              {requestLinkState.success && (
+                <p role="status" className="text-[12px] font-medium text-brand-green">{requestLinkState.success}</p>
+              )}
+              {requestLinkState.error && (
+                <p role="alert" className="text-[12px] font-medium text-brand-danger">{requestLinkState.error}</p>
+              )}
+            </form>
+
+            <div className="mt-5">
+              <Link to="/forgot-password" className="text-sm font-semibold text-brand-blue underline decoration-brand-rule underline-offset-4 transition-colors hover:decoration-brand-blue">
+                {requestTitle}
               </Link>
             </div>
           </div>
@@ -472,12 +552,37 @@ export default function ResetPassword() {
           />
 
           <form onSubmit={submit} className="mt-6 space-y-5">
-            {setupStatus?.setupRequired && <InfoNote>{setupStatus.activationRequested === false ? "Your approved account will remain inactive after password setup until an administrator authorizes activation." : "Saving a password alone does not activate your account. The server must confirm that account setup is complete."}</InfoNote>}
             {error && (
               <InfoNote tone="danger" icon={AlertTriangle}>
                 {error}
               </InfoNote>
             )}
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+              <h3 className="text-sm font-semibold text-brand-dark">Password Requirements</h3>
+              <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
+                Create a secure password for your KALUSAGAP account. Make sure your password meets all the requirements below.
+              </p>
+              <ul className="mt-3 space-y-2 text-[12px] text-slate-600">
+                {passwordRequirements.map((requirement) => {
+                  const passes = requirement.valid;
+                  return (
+                    <li key={requirement.label} className="flex items-center gap-2">
+                      <span
+                        className={`flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${passes ? "border-brand-green/30 bg-brand-green/10 text-brand-green" : "border-slate-300 bg-white text-slate-400"}`}
+                        aria-hidden="true"
+                      >
+                        {passes ? <Check className="h-3 w-3" strokeWidth={2.5} /> : "•"}
+                      </span>
+                      <span className={passes ? "text-brand-dark" : "text-slate-500"}>{requirement.label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {passwordRequirementsMet && (
+                <p className="mt-3 text-[12px] font-medium text-brand-green">Your password meets all security requirements.</p>
+              )}
+            </div>
 
             <Field label="New Password" required trailing={eyeButton(showNew, () => setShowNew((v) => !v))}>
               <input
@@ -505,11 +610,16 @@ export default function ResetPassword() {
                 value={confirmPassword}
                 disabled={submitting}
                 onChange={(e) => { setConfirmPassword(e.target.value); setPartialSaved(false); if (error) setError(""); }}
-                className={`${inputCls()} pr-12`}
+                className={`${inputCls(confirmPassword.length > 0 && !confirmPasswordIsValid)} pr-12`}
               />
+              {confirmPasswordMessage && (
+                <p className={`mt-2 text-[11.5px] font-medium ${confirmPasswordIsValid ? "text-brand-green" : "text-brand-danger"}`}>
+                  {confirmPasswordMessage}
+                </p>
+              )}
             </Field>
 
-            <button type="submit" disabled={submitting} className={`${btnPrimary} w-full`}>
+            <button type="submit" disabled={submitting || !!(confirmPassword && newPassword && newPassword !== confirmPassword)} className={`${btnPrimary} w-full`}>
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" /> Updating...
@@ -518,6 +628,10 @@ export default function ResetPassword() {
                  partialSaved ? "Retry Account Setup" : setupStatus?.setupRequired ? "Save Password and Complete Setup" : "Update Password"
               )}
             </button>
+
+            <p className="text-center text-[11.5px] leading-relaxed text-slate-500">
+              Security tip: Use a unique password that you don't use for other websites. Never share your password with anyone.
+            </p>
 
             <p className="text-center">
               <Link

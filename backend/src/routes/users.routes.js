@@ -50,6 +50,7 @@ router.post(
       const input = req.body?.user || req.body || {};
       const permissions = ['accounts.create', 'accounts.roles.manage'];
       if (input.approvalStatus !== 'pending') permissions.push('accounts.personnel.approve');
+      if (typeof input.temporaryPassword === 'string') permissions.push('accounts.personnel.approve');
       if (input.activate ?? (input.status !== 'disabled')) permissions.push('accounts.deactivate');
       return permissions;
     },

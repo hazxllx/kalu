@@ -57,7 +57,7 @@ test('personnel list sends exact filters and pagination through real Supabase qu
     assert.equal(url.searchParams.get('notifications.order'), 'created_at.desc');
     assert.match(url.searchParams.get('select'), /personnel_accounts!account_id!inner/);
     assert.match(url.searchParams.get('select'), /personnel_notification_outbox!account_id/);
-    assert.doesNotMatch(url.searchParams.get('select'), /claim_token|claimed_at|password|action_link/);
+    assert.doesNotMatch(url.searchParams.get('select'), /(?:^|[,(!])(?:password|password_hash|temporary_password|action_link|claim_token|claimed_at)(?:[,!)])/);
     return respond([rawProfile()], { count: 150 });
   }, async () => {
     const result = await repository.listProfiles({ personnelOnly: true, lifecycleState: 'awaiting_setup', offset: 50, limit: 50 });

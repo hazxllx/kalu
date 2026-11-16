@@ -102,6 +102,7 @@ const actionLabelFor = (notification, role) => {
 export default function NotificationsPage({ crumbs = ["Notifications"] }) {
   const navigate = useNavigate();
   const { role } = useAuth();
+  const isAdmin = role === "admin";
   const { toast } = useToast();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -274,7 +275,7 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                 onClick={() => setActiveTab(seg.id)}
                 className={`flex h-8 items-center gap-2 rounded-[10px] px-3 text-sm font-medium transition-colors ${
                   active
-                    ? "bg-[#164A82] text-white shadow-sm"
+                    ? "bg-brand-blue text-white shadow-sm"
                     : "bg-transparent text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700"
                 }`}
               >
@@ -292,24 +293,25 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-start gap-2 sm:justify-end">
-        <button
-          onClick={markAllAsRead}
-          disabled={unreadCount === 0 || markAllPending.current || pendingReadIds.current.size > 0}
-          className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-blue/5 disabled:cursor-not-allowed disabled:text-slate-400 dark:disabled:text-slate-500"
-        >
-          <CheckCheck className="h-4 w-4" strokeWidth={1.9} /> Mark all as read
-        </button>
-      </div>
     </div>
   );
 
   return (
-    <>
+    <div className="mx-auto w-full max-w-[900px]">
       <PageHeader
-        management={roleKey === "admin"}
+        management={isAdmin}
         crumbs={crumbs}
         title="Notifications"
+        action={unreadCount > 0 ? (
+          <button
+            type="button"
+            onClick={markAllAsRead}
+            disabled={markAllPending.current || pendingReadIds.current.size > 0}
+            className="inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2 text-[12px] font-medium text-white transition-colors hover:bg-white/10 disabled:opacity-60"
+          >
+            <CheckCheck className="h-3.5 w-3.5" strokeWidth={1.9} /> Mark all as read
+          </button>
+        ) : null}
         subtitle={
           loading
             ? "Loading notifications..."
@@ -359,15 +361,15 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
               />
             </Card>
           ) : (
-            <Card className="p-4">
+            <Card className="overflow-hidden p-0">
               {Object.entries(grouped).map(([group, items]) => {
                 if (items.length === 0) return null;
                 return (
-                  <div key={group} className="mb-6 last:mb-0">
-                    <h4 className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">
+                  <div key={group}>
+                    <h4 className="border-b border-brand-border bg-brand-bg px-5 py-2 font-mono text-[9px] font-medium uppercase tracking-[0.13em] text-brand-gray">
                       {group === "today" ? "Today" : group === "yesterday" ? "Yesterday" : "Earlier"}
                     </h4>
-                    <div className="space-y-2">
+                    <ul className="divide-y divide-brand-border">
                       {items.map((n, i) => {
                         const CategoryIcon = getCategoryIcon(n.category);
                         const priority = hasPriority(n) ? n.priority : "";
@@ -383,14 +385,14 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                           ? `${n.title} — ${actionLabel.toLowerCase()}`
                           : `${n.title} — mark as read`;
                         return (
-                          <motion.div key={n.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
+                          <motion.li key={n.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
                             <div
-                              className={`flex items-start gap-3 rounded-btn p-3 transition-all ${
+                              className={`flex items-start gap-4 px-5 py-4 transition-colors ${
                                 priority
-                                  ? "border-l-2 border-l-[#FECACA] bg-[#FEF2F2]/60 hover:bg-[#FEF2F2] dark:border-l-red-800 dark:bg-red-950/20 dark:hover:bg-red-950/30"
+                                  ? "border-l-2 border-l-brand-danger/30 bg-brand-danger/5 hover:bg-brand-danger/10"
                                   : n.read
-                                    ? "hover:bg-slate-50 dark:hover:bg-hover"
-                                    : "bg-sky-50/70 hover:bg-sky-50 dark:bg-sky-500/5 dark:hover:bg-sky-500/10"
+                                    ? "hover:bg-brand-bg"
+                                    : "bg-brand-blue/[0.035] hover:bg-brand-blue/[0.06]"
                               } ${interactive ? "cursor-pointer" : ""}`}
                               role={interactive ? "button" : undefined}
                               tabIndex={interactive ? 0 : undefined}
@@ -403,7 +405,7 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                                 }
                               } : undefined}
                             >
-                              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${getCategoryColor(n)}`}>
+                              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${getCategoryColor(n)}`}>
                                 {priority
                                   ? <AlertTriangle className="h-4 w-4" strokeWidth={1.8} />
                                   : <CategoryIcon className="h-4 w-4" strokeWidth={1.8} />}
@@ -439,10 +441,10 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                                 </div>
                               </div>
                             </div>
-                          </motion.div>
+                          </motion.li>
                         );
                       })}
-                    </div>
+                    </ul>
                   </div>
                 );
               })}
@@ -450,6 +452,6 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
           )}
         </>
       )}
-    </>
+    </div>
   );
 }

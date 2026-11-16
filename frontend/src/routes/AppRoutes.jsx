@@ -171,6 +171,12 @@ const ResetPassword = publicPage(
       '@/features/authentication/pages/ResetPassword'
     )
 );
+const ChangeTemporaryPassword = publicPage(
+  () =>
+    import(
+      '@/features/authentication/pages/ChangeTemporaryPassword'
+    )
+);
 
 // Verification
 const VerificationsApprovals = appPage(
@@ -682,6 +688,10 @@ const AppRoutes = () => (
     <Route
       path="/reset-password"
       element={<ResetPassword />}
+    />
+    <Route
+      path="/change-password"
+      element={<ChangeTemporaryPassword />}
     />
     <Route
       path="/setup-password"

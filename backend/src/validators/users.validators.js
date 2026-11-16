@@ -1,4 +1,5 @@
 import { hasControlChars, isUuid, text, valid, invalid } from './common.js';
+import { personnelPasswordSetupValidator } from './auth.validators.js';
 
 export const PERSONNEL_ACTIONS = Object.freeze(['approve', 'reject', 'suspend', 'reactivate', 'invite', 'retry_email']);
 export const APPROVAL_STATUSES = Object.freeze(['pending', 'approved', 'rejected']);
@@ -11,6 +12,9 @@ const fieldsValidator = (body, { create = false } = {}) => {
   const errors = {};
   const value = { ...input };
   if (Object.hasOwn(input, 'password')) errors.password = 'Administrators cannot choose or supply an account password.';
+  if (!create && (Object.hasOwn(input, 'temporaryPassword') || Object.hasOwn(input, 'mustChangePassword'))) {
+    errors.temporaryPassword = 'Password assignment is available only during personnel account creation.';
+  }
   for (const field of ['email', 'name', 'fullName', 'contact', 'position', 'licenseNo', 'role', 'status', 'suspensionReason']) {
     if (input[field] !== undefined && typeof input[field] !== 'string') errors[field] = 'Use a text value.';
     else if (input[field] !== undefined && field !== 'suspensionReason' && hasControlChars(input[field])) errors[field] = 'Control characters are not allowed.';
@@ -32,6 +36,16 @@ const fieldsValidator = (body, { create = false } = {}) => {
     value.approvalStatus = input.approvalStatus === undefined ? 'approved' : input.approvalStatus;
     if (!['pending', 'approved'].includes(value.approvalStatus)) errors.approvalStatus = 'Choose pending or approved.';
     if (input.activate !== undefined && typeof input.activate !== 'boolean') errors.activate = 'Use true or false.';
+    if (input.temporaryPassword !== undefined) {
+      const passwordResult = personnelPasswordSetupValidator({ password: input.temporaryPassword });
+      if (passwordResult.error) errors.temporaryPassword = passwordResult.error.password;
+      if (!['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(input.role)) {
+        errors.temporaryPassword = 'A temporary password can only be assigned to health personnel accounts.';
+      }
+    }
+    if (Object.hasOwn(input, 'confirmTemporaryPassword')) {
+      errors.confirmTemporaryPassword = 'Only the temporary password may be submitted.';
+    }
   } else {
     for (const field of ['approvalStatus', 'activationRequested', 'activate', 'setupRequired', 'setupCompletedAt', 'suspendedAt', 'decisionReason']) {
       if (Object.hasOwn(input, field)) errors[field] = 'Use an explicit personnel lifecycle action for this field.';

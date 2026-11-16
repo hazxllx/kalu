@@ -19,33 +19,29 @@ import { api } from "@/services/api";
 const META = {
   transfer_pending: {
     label: "Transfer Pending",
-    tone: "border-amber-200 bg-amber-50",
-    iconWrap: "border-amber-200 bg-white text-amber-700",
-    chip: "text-amber-700 bg-amber-100",
+    heading: "Your transfer request is being reviewed",
+    chip: "border-brand-gold/40 bg-brand-gold/15 text-brand-dark",
     message: "Your residency transfer request is currently being reviewed by the health office.",
     Icon: Clock,
   },
   transfer_approved: {
     label: "Transfer Approved",
-    tone: "border-emerald-200 bg-emerald-50",
-    iconWrap: "border-emerald-200 bg-white text-emerald-700",
-    chip: "text-emerald-700 bg-emerald-100",
+    heading: "Your residency transfer has been approved",
+    chip: "border-brand-green/25 bg-brand-green/10 text-brand-green",
     message: "Your residency transfer has been approved. Your current barangay has been updated and your existing health record remains associated with your account.",
     Icon: BadgeCheck,
   },
   transfer_resubmission: {
     label: "Corrections Needed",
-    tone: "border-sky-200 bg-sky-50",
-    iconWrap: "border-sky-200 bg-white text-sky-700",
-    chip: "text-sky-700 bg-sky-100",
+    heading: "A few details before your transfer can be approved",
+    chip: "border-brand-gold/40 bg-brand-gold/15 text-brand-dark",
     message: "The health office needs corrections before your residency transfer can be approved. Review the instructions below and resubmit your request.",
     Icon: RotateCcw,
   },
   transfer_rejected: {
     label: "Transfer Rejected",
-    tone: "border-rose-200 bg-rose-50",
-    iconWrap: "border-rose-200 bg-white text-rose-700",
-    chip: "text-rose-700 bg-rose-100",
+    heading: "Your transfer request was not approved",
+    chip: "border-brand-danger/25 bg-brand-danger/10 text-brand-danger",
     message: "Your residency transfer request was rejected. Your current barangay and health records are unchanged.",
     Icon: ShieldAlert,
   },
@@ -87,46 +83,52 @@ export default function TransferStatusBanner() {
   const healthRecords = (transfer.documents || []).filter((d) => d.kind === "imported_health_record");
 
   return (
-    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-      <Card className={`p-6 ${meta.tone}`}>
-        <div className="flex items-start gap-4">
-          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border ${meta.iconWrap}`}>
-            <Icon className="h-6 w-6" strokeWidth={1.8} aria-hidden="true" />
+    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
+      <Card className="overflow-hidden rounded-lg border border-brand-border bg-white p-0 shadow-none">
+        <div className="flex flex-col gap-4 p-5 md:p-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-mono text-[9px] uppercase tracking-[0.15em] text-brand-gray">Residency transfer</p>
+            <span className="h-1 w-1 rounded-full bg-brand-border" />
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[9px] font-semibold uppercase tracking-[0.1em] ${meta.chip}`}>
+              <Icon className="h-3 w-3" strokeWidth={1.8} aria-hidden="true" />
+              {meta.label}
+            </span>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-brand-gray">Residency transfer</p>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <h2 className="font-heading text-lg font-semibold text-brand-ink">{meta.label}</h2>
-              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.06em] ${meta.chip}`}>
-                {(transfer.fromBarangay || "—")}
-                <ArrowRight className="mx-1 inline h-3 w-3" />
-                {(transfer.toBarangay || "—")}
-              </span>
+
+          <div className="flex flex-col gap-3">
+            <h2 className="max-w-2xl font-display text-xl leading-tight text-brand-ink">{meta.heading}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-brand-border bg-brand-bg px-2.5 py-1 text-[11px] font-medium text-brand-blue">{transfer.fromBarangay || "—"}</span>
+              <ArrowRight className="h-3.5 w-3.5 text-brand-gray" aria-hidden="true" />
+              <span className="rounded-full border border-brand-border bg-brand-bg px-2.5 py-1 text-[11px] font-medium text-brand-blue">{transfer.toBarangay || "—"}</span>
             </div>
-            <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-brand-gray">{meta.message}</p>
+            <p className="max-w-2xl text-[13px] leading-relaxed text-brand-gray">{meta.message}</p>
+          </div>
 
             {transfer.submittedAt && (
-              <p className="mt-2 text-xs text-brand-gray">
+              <p className="font-mono text-[10px] uppercase tracking-[0.09em] text-brand-gray">
                 Submitted on <span className="font-medium text-brand-ink">{formatDate(transfer.submittedAt)}</span>
               </p>
             )}
 
             {transfer.residencyStatus === "transfer_rejected" && transfer.rejectionReason && (
-              <p className="mt-3 rounded-lg border border-brand-danger/20 bg-white px-3 py-2 text-xs text-brand-ink">
-                <span className="font-semibold">Reason:</span> {transfer.rejectionReason}
+              <p className="rounded-lg border border-brand-border bg-brand-bg px-4 py-3 text-[13px] leading-relaxed text-brand-ink">
+                <span className="font-semibold">Reason</span>
+                <span className="mt-1 block">{transfer.rejectionReason}</span>
               </p>
             )}
 
             {transfer.residencyStatus === "transfer_resubmission" && (
-              <div className="mt-3">
+              <div>
                 {transfer.resubmissionInstructions && (
-                  <p className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs text-brand-ink">
-                    <span className="font-semibold">Instructions:</span> {transfer.resubmissionInstructions}
+                  <p className="rounded-lg border border-brand-border bg-brand-bg px-4 py-3 text-[13px] leading-relaxed text-brand-ink">
+                    <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.13em] text-brand-gray">Instruction</span>
+                    <span className="mt-1 block">{transfer.resubmissionInstructions}</span>
                   </p>
                 )}
                 <Link
                   to="/register/transfer"
-                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-sky-700 px-3 py-2 text-xs font-bold text-white hover:bg-sky-800"
+                  className="mt-3 inline-flex items-center gap-2 rounded-full bg-brand-blue px-4 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-brand-dark"
                 >
                   Provide corrections & resubmit <ArrowRight className="h-3.5 w-3.5" />
                 </Link>
@@ -134,14 +136,14 @@ export default function TransferStatusBanner() {
             )}
 
             {healthRecords.length > 0 && (
-              <div className="mt-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-brand-gray">Imported health record</p>
-                <ul className="mt-1.5 space-y-1.5">
+              <div>
+                <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-brand-gray">Imported health record</p>
+                <ul className="mt-2 space-y-2">
                   {healthRecords.map((doc) => (
-                    <li key={doc.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                    <li key={doc.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-border px-4 py-3 text-xs">
                       <FileText className="h-4 w-4 shrink-0 text-brand-blue" />
                       <span className="min-w-0 flex-1 truncate text-brand-ink">{doc.fileName}</span>
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 font-bold uppercase tracking-wide text-amber-700">
+                      <span className="shrink-0 rounded-full bg-brand-gold/15 px-2.5 py-1 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-brand-dark">
                         Pending verification
                       </span>
                       {doc.url && (
@@ -157,7 +159,6 @@ export default function TransferStatusBanner() {
                 </p>
               </div>
             )}
-          </div>
         </div>
       </Card>
     </motion.div>

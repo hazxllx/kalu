@@ -284,12 +284,38 @@ export default function TransferRegistration() {
                     ? "The health office has returned your transfer request for corrections. Review the instructions, then resubmit your request."
                     : "You already have a pending transfer request. Please wait for the current request to be reviewed before submitting another transfer."}
                 />
-                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-                  <p className="px-4 py-3 text-sm text-brand-ink"><strong>Current Barangay:</strong> {activeRequest.fromBarangay || resident?.barangay || "—"}</p>
-                  <p className="px-4 py-3 text-sm text-brand-ink"><strong>Requested Barangay:</strong> {activeRequest.toBarangay || "—"}</p>
-                  <p className="px-4 py-3 text-sm text-brand-ink"><strong>Status:</strong> {STATUS_LABELS[activeRequest.status] || activeRequest.status}</p>
-                  <p className="px-4 py-3 text-sm text-brand-ink"><strong>Submitted:</strong> {formatDate(activeRequest.submittedAt) || "—"}</p>
-                </div>
+                <section className="overflow-hidden rounded-lg border border-brand-border bg-white">
+                  <div className="flex flex-col gap-3 p-4 sm:p-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-brand-gray">Residency transfer</span>
+                      <span className="rounded-full bg-brand-gold/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-brand-dark">
+                        {STATUS_LABELS[activeRequest.status] || activeRequest.status}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-brand-border bg-brand-bg px-3 py-1 text-xs font-medium text-brand-blue">
+                        {activeRequest.fromBarangay || resident?.barangay || "—"}
+                      </span>
+                      <ArrowRight className="h-3.5 w-3.5 text-brand-gray" aria-hidden="true" />
+                      <span className="rounded-full border border-brand-border bg-brand-bg px-3 py-1 text-xs font-medium text-brand-blue">
+                        {activeRequest.toBarangay || "—"}
+                      </span>
+                    </div>
+                    <div className="grid gap-3 border-t border-brand-border pt-3 sm:grid-cols-2">
+                      <div>
+                        <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-brand-gray">Current barangay</p>
+                        <p className="mt-1 text-sm font-medium text-brand-ink">{activeRequest.fromBarangay || resident?.barangay || "—"}</p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-brand-gray">Requested barangay</p>
+                        <p className="mt-1 text-sm font-medium text-brand-ink">{activeRequest.toBarangay || "—"}</p>
+                      </div>
+                    </div>
+                    <p className="border-t border-brand-border pt-3 font-mono text-[10px] uppercase tracking-[0.08em] text-brand-gray">
+                      Submitted {formatDate(activeRequest.submittedAt) || "—"}
+                    </p>
+                  </div>
+                </section>
                 {needsResubmission ? (
                   <InfoNote tone="gold" icon={AlertCircle}>
                     <strong className="block text-brand-dark">What to correct</strong>

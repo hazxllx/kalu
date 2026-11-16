@@ -56,4 +56,20 @@ export const personnelPasswordSetup = async (req, res) => {
   sendData(res, await authService.setupPersonnelPassword({ accessToken: bearerToken(req), password: req.body.password }));
 };
 
-export default { login, me, updateMe, logout, forgotPassword, personnelSetupStatus, personnelPasswordSetup };
+export const temporaryPasswordChange = async (req, res) => {
+  sendData(res, await authService.changeTemporaryPersonnelPassword({
+    accessToken: bearerToken(req),
+    password: req.body.password,
+  }));
+};
+
+export default {
+  login,
+  me,
+  updateMe,
+  logout,
+  forgotPassword,
+  personnelSetupStatus,
+  personnelPasswordSetup,
+  temporaryPasswordChange,
+};

@@ -6,7 +6,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MANAGED_ROLES = new Set(['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw']);
 const ACCESS_EVENTS = new Set(['approved', 'reactivated', 'invitation']);
 const PROFILE_COLUMNS = 'id,email,full_name,role,status';
-const ACCOUNT_COLUMNS = 'account_id,approval_status,activation_requested,setup_required,setup_completed_at,suspended_at,decision_reason';
+const ACCOUNT_COLUMNS = 'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,suspended_at,decision_reason';
 const WORKER_ERROR_CODES = new Set([
   'PROFILE_READ_FAILED', 'ACCOUNT_READ_FAILED', 'ACCOUNT_IDENTITY_MISMATCH',
   'AUTH_USER_READ_FAILED', 'AUTH_IDENTITY_MISMATCH', 'AUTH_LINK_GENERATION_FAILED',
@@ -82,7 +82,13 @@ const buildMail = ({ job, account, profile, origin, actionLink, needsSetup, auth
     paragraphs.push(job.event_type === 'approved' ? `Your ${accountLabel} has been approved.`
       : job.event_type === 'reactivated' ? `Your administrator has removed the suspension from your approved ${accountLabel}.`
         : `Your administrator has invited you to set up your approved ${accountLabel}.`);
-    if (needsSetup) {
+    if (account.must_change_password === true) {
+      paragraphs.push('Your administrator has provided you with temporary login credentials.');
+      paragraphs.push('For security reasons, you will be required to create your own permanent password the first time you sign in.');
+      paragraphs.push('Please keep your credentials confidential. Your administrator will communicate the temporary password through an approved secure channel.');
+      link = `${origin}/login`;
+      linkLabel = 'Sign In';
+    } else if (needsSetup) {
       paragraphs.push('Approval alone does not grant access. Your account remains inactive until you complete password setup.');
       paragraphs.push(account.activation_requested
         ? 'Activation has been requested. Complete password setup before signing in.'
@@ -220,7 +226,8 @@ export const processPersonnelNotifications = ({
         if (account.account_id !== job.account_id || profile.id !== job.account_id || !validEmail(profile.email)) {
           throw failure('ACCOUNT_IDENTITY_MISMATCH');
         }
-        const needsSetup = ACCESS_EVENTS.has(job.event_type) && account.setup_required === true && !account.setup_completed_at;
+        const needsSetup = ACCESS_EVENTS.has(job.event_type) && account.setup_required === true
+          && !account.setup_completed_at && account.must_change_password !== true;
         if (job.event_type === 'invitation' && !needsSetup) {
           await finish('cancelled', 'NOTIFICATION_SETUP_COMPLETED');
           return;
@@ -255,7 +262,7 @@ export const processPersonnelNotifications = ({
           if (typeof tokenHash !== 'string' || tokenHash.length < 16 || tokenHash.length > 2048) {
             throw failure('AUTH_LINK_INVALID');
           }
-          const setupUrl = new URL('/setup-password', origin);
+          const setupUrl = new URL('/reset-password', origin);
           setupUrl.searchParams.set('token_hash', tokenHash);
           setupUrl.searchParams.set('type', type);
           actionLink = setupUrl.href;

@@ -48,6 +48,7 @@ const harness = async ({ role = 'admin', status = 'active', permissions = ALL_PE
         municipality_id: MUNICIPALITY, barangay_id: BARANGAY, facility_id: null, rhu_stations: [],
         barangay: { id: BARANGAY, name: 'San Isidro', status: 'Active', municipality_id: MUNICIPALITY },
       }, error: null };
+      if (table === 'personnel_accounts') return { data: null, error: null };
       if (table === 'role_permissions') return { data: ALL_PERMISSIONS.map((permission_id) => ({ permission_id, granted: permissions.includes(permission_id) })), error: null };
       if (table === 'staff_account_requests') return { data: request, error: null };
       if (table === 'staff_registration_documents') return { data: [], error: null };
@@ -221,6 +222,27 @@ test('setup status verifies real bearer identity without ordinary active-profile
     assert.equal((await api('/auth/personnel/setup-status', { token: null })).status, 401);
     assert.equal((await api('/auth/personnel/setup-status', { token: 'invalid-token' })).status, 401);
   });
+});
+
+test('temporary password change validates own-account input and delegates only the verified token identity', async () => {
+  const calls = [];
+  await harness({ ownerId: TARGET, repo: {
+    getPersonnelSetupAccount: async (id) => { calls.push(['account', id]); return profile({ mustChangePassword: true }); },
+    completeTemporaryPasswordChange: async (id) => { calls.push(['complete', id]); return profile({ mustChangePassword: false, setupRequired: false, status: 'active' }); },
+  } }, async ({ api, client }) => withMethods(client.auth.admin, {
+    updateUserById: async (id, input) => { calls.push(['password', id, input]); return { data: { user: { id } }, error: null }; },
+  }, async () => {
+    assert.equal((await api('/auth/personnel/temporary-password-change', { method: 'POST', body: { password: 'weak' } })).status, 400);
+    const result = await api('/auth/personnel/temporary-password-change', { method: 'POST', body: { password: PASSWORD } });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.json.data, { passwordChanged: true, active: true, approvalStatus: 'approved', activationRequested: true });
+    assert.deepEqual(calls, [
+      ['account', TARGET],
+      ['password', TARGET, { password: PASSWORD }],
+      ['complete', TARGET],
+    ]);
+    assert.doesNotMatch(JSON.stringify(result.json), /OwnerChosen9/);
+  }));
 });
 
 test('password setup rejects client ids/roles and weak passwords without updating anyone', async () => {

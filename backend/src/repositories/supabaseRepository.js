@@ -772,7 +772,7 @@ const residentSearchFilter = (term, { includeBarangay = false } = {}) => {
 const PROFILE_ADMIN_COLUMNS =
   'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations,position,license_no,contact,created_at,updated_at';
 const PERSONNEL_ACCOUNT_COLUMNS =
-  'account_id,approval_status,activation_requested,setup_required,setup_completed_at,suspended_at,suspension_reason,decision_reason,version';
+  'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,temporary_password_assigned_by,temporary_password_assigned_at,password_changed_at,suspended_at,suspension_reason,decision_reason,version';
 const PERSONNEL_NOTIFICATION_COLUMNS =
   'id,account_id,event_type,actor_id,reason,status,attempts,next_attempt_at,last_error_code,provider_message_id,created_at,sent_at';
 const PROFILE_ADMIN_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS},personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS}),notifications:personnel_notification_outbox!account_id(${PERSONNEL_NOTIFICATION_COLUMNS})`;
@@ -838,6 +838,7 @@ const ACCOUNT_AUDIT_FIELDS = new Set([
   'email', 'full_name', 'role', 'status', 'position', 'license_no', 'contact',
   'municipality_id', 'barangay_id', 'facility_id', 'rhu_stations', 'approval_status',
   'activation_requested', 'setup_required', 'setup_completed_at', 'suspended_at',
+  'must_change_password', 'temporary_password_assigned_by', 'temporary_password_assigned_at', 'password_changed_at',
   'suspension_reason', 'decision_reason', 'reason', 'outcome', 'operation_id',
   'approved_by', 'approved_at', 'rejected_by', 'rejected_at', 'suspended_by',
   'version', 'event_type', 'notification_id', 'request_id', 'profile_status',
@@ -894,6 +895,10 @@ export const profileToAdminUser = (row) => {
   activationRequested: lifecycle?.activation_requested ?? false,
   setupRequired: lifecycle?.setup_required ?? false,
   setupCompletedAt: lifecycle?.setup_completed_at ?? null,
+  mustChangePassword: lifecycle?.must_change_password === true,
+  temporaryPasswordAssignedBy: lifecycle?.temporary_password_assigned_by ?? null,
+  temporaryPasswordAssignedAt: lifecycle?.temporary_password_assigned_at ?? null,
+  passwordChangedAt: lifecycle?.password_changed_at ?? null,
   suspendedAt: lifecycle?.suspended_at ?? null,
   suspensionReason: lifecycle?.suspension_reason || '',
   decisionReason: lifecycle?.decision_reason || '',
@@ -1935,7 +1940,7 @@ export const supabaseRepository = {
     return Array.isArray(data) ? data[0] : data;
   },
 
-  async createManagedAuthAccount({ id, email, fullName }) {
+  async createManagedAuthAccount({ id, email, fullName, temporaryPassword = null }) {
     const admin = getServiceClient().auth.admin;
     const readReservedUser = async () => {
       let result;
@@ -1955,19 +1960,34 @@ export const supabaseRepository = {
       }
       return user;
     };
+    const setInitialPassword = async () => {
+      if (!temporaryPassword) return;
+      let updated;
+      try {
+        updated = await admin.updateUserById(id, { password: temporaryPassword, email_confirm: true });
+      } catch {
+        throw new ApiError(503, 'Temporary account credentials could not be confirmed. Retry with the same account request.');
+      }
+      if (updated.error || updated.data?.user?.id !== id) {
+        throw new ApiError(503, 'Temporary account credentials could not be confirmed. Retry with the same account request.');
+      }
+    };
 
     // A retry recovers ONLY the reserved identity. Never search by email and
     // adopt another account, or delete Auth after an uncertain SQL outcome.
     const existing = await readReservedUser();
-    if (existing) return existing.id;
+    if (existing) {
+      await setInitialPassword();
+      return existing.id;
+    }
     let created;
     try {
       created = await admin.createUser({
         id,
         email,
-        email_confirm: false,
+        email_confirm: Boolean(temporaryPassword),
         // Satisfy strict hosted password policies without exposing credentials.
-        password: `Aa1!${randomBytes(48).toString('base64url')}`,
+        password: temporaryPassword || `Aa1!${randomBytes(48).toString('base64url')}`,
         user_metadata: { full_name: fullName },
         app_metadata: { personnel_managed: true },
       });
@@ -2053,6 +2073,15 @@ export const supabaseRepository = {
   async completePersonnelAccountSetup(id) {
     const { data, error } = await getServiceClient().rpc('complete_personnel_account_setup', { p_target_id: id });
     throwAccountError(error, 'Your password was saved, but account setup could not be confirmed.');
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.id ? profileToAdminUser(row) : null;
+  },
+
+  async completeTemporaryPasswordChange(id) {
+    const { data, error } = await getServiceClient().rpc('complete_temporary_personnel_password_change', {
+      p_target_id: id,
+    });
+    throwAccountError(error, 'The password-change requirement could not be cleared.');
     const row = Array.isArray(data) ? data[0] : data;
     return row?.id ? profileToAdminUser(row) : null;
   },

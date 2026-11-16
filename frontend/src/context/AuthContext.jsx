@@ -39,6 +39,7 @@ const profileToFrontendUser = (profileUser) => ({
   name: profileUser.name || profileUser.email,
   role: profileUser.role,
   status: profileUser.status ?? null,
+  mustChangePassword: profileUser.mustChangePassword === true,
   assignedBarangay: profileUser.barangay ?? null,
   barangay: profileUser.barangay ?? null,
   barangayId: profileUser.barangayId ?? null,

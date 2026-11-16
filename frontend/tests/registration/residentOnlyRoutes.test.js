@@ -110,18 +110,20 @@ test("history consumes canonical API camel-case events and refreshes the real ac
 
 test("password setup keeps the existing reset route and verified bearer-only own-account API", () => {
   assert.match(routes, /path="\/reset-password"\s+element=\{<ResetPassword \/>\}/);
+  assert.match(routes, /path="\/setup-password"\s+element=\{<ResetPassword \/>\}/);
   assert.doesNotMatch(routes, /\/accept-invite|\/personnel-setup/);
   const authContext = source("context/AuthContext.jsx");
-  assert.match(authContext, /RECOVERY_PATH = '\/reset-password'/);
+  assert.match(authContext, /PASSWORD_LINK_PATHS = \['\/reset-password', '\/setup-password'\]/);
   const authApi = source("services/api/authApi.js");
   assert.match(authApi, /personnelSetupStatus: \(token\) => api.get\('\/auth\/personnel\/setup-status'/);
   assert.match(authApi, /personnelPasswordSetup: \(password, token\) => api.post\('\/auth\/personnel\/password-setup', \{ password \}/);
   assert.match(authApi, /Authorization: `Bearer \$\{token\}`/);
   const reset = source("features/authentication/pages/ResetPassword.jsx");
   assert.match(reset, /const outcome = await saveResetPassword/);
-  assert.match(reset, /setStatus\("done"\)/);
-  assert.ok(reset.indexOf("const outcome = await saveResetPassword(") < reset.indexOf('setStatus("done")'));
-  assert.ok(reset.indexOf('setStatus("done")') < reset.indexOf("await supabase.auth.signOut()"));
+  assert.match(reset, /setCompletion\(outcome\)/);
+  assert.ok(reset.indexOf("const outcome = await saveResetPassword(") < reset.indexOf("setCompletion(outcome)"));
+  assert.ok(reset.indexOf("setCompletion(outcome)") < reset.indexOf("await supabase.auth.signOut()"));
+  assert.ok(reset.indexOf("await supabase.auth.signOut()") < reset.indexOf('window.location.replace(`${window.location.origin}/login?passwordSetupComplete=1`)'));
   assert.match(reset, /if \(passwordWasSaved\(failure\)\)/);
 });
 

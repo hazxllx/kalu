@@ -79,6 +79,29 @@ test('creation reserves identity, silently creates Auth, then provisions approva
   });
 });
 
+test('temporary personnel credentials go only to Auth and never enter reservations or returned account data', async () => {
+  const temporaryPassword = 'Temporary9!Secure';
+  let reservedProfile;
+  let authInput;
+  await withMethods(repository, {
+    getAccountAssignmentOptions: async () => options(),
+    reservePersonnelAccount: async ({ profile: input }) => {
+      reservedProfile = input;
+      return { target_id: TARGET, completed: false };
+    },
+    createManagedAuthAccount: async (input) => { authInput = input; return TARGET; },
+    createPersonnelAccountProfile: async ({ profile: input }) => profile({ mustChangePassword: input.must_change_password }),
+    getProfileById: async () => profile({ mustChangePassword: true }),
+  }, async () => {
+    const result = await users.createUser({ actorId: ACTOR, input: creation({ temporaryPassword }) });
+    assert.equal(reservedProfile.must_change_password, true);
+    assert.equal(JSON.stringify(reservedProfile).includes(temporaryPassword), false);
+    assert.equal(authInput.temporaryPassword, temporaryPassword);
+    assert.equal(JSON.stringify(result).includes(temporaryPassword), false);
+    assert.equal(result.mustChangePassword, true);
+  });
+});
+
 test('pending creation with activation withheld uses one SQL workflow; administrator creation is managed too', async () => {
   for (const role of ['phn', 'admin']) {
     let payload;
@@ -133,6 +156,15 @@ test('invalid operations, password input and resident creation are refused befor
     for (const input of [creation({ operationId: undefined }), creation({ operationId: 'invalid' }), creation({ password: PASSWORD }), creation({ role: 'resident' })]) {
       await assert.rejects(() => users.createUser({ actorId: ACTOR, input }), (error) => [400, 422].includes(error.statusCode));
     }
+  });
+
+  test('temporary password creation enforces the personnel policy and rejects non-personnel assignment', () => {
+    assert.equal(validators.createUserValidator(creation({ temporaryPassword: PASSWORD })).error, undefined);
+    for (const password of ['short1!', 'UPPERCASE1!', 'lowercase1!', 'NoDigitsHere!', 'NoSpecial1 ']) {
+      assert.ok(validators.createUserValidator(creation({ temporaryPassword: password })).error?.temporaryPassword);
+    }
+    assert.ok(validators.createUserValidator(creation({ role: 'admin', temporaryPassword: PASSWORD })).error?.temporaryPassword);
+    assert.ok(validators.createUserValidator(creation({ temporaryPassword: PASSWORD, confirmTemporaryPassword: PASSWORD })).error?.confirmTemporaryPassword);
   });
 });
 
@@ -308,6 +340,24 @@ test('Auth creation retry recovers only the same reserved id and never adopts an
   });
 });
 
+test('temporary Auth provisioning confirms the identity and never echoes the chosen password', async () => {
+  const admin = getServiceClient().auth.admin;
+  const temporaryPassword = 'Temporary9!Secure';
+  await withMethods(admin, {
+    getUserById: async () => ({ data: { user: null }, error: { status: 404 } }),
+    createUser: async (input) => {
+      assert.equal(input.id, TARGET);
+      assert.equal(input.password, temporaryPassword);
+      assert.equal(input.email_confirm, true);
+      return { data: { user: { id: TARGET, email: EMAIL } }, error: null };
+    },
+  }, async () => {
+    assert.equal(await repository.createManagedAuthAccount({
+      id: TARGET, email: EMAIL, fullName: 'Nurse Juana', temporaryPassword,
+    }), TARGET);
+  });
+});
+
 test('mismatched Auth identity is refused and not deleted', async () => {
   const admin = getServiceClient().auth.admin;
   await withMethods(admin, {
@@ -320,7 +370,15 @@ test('mismatched Auth identity is refused and not deleted', async () => {
   });
 });
 
-const withSetup = async ({ account = profile(), owner = {}, updateError = null, completion = profile({ setupRequired: false, setupCompletedAt: '2026-10-31T10:00:00Z', status: 'active' }), completionError = null } = {}, run) => {
+const withSetup = async ({
+  account = profile(),
+  owner = {},
+  updateError = null,
+  completion = profile({ setupRequired: false, setupCompletedAt: '2026-10-31T10:00:00Z', status: 'active' }),
+  completionError = null,
+  temporaryCompletion = profile({ mustChangePassword: false, setupRequired: false, status: 'active', passwordChangedAt: '2026-10-31T10:00:00Z' }),
+  temporaryCompletionError = null,
+} = {}, run) => {
   const calls = [];
   const client = getServiceClient();
   return withMethods(client.auth, {
@@ -332,13 +390,16 @@ const withSetup = async ({ account = profile(), owner = {}, updateError = null, 
   }, () => withMethods(repository, {
     getPersonnelSetupAccount: async (id) => { calls.push(['account', id]); return account; },
     completePersonnelAccountSetup: async (id) => { calls.push(['complete', id]); if (completionError) throw completionError; return completion; },
+    completeTemporaryPasswordChange: async (id) => { calls.push(['temporaryComplete', id]); if (temporaryCompletionError) throw temporaryCompletionError; return temporaryCompletion; },
   }, () => run(calls))));
 };
 
 test('setup status verifies the token owner and allows pending/disabled managed profiles without active-profile authentication', async () => {
   await withSetup({}, async (calls) => {
     assert.deepEqual(await auth.getPersonnelSetupStatus({ accessToken: 'owner-token', id: ACTOR, role: 'admin' }), {
-      setupRequired: true, approvalStatus: 'approved', activationRequested: true, suspended: false, active: false,
+      setupRequired: true, mustChangePassword: false, approvalStatus: 'approved',
+      activationRequested: true, suspended: false, active: false,
+      temporaryPasswordAssignedAt: null, passwordChangedAt: null,
     });
     assert.deepEqual(calls, [['verify', 'owner-token'], ['account', TARGET]]);
   });
@@ -376,6 +437,64 @@ test('password setup requires confirmed email, approved unsuspended lifecycle an
       assert.equal(calls.some(([kind]) => ['password', 'complete'].includes(kind)), false);
     });
   }
+});
+
+test('temporary password change updates Auth first and clears the requirement only after trusted completion', async () => {
+  await withSetup({ account: profile({ mustChangePassword: true }) }, async (calls) => {
+    const result = await auth.changeTemporaryPersonnelPassword({ accessToken: 'owner-token', password: PASSWORD });
+    assert.deepEqual(result, {
+      passwordChanged: true,
+      active: true,
+      approvalStatus: 'approved',
+      activationRequested: true,
+    });
+    assert.deepEqual(calls, [
+      ['verify', 'owner-token'],
+      ['account', TARGET],
+      ['password', TARGET, { password: PASSWORD }],
+      ['temporaryComplete', TARGET],
+    ]);
+  });
+});
+
+test('temporary-password failures never call the completion operation or clear its requirement', async () => {
+  await withSetup({
+    account: profile({ mustChangePassword: true }),
+    updateError: { message: `provider detail ${PASSWORD}` },
+  }, async (calls) => {
+    await assert.rejects(() => auth.changeTemporaryPersonnelPassword({ accessToken: 'owner-token', password: PASSWORD }),
+      (error) => error.statusCode === 503 && !JSON.stringify(error).includes(PASSWORD));
+    assert.equal(calls.some(([kind]) => kind === 'temporaryComplete'), false);
+  });
+  await withSetup({
+    account: profile({ mustChangePassword: true }),
+    temporaryCompletionError: new Error('RPC unavailable'),
+  }, async (calls) => {
+    await assert.rejects(() => auth.changeTemporaryPersonnelPassword({ accessToken: 'owner-token', password: PASSWORD }),
+      (error) => error.statusCode === 503 && !JSON.stringify(error).includes(PASSWORD));
+    assert.equal(calls.some(([kind]) => kind === 'password'), true);
+    assert.equal(calls.some(([kind]) => kind === 'temporaryComplete'), true);
+  });
+});
+
+test('temporary-password changes require a valid policy, approval, unsuspended state, and an outstanding requirement', async () => {
+  for (const patch of [
+    { mustChangePassword: false },
+    { approvalStatus: 'pending', mustChangePassword: true },
+    { approvalStatus: 'rejected', mustChangePassword: true },
+    { suspendedAt: '2026-10-31T09:00:00Z', mustChangePassword: true },
+  ]) {
+    await withSetup({ account: profile(patch) }, async (calls) => {
+      await assert.rejects(() => auth.changeTemporaryPersonnelPassword({ accessToken: 'owner-token', password: PASSWORD }),
+        (error) => [403, 409].includes(error.statusCode));
+      assert.equal(calls.some(([kind]) => ['password', 'temporaryComplete'].includes(kind)), false);
+    });
+  }
+  await withSetup({ account: profile({ mustChangePassword: true }) }, async (calls) => {
+    await assert.rejects(() => auth.changeTemporaryPersonnelPassword({ accessToken: 'owner-token', password: 'WeakPass' }),
+      (error) => error.statusCode === 400);
+    assert.equal(calls.length, 0);
+  });
 });
 
 test('password is saved only for the verified owner and before SQL completion', async () => {
@@ -428,7 +547,8 @@ test('admin shape preserves raw historical stations and strips outbox credential
   assert.deepEqual(result.rhuStations, ['historical']);
   assert.equal(result.lifecycleVersion, 5);
   assert.equal(result.notification.status, 'delivery_unknown');
-  assert.doesNotMatch(JSON.stringify(result), /private-|claim_token|action_link|password/);
+  assert.equal(result.mustChangePassword, false);
+  assert.doesNotMatch(JSON.stringify(result), /private-|claim_token|action_link|"password"\s*:/);
 });
 
 test('account RPC error mapping is safe, explicit and never exposes SQL/Auth details', async () => {

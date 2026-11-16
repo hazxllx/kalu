@@ -518,8 +518,11 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
                 {variant === "resident" ? "Your scheduled follow-up" : schedule.residentName}
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <ScheduleStatusBadge value={schedule.status} />
+            <div className="flex items-start gap-2">
+              <div className="flex min-w-0 flex-col items-end gap-1">
+                <ScheduleStatusBadge value={schedule.status} />
+                {schedule.statusDetail && <span className="max-w-[220px] text-right text-[11px] leading-snug text-brand-gray">{schedule.statusDetail}</span>}
+              </div>
               <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
                 <X className="h-5 w-5" />
               </button>
@@ -544,7 +547,7 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
             {/* Resident confirmation — shared by both roles; the supervisor
                 sees the resident's response (and rejection reason) here without
                 creating or editing anything. */}
-            {schedule.confirmationStatus && (
+            {schedule.confirmationStatus && variant !== "resident" && (
               <div className="rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested">
                 <p className="text-[11px] uppercase tracking-wide text-brand-gray">
                   {variant === "resident" ? "Confirmation" : "Resident Confirmation"}
@@ -563,6 +566,14 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
                     <p className="mt-0.5 text-sm text-rose-700 dark:text-rose-300">{schedule.rejectionReason}</p>
                   </div>
                 )}
+              </div>
+            )}
+            {variant === "resident" && (schedule.statusDetail || schedule.respondedAt || schedule.rejectionReason) && (
+              <div className="rounded-btn bg-brand-bg/60 px-3.5 py-2.5 dark:bg-card-nested">
+                <p className="text-[11px] uppercase tracking-wide text-brand-gray">Status details</p>
+                {schedule.statusDetail && <p className="mt-1 text-sm text-brand-ink">{schedule.statusDetail}</p>}
+                {schedule.respondedAt && <p className="mt-1 text-xs text-brand-gray">Response recorded {formatDateTime(schedule.respondedAt)}</p>}
+                {schedule.rejectionReason && <p className="mt-1 text-sm text-brand-ink">Reason: {schedule.rejectionReason}</p>}
               </div>
             )}
             {/* Resident response prompt — shown only while the follow-up is

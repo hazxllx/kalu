@@ -344,6 +344,33 @@ export default function HealthRecord() {
     (serviceRecordPage - 1) * serviceRecordPageSize,
     serviceRecordPage * serviceRecordPageSize,
   );
+  const recordTimeline = useMemo(() => [
+    ...consultations.map((item) => ({
+      id: `consultation-${item.id}`,
+      type: "Health consultation",
+      date: item.date,
+      detail: [item.chiefComplaint, item.diagnosis].filter(Boolean).join(" · ") || "Consultation recorded",
+      tone: "blue",
+    })),
+    ...healthServiceRecords.map((item) => ({
+      id: `service-${item.id}`,
+      type: "Health service",
+      date: item.date,
+      detail: [item.serviceName, item.serviceProvided].filter(Boolean).join(" · ") || "Health service recorded",
+      tone: "green",
+    })),
+    ...vaccinations.map((item, index) => ({
+      id: `vaccination-${item.id || `${item.name}-${index}`}`,
+      type: "Vaccination",
+      date: item.date,
+      detail: [item.name, item.dose].filter(Boolean).join(" · ") || "Vaccination recorded",
+      tone: "yellow",
+    })),
+  ].filter((item) => item.date).sort((a, b) => String(b.date).localeCompare(String(a.date))), [
+    consultations,
+    healthServiceRecords,
+    vaccinations,
+  ]);
 
   useEffect(() => {
     setConsultationPage((page) => Math.min(page, consultationPageCount));
@@ -646,18 +673,18 @@ export default function HealthRecord() {
   );
 
   return (
-    <>
+    <div className="mx-auto w-full max-w-[1180px]">
       <PageHeader
         crumbs={["My Health Record"]}
         title="My Health Record"
         subtitle="A complete view of your medical history and vitals."
         action={
-          <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-col items-start gap-1 md:items-end">
             <button
               onClick={exportHealthRecord}
               disabled={loading || !!error || exporting}
               aria-busy={exporting}
-              className="flex items-center gap-2 bg-brand-blue text-white px-5 py-2.5 rounded-btn text-sm font-medium hover:bg-brand-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 rounded-full bg-brand-gold px-4 py-2 text-[13px] font-semibold text-brand-dark transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {exporting ? (
                 <>
@@ -685,19 +712,31 @@ export default function HealthRecord() {
         <Card className="p-6 text-sm text-brand-gray">Loading your health record…</Card>
       ) : (
         <>
-          <Card className="p-5 mb-6">
-            <div className="grid md:grid-cols-2 xl:grid-cols-6 gap-4 text-sm">
-              <div><p className="text-brand-gray">Resident Name</p><p className="font-semibold text-brand-ink">{dash(resident?.name)}</p></div>
-              <div><p className="text-brand-gray">Barangay</p><p className="font-semibold text-brand-ink">{dash(resident?.barangay)}</p></div>
-              <div><p className="text-brand-gray">Birthday</p><p className="font-semibold text-brand-ink">{dash(resident?.birthDate)}</p></div>
-              <div><p className="text-brand-gray">Age</p><p className="font-semibold text-brand-ink">{dash(resident?.age)}</p></div>
-              <div><p className="text-brand-gray">Sex</p><p className="font-semibold text-brand-ink">{dash(resident?.sex)}</p></div>
-              <div><p className="text-brand-gray">Verification</p><p className="font-semibold text-brand-ink capitalize">{dash(resident?.verificationStatus)}</p></div>
+          <Card className="mb-5 rounded-lg px-5 py-5 shadow-none">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm md:grid-cols-6">
+              {[
+                ["Resident name", resident?.name],
+                ["Barangay", resident?.barangay],
+                ["Birthday", resident?.birthDate ? formatDate(resident.birthDate) : null],
+                ["Age", resident?.age],
+                ["Sex", resident?.sex],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">{label}</p>
+                  <p className="mt-1.5 truncate text-[13px] text-brand-ink">{dash(value)}</p>
+                </div>
+              ))}
+              <div>
+                <p className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">Verification</p>
+                <p className="mt-1.5 inline-flex rounded-full border border-brand-border bg-brand-bg px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-ink">
+                  {dash(resident?.verificationStatus)}
+                </p>
+              </div>
             </div>
           </Card>
 
           {/* Section tabs — Consultation History is a subsection of this page. */}
-          <div className="mb-6 flex flex-wrap gap-1 border-b border-brand-border" role="tablist" aria-label="Health record sections">
+          <div className="mb-5 flex flex-wrap gap-1 border-b border-brand-border" role="tablist" aria-label="Health record sections">
             {[
               { key: "overview", label: "Overview" },
               { key: "consultations", label: "Consultation History" },
@@ -711,7 +750,7 @@ export default function HealthRecord() {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`-mb-px rounded-t-btn border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                  className={`-mb-px border-b-2 px-3.5 py-2.5 text-[12px] font-medium transition-colors ${
                     active
                       ? "border-brand-blue text-brand-blue"
                       : "border-transparent text-brand-gray hover:text-brand-ink"
@@ -735,7 +774,7 @@ export default function HealthRecord() {
                   <Card className="p-5 text-sm text-brand-gray xl:col-span-4">No vitals recorded yet.</Card>
                 ) : (
                   latestVitals.map((v) => (
-                    <Card key={v.label} className="p-5">
+                    <Card key={v.label} className="rounded-lg p-4 shadow-none">
                       <p className="text-xs text-brand-gray">{v.label}</p>
                       <p className="font-stat font-bold text-brand-ink text-lg">
                         {v.value} {v.unit && <span className="text-xs font-normal text-brand-gray">{v.unit}</span>}
@@ -746,7 +785,7 @@ export default function HealthRecord() {
               </div>
 
               <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-                <Card className="p-6">
+                <Card className="rounded-lg p-5 shadow-none">
                   <h3 className="font-semibold text-brand-ink mb-4">Medical History & Allergies</h3>
                   <div className="space-y-3 text-sm">
                     <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Chronic Conditions</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.chronicConditions || "—"}</span></div>
@@ -758,7 +797,7 @@ export default function HealthRecord() {
                   </div>
                 </Card>
 
-                <Card className="p-6">
+                <Card className="rounded-lg p-5 shadow-none">
                   <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2"><Syringe className="w-4 h-4 text-brand-blue" /> Vaccinations</h3>
                   <div className="space-y-3">
                     {vaccinations.length === 0 ? (
@@ -774,7 +813,7 @@ export default function HealthRecord() {
                   </div>
                 </Card>
 
-                <Card className="p-6">
+                <Card className="rounded-lg p-5 shadow-none">
                   <h3 className="font-semibold text-brand-ink mb-4 flex items-center gap-2"><FlaskConical className="w-4 h-4 text-brand-blue" /> Laboratory Results</h3>
                   <div className="space-y-3">
                     {labs.length === 0 ? (
@@ -790,10 +829,36 @@ export default function HealthRecord() {
                   </div>
                 </Card>
               </div>
+
+              <Card className="mt-5 rounded-lg p-5 shadow-none">
+                <div className="mb-4">
+                  <h3 className="font-display text-lg text-brand-ink">Health timeline</h3>
+                  <p className="mt-1 text-xs text-brand-gray">Your recorded health activity, newest first.</p>
+                </div>
+                {recordTimeline.length ? (
+                  <ol className="relative">
+                    <span aria-hidden="true" className="absolute bottom-3 left-[6px] top-3 w-px bg-brand-border" />
+                    {recordTimeline.map((item) => (
+                      <li key={item.id} className="relative flex gap-4 py-3 first:pt-0 last:pb-0">
+                        <span className={`relative z-10 mt-1 h-[13px] w-[13px] shrink-0 rounded-full ring-4 ring-white ${
+                          item.tone === "green" ? "bg-brand-green" : item.tone === "yellow" ? "bg-brand-gold" : "bg-brand-blue"
+                        }`} />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">{item.type}</p>
+                          <p className="mt-1 text-[13px] leading-relaxed text-brand-ink">{item.detail}</p>
+                          <p className="mt-0.5 font-mono text-[10px] text-brand-gray">{formatDate(item.date)}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="py-2 text-sm text-brand-gray">Nothing recorded yet.</p>
+                )}
+              </Card>
             </>
           )}
         </>
       )}
-    </>
+    </div>
   );
 }

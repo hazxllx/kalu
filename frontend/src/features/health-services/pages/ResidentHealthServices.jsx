@@ -140,23 +140,23 @@ export default function ResidentHealthServices() {
 
       {state === "ready" && (
         <div className="space-y-5">
-          <section className="rounded-card border border-brand-border bg-white p-4 shadow-card md:p-5">
-            <div className="mb-3">
-              <h2 className="text-sm font-semibold text-brand-ink">Find health services</h2>
+          <section className="flex flex-col gap-3 rounded-lg border border-brand-border bg-white px-5 py-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="font-display text-base text-brand-ink">Find a health service</h2>
               <p className="mt-0.5 text-xs text-brand-gray">Filter by availability and the facility offering the service.</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-wrap gap-3">
               <label className="grid gap-1.5 text-xs font-medium text-brand-gray">
                 Availability
-                <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 rounded-btn border border-brand-border bg-white px-3 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 min-w-[160px] rounded-full border border-brand-border bg-white px-3.5 text-xs text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
                   <option value="all">All services</option>
                   <option value="open">Open for registration</option>
                   <option value="closed">Closed for registration</option>
                 </select>
               </label>
               <label className="grid gap-1.5 text-xs font-medium text-brand-gray">
-                Scope
-                <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 rounded-btn border border-brand-border bg-white px-3 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                Facility
+                <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 min-w-[180px] rounded-full border border-brand-border bg-white px-3.5 text-xs text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
                   <option value="all">All facilities</option>
                   <option value="bhc">Barangay Health Center</option>
                   <option value="rhu">Rural Health Unit (RHU)</option>
@@ -295,16 +295,15 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPr
   useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
 
   return (
-    <section className="overflow-hidden rounded-card border border-brand-border bg-white shadow-card">
-      <header className="border-b border-brand-border px-5 py-4 md:px-6">
-        <h2 className="text-base font-semibold text-brand-ink">{title}</h2>
-        <p className="mt-0.5 text-[13px] text-brand-gray">{subtitle}</p>
+    <section className="flex flex-col gap-3">
+      <header>
+        <p className="font-mono text-[10px] uppercase tracking-[0.15em] text-brand-gray">{title}</p>
+        <p className="mt-1 text-[12px] text-brand-gray">{subtitle}</p>
       </header>
-      <div className="p-4 md:p-5">
-        {services.length === 0 ? (
-          <SectionEmpty />
-        ) : (
-          <div className="space-y-3">
+      {services.length === 0 ? (
+        <SectionEmpty />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {visibleServices.map((svc) => (
               <ServiceCard
                 key={svc.id}
@@ -315,20 +314,19 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPr
                 onPreviewMemo={onPreviewMemo}
               />
             ))}
-          </div>
-        )}
-        {services.length > 0 && (
-          <TablePagination
-            total={services.length}
-            page={page}
-            pageSize={pageSize}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
-            itemLabel="services"
-            className="mt-4"
-          />
-        )}
-      </div>
+        </div>
+      )}
+      {services.length > 0 && (
+        <TablePagination
+          total={services.length}
+          page={page}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+          itemLabel="services"
+          className="mt-1"
+        />
+      )}
     </section>
   );
 }
@@ -381,67 +379,88 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
   // resident sees the actual date and time before registering.
   const serviceSchedule = formatServiceSchedule(service.schedule);
   const registerBy = formatDeadline(service.schedule?.registrationDeadline);
+  const stateLabel = status || (avail.open ? "Available" : "Closed");
+  const stateClass = status === "Attended"
+    ? "bg-brand-green text-white"
+    : isActive
+      ? "bg-brand-blue text-white"
+      : avail.open
+        ? "bg-brand-gold text-brand-dark"
+        : "bg-brand-bg text-brand-ink";
+  const poster = (
+    <div className="relative aspect-[4/5] overflow-hidden bg-brand-dark">
+      {service.pubmatUrl && !pubmatFailed ? (
+        <img
+          src={service.pubmatUrl}
+          alt={`${service.name} publication material`}
+          loading="lazy"
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+          onError={() => setPubmatFailed(true)}
+        />
+      ) : (
+        <div className="grid h-full place-items-center bg-gradient-to-br from-brand-blue to-brand-dark">
+          <Stethoscope className="h-12 w-12 text-white/55" aria-hidden="true" />
+        </div>
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-brand-dark via-brand-dark/50 to-transparent" />
+      <span className={`absolute left-3 top-3 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${stateClass}`}>
+        {stateLabel}
+      </span>
+      <div className="absolute inset-x-4 bottom-4 text-left">
+        {service.category && <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-brand-gold">{service.category}</p>}
+        <h3 className="mt-1 font-display text-lg leading-snug text-white">{service.name}</h3>
+        <p className="mt-1 truncate font-mono text-[9px] uppercase tracking-[0.08em] text-white/70">{service.facilityName || "Health service"}</p>
+        {serviceSchedule && <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-white/55">{serviceSchedule}</p>}
+      </div>
+      {service.pubmatUrl && !pubmatFailed && (
+        <span className="absolute bottom-3 right-3 rounded-full bg-black/55 p-1.5 text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+          <ZoomIn className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      )}
+    </div>
+  );
 
   return (
-    <div className="rounded-card border border-brand-border bg-white px-4 py-4 transition-colors hover:border-brand-blue/40 md:px-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-5">
-        {/* Publication material thumbnail, when the service has one. */}
-        {service.pubmatUrl && !pubmatFailed ? (
-          <button type="button" onClick={() => onPreviewPubmat?.({ url: service.pubmatUrl, name: service.name })} className="group relative flex aspect-[3/4] w-20 shrink-0 items-center justify-center overflow-hidden rounded-card border border-brand-border bg-slate-50 p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue" aria-label={`Enlarge ${service.name} publication material`} title="Click to enlarge publication material">
-            <img
-              src={service.pubmatUrl}
-              alt={`${service.name} publication material`}
-              loading="lazy"
-              className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.03]"
-              onError={() => setPubmatFailed(true)}
-            />
-            <span className="absolute bottom-1 right-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
-              <ZoomIn className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
-          </button>
-        ) : (
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-card bg-brand-blue/10 text-brand-blue sm:mt-1">
-            <Stethoscope className="h-5 w-5" aria-hidden="true" />
+    <article className="group flex h-full flex-col overflow-hidden rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40">
+      {service.pubmatUrl && !pubmatFailed ? (
+        <button
+          type="button"
+          onClick={() => onPreviewPubmat?.({ url: service.pubmatUrl, name: service.name })}
+          className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
+          aria-label={`Enlarge ${service.name} publication material`}
+          title="Click to enlarge publication material"
+        >
+          {poster}
+        </button>
+      ) : poster}
+
+      <div className="flex flex-1 flex-col p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full border border-brand-border px-2 py-0.5 text-[10px] font-medium text-brand-gray">{serviceType}</span>
+          {registerBy && <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-brand-gray">Register by {registerBy}</span>}
+        </div>
+        {service.description && (
+          <div className="mt-2">
+            <p className={`text-xs leading-relaxed text-brand-gray ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
+            {service.description.length > 180 && (
+              <button type="button" aria-expanded={descriptionExpanded} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="mt-1 inline-flex min-h-7 items-center text-[11px] font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
+                {descriptionExpanded ? "View less" : "View more"}
+              </button>
+            )}
           </div>
         )}
-
-        {/* Name + type + description */}
-        <div className="min-w-0 lg:flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="text-[15px] font-semibold leading-tight text-brand-ink">{service.name}</h3>
-            <span className="inline-flex items-center rounded border border-brand-border px-1.5 py-0.5 text-[11px] font-medium text-brand-gray">
-              {serviceType}
-            </span>
-          </div>
-          {(service.description || service.memo?.url) && (
-            <div className="mt-1 flex flex-col items-start gap-2">
-              {service.description && (
-                <>
-              <p className={`mt-1 text-[13px] leading-relaxed text-brand-gray ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
-              {service.description.length > 180 && (
-                <button type="button" aria-expanded={descriptionExpanded} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="inline-flex min-h-8 items-center text-xs font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
-                  {descriptionExpanded ? "View less" : "View more"}
-                </button>
-              )}
-                </>
-              )}
-              {service.memo?.url && (
-            <button
-              type="button"
-              onClick={() => onPreviewMemo?.({ ...service.memo, name: service.name })}
-              className="inline-flex max-w-full items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-              title={service.memo.filename || "View memorandum"}
-            >
-              <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
-            </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Schedule / time / location */}
-        <div className="space-y-1.5 text-[12px] text-brand-gray lg:w-52 lg:shrink-0">
+        {service.memo?.url && (
+          <button
+            type="button"
+            onClick={() => onPreviewMemo?.({ ...service.memo, name: service.name })}
+            className="mt-2 inline-flex max-w-full items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+            title={service.memo.filename || "View memorandum"}
+          >
+            <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
+          </button>
+        )}
+        <div className="mt-3 space-y-1.5 text-[11px] text-brand-gray">
           {serviceSchedule && (
             <p className="flex items-center gap-1.5">
               <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
@@ -476,9 +495,8 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
             <p className="italic text-slate-400">Schedule to be announced.</p>
           )}
         </div>
-
-        {/* Action */}
-        <div className="shrink-0 lg:w-44 lg:text-right">
+      </div>
+      <footer className="mt-auto border-t border-brand-border px-4 py-3">
           {plan ? (
             <div className="flex flex-col items-start gap-1.5 lg:items-end">
               <StatusBadge status={status} />
@@ -516,9 +534,8 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
               )}
             </div>
           )}
-        </div>
-      </div>
-    </div>
+      </footer>
+    </article>
   );
 }
 
@@ -561,26 +578,27 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
   );
 }
 
-/** Loading placeholder: two facility container cards with card rows. */
+/** Loading placeholder matching the poster-card directory grid. */
 function DirectorySkeleton() {
   return (
     <div role="status" aria-label="Loading health services" className="space-y-5">
       {[0, 1].map((s) => (
-        <section key={s} className="overflow-hidden rounded-card border border-brand-border bg-white shadow-card">
-          <div className="border-b border-brand-border px-5 py-4">
+        <section key={s} className="space-y-3">
+          <div>
             <Skeleton className="h-4 w-64 max-w-full" />
             <Skeleton className="mt-2 h-3 w-80 max-w-full" />
           </div>
-          <div className="space-y-3 p-4 md:p-5">
-            {Array.from({ length: s === 0 ? 2 : 1 }).map((_, i) => (
-              <div key={i} className="rounded-card border border-brand-border bg-white px-4 py-4 md:px-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-                  <Skeleton className="h-11 w-11 shrink-0 rounded-card" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-1/3" />
-                    <Skeleton className="h-3 w-2/3" />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: s === 0 ? 3 : 2 }).map((_, i) => (
+              <div key={i} className="overflow-hidden rounded-lg border border-brand-border bg-white">
+                <Skeleton className="aspect-[4/5] w-full rounded-none" />
+                <div className="space-y-2 p-4">
+                  <div className="flex gap-2">
+                    <Skeleton className="h-4 w-16 rounded-full" />
+                    <Skeleton className="h-4 w-24 rounded-full" />
                   </div>
-                  <Skeleton className="h-9 w-full lg:w-32" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-2/3" />
                 </div>
               </div>
             ))}

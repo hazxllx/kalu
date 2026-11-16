@@ -45,6 +45,11 @@ const passwordSetupLimiter = rateLimit({
   max: env.authRateLimitMaxRequests,
   message: 'Too many password setup attempts. Please try again later.',
 });
+const temporaryPasswordChangeLimiter = rateLimit({
+  windowMs: env.authRateLimitWindowMs,
+  max: env.authRateLimitMaxRequests,
+  message: 'Too many password change attempts. Please try again later.',
+});
 const passwordResetRequestLimiter = rateLimit({
   windowMs: env.authRateLimitWindowMs,
   max: Math.min(5, env.authRateLimitMaxRequests),
@@ -56,6 +61,7 @@ const passwordResetRequestLimiter = rateLimit({
 // until their own password setup completes.
 router.get('/personnel/setup-status', setupStatusLimiter, asyncHandler(authController.personnelSetupStatus));
 router.post('/personnel/password-setup', passwordSetupLimiter, validate(personnelPasswordSetupValidator), asyncHandler(authController.personnelPasswordSetup));
+router.post('/personnel/temporary-password-change', temporaryPasswordChangeLimiter, validate(personnelPasswordSetupValidator), asyncHandler(authController.temporaryPasswordChange));
 router.post('/forgot-password', passwordResetRequestLimiter, validate(passwordResetRequestValidator), asyncHandler(authController.forgotPassword));
 
 router.post('/login', loginLimiter, validate(signInValidator), asyncHandler(authController.login));

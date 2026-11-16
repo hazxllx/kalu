@@ -17,10 +17,11 @@ import {
   stationAssignmentPatch, stationAssignmentError, coverageAssignmentPatch, lifecyclePayload, auditActorLabel,
 } from "../personnelLifecycle";
 import {
-  AlertTriangle, Ban, CheckCircle2, Clock, Eye, Filter, KeyRound,
+  AlertTriangle, Ban, CheckCircle2, Clock, Copy, Eye, EyeOff, Filter, KeyRound,
   Loader2, Mail, MoreVertical, Pencil, Plus, RotateCcw, Search, ShieldCheck,
   Trash2, UserCheck, UserCog, Users, UserX, X,
 } from "lucide-react";
+import { personnelPasswordError } from "@/features/authentication/personnelPasswordSetup";
 
 const ROLE_LABELS = {
   admin: "System Administrator",
@@ -69,6 +70,32 @@ const formatTimestamp = (value) => {
   return Number.isNaN(date.getTime()) ? "Not recorded" : date.toLocaleString();
 };
 
+const PASSWORD_GROUPS = [
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  "abcdefghijklmnopqrstuvwxyz",
+  "0123456789",
+  "!@#$%^&*()-_=+[]{}:,.?",
+];
+
+const secureIndex = (maximum) => {
+  if (!globalThis.crypto?.getRandomValues) throw new Error("Secure password generation is unavailable in this browser.");
+  const limit = Math.floor(0x100000000 / maximum) * maximum;
+  const value = new Uint32Array(1);
+  do { globalThis.crypto.getRandomValues(value); } while (value[0] >= limit);
+  return value[0] % maximum;
+};
+
+const generateTemporaryPassword = () => {
+  const alphabet = PASSWORD_GROUPS.join("");
+  const characters = PASSWORD_GROUPS.map((group) => group[secureIndex(group.length)]);
+  while (characters.length < 20) characters.push(alphabet[secureIndex(alphabet.length)]);
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const swap = secureIndex(index + 1);
+    [characters[index], characters[swap]] = [characters[swap], characters[index]];
+  }
+  return characters.join("");
+};
+
 const stationsLabel = (stations, options = []) => Array.isArray(stations) && stations.length
   ? stations.map((id) => options.find((station) => station.id === id)?.name || id.replace(/_/g, " ")).join(" + ") : "None assigned";
 
@@ -80,13 +107,23 @@ function LifecyclePill({ account }) {
   const badgeClass = tone ? TONE_CLASSES[tone] : accountMeta.badge;
   const dotClass = tone ? TONE_DOTS[tone] || TONE_DOTS.slate : accountMeta.dot;
   const label = lifecycleMeta?.label || accountMeta.label;
+  const passwordLabel = account.mustChangePassword
+    ? "Password Change Required"
+    : account.passwordChangedAt
+      ? "Password Updated"
+      : account.temporaryPasswordAssignedAt
+        ? "Temporary Password Assigned"
+        : null;
   return (
-    <span
-      title={lifecycleMeta?.description}
-      className={`inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium leading-none ${badgeClass}`}
-    >
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
-      {label}
+    <span className="flex flex-col items-start gap-1">
+      <span
+        title={lifecycleMeta?.description}
+        className={`inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium leading-none ${badgeClass}`}
+      >
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
+        {label}
+      </span>
+      {passwordLabel && <span className="text-[10px] leading-3 text-brand-gray">{passwordLabel}</span>}
     </span>
   );
 }
@@ -131,6 +168,44 @@ function AccountDialog({ title, description, busy = false, onClose, children, wi
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function TemporaryCredentialDialog({ credential, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const copy = async () => {
+    setError("");
+    try {
+      await navigator.clipboard.writeText(credential.password);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setError("Copying is not available in this browser. Select and copy the password manually.");
+    }
+  };
+  return (
+    <AccountDialog title="Temporary password assigned" description={`Initial credentials for ${credential.name} (${credential.email}).`} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="created-temporary-password" className="text-sm font-medium text-brand-ink">Temporary Password</label>
+          <div className="mt-1 flex items-center gap-2">
+            <input id="created-temporary-password" readOnly value={credential.password} className={`${inputCls()} font-mono`} />
+            <button type="button" onClick={copy} className="inline-flex shrink-0 items-center gap-1.5 rounded-btn border border-brand-border px-3 py-2.5 text-sm font-medium text-brand-blue hover:bg-brand-blue/5">
+              <Copy className="h-4 w-4" aria-hidden="true" />{copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          {error && <p role="alert" className="mt-1 text-xs text-brand-danger">{error}</p>}
+        </div>
+        <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900" role="alert">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>Share this temporary credential only through an approved secure channel. It will not be shown again. The user must create a permanent password on first login.</span>
+        </p>
+        <div className="flex justify-end">
+          <button type="button" onClick={onClose} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">Done</button>
+        </div>
+      </div>
+    </AccountDialog>
   );
 }
 
@@ -434,6 +509,17 @@ function DetailsModal({ target: initialTarget, options, onClose }) {
           <DetailRow label="Activation requested" value={typeof target.activationRequested === "boolean" ? target.activationRequested ? "Yes" : "No; activation withheld" : "Not recorded"} />
           <DetailRow label="Password setup" value={target.setupRequired === true ? "Required" : target.setupRequired === false ? "No setup required" : "Not recorded"} />
           <DetailRow label="Setup completed" value={formatTimestamp(target.setupCompletedAt)} />
+          {isPersonnelRole(target.roleId) && <DetailRow
+            label="Temporary password status"
+            value={target.mustChangePassword
+              ? "Password change required"
+              : target.passwordChangedAt
+                ? `Password updated ${formatTimestamp(target.passwordChangedAt)}`
+                : target.temporaryPasswordAssignedAt
+                  ? `Temporary password assigned ${formatTimestamp(target.temporaryPasswordAssignedAt)}`
+                  : "No temporary password assigned"}
+          />}
+          {target.temporaryPasswordAssignedAt && <DetailRow label="Temporary password assigned at" value={formatTimestamp(target.temporaryPasswordAssignedAt)} />}
           {target.suspendedAt && <DetailRow label="Suspended at" value={formatTimestamp(target.suspendedAt)} />}
           {target.suspensionReason && <DetailRow label="Suspension reason" value={target.suspensionReason} />}
           {target.decisionReason && <DetailRow label="Decision reason" value={target.decisionReason} />}
@@ -593,8 +679,13 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
     rhuStations: Array.isArray(initial?.rhuStations) ? initial.rhuStations : [],
     approvalStatus: canApprove ? "approved" : "pending",
     activate: canDeactivate,
+    assignTemporaryPassword: false,
   }));
   const [errors, setErrors] = useState(/** @type {Record<string, string>} */ ({}));
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [confirmTemporaryPassword, setConfirmTemporaryPassword] = useState("");
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
+  const [showConfirmTemporaryPassword, setShowConfirmTemporaryPassword] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [creationWarning, setCreationWarning] = useState("");
   const preparation = useRef(false);
@@ -614,11 +705,23 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
     () => options.facilities.filter((item) => !form.municipalityId || item.municipalityId === form.municipalityId),
     [options.facilities, form.municipalityId],
   );
+  const passwordRequirements = [
+    ["8–200 characters", temporaryPassword.length >= 8 && temporaryPassword.length <= 200],
+    ["At least one uppercase letter", /[A-Z]/.test(temporaryPassword)],
+    ["At least one lowercase letter", /[a-z]/.test(temporaryPassword)],
+    ["At least one number", /\d/.test(temporaryPassword)],
+    ["At least one non-whitespace special character", /[^A-Za-z0-9\s]/.test(temporaryPassword)],
+  ];
 
   const change = (key, value) => {
     setForm((current) => {
       const next = { ...current, [key]: value };
       if (key === "role") {
+        if (!isPersonnelRole(value)) {
+          next.assignTemporaryPassword = false;
+          setTemporaryPassword("");
+          setConfirmTemporaryPassword("");
+        }
         if (value !== "rhu_personnel" && value !== "health_supervisor") next.rhuStations = [];
         if (value === "admin") {
           next.municipalityId = "";
@@ -658,6 +761,12 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
     if (!isNew && role !== initial.roleId && (!canManageRoles || residentRole)) next.role = "Role changes are not allowed for this account.";
     if (!isNew && Object.keys(coveragePatch).length > 0 && !canManageRoles) next.form = "Assignment changes are not allowed for this account.";
     if (isNew && form.approvalStatus === "approved" && !canApprove) next.approvalStatus = "Approval permission is required. Save this account pending instead.";
+    if (isNew && form.assignTemporaryPassword) {
+      if (!canApprove) next.temporaryPassword = "Approval permission is required to assign a temporary password.";
+      const passwordError = personnelPasswordError(temporaryPassword);
+      if (passwordError) next.temporaryPassword = passwordError;
+      if (temporaryPassword !== confirmTemporaryPassword) next.confirmTemporaryPassword = "The temporary passwords do not match.";
+    }
     if (assignmentChanged && barangayScoped && !form.barangayId) next.barangayId = "Select a barangay.";
     if (assignmentChanged && facilityScoped && !form.facilityId) next.facilityId = "Select an RHU facility.";
     if (assignmentChanged && municipalityScoped && !form.municipalityId) next.municipalityId = "Select a municipality.";
@@ -686,7 +795,11 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
       try {
         operation.current = await personnelCreationOperation(operation.current, payload, actorId);
         setCreationWarning(operation.current.persistent ? "" : `The safe retry reference could not be saved in this browser. Keep this page open and retry with unchanged details. If you leave or reload after failure, administrative review may be required. Request reference: ${operation.current.id}`);
-        await onSave({ ...payload, operationId: operation.current.id }, operation.current);
+        await onSave({
+          ...payload,
+          ...(form.assignTemporaryPassword ? { temporaryPassword } : {}),
+          operationId: operation.current.id,
+        }, operation.current);
       } catch (failure) {
         setErrors({ form: failure.message });
         return false;
@@ -719,7 +832,7 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
   return (
     <AccountDialog
       title={isNew ? personnel ? "Create health personnel account" : "Create administrator account" : "Edit account"}
-      description={isNew ? "Create and approve in one action, or save pending for later review. The account owner sets their own password through a secure invitation; no password is entered here." : "Update profile, role, and coverage assignment. Existing assignments remain unchanged unless you edit them."}
+    description={isNew ? "Create and approve in one action, or save pending for later review. Use a temporary password now or retain the existing email-based setup flow." : "Update profile, role, and coverage assignment. Existing assignments remain unchanged unless you edit them."}
       busy={busy || preparing}
       onClose={onClose}
       wide
@@ -753,7 +866,13 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
               <select
                 id="account-role"
                 value={form.role}
-                onChange={(event) => change("role", event.target.value)}
+                onChange={(event) => {
+                  change("role", event.target.value);
+                  if (!isPersonnelRole(event.target.value)) {
+                    setTemporaryPassword("");
+                    setConfirmTemporaryPassword("");
+                  }
+                }}
                 disabled={!canManageRoles || residentRole}
                 className={`${inputCls(errors.role)} disabled:cursor-not-allowed disabled:opacity-70`}
               >
@@ -813,9 +932,84 @@ function AccountModal({ initial, options, busy, error, actorId, canManageRoles, 
                 <input type="checkbox" checked={canDeactivate && form.activate} onChange={(event) => change("activate", event.target.checked)} disabled={!canDeactivate} className="mt-1 accent-brand-blue" />
                 <span>Allow activation after approval and password setup</span>
               </label>
-              <p className="text-xs leading-relaxed text-brand-gray">{form.approvalStatus === "pending" ? "No sign-in access or setup invitation is granted while approval is pending." : "New approved accounts stay disabled until the owner successfully sets a password through the invitation."}{(!canDeactivate || !form.activate) && " Activation will remain withheld even after setup; an administrator must activate the account later."}</p>
+              <p className="text-xs leading-relaxed text-brand-gray">{form.approvalStatus === "pending" ? "No sign-in access is granted while approval is pending." : form.assignTemporaryPassword ? "The account remains blocked from protected access until the user creates a permanent password." : "New approved accounts stay disabled until the owner successfully sets a password through the existing email setup flow."}{(!canDeactivate || !form.activate) && " Activation will remain withheld even after password setup; an administrator must activate the account later."}</p>
               {!canDeactivate && <p className="text-xs text-brand-gray">You do not have activation permission, so this account will be created inactive.</p>}
             </div>}
+            {isNew && personnel && <section className="space-y-3 rounded-xl border border-slate-200 p-4 sm:col-span-2" aria-labelledby="initial-account-password-title">
+              <div>
+                <h3 id="initial-account-password-title" className="text-sm font-semibold text-brand-ink">Initial Account Password</h3>
+                <p className="mt-1 text-xs leading-relaxed text-brand-gray">Set a temporary password for this Health Personnel account. The user will be required to create a new password upon their first login.</p>
+              </div>
+              <label className="flex items-start gap-2 text-sm font-medium text-brand-ink">
+                <input
+                  type="checkbox"
+                  checked={form.assignTemporaryPassword}
+                  onChange={(event) => {
+                    change("assignTemporaryPassword", event.target.checked);
+                    if (!event.target.checked) {
+                      setTemporaryPassword("");
+                      setConfirmTemporaryPassword("");
+                    }
+                  }}
+                  className="mt-1 accent-brand-blue"
+                />
+                <span>Assign a temporary password now</span>
+              </label>
+              {form.assignTemporaryPassword && <>
+                <Field label="Temporary Password" htmlFor="account-temporary-password" required error={errors.temporaryPassword}>
+                  <div className="mt-1 flex">
+                    <input
+                      id="account-temporary-password"
+                      type={showTemporaryPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={temporaryPassword}
+                      onChange={(event) => { setTemporaryPassword(event.target.value); setErrors((previous) => ({ ...previous, temporaryPassword: "" })); }}
+                      className={`${inputCls(errors.temporaryPassword)} mt-0 rounded-r-none`}
+                    />
+                    <button type="button" onClick={() => setShowTemporaryPassword((value) => !value)} aria-label={showTemporaryPassword ? "Hide temporary password" : "Show temporary password"} className="mt-0 rounded-r-btn border border-l-0 border-slate-200 px-3 text-brand-gray">
+                      {showTemporaryPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <ul className="mt-2 space-y-1 text-xs" aria-label="Temporary password requirements">
+                    {passwordRequirements.map(([label, passed]) => <li key={label} className={passed ? "text-emerald-700" : "text-brand-gray"}><span aria-hidden="true">{passed ? "✓" : "•"} </span>{label}</li>)}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        const generated = generateTemporaryPassword();
+                        setTemporaryPassword(generated);
+                        setConfirmTemporaryPassword(generated);
+                        setErrors((previous) => ({ ...previous, temporaryPassword: "", confirmTemporaryPassword: "" }));
+                      } catch (failure) {
+                        setErrors((previous) => ({ ...previous, temporaryPassword: failure.message }));
+                      }
+                    }}
+                    className="mt-2 text-xs font-medium text-brand-blue underline underline-offset-2"
+                  >Generate secure password</button>
+                </Field>
+                <Field label="Confirm Temporary Password" htmlFor="account-confirm-temporary-password" required error={errors.confirmTemporaryPassword}>
+                  <div className="mt-1 flex">
+                    <input
+                      id="account-confirm-temporary-password"
+                      type={showConfirmTemporaryPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={confirmTemporaryPassword}
+                      onChange={(event) => { setConfirmTemporaryPassword(event.target.value); setErrors((previous) => ({ ...previous, confirmTemporaryPassword: "" })); }}
+                      className={`${inputCls(errors.confirmTemporaryPassword)} mt-0 rounded-r-none`}
+                    />
+                    <button type="button" onClick={() => setShowConfirmTemporaryPassword((value) => !value)} aria-label={showConfirmTemporaryPassword ? "Hide confirmation password" : "Show confirmation password"} className="mt-0 rounded-r-btn border border-l-0 border-slate-200 px-3 text-brand-gray">
+                      {showConfirmTemporaryPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {confirmTemporaryPassword && <p className={`mt-1 text-xs ${temporaryPassword === confirmTemporaryPassword ? "text-emerald-700" : "text-brand-danger"}`}>{temporaryPassword === confirmTemporaryPassword ? "Passwords match." : "Passwords do not match."}</p>}
+                </Field>
+                <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 sm:col-span-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>The approval email will not contain this password. Share the temporary credential through an approved secure channel.</span>
+                </p>
+              </>}
+            </section>}
             {role === "admin" && <p className="sm:col-span-2 text-xs text-brand-gray">Administrator accounts have system-wide scope.</p>}
           </fieldset>
 
@@ -997,6 +1191,7 @@ export default function UserManagement({ personnelOnly = false }) {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [toast, setToast] = useState("");
+  const [credentialNotice, setCredentialNotice] = useState(null);
   const requestSequence = useRef(0);
   const toastTimer = useRef(null);
   const pageSize = 50;
@@ -1116,6 +1311,13 @@ export default function UserManagement({ personnelOnly = false }) {
       const wasNew = modalTarget?.isNew;
       if (wasNew) {
         if (!result?.user?.id) throw new Error("The server did not confirm account creation. Retry unchanged details with the saved request reference; do not create a duplicate identity.");
+        if (typeof data.temporaryPassword === "string") {
+          setCredentialNotice({
+            name: data.name,
+            email: data.email,
+            password: data.temporaryPassword,
+          });
+        }
         clearPersonnelCreationOperation(creationOperation);
       }
       setModalTarget(null);
@@ -1448,6 +1650,7 @@ export default function UserManagement({ personnelOnly = false }) {
           onClose={() => { if (!busy) { setDeleteTarget(null); setDeleteError(""); } }}
         />
       )}
+      {credentialNotice && <TemporaryCredentialDialog credential={credentialNotice} onClose={() => setCredentialNotice(null)} />}
     </>
   );
 }

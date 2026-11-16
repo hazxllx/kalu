@@ -10,6 +10,7 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 const db = new PGlite({ extensions: { pgcrypto } });
 const migrations = new URL('../../supabase/migrations/', import.meta.url);
 const candidate = '20261101010000_health_personnel_account_management.sql';
+const temporaryPasswordMigration = '20261117000000_admin_temporary_personnel_password.sql';
 const ids = Object.fromEntries(['municipality', 'otherMunicipality', 'barangay', 'otherBarangay', 'legacyBarangay', 'facility']
   .map((name) => [name, randomUUID()]));
 const existing = {};
@@ -103,7 +104,7 @@ const managedAccount = async (overrides = {}) => {
   };
   const operationId = randomUUID();
   const reservation = await rpc('admin_reserve_personnel_account', [existing.admin, operationId, JSON.stringify(input)]);
-  await createAuthIdentity(reservation.target_id, input.email, true);
+  await createAuthIdentity(reservation.target_id, input.email, true, input.must_change_password === true);
   const account = await rpc('admin_create_personnel_account', [existing.admin, operationId, JSON.stringify(input)]);
   return { id: account.id, account, input, operationId };
 };
@@ -149,6 +150,7 @@ before(async () => {
   }
   preservedProfiles = await query('select * from public.profiles order by id');
   await db.exec(await readFile(new URL(candidate, migrations), 'utf8'));
+  await db.exec(await readFile(new URL(temporaryPasswordMigration, migrations), 'utf8'));
 }, { timeout: 120000 });
 after(async () => { await db.close(); });
 
@@ -210,6 +212,55 @@ test('create and approve is one committed workflow, with setup deferred and one 
   assert.equal(jobs[0].status, 'pending');
   assert.equal(jobs[0].operation_id, created.operationId);
   assert.doesNotMatch(JSON.stringify(jobs), /action_link|hashed_token|password|service_role_key/);
+});
+
+test('temporary password assignment records only status and actor metadata, never a credential', async () => {
+  const created = await managedAccount({ must_change_password: true });
+  const lifecycle = created.account.personnel_account;
+  assert.equal(created.account.status, 'disabled');
+  assert.equal(lifecycle.setup_required, true);
+  assert.equal(lifecycle.must_change_password, true);
+  assert.equal(lifecycle.temporary_password_assigned_by, existing.admin);
+  assert.ok(lifecycle.temporary_password_assigned_at);
+  assert.equal((await query('select email_confirmed_at from auth.users where id = $1', [created.id]))[0].email_confirmed_at != null, true);
+  const jobs = await notifications(created.id);
+  assert.equal(jobs.length, 1);
+  assert.doesNotMatch(JSON.stringify(created), /temporary password contents|password\s*:/i);
+  assert.doesNotMatch(JSON.stringify(jobs), /Temporary9!Secure/);
+  assert.equal((await audit(created.id, 'ACCOUNT_APPROVED'))[0].actor_id, existing.admin);
+});
+
+test('temporary-password sessions fail the database access gate and cannot clear their own requirement', async () => {
+  const created = await managedAccount({ must_change_password: true });
+  await asClient(created.id, 'authenticated', async () => {
+    assert.equal((await query('select public.personnel_session_is_usable() as usable'))[0].usable, false);
+    assert.equal((await query("select id from public.visits where id = 'SUB-000001'")).length, 0);
+    assert.equal((await query('select must_change_password from public.personnel_accounts where account_id = $1', [created.id]))[0].must_change_password, true);
+    await assert.rejects(() => query('update public.personnel_accounts set must_change_password = false where account_id = $1', [created.id]),
+      (error) => error.code === '42501');
+    await assert.rejects(() => rpc('complete_temporary_personnel_password_change', [created.id]),
+      (error) => error.code === '42501');
+  });
+});
+
+test('trusted password completion clears the gate only after approval and preserves withheld activation', async () => {
+  const active = await managedAccount({ must_change_password: true });
+  const completed = await rpc('complete_temporary_personnel_password_change', [active.id]);
+  assert.equal(completed.personnel_account.must_change_password, false);
+  assert.equal(completed.personnel_account.setup_required, false);
+  assert.ok(completed.personnel_account.password_changed_at);
+  assert.equal(completed.status, 'active');
+  await asClient(active.id, 'authenticated', async () => {
+    assert.equal((await query('select public.personnel_session_is_usable() as usable'))[0].usable, true);
+  });
+  const changeAudit = await audit(active.id, 'ACCOUNT_TEMPORARY_PASSWORD_CHANGED');
+  assert.equal(changeAudit.length, 1);
+  assert.equal(changeAudit[0].actor_id, active.id);
+
+  const withheld = await managedAccount({ must_change_password: true, activation_requested: false });
+  const withheldComplete = await rpc('complete_temporary_personnel_password_change', [withheld.id]);
+  assert.equal(withheldComplete.personnel_account.must_change_password, false);
+  assert.equal(withheldComplete.status, 'disabled');
 });
 
 test('creation reservation/replay preserves the same identity and cannot adopt or duplicate an existing email', async () => {
