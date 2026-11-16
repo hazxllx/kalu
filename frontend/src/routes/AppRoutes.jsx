@@ -684,6 +684,10 @@ const AppRoutes = () => (
       element={<ResetPassword />}
     />
     <Route
+      path="/setup-password"
+      element={<ResetPassword />}
+    />
+    <Route
       path="/register"
       element={<RegistrationTypeSelection />}
     />

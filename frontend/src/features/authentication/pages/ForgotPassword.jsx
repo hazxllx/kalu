@@ -12,17 +12,16 @@ import {
   InfoNote,
   btnPrimary,
 } from "@/features/registration/components/RegistrationDesign";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { authApi } from "@/services/api";
 import { isEmail } from "@/utils/validation";
 
 /**
  * Forgot Password — request a Supabase Auth password-reset email.
  *
- * Uses the shared browser Supabase client (public anon key only) and
- * `resetPasswordForEmail`, pointing the recovery link back to the app's own
- * `/reset-password` route via `window.location.origin` (works for localhost and
- * any deployed origin — no hardcoded URL). The success state is intentionally
- * generic so it never reveals whether an account exists.
+ * Uses the backend SMTP sender and a one-time Supabase recovery token hash.
+ * The success state is intentionally generic so it never reveals whether an
+ * account exists. The reset page verifies the token only after the user clicks
+ * Continue, so mail previews cannot consume the link.
  */
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
@@ -43,31 +42,13 @@ export default function ForgotPassword() {
       setError("Please enter a valid email address.");
       return;
     }
-    if (!isSupabaseConfigured || !supabase) {
-      setError("Password reset is unavailable: authentication is not configured. Contact the system administrator.");
-      return;
-    }
-
     setLoading(true);
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      // Supabase does not disclose whether the address exists; a returned error
-      // here is a real failure (rate limit, network). Show a friendly, generic
-      // error and never confirm/deny account existence.
-      if (resetError) {
-        const msg = String(resetError.message || "").toLowerCase();
-        if (msg.includes("rate") || msg.includes("too many")) {
-          setError("Too many requests. Please wait a moment before trying again.");
-        } else {
-          setError("We couldn't send the reset link right now. Please try again in a moment.");
-        }
-        return;
-      }
+      await authApi.requestPasswordReset(email.trim());
       setSent(true);
-    } catch {
-      setError("We couldn't send the reset link right now. Please try again in a moment.");
+    } catch (failure) {
+      if (failure?.status === 429) setError("Too many requests. Please wait a moment before trying again.");
+      else setError("We couldn't send the reset link right now. Please try again in a moment.");
     } finally {
       setLoading(false);
     }

@@ -23,6 +23,15 @@ export const signInValidator = (input = {}) => {
   return valid({ email, password });
 };
 
+export const passwordResetRequestValidator = (input = {}) => {
+  const errors = {};
+  const email = text(input.email).trim().toLowerCase();
+  if (!email) errors.email = 'Email is required.';
+  else if (!isEmail(email) || email.length > 254) errors.email = 'Please enter a valid email address.';
+  if (Object.keys(input || {}).some((key) => key !== 'email')) errors.request = 'Only an email address may be supplied.';
+  return Object.keys(errors).length ? invalid(errors) : valid({ email });
+};
+
 export const personnelPasswordSetupValidator = (input = {}) => {
   const errors = {};
   if (!input || typeof input !== 'object' || Array.isArray(input)) return invalid({ password: 'A password is required.' });
@@ -35,4 +44,4 @@ export const personnelPasswordSetupValidator = (input = {}) => {
   return Object.keys(errors).length ? invalid(errors) : valid({ password });
 };
 
-export default { signInValidator, personnelPasswordSetupValidator };
+export default { signInValidator, passwordResetRequestValidator, personnelPasswordSetupValidator };

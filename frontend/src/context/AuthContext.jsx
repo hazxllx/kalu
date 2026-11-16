@@ -99,7 +99,7 @@ const permitsCachedRestore = (error) => error?.code !== 'AUTH_PROFILE_INVALID' &
  * True when the current page load is a Supabase password-recovery flow.
  *
  * A recovery link establishes a short-lived Supabase session so the user can
- * set a new password on `/reset-password`. That session must NOT be treated as
+ * set a new password on `/reset-password` or `/setup-password`. That session must NOT be treated as
  * a normal application sign-in: resolving the account profile here would run
  * the backend `GET /api/auth/me`, and any account-state rejection (403 — e.g. a
  * resident still pending verification) would call `signOut()` and destroy the
@@ -109,12 +109,13 @@ const permitsCachedRestore = (error) => error?.code !== 'AUTH_PROFILE_INVALID' &
  * stripped quickly by `detectSessionInUrl`, so the route check is the durable
  * signal).
  */
-const RECOVERY_PATH = '/reset-password';
+const PASSWORD_LINK_PATHS = ['/reset-password', '/setup-password'];
 const isRecoveryFlow = () => {
   if (typeof window === 'undefined') return false;
-  const onResetRoute = (window.location.pathname || '').startsWith(RECOVERY_PATH);
+  const pathname = window.location.pathname || '';
+  const onPasswordLinkRoute = PASSWORD_LINK_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
   const hash = window.location.hash || '';
-  return onResetRoute || hash.includes('type=recovery');
+  return onPasswordLinkRoute || hash.includes('type=recovery') || hash.includes('type=invite');
 };
 
 /**

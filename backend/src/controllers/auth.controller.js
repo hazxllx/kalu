@@ -37,6 +37,12 @@ export const logout = async (req, res) => {
   sendData(res, result);
 };
 
+export const forgotPassword = async (req, res) => {
+  await authService.requestPasswordReset({ email: req.body.email });
+  // Same response whether or not an eligible account exists.
+  sendData(res, { accepted: true });
+};
+
 const bearerToken = (req) => {
   const header = req.headers.authorization || '';
   return header.startsWith('Bearer ') ? header.slice(7).trim() : null;
@@ -50,4 +56,4 @@ export const personnelPasswordSetup = async (req, res) => {
   sendData(res, await authService.setupPersonnelPassword({ accessToken: bearerToken(req), password: req.body.password }));
 };
 
-export default { login, me, updateMe, logout, personnelSetupStatus, personnelPasswordSetup };
+export default { login, me, updateMe, logout, forgotPassword, personnelSetupStatus, personnelPasswordSetup };

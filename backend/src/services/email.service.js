@@ -123,4 +123,64 @@ export const sendTransferOtp = async ({ email, otp }) => {
   });
 };
 
-export default { sendTransferOtp, getEmailTransporter, sendSmtpMail };
+export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
+  const safeUrl = String(resetUrl || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const message = {
+    from: env.smtpFrom,
+    to: { address: email },
+    subject: 'KALUSAGAP Password Reset',
+    text: [
+      'Hello,',
+      '',
+      'Use the link below to reset your KALUSAGAP password.',
+      '',
+      resetUrl,
+      '',
+      'This is a one-time link. If you did not request a password reset, you can ignore this email.',
+    ].join('\n'),
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#0f172a;">
+      <h1 style="font-size:18px;">Reset your KALUSAGAP password</h1>
+      <p>Use the button below to choose a new password. This is a one-time link.</p>
+      <p><a href="${safeUrl}" style="display:inline-block;padding:12px 18px;background:#174f86;color:#fff;text-decoration:none;border-radius:6px;">Reset Password</a></p>
+      <p>If you did not request this, you can ignore this email.</p>
+    </div>`,
+  };
+  const result = await sendSmtpMail(message);
+  const accepted = Array.isArray(result?.accepted)
+    && result.accepted.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
+  const rejected = Array.isArray(result?.rejected)
+    && result.rejected.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
+  if (!accepted || rejected) throw Object.assign(new Error('Password reset email was not accepted.'), { code: 'SMTP_RECIPIENT_REJECTED' });
+};
+
+export const sendPasswordSetupEmail = async ({ email, setupUrl }) => {
+  const safeUrl = String(setupUrl || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const message = {
+    from: env.smtpFrom,
+    to: { address: email },
+    subject: 'KALUSAGAP Password Setup',
+    text: [
+      'Hello,',
+      '',
+      'Use the link below to set up your KALUSAGAP account password.',
+      '',
+      setupUrl,
+      '',
+      'This is a one-time setup link. If it has expired or was already used, request a new link from Forgot Password.',
+    ].join('\n'),
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#0f172a;">
+      <h1 style="font-size:18px;">Set up your KALUSAGAP password</h1>
+      <p>Use the button below to finish setting up your account. This is a one-time link.</p>
+      <p><a href="${safeUrl}" style="display:inline-block;padding:12px 18px;background:#174f86;color:#fff;text-decoration:none;border-radius:6px;">Set Up Password</a></p>
+      <p>If you did not expect this email, you can ignore it.</p>
+    </div>`,
+  };
+  const result = await sendSmtpMail(message);
+  const accepted = Array.isArray(result?.accepted)
+    && result.accepted.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
+  const rejected = Array.isArray(result?.rejected)
+    && result.rejected.some((recipient) => String(recipient?.address || recipient).trim().toLowerCase() === String(email).trim().toLowerCase());
+  if (!accepted || rejected) throw Object.assign(new Error('Password setup email was not accepted.'), { code: 'SMTP_RECIPIENT_REJECTED' });
+};
+
+export default { sendTransferOtp, sendPasswordResetEmail, sendPasswordSetupEmail, getEmailTransporter, sendSmtpMail };

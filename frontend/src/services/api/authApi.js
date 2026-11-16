@@ -7,6 +7,7 @@ import { api } from './apiClient';
  */
 export const authApi = {
   login: (email, password) => api.post('/auth/login', { email, password }),
+  requestPasswordReset: (email) => api.post('/auth/forgot-password', { email }),
   me: (options) => api.get('/auth/me', options),
   // Self-service update of the signed-in account's own contact number.
   updateMe: (payload) => api.patch('/auth/me', payload),
