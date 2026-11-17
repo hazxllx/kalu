@@ -255,13 +255,19 @@ export const loadSessionProfile = async (userId) => {
     return { ...result, passwordStatus: { mustChangePassword: false } };
   }
   const { data, error } = await getServiceClient().from('personnel_accounts')
-    .select('must_change_password,approval_status,activation_requested,suspended_at')
+    .select('must_change_password,temporary_password_expires_at,approval_status,activation_requested,suspended_at')
     .eq('account_id', userId)
     .maybeSingle();
   if (error) return { profile: null, unavailable: false, error };
 
   const passwordStatus = {
     mustChangePassword: data?.must_change_password === true,
+    temporaryPasswordExpiresAt: data?.temporary_password_expires_at ?? null,
+    temporaryPasswordExpired: data?.must_change_password === true
+      && data?.temporary_password_expires_at !== null
+      && data?.temporary_password_expires_at !== undefined
+      && (!Number.isFinite(Date.parse(data.temporary_password_expires_at))
+        || Date.parse(data.temporary_password_expires_at) <= Date.now()),
     approvalStatus: data?.approval_status ?? null,
     activationRequested: data?.activation_requested === true,
     suspended: Boolean(data?.suspended_at),

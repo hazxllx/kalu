@@ -83,15 +83,14 @@ test("personnel deletion is hidden while general deletion and identity safeguard
   assert.match(management, /setDeleteError\(error\?\.message/);
 });
 
-test("new personnel creation cannot select an active status or administrator-set password", () => {
+test("new personnel creation uses fixed location and generated password without approval controls", () => {
   const form = management.slice(management.indexOf("function AccountModal("), management.indexOf("function AccountIdentity("));
   assert.doesNotMatch(form, /Initial status|account-status|status: form.status/);
-  assert.match(form, /approvalStatus: form.approvalStatus/);
-  assert.match(form, /activate: canDeactivate && form.activate/);
-  assert.match(form, /Create and Approve/);
-  assert.match(form, /Save Pending/);
+  assert.doesNotMatch(form, /approvalStatus: form\.approvalStatus|activate: canDeactivate && form\.activate/);
+  assert.match(form, /Create Account/);
+  assert.match(form, /value="Pili"/);
+  assert.match(form, /maxLength=\{11\}/);
   assert.match(form, /operationId: operation.current.id/);
-  assert.match(form, /disabled=\{!canDeactivate\}/);
   assert.doesNotMatch(form, /type="password"|password:\s*form/);
   assert.match(management, /Dialog\.Content/);
   assert.match(management, /lifecycleState: lifecycleFilter/);

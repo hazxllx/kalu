@@ -37,7 +37,7 @@ export const personnelPasswordSetupValidator = (input = {}) => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return invalid({ password: 'A password is required.' });
   const password = typeof input.password === 'string' ? input.password : '';
   if (Object.keys(input).some((key) => key !== 'password')) errors.request = 'Only the new password may be supplied.';
-  if (!password || password.length > 200 || hasControlChars(password)
+  if (!password || password.length > 200 || /\s/.test(password) || hasControlChars(password)
       || !/^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9\s]).{8,}$/.test(password)) {
     errors.password = 'Use 8 to 200 characters including uppercase, lowercase, a number and a special character.';
   }

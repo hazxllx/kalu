@@ -12,7 +12,7 @@ test('the existing login uses Supabase Auth with an accurate network-outage mess
 
 test('the current login form and design remain in place with no role picker or hardcoded sign-in', async () => {
   const source = await readFile(new URL('../../src/features/authentication/pages/Login.jsx', import.meta.url), 'utf8');
-  assert.match(source, /login\(\{ email, password \}\)/);
+  assert.match(source, /login\(\{ email, password \}, \{/);
   assert.match(source, /gov-navy-panel/);
   assert.match(source, /Sign in to the portal/);
   assert.match(source, /id="login-email"/);

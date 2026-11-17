@@ -105,3 +105,18 @@ test('temporary-password sessions retain access to session verification and logo
   );
   assert.equal((await verifyLogout()).failure, undefined);
 });
+
+test('expired temporary-password sessions cannot use even the password challenge or session endpoint', async () => {
+  const verify = await loadMiddleware(
+    async () => ({ data: { user: { id: 'expired-temporary-account' } }, error: null }),
+    async () => ({
+      profile: { id: 'expired-temporary-account', role: 'phn', status: 'disabled' },
+      passwordStatus: { mustChangePassword: true, temporaryPasswordExpired: true },
+    }),
+    { method: 'GET', originalUrl: '/api/auth/me' },
+  );
+  const result = await verify();
+  assert.equal(result.failure.statusCode, 403);
+  assert.equal(result.failure.code, 'TEMPORARY_PASSWORD_EXPIRED');
+  assert.match(result.failure.message, /expired/i);
+});

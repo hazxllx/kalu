@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 const renderToastProvider = ({ children = null, ...props }, ref) => (
   <div
     ref={ref}
-    className="fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]"
+    className="relative z-[100]"
     {...props}
   >
     {children}
@@ -29,7 +29,7 @@ ToastProvider.displayName = "ToastProvider";
 const renderToastViewport = ({ children = null, ...props }, ref) => (
   <div
     ref={ref}
-    className="fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]"
+    className="fixed inset-x-4 bottom-4 z-[100] flex max-h-[calc(100vh-2rem)] flex-col gap-2 sm:left-auto sm:w-max sm:max-w-[min(420px,calc(100vw-2rem))]"
     {...props}
   >
     {children}
@@ -39,7 +39,7 @@ const ToastViewport = React.forwardRef(renderToastViewport);
 ToastViewport.displayName = "ToastViewport";
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all duration-200 data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-bottom-2 data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom-2",
   {
     variants: {
       variant: {
@@ -86,7 +86,7 @@ const renderToastClose = ({ className = "", ...props }, ref) => (
     type="button"
     aria-label="Dismiss notification"
     className={cn(
-      "absolute right-2 top-2 cursor-pointer rounded-md p-1 text-foreground/50 opacity-100 transition-colors hover:text-foreground focus:outline-none focus:ring-2 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
+      "absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-md p-1 text-foreground/50 opacity-100 transition-colors hover:text-foreground focus:outline-none focus:ring-2 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600 group-[.account-management-toast]:text-white/70 group-[.account-management-toast]:hover:text-white",
       className
     )}
     {...props}

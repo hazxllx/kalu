@@ -16,11 +16,13 @@
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/supabaseRepository.js';
 import { randomUUID } from 'node:crypto';
+import { processPersonnelNotifications } from './personnelNotifications.service.js';
 import { ROLES, isValidRole } from '../config/roles.js';
 import { RHU_STATION_VALUES, STATION_ASSIGNED_ROLES, normalizeStations, stationLabel } from '../config/rhuStations.js';
-import { isUuid } from '../validators/common.js';
+import { isStrictMobile, isUuid } from '../validators/common.js';
 import { createUserValidator, updateUserValidator, userQueryValidator, personnelLifecycleValidator } from '../validators/users.validators.js';
 import { getAccountRequestHistory } from './staffAccounts.service.js';
+import { encryptTemporaryPassword, generateTemporaryPassword } from '../utils/temporaryPassword.js';
 
 const VALID_STATUSES = Object.freeze(['active', 'pending_verification', 'disabled']);
 
@@ -119,7 +121,9 @@ export const getUser = async ({ id } = {}) => {
 
 const normalizeOptionalText = (value) => String(value ?? '').trim();
 
-export const makeProfileAssignment = async ({ role, municipalityId, barangayId, facilityId, allowResident }) => {
+export const makeProfileAssignment = async ({
+  role, municipalityId, barangayId, facilityId, allowResident, assignmentOptions = null,
+}) => {
   if (role === ROLES.ADMIN) {
     return { municipality_id: null, barangay_id: null, facility_id: null };
   }
@@ -131,7 +135,7 @@ export const makeProfileAssignment = async ({ role, municipalityId, barangayId, 
     if (!barangayId) {
       return { municipality_id: municipalityId || null, barangay_id: null, facility_id: null };
     }
-    const options = await repository.getAccountAssignmentOptions();
+    const options = assignmentOptions || await repository.getAccountAssignmentOptions();
     const barangay = options.barangays.find((item) => item.id === barangayId);
     if (!barangay) {
       throw ApiError.unprocessable('Select an approved active barangay for this resident.');
@@ -146,7 +150,7 @@ export const makeProfileAssignment = async ({ role, municipalityId, barangayId, 
     };
   }
 
-  const options = await repository.getAccountAssignmentOptions();
+  const options = assignmentOptions || await repository.getAccountAssignmentOptions();
   if (BARANGAY_SCOPED_ROLES.includes(role)) {
     const barangay = options.barangays.find((item) => item.id === barangayId);
     if (!barangay) {
@@ -221,7 +225,7 @@ const accountStatus = (value, fallback, allowPending = false) => {
   return status;
 };
 
-export const createUser = async ({ actorId, input = {} } = {}) => {
+export const createUser = async ({ actorId, input = {}, notificationProcessor = processPersonnelNotifications } = {}) => {
   input = validated(createUserValidator, input);
   const email = String(input.email ?? '').trim().toLowerCase();
   const fullName = String(input.fullName ?? input.name ?? '').trim();
@@ -232,18 +236,34 @@ export const createUser = async ({ actorId, input = {} } = {}) => {
   if (!ASSIGNABLE_ROLES.includes(role) || role === ROLES.RESIDENT) {
     errors.push('Choose an assignable staff role. Resident accounts must use resident registration.');
   }
+  const isHealthPersonnel = ['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(role);
+  if (isHealthPersonnel && !isStrictMobile(String(input.contact ?? ''))) {
+    errors.push('Enter an 11-digit mobile number starting with 09 (e.g. 09171234567).');
+  }
   if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
 
   const status = accountStatus(input.status, 'active');
-  const approvalStatus = input.approvalStatus;
-  const activate = input.activate ?? (status === 'active');
-  const temporaryPassword = input.temporaryPassword || null;
+  const approvalStatus = isHealthPersonnel ? 'approved' : input.approvalStatus;
+  const activate = isHealthPersonnel ? true : input.activate ?? (status === 'active');
+  const temporaryPassword = isHealthPersonnel ? generateTemporaryPassword() : null;
+  const temporaryPasswordCiphertext = temporaryPassword ? encryptTemporaryPassword(temporaryPassword) : null;
+  const assignmentOptions = isHealthPersonnel ? await repository.getAccountAssignmentOptions() : null;
+  const piliMunicipality = assignmentOptions?.municipalities.find(
+    (municipality) => municipality.name.trim().toLowerCase() === 'pili',
+  );
+  if (isHealthPersonnel && !piliMunicipality) {
+    throw ApiError.unprocessable('The active Pili municipality is unavailable. Health personnel accounts cannot be created.');
+  }
+  if (isHealthPersonnel && input.municipalityId && input.municipalityId !== piliMunicipality.id) {
+    throw ApiError.unprocessable('Health personnel accounts must be assigned to Pili.');
+  }
   const assignment = await makeProfileAssignment({
     role,
-    municipalityId: input.municipalityId ? String(input.municipalityId).trim() : null,
+    municipalityId: isHealthPersonnel ? piliMunicipality.id : input.municipalityId ? String(input.municipalityId).trim() : null,
     barangayId: input.barangayId ? String(input.barangayId).trim() : null,
     facilityId: input.facilityId ? String(input.facilityId).trim() : null,
     allowResident: false,
+    assignmentOptions,
   });
   const profile = {
     email,
@@ -274,13 +294,25 @@ export const createUser = async ({ actorId, input = {} } = {}) => {
     });
     if (createdId !== reservation.target_id) throw new ApiError(502, 'Auth did not confirm the reserved account identity.');
   }
-  // The SQL transaction also records approval and queues email. No mail is sent
-  // here, and an uncertain result leaves Auth/reservation recoverable on retry.
-  const user = await repository.createPersonnelAccountProfile({ actorId, operationId, profile });
+  // The SQL transaction records approval and an encrypted, durable email job.
+  const user = await repository.createPersonnelAccountProfile({
+    actorId,
+    operationId,
+    profile,
+    temporaryPasswordCiphertext,
+  });
   if (!user?.id || user.id !== reservation.target_id) {
     throw new ApiError(503, 'Account provisioning could not be confirmed. Retry with the same operation reference.');
   }
-  return (await repository.getProfileById(user.id)) || user;
+  let createdUser = (await repository.getProfileById(user.id)) || user;
+  if (isHealthPersonnel) {
+    await notificationProcessor({ targetId: user.id });
+    createdUser = (await repository.getProfileById(user.id)) || createdUser;
+    if (createdUser.notification?.status !== 'sent') {
+      throw new ApiError(503, 'The account was provisioned, but temporary-password email delivery could not be confirmed. Retry the same creation request or use the email retry action.');
+    }
+  }
+  return createdUser;
 };
 
 /**

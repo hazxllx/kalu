@@ -600,7 +600,7 @@ export default function ResetPassword() {
             <Field
               label="Confirm New Password"
               required
-              hint={setupStatus?.setupRequired ? "8 to 200 characters, with uppercase, lowercase, a number, and a non-whitespace special character." : "Minimum 8 characters, with an uppercase letter, a lowercase letter, and a number."}
+              hint={setupStatus?.setupRequired ? "8 to 200 characters, with uppercase, lowercase, a number, a special character, and no whitespace." : "Minimum 8 characters, with an uppercase letter, a lowercase letter, and a number."}
               trailing={eyeButton(showConfirm, () => setShowConfirm((v) => !v))}
             >
               <input

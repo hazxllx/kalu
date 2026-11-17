@@ -27,8 +27,8 @@ export const personnelSetupBlocked = (status) => status?.setupRequired === true 
 
 export function personnelPasswordError(password) {
   if (password.length < 8 || password.length > 200 || !/[A-Z]/.test(password) || !/[a-z]/.test(password)
-    || !/\d/.test(password) || !/[^A-Za-z0-9\s]/.test(password)) {
-    return "Use 8 to 200 characters with an uppercase letter, a lowercase letter, a number, and a non-whitespace special character.";
+    || !/\d/.test(password) || !/[^A-Za-z0-9\s]/.test(password) || /\s/.test(password)) {
+    return "Use 8 to 200 characters with uppercase, lowercase, a number, a special character, and no whitespace.";
   }
   return "";
 }

@@ -117,26 +117,25 @@ test('all users endpoints require a real token and the actual profile admin role
   }
 });
 
-test('approved creation requires create, role management, approval and activation permissions; pending/inactive creation does not need approval', async () => {
+test('health personnel creation always requires create, role management, approval and activation permissions', async () => {
   let created = 0;
   const repo = {
-    getAccountAssignmentOptions: async () => ({ municipalities: [{ id: MUNICIPALITY }], barangays: [], facilities: [] }),
+    getAccountAssignmentOptions: async () => ({ municipalities: [{ id: MUNICIPALITY, name: 'Pili' }], barangays: [], facilities: [] }),
     reservePersonnelAccount: async () => ({ target_id: TARGET, completed: true }),
     createPersonnelAccountProfile: async ({ actorId }) => { assert.equal(actorId, ACTOR); created += 1; return profile(); },
     getProfileById: async () => profile(),
   };
-  const body = { fullName: 'Nurse Juana', email: 'nurse@example.gov', role: 'phn', municipalityId: MUNICIPALITY, operationId: OPERATION };
+  const body = { fullName: 'Nurse Juana', email: 'nurse@example.gov', contact: '09171234567', role: 'phn', municipalityId: MUNICIPALITY, operationId: OPERATION };
   await harness({ permissions: ['accounts.create', 'accounts.roles.manage'], repo }, async ({ api }) => {
     assert.equal((await api('/users', { method: 'POST', body: { ...body, approvalStatus: 'approved', activate: false } })).status, 403);
-    assert.equal((await api('/users', { method: 'POST', body: { ...body, approvalStatus: 'pending', activate: false } })).status, 201);
-    assert.equal((await api('/users', { method: 'POST', body: { ...body, approvalStatus: 'pending', activate: true } })).status, 403);
-  });
-  await harness({ permissions: ['accounts.create', 'accounts.roles.manage', 'accounts.personnel.approve'], repo }, async ({ api }) => {
-    assert.equal((await api('/users', { method: 'POST', body: { ...body, activate: false, actorId: TARGET } })).status, 201);
-    assert.equal((await api('/users', { method: 'POST', body: { ...body, status: 'disabled', activate: false } })).status, 201);
     assert.equal((await api('/users', { method: 'POST', body })).status, 403);
   });
-  assert.equal(created, 3);
+  await harness({ permissions: ['accounts.create', 'accounts.roles.manage', 'accounts.personnel.approve', 'accounts.deactivate'], repo }, async ({ api }) => {
+    const result = await api('/users', { method: 'POST', body });
+    assert.equal(result.status, 503);
+    assert.match(result.json.error.message, /temporary-password email delivery could not be confirmed/i);
+  });
+  assert.equal(created, 1);
 });
 
 test('lifecycle actions enforce their own configured permissions and take actor only from verified req.user', async () => {

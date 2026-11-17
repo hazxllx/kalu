@@ -11,6 +11,8 @@ const db = new PGlite({ extensions: { pgcrypto } });
 const migrations = new URL('../../supabase/migrations/', import.meta.url);
 const candidate = '20261101010000_health_personnel_account_management.sql';
 const temporaryPasswordMigration = '20261117000000_admin_temporary_personnel_password.sql';
+const temporaryPasswordEmailMigration = '20261117150000_temporary_password_email_and_pili_scope.sql';
+const TEMPORARY_PASSWORD_CIPHERTEXT = 'v1.test-encrypted-temporary-credential';
 const ids = Object.fromEntries(['municipality', 'otherMunicipality', 'barangay', 'otherBarangay', 'legacyBarangay', 'facility']
   .map((name) => [name, randomUUID()]));
 const existing = {};
@@ -105,7 +107,10 @@ const managedAccount = async (overrides = {}) => {
   const operationId = randomUUID();
   const reservation = await rpc('admin_reserve_personnel_account', [existing.admin, operationId, JSON.stringify(input)]);
   await createAuthIdentity(reservation.target_id, input.email, true, input.must_change_password === true);
-  const account = await rpc('admin_create_personnel_account', [existing.admin, operationId, JSON.stringify(input)]);
+  const account = await rpc('admin_create_personnel_account', [
+    existing.admin, operationId, JSON.stringify(input),
+    input.must_change_password === true ? TEMPORARY_PASSWORD_CIPHERTEXT : null,
+  ]);
   return { id: account.id, account, input, operationId };
 };
 const notifications = (id) => query('select * from public.personnel_notification_outbox where account_id = $1 order by created_at, id', [id]);
@@ -151,6 +156,7 @@ before(async () => {
   preservedProfiles = await query('select * from public.profiles order by id');
   await db.exec(await readFile(new URL(candidate, migrations), 'utf8'));
   await db.exec(await readFile(new URL(temporaryPasswordMigration, migrations), 'utf8'));
+  await db.exec(await readFile(new URL(temporaryPasswordEmailMigration, migrations), 'utf8'));
 }, { timeout: 120000 });
 after(async () => { await db.close(); });
 
@@ -211,7 +217,7 @@ test('create and approve is one committed workflow, with setup deferred and one 
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].status, 'pending');
   assert.equal(jobs[0].operation_id, created.operationId);
-  assert.doesNotMatch(JSON.stringify(jobs), /action_link|hashed_token|password|service_role_key/);
+  assert.doesNotMatch(JSON.stringify(jobs), /action_link|hashed_token|service_role_key|Temporary9!Secure/);
 });
 
 test('temporary password assignment records only status and actor metadata, never a credential', async () => {
@@ -222,10 +228,16 @@ test('temporary password assignment records only status and actor metadata, neve
   assert.equal(lifecycle.must_change_password, true);
   assert.equal(lifecycle.temporary_password_assigned_by, existing.admin);
   assert.ok(lifecycle.temporary_password_assigned_at);
+  assert.equal(
+    new Date(lifecycle.temporary_password_expires_at).getTime()
+      - new Date(lifecycle.temporary_password_assigned_at).getTime(),
+    10 * 60 * 1000,
+  );
+  assert.equal((await notifications(created.id))[0].temporary_password_ciphertext, TEMPORARY_PASSWORD_CIPHERTEXT);
   assert.equal((await query('select email_confirmed_at from auth.users where id = $1', [created.id]))[0].email_confirmed_at != null, true);
   const jobs = await notifications(created.id);
   assert.equal(jobs.length, 1);
-  assert.doesNotMatch(JSON.stringify(created), /temporary password contents|password\s*:/i);
+  assert.doesNotMatch(JSON.stringify(created), /Temporary9!Secure/);
   assert.doesNotMatch(JSON.stringify(jobs), /Temporary9!Secure/);
   assert.equal((await audit(created.id, 'ACCOUNT_APPROVED'))[0].actor_id, existing.admin);
 });
@@ -243,12 +255,27 @@ test('temporary-password sessions fail the database access gate and cannot clear
   });
 });
 
-test('trusted password completion clears the gate only after approval and preserves withheld activation', async () => {
+test('an expired temporary password cannot complete password setup', async () => {
+  const created = await managedAccount({ must_change_password: true });
+  await query(
+    "update public.personnel_accounts set temporary_password_expires_at = now() - interval '1 minute' where account_id = $1",
+    [created.id],
+  );
+  await assert.rejects(() => rpc('complete_temporary_personnel_password_change', [created.id]),
+    (error) => error.code === '42501' && /temporary password has expired/i.test(error.message));
+  assert.equal((await query(
+    'select must_change_password from public.personnel_accounts where account_id = $1',
+    [created.id],
+  ))[0].must_change_password, true);
+});
+
+test('trusted password completion clears the gate only after approval and creation always requests activation', async () => {
   const active = await managedAccount({ must_change_password: true });
   const completed = await rpc('complete_temporary_personnel_password_change', [active.id]);
   assert.equal(completed.personnel_account.must_change_password, false);
   assert.equal(completed.personnel_account.setup_required, false);
   assert.ok(completed.personnel_account.password_changed_at);
+  assert.equal(completed.personnel_account.temporary_password_expires_at, null);
   assert.equal(completed.status, 'active');
   await asClient(active.id, 'authenticated', async () => {
     assert.equal((await query('select public.personnel_session_is_usable() as usable'))[0].usable, true);
@@ -257,15 +284,15 @@ test('trusted password completion clears the gate only after approval and preser
   assert.equal(changeAudit.length, 1);
   assert.equal(changeAudit[0].actor_id, active.id);
 
-  const withheld = await managedAccount({ must_change_password: true, activation_requested: false });
-  const withheldComplete = await rpc('complete_temporary_personnel_password_change', [withheld.id]);
-  assert.equal(withheldComplete.personnel_account.must_change_password, false);
-  assert.equal(withheldComplete.status, 'disabled');
+  await assert.rejects(() => managedAccount({ must_change_password: true, activation_requested: false }),
+    /must be approved and activated at creation/i);
 });
 
 test('creation reservation/replay preserves the same identity and cannot adopt or duplicate an existing email', async () => {
   const created = await managedAccount();
-  const replay = await rpc('admin_create_personnel_account', [existing.admin, created.operationId, JSON.stringify(created.input)]);
+  const replay = await rpc('admin_create_personnel_account', [
+    existing.admin, created.operationId, JSON.stringify(created.input), null,
+  ]);
   assert.equal(replay.id, created.id);
   assert.equal((await notifications(created.id)).length, 1);
   assert.equal((await audit(created.id, 'ACCOUNT_CREATED')).length, 1);
@@ -285,7 +312,9 @@ test('a provisioning retry cannot overwrite a resident identity linked while an 
   await createAuthIdentity(reservation.target_id, input.email, true, true);
   await query(`insert into public.residents(id,health_record_no,first_name,last_name,barangay_id,auth_user_id)
     values ('RES-000002','HR-000002','Reserved','Resident',$1,$2)`, [ids.barangay, reservation.target_id]);
-  await assert.rejects(() => rpc('admin_create_personnel_account', [existing.admin, operationId, JSON.stringify(input)]), (error) => error.code === '23514');
+  await assert.rejects(() => rpc('admin_create_personnel_account', [
+    existing.admin, operationId, JSON.stringify(input), null,
+  ]), (error) => error.code === '23514');
   assert.equal((await profile(reservation.target_id)).role, 'resident');
   assert.equal((await query("select auth_user_id from public.residents where id = 'RES-000002'"))[0].auth_user_id, reservation.target_id);
   assert.equal((await notifications(reservation.target_id)).length, 0);

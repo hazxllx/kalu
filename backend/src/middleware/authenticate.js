@@ -142,6 +142,10 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     accessToken: token,
     authMode: 'supabase',
   };
+  if (passwordStatus?.temporaryPasswordExpired) {
+    throw ApiError.forbidden('This temporary password has expired. Contact your administrator for a new one.')
+      .withCode('TEMPORARY_PASSWORD_EXPIRED');
+  }
   if (mustChangePassword) {
     const path = String(req.originalUrl || '').split('?')[0];
     const allowedChallengeOperation = (req.method === 'GET' && path === '/api/auth/me')

@@ -14,11 +14,13 @@ const auth = await import('../src/services/auth.service.js');
 const staff = await import('../src/services/staffAccounts.service.js');
 const validators = await import('../src/validators/users.validators.js');
 const { personnelPasswordSetupValidator } = await import('../src/validators/auth.validators.js');
+const { decryptTemporaryPassword } = await import('../src/utils/temporaryPassword.js');
 
 const ACTOR = '11111111-1111-4111-8111-111111111111';
 const TARGET = '22222222-2222-4222-8222-222222222222';
 const OPERATION = '33333333-3333-4333-8333-333333333333';
 const MUNICIPALITY = '44444444-4444-4444-8444-444444444444';
+const OTHER_MUNICIPALITY = '88888888-8888-4888-8888-888888888888';
 const BARANGAY = '55555555-5555-4555-8555-555555555555';
 const FACILITY = '66666666-6666-4666-8666-666666666666';
 const REQUEST = '77777777-7777-4777-8777-777777777777';
@@ -41,10 +43,10 @@ const profile = (patch = {}) => ({
 });
 const creation = (patch = {}) => ({
   fullName: 'Nurse Juana', email: EMAIL, role: 'phn', municipalityId: MUNICIPALITY,
-  operationId: OPERATION, ...patch,
+  contact: '09171234567', operationId: OPERATION, ...patch,
 });
 const options = () => ({
-  municipalities: [{ id: MUNICIPALITY, name: 'Pili' }],
+  municipalities: [{ id: MUNICIPALITY, name: 'Pili' }, { id: OTHER_MUNICIPALITY, name: 'Elsewhere' }],
   barangays: [{ id: BARANGAY, name: 'San Isidro', municipalityId: MUNICIPALITY }],
   facilities: [{ id: FACILITY, name: 'RHU', municipalityId: MUNICIPALITY }],
 });
@@ -54,18 +56,22 @@ test('public personnel submission is denied at the exported service without touc
     (error) => error.statusCode === 403 && /disabled/i.test(error.message));
 });
 
-test('creation reserves identity, silently creates Auth, then provisions approval and outbox together', async () => {
+test('creation reserves identity, provisions approval, and confirms the temporary-password email', async () => {
   const calls = [];
   await withMethods(repository, {
     getAccountAssignmentOptions: async () => options(),
     reservePersonnelAccount: async (args) => { calls.push(['reserve', args]); return { target_id: TARGET, completed: false }; },
     createManagedAuthAccount: async (args) => { calls.push(['auth', args]); return TARGET; },
     createPersonnelAccountProfile: async (args) => { calls.push(['sql', args]); return profile(); },
-    getProfileById: async () => profile({ notification: { status: 'pending', eventType: 'approved' } }),
+    getProfileById: async () => profile({ notification: { status: 'sent', eventType: 'approved' } }),
     inviteAccount: async () => { throw new Error('must never invite before provisioning'); },
   }, async () => {
-    const result = await users.createUser({ actorId: ACTOR, input: creation({ email: ' Nurse@Example.gov ' }) });
-    assert.deepEqual(calls.map(([kind]) => kind), ['reserve', 'auth', 'sql']);
+    const result = await users.createUser({
+      actorId: ACTOR,
+      input: creation({ email: ' Nurse@Example.gov ' }),
+      notificationProcessor: async ({ targetId }) => calls.push(['email', targetId]),
+    });
+    assert.deepEqual(calls.map(([kind]) => kind), ['reserve', 'auth', 'sql', 'email']);
     assert.equal(calls[0][1].actorId, ACTOR);
     assert.equal(calls[0][1].operationId, OPERATION);
     assert.deepEqual(calls[0][1].profile, calls[2][1].profile);
@@ -73,16 +79,25 @@ test('creation reserves identity, silently creates Auth, then provisions approva
     assert.equal(calls[2][1].profile.approval_status, 'approved');
     assert.equal(calls[2][1].profile.activation_requested, true);
     assert.equal(calls[2][1].profile.status, 'disabled', 'setup must finish before staff is active');
-    assert.deepEqual(calls[1][1], { id: TARGET, email: EMAIL, fullName: 'Nurse Juana' });
-    assert.equal(result.notification.status, 'pending');
+    assert.equal(calls[2][1].profile.must_change_password, true);
+    assert.deepEqual(calls[3], ['email', TARGET]);
+    assert.equal(calls[1][1].id, TARGET);
+    assert.equal(calls[1][1].email, EMAIL);
+    assert.equal(calls[1][1].fullName, 'Nurse Juana');
+    assert.match(calls[1][1].temporaryPassword, /[A-Z]/);
+    assert.match(calls[1][1].temporaryPassword, /[a-z]/);
+    assert.match(calls[1][1].temporaryPassword, /\d/);
+    assert.match(calls[1][1].temporaryPassword, /[^A-Za-z0-9\s]/);
+    assert.equal(decryptTemporaryPassword(calls[2][1].temporaryPasswordCiphertext), calls[1][1].temporaryPassword);
+    assert.equal(result.notification.status, 'sent');
     assert.equal(JSON.stringify(result).includes('password'), false);
   });
 });
 
-test('temporary personnel credentials go only to Auth and never enter reservations or returned account data', async () => {
-  const temporaryPassword = 'Temporary9!Secure';
+test('temporary passwords are backend-generated and are never accepted from or returned to the administrator', async () => {
   let reservedProfile;
   let authInput;
+  let provisionInput;
   await withMethods(repository, {
     getAccountAssignmentOptions: async () => options(),
     reservePersonnelAccount: async ({ profile: input }) => {
@@ -90,19 +105,53 @@ test('temporary personnel credentials go only to Auth and never enter reservatio
       return { target_id: TARGET, completed: false };
     },
     createManagedAuthAccount: async (input) => { authInput = input; return TARGET; },
-    createPersonnelAccountProfile: async ({ profile: input }) => profile({ mustChangePassword: input.must_change_password }),
-    getProfileById: async () => profile({ mustChangePassword: true }),
+    createPersonnelAccountProfile: async (args) => { provisionInput = args; return profile({ mustChangePassword: args.profile.must_change_password }); },
+    getProfileById: async () => profile({ mustChangePassword: true, notification: { status: 'sent' } }),
   }, async () => {
-    const result = await users.createUser({ actorId: ACTOR, input: creation({ temporaryPassword }) });
+    const result = await users.createUser({
+      actorId: ACTOR,
+      input: creation(),
+      notificationProcessor: async () => ({ mailServerAccepted: 1 }),
+    });
+    const temporaryPassword = authInput.temporaryPassword;
     assert.equal(reservedProfile.must_change_password, true);
     assert.equal(JSON.stringify(reservedProfile).includes(temporaryPassword), false);
-    assert.equal(authInput.temporaryPassword, temporaryPassword);
+    assert.equal(temporaryPassword.length, 9);
+    assert.equal(typeof provisionInput.temporaryPasswordCiphertext, 'string');
+    assert.notEqual(provisionInput.temporaryPasswordCiphertext, temporaryPassword);
     assert.equal(JSON.stringify(result).includes(temporaryPassword), false);
     assert.equal(result.mustChangePassword, true);
   });
 });
 
-test('pending creation with activation withheld uses one SQL workflow; administrator creation is managed too', async () => {
+test('unconfirmed temporary-password email delivery is an explicit failure, never a successful account-creation response', async () => {
+  let provisioned;
+  await withMethods(repository, {
+    getAccountAssignmentOptions: async () => options(),
+    reservePersonnelAccount: async () => ({ target_id: TARGET, completed: false }),
+    createManagedAuthAccount: async () => TARGET,
+    createPersonnelAccountProfile: async ({ profile: createdProfile, temporaryPasswordCiphertext }) => {
+      provisioned = { profile: createdProfile, temporaryPasswordCiphertext };
+      return profile({ mustChangePassword: true });
+    },
+    getProfileById: async () => profile({
+      mustChangePassword: true,
+      notification: { status: 'failed', lastErrorCode: 'SMTP_RECIPIENT_REJECTED' },
+    }),
+  }, async () => {
+    await assert.rejects(() => users.createUser({
+      actorId: ACTOR,
+      input: creation(),
+      notificationProcessor: async () => ({ failed: 1 }),
+    }), (error) => error.statusCode === 503
+      && /temporary-password email delivery could not be confirmed/i.test(error.message)
+      && !/password:\s*\S+/i.test(error.message));
+    assert.equal(provisioned.profile.must_change_password, true);
+    assert.equal(typeof provisioned.temporaryPasswordCiphertext, 'string');
+  });
+});
+
+test('health personnel are always approved and activated; administrative account decisions remain separate', async () => {
   for (const role of ['phn', 'admin']) {
     let payload;
     await withMethods(repository, {
@@ -110,12 +159,16 @@ test('pending creation with activation withheld uses one SQL workflow; administr
       reservePersonnelAccount: async () => ({ target_id: TARGET, completed: false }),
       createManagedAuthAccount: async () => TARGET,
       createPersonnelAccountProfile: async (args) => { payload = args.profile; return profile({ role, approvalStatus: 'pending' }); },
-      getProfileById: async () => profile({ role, approvalStatus: 'pending' }),
+      getProfileById: async () => profile({ role, approvalStatus: role === 'phn' ? 'approved' : 'pending', notification: { status: 'sent' } }),
     }, async () => {
-      await users.createUser({ actorId: ACTOR, input: creation({ role, approvalStatus: 'pending', activate: false }) });
-      assert.equal(payload.approval_status, 'pending');
-      assert.equal(payload.activation_requested, false);
-      assert.equal(payload.status, 'pending_verification');
+      await users.createUser({
+        actorId: ACTOR,
+        input: creation({ role, approvalStatus: 'pending', activate: false }),
+        notificationProcessor: async () => ({ mailServerAccepted: 1 }),
+      });
+      assert.equal(payload.approval_status, role === 'phn' ? 'approved' : 'pending');
+      assert.equal(payload.activation_requested, role === 'phn');
+      assert.equal(payload.status, role === 'phn' ? 'disabled' : 'pending_verification');
       assert.deepEqual(payload.rhu_stations, []);
       if (role === 'admin') assert.equal(payload.municipality_id, null);
     });
@@ -128,8 +181,12 @@ test('completed creation replay performs no additional Auth operation', async ()
     reservePersonnelAccount: async () => ({ target_id: TARGET, completed: true }),
     createManagedAuthAccount: async () => { throw new Error('must not recreate completed Auth identity'); },
     createPersonnelAccountProfile: async () => profile(),
-    getProfileById: async () => profile(),
-  }, async () => assert.equal((await users.createUser({ actorId: ACTOR, input: creation() })).id, TARGET));
+    getProfileById: async () => profile({ notification: { status: 'sent' } }),
+  }, async () => assert.equal((await users.createUser({
+    actorId: ACTOR,
+    input: creation(),
+    notificationProcessor: async () => ({ mailServerAccepted: 1 }),
+  })).id, TARGET));
 });
 
 test('uncertain provisioning never deletes Auth and preserves the operation reference for recovery', async () => {
@@ -149,23 +206,30 @@ test('uncertain provisioning never deletes Auth and preserves the operation refe
   });
 });
 
-test('invalid operations, password input and resident creation are refused before reservation', async () => {
+test('invalid operations, manual passwords, invalid contact numbers, and resident creation are refused', async () => {
   await withMethods(repository, {
     reservePersonnelAccount: async () => { throw new Error('must not reserve invalid input'); },
   }, async () => {
-    for (const input of [creation({ operationId: undefined }), creation({ operationId: 'invalid' }), creation({ password: PASSWORD }), creation({ role: 'resident' })]) {
+    for (const input of [
+      creation({ operationId: undefined }),
+      creation({ operationId: 'invalid' }),
+      creation({ password: PASSWORD }),
+      creation({ temporaryPassword: PASSWORD }),
+      creation({ contact: '0917 123 4567' }),
+      creation({ contact: '0917123456' }),
+      creation({ role: 'resident' }),
+    ]) {
       await assert.rejects(() => users.createUser({ actorId: ACTOR, input }), (error) => [400, 422].includes(error.statusCode));
     }
   });
+});
 
-  test('temporary password creation enforces the personnel policy and rejects non-personnel assignment', () => {
-    assert.equal(validators.createUserValidator(creation({ temporaryPassword: PASSWORD })).error, undefined);
-    for (const password of ['short1!', 'UPPERCASE1!', 'lowercase1!', 'NoDigitsHere!', 'NoSpecial1 ']) {
-      assert.ok(validators.createUserValidator(creation({ temporaryPassword: password })).error?.temporaryPassword);
-    }
-    assert.ok(validators.createUserValidator(creation({ role: 'admin', temporaryPassword: PASSWORD })).error?.temporaryPassword);
-    assert.ok(validators.createUserValidator(creation({ temporaryPassword: PASSWORD, confirmTemporaryPassword: PASSWORD })).error?.confirmTemporaryPassword);
-  });
+test('contact validator accepts exactly eleven digits and rejects formatted or incomplete values', () => {
+  assert.equal(validators.createUserValidator(creation()).error, undefined);
+  for (const contact of ['', '0917123456', '091712345678', '0917 123 4567', '+639171234567', '09ABC123456']) {
+    assert.ok(validators.createUserValidator(creation({ contact })).error?.contact, contact);
+  }
+  assert.equal(validators.createUserValidator(creation({ role: 'admin', contact: '' })).error?.contact, undefined);
 });
 
 test('RHU creation requires known nonempty stations; HS stations are optional and other roles have none', async () => {
@@ -185,11 +249,19 @@ test('RHU creation requires known nonempty stations; HS stations are optional an
     getAccountAssignmentOptions: async () => options(),
     reservePersonnelAccount: async () => ({ target_id: TARGET, completed: true }),
     createPersonnelAccountProfile: async (args) => { payload = args.profile; return profile(); },
-    getProfileById: async () => profile(),
+    getProfileById: async () => profile({ notification: { status: 'sent' } }),
   }, async () => {
-    await users.createUser({ actorId: ACTOR, input: creation({ role: 'health_supervisor', barangayId: BARANGAY }) });
+    await users.createUser({
+      actorId: ACTOR,
+      input: creation({ role: 'health_supervisor', barangayId: BARANGAY }),
+      notificationProcessor: async () => ({ mailServerAccepted: 1 }),
+    });
     assert.deepEqual(payload.rhu_stations, []);
-    await users.createUser({ actorId: ACTOR, input: creation({ role: 'rhu_personnel', facilityId: FACILITY, rhuStations: [' Triage ', 'consultation', 'triage'] }) });
+    await users.createUser({
+      actorId: ACTOR,
+      input: creation({ role: 'rhu_personnel', facilityId: FACILITY, rhuStations: [' Triage ', 'consultation', 'triage'] }),
+      notificationProcessor: async () => ({ mailServerAccepted: 1 }),
+    });
     assert.deepEqual(payload.rhu_stations, ['triage', 'consultation']);
   });
 });
@@ -399,7 +471,7 @@ test('setup status verifies the token owner and allows pending/disabled managed 
     assert.deepEqual(await auth.getPersonnelSetupStatus({ accessToken: 'owner-token', id: ACTOR, role: 'admin' }), {
       setupRequired: true, mustChangePassword: false, approvalStatus: 'approved',
       activationRequested: true, suspended: false, active: false,
-      temporaryPasswordAssignedAt: null, passwordChangedAt: null,
+      temporaryPasswordAssignedAt: null, temporaryPasswordExpired: false, passwordChangedAt: null,
     });
     assert.deepEqual(calls, [['verify', 'owner-token'], ['account', TARGET]]);
   });
@@ -416,7 +488,7 @@ test('nonmanaged legacy and resident setup status is false; missing managed prov
 });
 
 test('password setup enforces actual strength rather than the legacy weak policy or error wording', () => {
-  for (const password of ['password1', 'PASSWORD1!', 'Password!!', 'Password9 ', 'Short1!', 'Password9!\n', 'A'.repeat(201)]) {
+  for (const password of ['password1', 'PASSWORD1!', 'Password!!', 'Password9 ', 'Password9! ', 'Short1!', 'Password9!\n', 'A'.repeat(201)]) {
     assert.ok(personnelPasswordSetupValidator({ password }).error?.password);
   }
   assert.deepEqual(personnelPasswordSetupValidator({ password: PASSWORD }).value, { password: PASSWORD });

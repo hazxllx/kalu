@@ -69,6 +69,10 @@ export const signIn = async ({ email, password }) => {
   const { profile, unavailable, error: profileError, passwordStatus } = profileResult;
   if (profileError) throw new ApiError(503, 'Profile lookup failed. Please try again.');
   if (unavailable) throw new ApiError(503, 'The account profile service is temporarily unavailable. Please try again shortly.');
+  if (passwordStatus?.temporaryPasswordExpired) {
+    try { await getServiceClient().auth.admin.signOut(data.session.access_token); } catch { /* best-effort revocation */ }
+    throw ApiError.unauthorized('This temporary password has expired. Contact your administrator for a new one.');
+  }
   const user = profile
     ? { ...profileToSessionUser(profile), mustChangePassword: passwordStatus?.mustChangePassword === true }
     : metadataUser(data.user);
@@ -101,6 +105,9 @@ export const getCurrentUser = async (accessToken) => {
   const { profile, unavailable, error: profileError, passwordStatus } = await loadSessionProfile(data.user.id);
   if (profileError) throw new ApiError(503, 'Profile lookup failed. Please try again.');
   if (unavailable) throw new ApiError(503, 'The account profile service is temporarily unavailable. Please try again shortly.');
+  if (passwordStatus?.temporaryPasswordExpired) {
+    throw ApiError.forbidden('This temporary password has expired. Contact your administrator for a new one.');
+  }
   return profile
     ? { ...profileToSessionUser(profile), mustChangePassword: passwordStatus?.mustChangePassword === true }
     : metadataUser(data.user);
@@ -220,6 +227,9 @@ const verifySetupOwner = async (accessToken) => {
 const setupStatus = (account) => ({
   setupRequired: account?.setupRequired === true,
   mustChangePassword: account?.mustChangePassword === true,
+  temporaryPasswordExpired: account?.mustChangePassword === true
+    && Boolean(account.temporaryPasswordExpiresAt)
+    && Date.parse(account.temporaryPasswordExpiresAt) <= Date.now(),
   approvalStatus: account?.approvalStatus ?? null,
   activationRequested: account?.activationRequested === true,
   suspended: Boolean(account?.suspendedAt),
@@ -286,6 +296,9 @@ export const changeTemporaryPersonnelPassword = async ({ accessToken, password }
   const account = await loadSetupAccount(owner);
   if (!account || account.lifecycleVersion === null || !account.mustChangePassword) {
     throw ApiError.conflict('This account does not require a temporary-password change.');
+  }
+  if (account.temporaryPasswordExpiresAt && Date.parse(account.temporaryPasswordExpiresAt) <= Date.now()) {
+    throw ApiError.forbidden('This temporary password has expired. Contact your administrator for a new one.');
   }
   if (account.approvalStatus !== 'approved' || account.suspendedAt) {
     throw ApiError.forbidden('A permanent password can be created only after approval and while the account is not suspended.');

@@ -1,5 +1,4 @@
-import { hasControlChars, isUuid, text, valid, invalid } from './common.js';
-import { personnelPasswordSetupValidator } from './auth.validators.js';
+import { hasControlChars, isStrictMobile, isUuid, text, valid, invalid } from './common.js';
 
 export const PERSONNEL_ACTIONS = Object.freeze(['approve', 'reject', 'suspend', 'reactivate', 'invite', 'retry_email']);
 export const APPROVAL_STATUSES = Object.freeze(['pending', 'approved', 'rejected']);
@@ -36,13 +35,11 @@ const fieldsValidator = (body, { create = false } = {}) => {
     value.approvalStatus = input.approvalStatus === undefined ? 'approved' : input.approvalStatus;
     if (!['pending', 'approved'].includes(value.approvalStatus)) errors.approvalStatus = 'Choose pending or approved.';
     if (input.activate !== undefined && typeof input.activate !== 'boolean') errors.activate = 'Use true or false.';
-    if (input.temporaryPassword !== undefined) {
-      const passwordResult = personnelPasswordSetupValidator({ password: input.temporaryPassword });
-      if (passwordResult.error) errors.temporaryPassword = passwordResult.error.password;
-      if (!['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(input.role)) {
-        errors.temporaryPassword = 'A temporary password can only be assigned to health personnel accounts.';
-      }
+    if (['mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'].includes(input.role)
+        && !isStrictMobile(input.contact)) {
+      errors.contact = 'Enter an 11-digit mobile number starting with 09 (e.g. 09171234567).';
     }
+    if (Object.hasOwn(input, 'temporaryPassword')) errors.temporaryPassword = 'Temporary passwords are generated automatically by the account service.';
     if (Object.hasOwn(input, 'confirmTemporaryPassword')) {
       errors.confirmTemporaryPassword = 'Only the temporary password may be submitted.';
     }

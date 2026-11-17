@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 
 const TOAST_LIMIT = 20;
-const TOAST_REMOVE_DELAY = 1000000;
+const TOAST_REMOVE_DELAY = 250;
 
 const actionTypes = {
   ADD_TOAST: "ADD_TOAST",
@@ -19,6 +19,7 @@ function genId() {
 }
 
 const toastTimeouts = new Map();
+const autoDismissTimeouts = new Map();
 
 const addToRemoveQueue = (toastId) => {
   if (toastTimeouts.has(toastId)) {
@@ -110,6 +111,18 @@ function dispatch(action) {
   });
 }
 
+function dismissToast(toastId) {
+  if (toastId === undefined) {
+    for (const timeout of autoDismissTimeouts.values()) clearTimeout(timeout);
+    autoDismissTimeouts.clear();
+  } else {
+    const timeout = autoDismissTimeouts.get(toastId);
+    if (timeout) clearTimeout(timeout);
+    autoDismissTimeouts.delete(toastId);
+  }
+  dispatch({ type: actionTypes.DISMISS_TOAST, toastId });
+}
+
 function toast({ ...props }) {
   const id = genId();
 
@@ -119,8 +132,10 @@ function toast({ ...props }) {
       toast: { ...props, id },
     });
 
-  const dismiss = () =>
-    dispatch({ type: actionTypes.DISMISS_TOAST, toastId: id });
+  const dismiss = () => dismissToast(id);
+  if (typeof props.duration === "number" && props.duration > 0) {
+    autoDismissTimeouts.set(id, setTimeout(dismiss, props.duration));
+  }
 
   dispatch({
     type: actionTypes.ADD_TOAST,
@@ -157,7 +172,7 @@ function useToast() {
   return {
     ...state,
     toast,
-    dismiss: (toastId) => dispatch({ type: actionTypes.DISMISS_TOAST, toastId }),
+    dismiss: dismissToast,
   };
 }
 

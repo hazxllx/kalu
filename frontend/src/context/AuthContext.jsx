@@ -472,10 +472,10 @@ export const AuthProvider = ({ children }) => {
   }, [applyUser, invalidateProfileAccess]);
 
   /**
-   * Log in with email + password. Returns the resolved role on success so the
-   * caller can redirect to the correct dashboard.
+   * Log in with email + password. Returns the resolved role and optionally
+   * signals that the verified session must go to the password challenge.
    */
-  const login = useCallback(async ({ email, password }) => {
+  const login = useCallback(async ({ email, password }, { onPasswordChangeRequired } = {}) => {
     if ((loginRequestRef.current && !loginRequestRef.current.cancelReason) || logoutRequestRef.current) throw sessionError('AUTH_IN_PROGRESS');
     const request = { ownerId: null, cancelReason: null, credentials: null, session: null };
     loginRequestRef.current = request;
@@ -548,6 +548,7 @@ export const AuthProvider = ({ children }) => {
         throw new Error(message);
       }
 
+      if (nextUser.mustChangePassword) onPasswordChangeRequired?.();
       return nextUser.role;
     } finally {
       if (loginRequestRef.current === request) {

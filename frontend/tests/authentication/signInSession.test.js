@@ -285,6 +285,6 @@ test('the login UI synchronously locks submissions and waits for profile/session
   assert.match(login, /if \(submittingRef\.current \|\| authBusy\) return/);
   assert.match(login, /submittingRef\.current = true/);
   assert.match(login, /disabled=\{submitting \|\| authBusy \|\| !isSupabaseConfigured\}/);
-  assert.match(login, /await login\(\{ email, password \}\)/);
+  assert.match(login, /await login\(\{ email, password \}, \{/);
   assert.match(guard, /isResolvingProfile \|\| isSigningIn \|\| isSigningOut/);
 });

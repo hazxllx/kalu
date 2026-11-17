@@ -97,7 +97,7 @@ test("pending, rejected, or suspended setup cannot mutate a password", async () 
 
 test("new personnel setup matches the server's stronger policy without changing ordinary reset policy", () => {
   assert.equal(personnelPasswordError("ValidPassword1!"), "");
-  for (const password of ["short1!", "UPPERCASE1!", "lowercase1!", "NoDigitsHere!", "NoSpecial1 ", "A1!".repeat(70)]) assert.match(personnelPasswordError(password), /8 to 200 characters/);
+  for (const password of ["short1!", "UPPERCASE1!", "lowercase1!", "NoDigitsHere!", "NoSpecial1 ", "ValidPassword1! ", "A1!".repeat(70)]) assert.match(personnelPasswordError(password), /8 to 200 characters/);
 });
 
 test("a saved-password retry can finish from newly verified completed setup without changing the password again", async () => {

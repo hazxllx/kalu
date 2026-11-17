@@ -11,7 +11,7 @@ import { FieldError, ValidationSummary } from "@/components/common/Validation";
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, isSupabaseConfigured, authNotice, isSigningIn, isSigningOut, isLoadingAuth, authChecked, isResolvingProfile, isAuthenticated, role } = useAuth();
+  const { login, user, isSupabaseConfigured, authNotice, isSigningIn, isSigningOut, isLoadingAuth, authChecked, isResolvingProfile, isAuthenticated, role } = useAuth();
   const [show, setShow] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,9 +28,9 @@ export default function Login() {
 
   useEffect(() => {
     if (isAuthenticated && !authBusy && !submittingRef.current) {
-      navigate(landingFor(role, location.state?.from) || homeForRole(role), { replace: true });
+      navigate(user?.mustChangePassword ? "/change-password" : landingFor(role, location.state?.from) || homeForRole(role), { replace: true });
     }
-  }, [isAuthenticated, authBusy, role, location.state?.from, navigate]);
+  }, [isAuthenticated, authBusy, role, user?.mustChangePassword, location.state?.from, navigate]);
 
   const focusField = (field) => {
     const target = fieldRefs[field]?.current;
@@ -63,7 +63,14 @@ export default function Login() {
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      const signedInRole = await login({ email, password });
+      let passwordChangeRequired = false;
+      const signedInRole = await login({ email, password }, {
+        onPasswordChangeRequired: () => {
+          passwordChangeRequired = true;
+          navigate("/change-password", { replace: true });
+        },
+      });
+      if (passwordChangeRequired) return;
       const from = location.state?.from;
       navigate(landingFor(signedInRole, from) || homeForRole(signedInRole), { replace: true });
     } catch (err) {

@@ -13,34 +13,27 @@ export function Toaster() {
 
   return (
     <ToastProvider>
-      {toasts
-        // A dismissed toast flips `open` to false; drop it from the UI
-        // immediately so the X click removes the notification right away.
-        .filter((t) => t.open !== false)
-        .map(function ({
-          id,
-          title,
-          description,
-          action,
-          // Strip control-only fields so they aren't spread onto the DOM node.
-          open: _open,
-          onOpenChange: _onOpenChange,
-          ...props
-        }) {
-          return (
-            <Toast key={id} {...props}>
-              <div className="grid gap-1">
-                {title && <ToastTitle>{title}</ToastTitle>}
-                {description && (
-                  <ToastDescription>{description}</ToastDescription>
-                )}
-              </div>
-              {action}
-              <ToastClose onClick={() => dismiss(id)} />
-            </Toast>
-          );
-        })}
-      <ToastViewport />
+      <ToastViewport>
+        {toasts.map(({
+            id,
+            title,
+            description,
+            action,
+            duration: _duration,
+            open,
+            onOpenChange: _onOpenChange,
+            ...props
+          }) => (
+          <Toast key={id} {...props} data-state={open === false ? "closed" : "open"} role="status">
+            <div className="grid gap-1">
+              {title && <ToastTitle>{title}</ToastTitle>}
+              {description && <ToastDescription>{description}</ToastDescription>}
+            </div>
+            {action}
+            <ToastClose onClick={() => dismiss(id)} />
+          </Toast>
+        ))}
+      </ToastViewport>
     </ToastProvider>
   );
 } 

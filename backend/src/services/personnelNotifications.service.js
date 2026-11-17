@@ -1,17 +1,19 @@
 import env from '../config/env.js';
 import { getServiceClient } from '../config/supabase.js';
 import { getEmailTransporter, sendSmtpMail } from './email.service.js';
+import { decryptTemporaryPassword } from '../utils/temporaryPassword.js';
+import { personnelPasswordSetupValidator } from '../validators/auth.validators.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MANAGED_ROLES = new Set(['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw']);
 const ACCESS_EVENTS = new Set(['approved', 'reactivated', 'invitation']);
 const PROFILE_COLUMNS = 'id,email,full_name,role,status';
-const ACCOUNT_COLUMNS = 'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,suspended_at,decision_reason';
+const ACCOUNT_COLUMNS = 'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,temporary_password_expires_at,suspended_at,decision_reason';
 const WORKER_ERROR_CODES = new Set([
   'PROFILE_READ_FAILED', 'ACCOUNT_READ_FAILED', 'ACCOUNT_IDENTITY_MISMATCH',
   'AUTH_USER_READ_FAILED', 'AUTH_IDENTITY_MISMATCH', 'AUTH_LINK_GENERATION_FAILED',
   'AUTH_LINK_IDENTITY_MISMATCH', 'AUTH_LINK_INVALID', 'AUTH_REDIRECT_MISMATCH',
-  'SMTP_NOT_CONFIGURED', 'CLIENT_URL_NOT_CONFIGURED', 'CLIENT_URL_INVALID',
+  'SMTP_NOT_CONFIGURED', 'CLIENT_URL_NOT_CONFIGURED', 'CLIENT_URL_INVALID', 'TEMPORARY_PASSWORD_INVALID',
   'NOTIFICATION_BEGIN_FAILED',
 ]);
 let activeBatch = null;
@@ -60,7 +62,86 @@ const eventStillValid = (job, account) => ACCESS_EVENTS.has(job.event_type)
   : job.event_type === 'rejected' ? account.approval_status === 'rejected'
     : job.event_type === 'suspended' && Boolean(account.suspended_at);
 
-const buildMail = ({ job, account, profile, origin, actionLink, needsSetup, authConfirmed, config }) => {
+const buildMail = ({ job, account, profile, origin, actionLink, needsSetup, authConfirmed, config, temporaryPassword = null }) => {
+  if (temporaryPassword) {
+    const loginUrl = `${origin}/login`;
+    const text = [
+      'KALUSAGAP',
+      'COMMUNITY HEALTH MONITORING SYSTEM',
+      '',
+      'Your account is ready.',
+      '',
+      `Hello, ${profile.full_name || 'Health Personnel'}. Your KALUSAGAP account has been created and approved.`,
+      '',
+      `Registered email address: ${profile.email}`,
+      `Temporary password: ${temporaryPassword}`,
+      'To copy the password, select it and use your email client’s Copy command. Interactive copy controls are not supported by every email app.',
+      '',
+      `Sign in to KALUSAGAP: ${loginUrl}`,
+      '',
+      'Your temporary password expires in 10 minutes. After signing in, you will be required to create a new permanent password before accessing your account.',
+      '',
+      'KALUSAGAP – Community Health Monitoring System.',
+      'Municipality of Pili, Camarines Sur.',
+      'For your security, do not forward or share this email.',
+    ].join('\n');
+    return {
+      from: config.smtpFrom,
+      to: { address: profile.email.trim() },
+      messageId: `<personnel-${job.id}@notifications.kalusagap.local>`,
+      subject: 'Your KALUSAGAP account is ready.',
+      text,
+      html: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0;background-color:#f3f6fa;font-family:Arial,Helvetica,sans-serif;color:#172b45;">
+        <tr><td align="center" style="padding:24px 12px;">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border:1px solid #d7e0eb;">
+            <tr><td style="padding:26px 28px 18px;">
+              <p style="margin:0;color:#102f53;font-size:17px;font-weight:bold;letter-spacing:1px;line-height:22px;">KALUSAGAP</p>
+              <p style="margin:4px 0 0;color:#64748b;font-size:10px;font-weight:bold;letter-spacing:1.2px;line-height:15px;">COMMUNITY HEALTH MONITORING SYSTEM</p>
+            </td></tr>
+            <tr><td style="padding:0 28px;"><div style="height:1px;background-color:#d7e0eb;font-size:1px;line-height:1px;">&nbsp;</div></td></tr>
+            <tr><td style="padding:28px 28px 8px;">
+              <h1 style="margin:0;color:#102f53;font-size:24px;font-weight:bold;line-height:30px;">Your account is ready.</h1>
+              <p style="margin:14px 0 0;color:#34465c;font-size:15px;line-height:23px;">Hello, ${escapeHtml(profile.full_name || 'Health Personnel')}. Your KALUSAGAP account has been created and approved.</p>
+            </td></tr>
+            <tr><td style="padding:20px 28px 0;">
+              <p style="margin:0 0 7px;color:#64748b;font-size:11px;font-weight:bold;letter-spacing:.7px;line-height:16px;text-transform:uppercase;">Registered email address</p>
+              <p style="margin:0;color:#172b45;font-size:14px;line-height:21px;word-break:break-word;">${escapeHtml(profile.email)}</p>
+            </td></tr>
+            <tr><td style="padding:18px 28px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#f3f6fa;border:1px solid #d7e0eb;">
+                <tr><td style="padding:13px 15px 7px;">
+                  <p style="margin:0;color:#64748b;font-size:11px;font-weight:bold;letter-spacing:.7px;line-height:16px;text-transform:uppercase;">Temporary password</p>
+                </td></tr>
+                <tr><td style="padding:0 15px 5px;">
+                  <p style="margin:0;color:#102f53;font-family:Consolas,Menlo,monospace;font-size:20px;font-weight:bold;letter-spacing:2px;line-height:28px;">${escapeHtml(temporaryPassword)}</p>
+                </td></tr>
+                <tr><td style="padding:0 15px 13px;">
+                  <p style="margin:0;color:#64748b;font-size:12px;line-height:18px;">To copy, select the password and use your email app’s copy command. Interactive copy buttons are not supported by all email apps.</p>
+                </td></tr>
+              </table>
+            </td></tr>
+            <tr><td align="left" style="padding:23px 28px 0;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr><td align="center" bgcolor="#124b86" style="background-color:#124b86;">
+                  <a href="${escapeHtml(loginUrl)}" style="display:inline-block;padding:12px 18px;color:#ffffff;font-size:14px;font-weight:bold;line-height:20px;text-decoration:none;">Sign in to KALUSAGAP</a>
+                </td></tr>
+              </table>
+            </td></tr>
+            <tr><td style="padding:20px 28px 25px;">
+              <p style="margin:0;color:#34465c;font-size:13px;line-height:20px;"><strong style="color:#102f53;">Security notice</strong><br>Your temporary password expires in 10 minutes. After signing in, you will be required to create a new permanent password before accessing your account.</p>
+            </td></tr>
+            <tr><td style="padding:0 28px;"><div style="height:1px;background-color:#d7e0eb;font-size:1px;line-height:1px;">&nbsp;</div></td></tr>
+            <tr><td style="padding:17px 28px 21px;">
+              <p style="margin:0;color:#34465c;font-size:12px;font-weight:bold;line-height:18px;">KALUSAGAP – Community Health Monitoring System</p>
+              <p style="margin:3px 0 0;color:#64748b;font-size:12px;line-height:18px;">Municipality of Pili, Camarines Sur.</p>
+              <p style="margin:9px 0 0;color:#64748b;font-size:11px;line-height:16px;">Keep your password private. KALUSAGAP staff will never ask you to send it by email.</p>
+            </td></tr>
+          </table>
+        </td></tr>
+      </table>`,
+    };
+  }
+
   const titlePrefix = profile.role === 'admin' ? 'Administrative' : 'Health Personnel';
   const accountLabel = profile.role === 'admin' ? 'administrative account' : 'health personnel account';
   const titles = {
@@ -241,6 +322,25 @@ export const processPersonnelNotifications = ({
           || (transport && typeof transport.sendMail !== 'function')) throw failure('SMTP_NOT_CONFIGURED');
         smtp = transport || getEmailTransporter();
         const origin = ACCESS_EVENTS.has(job.event_type) ? clientOrigin(config) : null;
+        let temporaryPassword = null;
+        if (job.temporary_password_ciphertext) {
+          const expiresAt = Date.parse(account.temporary_password_expires_at || '');
+          if (account.must_change_password !== true || !Number.isFinite(expiresAt)) {
+            throw failure('TEMPORARY_PASSWORD_INVALID');
+          }
+          if (expiresAt <= Date.now()) {
+            await finish('cancelled', 'TEMPORARY_PASSWORD_EXPIRED');
+            return;
+          }
+          try {
+            temporaryPassword = decryptTemporaryPassword(job.temporary_password_ciphertext, config.supabaseServiceRoleKey);
+          } catch {
+            throw failure('TEMPORARY_PASSWORD_INVALID');
+          }
+          if (temporaryPassword.length !== 9 || personnelPasswordSetupValidator({ password: temporaryPassword }).error) {
+            throw failure('TEMPORARY_PASSWORD_INVALID');
+          }
+        }
         let actionLink = null;
         if (needsSetup) {
           const type = authUser.email_confirmed_at ? 'recovery' : 'invite';
@@ -267,7 +367,10 @@ export const processPersonnelNotifications = ({
           setupUrl.searchParams.set('type', type);
           actionLink = setupUrl.href;
         }
-        message = buildMail({ job, account, profile, origin, actionLink, needsSetup, authConfirmed: Boolean(authUser.email_confirmed_at), config });
+        message = buildMail({
+          job, account, profile, origin, actionLink, needsSetup,
+          authConfirmed: Boolean(authUser.email_confirmed_at), config, temporaryPassword,
+        });
         const { data: begun, error: beginError } = await client.rpc('begin_personnel_notification_send', {
           p_notification_id: job.id, p_claim_token: job.claim_token,
         });

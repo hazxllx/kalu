@@ -6,6 +6,7 @@ import nodemailer from 'nodemailer';
 
 import { sendSmtpMail } from '../src/services/email.service.js';
 import { processPersonnelNotifications, startPersonnelNotificationWorker } from '../src/services/personnelNotifications.service.js';
+import { encryptTemporaryPassword } from '../src/utils/temporaryPassword.js';
 
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const JOB_ID = '22222222-2222-4222-8222-222222222222';
@@ -20,6 +21,7 @@ const CONFIG = {
   smtpHost: 'smtp.example.test', smtpPort: 587,
   smtpUser: 'test-smtp-user', smtpPassword: 'test-smtp-password',
   smtpFrom: 'KALUSAGAP <notices@example.test>',
+  supabaseServiceRoleKey: 'personnel-test-service-key',
   personnelNotificationIntervalMs: 60_000,
 };
 const smtpError = (code, command, responseCode) => Object.assign(
@@ -193,6 +195,61 @@ test('temporary-password approval email requires first-login change without send
   assert.match(f.state.messages[0].text, /required to create your own permanent password the first time you sign in/);
   assert.match(f.state.messages[0].text, /keep your credentials confidential/);
   assert.doesNotMatch(f.state.messages[0].text, /Temporary9|password:\s*\S+|Set Your Password/);
+});
+
+test('new health personnel email includes the generated password and 10-minute expiry without logging plaintext', async () => {
+  const password = 'N7!vQ3#rX';
+  const f = fixture({
+    account: {
+      must_change_password: true,
+      setup_required: true,
+      temporary_password_expires_at: '2027-01-02T03:04:05.000Z',
+    },
+    jobs: [{
+      event_type: 'approved',
+      temporary_password_ciphertext: encryptTemporaryPassword(password, CONFIG.supabaseServiceRoleKey),
+    }],
+    profile: { status: 'disabled' },
+  });
+  const result = await f.run({ targetId: ACCOUNT_ID });
+  const message = f.state.messages[0];
+  assert.equal(result.mailServerAccepted, 1);
+  assert.equal(f.state.jobs[0].status, 'sent');
+  assert.equal(message.subject, 'Your KALUSAGAP account is ready.');
+  assert.match(message.text, /Hello, Nurse Example/);
+  assert.match(message.text, new RegExp(EMAIL));
+  assert.match(message.text, new RegExp(password));
+  assert.match(message.text, /https:\/\/app\.example\.test\/login/);
+  assert.match(message.text, /expires in 10 minutes/i);
+  assert.match(message.text, /required to create a new permanent password before accessing your account/i);
+  assert.match(message.text, /select it and use your email client/i);
+  assert.match(message.text, /Municipality of Pili, Camarines Sur/);
+  assert.match(message.html, /COMMUNITY HEALTH MONITORING SYSTEM/);
+  assert.match(message.html, /Your account is ready\./);
+  assert.match(message.html, /font-family:Consolas,Menlo,monospace/);
+  assert.match(message.html, /https:\/\/app\.example\.test\/login/);
+  assert.doesNotMatch(message.html, /<script/i);
+  assert.doesNotMatch(JSON.stringify(f.state.logs), new RegExp(password));
+});
+
+test('notification worker refuses to send a non-nine-character temporary credential', async () => {
+  const password = 'Aa1!xY2#z0';
+  const f = fixture({
+    account: {
+      must_change_password: true,
+      setup_required: true,
+      temporary_password_expires_at: '2027-01-02T03:04:05.000Z',
+    },
+    jobs: [{
+      event_type: 'approved',
+      temporary_password_ciphertext: encryptTemporaryPassword(password, CONFIG.supabaseServiceRoleKey),
+    }],
+    profile: { status: 'disabled' },
+  });
+  const result = await f.run({ targetId: ACCOUNT_ID });
+  assert.equal(result.failed, 1);
+  assert.equal(f.state.messages.length, 0);
+  assert.doesNotMatch(JSON.stringify(f.state.logs), new RegExp(password));
 });
 
 test('an unconfirmed setup-required identity gets an expiring invite, never createUser', async () => {

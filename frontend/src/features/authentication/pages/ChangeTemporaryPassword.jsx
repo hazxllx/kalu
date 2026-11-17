@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Circle, Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { authApi } from "@/services/api";
 import { homeForRole, landingFor } from "@/lib/roles";
@@ -12,6 +12,7 @@ const REQUIREMENTS = [
   ["lowercase", "At least one lowercase letter", (value) => /[a-z]/.test(value)],
   ["number", "At least one number", (value) => /\d/.test(value)],
   ["special", "At least one non-whitespace special character", (value) => /[^A-Za-z0-9\s]/.test(value)],
+  ["whitespace", "No whitespace", (value) => !/\s/.test(value)],
 ];
 
 export default function ChangeTemporaryPassword() {
@@ -99,88 +100,101 @@ export default function ChangeTemporaryPassword() {
   };
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-brand-bg px-4 py-8">
-      <section className="w-full max-w-lg rounded-2xl border border-brand-border bg-white p-6 shadow-card sm:p-8" aria-labelledby="change-password-title">
-        <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue">
-          <ShieldCheck className="h-6 w-6" aria-hidden="true" />
-        </div>
-        <h1 id="change-password-title" className="text-2xl font-semibold text-brand-ink">Create Your Permanent Password</h1>
-        <p className="mt-2 text-sm leading-relaxed text-brand-gray">
-          Your administrator provided a temporary password. For your security, create a new password before continuing to your account.
-        </p>
+    <main className="flex min-h-dvh items-center justify-center bg-brand-bg px-4 py-6 sm:py-8">
+      <div className="w-full max-w-md">
+        <header className="mb-5 border-b border-brand-border px-1 pb-4">
+          <p className="font-display text-[17px] font-bold leading-tight tracking-[0.03em] text-brand-dark">KALUSAGAP</p>
+          <p className="mt-1 text-[10px] font-semibold tracking-[0.16em] text-brand-gray">HEALTH PERSONNEL PORTAL</p>
+        </header>
 
-        {status === "checking" && <p role="status" className="mt-6 flex items-center gap-2 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Checking your password-change status...</p>}
-        {status === "blocked" && (
-          <div className="mt-6 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="status">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Your account must be approved and not suspended before you can create a permanent password. Your administrator will need to complete the account review.</span>
+        <section className="rounded-lg border border-brand-border bg-white p-5 shadow-sm sm:p-6" aria-labelledby="change-password-title">
+          <div className="mb-3 inline-flex items-center gap-2 border border-brand-blue/20 bg-brand-light px-2.5 py-1 text-[10px] font-bold tracking-[0.12em] text-brand-blue">
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-blue" aria-hidden="true" />
+            FIRST-TIME ACCOUNT SETUP
           </div>
-        )}
-        {status === "error" && (
-          <div className="mt-6 flex items-start gap-2 rounded-lg border border-brand-danger/30 bg-brand-danger/5 p-3 text-sm text-brand-danger" role="alert">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span>
+          <h1 id="change-password-title" className="font-display text-[22px] font-bold leading-tight text-brand-dark">Set up your password</h1>
+          <p className="mt-2 text-[13px] leading-5 text-brand-gray">
+            Before accessing your account, create a new permanent password.
+          </p>
+
+          {status === "checking" && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Checking your password-change status...</p>}
+          {status === "blocked" && (
+            <div className="mt-4 flex items-start gap-2 border border-amber-200 bg-amber-50 p-3 text-[13px] leading-5 text-amber-900" role="status">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Your account must be approved and not suspended before you can create a permanent password. Your administrator will need to complete the account review.</span>
+            </div>
+          )}
+          {status === "error" && (
+            <div className="mt-4 flex items-start gap-2 border border-brand-danger/30 bg-brand-danger/5 p-3 text-[13px] leading-5 text-brand-danger" role="alert">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span>
+            </div>
+          )}
+          {success && <div role="status" className="mt-4 flex items-start gap-2 border border-emerald-200 bg-emerald-50 p-3 text-[13px] leading-5 text-emerald-800"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>{success}</span></div>}
+          {error && status !== "error" && <div role="alert" className="mt-4 flex items-start gap-2 border border-brand-danger/30 bg-brand-danger/5 p-3 text-[13px] leading-5 text-brand-danger"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
+
+          {status === "ready" && (
+            <form onSubmit={submit} className="mt-5 space-y-4">
+              <div>
+                <label htmlFor="permanent-password" className="text-[13px] font-semibold text-brand-ink">New Password</label>
+                <div className="mt-1 flex rounded-input border border-brand-border bg-white focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/15">
+                  <input
+                    id="permanent-password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(event) => { setPassword(event.target.value); setError(""); }}
+                    disabled={busy}
+                    className="min-w-0 w-full rounded-l-input bg-transparent px-3 py-2.5 text-sm text-brand-ink outline-none"
+                    required
+                  />
+                  <button type="button" aria-label={showPassword ? "Hide new password" : "Show new password"} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)} className="flex shrink-0 items-center justify-center px-3 text-brand-gray hover:text-brand-dark">
+                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                  </button>
+                </div>
+                <ul className="mt-2 grid grid-cols-1 gap-1 text-[11px] leading-4 sm:grid-cols-2" aria-label="Password requirements" aria-live="polite">
+                  {REQUIREMENTS.map(([key, label]) => (
+                    <li key={key} className={`flex items-center gap-1.5 ${requirements[key] ? "text-emerald-700" : "text-brand-gray"}`}>
+                      {requirements[key] ? <Check className="h-3 w-3 shrink-0" aria-hidden="true" /> : <Circle className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />}
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div>
+                <label htmlFor="confirm-permanent-password" className="text-[13px] font-semibold text-brand-ink">Confirm Password</label>
+                <div className="mt-1 flex rounded-input border border-brand-border bg-white focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/15">
+                  <input
+                    id="confirm-permanent-password"
+                    type={showConfirmation ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={confirmation}
+                    onChange={(event) => { setConfirmation(event.target.value); setError(""); }}
+                    disabled={busy}
+                    className="min-w-0 w-full rounded-l-input bg-transparent px-3 py-2.5 text-sm text-brand-ink outline-none"
+                    required
+                  />
+                  <button type="button" aria-label={showConfirmation ? "Hide confirmation password" : "Show confirmation password"} aria-pressed={showConfirmation} onClick={() => setShowConfirmation((value) => !value)} className="flex shrink-0 items-center justify-center px-3 text-brand-gray hover:text-brand-dark">
+                    {showConfirmation ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                  </button>
+                </div>
+                {confirmation && <p className={`mt-1 text-xs ${password === confirmation ? "text-emerald-700" : "text-brand-danger"}`} role="status">{password === confirmation ? "Passwords match." : "Passwords do not match."}</p>}
+              </div>
+
+              <button type="submit" disabled={busy || !allRequirementsMet || !password || !confirmation || password !== confirmation} className="flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
+                {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving password...</> : <><KeyRound className="h-4 w-4" /> Save new password</>}
+              </button>
+            </form>
+          )}
+          {status === "inactive" && <button type="button" onClick={signOut} className="mt-4 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white">Sign out</button>}
+          {(status === "error" || status === "blocked") && <button type="button" onClick={signOut} className="mt-4 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink">Sign out</button>}
+          {accountStatus?.approvalStatus && <p className="mt-3 text-xs text-brand-gray">Account approval status: {accountStatus.approvalStatus.replace(/_/g, " ")}.</p>}
+
+          <div className="mt-5 border-t border-brand-border pt-3">
+            <p className="text-[11px] leading-4 text-brand-gray">Your account is protected. Your new password replaces your temporary credentials.</p>
           </div>
-        )}
-        {success && <div role="status" className="mt-5 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>{success}</span></div>}
-        {error && status !== "error" && <div role="alert" className="mt-5 flex items-start gap-2 rounded-lg border border-brand-danger/30 bg-brand-danger/5 p-3 text-sm text-brand-danger"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
-
-        {status === "ready" && (
-          <form onSubmit={submit} className="mt-6 space-y-5">
-            <div>
-              <label htmlFor="permanent-password" className="text-sm font-medium text-brand-ink">New Password</label>
-              <div className="mt-1 flex rounded-btn border border-slate-200 focus-within:border-brand-blue">
-                <input
-                  id="permanent-password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(event) => { setPassword(event.target.value); setError(""); }}
-                  disabled={busy}
-                  className="w-full rounded-l-btn px-3 py-2.5 text-sm outline-none"
-                  required
-                />
-                <button type="button" aria-label={showPassword ? "Hide new password" : "Show new password"} onClick={() => setShowPassword((value) => !value)} className="px-3 text-brand-gray">
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              <ul className="mt-2 space-y-1 text-xs" aria-label="Password requirements">
-                {REQUIREMENTS.map(([key, label]) => (
-                  <li key={key} className={requirements[key] ? "text-emerald-700" : "text-brand-gray"}>
-                    <span aria-hidden="true">{requirements[key] ? "✓" : "•"} </span>{label}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <label htmlFor="confirm-permanent-password" className="text-sm font-medium text-brand-ink">Confirm New Password</label>
-              <div className="mt-1 flex rounded-btn border border-slate-200 focus-within:border-brand-blue">
-                <input
-                  id="confirm-permanent-password"
-                  type={showConfirmation ? "text" : "password"}
-                  autoComplete="new-password"
-                  value={confirmation}
-                  onChange={(event) => { setConfirmation(event.target.value); setError(""); }}
-                  disabled={busy}
-                  className="w-full rounded-l-btn px-3 py-2.5 text-sm outline-none"
-                  required
-                />
-                <button type="button" aria-label={showConfirmation ? "Hide confirmation password" : "Show confirmation password"} onClick={() => setShowConfirmation((value) => !value)} className="px-3 text-brand-gray">
-                  {showConfirmation ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              {confirmation && <p className={`mt-1 text-xs ${password === confirmation ? "text-emerald-700" : "text-brand-danger"}`}>{password === confirmation ? "Passwords match." : "Passwords do not match."}</p>}
-            </div>
-
-            <button type="submit" disabled={busy || !allRequirementsMet || !password || !confirmation || password !== confirmation} className="flex w-full items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-3 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60">
-              {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving password...</> : <><KeyRound className="h-4 w-4" /> Save Permanent Password</>}
-            </button>
-          </form>
-        )}
-        {status === "inactive" && <button type="button" onClick={signOut} className="mt-5 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white">Sign out</button>}
-        {(status === "error" || status === "blocked") && <button type="button" onClick={signOut} className="mt-5 rounded-btn border border-slate-200 px-4 py-2.5 text-sm font-medium text-brand-ink">Sign out</button>}
-        {accountStatus?.approvalStatus && <p className="mt-5 text-xs text-brand-gray">Account approval status: {accountStatus.approvalStatus.replace(/_/g, " ")}.</p>}
-      </section>
+        </section>
+      </div>
     </main>
   );
 }

@@ -772,7 +772,7 @@ const residentSearchFilter = (term, { includeBarangay = false } = {}) => {
 const PROFILE_ADMIN_COLUMNS =
   'id,email,full_name,role,status,municipality_id,barangay_id,facility_id,rhu_stations,position,license_no,contact,created_at,updated_at';
 const PERSONNEL_ACCOUNT_COLUMNS =
-  'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,temporary_password_assigned_by,temporary_password_assigned_at,password_changed_at,suspended_at,suspension_reason,decision_reason,version';
+  'account_id,approval_status,activation_requested,setup_required,setup_completed_at,must_change_password,temporary_password_assigned_by,temporary_password_assigned_at,temporary_password_expires_at,password_changed_at,suspended_at,suspension_reason,decision_reason,version';
 const PERSONNEL_NOTIFICATION_COLUMNS =
   'id,account_id,event_type,actor_id,reason,status,attempts,next_attempt_at,last_error_code,provider_message_id,created_at,sent_at';
 const PROFILE_ADMIN_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS},personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS}),notifications:personnel_notification_outbox!account_id(${PERSONNEL_NOTIFICATION_COLUMNS})`;
@@ -898,6 +898,7 @@ export const profileToAdminUser = (row) => {
   mustChangePassword: lifecycle?.must_change_password === true,
   temporaryPasswordAssignedBy: lifecycle?.temporary_password_assigned_by ?? null,
   temporaryPasswordAssignedAt: lifecycle?.temporary_password_assigned_at ?? null,
+  temporaryPasswordExpiresAt: lifecycle?.temporary_password_expires_at ?? null,
   passwordChangedAt: lifecycle?.password_changed_at ?? null,
   suspendedAt: lifecycle?.suspended_at ?? null,
   suspensionReason: lifecycle?.suspension_reason || '',
@@ -2014,11 +2015,12 @@ export const supabaseRepository = {
     return id;
   },
 
-  async createPersonnelAccountProfile({ actorId, operationId, profile }) {
+  async createPersonnelAccountProfile({ actorId, operationId, profile, temporaryPasswordCiphertext = null }) {
     const { data, error } = await getServiceClient().rpc('admin_create_personnel_account', {
       p_actor_id: actorId,
       p_operation_id: operationId,
       p_profile: profile,
+      p_temporary_password_ciphertext: temporaryPasswordCiphertext,
     });
     throwAccountError(error, 'Account provisioning could not be confirmed. Retry with the same operation reference.');
     const row = Array.isArray(data) ? data[0] : data;
