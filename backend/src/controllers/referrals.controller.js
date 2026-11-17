@@ -13,8 +13,10 @@ export const list = async (req, res) =>
 export const incoming = async (req, res) =>
   sendData(res, { rows: await service.list({ user: req.user, status: req.query.status, box: 'incoming' }) });
 
-export const recipients = async (req, res) =>
-  sendData(res, { rows: await service.listRecipients({ user: req.user, residentId: req.query.residentId }) });
+export const recipients = async (req, res) => {
+  const result = await service.listRecipients({ user: req.user, residentId: req.query.residentId });
+  return sendData(res, { rows: result.routes, referringFacility: result.referringFacility });
+};
 
 export const getByVisit = async (req, res) =>
   sendData(res, { record: await service.getByVisitId({ user: req.user, visitId: req.params.visitId }) });

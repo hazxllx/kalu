@@ -118,18 +118,72 @@ test('incoming list is an actual individually assigned, fully paginated current-
 
 test('create resolves a real current recipient/facility and cannot override status, source identity, actor or scope', async () => {
   const client = transport();
-  const record = await service.create({ user: sender, payload: payload({ destination_facility: 'Forged facility name' }), supabase: client });
+  const record = await service.create({ user: sender, payload: payload({
+    destination_facility: 'Forged facility name',
+    external_receiving_facility: 'Outside General Hospital',
+    external_receiving_address: '10 Main Street',
+    external_receiving_role: 'Cardiologist',
+    external_recipient_name: 'Dr Example',
+    external_recipient_position: 'Attending physician',
+  }), supabase: client });
   assert.equal(record.destination_facility, 'Actual RHU');
+  assert.equal(record.referring_facility, 'Actual BHS');
   assert.equal(record.recipient.full_name, 'Actual Triage');
   assert.equal(record.created_by, sender.id);
   const call = client.calls.find((c) => c.rpc);
   assert.equal(call.args.p_actor_id, sender.id);
   assert.equal(call.args.p_record.recipient_personnel_id, ids.triage);
+  assert.equal(call.args.p_record.external_receiving_facility, 'Outside General Hospital');
+  assert.equal(call.args.p_record.external_recipient_name, 'Dr Example');
+  await assert.rejects(() => service.create({ user: sender, payload: payload({ external_receiving_facility: 'Outside General Hospital' }), supabase: client }),
+    (error) => error.statusCode === 422 && error.message.includes('outside facility'));
   for (const patch of [{ status: 'Completed' }, { municipality_id: ids.otherMunicipality }, { created_by: ids.peer }, { patient_snapshot: {} }, { completed_at: '2026-01-01' }]) {
     await assert.rejects(() => service.create({ user: sender, payload: payload(patch), supabase: client }), (error) => error.statusCode === 422);
   }
   await assert.rejects(() => service.create({ user: user(ids.sender, 'health_supervisor', { barangayId: ids.otherBarangay }), payload: payload(), supabase: client }), (error) => error.statusCode === 404);
   await assert.rejects(() => service.create({ user: { ...sender, municipalityId: null }, payload: payload(), supabase: client }), (error) => error.statusCode === 403);
+});
+
+test('manual outside referrals do not require an in-app recipient and are tracked by their sender', async () => {
+  const client = transport();
+  const manualPayload = payload({
+    recipient_personnel_id: null, recipient_facility_id: null, recipient_role: null, recipient_station: null,
+    external_receiving_facility: 'Outside General Hospital', external_receiving_address: '10 Main Street',
+    external_receiving_role: 'Cardiology', external_recipient_name: 'Dr Example',
+    external_recipient_position: 'Attending physician',
+  });
+  const referral = await service.create({ user: sender, payload: manualPayload, supabase: client });
+  assert.equal(referral.recipient_personnel_id, null);
+  assert.equal(referral.destination_facility, 'Outside General Hospital');
+  assert.equal(referral.referring_facility, 'Actual BHS');
+  assert.equal(referral.capabilities.manual_external, true);
+  assert.deepEqual(referral.capabilities.allowed_statuses, ['Accepted', 'Rejected', 'Cancelled']);
+  await assert.rejects(() => service.getById({ user: triage, id: referral.id, supabase: client }), (error) => error.statusCode === 404);
+  const accepted = await service.updateStatus({ user: sender, id: referral.id, status: 'Accepted', version: referral.version, supabase: client });
+  assert.deepEqual(accepted.capabilities.allowed_statuses, ['In Progress', 'Cancelled']);
+  const completed = await service.updateStatus({ user: sender, id: referral.id, status: 'In Progress', version: accepted.version, supabase: client });
+  await service.updateStatus({ user: sender, id: referral.id, status: 'Completed', version: completed.version, supabase: client });
+  await assert.rejects(() => service.create({ user: sender, payload: payload({
+    recipient_personnel_id: null, recipient_facility_id: null, recipient_role: null,
+    external_receiving_facility: 'Outside General Hospital',
+  }), supabase: transport() }), (error) => error.statusCode === 422 && error.message.includes('outside facility'));
+});
+
+test('referral vital signs are optional, normalized and validated when provided', async () => {
+  const client = transport();
+  await service.create({ user: sender, payload: payload({ referral_vitals: {} }), supabase: client });
+  const request = client.calls.find((call) => call.rpc);
+  assert.deepEqual(request.args.p_record.referral_vitals, {});
+
+  const withVitals = transport();
+  await service.create({ user: sender, payload: payload({ referral_vitals: {
+    bp: '120/80', temperature: '36.8', hr: '72', rr: '18', heightCm: '160', weightKg: '55', o2sat: '98',
+  } }), supabase: withVitals });
+  assert.deepEqual(withVitals.calls.find((call) => call.rpc).args.p_record.referral_vitals, {
+    bp: '120/80', temperature: 36.8, hr: 72, rr: 18, heightCm: 160, weightKg: 55, o2sat: 98,
+  });
+  await assert.rejects(() => service.create({ user: sender, payload: payload({ referral_vitals: { hr: '900' } }), supabase: transport() }),
+    (error) => error.statusCode === 422 && error.message.includes('Heart rate'));
 });
 
 test('wrong recipient role, station, current geography/facility, suspended account and name-only routing fail before any write', async () => {
@@ -149,7 +203,9 @@ test('wrong recipient role, station, current geography/facility, suspended accou
 
 test('recipient directory supplies only eligible real IDs/roles/stations, no BHW or private personnel fields', async () => {
   const client = transport();
-  const routes = await service.listRecipients({ user: sender, residentId: 'RES-CANONICAL', supabase: client });
+  const { routes, referringFacility } = await service.listRecipients({ user: sender, residentId: 'RES-CANONICAL', supabase: client });
+  assert.equal(referringFacility, 'Actual BHS');
+  assert(client.calls.some((call) => call.table === 'profiles' && String(call.columns).includes('personnel_accounts!personnel_accounts_account_id_fkey')));
   assert(routes.some((r) => r.id === ids.consultation && r.station === 'consultation'));
   assert(routes.some((r) => r.id === ids.midwife && r.facility_id === ids.bhs));
   assert(!routes.some((r) => [ids.sender, ids.bhw, ids.outside].includes(r.id)));
@@ -157,6 +213,20 @@ test('recipient directory supplies only eligible real IDs/roles/stations, no BHW
   assert(!client.calls.some((c) => /email|license|contact_number/.test(c.columns || '')));
   const midwife = await service.create({ user: nurse, payload: payload({ recipient_personnel_id: ids.midwife, recipient_facility_id: ids.bhs, recipient_role: 'midwife', recipient_station: null }), supabase: client });
   assert.equal(midwife.recipient_role, 'health_supervisor');
+  assert.equal(midwife.referring_facility, 'Actual RHU');
+});
+
+test('scheduled referral dates are checked against Asia/Manila even if the browser reports another timezone', () => {
+  const now = new Date('2026-10-20T02:00:00.000Z'); // 10:00 AM in Manila
+  assert.throws(() => service.assertReferralDates({
+    scheduled_at: '2026-10-20T10:00:00+08:00', client_time_zone: 'America/Los_Angeles',
+  }, { now }), (error) => error.statusCode === 422 && error.message.includes('past'));
+  assert.doesNotThrow(() => service.assertReferralDates({
+    scheduled_at: '2026-10-20T10:01:00+08:00', client_time_zone: 'America/Los_Angeles',
+  }, { now }));
+  assert.throws(() => service.assertReferralDates({
+    referral_date: '2026-10-21', client_time_zone: 'America/Los_Angeles',
+  }, { now }), (error) => error.statusCode === 422 && error.message.includes('later than today'));
 });
 
 test('row capabilities and status transitions prevent sender approval, unassigned peer decisions and completed/rejected rewrites', async () => {

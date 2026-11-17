@@ -119,7 +119,7 @@ before(async () => {
   originalLegacy = await query('select to_jsonb(r) as record from public.referrals r order by id');
   originalVisits = await query('select to_jsonb(v) as record from public.visits v order by id');
   originalCanonical = await row(ids.existingReferral);
-  migrationSql = await readFile(new URL(candidate, migrations), 'utf8');
+  migrationSql = `${await readFile(new URL(candidate, migrations), 'utf8')}\n${await readFile(new URL('20261118090000_referral_external_destination_contacts.sql', migrations), 'utf8')}`;
   await db.exec(migrationSql);
 }, { timeout: 120000 });
 after(async () => { await db.close(); });
@@ -193,6 +193,57 @@ test('recipient, municipality, facility, station, role, resident and sender vali
   await assert.rejects(() => create({ status: 'Completed' }), (error) => error.code === '22023');
   await assert.rejects(() => create({ patient_snapshot: { spoofed: true } }), (error) => error.code === '22023');
   assert.equal((await query('select count(*)::int count from public.health_referrals'))[0].count, before);
+});
+
+test('outside referral needs no registered assignee and its sender can track progress', async () => {
+  let referral = await create({
+    recipient_personnel_id: null,
+    recipient_facility_id: null,
+    recipient_role: null,
+    recipient_station: null,
+    external_receiving_facility: 'Pili Community Hospital',
+    external_receiving_address: 'Pili, Camarines Sur',
+    external_receiving_role: 'Cardiology',
+    external_recipient_name: 'Dr Example',
+    external_recipient_position: 'Consultant',
+  });
+  assert.equal(referral.recipient_personnel_id, null);
+  assert.equal(referral.recipient_facility_id, null);
+  assert.equal(referral.destination_facility, 'Pili Community Hospital');
+  assert.equal(referral.external_recipient_name, 'Dr Example');
+  await assert.rejects(() => change(referral, 'Accepted', people.triage), (error) => error.code === '42501');
+  referral = await change(referral, 'Accepted', people.sender, 'Sent to the outside facility.');
+  referral = await change(referral, 'In Progress', people.sender, 'External facility is assessing the resident.');
+  referral = await change(referral, 'Completed', people.sender, 'Outside consultation completed.');
+  assert.equal(referral.status, 'Completed');
+  assert.deepEqual((await history(referral.id)).map((entry) => entry.new_status), ['Pending', 'Accepted', 'In Progress', 'Completed']);
+
+  const pendingAssigned = await create();
+  const converted = await write(people.sender, pendingAssigned.id, 'update', pendingAssigned.version, {
+    recipient_personnel_id: null,
+    recipient_facility_id: null,
+    recipient_role: null,
+    recipient_station: null,
+    external_receiving_facility: 'Outside Specialist Clinic',
+    external_receiving_address: 'Pili, Camarines Sur',
+    external_receiving_role: 'Dermatology',
+    external_recipient_name: 'Dr Another',
+    external_recipient_position: 'Consultant',
+  });
+  assert.equal(converted.recipient_personnel_id, null);
+  assert.equal(converted.destination_facility, 'Outside Specialist Clinic');
+});
+
+test('referral vital signs persist independently and can remain empty', async () => {
+  const empty = await create({ referral_vitals: {} });
+  assert.deepEqual(empty.referral_vitals, {});
+  const recorded = await create({ referral_vitals: {
+    bp: '118/76', temperature: 36.8, hr: 72, rr: 18, heightCm: 160, weightKg: 55, o2sat: 98,
+  } });
+  assert.deepEqual(recorded.referral_vitals, {
+    bp: '118/76', temperature: 36.8, hr: 72, rr: 18, heightCm: 160, weightKg: 55, o2sat: 98,
+  });
+  assert.equal(recorded.physical_exam_findings, '');
 });
 
 test('only the actual recipient receives/acts; sender sees the same durable accepted, progress and completed row', async () => {

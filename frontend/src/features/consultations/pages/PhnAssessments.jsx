@@ -74,6 +74,7 @@ const buildDraftBase = (patient) => ({
   consultationLocation: consultationLocationFor(patient || {}),
   reason: patient?.reason || patient?.triage?.chiefComplaint || "",
   findings: patient?.checkup?.assessment || "",
+  vitals: patient?.triage?.vitals || {},
   riskLevel: patient?.checkup?.riskLevel || "",
   clinicalNotes: patient?.checkup?.clinicalNotes || "",
   recommendations: patient?.checkup?.recommendations || "",

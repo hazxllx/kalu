@@ -581,11 +581,18 @@ export default function TreatmentConsultation() {
         findings: formData.clinicalFindingsDiagnosis || "",
         chiefComplaints: formData.chiefComplaint || "",
         clinicalHistory: "",
-        physicalExamFindings: formData.clinicalFindingsDiagnosis || "",
+        vitals: {
+          bp: formData.bloodPressure,
+          temperature: formData.temperature,
+          hr: formData.pulseRate,
+          rr: formData.respiratoryRate,
+          heightCm: formData.height,
+          weightKg: formData.weight,
+          o2sat: formData.oxygenSaturation,
+        },
         impression: formData.clinicalFindingsDiagnosis || "",
         recommendations: formData.adviceGiven || "",
         clinicalNotes: formData.remarks || "",
-        referringFacility: selectedResident.barangay ? `${selectedResident.barangay} Health Station` : "",
         treatmentVisitId: saved?.id || "",
       };
       cancelForm();

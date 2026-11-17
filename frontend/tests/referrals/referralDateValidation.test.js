@@ -1,6 +1,5 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-
+import assert from 'node:assert/strict';
+import test from 'node:test';
 import {
   localDateKey,
   localDateTimeToIso,
@@ -9,60 +8,41 @@ import {
   toLocalDateTimeInput,
 } from "../../src/features/referrals/lib/referralDateValidation.js";
 
-test("referral dates use the local calendar day and reject future referral dates", () => {
-  const now = new Date(2026, 9, 15, 12, 0);
-  const today = localDateKey(now);
-
-  assert.deepEqual(referralDateErrors({ referralDate: "2026-10-14", scheduledAt: "" }, { now }), {});
-  assert.deepEqual(referralDateErrors({ referralDate: today, scheduledAt: "" }, { now }), {});
-  assert.equal(
-    referralDateErrors({ referralDate: "2026-10-16", scheduledAt: "" }, { now }).referralDate,
-    "Referral date cannot be later than today.",
-  );
+test("referral dates use the Asia/Manila calendar day and reject future referral dates", () => {
+  const now = new Date('2026-10-20T02:00:00.000Z'); // 10:00 in Manila
+  assert.equal(localDateKey(now), '2026-10-20');
+  assert.deepEqual(referralDateErrors({ referralDate: '2026-10-19', scheduledAt: '' }, { now }), {});
+  assert.deepEqual(referralDateErrors({ referralDate: '2026-10-20', scheduledAt: '' }, { now }), {});
+  assert.equal(referralDateErrors({ referralDate: '2026-10-21', scheduledAt: '' }, { now }).referralDate,
+    'Referral date cannot be later than today.');
 });
 
-test("scheduled referral time rejects yesterday, past and current time today", () => {
-  const now = new Date(2026, 9, 15, 12, 30);
-
-  for (const scheduledAt of ["2026-10-14T12:31", "2026-10-15T12:29", "2026-10-15T12:30"]) {
-    assert.equal(
-      referralDateErrors({ referralDate: "2026-10-15", scheduledAt }, { now }).scheduledAt,
-      "Scheduled date and time cannot be in the past.",
-    );
+test("scheduled referral times reject yesterday, past time and the current time", () => {
+  const now = new Date('2026-10-20T02:00:00.000Z'); // 10:00 in Manila
+  for (const scheduledAt of ['2026-10-19T10:00', '2026-10-20T09:59', '2026-10-20T10:00']) {
+    assert.equal(referralDateErrors({ referralDate: '2026-10-20', scheduledAt }, { now }).scheduledAt,
+      'Scheduled date and time cannot be in the past.');
   }
 });
 
-test("future time today and a future date are valid", () => {
-  const now = new Date(2026, 9, 15, 12, 30);
-
-  assert.deepEqual(referralDateErrors({
-    referralDate: "2026-10-15",
-    scheduledAt: "2026-10-15T12:31",
-  }, { now }), {});
-  assert.deepEqual(referralDateErrors({
-    referralDate: "2026-10-15",
-    scheduledAt: "2026-10-16T09:00",
-  }, { now }), {});
+test("a future time today and future date are valid and convert using +08:00", () => {
+  const now = new Date('2026-10-20T02:00:00.000Z');
+  assert.deepEqual(referralDateErrors({ referralDate: '2026-10-20', scheduledAt: '2026-10-20T10:01' }, { now }), {});
+  assert.deepEqual(referralDateErrors({ referralDate: '2026-10-20', scheduledAt: '2026-10-21T09:00' }, { now }), {});
+  assert.equal(localDateTimeToIso('2026-10-20T10:01'), '2026-10-20T10:01:00+08:00');
+  assert.equal(toLocalDateTimeInput('2026-10-20T02:00:00.000Z'), '2026-10-20T10:00');
+  assert.equal(referralDateTimeMinimum(new Date('2026-10-20T02:00:59.000Z')), '2026-10-20T10:01');
 });
 
 test("unchanged historical schedules remain editable but changed past schedules do not", () => {
-  const now = new Date(2026, 9, 15, 12, 30);
-  const originalScheduledAt = "2026-10-14T12:00";
-
+  const now = new Date('2026-10-20T02:00:00.000Z');
+  const historical = '2026-10-19T10:00';
   assert.deepEqual(referralDateErrors(
-    { referralDate: "2026-10-14", scheduledAt: originalScheduledAt },
-    { now, originalScheduledAt },
+    { referralDate: '2026-10-19', scheduledAt: historical },
+    { now, originalScheduledAt: historical },
   ), {});
   assert.equal(referralDateErrors(
-    { referralDate: "2026-10-14", scheduledAt: "2026-10-14T12:01" },
-    { now, originalScheduledAt },
-  ).scheduledAt, "Scheduled date and time cannot be in the past.");
-});
-
-test("local schedule values convert to timezone-aware API timestamps and edit values", () => {
-  const value = "2026-10-15T12:31";
-  const serialized = localDateTimeToIso(value);
-  assert(serialized.endsWith("Z"));
-  assert.equal(toLocalDateTimeInput(serialized), value);
-  assert.equal(referralDateTimeMinimum(new Date(2026, 9, 15, 12, 30, 59)), "2026-10-15T12:31");
+    { referralDate: '2026-10-19', scheduledAt: '2026-10-19T10:01' },
+    { now, originalScheduledAt: historical },
+  ).scheduledAt, 'Scheduled date and time cannot be in the past.');
 });

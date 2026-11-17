@@ -67,23 +67,65 @@ export function renderReferralPdf(referral, branding = null) {
     ? legacy.patient_snapshot
     : referral.patient_snapshot || referral.patientSnapshot;
   const hasSnapshot = snapshot && Object.keys(snapshot).length > 0;
-  const resident = hasSnapshot ? snapshot : referral.resident || {};
+  const resident = referral.resident && Object.keys(referral.resident).length
+    ? referral.resident
+    : hasSnapshot ? snapshot : {};
   const patientName = fullName(resident) || str(referral.residentName) || str(referral.patient);
   const referralDate = str(referral.referralDate || referral.referral_date || referral.createdAt || referral.date);
+  const createdAt = str(referral.created_at || referral.createdAt);
   const scheduledAt = str(referral.scheduledAt || referral.scheduled_at || "");
   const referralNo = str(referral.referralNo || referral.reference_no || referral.legacy_links?.[0]?.legacy_referral_id || referral.id);
   const sex = str(resident.sex || referral.sex || referral.gender);
   const age = str((hasSnapshot ? resident.age ?? ageFromBirthDate(resident.birth_date || resident.birthDate, referralDate || new Date()) : ageFromBirthDate(resident.birth_date || resident.birthDate)) || referral.age || "");
   const address = str(resident.current_address || resident.currentAddress || resident.permanent_address || resident.permanentAddress || referral.address || resident.barangay || referral.barangay || "");
+  const birthDate = str(resident.birth_date || resident.birthDate);
+  const patientContact = str(resident.cellphone_no || resident.cellphoneNo || referral.contactNumber);
   const referringPersonnel = str(referral.sender?.full_name || referral.referringPersonnel || referral.referring_personnel || legacy?.referring_personnel);
+  const referringFacility = str(referral.referring_facility || referral.referringFacility);
+  const referringFacilityAddress = str(referral.referring_facility_address || referral.referringFacilityAddress);
+  const referringContact = str(referral.referring_contact || referral.referringContact);
   const reason = str(referral.reason);
-  const chiefComplaints = str(referral.chiefComplaints || referral.chief_complaints || reason);
-  const medicalHistory = str(referral.medicalHistory || referral.medical_history || referral.notes || referral.healthHistory);
-  const physicalExamFindings = str(referral.physicalExamFindings || referral.physical_exam_findings || referral.laboratoryTest || referral.laboratory_test || "");
-  const impression = str(referral.impression || referral.destinationService || referral.destination_service || referral.impressionText || "");
+  const encounter = referral.encounter || {};
+  const chiefComplaints = str(referral.chiefComplaints || referral.chief_complaints || encounter.chief_complaint);
+  const medicalHistory = str(referral.medicalHistory || referral.medical_history || encounter.clinical_history);
+  const physicalExamFindings = str(referral.physicalExamFindings || referral.physical_exam_findings || encounter.findings);
+  const impression = str(referral.impression || encounter.phn_assessment);
+  const treatmentGiven = str(encounter.treatment_given || referral.treatmentGiven || referral.treatment_given);
+  const recommendations = str(encounter.recommendation || referral.recommendation);
+  const encounterNotes = str(encounter.phn_notes || referral.notes);
+  const referralVitals = referral.referral_vitals || referral.referralVitals || {};
+  const referralHeight = referralVitals.heightCm ?? referralVitals.height_cm;
+  const referralWeight = referralVitals.weightKg ?? referralVitals.weight_kg;
+  const referralBmi = Number(referralHeight) > 0 && Number(referralWeight) > 0
+    ? (Number(referralWeight) / ((Number(referralHeight) / 100) ** 2)).toFixed(2) : "";
+  const vitals = {
+    bp: str(referralVitals.bp || encounter.bp || encounter.vitals?.bp),
+    hr: str(referralVitals.hr ?? encounter.hr ?? encounter.vitals?.hr),
+    rr: str(referralVitals.rr ?? encounter.rr ?? encounter.vitals?.rr),
+    o2sat: str(referralVitals.o2sat ?? encounter.o2sat ?? encounter.vitals?.o2sat),
+    temperature: str(referralVitals.temperature ?? encounter.temperature ?? encounter.vitals?.temperature),
+    height: str(referralVitals.heightCm ?? encounter.height_cm ?? encounter.vitals?.height_cm),
+    weight: str(referralVitals.weightKg ?? encounter.weight_kg ?? encounter.vitals?.weight_kg),
+    bmi: str(referralVitals.bmi ?? encounter.bmi ?? encounter.vitals?.bmi ?? referralBmi),
+  };
   const destinationFacility = str(referral.destination_facility || referral.destinationFacility || referral.facility);
+  const inSystemFacility = (referral.recipient_personnel_id || referral.recipientPersonnelId) ? destinationFacility : "";
+  const receivingAddress = str(referral.recipient_facility?.address || referral.receivingFacilityAddress);
   const recipient = (referral.recipient_personnel_id || referral.recipientPersonnelId)
-    ? str(referral.recipient?.full_name || referral.recipientName) : "";
+    ? str(referral.recipient?.full_name || referral.recipientName) : str(referral.receivingPersonnel);
+  const recipientRole = str(referral.recipient_role || referral.recipientRole);
+  const recipientStation = str(referral.recipient_station || referral.recipientStation);
+  const externalFacility = str(referral.external_receiving_facility || referral.externalReceivingFacility);
+  const externalAddress = str(referral.external_receiving_address || referral.externalReceivingAddress);
+  const externalRole = str(referral.external_receiving_role || referral.externalReceivingRole);
+  const externalRecipient = str(referral.external_recipient_name || referral.externalRecipientName);
+  const externalPosition = str(referral.external_recipient_position || referral.externalRecipientPosition);
+  const referralCategory = str(referral.referral_category || referral.referralCategory);
+  const priority = str(referral.priority);
+  const status = str(referral.status);
+  const destinationService = str(referral.destination_service || referral.destinationService);
+  const laboratory = referral.laboratory_test_required || referral.laboratoryTestRequired
+    ? str(referral.laboratory_test || referral.laboratoryTest) : "Not required";
 
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   doc.setProperties({
@@ -113,19 +155,6 @@ export function renderReferralPdf(referral, branding = null) {
     doc.setDrawColor(...color);
     doc.setLineWidth(width);
     doc.line(x1, baseline, x2, baseline);
-  };
-
-  /** "Label:" followed by a thin writing rule extending to the right margin. */
-  const labeledRule = (label, x, baseline, value = "", { endX = PAGE_W - MARGIN } = {}) => {
-    setFont("normal", 10.5);
-    doc.text(label, x, baseline);
-    const labelWidth = doc.getTextWidth(label);
-    const start = x + labelWidth + 4;
-    if (str(value)) {
-      setFont("normal", 10.5);
-      doc.text(value, start, baseline);
-    }
-    thinRule(start, endX, baseline + 3);
   };
 
   // --------------------------------------------------------------- header
@@ -187,67 +216,132 @@ export function renderReferralPdf(referral, branding = null) {
   thinRule(cx - titleWidth / 2 - 8, cx + titleWidth / 2 + 8, y + 14, { color: INK, width: 0.8 });
   y += 30;
 
-  // -------------------------------------------------------------- top strip
-  // "Dr. / s:" (left) and "Date:" (right)
-  setFont("normal", 10.5);
-  const dateLabelX = PAGE_W - MARGIN - 100;
-  doc.text("Dr. / s:", MARGIN, y + 2);
-  const drStart = MARGIN + doc.getTextWidth("Dr. / s:") + 4;
-  if (referringPersonnel) doc.text(referringPersonnel, drStart, y + 2);
-  thinRule(drStart, dateLabelX - 12, y + 5);
-
-  doc.text("Date:", dateLabelX, y + 2);
-  const dateStart = dateLabelX + doc.getTextWidth("Date:") + 4;
-  if (referralDate) doc.text(formatDate(referralDate), dateStart, y + 2);
-  thinRule(dateStart, PAGE_W - MARGIN, y + 5);
-  y += 18;
-
-  labeledRule("Receiving facility:", MARGIN, y + 2, destinationFacility);
-  y += 20;
-  if (recipient) { labeledRule("Assigned recipient:", MARGIN, y + 2, recipient); y += 20; }
-
-  // Patient information row
-  setFont("normal", 10.5);
-  doc.text("Name of Patient:", MARGIN, y + 2);
-  const nameStart = MARGIN + doc.getTextWidth("Name of Patient:") + 4;
-  if (patientName) doc.text(patientName, nameStart, y + 2);
-  const ageX = 250;
-  const sexX = 350;
-  thinRule(nameStart, ageX - 12, y + 5);
-  doc.text("Age:", ageX, y + 2);
-  if (age) doc.text(age, ageX + doc.getTextWidth("Age:") + 4, y + 2);
-  thinRule(ageX + doc.getTextWidth("Age:") + 4, sexX - 8, y + 5);
-  doc.text("Sex:", sexX, y + 2);
-  if (sex) doc.text(sex, sexX + doc.getTextWidth("Sex:") + 4, y + 2);
-  thinRule(sexX + doc.getTextWidth("Sex:") + 4, PAGE_W - MARGIN, y + 5);
-  y += 20;
-
-  labeledRule("Address:", MARGIN, y + 2, address);
-  y += 20;
-
-  // --------------------------------------------------- free-writing fields
-  const noteField = (label, value, lines) => {
-    const content = str(value) ? doc.splitTextToSize(str(value), PAGE_W - 2 * MARGIN - 8) : [];
-    const rows = Math.max(lines, content.length);
-    ensure(Math.min(rows * 15 + 24, PAGE_H - MARGIN - 48));
-    setFont("normal", 10.5);
-    doc.text(label, MARGIN, y + 2);
-    let ty = y + 12;
-    for (let i = 0; i < rows; i += 1) {
-      if (ty + 15 > PAGE_H - 48) { doc.addPage(); ty = MARGIN; }
-      const textValue = content[i] || "";
-      if (textValue) doc.text(textValue, MARGIN + 4, ty);
-      thinRule(MARGIN + 4, PAGE_W - MARGIN, ty + 3);
-      ty += 15;
-    }
-    y = ty + 4;
+  // --------------------------- structured content (branded header unchanged)
+  const contentW = PAGE_W - 2 * MARGIN;
+  const bottom = PAGE_H - 48;
+  const missing = "Not provided";
+  const sectionHeading = (title) => {
+    ensure(26);
+    setFont("bold", 10);
+    doc.text(title.toUpperCase(), MARGIN, y + 10);
+    thinRule(MARGIN, PAGE_W - MARGIN, y + 15, { color: RULE, width: 0.45 });
+    y += 22;
   };
 
-  noteField("Chief Complaints:", chiefComplaints, 2);
-  noteField("Medical History:", medicalHistory, 2);
-  noteField("PPE:", physicalExamFindings, 1);
-  noteField("Impression:", impression, 2);
-  noteField("Reason for Referral:", reason, 2);
+  const gridSection = (title, fields, columns = 2) => {
+    if (title) sectionHeading(title);
+    const gap = 6;
+    const colW = (contentW - gap * (columns - 1)) / columns;
+    for (let start = 0; start < fields.length; start += columns) {
+      const row = fields.slice(start, start + columns);
+      const prepared = row.map(([label, value]) => {
+        const textValue = str(value) || missing;
+        setFont("normal", 9.2);
+        const lines = doc.splitTextToSize(textValue, colW - 4);
+        return { label, lines, height: 19 + lines.length * 10 };
+      });
+      const rowHeight = Math.max(30, ...prepared.map((item) => item.height));
+      ensure(rowHeight + 2);
+      prepared.forEach((item, index) => {
+        const x = MARGIN + index * (colW + gap);
+        setFont("bold", 8.2);
+        doc.setTextColor(...GRAY);
+        doc.text(item.label.toUpperCase(), x, y + 8);
+        setFont("normal", 9.2);
+        doc.text(item.lines, x, y + 19);
+      });
+      y += rowHeight + 2;
+    }
+    y += 4;
+  };
+
+  const paragraphField = (label, value) => {
+    const textValue = str(value) || missing;
+    setFont("normal", 9.5);
+    const lines = doc.splitTextToSize(textValue, contentW - 12);
+    ensure(25);
+    setFont("bold", 9);
+    doc.text(label, MARGIN + 2, y + 9);
+    y += 14;
+    setFont("normal", 9.5);
+    for (const line of lines) {
+      if (y + 12 > bottom) { doc.addPage(); y = MARGIN; }
+      doc.text(line, MARGIN + 5, y + 8);
+      y += 12;
+    }
+    y += 5;
+  };
+
+  const formatTime = (value) => {
+    if (!str(value)) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return str(value);
+    return new Intl.DateTimeFormat("en-PH", {
+      timeZone: "Asia/Manila", hour: "numeric", minute: "2-digit", hour12: true,
+    }).format(date);
+  };
+  const formatDateTime = (value) => {
+    if (!str(value)) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return str(value);
+    return new Intl.DateTimeFormat("en-PH", {
+      timeZone: "Asia/Manila", year: "numeric", month: "long", day: "numeric",
+      hour: "numeric", minute: "2-digit", hour12: true,
+    }).format(date);
+  };
+
+  gridSection("Referring and Receiving Facility Information", [
+    ["Referring facility", referringFacility],
+    ["Receiving facility (in-system route)", inSystemFacility],
+    ["Referring facility address", referringFacilityAddress],
+    ["Outside receiving facility", externalFacility],
+    ["Receiving facility address (in-system)", receivingAddress],
+    ["Outside facility address", externalAddress],
+    ["Referring personnel", referringPersonnel],
+    ["Assigned in-system recipient / role", [recipient, recipientRole, recipientStation].filter(Boolean).join(" · ")],
+    ["Referring contact", referringContact],
+    ["Destination service / clinic", destinationService],
+    ["Outside recipient", externalRecipient],
+    ["Outside recipient role / position", [externalRole, externalPosition].filter(Boolean).join(" · ")],
+  ], 2);
+
+  gridSection("Patient Information", [
+    ["Patient name", patientName],
+    ["Age", age ? `${age} years` : ""],
+    ["Date of birth", birthDate ? formatDate(birthDate) : ""],
+    ["Sex", sex],
+    ["Complete address", address],
+    ["Contact number", patientContact],
+  ], 2);
+
+  gridSection("Referral Details", [
+    ["Referral number", referralNo],
+    ["Referral date", referralDate ? formatDate(referralDate) : ""],
+    ["Referral time", formatTime(createdAt)],
+    ["Category", referralCategory],
+    ["Priority", priority],
+    ["Status", status],
+    ["Scheduled appointment", formatDateTime(scheduledAt)],
+    ["Laboratory test", laboratory],
+  ], 2);
+
+  sectionHeading("Clinical Information");
+  paragraphField("Reason for referral", reason);
+  paragraphField("Chief complaints", chiefComplaints);
+  paragraphField("Clinical history", medicalHistory);
+  paragraphField("Working impression", impression);
+  if (physicalExamFindings) paragraphField("Previously recorded examination findings (barangay)", physicalExamFindings);
+  paragraphField("RHU screening findings", encounter.findings);
+
+  gridSection("Vital Signs", [
+    ["Blood pressure", vitals.bp], ["Heart rate", vitals.hr ? `${vitals.hr} bpm` : ""],
+    ["Respiratory rate", vitals.rr ? `${vitals.rr} /min` : ""], ["Oxygen saturation", vitals.o2sat ? `${vitals.o2sat}%` : ""],
+    ["Temperature", vitals.temperature ? `${vitals.temperature} °C` : ""], ["Height", vitals.height ? `${vitals.height} cm` : ""],
+    ["Weight", vitals.weight ? `${vitals.weight} kg` : ""], ["BMI", vitals.bmi],
+  ], 3);
+  paragraphField("Treatment given", treatmentGiven);
+  paragraphField("Recommendations", recommendations);
+  paragraphField("Additional notes", encounterNotes);
 
   // ------------------------------------------------------------ signature
   ensure(110);

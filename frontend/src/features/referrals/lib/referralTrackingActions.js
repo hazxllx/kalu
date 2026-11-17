@@ -29,7 +29,11 @@ export const referralRoleLabel = (role) => ({
 
 export const referralRecipientLabel = (record) => {
   const name = record?.recipient?.full_name || record?.recipientName;
-  if (!name || !(record?.recipient_personnel_id || record?.recipientPersonnelId)) return "Unassigned historical referral";
+  if (!name || !(record?.recipient_personnel_id || record?.recipientPersonnelId)) {
+    const externalName = record?.external_recipient_name || record?.externalRecipientName;
+    const externalRole = record?.external_receiving_role || record?.externalReceivingRole;
+    return externalName ? [`Outside recipient: ${externalName}`, externalRole].filter(Boolean).join(" / ") : "Unassigned historical referral";
+  }
   const role = record.recipient_role || record.recipientRole;
   const station = record.recipient_station || record.recipientStation;
   return [name, referralRoleLabel(role), station && `${station[0].toUpperCase()}${station.slice(1)}`].filter(Boolean).join(" / ");

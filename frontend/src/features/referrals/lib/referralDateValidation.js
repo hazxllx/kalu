@@ -1,24 +1,31 @@
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const LOCAL_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+const REFERRAL_TIME_ZONE = "Asia/Manila";
+
+const partsInManila = (date) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: REFERRAL_TIME_ZONE,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+};
 
 export const localDateKey = (date = new Date()) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const p = partsInManila(date);
+  return `${p.year}-${p.month}-${p.day}`;
 };
 
 const parseLocalDateTime = (value) => {
   const match = LOCAL_DATE_TIME_PATTERN.exec(String(value || ""));
   if (!match) return null;
   const [, year, month, day, hour, minute] = match.map(Number);
-  const date = new Date(year, month - 1, day, hour, minute);
+  // Interpret datetime-local as Asia/Manila regardless of the browser's zone.
+  const date = new Date(Date.UTC(year, month - 1, day, hour - 8, minute));
+  const local = partsInManila(date);
   if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day ||
-    date.getHours() !== hour ||
-    date.getMinutes() !== minute
+    Number(local.year) !== year || Number(local.month) !== month ||
+    Number(local.day) !== day || Number(local.hour) !== hour || Number(local.minute) !== minute
   ) return null;
   return date;
 };
@@ -30,17 +37,21 @@ export const toLocalDateTimeInput = (value) => {
 
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return "";
-  const datePart = localDateKey(date);
-  const timePart = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-  return `${datePart}T${timePart}`;
+  const p = partsInManila(date);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 };
 
-export const localDateTimeToIso = (value) => parseLocalDateTime(value)?.toISOString() || null;
+export const localDateTimeToIso = (value) => {
+  const date = parseLocalDateTime(value);
+  if (!date) return null;
+  const p = partsInManila(date);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:00+08:00`;
+};
 
 export const referralDateTimeMinimum = (now = new Date()) => {
   const nextMinute = new Date(Math.floor(now.getTime() / 60_000) * 60_000 + 60_000);
-  const timePart = `${String(nextMinute.getHours()).padStart(2, "0")}:${String(nextMinute.getMinutes()).padStart(2, "0")}`;
-  return `${localDateKey(nextMinute)}T${timePart}`;
+  const p = partsInManila(nextMinute);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 };
 
 export const referralDateErrors = (
@@ -51,10 +62,10 @@ export const referralDateErrors = (
   const today = localDateKey(now);
 
   if (referralDate) {
-    const date = new Date(`${referralDate}T00:00:00`);
+    const date = new Date(`${referralDate}T00:00:00.000Z`);
     const isValidDate = DATE_ONLY_PATTERN.test(referralDate)
       && !Number.isNaN(date.getTime())
-      && localDateKey(date) === referralDate;
+      && date.toISOString().slice(0, 10) === referralDate;
     if (isValidDate && referralDate > today) {
       errors.referralDate = "Referral date cannot be later than today.";
     } else if (!isValidDate) {

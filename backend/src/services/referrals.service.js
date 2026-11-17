@@ -3,6 +3,7 @@ import ApiError from '../utils/apiError.js';
 import { deriveStage } from '../config/referralStage.js';
 import { stationsOf } from '../config/rhuStations.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
+import { validateVitals } from './intake.service.js';
 
 /**
  * Health Supervisor referral coordination service.
@@ -45,6 +46,7 @@ export const REFERRAL_TRANSITIONS = Object.freeze({
 const VALID_PRIORITIES = ['Low', 'Medium', 'High'];
 const CLOSED_STATUSES = new Set(['Completed', 'Rejected', 'Cancelled']);
 const REFERRAL_PAGE_SIZE = 200;
+const REFERRAL_TIME_ZONE = 'Asia/Manila';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ZONED_DATE_TIME_PATTERN =
@@ -61,10 +63,21 @@ const ZONED_DATE_TIME_PATTERN =
  */
 const BARANGAY_SCOPE = 'barangay_scope:barangays!barangay_id(id, name, status, municipality_id)';
 const RESIDENT_EMBED =
-  `resident:residents!inner(id, first_name, middle_name, last_name, barangay, barangay_id, sex, birth_date, current_address, permanent_address, auth_user_id, municipality_id, ${BARANGAY_SCOPE})`;
+  `resident:residents!inner(id, first_name, middle_name, last_name, barangay, barangay_id, sex, birth_date, current_address, permanent_address, cellphone_no, auth_user_id, municipality_id, ${BARANGAY_SCOPE})`;
 const PROFILE_COLUMNS = `id, full_name, role, status, municipality_id, barangay_id, facility_id, rhu_stations, ${BARANGAY_SCOPE}`;
 const FACILITY_COLUMNS = `id, name, type, address, municipality_id, barangay_id, ${BARANGAY_SCOPE}`;
 const REFERRAL_SELECT = `*, ${RESIDENT_EMBED}, sender:profiles!created_by(id, full_name, role), recipient:profiles!recipient_personnel_id(${PROFILE_COLUMNS}), recipient_facility:facilities!recipient_facility_id(${FACILITY_COLUMNS}), legacy_links:${LEGACY_MAP}(legacy_referral_id, legacy_snapshot, source_visit_matches_resident)`;
+
+const referringFacilityFor = (user, facilities = []) => {
+  const type = user.role === 'health_supervisor' ? 'barangay_health_station' : 'rhu';
+  const scoped = facilities.filter((facility) => facility.type === type
+    && (type !== 'barangay_health_station' || facility.barangay_id === user.barangayId));
+  const assigned = scoped.find((facility) => facility.id === user.facilityId);
+  const facility = assigned || scoped[0];
+  if (facility?.name) return facility.name;
+  if (user.role === 'health_supervisor') return user.barangay ? `Barangay Health Station — ${user.barangay}` : 'Barangay Health Station';
+  return user.municipality ? `RHU — ${user.municipality}` : 'Rural Health Unit';
+};
 
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
@@ -104,7 +117,9 @@ const sameInstant = (left, right) => {
 export const assertReferralDates = (payload, { existing = null, now = new Date() } = {}) => {
   const referralDate = payload.referral_date;
   const scheduledAt = payload.scheduled_at;
-  const timeZone = text(payload.client_time_zone) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // Schedules are entered in Philippine local time throughout KALUSAGAP.
+  // Never trust the browser's timezone (which may differ from the facility).
+  const timeZone = REFERRAL_TIME_ZONE;
 
   if (referralDate !== undefined && referralDate !== null && referralDate !== '') {
     if (!isValidDateOnly(referralDate)) {
@@ -229,12 +244,14 @@ const canRead = (user, row) => {
 const capabilitiesFor = (user, row) => {
   const sender = WRITE_ROLES.has(user.role) && row.created_by === user.id && hasSenderScope(user, row);
   const recipient = isCurrentRecipient(user, row);
-  const allowed = (REFERRAL_TRANSITIONS[row.status] || []).filter((status) => status === 'Cancelled' ? sender : recipient);
+  const manualExternal = !row.recipient_personnel_id && Boolean(row.external_receiving_facility);
+  const allowed = (REFERRAL_TRANSITIONS[row.status] || []).filter((status) => status === 'Cancelled' ? sender : recipient || (manualExternal && sender));
   return {
     can_edit: sender && row.status === 'Pending',
-    can_assign: sender && !CLOSED_STATUSES.has(row.status),
+    can_assign: sender && !CLOSED_STATUSES.has(row.status) && (!manualExternal || row.status === 'Pending'),
     is_sender: sender,
     is_recipient: recipient,
+    manual_external: manualExternal,
     allowed_statuses: allowed,
     can_screen: recipient && row.recipient_station === 'triage' && ['Accepted', 'In Progress'].includes(row.status),
   };
@@ -419,7 +436,7 @@ export const listRecipients = async ({ user, residentId = null, supabase = getSe
   const [profiles, facilities] = await Promise.all([
     // personnel_accounts references profiles through several audit columns;
     // name its identity FK so PostgREST does not have to guess the relation.
-    supabase.from('profiles').select(`${PROFILE_COLUMNS}, account:personnel_accounts!account_id(approval_status, setup_required, suspended_at)`).eq('municipality_id', user.municipalityId).eq('status', 'active').in('role', [...RECIPIENT_ROLES]).order('full_name', { ascending: true }),
+    supabase.from('profiles').select(`${PROFILE_COLUMNS}, account:personnel_accounts!personnel_accounts_account_id_fkey(approval_status, setup_required, suspended_at)`).eq('municipality_id', user.municipalityId).eq('status', 'active').in('role', [...RECIPIENT_ROLES]).order('full_name', { ascending: true }),
     supabase.from('facilities').select(FACILITY_COLUMNS).eq('municipality_id', user.municipalityId).order('name', { ascending: true }),
   ]);
   throwOnError(profiles.error, 'Could not load referral recipients');
@@ -436,17 +453,33 @@ export const listRecipients = async ({ user, residentId = null, supabase = getSe
       }
     }
   }
-  return routes;
+  return { routes, referringFacility: referringFacilityFor(user, facilities.data || []) };
 };
 
 const resolveRecipient = async (supabase, resident, payload, existing = null) => {
-  const personnelId = text(payload.recipient_personnel_id ?? existing?.recipient_personnel_id);
-  const facilityId = text(payload.recipient_facility_id ?? existing?.recipient_facility_id);
+  const personnelId = text(payload.recipient_personnel_id !== undefined ? payload.recipient_personnel_id : existing?.recipient_personnel_id);
+  const facilityId = text(payload.recipient_facility_id !== undefined ? payload.recipient_facility_id : existing?.recipient_facility_id);
+  const externalFacility = text(payload.external_receiving_facility ?? existing?.external_receiving_facility);
+  if (!personnelId && !facilityId) {
+    const externalRole = text(payload.external_receiving_role ?? existing?.external_receiving_role);
+    const externalName = text(payload.external_recipient_name ?? existing?.external_recipient_name);
+    const externalPosition = text(payload.external_recipient_position ?? existing?.external_recipient_position);
+    if (!externalFacility || !externalRole || !externalName || !externalPosition) {
+      throw ApiError.unprocessable('Enter the outside facility, receiving role, recipient name and position.');
+    }
+    return {
+      recipient_personnel_id: null,
+      recipient_facility_id: null,
+      recipient_role: null,
+      recipient_station: null,
+      destination_facility: externalFacility,
+    };
+  }
   if (!UUID_PATTERN.test(personnelId) || !UUID_PATTERN.test(facilityId)) {
     throw ApiError.unprocessable('Select a receiving facility and an assigned recipient.');
   }
   const [personnel, destination] = await Promise.all([
-    supabase.from('profiles').select(`${PROFILE_COLUMNS}, account:personnel_accounts!account_id(approval_status, setup_required, suspended_at)`).eq('id', personnelId).maybeSingle(),
+    supabase.from('profiles').select(`${PROFILE_COLUMNS}, account:personnel_accounts!personnel_accounts_account_id_fkey(approval_status, setup_required, suspended_at)`).eq('id', personnelId).maybeSingle(),
     supabase.from('facilities').select(FACILITY_COLUMNS).eq('id', facilityId).maybeSingle(),
   ]);
   throwOnError(personnel.error, 'Could not validate referral recipient');
@@ -478,6 +511,23 @@ const sanitizeWrite = (payload = {}) => {
   if (payload.chief_complaints !== undefined) row.chief_complaints = text(payload.chief_complaints);
   if (payload.medical_history !== undefined) row.medical_history = text(payload.medical_history);
   if (payload.physical_exam_findings !== undefined) row.physical_exam_findings = text(payload.physical_exam_findings);
+  if (payload.referral_vitals !== undefined) {
+    const input = payload.referral_vitals && typeof payload.referral_vitals === 'object' && !Array.isArray(payload.referral_vitals)
+      ? payload.referral_vitals : {};
+    const optionalNumber = (value) => value === '' || value === null || value === undefined ? null : Number(value);
+    const vitals = {
+      bp: text(input.bp),
+      temperature: optionalNumber(input.temperature),
+      hr: optionalNumber(input.hr),
+      rr: optionalNumber(input.rr),
+      heightCm: optionalNumber(input.heightCm),
+      weightKg: optionalNumber(input.weightKg),
+      o2sat: optionalNumber(input.o2sat),
+    };
+    const errors = validateVitals(vitals);
+    if (errors.length) throw ApiError.unprocessable(errors.join(' '));
+    row.referral_vitals = Object.fromEntries(Object.entries(vitals).filter(([, value]) => value !== null && value !== ''));
+  }
   if (payload.impression !== undefined) row.impression = text(payload.impression);
   if (payload.treatment_visit_id !== undefined) row.treatment_visit_id = text(payload.treatment_visit_id) || null;
   if (payload.notes !== undefined) row.notes = text(payload.notes);
@@ -485,6 +535,17 @@ const sanitizeWrite = (payload = {}) => {
   if (payload.laboratory_test !== undefined) row.laboratory_test = text(payload.laboratory_test);
   if (payload.additional_instructions !== undefined) row.additional_instructions = text(payload.additional_instructions);
   if (payload.referral_category !== undefined) row.referral_category = text(payload.referral_category);
+  if (payload.external_receiving_facility !== undefined) row.external_receiving_facility = text(payload.external_receiving_facility);
+  if (payload.external_receiving_address !== undefined) row.external_receiving_address = text(payload.external_receiving_address);
+  if (payload.external_receiving_role !== undefined) row.external_receiving_role = text(payload.external_receiving_role);
+  if (payload.external_recipient_name !== undefined) row.external_recipient_name = text(payload.external_recipient_name);
+  if (payload.external_recipient_position !== undefined) row.external_recipient_position = text(payload.external_recipient_position);
+  const externalContact = [row.external_receiving_facility, row.external_receiving_address, row.external_receiving_role,
+    row.external_recipient_name, row.external_recipient_position].some(Boolean);
+  if (externalContact && (!row.external_receiving_facility || !row.external_receiving_role
+    || !row.external_recipient_name || !row.external_recipient_position)) {
+    throw ApiError.unprocessable('Enter the outside facility, receiving role, recipient name and position.');
+  }
   return row;
 };
 
@@ -523,6 +584,10 @@ export const create = async ({ user, payload = {}, fromPhn = false, supabase = g
     throw ApiError.unprocessable('Laboratory test details are required when laboratory test is marked as required.');
   }
   Object.assign(row, await resolveRecipient(supabase, resident, payload));
+  const sourceFacilities = await supabase.from('facilities').select(FACILITY_COLUMNS)
+    .eq('municipality_id', user.municipalityId).order('name', { ascending: true });
+  throwOnError(sourceFacilities.error, 'Could not resolve the referring facility');
+  row.referring_facility = referringFacilityFor(user, sourceFacilities.data || []);
   if (row.recipient_personnel_id === user.id) throw ApiError.unprocessable('Select another authorized recipient.');
   row.resident_id = resident.id;
   return write({ user, action: fromPhn ? 'create_phn' : 'create', record: row, supabase });
@@ -561,8 +626,8 @@ export const updateStatus = async ({ user, id, status, resolutionNotes, version,
   const existing = await getById({ user, id, supabase });
   if (!REFERRAL_STATUSES.includes(status) || status === 'Pending') throw ApiError.unprocessable('Invalid referral status.');
   const capabilities = capabilitiesFor(user, existing);
-  if (status === 'Cancelled' ? !capabilities.is_sender : !capabilities.is_recipient) {
-    throw ApiError.forbidden('Only the current recipient may make decisions; only the sender may cancel.');
+  if (status === 'Cancelled' ? !capabilities.is_sender : !(capabilities.is_recipient || (capabilities.manual_external && capabilities.is_sender))) {
+    throw ApiError.forbidden('Only the current recipient may make decisions; for an outside referral, only its sender may record progress.');
   }
   if (status !== existing.status && !capabilities.allowed_statuses.includes(status)) throw ApiError.conflict('This referral status transition is not allowed.');
   if (['Rejected', 'Cancelled'].includes(status) && !text(resolutionNotes) && status !== existing.status) {
