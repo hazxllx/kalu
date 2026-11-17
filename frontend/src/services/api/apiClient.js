@@ -209,7 +209,8 @@ async function request(
     promise
       .finally(() => {
         pendingRequests.delete(requestKey);
-      });
+      })
+      .catch(() => {});
     return promise;
   }
 

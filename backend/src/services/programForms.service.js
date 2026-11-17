@@ -1,5 +1,6 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
+import { extractExpectedRevision } from '../utils/syncConcurrency.js';
 import { assignedBarangay } from '../config/scope.js';
 import { SCHEMAS } from '../config/programFormSchemas.js';
 
@@ -213,22 +214,112 @@ export const list = async ({
   return data || [];
 };
 
-export const create = async ({ user, kind, payload = {}, supabase = getServiceClient() }) => {
+const findProgramByOperationKey = async ({
+  supabase,
+  schema,
+  idempotencyKey,
+  user,
+  linkColumn,
+  entityId,
+}) => {
+  const { data, error } = await supabase
+    .from(schema.table)
+    .select(selectFor(schema))
+    .eq('client_operation_key', idempotencyKey)
+    .maybeSingle();
+  throwOnError(error, `Could not verify the ${schema.kind} operation`);
+  if (!data) return null;
+  if (data.created_by !== user.id || data[linkColumn] !== entityId) {
+    throw ApiError.conflict(`This Idempotency-Key belongs to another ${schema.kind} operation.`);
+  }
+  return data;
+};
+
+export const verifyRecordScope = async ({ user, kind, id, supabase = getServiceClient() }) => {
   const schema = schemaFor(kind);
   assertStaff(user);
+  const { data: existing, error } = await supabase
+    .from(schema.table)
+    .select(`id, ${schema.scope === 'household' ? 'household_id' : 'resident_id'}`)
+    .eq('id', id)
+    .maybeSingle();
+  throwOnError(error, `Could not load ${kind}`);
+  if (!existing) throw ApiError.notFound('Program record not found.');
+  if (schema.scope === 'household') {
+    await householdFor(supabase, user, existing.household_id);
+  } else {
+    await residentFor(supabase, user, existing.resident_id);
+  }
+  return existing;
+};
+
+export const create = async ({ user, kind, payload = {}, idempotencyKey = null, isSync = false, supabase = getServiceClient() }) => {
+  const schema = schemaFor(kind);
+  assertStaff(user);
+  const opKey = idempotencyKey == null ? null : text(idempotencyKey);
+  if (idempotencyKey !== null && idempotencyKey !== undefined && (!opKey || opKey.length > 200)) {
+    throw ApiError.badRequest('Invalid Idempotency-Key.');
+  }
+  if (isSync && !opKey) {
+    throw ApiError.badRequest('Synchronization create requires an Idempotency-Key.').withCode('IDEMPOTENCY_KEY_REQUIRED');
+  }
   const { linkColumn, id: entityId, entity } = await entityFor(supabase, user, schema, payload);
   const { columns, data } = buildRow(schema, payload);
   if (schema.kind === 'environmental') computeEnvironmentalDerived(columns, data);
-  const row = { ...columns, data, [linkColumn]: entityId, created_by: user.id };
+  if (opKey) {
+    const existing = await findProgramByOperationKey({
+      supabase,
+      schema,
+      idempotencyKey: opKey,
+      user,
+      linkColumn,
+      entityId,
+    });
+    if (existing) return existing;
+  }
+  const row = {
+    ...columns,
+    data,
+    [linkColumn]: entityId,
+    created_by: user.id,
+    ...(opKey ? { client_operation_key: opKey } : {}),
+  };
   const { data: created, error } = await supabase.from(schema.table).insert(row).select(selectFor(schema)).single();
+  if (error?.code === '23505' && opKey) {
+    const existing = await findProgramByOperationKey({
+      supabase,
+      schema,
+      idempotencyKey: opKey,
+      user,
+      linkColumn,
+      entityId,
+    });
+    if (existing) return existing;
+  }
   throwOnError(error, `Could not create ${kind}`);
   await audit(supabase, user, `${kind.toUpperCase()}_CREATED`, schema.table, created.id, entity);
   return created;
 };
 
-export const update = async ({ user, kind, id, payload = {}, supabase = getServiceClient() }) => {
+export const update = async ({
+  user,
+  kind,
+  id,
+  payload = {},
+  ifMatch = undefined,
+  expectedRevision = undefined,
+  isSync = false,
+  supabase = getServiceClient(),
+}) => {
   const schema = schemaFor(kind);
   assertStaff(user);
+  const precondition = extractExpectedRevision({
+    ifMatch,
+    bodyRevision: expectedRevision ?? payload?.expected_revision ?? payload?.expectedRevision ?? payload?.baseRevision,
+    isSync,
+    allowLegacyTimestamp: false,
+    entityLabel: kind,
+  });
   const { data: existing, error: readError } = await supabase.from(schema.table).select('*').eq('id', id).maybeSingle();
   throwOnError(readError, `Could not load ${kind}`);
   if (!existing) throw ApiError.notFound('Program record not found.');
@@ -236,13 +327,31 @@ export const update = async ({ user, kind, id, payload = {}, supabase = getServi
   const scope = schema.scope === 'household'
     ? await householdFor(supabase, user, existing.household_id)
     : await residentFor(supabase, user, existing.resident_id);
+  const staleMessage = 'This program record changed on the server. Reload it before applying the queued changes.';
+  if (precondition.expectedRevision !== null) {
+    const currentRevision = Number(existing.revision ?? 1);
+    if (currentRevision !== precondition.expectedRevision) {
+      throw ApiError.staleRevision(staleMessage, { currentRevision });
+    }
+  }
   const { columns, data } = buildRow(schema, payload);
   if (schema.kind === 'environmental') computeEnvironmentalDerived(columns, data);
   // Merge jsonb data so a partial update does not wipe untouched detail keys.
   const mergedData = { ...(existing.data || {}), ...data };
   const row = { ...columns, data: mergedData };
-  const { data: updated, error } = await supabase.from(schema.table).update(row).eq('id', id).select(selectFor(schema)).single();
+  let updateQuery = supabase.from(schema.table).update(row).eq('id', id);
+  const hasCas = precondition.expectedRevision !== null;
+  if (hasCas) updateQuery = updateQuery.eq('revision', precondition.expectedRevision);
+  const updateSelect = updateQuery.select(selectFor(schema));
+  const { data: updated, error } = await (hasCas ? updateSelect.maybeSingle() : updateSelect.single());
   throwOnError(error, `Could not update ${kind}`);
+  if (hasCas && !updated) {
+    const { data: latest } = await supabase.from(schema.table).select('revision').eq('id', id).maybeSingle();
+    throw ApiError.staleRevision(
+      staleMessage,
+      latest?.revision !== undefined ? { currentRevision: latest.revision } : undefined,
+    );
+  }
   await audit(supabase, user, `${kind.toUpperCase()}_UPDATED`, schema.table, id, scope);
   return updated;
 };
@@ -338,4 +447,4 @@ export const oralStatistics = async ({ user, from = null, to = null, population 
   };
 };
 
-export default { list, create, update, remove, oralStatistics };
+export default { list, create, update, remove, oralStatistics, verifyRecordScope };

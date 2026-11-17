@@ -171,8 +171,8 @@ function RegisterPregnancyForm({
     if (isEditMode && initial) {
       return {
         lmp: initial.lmp || "",
-        gravida: initial.gravida || "",
-        para: initial.para || "",
+        gravida: initial.gravida ?? "",
+        para: initial.para ?? "",
         dateOfRegistration: initial.dateOfRegistration || "",
         risk: initial.risk || "Low",
         socioEconomicStatus: initial.socioEconomicStatus || "",

@@ -479,7 +479,7 @@ ind('F', F, 'F_9', 'Newly identified hypertensive adults', { aggregation: 'COUNT
 // resident enrolled in the "Diabetes" target-client program in the reporting
 // month is a newly identified Type 2 diabetic under management. No manual
 // re-entry of the same enrollment.
-ind('F', F, 'F_10', 'Newly identified adults with Type 2 Diabetes Mellitus', { source: 'tcl_entries', aggregation: 'COUNT_UNIQUE_RESIDENTS', sex: true, match: { field: 'program', regex: '^Diabetes$' } });
+ind('F', F, 'F_10', 'Newly identified adults with Type 2 Diabetes Mellitus', { source: 'tcl_entries', aggregation: 'COUNT_UNIQUE_RESIDENTS', sex: true, match: { field: 'program', regex: '^(?:Type\\s*2\\s*)?Diabetes(?:\\s+Mellitus)?$' } });
 ind('F', F, 'F_11', 'Senior citizens screened for visual acuity', { aggregation: 'COUNT_UNIQUE_RESIDENTS', sex: true });
 ind('F', F, 'F_12', 'Senior citizens diagnosed with eye disease(s)', { aggregation: 'COUNT_CASES', sex: true });
 // F_13 (PPV) and F_14 (influenza) are DERIVED from the existing

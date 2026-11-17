@@ -1,5 +1,6 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
+import { extractExpectedRevision } from '../utils/syncConcurrency.js';
 import { assignedBarangay } from '../config/scope.js';
 import { resolveHouseholdWorker } from './households.service.js';
 
@@ -450,18 +451,51 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
   return data || [];
 };
 
-const findFollowUpByOperationKey = async ({ supabase, idempotencyKey, user, resident }) => {
+const formatOperationalRecord = (normalizedKind, data) => {
+  if (!data) return data;
+  if (normalizedKind === 'followups') return withScheduleState(data);
+  if (normalizedKind === 'tcl') return withTclWorker(data);
+  return data;
+};
+
+const findOperationalByOperationKey = async ({
+  supabase,
+  table,
+  normalizedKind,
+  idempotencyKey,
+  user,
+  resident,
+  expectedMaternalCaseId = null,
+}) => {
   const { data, error } = await supabase
-    .from('follow_ups')
-    .select(selectFor('followups'))
+    .from(table)
+    .select(selectFor(normalizedKind))
     .eq('client_operation_key', idempotencyKey)
     .maybeSingle();
-  throwOnError(error, 'Could not verify the follow-up operation');
+  throwOnError(error, `Could not verify the ${normalizedKind} operation`);
   if (!data) return null;
-  if (data.created_by !== user.id || data.resident_id !== resident.id) {
-    throw ApiError.conflict('This Idempotency-Key belongs to another follow-up operation.');
+  if (
+    data.created_by !== user.id
+    || data.resident_id !== resident.id
+    || (normalizedKind === 'maternalvisits' && expectedMaternalCaseId && data.maternal_case_id !== expectedMaternalCaseId)
+  ) {
+    throw ApiError.conflict(`This Idempotency-Key belongs to another ${normalizedKind} operation.`);
   }
-  return withScheduleState(data);
+  return formatOperationalRecord(normalizedKind, data);
+};
+
+export const verifyRecordScope = async ({ user, kind, id, supabase = getServiceClient() }) => {
+  const normalizedKind = normalizeKind(kind);
+  const table = TABLES[normalizedKind] || TABLES[kind];
+  if (!table || normalizedKind === 'notifications') {
+    throw ApiError.badRequest('Unknown operational record type.');
+  }
+  assertStaff(user);
+  const { data: existing, error } = await supabase.from(table).select('id, resident_id').eq('id', id).maybeSingle();
+  throwOnError(error, `Could not load ${normalizedKind}`);
+  if (!existing) throw ApiError.notFound('Operational record not found.');
+  await residentFor(supabase, user, existing.resident_id);
+  return existing;
 };
 
 /** Follow-ups in these statuses never block scheduling an identical one. */
@@ -501,30 +535,36 @@ const assertNoDuplicateFollowUp = async ({ supabase, residentId, row }) => {
   }
 };
 
-/** `"2026-10-20T01:02:03Z"` / `W/"..."` -> bare value. */
-const parseRevisionHeader = (value) => text(value).replace(/^W\//i, '').replace(/^"(.*)"$/s, '$1').trim();
-
-export const create = async ({ user, kind, payload = {}, idempotencyKey = null, supabase = getServiceClient() }) => {
+export const create = async ({ user, kind, payload = {}, idempotencyKey = null, isSync = false, supabase = getServiceClient() }) => {
   const normalizedKind = normalizeKind(kind);
   assertStaff(user);
   const table = TABLES[normalizedKind] || TABLES[kind];
-  if (!table) throw ApiError.badRequest('Unknown operational record type.');
+  if (!table || normalizedKind === 'notifications') throw ApiError.badRequest('Unknown operational record type.');
+  const opKey = idempotencyKey == null ? null : text(idempotencyKey);
+  if (idempotencyKey !== null && idempotencyKey !== undefined && (!opKey || opKey.length > 200)) {
+    throw ApiError.badRequest('Invalid Idempotency-Key.');
+  }
+  if (isSync && !opKey) {
+    throw ApiError.badRequest('Synchronization create requires an Idempotency-Key.').withCode('IDEMPOTENCY_KEY_REQUIRED');
+  }
   const resident = await residentFor(supabase, user, payload.residentId || payload.resident_id);
   const row = { ...payload, resident_id: resident.id, created_by: user.id };
   delete row.residentId;
   delete row.consultationId;
   delete row.id;
   delete row.client_operation_key;
+  delete row.revision;
+  delete row.expected_revision;
+  delete row.expectedRevision;
+  delete row.baseRevision;
+  delete row.created_at;
+  delete row.updated_at;
+  delete row.municipality_id;
+  delete row.barangay_id;
 
   if (normalizedKind === 'tcl') await normalizeTclWorker({ row, user, resident, supabase });
 
   if (normalizedKind === 'maternal') Object.assign(row, validateMaternalRecord(row));
-
-  if (normalizedKind === 'followups' && idempotencyKey) {
-    const existing = await findFollowUpByOperationKey({ supabase, idempotencyKey, user, resident });
-    if (existing) return existing;
-    row.client_operation_key = idempotencyKey;
-  }
 
   if (normalizedKind === 'maternalvisits') {
     const maternalCaseId = text(row.maternal_case_id || row.maternalCaseId || row.maternal_record_id || row.maternalRecordId);
@@ -545,6 +585,20 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     delete row.maternal_record_id;
     delete row.maternalRecordId;
     Object.assign(row, validateMaternalVisit(row));
+  }
+
+  if (opKey) {
+    const existing = await findOperationalByOperationKey({
+      supabase,
+      table,
+      normalizedKind,
+      idempotencyKey: opKey,
+      user,
+      resident,
+      expectedMaternalCaseId: row.maternal_case_id || null,
+    });
+    if (existing) return existing;
+    row.client_operation_key = opKey;
   }
 
   // A follow-up may require the resident to confirm (approve) or reject it
@@ -594,17 +648,35 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     await assertNoDuplicateFollowUp({ supabase, residentId: resident.id, row });
   }
   const { data, error } = await supabase.from(table).insert(row).select(selectFor(normalizedKind)).single();
-  if (error?.code === '23505' && normalizedKind === 'followups' && idempotencyKey) {
-    const existing = await findFollowUpByOperationKey({ supabase, idempotencyKey, user, resident });
+  if (error?.code === '23505' && opKey) {
+    const existing = await findOperationalByOperationKey({
+      supabase,
+      table,
+      normalizedKind,
+      idempotencyKey: opKey,
+      user,
+      resident,
+      expectedMaternalCaseId: row.maternal_case_id || null,
+    });
     if (existing) return existing;
   }
   throwOnError(error, `Could not create ${normalizedKind}`);
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
   await notifyResident(supabase, resident, normalizedKind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);
-  return normalizedKind === 'followups' ? withScheduleState(data) : normalizedKind === 'tcl' ? withTclWorker(data) : data;
+  return formatOperationalRecord(normalizedKind, data);
 };
 
-export const update = async ({ user, kind, id, payload = {}, consultationId = null, expectedUpdatedAt = null, supabase = getServiceClient() }) => {
+export const update = async ({
+  user,
+  kind,
+  id,
+  payload = {},
+  consultationId = null,
+  expectedUpdatedAt = undefined,
+  expectedRevision = undefined,
+  isSync = false,
+  supabase = getServiceClient(),
+}) => {
   const normalizedKind = normalizeKind(kind);
   // Notifications are owned by their recipient (any role), not scoped like the
   // staff operational records. Dispatch BEFORE the table/staff checks: a
@@ -619,18 +691,33 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
     throw ApiError.badRequest('Unknown operational record type.');
   }
   assertStaff(user);
+  const precondition = extractExpectedRevision({
+    ifMatch: expectedUpdatedAt,
+    bodyRevision: expectedRevision ?? payload?.expected_revision ?? payload?.expectedRevision ?? payload?.baseRevision,
+    isSync,
+    allowLegacyTimestamp: normalizedKind === 'followups',
+    entityLabel: normalizedKind,
+  });
+
   const { data: existing, error: readError } = await supabase.from(table).select('*').eq('id', id).maybeSingle();
   throwOnError(readError, `Could not load ${normalizedKind}`);
   if (!existing) throw ApiError.notFound('Operational record not found.');
   const resident = await residentFor(supabase, user, existing.resident_id);
-  // Optimistic concurrency for follow-ups (offline sync). Only enforced when the
-  // caller sends an If-Match revision, so online flows are unchanged.
-  const revision = normalizedKind === 'followups' ? parseRevisionHeader(expectedUpdatedAt) : '';
-  const staleFollowUpMessage = 'This follow-up changed on the server. Reload it before applying the queued changes.';
-  if (revision) {
-    const expectedMs = Date.parse(revision);
+
+  const staleMessage = normalizedKind === 'followups'
+    ? 'This follow-up changed on the server. Reload it before applying the queued changes.'
+    : 'This clinical record changed on the server. Reload it before applying the queued changes.';
+
+  if (precondition.expectedRevision !== null) {
+    const currentRevision = Number(existing.revision ?? 1);
+    if (currentRevision !== precondition.expectedRevision) {
+      throw ApiError.staleRevision(staleMessage, { currentRevision });
+    }
+  }
+  if (precondition.expectedUpdatedAt) {
+    const expectedMs = Date.parse(precondition.expectedUpdatedAt);
     if (!Number.isFinite(expectedMs)) throw ApiError.badRequest('The follow-up revision is invalid.');
-    if (expectedMs !== Date.parse(existing.updated_at)) throw ApiError.staleRevision(staleFollowUpMessage);
+    if (expectedMs !== Date.parse(existing.updated_at)) throw ApiError.staleRevision(staleMessage);
   }
   const row = { ...payload };
   delete row.residentId;
@@ -640,6 +727,12 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
   delete row.municipality_id;
   delete row.created_by;
   delete row.created_at;
+  delete row.updated_at;
+  delete row.client_operation_key;
+  delete row.revision;
+  delete row.expected_revision;
+  delete row.expectedRevision;
+  delete row.baseRevision;
   delete row.consultation_id;
   delete row.consultationId;
   if (normalizedKind === 'tcl') await normalizeTclWorker({ row, existing, user, resident, supabase });
@@ -696,11 +789,19 @@ export const update = async ({ user, kind, id, payload = {}, consultationId = nu
     assertFollowUpTransition(existing, payload.status);
   }
   let updateQuery = supabase.from(table).update(row).eq('id', id);
-  if (revision) updateQuery = updateQuery.eq('updated_at', existing.updated_at);
+  const hasCas = precondition.expectedRevision !== null || Boolean(precondition.expectedUpdatedAt);
+  if (precondition.expectedRevision !== null) updateQuery = updateQuery.eq('revision', precondition.expectedRevision);
+  if (precondition.expectedUpdatedAt) updateQuery = updateQuery.eq('updated_at', existing.updated_at);
   const updateSelect = updateQuery.select(selectFor(normalizedKind));
-  const { data, error } = await (revision ? updateSelect.maybeSingle() : updateSelect.single());
+  const { data, error } = await (hasCas ? updateSelect.maybeSingle() : updateSelect.single());
   throwOnError(error, `Could not update ${normalizedKind}`);
-  if (revision && !data) throw ApiError.staleRevision(staleFollowUpMessage);
+  if (hasCas && !data) {
+    const { data: latest } = await supabase.from(table).select('revision').eq('id', id).maybeSingle();
+    throw ApiError.staleRevision(
+      staleMessage,
+      latest?.revision !== undefined ? { currentRevision: latest.revision } : undefined,
+    );
+  }
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_UPDATED`, table, id, resident);
 
   if (normalizedKind === 'followups') {
@@ -776,4 +877,4 @@ export const markAllNotificationsRead = async ({ user, supabase = getServiceClie
   return { updated: (data || []).length };
 };
 
-export default { list, create, update, remove, markNotificationRead, markAllNotificationsRead, withScheduleState };
+export default { list, create, update, remove, markNotificationRead, markAllNotificationsRead, verifyRecordScope, withScheduleState };

@@ -825,22 +825,51 @@ export const addHouseholdMember = async ({ id, user, member = {}, repo = reposit
   if (residentId && (household.members || []).some((m) => m.residentId === residentId)) {
     throw ApiError.duplicate('That resident is already a member of this household.');
   }
-  const created = await repo.addHouseholdMember(household.id, {
+  const memberPayload = {
     ...newMember,
     residentId,
     newResident: undefined,
-  });
+  };
+  const nextMembers = [...(household.members || []), memberPayload];
+  const nextRisk = recomputeRisk(household, {}, nextMembers);
+
+  let created = null;
+  const atomic = typeof repo.addHouseholdMemberWithRisk === 'function'
+    ? await repo.addHouseholdMemberWithRisk(household.id, memberPayload, nextRisk)
+    : null;
+  if (atomic?.missing === 'household') {
+    throw ApiError.notFound('Household not found');
+  }
+  if (atomic?.member) {
+    created = atomic.member;
+  } else {
+    created = await repo.addHouseholdMember(household.id, memberPayload);
+    await repo.updateHousehold(household.id, nextRisk);
+  }
   return { member: created, household: await repo.getHousehold(household.id) };
 };
 
-export const removeHouseholdMember = async ({ id, memberId, user }) => {
+export const removeHouseholdMember = async ({ id, memberId, user, repo = repository }) => {
   if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
-  const household = await getScopedHousehold(id, user);
+  const household = await getScopedHousehold(id, user, repo);
   const member = (household.members || []).find((m) => m.id === memberId);
   if (!member) throw ApiError.notFound('Household member not found');
-  const removed = await repository.removeHouseholdMember(household.id, memberId);
-  if (!removed) throw ApiError.notFound('Household member not found');
-  return { success: true, household: await repository.getHousehold(household.id) };
+
+  const nextMembers = (household.members || []).filter((m) => m.id !== memberId);
+  const nextRisk = recomputeRisk(household, {}, nextMembers);
+
+  const atomic = typeof repo.removeHouseholdMemberWithRisk === 'function'
+    ? await repo.removeHouseholdMemberWithRisk(household.id, memberId, nextRisk)
+    : null;
+  if (atomic?.missing) {
+    throw ApiError.notFound(atomic.missing === 'household' ? 'Household not found' : 'Household member not found');
+  }
+  if (!atomic) {
+    const removed = await repo.removeHouseholdMember(household.id, memberId);
+    if (!removed) throw ApiError.notFound('Household member not found');
+    await repo.updateHousehold(household.id, nextRisk);
+  }
+  return { success: true, household: await repo.getHousehold(household.id) };
 };
 
 export const updateHouseholdMember = async ({ id, memberId, member = {}, user, repo = repository }) => {
@@ -854,8 +883,24 @@ export const updateHouseholdMember = async ({ id, memberId, member = {}, user, r
   if (normalized.residentId && (household.members || []).some((row) => row.id !== memberId && row.residentId === normalized.residentId)) {
     throw ApiError.duplicate('That resident is already linked to another member in this household.');
   }
-  const updated = await repo.updateHouseholdMember(household.id, memberId, normalized);
-  if (!updated) throw ApiError.notFound('Household member not found');
+
+  const nextMembers = (household.members || []).map((row) => (row.id === memberId ? { ...row, ...normalized } : row));
+  const nextRisk = recomputeRisk(household, {}, nextMembers);
+
+  let updated = null;
+  const atomic = typeof repo.updateHouseholdMemberWithRisk === 'function'
+    ? await repo.updateHouseholdMemberWithRisk(household.id, memberId, normalized, nextRisk)
+    : null;
+  if (atomic?.missing) {
+    throw ApiError.notFound(atomic.missing === 'household' ? 'Household not found' : 'Household member not found');
+  }
+  if (atomic?.member) {
+    updated = atomic.member;
+  } else {
+    updated = await repo.updateHouseholdMember(household.id, memberId, normalized);
+    if (!updated) throw ApiError.notFound('Household member not found');
+    await repo.updateHousehold(household.id, nextRisk);
+  }
   return { member: updated, household: await repo.getHousehold(household.id) };
 };
 

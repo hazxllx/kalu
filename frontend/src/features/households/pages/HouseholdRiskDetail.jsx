@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
+import { getHouseholdDetailAccess, loadHouseholdDetailData } from "../lib/riskDetailAccess";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import { householdsApi } from "@/services/api/householdsApi";
@@ -63,6 +65,9 @@ function InfoCell({ icon: Icon, label, value }) {
 export default function HouseholdRiskDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  const { can } = usePermissions();
+  const access = getHouseholdDetailAccess({ user, can });
+  const { canViewWorkflow, canEditWorkflow, canCreateVisits } = access;
 
   const [phase, setPhase] = useState("loading"); // loading | ready | error | notfound
   const [loadError, setLoadError] = useState(null);
@@ -87,19 +92,20 @@ export default function HouseholdRiskDetail() {
     setPhase("loading");
     setLoadError(null);
     try {
-      const res = await householdsApi.get(id);
-      const record = res?.household || null;
-      if (!record) {
+      const loaded = await loadHouseholdDetailData({
+        id,
+        access: { canViewWorkflow: access.canViewWorkflow, canViewVisits: access.canViewVisits },
+        getHousehold: (targetId) => householdsApi.get(targetId),
+        getWorkflow: (targetId) => householdRiskApi.getWorkflow(targetId),
+        listVisits: (targetId) => householdsApi.listVisits(targetId),
+      });
+      if (!loaded) {
         setHousehold(null);
         setPhase("notfound");
         return;
       }
-      const [workflow, visitResult] = await Promise.all([
-        householdRiskApi.getWorkflow(id),
-        user?.role === "bhw" ? householdsApi.listVisits(id) : Promise.resolve({ visits: [] }),
-      ]);
-      setVisits(Array.isArray(visitResult?.visits) ? visitResult.visits : []);
-      setHousehold(toRiskCluster(record, workflow));
+      setVisits(loaded.visits);
+      setHousehold(toRiskCluster(loaded.record, loaded.workflow));
       setPhase("ready");
     } catch (err) {
       if (err?.status === 404) {
@@ -110,7 +116,7 @@ export default function HouseholdRiskDetail() {
       setLoadError(err);
       setPhase("error");
     }
-  }, [id, user?.role]);
+  }, [id, access.canViewWorkflow, access.canViewVisits]);
 
   useEffect(() => {
     load();
@@ -229,15 +235,19 @@ export default function HouseholdRiskDetail() {
         subtitle={`${h.id} · Barangay ${h.barangay}`}
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => setAction("followup")} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-              <PhoneCall className="h-4 w-4" /> Record Household Follow-up
-            </button>
-            <button onClick={() => setAction("assign")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
-              <UserPlus className="h-4 w-4" /> Assign Health Worker
-            </button>
-            <button onClick={() => setAction("escalate")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card">
-              <ArrowUpRight className="h-4 w-4" /> Escalate
-            </button>
+            {canEditWorkflow && (
+              <>
+                <button onClick={() => setAction("followup")} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-dark">
+                  <PhoneCall className="h-4 w-4" /> Record Household Follow-up
+                </button>
+                <button onClick={() => setAction("assign")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
+                  <UserPlus className="h-4 w-4" /> Assign Health Worker
+                </button>
+                <button onClick={() => setAction("escalate")} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card">
+                  <ArrowUpRight className="h-4 w-4" /> Escalate
+                </button>
+              </>
+            )}
             <Link to={backPath} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
               <ChevronRight className="h-4 w-4 rotate-180" /> Back to Risk Overview
             </Link>
@@ -261,13 +271,17 @@ export default function HouseholdRiskDetail() {
             <InfoCell icon={MapPin} label="Purok" value={h.purok || "—"} />
             <InfoCell icon={Home} label="Address" value={h.address || "—"} />
             <InfoCell icon={Users} label="Household Members" value={h.members} />
-            <InfoCell icon={UserPlus} label="Assigned Worker" value={h.assignedWorker || "—"} />
-            <InfoCell icon={Activity} label="Follow-up Status" value={h.workflowStatus || "—"} />
+            {canViewWorkflow && (
+              <>
+                <InfoCell icon={UserPlus} label="Assigned Worker" value={h.assignedWorker || "—"} />
+                <InfoCell icon={Activity} label="Follow-up Status" value={h.workflowStatus || "—"} />
+              </>
+            )}
             <InfoCell icon={FileText} label="Last Assessment" value={formatDate(h.lastAssessment)} />
           </div>
         </Card>
 
-        {user?.role === "bhw" && (
+        {access.canViewVisits && (
           <Card className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -281,7 +295,7 @@ export default function HouseholdRiskDetail() {
               )}
             </div>
 
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+            {canCreateVisits && <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
               <label className="w-full max-w-xs text-sm font-medium text-brand-ink">
                 Visit date
                 <input
@@ -312,7 +326,7 @@ export default function HouseholdRiskDetail() {
               >
                 <Plus className="h-4 w-4" /> {savingVisit ? "Saving…" : "Record Visit"}
               </button>
-            </div>
+            </div>}
             {visitError && <p role="alert" className="mt-2 text-sm text-red-600">{visitError}</p>}
 
             <div className="mt-5">
@@ -374,7 +388,7 @@ export default function HouseholdRiskDetail() {
             <InfoCell icon={Activity} label="Risk Level" value={RISK_LEVEL_LABELS[h.risk.level]} />
             <InfoCell icon={FileText} label="Risk Indicators" value={h.risk.count} />
             <InfoCell icon={Activity} label="Risk Score" value={h.risk.score} />
-            <InfoCell icon={Home} label="Last Household Visit" value={daysSince(h.lastHouseholdVisit) === null ? "—" : `${daysSince(h.lastHouseholdVisit)} days ago`} />
+            <InfoCell icon={Home} label="Last Household Visit" value={daysSince(visits[0]?.visitDate || h.lastHouseholdVisit) === null ? "—" : `${daysSince(visits[0]?.visitDate || h.lastHouseholdVisit)} days ago`} />
           </div>
 
           {/* Basis + contributing indicators */}
@@ -398,6 +412,8 @@ export default function HouseholdRiskDetail() {
             </p>
           </div>
 
+          {canViewWorkflow && (
+          <>
           {/* Risk history */}
           <div className="mt-4 rounded-2xl border border-slate-200 dark:border-border bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-3">Risk History</p>
@@ -439,10 +455,12 @@ export default function HouseholdRiskDetail() {
               <p className="text-sm text-brand-gray">No interventions recorded yet.</p>
             )}
           </div>
+          </>
+          )}
         </Card>
       </div>
 
-      {action === "followup" && (
+      {canEditWorkflow && action === "followup" && (
         <FollowUpModal
           household={h}
           onClose={() => setAction(null)}
@@ -457,7 +475,7 @@ export default function HouseholdRiskDetail() {
           }}
         />
       )}
-      {action === "assign" && (
+      {canEditWorkflow && action === "assign" && (
         <AssignWorkerModal
           household={h}
           onClose={() => setAction(null)}
@@ -470,7 +488,7 @@ export default function HouseholdRiskDetail() {
           }}
         />
       )}
-      {action === "escalate" && (
+      {canEditWorkflow && action === "escalate" && (
         <EscalateModal
           household={h}
           onClose={() => setAction(null)}

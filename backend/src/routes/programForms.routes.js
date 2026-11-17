@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
-import idempotency from '../middleware/idempotency.js';
+import { createIdempotencyMiddleware } from '../middleware/idempotency.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/apiError.js';
 import * as controller from '../controllers/programForms.controller.js';
+import * as service from '../services/programForms.service.js';
 import { PROGRAM_KINDS } from '../config/programFormSchemas.js';
 
 /**
@@ -31,12 +32,25 @@ const assertKnownKind = (req, _res, next) => {
   next();
 };
 
+const programFormsIdempotency = createIdempotencyMiddleware({
+  durable: true,
+  validateReplay: async (req, responseBody) => {
+    const recordId = responseBody?.data?.record?.id ?? responseBody?.record?.id;
+    if (!recordId) throw ApiError.notFound('Program record not found.');
+    await service.verifyRecordScope({
+      user: req.user,
+      kind: req.params.kind,
+      id: recordId,
+    });
+  },
+});
+
 // Oral Health statistical table (ST) — computed from saved oral_health_records.
 router.get('/oral-health/statistics', authorize(staff), asyncHandler(controller.oralStatistics));
 
 router.get('/:kind', assertKnownKind, authorize(staff), asyncHandler(controller.list));
-router.post('/:kind', assertKnownKind, authorize(staff), idempotency, asyncHandler(controller.create));
-router.put('/:kind/:id', assertKnownKind, authorize(staff), idempotency, asyncHandler(controller.update));
+router.post('/:kind', assertKnownKind, authorize(staff), programFormsIdempotency, asyncHandler(controller.create));
+router.put('/:kind/:id', assertKnownKind, authorize(staff), programFormsIdempotency, asyncHandler(controller.update));
 router.delete('/:kind/:id', assertKnownKind, authorize(staff), asyncHandler(controller.remove));
 
 export default router;

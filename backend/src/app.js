@@ -35,7 +35,7 @@ app.use(cors({
   origin: env.clientUrls,
   credentials: true,
   methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'If-Match'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'If-Match', 'X-Kalusagap-Sync'],
   maxAge: 600,
   optionsSuccessStatus: 204,
 }));

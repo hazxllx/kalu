@@ -42,6 +42,10 @@ async function mount(load = async () => response(), drill = async () => ({ recor
     Card: Panel, ErrorState, StatusBadge: ({ value }) => React.createElement('span', null, value), DataTable,
     TablePagination: Empty, SkeletonTable: Empty, TclEmptyState: ({ title, description }) => React.createElement('div', null, title, description), TclTabs,
     TclToolbar: Empty, X: Empty,
+    useSyncStatus: () => ({ online: true, lastSyncedAt: null }),
+    OfflineCacheNotice: () => null,
+    listM1ProgramOffline: async ({ params, fetchFn }) => ({ ...(await fetchFn(params)), source: 'server', stale: false, cachedAt: Date.now() }),
+    getM1DrilldownOffline: async ({ code, params, fetchFn }) => ({ data: await fetchFn(code, params), source: 'server', stale: false, cachedAt: Date.now() }),
     m1Api: { drilldown: drill },
   };
   const key = `__m1DetailTest${serial++}`;

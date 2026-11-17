@@ -2,7 +2,14 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import DataTable from "@/components/tables/DataTable";
 import { Card } from "@/components/common/Card";
 import { Plus, X, Search, CheckCircle2, RefreshCw, Pencil } from "lucide-react";
-import { residentsApi, householdsApi, programFormsApi } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { listProgramFormOffline } from "@/services/offline/clinicalOfflineService";
+import { listResidentsOffline } from "@/services/offline/residentOfflineService";
+import { listHouseholdsOffline } from "@/services/offline/householdOfflineService";
+import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
+import { programFormsApi } from "@/services/api";
 import ProgramFormModal from "./ProgramFormModal";
 import { fromRow } from "../lib/programFormConfig";
 import { buildProgramCsv, downloadCsv } from "../lib/programFormExport";
@@ -57,11 +64,14 @@ const cellValue = (col, row) => {
  * is persisted through the real /program-forms API (no local-only state).
  */
 export default function ProgramFormPage({ config }) {
+  const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const api = programFormsApi[config.kind];
   const [rows, setRows] = useState([]);
   const [entities, setEntities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
   const [toast, setToast] = useState(null);
 
   const [picking, setPicking] = useState(false);       // entity picker open
@@ -72,19 +82,44 @@ export default function ProgramFormPage({ config }) {
   const [submitError, setSubmitError] = useState("");
 
   const load = useCallback(() => {
+    if (!user?.id) { setRows([]); setEntities([]); setLoading(false); return Promise.resolve(); }
     setLoading(true);
     setLoadError(null);
-    const entityLoad = config.scope === "household"
-      ? householdsApi.list().then((r) => (r?.rows || r || []).map(normalizeHousehold))
-      : residentsApi.list({ limit: 300 }).then((r) => (r?.rows || r || []).map(normalizeResident));
-    return Promise.all([api.list(), entityLoad])
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
+    const entityLoad = (async () => {
+      try {
+        if (config.scope === "household") {
+          const r = await listHouseholdsOffline({ ownerId: user.id });
+          return (r?.rows || []).map(normalizeHousehold);
+        }
+        const r = await listResidentsOffline({ ownerId: user.id, params: { limit: 300 } });
+        return (r?.rows || []).map(normalizeResident);
+      } catch (err) {
+        if (classifySyncError(err).code === SYNC_ERROR.NETWORK) return [];
+        throw err;
+      }
+    })();
+    return Promise.all([
+      listProgramFormOffline({
+        ownerId: user.id,
+        kind: config.kind,
+        fetchFn: () => api.list(),
+        online: () => online,
+      }),
+      entityLoad,
+    ])
       .then(([recordResult, entityRows]) => {
         setRows(recordResult?.rows || []);
         setEntities(entityRows);
+        setCacheInfo({
+          source: recordResult?.source || "server",
+          cachedAt: recordResult?.cachedAt ?? null,
+          stale: Boolean(recordResult?.stale),
+        });
       })
       .catch((err) => { setLoadError(err?.message || "Unable to load records."); setRows([]); })
       .finally(() => setLoading(false));
-  }, [api, config.scope]);
+  }, [api, config.kind, config.scope, user?.id, online]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -141,7 +176,9 @@ export default function ProgramFormPage({ config }) {
     }
   };
 
-  const columns = [...config.columns, { key: "__actions", label: "" }];
+  // Strip config column `render` (which expects `(value, row)`) before passing to
+  // `DataTable` (which calls `column.render(row)` and would otherwise bypass `renderCell`).
+  const columns = [...config.columns.map(({ render: _omitRender, ...col }) => col), { key: "__actions", label: "" }];
 
   return (
     <>
@@ -150,6 +187,15 @@ export default function ProgramFormPage({ config }) {
           <CheckCircle2 className="w-4 h-4 text-brand-green" /><span className="text-sm">{toast}</span>
         </div>
       )}
+
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={rows.length === 0}
+        onRetry={load}
+      />
 
       <TclToolbar
         searchValue={recordQuery}
@@ -178,8 +224,8 @@ export default function ProgramFormPage({ config }) {
         </Card>
       ) : rows.length === 0 ? (
         <TclEmptyState
-          title={config.kind === "environmental" ? "No household assessments yet" : config.kind === "oral-health" ? "No oral health records yet" : "No screening records yet"}
-          description={config.kind === "environmental" ? "Household water, sanitation, and environmental assessments will appear here." : config.kind === "oral-health" ? "Client records and oral health services will appear here." : "Records for the selected screening category will appear here."}
+          title={cacheInfo.source === "cache" ? "No saved records available offline." : config.kind === "environmental" ? "No household assessments yet" : config.kind === "oral-health" ? "No oral health records yet" : "No screening records yet"}
+          description={cacheInfo.source === "cache" ? "Reconnect to load and save records for offline viewing." : config.kind === "environmental" ? "Household water, sanitation, and environmental assessments will appear here." : config.kind === "oral-health" ? "Client records and oral health services will appear here." : "Records for the selected screening category will appear here."}
           action={
             <button onClick={() => { setPicking(true); setQuery(""); }} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark transition-colors">
               <Plus className="h-4 w-4" /> New Record

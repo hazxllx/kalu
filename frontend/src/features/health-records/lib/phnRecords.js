@@ -57,3 +57,19 @@ export const requireServerConsultation = (response, expectedId = null) => {
   }
   return record;
 };
+
+/**
+ * Persists a completed PHN check-up from PhnCheckupWorkbench and refreshes both
+ * the consultations list and the PHN workflow queue.
+ */
+export const completePhnHealthRecordCheckup = async ({
+  checkup,
+  recorded,
+  completeCheckup,
+  refreshRecords,
+  refreshQueue,
+}) => {
+  if (!checkup?.id) throw new Error('No active PHN check-up selected.');
+  await completeCheckup(checkup.id, recorded);
+  await Promise.all([refreshRecords?.(), refreshQueue?.()]);
+};

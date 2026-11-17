@@ -1,0 +1,54 @@
+{
+  "meta": {
+    "version": 1,
+    "driver": "file"
+  },
+  "counters": {
+    "residents": 0,
+    "submissions": 0,
+    "referrals": 0
+  },
+  "residents": [],
+  "visits": [],
+  "referrals": [],
+  "verifications": [],
+  "residentVerificationLogs": [],
+  "transferRequests": [],
+  "transferRequestAuditLogs": [],
+  "riskCriteria": [],
+  "riskSettings": null,
+  "healthAuditLogs": [
+    {
+      "id": "HAL-000001",
+      "actorId": "admin-1",
+      "action": "MEDICINE_CREATED",
+      "entityType": "medicine_catalog",
+      "entityId": "m1",
+      "municipalityId": null,
+      "barangayId": null,
+      "metadata": {
+        "previous": null,
+        "next": {
+          "id": "m1",
+          "genericName": "Zinc Sulfate",
+          "brandName": "",
+          "strength": "20 mg",
+          "dosageForm": "Tablet",
+          "category": "",
+          "source": "local",
+          "indication": "",
+          "safetyNotes": "",
+          "contraindications": "",
+          "prescriptionRequirement": "rx",
+          "dosageInstructions": "",
+          "active": true,
+          "createdBy": "admin-1"
+        }
+      },
+      "createdAt": "2026-11-17T18:41:55.173Z"
+    }
+  ],
+  "medicines": [],
+  "medicineAvailability": [],
+  "bpThresholdSettings": null
+}

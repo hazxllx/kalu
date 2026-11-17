@@ -18,6 +18,9 @@ import {
   toReportParams,
 } from "@/features/health-records/lib/reportingPeriod";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { getM1ReportOffline, getM1DrilldownOffline } from "@/services/offline/clinicalOfflineService";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 import { m1Api } from "@/services/api";
 
@@ -41,6 +44,7 @@ export default function M1SectionDetail() {
   const section = String(route.section || "").toUpperCase();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const now = new Date();
   const [period, setPeriod] = useState(() => PERIOD_TYPES.includes(searchParams.get("period")) ? searchParams.get("period") : "monthly");
   const [year, setYear] = useState(() => validYear(searchParams.get("year"), now.getFullYear()));
@@ -62,6 +66,7 @@ export default function M1SectionDetail() {
   const [drilldownError, setDrilldownError] = useState(null);
   const [drillRetry, setDrillRetry] = useState(0);
   const [entryOpen, setEntryOpen] = useState(false);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
   const descriptor = useMemo(() => ({ period, year, month, quarter }), [period, year, month, quarter]);
   const periodLabel = makePeriodLabel(descriptor);
   const years = useMemo(() => reportingYearOptions(year), [year]);
@@ -89,37 +94,61 @@ export default function M1SectionDetail() {
     setLoading(true);
     setError(null);
     setRows(null);
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
     setSelectedIndicator(null);
     if (!Object.hasOwn(SECTION_TITLES, section)) {
       setError("The requested FHSIS section is invalid.");
       setLoading(false);
       return () => { active = false; };
     }
-    m1Api.report(toReportParams(descriptor))
-      .then((response) => {
+    if (!user?.id) { setLoading(false); return () => { active = false; }; }
+    const reportParams = toReportParams(descriptor);
+    getM1ReportOffline({
+      ownerId: user.id,
+      params: reportParams,
+      fetchFn: (params) => m1Api.report(params),
+      validate: (response) => {
+        if (!response?.byCode || typeof response.byCode !== "object") throw new Error("Invalid M1 report response.");
+        const sectionRows = Object.values(response.byCode).filter((row) => row.section === section);
+        if (sectionRows.some((row) => typeof row.name !== "string" || !Number.isFinite(row.total))) {
+          throw new Error("Section indicator definitions are incomplete.");
+        }
+      },
+      online: () => online,
+    })
+      .then(({ data: response, source, cachedAt, stale }) => {
         if (!response?.byCode || typeof response.byCode !== "object") throw new Error("Invalid M1 report response.");
         const sectionRows = Object.values(response.byCode).filter((row) => row.section === section);
         if (sectionRows.some((row) => typeof row.name !== "string" || !Number.isFinite(row.total))) throw new Error("Section indicator definitions are incomplete.");
-        if (active) setRows(sectionRows);
+        if (active) {
+          setRows(sectionRows);
+          setCacheInfo({ source: source || "server", cachedAt: cachedAt ?? null, stale: Boolean(stale) });
+        }
       })
       .catch((loadError) => { if (active) setError(loadError?.message || "Unable to load section data."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [section, descriptor, retry, user?.id]);
+  }, [section, descriptor, retry, user?.id, online]);
 
   useEffect(() => {
-    if (!selectedIndicator) return undefined;
+    if (!selectedIndicator || !user?.id) return undefined;
     let active = true;
     setDrilldown(null);
     setDrilldownError(null);
-    m1Api.drilldown(selectedIndicator.code, toReportParams(descriptor))
-      .then((response) => {
+    getM1DrilldownOffline({
+      ownerId: user.id,
+      code: selectedIndicator.code,
+      params: toReportParams(descriptor),
+      fetchFn: (code, params) => m1Api.drilldown(code, params),
+      online: () => online,
+    })
+      .then(({ data: response }) => {
         if (!Array.isArray(response?.records)) throw new Error("Invalid underlying-record response.");
         if (active) setDrilldown(response.records);
       })
       .catch((loadError) => { if (active) setDrilldownError(loadError?.message || "Unable to load underlying records."); });
     return () => { active = false; };
-  }, [selectedIndicator, descriptor, drillRetry]);
+  }, [selectedIndicator, descriptor, drillRetry, user?.id, online]);
 
   const subsections = [...new Set((rows || []).map((row) => row.subsection).filter(Boolean))];
   const tabs = subsections.map((value) => ({ value, label: value }));
@@ -138,6 +167,14 @@ export default function M1SectionDetail() {
         backLabel="Back to Consolidated Report"
       />
       <M1ReportingPeriod period={period} year={year} month={month} quarter={quarter} years={years} onPeriodChange={changePeriod} onYearChange={changeYear} onMonthChange={changeMonth} onQuarterChange={changeQuarter} />
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={!rows?.length}
+        onRetry={() => setRetry((value) => value + 1)}
+      />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold text-brand-ink">Section {section} Indicators</h2><p className="mt-0.5 text-xs text-brand-gray">{periodLabel}</p></div>{period === "monthly" && <button type="button" onClick={() => setEntryOpen(true)} className="ui-tcl-control ui-tcl-control-primary">Enter Reporting Figures</button>}</div>
       {loading ? <SkeletonTable rows={8} cols={4} className="ui-tcl-data-table" />
         : error ? <Card><ErrorState title="Unable to load FHSIS section" message={error} onRetry={() => setRetry((value) => value + 1)} /></Card>

@@ -13,8 +13,19 @@ import { SkeletonTable } from "@/components/system/Skeleton";
 import {
   Pencil, CheckCircle2, Download, Trash2,
 } from "lucide-react";
-import { maternalApi, maternalVisitsApi, residentsApi, m1Api, loadM1ProgramCounts } from "@/services/api";
+import { maternalApi, maternalVisitsApi, m1Api, m1ProgramsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import {
+  listMaternalOffline,
+  listMaternalVisitsOffline,
+  getM1ReportOffline,
+  getM1MetaOffline,
+  loadM1ProgramCountsOffline,
+} from "@/services/offline/clinicalOfflineService";
+import { listResidentsOffline } from "@/services/offline/residentOfflineService";
+import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 import { availableYears, followUpStatus } from "@/features/health-records/lib/m1Analytics";
 import {
@@ -32,6 +43,10 @@ import {
   PostpartumFollowUpForm,
 } from "@/features/health-records/components/MaternalRecordWorkflow";
 import MaternalRecordEditor from "@/features/health-records/components/MaternalRecordEditor";
+import {
+  buildCreateMaternalPayload,
+  buildEditMaternalHeaderPatch,
+} from "@/features/health-records/lib/maternalPayloads";
 import { buildMaternalCsv, downloadCsv } from "@/features/health-records/lib/programFormExport";
 
 const RISK_LEVELS = ["Low", "Moderate", "High"];
@@ -264,6 +279,7 @@ const YES_NO = [
 
 export default function M1Records() {
   const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isMaternalTclRoute = location.pathname.replace(/\/+$/, "").endsWith("/maternal-tcl");
@@ -292,6 +308,8 @@ export default function M1Records() {
   const [moduleCountsLoading, setModuleCountsLoading] = useState(false);
   const [moduleCountsError, setModuleCountsError] = useState(null);
   const [moduleCountsRetry, setModuleCountsRetry] = useState(0);
+  const [recordsCacheInfo, setRecordsCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
+  const [countsCacheInfo, setCountsCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
   const { startPrint, portal, brandingError } = useM1OfficialPrint();
   const { startPrint: startMaternalPrint, portal: maternalPrintPortal } = useMaternalRecordPrint();
 
@@ -321,11 +339,29 @@ export default function M1Records() {
   useEffect(() => { setPage(1); }, [period, year, month, quarter, search, statusFilter, isMaternalTclRoute]);
 
   const load = React.useCallback(() => {
+    if (!user?.id) { setRecords([]); setResidents([]); setLoading(false); return Promise.resolve(); }
     setLoading(true);
     setLoadError(null);
-    return Promise.all([maternalApi.list(), residentsApi.list({ limit: 200 })])
+    setRecordsCacheInfo({ source: null, cachedAt: null, stale: false });
+    const loadResidents = async () => {
+      try {
+        return await listResidentsOffline({ ownerId: user.id, params: { limit: 200 } });
+      } catch (err) {
+        if (classifySyncError(err).code === SYNC_ERROR.NETWORK) return { rows: [] };
+        throw err;
+      }
+    };
+    return Promise.all([
+      listMaternalOffline({ ownerId: user.id, fetchFn: () => maternalApi.list(), online: () => online }),
+      loadResidents(),
+    ])
       .then(([maternalResult, residentResult]) => {
         setRecords((maternalResult?.rows || []).map(mapRecord));
+        setRecordsCacheInfo({
+          source: maternalResult?.source || "server",
+          cachedAt: maternalResult?.cachedAt ?? null,
+          stale: Boolean(maternalResult?.stale),
+        });
         const rows = residentResult?.rows || residentResult || [];
         setResidents(
           rows
@@ -341,13 +377,19 @@ export default function M1Records() {
       })
       .catch((err) => setLoadError(err?.message || "Unable to load maternal records. Please try again."))
       .finally(() => setLoading(false));
-  }, [assignedBarangay]);
+  }, [assignedBarangay, user?.id, online]);
 
   const openDetail = async (record) => {
     setVisitLoadError(null);
     setDetail({ ...record, visits: [] });
+    if (!user?.id) return;
     try {
-      const result = await maternalVisitsApi.list({ residentId: record.residentId });
+      const result = await listMaternalVisitsOffline({
+        ownerId: user.id,
+        params: { residentId: record.residentId },
+        fetchFn: (params) => maternalVisitsApi.list(params),
+        online: () => online,
+      });
       const visits = (result?.rows || [])
         .filter((visit) => visit.maternal_case_id === record.id)
         .sort((a, b) => String(b.visit_date || "").localeCompare(String(a.visit_date || "")));
@@ -373,15 +415,18 @@ export default function M1Records() {
   // semantics as their detail pages. Never turn a failed count into a valid zero.
   useEffect(() => {
     if (isMaternalTclRoute) return undefined;
+    if (!user?.id) { setModuleCounts({}); setModuleCountsLoading(false); return undefined; }
     let active = true;
     setModuleCountsLoading(true);
     setModuleCountsError(null);
+    setCountsCacheInfo({ source: null, cachedAt: null, stale: false });
     const params = toReportParams({ period, year, month, quarter });
 
-    loadM1ProgramCounts(params)
-      .then((counts) => {
+    loadM1ProgramCountsOffline({ ownerId: user.id, params, clients: m1ProgramsApi, online: () => online })
+      .then(({ counts, source, cachedAt, stale }) => {
         if (!active) return;
         setModuleCounts(counts);
+        setCountsCacheInfo({ source, cachedAt: cachedAt ?? null, stale: Boolean(stale) });
       })
       .catch((err) => {
         if (!active) return;
@@ -392,7 +437,7 @@ export default function M1Records() {
         if (active) setModuleCountsLoading(false);
       });
     return () => { active = false; };
-  }, [period, year, month, quarter, isMaternalTclRoute, moduleCountsRetry]);
+  }, [period, year, month, quarter, isMaternalTclRoute, moduleCountsRetry, user?.id, online]);
 
   // --- Derived reporting data (pure; from loaded records) -----------------
   const descriptor = useMemo(() => ({ period, year, month, quarter }), [period, year, month, quarter]);
@@ -463,10 +508,22 @@ export default function M1Records() {
       // Report header meta is stored per month; use the period's first month for
       // the shared header fields (municipality/province/population/prepared-by).
       const metaMonth = period === "quarterly" ? (quarter - 1) * 3 + 1 : period === "annual" ? 1 : month + 1;
-      const [reportData, metaData] = await Promise.all([
-        m1Api.report(params),
-        m1Api.getMeta({ year, month: metaMonth }).catch(() => null),
+      const [reportRes, metaRes] = await Promise.all([
+        getM1ReportOffline({
+          ownerId: user?.id,
+          params,
+          fetchFn: () => m1Api.report(params),
+          online: () => online,
+        }),
+        getM1MetaOffline({
+          ownerId: user?.id,
+          params: { year, month: metaMonth },
+          fetchFn: (p) => m1Api.getMeta(p),
+          online: () => online,
+        }).catch(() => null),
       ]);
+      const reportData = reportRes?.data;
+      const metaData = metaRes?.data;
       await startPrint({
         data: reportData?.byCode || {},
         header: {
@@ -530,68 +587,20 @@ export default function M1Records() {
 
   const handleRegisterPregnancy = async (form) => {
     setSaving(true);
-    const payload = {
-      lmp: form.lmp || null,
-      edd: form.lmp ? (() => {
-        const lmp = new Date(form.lmp);
-        const edd = new Date(lmp.getTime() + 280 * 24 * 60 * 60 * 1000);
-        return edd.toISOString().split("T")[0];
-      })() : null,
-      prenatal_visits: 0,
-      risk: form.risk,
-      status: "Active",
-      provider: "",
-      notes: form.notes,
-      date_of_registration: form.dateOfRegistration || null,
-      family_serial_no: "",
-      socio_economic_status: form.socioEconomicStatus || "",
-      gravida: form.gravida === "" || form.gravida === null ? null : Number(form.gravida),
-      para: form.para === "" || form.para === null ? null : Number(form.para),
-      tt_td_doses: {},
-      fim_status: null,
-      prenatal_micronutrients: {},
-      iodine_given_date: null,
-      deworming_date: null,
-      syphilis_screen_date: null,
-      syphilis_result: "",
-      hepb_screen_date: null,
-      hepb_result: "",
-      hiv_screen_date: null,
-      gdm_screen_date: null,
-      gdm_result: "",
-      cbc_screen_date: null,
-      cbc_result: "",
-      cbc_iron_given: null,
-      pregnancy_outcome: "",
-      pregnancy_outcome_date: null,
-      newborn_sex: "",
-      type_of_delivery: "",
-      delivery_date: null,
-      delivery_time: "",
-      delivery_outcome: "",
-      birth_weight: "",
-      birth_weight_class: "",
-      place_of_delivery: "",
-      birth_attendant: "",
-      pp_checkup_24h: null,
-      pp_checkup_day3: null,
-      pp_checkup_7_14d: null,
-      pp_checkup_6wk: null,
-      iron_folic_completed_date: null,
-      vitamin_a_given_date: null,
-      smoking_history: null,
-      binge_alcohol: null,
-      insufficient_physical_activity: null,
-      unhealthy_diet: null,
-      bmi: null,
-    };
     try {
       if (formMode === "edit" && editingRecord) {
-        // Update existing record
-        await maternalApi.update(editingRecord.id, payload);
-        showToast("Pregnancy record updated.");
+        // Send only modified pregnancy header fields so existing prenatal visits,
+        // TT/Td doses, screenings, delivery, and postpartum milestones stay intact.
+        const patch = buildEditMaternalHeaderPatch(form, editingRecord);
+        if (Object.keys(patch).length > 0) {
+          await maternalApi.update(editingRecord.id, patch);
+          showToast("Pregnancy record updated.");
+        } else {
+          showToast("No changes to save.");
+        }
       } else {
         // Create new record
+        const payload = buildCreateMaternalPayload(form);
         await maternalApi.create({ residentId: selectedResident.id, ...payload });
         showToast("Pregnancy registered.");
       }
@@ -898,6 +907,14 @@ export default function M1Records() {
               : "Prenatal and postpartum records for your assigned barangay."
           }
         />
+        <OfflineCacheNotice
+          source={recordsCacheInfo.source}
+          cachedAt={recordsCacheInfo.cachedAt}
+          lastSyncedAt={lastSyncedAt}
+          stale={recordsCacheInfo.stale}
+          empty={records.length === 0}
+          onRetry={load}
+        />
         {loading ? <SkeletonTable rows={8} cols={8} className="ui-tcl-data-table" />
           : loadError ? <Card><ErrorState title="Unable to load maternal records" message={loadError} onRetry={load} /></Card>
             : <section aria-label="Prenatal and postpartum records">
@@ -916,8 +933,8 @@ export default function M1Records() {
               {participants.length === 0 ? (
                 <TclEmptyState
                   type={search.trim() || statusFilter !== "All" ? "filter" : "empty"}
-                  title="No prenatal or postpartum records found"
-                  description={records.length === 0 ? (assignedBarangay ? `No maternal records have been recorded for Brgy. ${assignedBarangay} yet.` : "No maternal records have been recorded yet.") : "No maternal records match the selected filters."}
+                  title={!(search.trim() || statusFilter !== "All") && recordsCacheInfo.source === "cache" && records.length === 0 ? "No saved records available offline." : "No prenatal or postpartum records found"}
+                  description={records.length === 0 ? (recordsCacheInfo.source === "cache" ? "Reconnect to load and save maternal records for offline viewing." : assignedBarangay ? `No maternal records have been recorded for Brgy. ${assignedBarangay} yet.` : "No maternal records have been recorded yet.") : "No maternal records match the selected filters."}
                   compact
                   action={(search.trim() || statusFilter !== "All") ? <button type="button" onClick={() => { setSearch(""); setStatusFilter("All"); }} className="ui-tcl-control ui-tcl-control-secondary">Reset filters</button> : null}
                 />
@@ -975,8 +992,18 @@ export default function M1Records() {
               </button>
             </div>
           )}
-          notices={(brandingError || moduleCountsError) ? (
+          notices={(brandingError || moduleCountsError || countsCacheInfo.source === "cache") ? (
             <>
+              {countsCacheInfo.source === "cache" && (
+                <OfflineCacheNotice
+                  source={countsCacheInfo.source}
+                  cachedAt={countsCacheInfo.cachedAt}
+                  lastSyncedAt={lastSyncedAt}
+                  stale={countsCacheInfo.stale}
+                  empty={Object.keys(moduleCounts).length === 0}
+                  className="!mb-0"
+                />
+              )}
               {brandingError && (
                 <div role="alert" className="border border-brand-danger/30 bg-brand-paper px-4 py-3 text-sm text-brand-danger dark:bg-card">
                   {brandingError}

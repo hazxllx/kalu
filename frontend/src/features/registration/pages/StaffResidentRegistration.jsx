@@ -1,18 +1,17 @@
 ﻿import React, { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { X, Loader2 } from "lucide-react";
-import { Card } from "@/components/common/Card";
 import { residentsApi } from "@/services/api";
 import {
   CIVIL_STATUSES,
   NAME_SUFFIXES,
   SEX_OPTIONS,
-  email as validateEmail,
-  strictMobile as validateStrictMobile,
-  required,
-  personName,
-  validateFields,
-  dateOfBirth,
 } from "@/utils/validation";
+import {
+  buildStaffResidentPayload,
+  calcStaffRegistrationAge,
+  validateStaffResidentForm,
+} from "@/features/registration/lib/staffResidentRegistration";
 import { BARANGAYS } from "@/lib/barangays";
 import { ButtonSelectGroup } from "@/components/system";
 import SearchableSelect from "@/components/common/SearchableSelect";
@@ -32,7 +31,8 @@ const errorClass = "text-xs text-brand-danger mt-1";
  * - onClose: function - Close handler
  * - onSuccess: function - Success callback (optional)
  */
-export default function StaffResidentRegistration({ isOpen, onClose, onSuccess }) {
+export default function StaffResidentRegistration({ isOpen = true, onClose, onSuccess }) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState(null);
@@ -58,10 +58,22 @@ export default function StaffResidentRegistration({ isOpen, onClose, onSuccess }
 
   // Helpers
   const set = (field) => (value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const handleClose = useCallback(() => {
+    if (onClose) {
+      onClose();
+    } else {
+      navigate("/residents");
+    }
+  }, [onClose, navigate]);
   
-  // Simple DOB handler - just update the date
   const onDobChange = (e) => {
-    set("dob")(e.target.value);
+    const dob = e.target.value;
+    setForm((prev) => ({
+      ...prev,
+      dob,
+      age: calcStaffRegistrationAge(dob),
+    }));
   };
 
   const onContactChange = (e) => {
@@ -70,66 +82,22 @@ export default function StaffResidentRegistration({ isOpen, onClose, onSuccess }
   };
 
   // Validation
-  const validateForm = useCallback(() => {
-    const stepErrors = {};
-    
-    const fields = {
-      firstName: [required("First name"), personName("First name")],
-      lastName: [required("Last name"), personName("Last name")],
-      dob: [required("Date of birth"), dateOfBirth("Date of birth")],
-      gender: [required("Sex")],
-      civilStatus: [required("Civil status")],
-      barangay: [required("Barangay")],
-    };
-
-    if (form.middleName && !personName("Middle name")(form.middleName)) {
-      stepErrors.middleName = "Middle name can contain letters, spaces, hyphens, apostrophes, and periods only.";
-    }
-
-    if (form.contact && !validateStrictMobile(form.contact)) {
-      stepErrors.contact = "Contact number must be exactly 11 digits.";
-    }
-
-    if (form.createAccount && !form.email) {
-      stepErrors.email = "Email is required when creating a login account.";
-    }
-    if (form.email && !validateEmail(form.email)) {
-      stepErrors.email = "Enter a valid email address.";
-    }
-
-    const validationErrors = validateFields(fields, form);
-    return { ...stepErrors, ...validationErrors };
-  }, [form]);
+  const validateForm = useCallback(() => validateStaffResidentForm(form), [form]);
 
   // Submit
   const handleSubmit = async () => {
     const stepErrors = validateForm();
     setErrors(stepErrors);
-    
+
     if (Object.keys(stepErrors).length > 0) return;
 
     setLoading(true);
     setApiError(null);
-    
-    try {
-      const payload = {
-        firstName: form.firstName,
-        middleName: form.middleName,
-        lastName: form.lastName,
-        suffix: form.suffix || undefined,
-        birthDate: form.dob,
-        sex: form.gender,
-        civilStatus: form.civilStatus,
-        barangay: form.barangay,
-        zone: form.purok ? parseInt(form.purok) : undefined,
-        cellphoneNo: form.contact || undefined,
-        currentAddress: form.street || undefined,
-        createLoginAccount: form.createAccount,
-        ...(form.createAccount ? { email: form.email } : {}),
-      };
 
-      await residentsApi.createResident({ resident: payload });
-      
+    try {
+      const payload = buildStaffResidentPayload(form);
+      await residentsApi.create({ resident: payload });
+
       // Success - reset and close
       setForm({
         firstName: "",
@@ -149,9 +117,9 @@ export default function StaffResidentRegistration({ isOpen, onClose, onSuccess }
         email: "",
       });
       setErrors({});
-      
+
       if (onSuccess) onSuccess();
-      onClose();
+      handleClose();
     } catch (error) {
       const message = error?.response?.data?.message || error?.message || "Failed to register resident";
       setApiError(message);
@@ -160,7 +128,7 @@ export default function StaffResidentRegistration({ isOpen, onClose, onSuccess }
     }
   };
 
-   if (!isOpen) return null;
+     if (!isOpen) return null;
 
    return (
      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -173,7 +141,7 @@ export default function StaffResidentRegistration({ isOpen, onClose, onSuccess }
                <p className="text-sm text-brand-gray mt-0.5">Register a new resident in the directory.</p>
              </div>
              <button 
-               onClick={onClose}
+               onClick={handleClose}
                className="text-brand-gray hover:text-brand-blue transition-colors"
                aria-label="Close resident registration"
              >
@@ -423,7 +391,7 @@ export default function StaffResidentRegistration({ isOpen, onClose, onSuccess }
          <div className="flex-shrink-0 border-t border-brand-border bg-brand-bg px-6 py-4">
            <div className="flex justify-end gap-3">
              <button 
-               onClick={onClose}
+               onClick={handleClose}
                disabled={loading}
                className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray bg-white border border-brand-border hover:bg-brand-light transition-colors disabled:opacity-50"
              >

@@ -4,10 +4,15 @@ import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
 import { Plus, X, Search, CheckCircle2, Calendar, User, MapPin, Stethoscope, RefreshCw, ChevronRight, Microscope, Eye, Pill, Heart, Baby, Leaf, Users } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { listTclOffline } from "@/services/offline/clinicalOfflineService";
+import { listResidentsOffline } from "@/services/offline/residentOfflineService";
+import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
 import useHouseholdWorkers from "@/hooks/useHouseholdWorkers";
-import { tclApi, residentsApi } from "@/services/api";
-import { normalizeTcl, loadResidentDirectory, workersForResident, tclDateError } from "../lib/tclData";
+import { tclApi } from "@/services/api";
+import { normalizeResident, normalizeTcl, loadResidentDirectory, workersForResident, tclDateError } from "../lib/tclData";
 import {
   TCL_PROGRAMS,
   TCL_STATUSES,
@@ -135,6 +140,7 @@ function ModalShell({ title, subtitle, onClose, children }) {
 
 export default function TCLS() {
   const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const directory = useHouseholdWorkers();
   const request = useRef(0);
   const [allTcls, setAllTcls] = useState([]);
@@ -142,6 +148,7 @@ export default function TCLS() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [loadedOwner, setLoadedOwner] = useState(null);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
 
   const loadData = useCallback(() => {
     const current = ++request.current;
@@ -149,14 +156,36 @@ export default function TCLS() {
     setLoadError(null);
     setAllTcls([]);
     setAllResidents([]);
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
     setLoadedOwner(user?.id || null);
     if (!user?.id) { setLoading(false); return Promise.resolve(); }
-    return Promise.all([tclApi.list(), loadResidentDirectory(residentsApi.list)])
+    const loadResidents = async () => {
+      if (online) {
+        try {
+          return await loadResidentDirectory((params) =>
+            listResidentsOffline({ ownerId: user.id, params }),
+          );
+        } catch (err) {
+          if (classifySyncError(err).code !== SYNC_ERROR.NETWORK) throw err;
+        }
+      }
+      const cachedResidents = await listResidentsOffline({ ownerId: user.id });
+      return (cachedResidents?.rows || []).map(normalizeResident).filter(Boolean);
+    };
+    return Promise.all([
+      listTclOffline({ ownerId: user.id, fetchFn: () => tclApi.list(), online: () => online }),
+      loadResidents(),
+    ])
       .then(([tclResult, residentResult]) => {
         if (current !== request.current) return;
         if (!Array.isArray(tclResult?.rows)) throw new Error("The TCL response was incomplete.");
         setAllTcls(tclResult.rows.map(normalizeTcl));
         setAllResidents(residentResult);
+        setCacheInfo({
+          source: tclResult.source || "server",
+          cachedAt: tclResult.cachedAt ?? null,
+          stale: Boolean(tclResult.stale),
+        });
       })
       .catch((err) => {
         if (current !== request.current) return;
@@ -167,7 +196,7 @@ export default function TCLS() {
         setAllResidents([]);
       })
       .finally(() => { if (current === request.current) setLoading(false); });
-  }, [user?.id]);
+  }, [user?.id, online]);
 
   useEffect(() => {
     loadData();
@@ -435,6 +464,15 @@ export default function TCLS() {
         </div>
       )}
 
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={allTcls.length === 0}
+        onRetry={loadData}
+      />
+
       <TclToolbar
         searchValue={recordQuery}
         onSearch={setRecordQuery}
@@ -460,8 +498,8 @@ export default function TCLS() {
         <TclListSkeleton rows={5} />
       ) : rows.length === 0 ? (
         <TclEmptyState
-          title={recordQuery || cat ? "No matching records found" : "No enrolled clients yet"}
-          description={recordQuery || cat ? "Try adjusting your search or filters." : "Residents enrolled in community health programs will appear here."}
+          title={recordQuery || cat ? "No matching records found" : cacheInfo.source === "cache" ? "No saved records available offline." : "No enrolled clients yet"}
+          description={recordQuery || cat ? "Try adjusting your search or filters." : cacheInfo.source === "cache" ? "Reconnect to load and save TCL records for offline viewing." : "Residents enrolled in community health programs will appear here."}
           type={recordQuery || cat ? "search" : "empty"}
           action={!(recordQuery || cat) ? (
             <button onClick={openAdd} className="ui-tcl-control ui-tcl-control-primary">

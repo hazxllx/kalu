@@ -19,7 +19,8 @@ import {
 import {
   AlertTriangle, Ban, CheckCircle2, Clock, Eye, Filter, KeyRound,
   Loader2, Mail, MoreVertical, Pencil, Plus, RotateCcw, Search, ShieldCheck,
-  Trash2, UserCheck, UserCog, Users, UserX, X,
+  Trash2, UserCheck, UserCog, Users, UserX, X, UserPlus, ShieldOff, MailCheck,
+  KeySquare, FileText, Copy, ChevronDown,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -81,47 +82,25 @@ function LifecyclePill({ account }) {
   const badgeClass = tone ? TONE_CLASSES[tone] : accountMeta.badge;
   const dotClass = tone ? TONE_DOTS[tone] || TONE_DOTS.slate : accountMeta.dot;
   const label = lifecycleMeta?.label || accountMeta.label;
-  const passwordLabel = account.mustChangePassword
-    ? "Password Change Required"
-    : account.passwordChangedAt
-      ? "Password Updated"
-      : account.temporaryPasswordAssignedAt
-        ? "Temporary Password Assigned"
-        : null;
   return (
-    <span className="flex flex-col items-start gap-1">
-      <span
-        title={lifecycleMeta?.description}
-        className={`inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium leading-none ${badgeClass}`}
-      >
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
-        {label}
-      </span>
-      {passwordLabel && <span className="text-[10px] leading-3 text-brand-gray">{passwordLabel}</span>}
+    <span
+      title={lifecycleMeta?.description}
+      className={`inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium leading-none ${badgeClass}`}
+    >
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
+      {label}
     </span>
   );
 }
 
-function EmailState({ notification, detailed = false }) {
-  const meta = notificationMeta(notification);
-  return (
-    <div title={meta.message} className="min-w-0">
-      <span className={`inline-flex max-w-full items-center gap-1.5 text-xs ${meta.tone === "rose" ? "text-brand-danger" : "text-brand-gray"}`}>
-        <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> <span className={detailed ? "" : "truncate"}>{meta.label}</span>
-      </span>
-      {detailed && <p className="mt-1 text-xs leading-relaxed text-brand-gray">{meta.message}</p>}
-    </div>
-  );
-}
-
-function AccountDialog({ title, description, busy = false, onClose, children, wide = false }) {
+function AccountDialog({ title, description, busy = false, onClose, children, wide = false, header = null }) {
   const returnFocus = useRef(typeof document !== "undefined" ? document.activeElement : null);
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/50" />
         <Dialog.Content
-          className={`fixed left-1/2 top-1/2 z-[85] max-h-[92dvh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-lg focus:outline-none dark:border-border dark:bg-card sm:p-6 ${wide ? "max-w-2xl" : "max-w-lg"}`}
+          className={`fixed left-1/2 top-1/2 z-[85] flex max-h-[92dvh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg focus:outline-none dark:border-border dark:bg-card ${wide ? "max-w-2xl" : "max-w-lg"}`}
           onEscapeKeyDown={(event) => { if (busy) event.preventDefault(); }}
           onPointerDownOutside={(event) => { if (busy) event.preventDefault(); }}
           onCloseAutoFocus={(event) => {
@@ -129,16 +108,20 @@ function AccountDialog({ title, description, busy = false, onClose, children, wi
             if (returnFocus.current instanceof HTMLElement && returnFocus.current.isConnected) returnFocus.current.focus();
           }}
         >
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <Dialog.Title className="break-words text-lg font-semibold text-brand-ink">{title}</Dialog.Title>
-              <Dialog.Description className="mt-1 break-words text-sm text-brand-gray">{description}</Dialog.Description>
-            </div>
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-border sm:px-6">
+            {header || (
+              <div className="min-w-0">
+                <Dialog.Title className="break-words text-lg font-semibold text-brand-ink">{title}</Dialog.Title>
+                <Dialog.Description className="mt-1 break-words text-sm text-brand-gray">{description}</Dialog.Description>
+              </div>
+            )}
             <Dialog.Close asChild>
               <button type="button" disabled={busy} className="shrink-0 rounded p-1 text-brand-gray hover:bg-brand-bg disabled:opacity-60" aria-label="Close dialog"><X className="h-5 w-5" /></button>
             </Dialog.Close>
           </div>
-          {children}
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+            {children}
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -384,14 +367,97 @@ function DeleteDialog({ target, busy, error, onConfirm, onClose }) {
 
 function DetailRow({ label, value }) {
   return (
-    <div className="flex flex-col gap-0.5 border-b border-slate-100 py-2.5 last:border-0 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-      <dt className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</dt>
-      <dd className="break-words text-sm text-brand-ink sm:max-w-[60%] sm:text-right">{value}</dd>
+    <div className="flex flex-col gap-0.5 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+      <dt className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-brand-gray">{label}</dt>
+      <dd className="break-words text-[13px] font-medium text-brand-ink sm:max-w-[62%] sm:text-right">{value}</dd>
     </div>
   );
 }
 
-function DetailsModal({ target: initialTarget, options, onClose }) {
+const initialsOf = (name) => {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+function InitialsAvatar({ name, size = "md" }) {
+  const dims = size === "lg" ? "h-11 w-11 text-[15px]" : "h-10 w-10 text-sm";
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex ${dims} shrink-0 select-none items-center justify-center rounded-full border border-brand-dark/25 bg-white font-semibold uppercase text-brand-dark dark:border-primary/40 dark:bg-card dark:text-foreground`}
+    >
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+function CopyEmailButton({ email, notify }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  if (!email) return null;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(email);
+      setCopied(true);
+      notify?.("Email address copied");
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      notify?.("Could not copy the email address");
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={`Copy ${email}`}
+      aria-label={`Copy email address ${email}`}
+      className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-brand-gray transition-colors hover:border-brand-blue/40 hover:text-brand-blue dark:border-border dark:hover:border-primary/50"
+    >
+      {copied ? <CheckCircle2 className="h-3 w-3 text-emerald-600" aria-hidden="true" /> : <Copy className="h-3 w-3" aria-hidden="true" />}
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+function InfoSection({ title, children }) {
+  return (
+    <section className="mt-5 first:mt-0" aria-label={title}>
+      <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-brand-gray">{title}</h4>
+      <dl className="divide-y divide-slate-100 px-1 dark:divide-border">{children}</dl>
+    </section>
+  );
+}
+
+function EmailDiagnostics({ notifications }) {
+  return (
+    <details className="group mt-1">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-[11px] font-medium text-brand-gray transition-colors hover:text-brand-blue [&::-webkit-details-marker]:hidden">
+        <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+        Delivery diagnostics
+        <span className="font-normal text-slate-400">({notifications.length})</span>
+      </summary>
+      <dl className="mt-1 space-y-2 border-l border-slate-200 pl-4 text-[11px] leading-4 text-brand-gray dark:border-border">
+        {notifications.map((entry) => (
+          <div key={entry.id} className="break-words">
+            <dt className="font-medium text-brand-ink">{String(entry.eventType || "Account notification").replace(/_/g, " ")}</dt>
+            <dd className="mt-0.5 space-y-0.5">
+              {entry.nextAttemptAt && <p>Next attempt: {formatTimestamp(entry.nextAttemptAt)}</p>}
+              {entry.lastErrorCode && <p>Failure code: <span className="break-all font-mono text-[10.5px]">{entry.lastErrorCode}</span></p>}
+              {entry.providerMessageId && <p>Mail-server reference: <span className="break-all font-mono text-[10.5px]">{entry.providerMessageId}</span></p>}
+              {!entry.nextAttemptAt && !entry.lastErrorCode && !entry.providerMessageId && <p>No delivery diagnostics recorded.</p>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+function DetailsModal({ target: initialTarget, options, onClose, notify }) {
   const [target, setTarget] = useState(initialTarget);
   const personnel = Boolean(personnelState(target));
   const [history, setHistory] = useState(null);
@@ -426,78 +492,116 @@ function DetailsModal({ target: initialTarget, options, onClose }) {
   const coverage = target.barangay || target.facility || target.municipality
     || (target.roleId === "admin" ? "System-wide" : "Not assigned");
 
+  const dialogHeader = (
+    <div className="flex min-w-0 items-center gap-3">
+      <InitialsAvatar name={target.name} size="lg" />
+      <div className="min-w-0 flex-1">
+        <Dialog.Title className="truncate text-[15px] font-semibold leading-5 text-brand-ink">{target.name || "Account details"}</Dialog.Title>
+        <Dialog.Description className="mt-0.5 flex items-center gap-2 truncate text-xs text-brand-gray">
+          <span className="truncate">{target.email || "No email on record"}</span>
+          <CopyEmailButton email={target.email} notify={notify} />
+          <LifecyclePill account={target} />
+        </Dialog.Description>
+      </div>
+    </div>
+  );
+
   return (
-    <AccountDialog title={target.name || "Account details"} description={target.email || "Account profile and history"} onClose={onClose} wide={personnel}>
-      <dl className="rounded-xl border border-slate-200 px-4 py-1">
-        <DetailRow label={personnel ? "Lifecycle" : "Status"} value={<LifecyclePill account={target} />} />
+    <AccountDialog title={target.name || "Account details"} description={target.email || "Account profile and history"} onClose={onClose} wide={personnel} header={dialogHeader}>
+      <InfoSection title="Account Overview">
+        <DetailRow label={personnel ? "Account status" : "Status"} value={<LifecyclePill account={target} />} />
         {personnel && <DetailRow label="Sign-in access" value={target.statusId === "active" && personnelState(target) === "active" ? "Enabled" : "Not enabled"} />}
         <DetailRow label="Role" value={roleLabel(target.roleId)} />
         <DetailRow label="Coverage" value={coverage} />
+      </InfoSection>
+
+      <InfoSection title="Assignment Information">
         <DetailRow label="Municipality" value={target.municipality || "Not assigned"} />
         <DetailRow label="Barangay" value={target.barangay || "Not assigned"} />
         <DetailRow label="RHU facility" value={target.facility || "Not assigned"} />
         {isPersonnelRole(target.roleId) && <DetailRow label="RHU stations" value={stationsLabel(target.rhuStations, options.rhuStations)} />}
+      </InfoSection>
+
+      <InfoSection title="Personnel Information">
         <DetailRow label="Contact number" value={target.contact || "Not provided"} />
         <DetailRow label="Position" value={target.position || "Not provided"} />
         <DetailRow label="License number" value={target.licenseNo || "Not provided"} />
         {personnel && <>
-          <DetailRow label="Approval" value={target.approvalStatus ? target.approvalStatus.replace(/_/g, " ") : "Not recorded"} />
+          <DetailRow label="Approval status" value={target.approvalStatus ? target.approvalStatus.replace(/_/g, " ") : "Not recorded"} />
           <DetailRow label="Activation requested" value={typeof target.activationRequested === "boolean" ? target.activationRequested ? "Yes" : "No; activation withheld" : "Not recorded"} />
-          <DetailRow label="Password setup" value={target.setupRequired === true ? "Required" : target.setupRequired === false ? "No setup required" : "Not recorded"} />
-          <DetailRow label="Setup completed" value={formatTimestamp(target.setupCompletedAt)} />
-          {isPersonnelRole(target.roleId) && <DetailRow
-            label="Temporary password status"
-            value={target.mustChangePassword
-              ? "Password change required"
-              : target.passwordChangedAt
-                ? `Password updated ${formatTimestamp(target.passwordChangedAt)}`
-                : target.temporaryPasswordAssignedAt
-                  ? `Temporary password assigned ${formatTimestamp(target.temporaryPasswordAssignedAt)}`
-                  : "No temporary password assigned"}
-          />}
-          {target.temporaryPasswordAssignedAt && <DetailRow label="Temporary password assigned at" value={formatTimestamp(target.temporaryPasswordAssignedAt)} />}
-          {target.suspendedAt && <DetailRow label="Suspended at" value={formatTimestamp(target.suspendedAt)} />}
-          {target.suspensionReason && <DetailRow label="Suspension reason" value={target.suspensionReason} />}
-          {target.decisionReason && <DetailRow label="Decision reason" value={target.decisionReason} />}
-          <DetailRow label="Latest email" value={<EmailState notification={target.notification} detailed />} />
         </>}
-      </dl>
+      </InfoSection>
 
-      {personnel && <section className="mt-5" aria-label="Account history">
+      {personnel && <section className="mt-6 border-t border-slate-100 pt-5 dark:border-border" aria-label="Account activity">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-brand-ink">Account History</h3>
-          <button type="button" onClick={loadHistory} disabled={historyLoading} className="rounded-btn px-2 py-1 text-xs font-medium text-brand-blue hover:bg-brand-blue/10 disabled:opacity-60">Refresh history</button>
+          <div>
+            <h3 className="text-sm font-semibold text-brand-ink">Account Activity</h3>
+            <p className="mt-0.5 text-xs text-brand-gray">Chronological record of account decisions and email deliveries.</p>
+          </div>
+          <button type="button" onClick={loadHistory} disabled={historyLoading} className="inline-flex shrink-0 items-center gap-1.5 rounded-btn border border-slate-200 px-2 py-1 text-xs font-medium text-brand-blue hover:bg-brand-blue/5 disabled:opacity-60 dark:border-border">
+            <RotateCcw className={`h-3.5 w-3.5 ${historyLoading ? "animate-spin" : ""}`} aria-hidden="true" /> Refresh
+          </button>
         </div>
-        {historyLoading && <p role="status" className="flex items-center gap-2 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Loading audit and email history...</p>}
+        {historyLoading && <p role="status" className="flex items-center gap-2 text-sm text-brand-gray"><Loader2 className="h-4 w-4 animate-spin" /> Loading account activity...</p>}
         {historyError && <p role="alert" className="rounded-btn bg-brand-danger/10 p-3 text-sm text-brand-danger">{historyError}</p>}
         {history && !historyLoading && !historyError && <>
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Decisions and Changes</h4>
-          {(history.audit || []).length === 0 ? <p className="mt-2 text-sm text-brand-gray">No audit events recorded.</p> : <ol className="mt-2 divide-y divide-slate-100 rounded-xl border border-slate-200 px-3">
-            {history.audit.map((entry) => <li key={entry.id} className="py-3 text-sm">
-              <p className="font-medium text-brand-ink">{String(entry.action || "Account event").replace(/_/g, " ")}</p>
-              <p className="mt-0.5 break-words text-xs text-brand-gray">{formatTimestamp(entry.createdAt)} | Actor: {auditActorLabel(entry)}</p>
-              {entry.metadata?.reason && <p className="mt-1 break-words text-sm text-brand-ink">Reason: {entry.metadata.reason}</p>}
-              {entry.metadata?.performed_by === "personnel_notification_worker" && <>
-                <p className="mt-1 break-words text-xs text-brand-gray">Attempts: {entry.metadata.new?.attempts ?? "Not recorded"} | Requested by: {entry.metadata.requested_by || "Not recorded"}</p>
-                {entry.metadata.new?.reason && <p className="mt-1 break-words text-xs text-brand-gray">Mail failure code: {entry.metadata.new.reason}</p>}
-              </>}
-            </li>)}
-          </ol>}
-          <h4 className="mt-4 text-xs font-semibold uppercase tracking-wide text-brand-gray">Email Attempts</h4>
-          {(history.notifications || []).length === 0 ? <p className="mt-2 text-sm text-brand-gray">No email events recorded.</p> : <ol className="mt-2 space-y-2">
-            {history.notifications.map((entry) => <li key={entry.id} className="rounded-xl border border-slate-200 p-3">
-              <p className="mb-1 text-sm font-medium text-brand-ink">{String(entry.eventType || "Account notification").replace(/_/g, " ")}</p>
-              <EmailState notification={entry} detailed />
-              <p className="mt-2 text-xs text-brand-gray">Attempts: {entry.attempts ?? 0}{entry.sentAt ? ` | Accepted: ${formatTimestamp(entry.sentAt)}` : ""}</p>
-              {entry.nextAttemptAt && <p className="mt-1 text-xs text-brand-gray">Next attempt: {formatTimestamp(entry.nextAttemptAt)}</p>}
-              {entry.lastErrorCode && <p className="mt-1 break-words text-xs text-brand-gray">Failure code: {entry.lastErrorCode}</p>}
-              {entry.providerMessageId && <p className="mt-1 break-all text-xs text-brand-gray">Mail-server reference: {entry.providerMessageId}</p>}
-            </li>)}
-          </ol>}
-          {legacyRequest && <section className="mt-4" aria-label="Historical personnel request">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Historical Request</h4>
-            <dl className="mt-2 rounded-xl border border-slate-200 px-3">
-              <DetailRow label="Reference" value={legacyRequest.id} />
+          <h4 className="mt-4 text-[11px] font-semibold uppercase tracking-wider text-brand-gray">Decisions and Changes</h4>
+          {(history.audit || []).length === 0 ? <p className="mt-2 text-sm text-brand-gray">No audit events recorded.</p> : (
+            <ol className="relative mt-2 ml-2 border-l border-slate-200 pl-4 dark:border-border">
+              {history.audit.map((entry) => {
+                const actionKey = String(entry.action || "");
+                const Icon = actionKey.includes("creat") ? UserPlus
+                  : actionKey.includes("approv") ? ShieldCheck
+                  : actionKey.includes("reject") ? UserX
+                  : actionKey.includes("suspend") ? ShieldOff
+                  : actionKey.includes("activ") || actionKey.includes("reactivat") ? UserCheck
+                  : actionKey.includes("password") || actionKey.includes("reset") ? KeySquare
+                  : actionKey.includes("notif") || actionKey.includes("email") || actionKey.includes("mail") ? MailCheck
+                  : FileText;
+                const iconTone = actionKey.includes("reject") || actionKey.includes("suspend") ? "text-rose-600 dark:text-rose-400"
+                  : actionKey.includes("approv") || actionKey.includes("activ") || actionKey.includes("reactivat") || actionKey.includes("creat") ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-slate-400 dark:text-slate-500";
+                return (
+                  <li key={entry.id} className="relative pb-4 last:pb-0">
+                    <span className={`absolute -left-[25px] top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white ring-1 ring-slate-200 dark:bg-card dark:ring-border ${iconTone}`}>
+                      <Icon className="h-3 w-3" aria-hidden="true" />
+                    </span>
+                    <p className="text-[13px] font-medium leading-5 text-brand-ink">{String(entry.action || "Account event").replace(/_/g, " ")}</p>
+                    <p className="mt-0.5 text-[11px] text-brand-gray">{formatTimestamp(entry.createdAt)} · {auditActorLabel(entry)}</p>
+                    {entry.metadata?.reason && <p className="mt-1 break-words text-xs text-brand-ink/80 dark:text-foreground/80">Reason: {entry.metadata.reason}</p>}
+                    {entry.metadata?.performed_by === "personnel_notification_worker" && <p className="mt-0.5 break-words text-[11px] text-brand-gray">Attempts: {entry.metadata.new?.attempts ?? "Not recorded"}{entry.metadata.requested_by ? ` · Requested by: ${entry.metadata.requested_by}` : ""}</p>}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          <h4 className="mt-5 text-[11px] font-semibold uppercase tracking-wider text-brand-gray">Email Attempts</h4>
+          {(history.notifications || []).length === 0 ? <p className="mt-2 text-sm text-brand-gray">No email events recorded.</p> : (
+            <>
+              <ol className="relative mt-2 ml-2 border-l border-slate-200 pl-4 dark:border-border">
+                {history.notifications.map((entry) => {
+                  const meta = notificationMeta(entry);
+                  const toneDot = meta.tone === "green" ? "bg-emerald-500"
+                    : meta.tone === "amber" ? "bg-amber-500"
+                    : meta.tone === "rose" ? "bg-rose-500"
+                    : "bg-slate-400";
+                  return (
+                    <li key={entry.id} className="relative pb-4 last:pb-0">
+                      <span className={`absolute -left-[25px] top-1 h-2.5 w-2.5 rounded-full bg-white ring-4 ring-white dark:ring-card ${toneDot}`} aria-hidden="true" />
+                      <p className="text-[13px] font-medium leading-5 text-brand-ink">{String(entry.eventType || "Account notification").replace(/_/g, " ")}</p>
+                      <p className="mt-0.5 text-[11px] text-brand-gray">
+                        {meta.label}{entry.attempts ? ` · Attempt ${entry.attempts}` : ""}{entry.sentAt ? ` · ${formatTimestamp(entry.sentAt)}` : ""}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ol>
+              <EmailDiagnostics notifications={history.notifications} />
+            </>
+          )}
+          {legacyRequest && <section className="mt-5" aria-label="Historical personnel request">
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-brand-gray">Historical Request</h4>
+            <dl className="mt-2 rounded-lg border border-slate-200/80 px-3.5 dark:border-border">
               <DetailRow label="Request status" value={String(legacyRequest.status || "Not recorded").replace(/_/g, " ")} />
               <DetailRow label="Submitted" value={formatTimestamp(legacyRequest.submittedAt)} />
               <DetailRow label="Reviewed" value={formatTimestamp(legacyRequest.decidedAt)} />
@@ -518,7 +622,7 @@ function DetailsModal({ target: initialTarget, options, onClose }) {
           </section>}
         </>}
       </section>}
-      <div className="mt-5 flex justify-end">
+      <div className="mt-5 flex justify-end border-t border-slate-100 pt-4 dark:border-border">
         <button type="button" onClick={onClose} className="rounded-btn border border-slate-200 px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg dark:border-border">Close</button>
       </div>
     </AccountDialog>
@@ -873,7 +977,6 @@ function AccountIdentity({ row }) {
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold leading-5 text-brand-ink" title={row.name}>{row.name}</p>
         <p className="truncate text-xs leading-4 text-brand-gray" title={row.email}>{row.email}</p>
-        {personnelState(row) && <div className="mt-0.5 leading-4"><EmailState notification={row.notification} /></div>}
       </div>
     </div>
   );
@@ -1454,7 +1557,7 @@ export default function UserManagement({ personnelOnly = false }) {
           onSave={saveAccount}
         />
       )}
-      {detailsTarget && <DetailsModal target={detailsTarget} options={options} onClose={() => setDetailsTarget(null)} />}
+      {detailsTarget && <DetailsModal target={detailsTarget} options={options} onClose={() => setDetailsTarget(null)} notify={showToast} />}
       {lifecycleTarget && <LifecycleDialog
         target={lifecycleTarget.target}
         action={lifecycleTarget.action}

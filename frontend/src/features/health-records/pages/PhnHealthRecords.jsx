@@ -16,7 +16,7 @@ import { saveConsultationOffline, listConsultationsOffline, listConsultationResi
 import { loadServerRows } from "@/lib/serverRows";
 import { formatClinicalDate } from "@/lib/dateUtils";
 import { normalizeResident } from "../lib/tclData";
-import { clinicalPayload, clinicalErrors, consultationForm, requireServerConsultation } from "../lib/phnRecords";
+import { clinicalPayload, clinicalErrors, consultationForm, requireServerConsultation, completePhnHealthRecordCheckup } from "../lib/phnRecords";
 import { filterRowsByScope } from "@/lib/phnScope";
 import { manilaDateKey, followUpNeedsAttention, isHighRiskResident } from "@/lib/phnDashboard";
 import PhnCheckupWorkbench from "@/features/consultations/components/PhnCheckupWorkbench";
@@ -180,6 +180,24 @@ export default function PhnHealthRecords() {
       }
     } catch (error) { if (guard()) setNotice({ error: true, message: error?.message || "Pending clinical work could not be opened or synchronized." }); }
     finally { setBusy(false); }
+  };
+  const handleCompleteCheckup = async (recorded) => {
+    if (!checkup?.id) return;
+    const guard = captureOwnerGuard(user?.id);
+    try {
+      await completePhnHealthRecordCheckup({
+        checkup,
+        recorded,
+        completeCheckup: queue.completeCheckup,
+        refreshRecords: resource.refresh,
+        refreshQueue: queue.refresh,
+      });
+      if (!guard()) return;
+      setCheckup(null);
+      setNotice({ message: "PHN check-up completed and persisted." });
+    } catch (error) {
+      if (guard()) setNotice({ error: true, message: error?.message || "Could not complete the PHN check-up." });
+    }
   };
   const field = (name, type = "text") => <label key={name} className="block text-xs font-medium text-brand-gray">{fieldNames[name]}<input type={type} value={form[name]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} className={`${inputCls} mt-1`} />{errors[name] && <span className="mt-1 block text-xs text-brand-danger">{errors[name]}</span>}</label>;
 
@@ -419,6 +437,6 @@ export default function PhnHealthRecords() {
     </Modal>}
     {policy && <Modal title="Clinical Record Retention" onClose={() => setPolicy(false)}><p className="text-sm text-brand-gray">Clinical records cannot be deleted from this page. Corrections must be saved against the existing server visit so the recorded history is retained. No record has been removed.</p></Modal>}
     {pendingView && <Modal title="Retained Pending Clinical Work" onClose={() => setPendingView(null)}><p className="mb-4 text-sm text-brand-gray">Status: {pendingView.status}. This owner-scoped encrypted draft is read-only here and has not been counted as a server health record. Retry uses its original operation ID.</p><pre className="overflow-x-auto whitespace-pre-wrap text-xs">{JSON.stringify(pendingView.data, null, 2)}</pre></Modal>}
-    {checkup && <PhnCheckupWorkbench patient={checkup} patientId={checkup.id} onClose={() => setCheckup(null)} onSaved={() => { setCheckup(null); void resource.refresh(); void queue.refresh(); }} />}
+    {checkup && <PhnCheckupWorkbench patient={checkup} onClose={() => setCheckup(null)} onComplete={handleCompleteCheckup} />}
   </>;
 }
