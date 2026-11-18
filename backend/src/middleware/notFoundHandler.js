@@ -1,4 +1,4 @@
-import ApiError from '../utils/apiError.js';
+import ApiError from '../utils/ApiError.js';
 
 /**
  * Catches any request that matched no route and hands a 404 to the error
