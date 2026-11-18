@@ -9,15 +9,30 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import authorize from '../middleware/authorize.js';
-import idempotency from '../middleware/idempotency.js';
+import { createIdempotencyMiddleware } from '../middleware/idempotency.js';
 import { resolveBarangayScope } from '../middleware/barangayScope.js';
+import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import * as controller from '../controllers/operational.controller.js';
+import * as service from '../services/operational.service.js';
 
 const router = Router();
 const kinds = ['followups', 'tcl', 'maternal', 'maternalvisits', 'immunizations', 'notifications'];
 const staff = ['admin', 'mho', 'phn', 'health_supervisor'];
 router.use(authenticate, resolveBarangayScope);
+
+const operationalIdempotency = createIdempotencyMiddleware({
+  durable: true,
+  validateReplay: async (req, responseBody) => {
+    const recordId = responseBody?.data?.record?.id ?? responseBody?.record?.id;
+    if (!recordId) throw ApiError.notFound('Operational record not found.');
+    await service.verifyRecordScope({
+      user: req.user,
+      kind: req.params.kind,
+      id: recordId,
+    });
+  },
+});
 
 // The controller/service are generic over the record `kind`. The literal path
 // segment is the source of truth for the kind, so bind it onto `req.params.kind`
@@ -57,14 +72,14 @@ for (const kind of kinds) {
       `/${kind}`,
       withKind(kind),
       authorize(staff, { permission: followUpPermission('POST') }),
-      idempotency,
+      operationalIdempotency,
       asyncHandler(controller.create),
     );
     router.put(
       `/${kind}/:id`,
       withKind(kind),
       authorize(staff, { permission: followUpPermission('PUT') }),
-      idempotency,
+      operationalIdempotency,
       asyncHandler(controller.update),
     );
     // Maternal records support deletion (spec PART 13). Other operational kinds

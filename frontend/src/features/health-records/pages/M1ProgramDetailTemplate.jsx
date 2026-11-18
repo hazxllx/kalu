@@ -22,6 +22,9 @@ import {
   toReportParams,
 } from "@/features/health-records/lib/reportingPeriod";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { listM1ProgramOffline, getM1DrilldownOffline } from "@/services/offline/clinicalOfflineService";
 import { m1Api } from "@/services/api";
 
 const PAGE_SIZE = 20;
@@ -41,6 +44,7 @@ const quarterFromQuery = (value, fallback) => {
 export function createM1ProgramDetailPage(programId, apiClients = {}) {
   return function M1ProgramDetail() {
     const { user } = useAuth();
+    const { online, lastSyncedAt } = useSyncStatus();
     const program = getProgram(programId);
     const [searchParams, setSearchParams] = useSearchParams();
     const now = new Date();
@@ -64,6 +68,7 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
     const [drilldown, setDrilldown] = useState(null);
     const [drilldownError, setDrilldownError] = useState(null);
     const [drillRetry, setDrillRetry] = useState(0);
+    const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
 
     const syncPeriodQuery = (next) => {
       const descriptor = { period, year, month, quarter, ...next };
@@ -89,11 +94,19 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
       setIndicatorData(null);
       setIndicatorSummary(null);
       setRecords([]);
+      setCacheInfo({ source: null, cachedAt: null, stale: false });
       setSelectedIndicator(null);
       const load = async () => {
         try {
           if (!program) throw new Error("Program not found");
-          const result = await apiClients.listRecords(toReportParams({ period, year, month, quarter }));
+          if (!user?.id) return;
+          const result = await listM1ProgramOffline({
+            ownerId: user.id,
+            programId,
+            params: toReportParams({ period, year, month, quarter }),
+            fetchFn: apiClients.listRecords,
+            online: () => online,
+          });
           if (result?.program !== programId || !Array.isArray(result.records)
             || !result.indicators || typeof result.indicators !== "object" || Array.isArray(result.indicators)) {
             throw new Error("Invalid program report response. Please try again.");
@@ -126,6 +139,11 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
           setIndicatorData(result.indicators);
           setIndicatorSummary(result.summary || null);
           setRecords(result.records);
+          setCacheInfo({
+            source: result.source || "server",
+            cachedAt: result.cachedAt ?? null,
+            stale: Boolean(result.stale),
+          });
         } catch (loadError) {
           if (active) setError(loadError?.message || "Unable to load program data");
         } finally {
@@ -134,21 +152,27 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
       };
       load();
       return () => { active = false; };
-    }, [period, year, month, quarter, program, user?.id, retry]);
+    }, [period, year, month, quarter, program, user?.id, retry, online]);
 
     useEffect(() => {
-      if (!selectedIndicator) return undefined;
+      if (!selectedIndicator || !user?.id) return undefined;
       let active = true;
       setDrilldown(null);
       setDrilldownError(null);
-      m1Api.drilldown(selectedIndicator.code, toReportParams({ period, year, month, quarter }))
-        .then((result) => {
+      getM1DrilldownOffline({
+        ownerId: user.id,
+        code: selectedIndicator.code,
+        params: toReportParams({ period, year, month, quarter }),
+        fetchFn: (code, params) => m1Api.drilldown(code, params),
+        online: () => online,
+      })
+        .then(({ data: result }) => {
           if (!Array.isArray(result?.records)) throw new Error("Invalid underlying-record response");
           if (active) setDrilldown(result);
         })
         .catch((loadError) => { if (active) setDrilldownError(loadError?.message || "Unable to load underlying records"); });
       return () => { active = false; };
-    }, [selectedIndicator, period, year, month, quarter, drillRetry]);
+    }, [selectedIndicator, period, year, month, quarter, drillRetry, user?.id, online]);
 
     useEffect(() => { setRecordPage(1); }, [recordSearch, recordStatus, records]);
 
@@ -205,6 +229,15 @@ export function createM1ProgramDetailPage(programId, apiClients = {}) {
           onYearChange={changeYear}
           onMonthChange={changeMonth}
           onQuarterChange={changeQuarter}
+        />
+
+        <OfflineCacheNotice
+          source={cacheInfo.source}
+          cachedAt={cacheInfo.cachedAt}
+          lastSyncedAt={lastSyncedAt}
+          stale={cacheInfo.stale}
+          empty={programId === "enrollment" ? records.length === 0 : rows.length === 0}
+          onRetry={() => setRetry((value) => value + 1)}
         />
 
         {loading ? (

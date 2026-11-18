@@ -5,18 +5,26 @@ import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
 import { X, Search, Activity, User, MapPin, Stethoscope, Plus, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { listTclOffline } from "@/services/offline/clinicalOfflineService";
+import { listResidentsOffline } from "@/services/offline/residentOfflineService";
+import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { tclApi, residentsApi } from "@/services/api";
+import useHouseholdWorkers from "@/hooks/useHouseholdWorkers";
+import { tclApi } from "@/services/api";
 import { formatClinicalDate, formatClinicalDateTime } from "@/lib/dateUtils";
-
-// TB records are stored in the shared tcl_entries register. Every program value
-// below satisfies isTbProgram() so the record is listed as a TB record, and the
-// priority/status values match the tcl_entries CHECK constraints exactly
-// (priority: Low/Medium/High; status: Active/Inactive/Completed/Transferred),
-// so a create is never rejected by the database.
-const TB_PROGRAMS = ["TB Patients", "TB Monitoring", "TB Prevention (TPT)"];
-const TB_PRIORITIES = ["Low", "Medium", "High"];
-const TB_STATUSES = ["Active", "Inactive", "Completed", "Transferred"];
+import {
+  normalizeResident,
+  loadResidentDirectory,
+  workersForResident,
+  TB_PROGRAMS,
+  TB_PRIORITIES,
+  TB_STATUSES,
+  mapTbRecord,
+  validateTbRecordForm,
+  buildTbRecordPayload,
+} from "../lib/tclData";
 
 /**
  * TB Records.
@@ -59,47 +67,7 @@ const formatDateTime = (iso) => {
   return formatted.date === "—" ? "—" : `${formatted.date}${formatted.time === "—" ? "" : ` · ${formatted.time}`}`;
 };
 
-const ageFromBirth = (birthDate) => {
-  if (!birthDate) return "";
-  const d = new Date(birthDate);
-  if (Number.isNaN(d.getTime())) return "";
-  const now = new Date();
-  let age = now.getFullYear() - d.getFullYear();
-  const m = now.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
-  return age >= 0 ? age : "";
-};
-
-/** Normalize a residents API row into the shape this page renders. */
-const normalizeResident = (r) => {
-  if (!r) return null;
-  const name = r.name || [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" ").trim();
-  return {
-    ...r,
-    name: name || "Unknown resident",
-    age: r.age ?? ageFromBirth(r.birthDate),
-    gender: r.gender || r.sex || "",
-    barangay: r.barangay || "",
-  };
-};
-
-/** persisted tcl_entries row (snake_case) → view shape. */
-const mapRecord = (row) => ({
-  id: row.id,
-  residentId: row.resident_id,
-  program: row.program || "",
-  bhw: row.assigned_bhw || "",
-  priority: row.priority || "",
-  status: row.status || "",
-  lastVisit: row.last_visit || "",
-  nextVisit: row.next_visit || "",
-  nextVisitTime: row.next_visit_time || "",
-  notes: row.notes || "",
-  createdAt: row.created_at || "",
-  updatedAt: row.updated_at || "",
-  // The `tcl` list select is `*` (no resident embed); kept only as a fallback.
-  resident: row.resident || null,
-});
+const mapRecord = mapTbRecord;
 
 export default function TBRecords() {
   const { user } = useAuth();
@@ -107,17 +75,21 @@ export default function TBRecords() {
   const scopedBarangays =
     scope && scope.level === HS_SCOPE.BARANGAY ? [scope.assignedBarangay] : null;
 
+  const { online, lastSyncedAt } = useSyncStatus();
   const [records, setRecords] = useState([]);
   const [residents, setResidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(8);
   const [detail, setDetail] = useState(null);
+  const [editingRecord, setEditingRecord] = useState(null);
+  const workerDirectory = useHouseholdWorkers();
 
-  // Add TB Record modal state. Creating a TB record enrolls an existing resident
+  // Add / Edit TB Record modal state. Creating a TB record enrolls an existing resident
   // into a TB program via the same authorized tcl create endpoint the TCL page
   // uses (POST /operational/tcl). Health Supervisor / PHN / MHO are authorized
   // server-side and by RLS, so the action the button exposes always succeeds for
@@ -146,14 +118,37 @@ export default function TBRecords() {
   };
 
   const load = useCallback(() => {
+    if (!user?.id) { setRecords([]); setResidents([]); setLoading(false); return Promise.resolve(); }
     setLoading(true);
     setLoadError(null);
-    return Promise.all([tclApi.list(), residentsApi.list({ limit: 200 })])
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
+    const loadResidents = async () => {
+      if (online) {
+        try {
+          return await loadResidentDirectory((params) =>
+            listResidentsOffline({ ownerId: user.id, params }),
+          );
+        } catch (err) {
+          if (classifySyncError(err).code !== SYNC_ERROR.NETWORK) throw err;
+        }
+      }
+      const cachedResidents = await listResidentsOffline({ ownerId: user.id });
+      return (cachedResidents?.rows || []).map(normalizeResident).filter(Boolean);
+    };
+    return Promise.all([
+      listTclOffline({ ownerId: user.id, fetchFn: () => tclApi.list(), online: () => online }),
+      loadResidents(),
+    ])
       .then(([tclResult, residentResult]) => {
         const tclRows = (tclResult?.rows || []).map(mapRecord).filter((r) => isTbProgram(r.program));
         setRecords(tclRows);
-        const residentRows = residentResult?.rows || residentResult || [];
-        setResidents(residentRows.map(normalizeResident).filter(Boolean));
+        setCacheInfo({
+          source: tclResult?.source || "server",
+          cachedAt: tclResult?.cachedAt ?? null,
+          stale: Boolean(tclResult?.stale),
+        });
+        const residentRows = Array.isArray(residentResult) ? residentResult : (residentResult?.rows || []).map(normalizeResident).filter(Boolean);
+        setResidents(residentRows);
       })
       .catch((err) => {
         // A failed load must surface as an explicit error, never a silent
@@ -162,7 +157,7 @@ export default function TBRecords() {
         setRecords([]);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.id, online]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -190,18 +185,25 @@ export default function TBRecords() {
     return map;
   }, [residents]);
 
-  // Resolve each record's resident from the live directory (source of truth for
-  // name/age/sex/barangay); fall back to any embedded snapshot.
+  const workerById = useMemo(() => {
+    const map = new Map();
+    (workerDirectory.rows || []).forEach((w) => map.set(w.id, w));
+    return map;
+  }, [workerDirectory.rows]);
+
+  // Resolve each record's resident and BHW name from the live directories.
   const scopedRecords = useMemo(
     () =>
       records
         .map((r) => {
           const live = residentById.get(r.residentId);
           const resident = live || (r.resident ? normalizeResident({ ...r.resident, id: r.residentId }) : null);
-          return { ...r, resident, barangay: resident?.barangay || "" };
+          const assignedWorker = r.bhwId ? workerById.get(r.bhwId) : null;
+          const bhw = assignedWorker ? (assignedWorker.fullName || assignedWorker.name || r.bhw) : r.bhw;
+          return { ...r, resident, barangay: resident?.barangay || "", bhw };
         })
         .filter((r) => !scopedBarangays || (r.barangay && scopedBarangays.includes(r.barangay))),
-    [records, residentById, scopedBarangays]
+    [records, residentById, workerById, scopedBarangays]
   );
 
   // Status filter options are DERIVED from the data so a filter is never shown
@@ -248,11 +250,16 @@ export default function TBRecords() {
   }, [residents, residentQuery, scopedBarangays]);
 
   const selectedResident = useMemo(
-    () => residents.find((r) => r.id === form.residentId) || null,
-    [residents, form.residentId]
+    () => residents.find((r) => r.id === form.residentId) || editingRecord?.resident || null,
+    [residents, form.residentId, editingRecord]
+  );
+  const assignableBhws = useMemo(
+    () => workersForResident(workerDirectory.rows || [], selectedResident),
+    [workerDirectory.rows, selectedResident]
   );
 
   const openAdd = () => {
+    setEditingRecord(null);
     setForm({
       residentId: "",
       program: TB_PROGRAMS[0],
@@ -270,42 +277,65 @@ export default function TBRecords() {
     setShowAdd(true);
   };
 
-  const saveRecord = async () => {
-    const errs = {};
-    if (!form.residentId) errs.resident = "Please select a resident.";
-    if (!form.program) errs.program = "Please select a TB program.";
-    // Prevent enrolling the same resident into the same TB program twice. TB
-    // records live in the shared tcl_entries register with no DB uniqueness on
-    // (resident, program), so this guard is enforced client-side against the
-    // records already loaded for the current scope.
-    if (!errs.resident && !errs.program) {
-      const duplicate = records.some(
-        (r) => r.residentId === form.residentId && r.program === form.program
-      );
-      if (duplicate) errs.program = `This resident is already enrolled in ${form.program}.`;
+  const openEdit = (record) => {
+    setEditingRecord(record);
+    setForm({
+      residentId: record.residentId || "",
+      program: record.program || TB_PROGRAMS[0],
+      bhw: record.bhwId || "",
+      priority: record.priority || "Medium",
+      status: record.status || "Active",
+      lastVisit: record.lastVisit || "",
+      nextVisit: record.nextVisit || "",
+      nextVisitTime: record.nextVisitTime || "",
+      notes: record.notes || "",
+    });
+    setResidentQuery("");
+    setFormErrors({});
+    setSubmitError("");
+    setDetail(null);
+    setShowAdd(true);
+  };
+
+  const updateStatus = async (recordId, status) => {
+    if (saving || !recordId) return;
+    setSaving(true);
+    setSubmitError("");
+    try {
+      const result = await tclApi.update(recordId, { status }, { ownerId: user?.id });
+      const updated = mapRecord(result?.record || { id: recordId, status });
+      setRecords((current) => current.map((row) => (row.id === recordId ? { ...row, ...updated } : row)));
+      setDetail((current) => (current && current.id === recordId ? { ...current, ...updated } : current));
+      showToast(`Status updated to ${updated.status}.`);
+      await load();
+    } catch (err) {
+      showToast(err?.message || "Could not update TB status.");
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const saveRecord = async () => {
+    const errs = validateTbRecordForm({ form, assignableBhws, records, editingRecord });
     setFormErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setSaving(true);
     setSubmitError("");
     try {
-      const result = await tclApi.create({
-        residentId: form.residentId,
-        program: form.program,
-        assigned_bhw: form.bhw,
-        priority: form.priority,
-        status: form.status,
-        last_visit: form.lastVisit || null,
-        next_visit: form.nextVisit || null,
-        next_visit_time: form.nextVisitTime || null,
-        notes: form.notes,
-      });
-      // Reflect the new record immediately, then reconcile with the server on
-      // the next load so the displayed resident/barangay stay authoritative.
-      setRecords((current) => [mapRecord(result?.record || {}), ...current]);
+      const payload = buildTbRecordPayload(form, editingRecord);
+      if (editingRecord) {
+        const result = await tclApi.update(editingRecord.id, payload, { ownerId: user?.id });
+        const updated = mapRecord(result?.record || { ...editingRecord, ...payload });
+        setRecords((current) => current.map((row) => (row.id === editingRecord.id ? { ...row, ...updated } : row)));
+        showToast(`${selectedResident?.name || "TB"} record updated.`);
+      } else {
+        const result = await tclApi.create(payload, { ownerId: user?.id });
+        setRecords((current) => [mapRecord(result?.record || {}), ...current]);
+        showToast(`${selectedResident?.name || "Resident"} added to ${form.program}.`);
+      }
       setShowAdd(false);
-      showToast(`${selectedResident?.name || "Resident"} added to ${form.program}.`);
-      load();
+      setEditingRecord(null);
+      await load();
     } catch (err) {
       setSubmitError(err?.message || "The TB record could not be saved.");
     } finally {
@@ -339,6 +369,15 @@ export default function TBRecords() {
           <span className="text-sm">{toast}</span>
         </div>
       )}
+
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={records.length === 0}
+        onRetry={load}
+      />
 
       <Card className="p-4 mb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -391,7 +430,10 @@ export default function TBRecords() {
                   <td className="px-4 py-3 text-sm text-brand-ink">{formatDate(r.lastVisit)}</td>
                   <td className="px-4 py-3 text-sm text-brand-ink">{formatDateTime(r.updatedAt)}</td>
                   <td className="px-4 py-3">
-                    <button onClick={() => setDetail(r)} className="text-sm font-medium text-brand-blue hover:underline">View</button>
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => setDetail(r)} className="text-sm font-medium text-brand-blue hover:underline">View</button>
+                      <button onClick={() => openEdit(r)} className="text-sm font-medium text-brand-gray hover:text-brand-ink">Edit</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -402,7 +444,9 @@ export default function TBRecords() {
                       ? "Loading TB records..."
                       : loadError
                         ? <span className="text-brand-danger">{loadError}</span>
-                        : "No TB records found."}
+                        : cacheInfo.source === "cache" && records.length === 0
+                          ? "No saved records available offline."
+                          : "No TB records found."}
                   </td>
                 </tr>
               )}
@@ -495,7 +539,29 @@ export default function TBRecords() {
                 </div>
               </div>
 
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+                <p className="text-xs font-semibold text-brand-gray uppercase tracking-wide mb-3">Update Status</p>
+                <div className="flex flex-wrap gap-2">
+                  {TB_STATUSES.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      disabled={saving || detail.status === s}
+                      onClick={() => updateStatus(detail.id, s)}
+                      className={`rounded-btn border px-3 py-1.5 text-xs font-medium transition-colors ${
+                        detail.status === s
+                          ? "border-brand-blue bg-brand-blue text-white"
+                          : "border-brand-border bg-white text-brand-ink hover:bg-brand-bg disabled:opacity-50"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="mt-6 flex justify-end gap-3 border-t border-brand-border pt-4">
+                <button onClick={() => openEdit(detail)} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg">Edit Record</button>
                 <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg">Close</button>
               </div>
             </div>
@@ -510,8 +576,8 @@ export default function TBRecords() {
             {/* Header */}
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-6 py-4">
               <div>
-                <h3 className="text-lg font-semibold text-brand-ink">Add TB Record</h3>
-                <p className="mt-0.5 text-sm text-brand-gray">Enroll an existing resident into TB monitoring. This links a TB record to the resident; it does not create or modify a resident record.</p>
+                <h3 className="text-lg font-semibold text-brand-ink">{editingRecord ? "Edit TB Record" : "Add TB Record"}</h3>
+                <p className="mt-0.5 text-sm text-brand-gray">{editingRecord ? "Update TB monitoring details, assigned BHW, or visit schedule." : "Enroll an existing resident into TB monitoring. This links a TB record to the resident; it does not create or modify a resident record."}</p>
               </div>
               <button onClick={() => setShowAdd(false)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
@@ -542,7 +608,7 @@ export default function TBRecords() {
                               <button
                                 key={r.id}
                                 type="button"
-                                onClick={() => { setForm((p) => ({ ...p, residentId: r.id })); setResidentQuery(""); if (formErrors.resident) setFormErrors((p) => ({ ...p, resident: "" })); }}
+                                onClick={() => { setForm((p) => ({ ...p, residentId: r.id, bhw: "" })); setResidentQuery(""); if (formErrors.resident) setFormErrors((p) => ({ ...p, resident: "" })); }}
                                 className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-brand-light dark:hover:bg-hover"
                               >
                                 <span className="min-w-0">
@@ -563,7 +629,7 @@ export default function TBRecords() {
                       <div className="mt-1.5 rounded-btn border border-emerald-200 bg-emerald-50/70 p-3.5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
                         <div className="flex items-start justify-between gap-3">
                           <p className="truncate text-sm font-semibold text-brand-ink">{selectedResident.name}</p>
-                          <button onClick={() => { setForm((p) => ({ ...p, residentId: "" })); setResidentQuery(""); }} className="shrink-0 text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">Change</button>
+                          {!editingRecord && <button onClick={() => { setForm((p) => ({ ...p, residentId: "", bhw: "" })); setResidentQuery(""); }} className="shrink-0 text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">Change</button>}
                         </div>
                         <div className="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                           {[
@@ -596,7 +662,29 @@ export default function TBRecords() {
                     </div>
                     <div>
                       <label className={labelCls}>Assigned BHW / Provider</label>
-                      <input value={form.bhw} onChange={(e) => setForm((p) => ({ ...p, bhw: e.target.value }))} placeholder="e.g. BHW J. Santos" className={inputCls()} />
+                      <select
+                        value={form.bhw}
+                        onChange={(e) => {
+                          setForm((p) => ({ ...p, bhw: e.target.value }));
+                          if (formErrors.bhw) setFormErrors((p) => ({ ...p, bhw: "" }));
+                        }}
+                        disabled={!selectedResident || workerDirectory.loading}
+                        className={`${inputCls(formErrors.bhw)} cursor-pointer disabled:cursor-not-allowed disabled:opacity-60`}
+                      >
+                        <option value="">
+                          {!selectedResident
+                            ? "Select a resident first"
+                            : assignableBhws.length
+                              ? "Unassigned (optional)"
+                              : "No BHW registered in resident's barangay"}
+                        </option>
+                        {assignableBhws.map((worker) => (
+                          <option key={worker.id} value={worker.id}>
+                            {worker.fullName || worker.name || worker.email}
+                          </option>
+                        ))}
+                      </select>
+                      {formErrors.bhw && <p className={errorCls}>{formErrors.bhw}</p>}
                     </div>
                     <div>
                       <label className={labelCls}>Priority</label>
@@ -622,6 +710,7 @@ export default function TBRecords() {
                       <label className={labelCls}>Next Follow-up Time</label>
                       <input type="time" value={form.nextVisitTime} onChange={(e) => setForm((p) => ({ ...p, nextVisitTime: e.target.value }))} className={inputCls()} />
                     </div>
+                    {formErrors.dates && <p className={`sm:col-span-2 ${errorCls}`}>{formErrors.dates}</p>}
                     <div className="sm:col-span-2">
                       <label className={labelCls}>Notes / History</label>
                       <textarea rows={2} value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} className={`${inputCls()} resize-none`} />
@@ -643,7 +732,7 @@ export default function TBRecords() {
                 disabled={saving}
                 className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
               >
-                <Plus className="h-4 w-4" /> {saving ? "Saving…" : "Add TB Record"}
+                <Plus className="h-4 w-4" /> {saving ? "Saving…" : editingRecord ? "Save Changes" : "Add TB Record"}
               </button>
             </div>
           </Card>

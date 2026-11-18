@@ -1,5 +1,13 @@
 import * as service from '../services/referrals.service.js';
 import { sendData, sendCreated } from '../utils/apiResponse.js';
+import { isSyncRequest } from '../utils/syncConcurrency.js';
+
+const readIfMatch = (req) => {
+  const headers = req?.headers || {};
+  if (Object.prototype.hasOwnProperty.call(headers, 'if-match')) return headers['if-match'];
+  if (Object.prototype.hasOwnProperty.call(headers, 'If-Match')) return headers['If-Match'];
+  return req?.get?.('If-Match');
+};
 
 /**
  * Health Supervisor referral coordination controller.
@@ -28,12 +36,28 @@ export const create = async (req, res) =>
   sendCreated(res, { record: await service.create({ user: req.user, payload: req.body?.record || req.body || {} }) });
 
 export const update = async (req, res) =>
-  sendData(res, { record: await service.update({ user: req.user, id: req.params.id, payload: req.body?.record || req.body || {} }) });
+  sendData(res, {
+    record: await service.update({
+      user: req.user,
+      id: req.params.id,
+      payload: req.body?.record || req.body || {},
+      ifMatch: readIfMatch(req),
+      isSync: isSyncRequest(req),
+    }),
+  });
 
 export const updateStatus = async (req, res) => {
   const body = req.body?.record || req.body || {};
   return sendData(res, {
-    record: await service.updateStatus({ user: req.user, id: req.params.id, status: body.status, resolutionNotes: body.resolution_notes, version: body.expected_version ?? body.version }),
+    record: await service.updateStatus({
+      user: req.user,
+      id: req.params.id,
+      status: body.status,
+      resolutionNotes: body.resolution_notes,
+      version: body.expected_version ?? body.version,
+      ifMatch: readIfMatch(req),
+      isSync: isSyncRequest(req),
+    }),
   });
 };
 

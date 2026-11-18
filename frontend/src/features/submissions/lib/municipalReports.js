@@ -8,12 +8,23 @@ export const submissionFromReport = (report) => {
     reference: String(report.id),
     type: report.reportType || '',
     group: reportGroup(report.reportType),
-    period: report.dateFrom && report.dateTo ? `${report.dateFrom} to ${report.dateTo}` : '',
+    period: report.reportPeriod || (report.dateFrom && report.dateTo ? `${report.dateFrom} to ${report.dateTo}` : ''),
     // A created timestamp is not evidence that a report was submitted then.
     submittedAt: report.submittedAt || null,
-    creator: report.createdByName || report.createdBy || '',
+    creator: report.senderName || report.createdByName || report.createdBy || '',
   };
 };
+
+export const canReviewSubmission = ({ report, user, can, transitions = [] }) => Boolean(
+  report
+  && report.recipientRole === user?.role
+  && report.createdBy !== user?.id
+  && (can?.('reports.view') ?? false)
+  && Array.isArray(transitions)
+  && transitions.length > 0,
+);
+
+export const requiresReviewRemarks = (status) => status === 'Needs Revision' || status === 'Rejected';
 
 export const linkedReviewHistory = (report, reviews) => (reviews || []).filter((review) => String(review.submissionRef) === String(report.id));
 

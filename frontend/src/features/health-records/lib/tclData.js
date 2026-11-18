@@ -73,3 +73,78 @@ export const tclDateError = ({ lastVisit, nextVisit, nextVisitTime }) => {
   if (lastVisit && nextVisit && nextVisit < lastVisit) return 'The next visit cannot precede the last recorded visit.';
   return '';
 };
+
+export const TB_PROGRAMS = ['TB Patients', 'TB Monitoring', 'TB Prevention (TPT)'];
+export const TB_PRIORITIES = ['Low', 'Medium', 'High'];
+export const TB_STATUSES = ['Active', 'Inactive', 'Completed', 'Transferred'];
+
+export const mapTbRecord = (row = {}) => {
+  const assignment = String(row.assigned_bhw || '');
+  return {
+    id: row.id,
+    residentId: row.resident_id,
+    program: row.program || '',
+    bhwId: row.assigned_bhw_id || row.assignedBhwId || (uuid.test(assignment) ? assignment : ''),
+    bhw: row.assigned_bhw_name || row.assignedBhwName || (!uuid.test(assignment) ? assignment : ''),
+    priority: row.priority || '',
+    status: row.status || '',
+    lastVisit: row.last_visit || '',
+    nextVisit: row.next_visit || '',
+    nextVisitTime: row.next_visit_time || '',
+    notes: row.notes || '',
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || '',
+    resident: row.resident || null,
+  };
+};
+
+export const validateTbRecordForm = ({
+  form = {},
+  assignableBhws = [],
+  records = [],
+  editingRecord = null,
+}) => {
+  const errs = {};
+  if (!form.residentId) errs.resident = 'Please select a resident.';
+  if (!form.program) errs.program = 'Please select a TB program.';
+
+  if (form.bhw && !assignableBhws.some((worker) => worker.id === form.bhw)) {
+    errs.bhw = "Select an available BHW for this resident's barangay.";
+  }
+
+  const dateError = tclDateError({
+    lastVisit: form.lastVisit,
+    nextVisit: form.nextVisit,
+    nextVisitTime: form.nextVisitTime,
+  });
+  if (dateError) errs.dates = dateError;
+
+  if (!errs.resident && !errs.program) {
+    const duplicate = records.some(
+      (r) => r.id !== editingRecord?.id
+        && r.residentId === form.residentId
+        && r.program === form.program,
+    );
+    if (duplicate) errs.program = `This resident is already enrolled in ${form.program}.`;
+  }
+
+  return errs;
+};
+
+export const buildTbRecordPayload = (form = {}, editingRecord = null) => {
+  const base = {
+    program: form.program,
+    assigned_bhw: form.bhw || '',
+    priority: form.priority,
+    status: form.status,
+    last_visit: form.lastVisit || null,
+    next_visit: form.nextVisit || null,
+    next_visit_time: form.nextVisitTime || null,
+    notes: form.notes || '',
+  };
+  if (editingRecord) return base;
+  return {
+    residentId: form.residentId,
+    ...base,
+  };
+};

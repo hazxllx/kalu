@@ -5,6 +5,9 @@ import { Card } from "@/components/common/Card";
 import StatusBadge from "@/components/common/StatusBadge";
 import { referralsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { listReferralInboxOffline, getReferralOffline } from "@/services/offline/clinicalOfflineService";
 import { usePermissions } from "@/context/PermissionsContext";
 import { allowedReferralStatuses, isOpenReferral, REFERRAL_STATUSES, referralRecipientLabel } from "@/features/referrals/lib/referralTrackingActions";
 import ReferralHistory from "@/features/referrals/components/ReferralHistory";
@@ -16,6 +19,8 @@ const dateTime = (value) => value ? new Date(value).toLocaleString() : "Not sche
 export default function IncomingReferrals() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
   const { can } = usePermissions();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,17 +43,29 @@ export default function IncomingReferrals() {
     const requestId = ++loadRequest.current;
     setLoading(true);
     setError("");
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
     if (!user?.id) { setRows([]); setLoading(false); return; }
     try {
-      const result = await referralsApi.inbox(undefined, { ownerId: user.id });
+      const result = await listReferralInboxOffline({
+        ownerId: user.id,
+        fetchFn: () => referralsApi.inbox(undefined, { ownerId: user.id }),
+        online: () => online,
+      });
       if (!Array.isArray(result?.rows)) throw new Error("The assigned inbox returned an invalid response.");
-      if (requestId === loadRequest.current) setRows(result.rows);
+      if (requestId === loadRequest.current) {
+        setRows(result.rows);
+        setCacheInfo({
+          source: result.source || "server",
+          cachedAt: result.cachedAt ?? null,
+          stale: Boolean(result.stale),
+        });
+      }
     } catch (err) {
       if (requestId === loadRequest.current) { setError(err?.message || "Could not load incoming referrals."); setRows([]); }
     } finally {
       if (requestId === loadRequest.current) setLoading(false);
     }
-  }, [user?.id, user?.role, user?.municipalityId, user?.facilityId, stationKey]);
+  }, [user?.id, user?.role, user?.municipalityId, user?.facilityId, stationKey, online]);
 
   useEffect(() => {
     setRows([]); setSelected(null); detailRequest.current += 1;
@@ -95,7 +112,13 @@ export default function IncomingReferrals() {
     setDetailLoading(true);
     setDetailError(""); setActionError(""); setNotes("");
     try {
-      const result = await referralsApi.get(row.id, { ownerId: user.id });
+      const result = await getReferralOffline({
+        ownerId: user.id,
+        entity: "referralIncomingDetail",
+        id: row.id,
+        fetchFn: (id) => referralsApi.get(id, { ownerId: user.id }),
+        online: () => online,
+      });
       if (!result?.record) throw new Error("The referral detail response is invalid.");
       if (requestId === detailRequest.current) setSelected(result.record);
     } catch (error) {
@@ -134,6 +157,15 @@ export default function IncomingReferrals() {
   return (
     <div className="space-y-5">
       <PageHeader crumbs={["Incoming Referrals"]} title="Assigned Incoming Referrals" subtitle="Only referrals assigned to your current authorized role, station and facility appear here. Accept, reject, progress and complete the same records the sender tracks." />
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={rows.length === 0}
+        onRetry={() => void load()}
+        className="!mb-0"
+      />
       <Card className="p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg/50 px-3 py-2.5">
@@ -156,7 +188,7 @@ export default function IncomingReferrals() {
       {actionError && !selected && <Card role="alert" className="p-4 text-sm text-brand-danger">{actionError}</Card>}
       <Card className="overflow-hidden">
         {loading ? <div className="flex items-center justify-center gap-2 py-14 text-sm text-brand-gray"><RefreshCw className="h-4 w-4 animate-spin" />Loading referrals…</div> : filtered.length === 0 ? (
-          <div className="px-4 py-14 text-center"><Stethoscope className="mx-auto mb-2 h-7 w-7 text-brand-gray/60" /><p className="text-sm font-medium text-brand-ink">No incoming referrals need attention</p><p className="mt-1 text-xs text-brand-gray">Try another filter or refresh the list.</p></div>
+          <div className="px-4 py-14 text-center"><Stethoscope className="mx-auto mb-2 h-7 w-7 text-brand-gray/60" /><p className="text-sm font-medium text-brand-ink">{cacheInfo.source === "cache" && rows.length === 0 ? "No saved records available offline." : "No incoming referrals need attention"}</p><p className="mt-1 text-xs text-brand-gray">{cacheInfo.source === "cache" && rows.length === 0 ? "Reconnect to load assigned incoming referrals for offline viewing." : "Try another filter or refresh the list."}</p></div>
         ) : (
           <ul className="divide-y divide-brand-border/70">
             {filtered.map((row) => {

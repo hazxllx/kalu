@@ -25,6 +25,14 @@ import {
   toReportParams,
 } from "@/features/health-records/lib/reportingPeriod";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import {
+  getM1ReportOffline,
+  getM1DailyOffline,
+  getM1MetaOffline,
+  getM1DrilldownOffline,
+} from "@/services/offline/clinicalOfflineService";
 import { isHealthSupervisor, getSupervisorScope } from "@/lib/supervisorScope";
 import { m1Api } from "@/services/api";
 
@@ -44,6 +52,7 @@ const validQuarter = (value, fallback) => {
 
 export default function M1Fhsis() {
   const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const [searchParams, setSearchParams] = useSearchParams();
   const now = new Date();
   const [period, setPeriod] = useState(() => PERIOD_TYPES.includes(searchParams.get("period")) ? searchParams.get("period") : "monthly");
@@ -68,6 +77,7 @@ export default function M1Fhsis() {
   const [drilldownError, setDrilldownError] = useState(null);
   const [drillRetry, setDrillRetry] = useState(0);
   const [printing, setPrinting] = useState(false);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
   const { startPrint, portal, brandingError } = useM1OfficialPrint();
   const scope = isHealthSupervisor(user) ? getSupervisorScope(user) : null;
   const assignedBarangay = scope?.level === "barangay" ? scope.assignedBarangay : null;
@@ -116,42 +126,69 @@ export default function M1Fhsis() {
   };
 
   useEffect(() => {
+    if (!user?.id) { setLoading(false); return undefined; }
     let active = true;
     setLoading(true);
     setError(null);
     setReport(null);
     setDailyRows(null);
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
     setSelectedIndicator(null);
     Promise.all([
-      m1Api.report(toReportParams(descriptor)),
-      period === "monthly" ? m1Api.daily(dailyDate) : Promise.resolve({ participants: [] }),
+      getM1ReportOffline({
+        ownerId: user.id,
+        params: toReportParams(descriptor),
+        fetchFn: () => m1Api.report(toReportParams(descriptor)),
+        online: () => online,
+      }),
+      period === "monthly"
+        ? getM1DailyOffline({
+            ownerId: user.id,
+            date: dailyDate,
+            fetchFn: (date) => m1Api.daily(date),
+            online: () => online,
+          }).catch(() => ({ data: { participants: [] }, source: "cache" }))
+        : Promise.resolve({ data: { participants: [] }, source: "server" }),
     ])
-      .then(([reportResult, dailyResult]) => {
+      .then(([reportRes, dailyRes]) => {
+        const reportResult = reportRes?.data;
+        const dailyResult = dailyRes?.data;
         if (!reportResult?.byCode || typeof reportResult.byCode !== "object" || !Array.isArray(dailyResult?.participants)) {
           throw new Error("Invalid M1 report response. Please try again.");
         }
         if (!active) return;
         setReport(reportResult);
         setDailyRows(dailyResult.participants);
+        setCacheInfo({
+          source: reportRes?.source || "server",
+          cachedAt: reportRes?.cachedAt ?? null,
+          stale: Boolean(reportRes?.stale),
+        });
       })
       .catch((loadError) => { if (active) setError(loadError?.message || "Unable to load the M1 report."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [descriptor, period, dailyDate, retry, user?.id]);
+  }, [descriptor, period, dailyDate, retry, user?.id, online]);
 
   useEffect(() => {
-    if (!selectedIndicator) return undefined;
+    if (!selectedIndicator || !user?.id) return undefined;
     let active = true;
     setDrilldown(null);
     setDrilldownError(null);
-    m1Api.drilldown(selectedIndicator.code, toReportParams(descriptor))
-      .then((result) => {
+    getM1DrilldownOffline({
+      ownerId: user.id,
+      code: selectedIndicator.code,
+      params: toReportParams(descriptor),
+      fetchFn: (code, params) => m1Api.drilldown(code, params),
+      online: () => online,
+    })
+      .then(({ data: result }) => {
         if (!Array.isArray(result?.records)) throw new Error("Invalid underlying-record response.");
         if (active) setDrilldown(result.records);
       })
       .catch((loadError) => { if (active) setDrilldownError(loadError?.message || "Unable to load underlying records."); });
     return () => { active = false; };
-  }, [selectedIndicator, descriptor, drillRetry]);
+  }, [selectedIndicator, descriptor, drillRetry, user?.id, online]);
 
   useEffect(() => { setPage(1); }, [activeTab, search, pageSize, dailyRows]);
 
@@ -184,10 +221,23 @@ export default function M1Fhsis() {
     if (printing) return;
     setPrinting(true);
     try {
-      const [freshReport, metaData] = await Promise.all([
-        m1Api.report(toReportParams(descriptor)),
-        m1Api.getMeta({ year, month: period === "monthly" ? month + 1 : period === "quarterly" ? (quarter - 1) * 3 + 1 : 1 }).catch(() => null),
+      const metaMonth = period === "monthly" ? month + 1 : period === "quarterly" ? (quarter - 1) * 3 + 1 : 1;
+      const [reportRes, metaRes] = await Promise.all([
+        getM1ReportOffline({
+          ownerId: user?.id,
+          params: toReportParams(descriptor),
+          fetchFn: () => m1Api.report(toReportParams(descriptor)),
+          online: () => online,
+        }),
+        getM1MetaOffline({
+          ownerId: user?.id,
+          params: { year, month: metaMonth },
+          fetchFn: (p) => m1Api.getMeta(p),
+          online: () => online,
+        }).catch(() => null),
       ]);
+      const freshReport = reportRes?.data;
+      const metaData = metaRes?.data;
       await startPrint({
         data: freshReport?.byCode || {},
         header: {
@@ -222,6 +272,14 @@ export default function M1Fhsis() {
         onYearChange={changeYear}
         onMonthChange={changeMonth}
         onQuarterChange={changeQuarter}
+      />
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={indicatorRows.length === 0}
+        onRetry={() => setRetry((value) => value + 1)}
       />
       {brandingError && <Card role="alert" className="mb-4 p-3 text-sm text-brand-danger">{brandingError}</Card>}
 

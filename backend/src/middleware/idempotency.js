@@ -31,16 +31,36 @@ const MAX_KEY_LENGTH = 200;
 const STALE_PROCESSING_MS = 60_000;
 
 const readKey = (req) => {
-  const raw = req.headers[HEADER];
-  const key = Array.isArray(raw) ? raw[0] : raw;
-  if (!key || typeof key !== 'string') return null;
-  const trimmed = key.trim();
-  if (!trimmed || trimmed.length > MAX_KEY_LENGTH) return null;
+  const headers = req?.headers || {};
+  const hasLower = Object.prototype.hasOwnProperty.call(headers, HEADER);
+  const hasMixed = Object.prototype.hasOwnProperty.call(headers, 'Idempotency-Key');
+  const raw = hasLower ? headers[HEADER] : hasMixed ? headers['Idempotency-Key'] : req?.get?.('Idempotency-Key');
+  if (raw === undefined || raw === null) return null;
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return null;
+    if (raw.length > 1) {
+      throw ApiError.badRequest('Multiple Idempotency-Key headers are not allowed.');
+    }
+  }
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string' || /[\r\n\0]/.test(value)) {
+    throw ApiError.badRequest('Invalid Idempotency-Key header.');
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_KEY_LENGTH) {
+    throw ApiError.badRequest('Invalid Idempotency-Key header.');
+  }
   return trimmed;
 };
 
-/** Pure header reader (exported for tests). */
-export const readIdempotencyKey = (headers = {}) => readKey({ headers });
+/** Pure header reader (exported for tests; returns null instead of throwing on invalid input). */
+export const readIdempotencyKey = (headers = {}) => {
+  try {
+    return readKey({ headers });
+  } catch {
+    return null;
+  }
+};
 
 /** Deterministic JSON with sorted object keys, so equivalent payloads hash equal. */
 export const stableStringify = (value) => {
@@ -90,12 +110,38 @@ const releaseClaim = async (supabase, userId, key, claimId = null) => {
 export const createIdempotencyMiddleware = ({ validateReplay, durable = false, getKey = readKey,
   getClient = getServiceClient, isConfigured = () => env.isSupabaseConfigured } = {}) =>
   asyncHandler(async (req, res, next) => {
-  const key = getKey(req);
+  // Always validate raw Idempotency-Key header syntax when supplied so malformed
+  // keys fail closed (400) rather than bypassing idempotency protection.
+  const headerKey = readKey(req);
+  const resolved = getKey === readKey ? headerKey : getKey(req);
+  const key = resolved == null ? null : String(resolved).trim();
+  if (key !== null && (!key || key.length > MAX_KEY_LENGTH || /[\r\n\0]/.test(key))) {
+    throw ApiError.badRequest('Invalid Idempotency-Key.');
+  }
+  const rawSyncHeader = req?.headers?.['x-kalusagap-sync'] ?? req?.get?.('X-Kalusagap-Sync');
+  const explicitSync = ['1', 'true'].includes(String(Array.isArray(rawSyncHeader) ? rawSyncHeader[0] : (rawSyncHeader ?? '')).trim().toLowerCase());
+  if (key || explicitSync) req.isSyncRequest = true;
+
   // Make the normalized key available to the controller so the domain write can
   // carry it into the created row (database-enforced deduplication).
   if (key) req.idempotencyKey = key;
   const userId = req.user?.id;
-  if (!key || !userId || !isConfigured()) return next();
+  if (!key) {
+    if (durable && explicitSync && req.method === 'POST') {
+      throw ApiError.badRequest('Synchronization requests require an Idempotency-Key header.').withCode('IDEMPOTENCY_KEY_REQUIRED');
+    }
+    return next();
+  }
+  if (!userId) {
+    if (durable) throw ApiError.unauthorized('Authentication is required for idempotent synchronization.');
+    return next();
+  }
+  if (!isConfigured()) {
+    if (durable) {
+      throw new ApiError(503, 'The operation ledger is unavailable. Retry the original operation.');
+    }
+    return next();
+  }
 
   const fingerprint = requestFingerprint({
     method: req.method,
@@ -174,6 +220,9 @@ export const createIdempotencyMiddleware = ({ validateReplay, durable = false, g
         .eq('user_id', userId)
         .eq('idempotency_key', key)
         .maybeSingle();
+      if (again.error && durable) {
+        throw new ApiError(503, 'The operation ledger is unavailable. Retry the original operation.');
+      }
       if (again.data) {
         if (!matchesRequest(again.data)) {
           throw ApiError.conflict(

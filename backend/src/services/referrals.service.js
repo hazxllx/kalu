@@ -1,5 +1,6 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
+import { parsePositiveIntegerRevision } from '../utils/syncConcurrency.js';
 import { deriveStage } from '../config/referralStage.js';
 import { stationsOf } from '../config/rhuStations.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
@@ -86,7 +87,8 @@ const throwOnError = (error, fallback) => {
   }
   if (error?.code === '42501') throw ApiError.forbidden(error.message || fallback);
   if (error?.code === 'P0002') throw ApiError.notFound(error.message || fallback);
-  if (['23505', '40001'].includes(error?.code)) throw ApiError.conflict(error.message || fallback);
+  if (error?.code === '40001') throw ApiError.staleRevision(error.message || fallback);
+  if (error?.code === '23505') throw ApiError.conflict(error.message || fallback);
   if (['22023', '22P02', '23514', '23502'].includes(error?.code)) throw ApiError.unprocessable(error.message || fallback);
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
 };
@@ -555,10 +557,45 @@ const assertNoProtectedWrite = (payload, { creating = false } = {}) => {
   }
 };
 
-const expectedVersion = (value, existing) => {
-  const version = value ?? existing.version;
-  if (!Number.isSafeInteger(Number(version)) || Number(version) < 1) throw ApiError.unprocessable('Invalid referral version.');
-  return Number(version);
+export const resolveExpectedReferralVersion = (
+  value,
+  existing,
+  { isSync = false, ifMatch = undefined } = {},
+) => {
+  let headerVersion = null;
+  if (ifMatch !== undefined && ifMatch !== null) {
+    headerVersion = parsePositiveIntegerRevision(ifMatch, 'referral If-Match version');
+  }
+  let bodyVersion = null;
+  if (value !== undefined && value !== null && value !== '') {
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 2147483647) {
+      throw ApiError.unprocessable('Invalid referral version.');
+    }
+    bodyVersion = parsed;
+  }
+  if (headerVersion !== null && bodyVersion !== null && headerVersion !== bodyVersion) {
+    throw ApiError.badRequest('Conflicting referral version preconditions were supplied.');
+  }
+  const explicitVersion = headerVersion ?? bodyVersion;
+  if (explicitVersion === null) {
+    if (isSync) {
+      throw ApiError.badRequest(
+        'Referral synchronization requires an explicit expected_version or If-Match precondition.',
+      ).withCode('REVISION_REQUIRED');
+    }
+    const fallbackVersion = Number(existing?.version);
+    if (!Number.isSafeInteger(fallbackVersion) || fallbackVersion < 1) {
+      throw ApiError.unprocessable('Invalid referral version.');
+    }
+    return fallbackVersion;
+  }
+  if (Number.isSafeInteger(Number(existing?.version)) && explicitVersion !== Number(existing.version)) {
+    throw ApiError.staleRevision('This referral changed. Refresh before trying again.', {
+      currentVersion: existing.version,
+    });
+  }
+  return explicitVersion;
 };
 
 const write = async ({ user, id = null, action, version = null, record, supabase }) => {
@@ -604,11 +641,16 @@ const writableReferral = async (supabase, user, id) => {
   return { existing: data, resident };
 };
 
-export const update = async ({ user, id, payload = {}, supabase = getServiceClient() }) => {
+export const update = async ({ user, id, payload = {}, ifMatch = undefined, isSync = false, supabase = getServiceClient() }) => {
   const { existing, resident } = await writableReferral(supabase, user, id);
   assertNoProtectedWrite(payload);
   if (payload.residentId !== undefined) throw ApiError.unprocessable('The referral resident cannot be changed.');
   if (CLOSED_STATUSES.has(existing.status)) throw ApiError.conflict('Closed referrals are immutable.');
+  const version = resolveExpectedReferralVersion(
+    payload.expected_version ?? payload.expectedVersion ?? payload.version,
+    existing,
+    { isSync, ifMatch },
+  );
   assertReferralDates(payload, { existing });
   const row = sanitizeWrite(payload);
   if (Object.prototype.hasOwnProperty.call(payload, 'reason') && !row.reason) {
@@ -619,10 +661,19 @@ export const update = async ({ user, id, payload = {}, supabase = getServiceClie
   }
   Object.assign(row, await resolveRecipient(supabase, resident, payload, existing));
   if (row.recipient_personnel_id === user.id) throw ApiError.unprocessable('Select another authorized recipient.');
-  return write({ user, id: existing.id, action: 'update', version: expectedVersion(payload.expected_version ?? payload.version, existing), record: row, supabase });
+  return write({ user, id: existing.id, action: 'update', version, record: row, supabase });
 };
 
-export const updateStatus = async ({ user, id, status, resolutionNotes, version, supabase = getServiceClient() }) => {
+export const updateStatus = async ({
+  user,
+  id,
+  status,
+  resolutionNotes,
+  version,
+  ifMatch = undefined,
+  isSync = false,
+  supabase = getServiceClient(),
+}) => {
   const existing = await getById({ user, id, supabase });
   if (!REFERRAL_STATUSES.includes(status) || status === 'Pending') throw ApiError.unprocessable('Invalid referral status.');
   const capabilities = capabilitiesFor(user, existing);
@@ -633,13 +684,15 @@ export const updateStatus = async ({ user, id, status, resolutionNotes, version,
   if (['Rejected', 'Cancelled'].includes(status) && !text(resolutionNotes) && status !== existing.status) {
     throw ApiError.unprocessable('A reason is required for rejection or cancellation.');
   }
-  return write({ user, id: existing.id, action: 'status', version: expectedVersion(version, existing), record: { status, resolution_notes: text(resolutionNotes) }, supabase });
+  const resolvedVersion = resolveExpectedReferralVersion(version, existing, { isSync, ifMatch });
+  return write({ user, id: existing.id, action: 'status', version: resolvedVersion, record: { status, resolution_notes: text(resolutionNotes) }, supabase });
 };
 
-export const syncSnapshots = async ({ user, id, version, supabase = getServiceClient() }) => {
+export const syncSnapshots = async ({ user, id, version, ifMatch = undefined, isSync = false, supabase = getServiceClient() }) => {
   const { existing } = await writableReferral(supabase, user, id);
   if (!existing.treatment_visit_id) throw ApiError.conflict('This referral has no source treatment visit to snapshot.');
-  return write({ user, id: existing.id, action: 'sync', version: expectedVersion(version, existing), record: {}, supabase });
+  const resolvedVersion = resolveExpectedReferralVersion(version, existing, { isSync, ifMatch });
+  return write({ user, id: existing.id, action: 'sync', version: resolvedVersion, record: {}, supabase });
 };
 
 /** Compatibility DELETE means cancellation, never destruction of history/FKs. */

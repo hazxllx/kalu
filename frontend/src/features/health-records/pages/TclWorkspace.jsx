@@ -9,6 +9,14 @@ import {
   Home,
   ClipboardList,
 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import {
+  listMaternalOffline,
+  listTclOffline,
+  listProgramFormOffline,
+} from "@/services/offline/clinicalOfflineService";
 import { programFormsApi, maternalApi, tclApi } from "@/services/api";
 import HealthProgramDirectory from "../components/HealthProgramDirectory";
 
@@ -62,41 +70,84 @@ const GROUPS = [
 ];
 
 const COUNT_FETCHERS = {
-  maternal: () => maternalApi.list(),
-  enrollment: () => tclApi.list(),
-  "ncd-risk": () => programFormsApi["ncd-risk"].list(),
-  "ncd-cervical": () => programFormsApi["ncd-cervical"].list(),
-  "ncd-visual": () => programFormsApi["ncd-visual"].list(),
-  "oral-health": () => programFormsApi["oral-health"].list(),
-  environmental: () => programFormsApi.environmental.list(),
+  maternal: ({ ownerId, online }) =>
+    listMaternalOffline({ ownerId, fetchFn: () => maternalApi.list(), online }),
+  enrollment: ({ ownerId, online }) =>
+    listTclOffline({ ownerId, fetchFn: () => tclApi.list(), online }),
+  "ncd-risk": ({ ownerId, online }) =>
+    listProgramFormOffline({ ownerId, kind: "ncd-risk", fetchFn: () => programFormsApi["ncd-risk"].list(), online }),
+  "ncd-cervical": ({ ownerId, online }) =>
+    listProgramFormOffline({ ownerId, kind: "ncd-cervical", fetchFn: () => programFormsApi["ncd-cervical"].list(), online }),
+  "ncd-visual": ({ ownerId, online }) =>
+    listProgramFormOffline({ ownerId, kind: "ncd-visual", fetchFn: () => programFormsApi["ncd-visual"].list(), online }),
+  "oral-health": ({ ownerId, online }) =>
+    listProgramFormOffline({ ownerId, kind: "oral-health", fetchFn: () => programFormsApi["oral-health"].list(), online }),
+  environmental: ({ ownerId, online }) =>
+    listProgramFormOffline({ ownerId, kind: "environmental", fetchFn: () => programFormsApi.environmental.list(), online }),
 };
 
 export default function TclWorkspace() {
+  const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const [counts, setCounts] = useState({}); // key -> number | 'error'
   const [loading, setLoading] = useState(true);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false, hasCachedData: false });
   const location = useLocation();
   const role = (location.pathname.match(/^\/app\/([^/]+)\//) || [])[1] || "";
 
   useEffect(() => {
     let active = true;
+    if (!user?.id) {
+      setCounts({});
+      setLoading(false);
+      return () => { active = false; };
+    }
+    setLoading(true);
     const keys = Object.keys(COUNT_FETCHERS);
-    Promise.allSettled(keys.map((k) => COUNT_FETCHERS[k]())).then((results) => {
+    Promise.allSettled(
+      keys.map((k) => COUNT_FETCHERS[k]({ ownerId: user.id, online: () => online })),
+    ).then((results) => {
       if (!active) return;
       const next = {};
+      let anyCache = false;
+      let anyStale = false;
+      let hasCachedData = false;
+      let latestCachedAt = null;
       results.forEach((res, i) => {
         const key = keys[i];
         if (res.status === "fulfilled") {
-          const rows = res.value?.rows || res.value || [];
-          next[key] = Array.isArray(rows) ? rows.length : 0;
+          const { rows = [], source, cachedAt, stale } = res.value || {};
+          if (source === "cache") {
+            anyCache = true;
+            if (stale) anyStale = true;
+            if (Number.isFinite(cachedAt) && (latestCachedAt === null || cachedAt > latestCachedAt)) {
+              latestCachedAt = cachedAt;
+            }
+            // Never report an uncached program as 0 offline — surface "Count unavailable".
+            if (!cachedAt && rows.length === 0) {
+              next[key] = "error";
+            } else {
+              hasCachedData = true;
+              next[key] = rows.length;
+            }
+          } else {
+            next[key] = Array.isArray(rows) ? rows.length : 0;
+          }
         } else {
           next[key] = "error";
         }
       });
       setCounts(next);
+      setCacheInfo({
+        source: anyCache ? "cache" : "server",
+        cachedAt: latestCachedAt,
+        stale: anyStale,
+        hasCachedData,
+      });
       setLoading(false);
     });
     return () => { active = false; };
-  }, []);
+  }, [user?.id, online]);
 
   // Record counts come from the role-scoped list APIs, so label them honestly.
   const scopeLabel = role === "health_supervisor"
@@ -133,6 +184,16 @@ export default function TclWorkspace() {
       programs={programs}
       crumbs={["Clinical Care", "TCL"]}
       subtitle="Review target client lists and program records within your authorized service area."
+      notices={cacheInfo.source === "cache" ? (
+        <OfflineCacheNotice
+          source={cacheInfo.source}
+          cachedAt={cacheInfo.cachedAt}
+          lastSyncedAt={lastSyncedAt}
+          stale={cacheInfo.stale}
+          empty={!cacheInfo.hasCachedData}
+          className="!mb-0"
+        />
+      ) : null}
       countNote={`Record counts reflect saved records ${scopeLabel}.`}
       showSectionSummary={false}
     />

@@ -1547,6 +1547,30 @@ export const supabaseRepository = {
     return memberFromRow(data);
   },
 
+  async addHouseholdMemberWithRisk(householdId, member, riskPatch) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('add_household_member_with_risk', {
+      p_household_id: householdId,
+      p_member: memberToRow(member),
+      p_risk: householdToRow(riskPatch),
+    });
+    if (error) {
+      if (isMissingRpc(error)) return null;
+      if (error.code === '23505') {
+        const duplicate = new Error('That resident is already a member of this household.');
+        duplicate.statusCode = 409;
+        throw duplicate;
+      }
+      throwOnError(error, 'Could not add household member');
+    }
+    const payload = Array.isArray(data) ? data[0] : data;
+    if (payload?.missing) return { missing: payload.missing };
+    return {
+      member: payload?.member ? memberFromRow(payload.member) : null,
+      household: payload?.household ? householdFromRow(payload.household) : null,
+    };
+  },
+
   async updateHouseholdMember(householdId, memberId, member) {
     const supabase = getServiceClient();
     const { data, error } = await supabase
@@ -1560,6 +1584,31 @@ export const supabaseRepository = {
     return data ? memberFromRow(data) : null;
   },
 
+  async updateHouseholdMemberWithRisk(householdId, memberId, member, riskPatch) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('update_household_member_with_risk', {
+      p_household_id: householdId,
+      p_member_id: memberId,
+      p_member: memberToRow(member),
+      p_risk: householdToRow(riskPatch),
+    });
+    if (error) {
+      if (isMissingRpc(error)) return null;
+      if (error.code === '23505') {
+        const duplicate = new Error('That resident is already linked to another member in this household.');
+        duplicate.statusCode = 409;
+        throw duplicate;
+      }
+      throwOnError(error, 'Could not update household member');
+    }
+    const payload = Array.isArray(data) ? data[0] : data;
+    if (payload?.missing) return { missing: payload.missing };
+    return {
+      member: payload?.member ? memberFromRow(payload.member) : null,
+      household: payload?.household ? householdFromRow(payload.household) : null,
+    };
+  },
+
   async removeHouseholdMember(householdId, memberId) {
     const supabase = getServiceClient();
     const { data, error } = await supabase
@@ -1571,6 +1620,25 @@ export const supabaseRepository = {
       .maybeSingle();
     throwOnError(error, 'Could not remove household member');
     return Boolean(data);
+  },
+
+  async removeHouseholdMemberWithRisk(householdId, memberId, riskPatch) {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase.rpc('remove_household_member_with_risk', {
+      p_household_id: householdId,
+      p_member_id: memberId,
+      p_risk: householdToRow(riskPatch),
+    });
+    if (error) {
+      if (isMissingRpc(error)) return null;
+      throwOnError(error, 'Could not remove household member');
+    }
+    const payload = Array.isArray(data) ? data[0] : data;
+    if (payload?.missing) return { missing: payload.missing };
+    return {
+      removed: Boolean(payload?.removed),
+      household: payload?.household ? householdFromRow(payload.household) : null,
+    };
   },
 
   /** Member health profile (1:1) or null when none has been recorded yet. */

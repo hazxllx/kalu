@@ -5,8 +5,13 @@ import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { listImmunizationsOffline } from "@/services/offline/clinicalOfflineService";
+import { listResidentsOffline } from "@/services/offline/residentOfflineService";
+import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
-import { immunizationsApi, residentsApi } from "@/services/api";
+import { immunizationsApi } from "@/services/api";
 import { X, Plus, CheckCircle2, Search, Syringe, Pencil } from "lucide-react";
 import { formatClinicalDate } from "@/lib/dateUtils";
 
@@ -235,6 +240,7 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
 
 export default function Immunization() {
   const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const scope = getSupervisorScope(user);
   const assignedBarangay = scope && scope.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
 
@@ -242,6 +248,7 @@ export default function Immunization() {
   const [residents, setResidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
   const [saving, setSaving] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -256,11 +263,29 @@ export default function Immunization() {
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   const load = React.useCallback(() => {
+    if (!user?.id) { setRecords([]); setResidents([]); setLoading(false); return Promise.resolve(); }
     setLoading(true);
     setLoadError(null);
-    return Promise.all([immunizationsApi.list(), residentsApi.list({ limit: 200 })])
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
+    const loadResidents = async () => {
+      try {
+        return await listResidentsOffline({ ownerId: user.id, params: { limit: 200 } });
+      } catch (err) {
+        if (classifySyncError(err).code === SYNC_ERROR.NETWORK) return { rows: [] };
+        throw err;
+      }
+    };
+    return Promise.all([
+      listImmunizationsOffline({ ownerId: user.id, fetchFn: () => immunizationsApi.list(), online: () => online }),
+      loadResidents(),
+    ])
       .then(([immResult, residentResult]) => {
         setRecords((immResult?.rows || []).map(mapRecord));
+        setCacheInfo({
+          source: immResult?.source || "server",
+          cachedAt: immResult?.cachedAt ?? null,
+          stale: Boolean(immResult?.stale),
+        });
         const rows = residentResult?.rows || residentResult || [];
         setResidents(
           rows
@@ -278,7 +303,7 @@ export default function Immunization() {
       })
       .catch((err) => setLoadError(err?.message || "Unable to load immunizations. Please try again."))
       .finally(() => setLoading(false));
-  }, [assignedBarangay]);
+  }, [assignedBarangay, user?.id, online]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -360,6 +385,15 @@ export default function Immunization() {
         </div>
       )}
 
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={records.length === 0}
+        onRetry={load}
+      />
+
       <Card className="p-4 mb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 sm:max-w-md sm:flex-1">
@@ -413,7 +447,9 @@ export default function Immunization() {
                       ? "Loading immunizations..."
                       : loadError
                         ? <span className="text-brand-danger">{loadError}</span>
-                        : "No immunization records yet."}
+                        : cacheInfo.source === "cache" && records.length === 0
+                          ? "No saved records available offline."
+                          : "No immunization records yet."}
                   </td>
                 </tr>
               )}

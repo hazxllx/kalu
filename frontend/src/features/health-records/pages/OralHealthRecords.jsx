@@ -3,6 +3,10 @@ import ProgramFormPage from "../components/ProgramFormPage";
 import TclPageHeader from "../components/TclPageHeader";
 import { Card } from "@/components/common/Card";
 import { RefreshCw, Download } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { getOralStatisticsOffline } from "@/services/offline/clinicalOfflineService";
 import { oralHealthApi } from "@/services/api";
 import { PROGRAM_FORMS } from "../lib/programFormConfig";
 import { buildOralStatisticsCsv, downloadCsv } from "../lib/programFormExport";
@@ -12,29 +16,58 @@ import TclTabs from "../components/TclTabs";
 const inputCls = "mt-1.5 w-full bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue";
 
 function Statistics() {
+  const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [population, setPopulation] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
 
   const load = useCallback(() => {
+    if (!user?.id) { setData(null); setLoading(false); return Promise.resolve(); }
     setLoading(true); setError(null);
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
     const params = {};
     if (from) params.from = from;
     if (to) params.to = to;
     if (population) params.population = population;
-    return oralHealthApi.statistics(params)
-      .then((res) => setData(res?.statistics || null))
-      .catch((e) => setError(e?.message || "Could not load statistics."))
+    return getOralStatisticsOffline({
+      ownerId: user.id,
+      params,
+      fetchFn: (p) => oralHealthApi.statistics(p),
+      online: () => online,
+    })
+      .then((res) => {
+        setData(res?.data?.statistics || null);
+        setCacheInfo({
+          source: res?.source || "server",
+          cachedAt: res?.cachedAt ?? null,
+          stale: Boolean(res?.stale),
+        });
+      })
+      .catch((e) => {
+        setData(null);
+        setError(e?.message || "Could not load statistics.");
+      })
       .finally(() => setLoading(false));
-  }, [from, to, population]);
+  }, [from, to, population, user?.id, online]);
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [user?.id, online]);
 
   return (
     <div className="ui-tcl-statistics">
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={!data}
+        onRetry={load}
+      />
+
       <Card className="mb-6 p-5">
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
           <div><label className="text-sm font-medium text-brand-ink">From</label><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} /></div>

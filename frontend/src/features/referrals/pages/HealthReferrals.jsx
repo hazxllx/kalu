@@ -7,6 +7,11 @@ import StatusBadge from "@/components/common/StatusBadge";
 import TablePagination from "@/components/tables/TablePagination";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { useAuth } from "@/context/AuthContext";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import OfflineCacheNotice from "@/features/offline/components/OfflineCacheNotice";
+import { listReferralsOffline, getReferralOffline } from "@/services/offline/clinicalOfflineService";
+import { listResidentsOffline } from "@/services/offline/residentOfflineService";
+import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
 import { usePermissions } from "@/context/PermissionsContext";
 import { ROLE } from "@/lib/roles";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
@@ -670,6 +675,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
 
 export default function HealthReferrals() {
   const { user } = useAuth();
+  const { online, lastSyncedAt } = useSyncStatus();
   const { can } = usePermissions();
   const isResident = user?.role === ROLE.RESIDENT || user?.role === ROLE.RESIDENT_LIMITED;
   const isHealthSupervisor = user?.role === ROLE.HEALTH_SUPERVISOR;
@@ -692,6 +698,7 @@ export default function HealthReferrals() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [residentLoadError, setResidentLoadError] = useState(null);
+  const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
   const [saving, setSaving] = useState(false);
   const loadRequest = useRef(0);
 
@@ -780,19 +787,33 @@ export default function HealthReferrals() {
       setLoadError("A verified barangay assignment is required to view referrals.");
       return;
     }
+    setCacheInfo({ source: null, cachedAt: null, stale: false });
     const loadResidents = async () => {
-      const all = [];
-      for (let offset = 0; ; offset += 100) {
-        if (requestId !== loadRequest.current) throw new Error("The referral directory request was superseded.");
-        const response = await api.get('/residents', { params: { limit: 100, offset }, ownerId: user.id });
-        const page = Array.isArray(response?.rows) ? response.rows : Array.isArray(response) ? response : null;
-        if (!page) throw new Error("The resident directory returned an invalid response.");
-        all.push(...page);
-        if (page.length < 100 || (Number.isFinite(response.total) && all.length >= response.total)) return { rows: all };
+      if (online) {
+        try {
+          const all = [];
+          for (let offset = 0; ; offset += 100) {
+            if (requestId !== loadRequest.current) throw new Error("The referral directory request was superseded.");
+            const response = await api.get('/residents', { params: { limit: 100, offset }, ownerId: user.id });
+            const page = Array.isArray(response?.rows) ? response.rows : Array.isArray(response) ? response : null;
+            if (!page) throw new Error("The resident directory returned an invalid response.");
+            all.push(...page);
+            if (page.length < 100 || (Number.isFinite(response.total) && all.length >= response.total)) return { rows: all };
+          }
+        } catch (err) {
+          if (classifySyncError(err).code !== SYNC_ERROR.NETWORK) throw err;
+        }
       }
+      const cached = await listResidentsOffline({ ownerId: user.id });
+      return { rows: cached?.rows || [] };
     };
     const results = await Promise.allSettled([
-      referralsApi.list({ box }, { ownerId: user.id }),
+      listReferralsOffline({
+        ownerId: user.id,
+        params: { box },
+        fetchFn: (params) => referralsApi.list(params, { ownerId: user.id }),
+        online: () => online,
+      }),
       canWrite && canCreate ? loadResidents() : Promise.resolve(null),
       canWrite && canCreate ? residentsApi.directoryFilters({ ownerId: user.id }) : Promise.resolve(null),
     ]);
@@ -801,6 +822,11 @@ export default function HealthReferrals() {
     const [referralResult, residentResult, barangayResult] = results;
     if (referralResult.status === "fulfilled" && Array.isArray(referralResult.value?.rows)) {
       setRecords(referralResult.value.rows.map(mapRecord));
+      setCacheInfo({
+        source: referralResult.value.source || "server",
+        cachedAt: referralResult.value.cachedAt ?? null,
+        stale: Boolean(referralResult.value.stale),
+      });
     } else {
       setRecords([]);
       setLoadError(
@@ -849,7 +875,7 @@ export default function HealthReferrals() {
       setReferralBarangays(directoryBarangays);
     } else setResidents([]);
     setLoading(false);
-  }, [assignedBarangay, box, canWrite, canCreate, isHealthSupervisor, user?.id, user?.role, user?.municipalityId, user?.barangayId, user?.facilityId]);
+  }, [assignedBarangay, box, canWrite, canCreate, isHealthSupervisor, user?.id, user?.role, user?.municipalityId, user?.barangayId, user?.facilityId, online]);
 
   useEffect(() => {
     load();
@@ -1091,7 +1117,12 @@ export default function HealthReferrals() {
     if (exportingId) return;
     setExportingId(record.id);
     try {
-      const detail = await referralsApi.get(record.id, { ownerId: user.id });
+      const detail = await getReferralOffline({
+        ownerId: user.id,
+        id: record.id,
+        fetchFn: (id) => referralsApi.get(id, { ownerId: user.id }),
+        online: () => online,
+      });
       if (!detail?.record?.id) throw new Error("Could not load the saved referral document.");
       const row = detail.record;
       await downloadReferralPdf(row, { residents });
@@ -1109,13 +1140,18 @@ export default function HealthReferrals() {
     setDetailLoading(true);
     setDetailError("");
     try {
-      const response = await referralsApi.get(record.id, { ownerId: user.id });
+      const response = await getReferralOffline({
+        ownerId: user.id,
+        id: record.id,
+        fetchFn: (id) => referralsApi.get(id, { ownerId: user.id }),
+        online: () => online,
+      });
       if (!response?.record || response.record.id !== record.id || !STATUSES.includes(response.record.status)) throw new Error("The referral detail response is invalid.");
       if (requestId === detailRequest.current) setDetail(mapRecord(response.record));
     } catch (error) {
       if (requestId === detailRequest.current) setDetailError(error?.message || "Could not load referral history.");
     } finally { if (requestId === detailRequest.current) setDetailLoading(false); }
-  }, [user?.id, canRead, isHealthSupervisor, assignedBarangay]);
+  }, [user?.id, canRead, isHealthSupervisor, assignedBarangay, online]);
 
   useEffect(() => {
     if (requestedStatus && STATUSES.includes(requestedStatus)) {
@@ -1264,6 +1300,15 @@ export default function HealthReferrals() {
         </div>
       )}
 
+      <OfflineCacheNotice
+        source={cacheInfo.source}
+        cachedAt={cacheInfo.cachedAt}
+        lastSyncedAt={lastSyncedAt}
+        stale={cacheInfo.stale}
+        empty={records.length === 0}
+        onRetry={load}
+      />
+
       <Card className="p-4 mb-5">
         {canWrite && canCreate && <div role="group" aria-label="Referral inbox" className="mb-4 flex flex-wrap gap-2 border-b border-brand-border pb-3">
           {[["all", "All Referrals"], ["incoming", "Assigned Inbox"], ["outgoing", "Sent Referrals"]].map(([value, label]) => (
@@ -1354,9 +1399,11 @@ export default function HealthReferrals() {
                       ? "Loading referrals..."
                       : loadError
                         ? <span className="text-brand-danger">{loadError}</span>
-                        : isResident
-                          ? "You have no referrals yet."
-                          : "No referrals match the selected filters."}
+                        : cacheInfo.source === "cache" && records.length === 0
+                          ? "No saved records available offline."
+                          : isResident
+                            ? "You have no referrals yet."
+                            : "No referrals match the selected filters."}
                   </td>
                 </tr>
               )}

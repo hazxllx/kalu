@@ -500,6 +500,30 @@ export const dailyParticipants = async ({ user, date, barangayId = null, supabas
 // Aggregation
 // ---------------------------------------------------------------------------
 
+const nextDayIso = (dateStr) => {
+  const next = new Date(`${dateStr}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString();
+};
+
+const matchTclEntry = (row, match) => {
+  if (!match) return true;
+  const field = match.field || 'program';
+  const raw = text(row?.[field]);
+  if (match.regex) {
+    return new RegExp(match.regex, 'i').test(raw);
+  }
+  if (match.eq !== undefined) {
+    return raw.toLowerCase() === text(match.eq).toLowerCase();
+  }
+  return true;
+};
+
+const tclEntryDate = (row) => {
+  const raw = row?.created_at;
+  return raw ? String(raw).slice(0, 10) : null;
+};
+
 const matchHousehold = (h, match) => {
   if (!match) return false;
   const test = (m) => {
@@ -728,7 +752,7 @@ const aggregateOverRange = async ({ scope, start, end, year, months, supabase })
  * drilldown().
  */
 export const monthlyReport = async ({ user, year, month, barangayId = null, supabase = getServiceClient() }) => {
-  const scope = await resolveScope(user, barangayId);
+  const scope = await resolveScope(user, barangayId, supabase);
   const { start, end } = monthRange(year, month);
   const { indicators, byCode } = await aggregateOverRange({ scope, start, end, year, months: [month], supabase });
   return { period: { year, month }, scope: { level: scope.level, barangayId: scope.barangayId }, indicators, byCode };
@@ -782,7 +806,7 @@ export const periodReport = async ({ user, period = 'monthly', year, month = nul
 };
 
 /** Aggregate a single indicator from the pre-loaded source sets. */
-const computeIndicator = (ind, sets) => {
+export const computeIndicator = (ind, sets) => {
   const breakdown = emptyBreakdown(ind);
   let total = 0;
   const uniqueResidents = new Set();
@@ -853,10 +877,29 @@ const computeIndicator = (ind, sets) => {
         breakdown.bySex[s === 'Male' || s === 'Female' || s === 'Other' ? s : 'Unknown'] += val;
       }
     }
+  } else if (ind.source === 'tcl_entries') {
+    const seen = new Set();
+    for (const row of sets.tclEntries || []) {
+      if (!matchTclEntry(row, ind.match)) continue;
+      const ds = tclEntryDate(row);
+      if (!ds || ds < sets.rangeStart || ds > sets.rangeEnd) continue;
+      if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+        if (!row.resident_id || seen.has(row.resident_id)) continue;
+        seen.add(row.resident_id);
+        uniqueResidents.add(row.resident_id);
+        addToBreakdown({ record_date: ds, sex: '' }, row.resident, 1);
+      } else {
+        total += 1;
+        addToBreakdown({ record_date: ds, sex: '' }, row.resident, 1);
+      }
+    }
+    if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+      total = seen.size;
+    }
   } else if (ind.source === 'workbook_unmapped') {
     // Workbook definitions are authoritative for presentation. Existing
     // application records are intentionally not mapped into them.
-  } else {
+  } else if (ind.source === 'm1_records') {
     // m1_records
     if (ind.dataType === 'fp_method' || ind.dataType === 'fp_total') {
       // Current-users logic per age group.
@@ -946,6 +989,8 @@ const computeIndicator = (ind, sets) => {
       }
       if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') total = uniqueResidents.size;
     }
+  } else {
+    throw new Error(`Unsupported M1 indicator source: ${ind.source}`);
   }
 
   return {
@@ -1043,6 +1088,16 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
   const { data: maternal, error: matErr } = await matQ;
   throwOnError(matErr, 'Could not load maternal records');
 
+  let tclQ = supabase
+    .from('tcl_entries')
+    .select('*, resident:residents(birth_date, sex)')
+    .gte('created_at', `${start}T00:00:00.000Z`)
+    .lte('created_at', `${end}T23:59:59.999999Z`)
+    .limit(50000);
+  tclQ = applyScope(tclQ, scope);
+  const { data: tclEntries, error: tclErr } = await tclQ;
+  throwOnError(tclErr, 'Could not load target-client enrollments');
+
   let manQ = supabase.from(MANUAL).select('indicator_code, period_month, age_group, sex, value').eq('period_year', year);
   manQ = applyScope(manQ, scope);
   const { data: manualRows, error: manErr } = await manQ;
@@ -1113,7 +1168,31 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
           bySex[s === 'Male' || s === 'Female' || s === 'Other' ? s : 'Unknown'] += val;
         }
       }
-    } else {
+    } else if (ind.source === 'tcl_entries') {
+      for (const row of tclEntries || []) {
+        if (!matchTclEntry(row, ind.match)) continue;
+        const ds = tclEntryDate(row);
+        if (!ds || ds < start || ds > end) continue;
+        const m = monthOf(ds);
+        if (!m) continue;
+        if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+          if (!row.resident_id) continue;
+          uniquePerMonth[m - 1].add(row.resident_id);
+          if (!uniqueYear.has(row.resident_id)) {
+            uniqueYear.add(row.resident_id);
+            addSex({ record_date: ds, sex: '' }, row.resident, 1);
+          }
+        } else {
+          months[m - 1] += 1;
+          addSex({ record_date: ds, sex: '' }, row.resident, 1);
+        }
+      }
+      if (ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+        for (let i = 0; i < 12; i += 1) months[i] = uniquePerMonth[i].size;
+      }
+    } else if (ind.source === 'workbook_unmapped') {
+      // Workbook definitions intentionally remain empty.
+    } else if (ind.source === 'm1_records') {
       if (ind.dataType === 'fp_method' || ind.dataType === 'fp_total') {
         // Annual current-user counts: the roster is a current snapshot, so the
         // annual figure is the end-of-year person count (same method the
@@ -1155,6 +1234,8 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
           for (let i = 0; i < 12; i += 1) months[i] = uniquePerMonth[i].size;
         }
       }
+    } else {
+      throw new Error(`Unsupported M1 indicator source: ${ind.source}`);
     }
 
     // Annual total respects the aggregation type (dedup uniques, else sum).
@@ -1173,7 +1254,7 @@ export const annualSummary = async ({ user, year, barangayId = null, supabase = 
 
     // Unique-resident indicators are deduplicated per person for the total, so
     // the split is recounted from the same deduplicated set to stay consistent.
-    if (bySex && ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
+    if (bySex && ind.source === 'm1_records' && ind.aggregation === 'COUNT_UNIQUE_RESIDENTS') {
       const seen = new Set();
       for (const r of recs || []) {
         if (r.indicator_code !== ind.code || !r.resident_id || seen.has(r.resident_id)) continue;
@@ -1290,7 +1371,25 @@ export const drilldown = async ({ user, indicatorCode, year, month = null, quart
         value: e.value, ageGroup: e.age_group, sex: e.sex, detail: { period_month: e.period_month }, remarks: '',
       });
     }
-  } else {
+  } else if (ind.source === 'tcl_entries') {
+    let q = supabase.from('tcl_entries').select(`*, resident:residents(${RESIDENT_SELECT})`)
+      .gte('created_at', `${start}T00:00:00.000Z`).lte('created_at', `${end}T23:59:59.999999Z`)
+      .order('created_at', { ascending: true }).limit(5000);
+    q = applyScope(q, scope);
+    const { data, error } = await q;
+    throwOnError(error, 'Could not load target-client drill-down');
+    for (const row of data || []) {
+      if (!matchTclEntry(row, ind.match)) continue;
+      const ds = tclEntryDate(row);
+      if (!ds || ds < start || ds > end) continue;
+      records.push({
+        id: row.id, resident: row.resident, date: ds, status: row.status,
+        ageGroup: resolveAgeGroup(ind, { record_date: ds }, row.resident), sex: resolveSex({ record_date: ds, sex: '' }, row.resident),
+        detail: { program: row.program, priority: row.priority, assigned_bhw: row.assigned_bhw, last_visit: row.last_visit, next_visit: row.next_visit },
+        remarks: row.notes,
+      });
+    }
+  } else if (ind.source === 'm1_records') {
     let q = supabase.from(RECORDS).select(`*, resident:residents(${RESIDENT_SELECT})`)
       .eq('indicator_code', indicatorCode)
       .gte('record_date', start).lte('record_date', end)
@@ -1306,6 +1405,8 @@ export const drilldown = async ({ user, indicatorCode, year, month = null, quart
         detail: r.detail, remarks: r.remarks,
       });
     }
+  } else {
+    throw new Error(`Unsupported M1 indicator source: ${ind.source}`);
   }
 
   return {
