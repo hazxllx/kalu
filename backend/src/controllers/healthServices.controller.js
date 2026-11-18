@@ -1,6 +1,6 @@
 import * as service from '../services/healthServices.service.js';
 import { sendCreated, sendData } from '../utils/apiResponse.js';
-import ApiError from '../utils/ApiError.js';
+import ApiError from '../utils/apiError.js';
 
 /**
  * Health service endpoints.
