@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canonicalRiskLevel, RISK_LEVELS } from "../../src/lib/riskLevel.js";
+import { canonicalRiskLevel, RISK_LEVELS, normalizeRiskDistribution, RISK_PRESENTATION } from "../../src/lib/riskLevel.js";
 
 test("canonical labels pass through unchanged", () => {
   assert.equal(canonicalRiskLevel("Low"), "Low");
@@ -35,4 +35,19 @@ test("missing / empty / unexpected values return null (treated as no-data, never
 test("Medium and Moderate resolve to the SAME canonical tier (same label/color/legend)", () => {
   assert.equal(canonicalRiskLevel("Medium"), canonicalRiskLevel("Moderate"));
   assert.equal(canonicalRiskLevel("Medium"), RISK_LEVELS.MODERATE);
+});
+
+test("risk-suffixed aliases aggregate without dropping or double-displaying residents", () => {
+  assert.deepEqual(normalizeRiskDistribution([
+    { name: 'High Risk', value: 7 }, { name: ' high ', value: 2 },
+    { name: 'Medium', value: 4 }, { name: 'Moderate Risk', value: 3 },
+    { name: 'Low Risk', value: 5 }, { name: 'Unassessed', value: 6 },
+    { name: 'unknown', value: 2 }, { name: 'Low', value: -1 },
+  ]), [
+    { name: 'High', value: 9 }, { name: 'Moderate', value: 7 },
+    { name: 'Low', value: 5 }, { name: 'Unassessed', value: 8 },
+  ]);
+  for (const [input, tone] of [['Medium', 'amber'], ['High Risk', 'red'], ['Low Risk', 'green'], ['Unassessed', 'slate']]) {
+    assert.equal(RISK_PRESENTATION[canonicalRiskLevel(input)].tone, tone);
+  }
 });

@@ -1127,10 +1127,10 @@ export default function ReportsPage({ roleKey = "midwife" }) {
       )}
 
       {/* Report Details Modal (View a persisted submission) */}
-      {detailReport && (!supervisor || detailOwner === user?.id) && (
+      {detailReport && canLoadOutgoing && detailOwner === user?.id && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card role="dialog" aria-modal="true" aria-label="Saved Report Details" className={`w-full max-w-lg max-h-[92vh] overflow-y-auto ${supervisor ? "supervisor-modal" : ""}`}>
-            <div className="p-6">
+          <Card role="dialog" aria-modal="true" aria-label="Saved Report Details" className={`min-w-0 w-full max-w-4xl max-h-[calc(100dvh-2rem)] overflow-y-auto break-words ${supervisor ? "supervisor-modal" : ""}`}>
+            <div className="p-3 sm:p-6">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-semibold text-brand-ink">{detailReport.name}</h3>
@@ -1185,7 +1185,7 @@ export default function ReportsPage({ roleKey = "midwife" }) {
               {submitError && <p role="alert" className="mt-4 rounded border border-brand-danger/30 bg-brand-danger/5 px-3 py-2 text-ui text-brand-danger">{submitError}</p>}
 
               <div className="mt-6 flex justify-end">
-                {canSubmitReports && detailStatus === "Needs Revision" && (
+                {canSubmitReports && detailContent?.id === detailReport.id && detailStatus === "Needs Revision" && (
                   <button
                     onClick={() => {
                       setRevisionTarget(detailReport);

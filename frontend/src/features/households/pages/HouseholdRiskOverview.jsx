@@ -5,25 +5,35 @@ import KpiHorizontal from "@/components/common/KpiHorizontal";
 import TablePagination from "@/components/tables/TablePagination";
 import { householdsApi } from "@/services/api/householdsApi";
 import { householdRiskApi } from "@/services/api/householdRiskApi";
-import { toRiskCluster, daysSince } from "../lib/riskClusterAdapter";
+import { loadRiskClusters, daysSince } from "../lib/riskClusterAdapter";
 import {
-  RISK_LEVELS, RISK_LEVEL_LABELS, getRiskConfig,
+  RISK_LEVELS, RISK_LEVEL_LABELS,
 } from "@/lib/householdRisk";
 import { useBarangays } from "@/context/BarangaysContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import { formatShortDate } from "@/lib/dateUtils";
 import { FollowUpModal } from "../components/RiskActionModals";
 import {
-  Search, ChevronRight, ArrowRight, AlertTriangle, RefreshCw,
+  Search, ArrowRight, AlertTriangle, RefreshCw,
 } from "lucide-react";
 
 const levelTone = {
   [RISK_LEVELS.STABLE]: { chip: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", color: "#10b981" },
-  [RISK_LEVELS.MONITOR]: { chip: "bg-blue-50 text-blue-700", dot: "bg-blue-500", color: "#3b82f6" },
+  [RISK_LEVELS.MONITOR]: { chip: "bg-amber-50 text-amber-700", dot: "bg-amber-500", color: "#f59e0b" },
   [RISK_LEVELS.INTERVENTION]: { chip: "bg-orange-50 text-orange-700", dot: "bg-orange-500", color: "#f97316" },
   [RISK_LEVELS.PRIORITY]: { chip: "bg-rose-50 text-rose-700", dot: "bg-rose-500", color: "#ef4444" },
+  [RISK_LEVELS.UNASSESSED]: { chip: "bg-slate-100 text-slate-600", dot: "bg-slate-400", color: "#94a3b8" },
 };
 
-const levelOrder = [RISK_LEVELS.PRIORITY, RISK_LEVELS.INTERVENTION, RISK_LEVELS.MONITOR, RISK_LEVELS.STABLE];
+const levelOrder = [RISK_LEVELS.PRIORITY, RISK_LEVELS.INTERVENTION, RISK_LEVELS.MONITOR, RISK_LEVELS.STABLE, RISK_LEVELS.UNASSESSED];
+const countKey = {
+  [RISK_LEVELS.PRIORITY]: "priority",
+  [RISK_LEVELS.INTERVENTION]: "intervention",
+  [RISK_LEVELS.MONITOR]: "monitor",
+  [RISK_LEVELS.STABLE]: "stable",
+  [RISK_LEVELS.UNASSESSED]: "unassessed",
+};
+const clusterLabel = (level) => RISK_LEVEL_LABELS[level] || RISK_LEVEL_LABELS[RISK_LEVELS.UNASSESSED];
 
 const formatDate = (iso) => formatShortDate(iso) || "—";
 
@@ -41,26 +51,33 @@ function householdDetailPath(id) {
 }
 
 export default function HouseholdRiskOverview() {
+  const { can } = usePermissions();
+  const canViewWorkflow = can("followups.view");
   const [phase, setPhase] = useState("loading");
+  const [loadError, setLoadError] = useState("");
   const [clusters, setClusters] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
   const load = useCallback(async () => {
     setPhase("loading");
+    setLoadError("");
     try {
-      const res = await householdsApi.list({ limit: 200 });
-      const rows = Array.isArray(res?.rows) ? res.rows : [];
-      const workflows = await Promise.all(
-        rows.map((h) => householdRiskApi.getWorkflow(h.id).catch(() => null))
-      );
-      setClusters(rows.map((h, i) => toRiskCluster(h, workflows[i])));
+      const loaded = await loadRiskClusters({
+        listHouseholds: (params) => householdsApi.list(params),
+        getWorkflow: (id) => householdRiskApi.getWorkflow(id),
+        includeWorkflow: canViewWorkflow,
+      });
+      setClusters(loaded);
       setPhase("ready");
-    } catch {
+    } catch (error) {
       setClusters([]);
+      setLoadError(error?.payload?.error?.code === "HOUSEHOLD_CLUSTER_SCHEMA_REQUIRED"
+        ? "Household cluster storage is unavailable. Apply the household cluster assignment migration and reload the API schema."
+        : error?.message || "We couldn't retrieve the latest household risk information.");
       setPhase("error");
     }
-  }, []);
+  }, [canViewWorkflow]);
 
   useEffect(() => {
     load();
@@ -93,7 +110,7 @@ export default function HouseholdRiskOverview() {
 
   const indicatorOptions = useMemo(() => {
     const seen = new Set();
-    clusters.forEach((h) => (h.risk?.indicators || []).forEach((i) => seen.add(i.key)));
+    clusters.forEach((h) => (h.environmentalRisk?.factors || []).forEach((factor) => seen.add(factor)));
     return [...seen];
   }, [clusters]);
 
@@ -109,7 +126,7 @@ export default function HouseholdRiskOverview() {
         if (appliedFilters.followUpFilter === "overdue" && !status.includes("overdue")) return false;
         if (appliedFilters.followUpFilter === "resolved" && status !== "resolved") return false;
       }
-      if (appliedFilters.indicatorFilter !== "all" && !(h.risk?.indicators || []).some((i) => i.key === appliedFilters.indicatorFilter)) return false;
+      if (appliedFilters.indicatorFilter !== "all" && !(h.environmentalRisk?.factors || []).includes(appliedFilters.indicatorFilter)) return false;
       if (appliedFilters.startDate || appliedFilters.endDate) {
         const last = h.lastHouseholdVisit || h.lastAssessment || "";
         if (last && appliedFilters.startDate && last < appliedFilters.startDate) return false;
@@ -124,12 +141,13 @@ export default function HouseholdRiskOverview() {
   }, [clusters, appliedFilters]);
 
   const counts = useMemo(() => {
-    const c = { total: clusters.length, priority: 0, intervention: 0, monitor: 0, stable: 0 };
+    const c = { total: clusters.length, priority: 0, intervention: 0, monitor: 0, stable: 0, unassessed: 0 };
     clusters.forEach((h) => {
       if (h.risk?.level === RISK_LEVELS.PRIORITY) c.priority += 1;
       else if (h.risk?.level === RISK_LEVELS.INTERVENTION) c.intervention += 1;
       else if (h.risk?.level === RISK_LEVELS.MONITOR) c.monitor += 1;
-      else c.stable += 1;
+      else if (h.risk?.level === RISK_LEVELS.STABLE) c.stable += 1;
+      else c.unassessed += 1;
     });
     return c;
   }, [clusters]);
@@ -145,20 +163,21 @@ export default function HouseholdRiskOverview() {
     const map = {};
     clusters.forEach((h) => {
       const b = h.barangay || "Unassigned";
-      if (!map[b]) map[b] = { priority: 0, intervention: 0, monitor: 0, stable: 0, total: 0 };
+      if (!map[b]) map[b] = { priority: 0, intervention: 0, monitor: 0, stable: 0, unassessed: 0, total: 0 };
       map[b].total += 1;
       if (h.risk?.level === RISK_LEVELS.PRIORITY) map[b].priority += 1;
       else if (h.risk?.level === RISK_LEVELS.INTERVENTION) map[b].intervention += 1;
       else if (h.risk?.level === RISK_LEVELS.MONITOR) map[b].monitor += 1;
-      else map[b].stable += 1;
+      else if (h.risk?.level === RISK_LEVELS.STABLE) map[b].stable += 1;
+      else map[b].unassessed += 1;
     });
     return Object.entries(map).sort((a, b) => b[1].priority - a[1].priority);
   }, [clusters]);
 
   const indicatorBreakdown = useMemo(() => {
     const map = {};
-    clusters.forEach((h) => (h.risk?.indicators || []).forEach((i) => {
-      map[i.label] = (map[i.label] || 0) + 1;
+    clusters.forEach((h) => (h.environmentalRisk?.factors || []).forEach((factor) => {
+      map[factor] = (map[factor] || 0) + 1;
     }));
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
   }, [clusters]);
@@ -166,7 +185,7 @@ export default function HouseholdRiskOverview() {
   const visiblePriorityList = useMemo(
     () => filtered
       .filter((h) => h.risk?.level === RISK_LEVELS.PRIORITY || h.risk?.level === RISK_LEVELS.INTERVENTION)
-      .sort((a, b) => (b.risk?.score || 0) - (a.risk?.score || 0)),
+      .sort((a, b) => levelOrder.indexOf(a.risk.level) - levelOrder.indexOf(b.risk.level)),
     [filtered]
   );
 
@@ -250,7 +269,7 @@ export default function HouseholdRiskOverview() {
           </div>
           <h3 className="mt-4 font-display text-xl font-medium text-slate-900">Unable to Load Household Risk Data</h3>
           <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-            We couldn&apos;t retrieve the latest household risk information.
+            {loadError || "We couldn&apos;t retrieve the latest household risk information."}
           </p>
           <button onClick={() => load()} className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white transition-colors hover:bg-blue-700">
             <RefreshCw className="h-4 w-4" /> Retry
@@ -286,16 +305,16 @@ export default function HouseholdRiskOverview() {
               description="Registered households in the registry"
             />
             <KpiHorizontal.Item
-              label="PRIORITY REVIEW"
+              label="PRIORITY"
               value={counts.priority}
               tone="red"
-              description="Households requiring immediate follow-up"
+              description="Households with an explicit Priority cluster assignment"
             />
             <KpiHorizontal.Item
-              label="NEEDS INTERVENTION"
+              label="INTERVENTION"
               value={counts.intervention}
               tone="amber"
-              description="Households requiring active intervention"
+              description="Households with an explicit Intervention cluster assignment"
             />
             <KpiHorizontal.Item
               label="OPEN FOLLOW-UPS"
@@ -377,8 +396,7 @@ export default function HouseholdRiskOverview() {
               >
                 <option value="all">All Indicators</option>
                 {indicatorOptions.map((k) => {
-                  const def = getRiskConfig().indicators.find((i) => i.key === k);
-                  return <option key={k} value={k}>{def?.label || k}</option>;
+                  return <option key={k} value={k}>{k}</option>;
                 })}
               </select>
             </div>
@@ -446,8 +464,8 @@ export default function HouseholdRiskOverview() {
         <div id="priority-section" className="mb-6 rounded-[20px] border border-blue-100 bg-white p-6">
           <div className="mb-5 flex items-end justify-between">
             <div>
-              <h2 className="font-display text-2xl font-medium text-slate-900">Priority households</h2>
-              <p className="mt-1 text-sm text-slate-600">Households requiring immediate follow-up and intervention</p>
+              <h2 className="font-display text-2xl font-medium text-slate-900">Priority and Intervention households</h2>
+              <p className="mt-1 text-sm text-slate-600">Households with one of these explicit cluster assignments</p>
             </div>
             <div className="flex items-center gap-4">
               <span className="text-sm text-slate-600">
@@ -464,9 +482,9 @@ export default function HouseholdRiskOverview() {
 
           {visiblePriorityList.length === 0 ? (
             <div className="py-12 text-center">
-              <p className="text-sm font-medium text-slate-900">No households currently require immediate review.</p>
-              <p className="mt-1 text-sm text-slate-600">
-                {noData ? "Household risk records will appear here when available." : "Households meeting the priority or intervention criteria will appear here."}
+                <p className="text-sm font-medium text-slate-900">No Priority or Intervention cluster assignments are recorded.</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {noData ? "Household cluster assignments will appear here when recorded." : "This list does not infer cluster assignments from environmental risk."}
               </p>
             </div>
           ) : (
@@ -477,16 +495,16 @@ export default function HouseholdRiskOverview() {
                     <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">ID</th>
                     <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Head of Household</th>
                     <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Barangay</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Risk Level</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Key Indicators</th>
+                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Cluster Assignment</th>
+                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Environmental Indicators</th>
                     <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Follow-up</th>
                     <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {visiblePriorityList.map((h) => {
-                    const tone = levelTone[h.risk?.level || RISK_LEVELS.STABLE];
-                    const indicators = (h.risk?.indicators || []).map((i) => i.label).join(", ");
+                    const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.UNASSESSED];
+                    const indicators = (h.environmentalRisk?.factors || []).join(", ");
                     return (
                       <tr key={h.id} className="transition-colors hover:bg-slate-50">
                         <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{h.id}</td>
@@ -495,12 +513,12 @@ export default function HouseholdRiskOverview() {
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${tone.chip}`}>
                             <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-                            {RISK_LEVEL_LABELS[h.risk?.level || RISK_LEVELS.STABLE]}
+                            {clusterLabel(h.risk?.level)}
                           </span>
                         </td>
                         <td className="max-w-xs px-4 py-3">
                           <div className="truncate text-sm text-slate-700" title={indicators}>
-                            {indicators || "No indicators listed"}
+                            {indicators || "No environmental indicators recorded"}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-600">{h.workflowStatus || "—"}</td>
@@ -542,7 +560,7 @@ export default function HouseholdRiskOverview() {
             ) : (
               <div className="mt-6 space-y-4">
                 {levelOrder.map((level) => {
-                  const value = counts[level === RISK_LEVELS.PRIORITY ? "priority" : level === RISK_LEVELS.INTERVENTION ? "intervention" : level === RISK_LEVELS.MONITOR ? "monitor" : "stable"];
+                  const value = counts[countKey[level]];
                   const percentage = Math.round((value / counts.total) * 100);
                   const tone = levelTone[level];
                   return (
@@ -615,6 +633,7 @@ export default function HouseholdRiskOverview() {
                   <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Intervention</th>
                   <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Monitor</th>
                   <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Stable</th>
+                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Unassigned</th>
                   <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Total</th>
                   <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Action</th>
                 </tr>
@@ -643,6 +662,9 @@ export default function HouseholdRiskOverview() {
                         {c.stable}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="text-sm font-semibold text-slate-500">{c.unassessed}</span>
+                    </td>
                     <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900">{c.total}</td>
                     <td className="px-4 py-3 text-right">
                       <button
@@ -660,7 +682,7 @@ export default function HouseholdRiskOverview() {
                 ))}
                 {byBarangay.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-600">
+                    <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-600">
                       No barangay data available.
                     </td>
                   </tr>
@@ -695,7 +717,7 @@ export default function HouseholdRiskOverview() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {paginatedData.map((h) => {
-                  const tone = levelTone[h.risk?.level || RISK_LEVELS.STABLE];
+                  const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.UNASSESSED];
                   return (
                     <tr key={h.id} className="transition-colors hover:bg-slate-50">
                       <td className="px-4 py-3">
@@ -706,10 +728,10 @@ export default function HouseholdRiskOverview() {
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${tone.chip}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-                          {RISK_LEVEL_LABELS[h.risk?.level || RISK_LEVELS.STABLE]}
+                          {clusterLabel(h.risk?.level)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-900">{h.risk?.count ?? 0}</td>
+                      <td className="px-4 py-3 text-sm text-slate-900">{h.environmentalRisk?.factors?.length ?? 0}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{daysAgo(h.lastHouseholdVisit)}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{h.workflowStatus || "—"}</td>
                       <td className="px-4 py-3 text-right">

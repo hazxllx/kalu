@@ -28,21 +28,63 @@ const isProfileConflictError = (error) =>
 // Too many verification emails in a short window.
 const isRateLimitError = (error) =>
   codeOf(error) === 'over_email_send_rate_limit'
+  || codeOf(error) === 'over_request_rate_limit'
+  || Number(error?.status) === 429
   || /rate limit|too many requests|frequency/i.test(messageOf(error));
+
+const diagnosticTextOf = (error) => [
+  error?.message,
+  error?.details,
+  error?.hint,
+  error?.code,
+  error?.error_description,
+].filter((value) => typeof value === 'string').join(' ');
+
+const isSmtpAuthenticationError = (error) =>
+  /\b535\b|5\.7\.8|smtp.{0,80}(?:auth|credential)|(?:auth|credential).{0,80}smtp/i
+    .test(diagnosticTextOf(error));
+
+const isEmailDeliveryError = (error) =>
+  /error sending (?:confirmation|signup|verification) email|smtp|email delivery/i
+    .test(diagnosticTextOf(error));
 
 /**
  * Classify any thrown/returned Supabase Auth error into a stable issue code.
  * Shared by the signUp response path and the catch handler so both stay
  * consistent.
  *
- * @returns {'duplicate_email'|'profile_conflict'|'rate_limited'|'signup_failed'}
+ * @returns {'duplicate_email'|'profile_conflict'|'rate_limited'|'smtp_auth_failed'|'email_delivery_failed'|'signup_failed'}
  */
 export const classifySignupError = (error) => {
   if (!error) return 'signup_failed';
   if (isDuplicateEmailError(error)) return 'duplicate_email';
   if (isProfileConflictError(error)) return 'profile_conflict';
   if (isRateLimitError(error)) return 'rate_limited';
+  if (isSmtpAuthenticationError(error)) return 'smtp_auth_failed';
+  if (isEmailDeliveryError(error)) return 'email_delivery_failed';
   return 'signup_failed';
+};
+
+/**
+ * Return a safe, actionable message for signup/resend failures. Auth provider
+ * diagnostics can contain implementation details, so raw error text is never
+ * displayed to the applicant.
+ *
+ * @param {unknown} error
+ * @param {{ isResend?: boolean }} [options]
+ * @returns {string}
+ */
+export const signupErrorMessage = (error, { isResend = false } = {}) => {
+  const issue = classifySignupError(error);
+  if (issue === 'smtp_auth_failed') {
+    return 'The verification email could not be sent because the email provider rejected SMTP authentication. Your email is not verified. Please try again later or contact the RHU.';
+  }
+  if (issue === 'email_delivery_failed') {
+    return 'We could not send your verification email. Your email is not verified. Please try again or contact the RHU.';
+  }
+  return isResend
+    ? 'We could not resend your verification code. Please try again later.'
+    : 'We could not send your verification code. Please try again later.';
 };
 
 /**
@@ -75,7 +117,7 @@ export const rateLimitRetrySeconds = (error) => {
  * existing email (email-enumeration protection). Missing or malformed
  * responses must never advance OTP state.
  *
- * @returns {'duplicate_email'|'profile_conflict'|'rate_limited'|'signup_failed'|'invalid_response'|null}
+ * @returns {'duplicate_email'|'profile_conflict'|'rate_limited'|'smtp_auth_failed'|'email_delivery_failed'|'signup_failed'|'invalid_response'|null}
  *   `null` means the signup is a genuinely new account and the OTP was sent.
  */
 export const signupResponseIssue = ({ data, error, email }) => {

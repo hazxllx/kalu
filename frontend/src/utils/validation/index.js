@@ -90,12 +90,13 @@ const parseDateOnly = (value) => {
   return date;
 };
 
-const ageFromDateOnly = (value, now = new Date()) => {
+export const ageFromDateOnly = (value, now = new Date()) => {
   const date = parseDateOnly(value);
   if (!date) return null;
-  let age = now.getUTCFullYear() - date.getUTCFullYear();
-  const monthDelta = now.getUTCMonth() - date.getUTCMonth();
-  if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < date.getUTCDate())) age -= 1;
+  // Birth dates are calendar dates; today's date follows the user's local day.
+  let age = now.getFullYear() - date.getUTCFullYear();
+  const monthDelta = now.getMonth() - date.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < date.getUTCDate())) age -= 1;
   return age;
 };
 
@@ -157,7 +158,7 @@ export const dateOfBirth = (value, { isRequired = true, maxAge = 120, label = 'D
   const date = parseDateOnly(value);
   if (!date) return `${label} is invalid.`;
   const now = new Date();
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   if (date.getTime() > today) return 'Date of birth cannot be in the future.';
   const age = ageFromDateOnly(value, now);
   if (age === null || age < 0 || age > maxAge) return `${label} is not a valid age.`;

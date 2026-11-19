@@ -4,7 +4,7 @@ import PageHeader from "@/components/common/PageHeader";
 import { NavTabs } from "@/layouts/NavTabsLayout";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup } from "@/components/system";
-import { AlertTriangle, Info, Pill, Plus, Save, Search, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, Info, Pill, Plus, Save, Search, X } from "lucide-react";
 import { medicinesApi, bpConfigApi } from "@/services/api";
 import { useToast } from "@/components/ui/use-toast";
 import { DEFAULT_BP_THRESHOLDS } from "@/features/consultations/utils/bpClassification";
@@ -642,13 +642,13 @@ export default function MedicineCatalog() {
                   </div>
                 </div>
                 <div className="sm:col-span-2">
-                  <label className={labelCls}>Dosage instructions</label>
-                  <textarea value={form.dosageInstructions} onChange={(e) => setForm({ ...form, dosageInstructions: e.target.value })} placeholder="Standard dosage, e.g. Adults: 1 tablet every 6 hours as needed" rows={2} className={`${inputCls} mt-1`} />
+                  <label className={labelCls}>Catalog dosage reference (optional)</label>
+                  <textarea value={form.dosageInstructions} onChange={(e) => setForm({ ...form, dosageInstructions: e.target.value })} placeholder="Reference text only; enter patient-specific directions in the consultation" rows={2} className={`${inputCls} mt-1`} />
                   <p className="mt-1 flex items-start gap-1.5 text-[11px] text-slate-500">
-                    <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" />
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" />
                     {editing && editing.dosageVerifiedAt
-                      ? `Verified on ${formatVerified(editing.dosageVerifiedAt)}. Editing re-stamps verification.`
-                      : "Saving records that these instructions were entered/verified by you as authorized health personnel."}
+                      ? `A review record is dated ${formatVerified(editing.dosageVerifiedAt)}, but no reference source is recorded.`
+                      : "Optional catalog text only. No source is recorded here, so treat it as unverified. It is never copied into a patient prescription."}
                   </p>
                 </div>
                 <label className="flex items-center gap-2 sm:col-span-2">

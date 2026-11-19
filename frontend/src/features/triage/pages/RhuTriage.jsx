@@ -16,12 +16,18 @@ import {
 import { useBarangays } from "@/context/BarangaysContext";
 import { useAuth } from "@/context/AuthContext";
 import {
+  VITAL_FIELDS, ageFromBirthDate, emptyVitals, errorStep, isRecorded,
+  mapTriageFieldErrors, optionalReading, previewBmi, residentIdentity, reviewFlags,
+  validateDemographics, validateRegisteredPatient, validateVisitDetails,
+} from "@/features/triage/lib/triageValidation";
+import {
   ArrowLeft,
   Search,
   Send,
   Users,
   Plus,
   Check,
+  AlertCircle,
   Stethoscope,
   ChevronRight,
 } from "lucide-react";
@@ -57,36 +63,11 @@ const STATUS_TONES = {
 const ROW_COLS = "md:grid-cols-[2.2fr_1fr_1.6fr_1.2fr_auto]";
 
 /* Workflow steps (0-indexed progress). */
-const STEP_ORDER = ["patient", "vitals", "reason", "review"];
+const STEP_ORDER = ["patient", "details", "review"];
 const STEP_LABELS = {
   patient: "Patient",
-  vitals: "Vital Signs",
-  reason: "Reason for Visit",
+  details: "Visit Details",
   review: "Review",
-};
-
-/** Vital sign draft. BMI is computed, never stored for manual input. */
-const emptyVitals = () => ({
-  heightCm: "",
-  weightKg: "",
-  bloodPressure: "",
-  bloodSugar: "",
-});
-
-/** BMI = weight(kg) / (height(m))². Returns "" when inputs are missing/invalid.
- *  Preview only: the backend (utils/bmi.js) recomputes and persists the
- *  authoritative value at 1-decimal precision, so this preview uses the SAME
- *  rounding to avoid a frontend/backend mismatch. Never defaults missing
- *  height/weight to 0. */
-const computeBmi = (heightCm, weightKg) => {
-  const h = Number(heightCm);
-  const w = Number(weightKg);
-  if (!heightCm || !weightKg || Number.isNaN(h) || Number.isNaN(w) || h <= 0 || w <= 0) {
-    return { value: "", raw: null };
-  }
-  const hM = h / 100;
-  const rounded = Math.round((w / (hM * hM)) * 10) / 10;
-  return { value: rounded.toFixed(1), raw: rounded };
 };
 
 const inputCls = (error) =>
@@ -95,15 +76,14 @@ const inputCls = (error) =>
   }`;
 
 const metaLine = (age, sex, barangay) =>
-  [age ? `${age} years old` : null, sex, barangay || "RHU"].filter(Boolean).join(" • ");
-
-const numeric = (value) => (value !== "" && value != null && !Number.isNaN(Number(value)) ? Number(value) : null);
+  [isRecorded(age) ? `${age} years old` : "Age not recorded", sex || "Sex not recorded", barangay || "Barangay not recorded"].join(" • ");
 
 export default function RhuTriage() {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const { barangays: liveBarangays } = useBarangays();
+  const { records: barangayRecords, loading: barangaysLoading, error: barangaysError } = useBarangays();
+  const liveBarangays = (barangayRecords || []).filter((record) => record.id && String(record.status || "Active").toLowerCase() === "active").map((record) => record.name);
   // BUG-008: the "recently sent" list and the triage hand-off are backed by the
   // persistent database (the caller's own /intake submissions), not localStorage.
   const { patients: sentPatients, sendToPhnQueue } = usePhnWorkflow({ source: "intake" });
@@ -119,10 +99,11 @@ export default function RhuTriage() {
   const [selected, setSelected] = useState(null); // registered resident object (real record only)
   const [residentContext, setResidentContext] = useState(null);
   const [residentContextLoading, setResidentContextLoading] = useState(false);
-  const [walkIn, setWalkIn] = useState({ name: "", age: "", sex: "Female", barangay: "" }); // walk-in draft
+  const [walkIn, setWalkIn] = useState({ name: "", age: "", sex: "", barangay: "" }); // walk-in draft
 
   // Remaining triage sections (kept in state so Back/Continue never lose data).
   const [vitals, setVitals] = useState(emptyVitals);
+  const bmiPreview = previewBmi(vitals);
   const [reason, setReason] = useState("");
   const [reasonDetail, setReasonDetail] = useState("");
   const [notes, setNotes] = useState("");
@@ -149,6 +130,8 @@ export default function RhuTriage() {
   // after a successful hand-off).
   const referralLoadSeq = useRef(0);
   const residentLoadSeq = useRef(0);
+  const submissionRef = useRef(null);
+  const sendingRef = useRef(false);
 
   const loadIncomingReferrals = useCallback(async () => {
     const seq = (referralLoadSeq.current += 1);
@@ -236,7 +219,7 @@ export default function RhuTriage() {
               r.name ||
               "",
             age: r.birthDate
-              ? Math.max(0, new Date().getFullYear() - new Date(r.birthDate).getFullYear())
+              ? ageFromBirthDate(r.birthDate)
               : r.age ?? "",
             sex: r.sex || "",
             barangay: r.barangay || "",
@@ -257,33 +240,34 @@ export default function RhuTriage() {
   }, [trimmedQuery, shouldSearch, user?.id]);
 
   /* --------------------- Derived patient identity ---------------------- */
+  const loadedIdentity = residentContext?.id === selected?.id ? residentIdentity(residentContext) : null;
   const hasPatient = patientType !== null;
   const patientName = patientType === "registered"
-    ? selected?.name || ""
+    ? loadedIdentity?.name || selected?.name || ""
     : patientType === "walkin"
       ? walkIn.name
       : "";
   const patientAge = patientType === "registered"
-    ? selected?.age ?? ""
+    ? loadedIdentity?.age ?? ""
     : patientType === "walkin"
       ? walkIn.age
       : "";
   const patientSex = patientType === "registered"
-    ? selected?.sex || ""
+    ? loadedIdentity?.sex || ""
     : patientType === "walkin"
       ? walkIn.sex
       : "";
   const patientBarangay = patientType === "registered"
-    ? selected?.barangay || ""
+    ? loadedIdentity?.barangay || ""
     : patientType === "walkin"
       ? walkIn.barangay || ""
       : "";
 
-  const bmi = computeBmi(vitals.heightCm, vitals.weightKg);
+  const flags = reviewFlags(vitals);
   const finalReason = reason === "Other" ? reasonDetail.trim() : reason.trim();
 
-  const showToast = (message) => {
-    setToast(message);
+  const showToast = (message, ok) => {
+    setToast({ message, ok });
     setTimeout(() => setToast(null), 3200);
   };
 
@@ -292,7 +276,7 @@ export default function RhuTriage() {
     setPatientType(null);
     setSelected(null);
     setResidentContext(null);
-    setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
+    setWalkIn({ name: "", age: "", sex: "", barangay: "" });
     setSearchQuery("");
     setEntryMode("choose");
     setVitals(emptyVitals());
@@ -301,6 +285,7 @@ export default function RhuTriage() {
     setNotes("");
     setActiveReferral(null);
     setErrors({});
+    submissionRef.current = null;
   };
 
   /* --------------------------- Patient handlers ------------------------- */
@@ -310,38 +295,48 @@ export default function RhuTriage() {
     setSelected(resident);
     setResidentContext(null);
     setVitals(emptyVitals());
+    setReason("");
+    setReasonDetail("");
+    setNotes("");
+    setActiveReferral(null);
     setSearchQuery("");
-    setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
+    setWalkIn({ name: "", age: "", sex: "", barangay: "" });
+    submissionRef.current = null;
     setErrors({});
   };
 
   /**
    * Start screening a referred patient. Seeds the wizard with the referral's
    * resident and reason, links this screening to the referral (referralId), and
-   * jumps to vitals. The original barangay referral is read-only context — the
+   * verifies the loaded patient first. The original referral is read-only context; the
    * triage records its own findings.
    */
   const beginReferralTriage = (ref) => {
     const r = ref.resident || {};
     const name = [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(" ").trim();
     const age = r.birth_date
-      ? Math.max(0, new Date().getFullYear() - new Date(r.birth_date).getFullYear())
+      ? ageFromBirthDate(r.birth_date)
       : "";
     chooseRegistered({ id: r.id || ref.resident_id, name, age, sex: r.sex || "", barangay: r.barangay || "" });
     setActiveReferral(ref);
     const draft = ref.encounter?.status === "draft" ? ref.encounter : null;
     if (draft) {
       setVitals({
+        ...emptyVitals(),
         heightCm: draft.height_cm == null ? "" : String(draft.height_cm),
         weightKg: draft.weight_kg == null ? "" : String(draft.weight_kg),
         bloodPressure: draft.bp || "",
         bloodSugar: draft.blood_sugar == null ? "" : String(draft.blood_sugar),
+        temperature: draft.temperature == null ? "" : String(draft.temperature),
+        pulseRate: draft.hr == null ? "" : String(draft.hr),
+        respiratoryRate: draft.rr == null ? "" : String(draft.rr),
+        oxygenSaturation: draft.o2sat == null ? "" : String(draft.o2sat),
       });
     }
     setNotes(draft?.clinical_history || "");
     setReason("Other");
     setReasonDetail(draft?.chief_complaint || ref.reason || ref.chief_complaints || "");
-    setCurrentStep("vitals");
+    setCurrentStep("patient");
     setErrors({});
   };
 
@@ -354,86 +349,51 @@ export default function RhuTriage() {
 
   const startSearch = () => {
     setEntryMode("search");
-    setErrors({});
   };
 
   const openWalkIn = () => {
     setPatientType(null);
     setEntryMode("walkin");
-    setErrors({});
   };
 
   const backToChoices = () => {
     setEntryMode("choose");
     setSearchQuery("");
-    setErrors({});
   };
 
   const changePatient = () => {
     setPatientType(null);
     setSelected(null);
     setResidentContext(null);
-    setWalkIn({ name: "", age: "", sex: "Female", barangay: "" });
+    setActiveReferral(null);
+    submissionRef.current = null;
     setEntryMode("choose");
     setSearchQuery("");
     setErrors({});
   };
 
   /* ----------------------------- Validation ----------------------------- */
-  const validateRegisteredPatient = () => {
-    const next = {};
-    if (!selected) next.patient = "Please select a patient first.";
-    return next;
-  };
-
-  const validateWalkInFields = () => {
-    const next = {};
-    if (!walkIn.name.trim()) next.name = "Please enter the patient's name.";
-    if (!walkIn.barangay) next.barangay = "Please choose the patient's barangay.";
-    return next;
-  };
+  const validateWalkInFields = () => validateDemographics(walkIn, liveBarangays);
 
   const validatePatient = () => {
     if (patientType === "walkin") return validateWalkInFields();
-    return validateRegisteredPatient();
+    return validateRegisteredPatient(selected, residentContext, residentContextLoading, liveBarangays);
   };
 
-  const validateVitals = () => {
-    const next = {};
-    if (!vitals.heightCm) next.heightCm = "Please enter the patient's height.";
-    else if (!(Number(vitals.heightCm) > 0)) next.heightCm = "Please enter a valid height.";
-    if (!vitals.weightKg) next.weightKg = "Please enter the patient's weight.";
-    else if (!(Number(vitals.weightKg) > 0)) next.weightKg = "Please enter a valid weight.";
-    if (!vitals.bloodPressure) next.bloodPressure = "Please enter the patient's blood pressure.";
-    else if (!/^\d{2,3}\s*\/\s*\d{2,3}$/.test(vitals.bloodPressure.trim())) {
-      next.bloodPressure = "Use the format 120/80.";
-    }
-    if (!vitals.bloodSugar) next.bloodSugar = "Please enter the patient's blood sugar.";
-    else if (!(Number(vitals.bloodSugar) > 0)) next.bloodSugar = "Please enter a valid blood sugar.";
-    return next;
-  };
+  const validateDetails = () => validateVisitDetails(vitals, reason, reasonDetail, notes);
 
   /* ------------------------- Continue / Back logic ---------------------- */
   const continueFromPatient = () => {
     const nextErrors = validatePatient();
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
-    setCurrentStep("vitals");
+    setCurrentStep("details");
   };
 
-  const continueFromVitals = () => {
-    const nextErrors = validateVitals();
+  const continueFromDetails = () => {
+    const nextErrors = validateDetails();
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
-    setCurrentStep("reason");
-  };
-
-  const continueFromReason = () => {
-    if (reason === "Other" && !reasonDetail.trim()) {
-      setErrors({ reasonDetail: "Please describe the reason." });
-      return;
-    }
-    setErrors({});
     setCurrentStep("review");
   };
 
@@ -441,47 +401,53 @@ export default function RhuTriage() {
     const idx = STEP_ORDER.indexOf(currentStep);
     if (idx > 0) {
       setCurrentStep(STEP_ORDER[idx - 1]);
-      setErrors({});
     }
   };
 
   /* ----------------------------- Final action --------------------------- */
   const [sending, setSending] = useState(false);
   const handleSendToPhn = async () => {
-    if (sending) return;
-    const payload = {
-      // Registered patients carry their real residents.id (from the backend
-      // search); walk-ins have none until they are created through intake.
-      residentId: patientType === "registered" ? selected?.id || null : null,
-      // When screening a referred patient, link this encounter to the barangay
-      // referral; the backend treats the referral as authoritative for identity.
-      referralId: activeReferral?.id || null,
-      patient: patientName,
-      age: numeric(patientAge),
-      sex: patientSex,
-      barangay: patientBarangay || null,
-      reason: finalReason,
-      chiefComplaint: finalReason,
-      // Measurements collected during triage.
-      temperature: null,
-      bloodPressure: vitals.bloodPressure.trim() || null,
-      pulseRate: null,
-      respiratoryRate: null,
-      oxygenSaturation: null,
-      weight: vitals.weightKg ? String(vitals.weightKg) : null,
-      heightCm: vitals.heightCm ? String(vitals.heightCm) : null,
-      bmi: bmi.value || null,
-      bloodSugar: vitals.bloodSugar.trim() || null,
-      notes: notes.trim(),
-      personnel: user?.name || "RHU Personnel",
-      visitDate: new Date().toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      }),
-    };
+    if (sendingRef.current) return;
+    const nextErrors = { ...validatePatient(), ...validateDetails() };
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      if (patientType === "walkin" && errorStep(nextErrors) === "patient") {
+        setPatientType(null);
+        setEntryMode("walkin");
+      }
+      setCurrentStep(errorStep(nextErrors));
+      return;
+    }
+    sendingRef.current = true;
     setSending(true);
     try {
+      if (!submissionRef.current) {
+        submissionRef.current = { clientSubmissionId: crypto.randomUUID(), visitDate: new Date().toISOString() };
+      }
+      const payload = {
+        ...submissionRef.current,
+        // Registered patients carry their real residents.id (from the backend
+        // search); walk-ins have none until they are created through intake.
+        residentId: patientType === "registered" ? selected?.id || null : null,
+        // The backend treats a linked referral as authoritative for identity.
+        referralId: activeReferral?.id || null,
+        patient: patientName,
+        age: Number(patientAge),
+        sex: patientSex,
+        barangay: patientBarangay || null,
+        reason: finalReason,
+        chiefComplaint: finalReason,
+        temperature: optionalReading(vitals.temperature),
+        bloodPressure: optionalReading(vitals.bloodPressure),
+        pulseRate: optionalReading(vitals.pulseRate),
+        respiratoryRate: optionalReading(vitals.respiratoryRate),
+        oxygenSaturation: optionalReading(vitals.oxygenSaturation),
+        weight: optionalReading(vitals.weightKg),
+        heightCm: optionalReading(vitals.heightCm),
+        bloodSugar: optionalReading(vitals.bloodSugar),
+        notes: notes.trim(),
+        personnel: user?.name || null,
+      };
       // The submission contract (see features/triage/lib/triageWorkflow.js):
       //  - only a real API failure preserves the active referral + wizard and
       //    shows the error toast;
@@ -489,14 +455,28 @@ export default function RhuTriage() {
       //    notifies, and refreshes the incoming referral list;
       //  - post-success cleanup/refresh errors can never produce a false
       //    failure toast.
-      await submitTriage({
+      const result = await submitTriage({
         send: () => sendToPhnQueue(payload),
         reset: resetAll,
-        notify: ({ message }) => showToast(message),
+        notify: ({ message, ok }) => showToast(message, ok),
         refresh: loadIncomingReferrals,
         messages: TRIAGE_MESSAGES,
       });
+      if (!result.ok && result.error) {
+        const fieldErrors = mapTriageFieldErrors(result.error);
+        setErrors({ ...fieldErrors, submit: result.error.message || TRIAGE_MESSAGES.failure });
+        if (Object.keys(fieldErrors).length) {
+          if (patientType === "walkin" && ["name", "age", "sex", "barangay"].some((field) => fieldErrors[field])) {
+            setPatientType(null);
+            setEntryMode("walkin");
+          }
+          setCurrentStep(errorStep(fieldErrors));
+        }
+      }
+    } catch (error) {
+      setErrors((previous) => ({ ...previous, submit: error?.message || TRIAGE_MESSAGES.failure }));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -573,8 +553,8 @@ export default function RhuTriage() {
       {/* Toast */}
       {toast && (
         <div className="fixed bottom-4 right-4 z-[60] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg animate-in slide-in-from-bottom-2">
-          <Check className="h-4 w-4 text-brand-green" />
-          <span className="text-sm">{toast}</span>
+          {toast.ok ? <Check className="h-4 w-4 text-brand-green" /> : <AlertCircle className="h-4 w-4 text-brand-danger" />}
+          <span role={toast.ok ? "status" : "alert"} className="text-sm">{toast.message}</span>
         </div>
       )}
 
@@ -596,6 +576,7 @@ export default function RhuTriage() {
 
           <div className="px-4 py-5 sm:px-6 sm:py-6">
             {hasPatient && progress}
+            {errors.submit && <p role="alert" className="mb-4 text-sm text-brand-danger">{errors.submit}</p>}
 
             {/* ============ STEP 1 · PATIENT ============ */}
             {currentStep === "patient" && (
@@ -661,6 +642,7 @@ export default function RhuTriage() {
                             Patient Name <span className="text-brand-danger">*</span>
                           </label>
                           <input
+                            aria-label="Patient Name"
                             type="text"
                             placeholder="Enter patient's name"
                             value={walkIn.name}
@@ -673,22 +655,25 @@ export default function RhuTriage() {
                           <div>
                             <label className="mb-1.5 block text-sm font-medium text-brand-ink">Age *</label>
                             <input
-                              type="number"
-                              min="0"
+                              aria-label="Age"
+                              type="text"
+                              inputMode="numeric"
                               placeholder="e.g. 34"
                               value={walkIn.age}
                               onChange={(e) => setWalkIn((prev) => ({ ...prev, age: e.target.value }))}
-                              className={inputCls()}
+                              className={inputCls(errors.age)}
                             />
+                            {errors.age && <p className="mt-1 text-xs text-brand-danger">{errors.age}</p>}
                           </div>
                           <div>
                             <label className="mb-1.5 block text-sm font-medium text-brand-ink">Sex *</label>
                             <ButtonSelectGroup
                               ariaLabel="Sex"
-                              options={["Female", "Male"]}
+                              options={["Female", "Male", "Other"]}
                               value={walkIn.sex}
                               onChange={(v) => setWalkIn((prev) => ({ ...prev, sex: v }))}
                             />
+                            {errors.sex && <p className="mt-1 text-xs text-brand-danger">{errors.sex}</p>}
                           </div>
                         </div>
                         <div className="max-w-xl">
@@ -703,6 +688,7 @@ export default function RhuTriage() {
                             emptyText="No barangay found."
                             error={errors.barangay}
                           />
+                          {(barangaysLoading || barangaysError || !liveBarangays.length) && <p className="mt-1 text-xs text-brand-gray">{barangaysLoading ? "Loading registered barangays..." : "Registered barangays are unavailable. Reload before continuing."}</p>}
                         </div>
                         <div className="flex flex-col-reverse items-stretch gap-3 pt-1 sm:max-w-xl sm:flex-row sm:items-center sm:justify-between">
                           <button
@@ -828,15 +814,15 @@ export default function RhuTriage() {
                               )}
                               <div>
                                 <dt className="text-brand-gray">Age</dt>
-                                <dd className="font-medium text-brand-ink">{patientAge !== "" && patientAge != null ? `${patientAge}` : "—"}</dd>
+                                <dd className="font-medium text-brand-ink">{patientAge !== "" && patientAge != null ? `${patientAge}` : "Not recorded"}</dd>
                               </div>
                               <div>
                                 <dt className="text-brand-gray">Sex</dt>
-                                <dd className="font-medium text-brand-ink">{patientSex || "—"}</dd>
+                                <dd className="font-medium text-brand-ink">{patientSex || "Not recorded"}</dd>
                               </div>
                               <div>
                                 <dt className="text-brand-gray">Barangay</dt>
-                                <dd className="font-medium text-brand-ink">{patientBarangay || "—"}</dd>
+                                <dd className="font-medium text-brand-ink">{patientBarangay || "Not recorded"}</dd>
                               </div>
                             </dl>
                             {patientType === "registered" && (
@@ -857,6 +843,7 @@ export default function RhuTriage() {
                     </div>
 
                     {errors.patient && <p className="mt-2 text-xs text-brand-danger">{errors.patient}</p>}
+                    {patientType === "registered" && ["name", "age", "sex", "barangay"].filter((field) => errors[field]).map((field) => <p key={field} className="mt-2 text-xs text-brand-danger">{errors[field]}</p>)}
                     {backContinue(continueFromPatient, "Continue to Triage")}
                   </>
                 )}
@@ -864,12 +851,12 @@ export default function RhuTriage() {
             )}
 
             {/* ============ STEP 2 · VITAL SIGNS & MEASUREMENTS ============ */}
-            {currentStep === "vitals" && (
+            {currentStep === "details" && (
               <div>
                 {stepIndicator(
                   2,
-                  "Vital Signs & Measurements",
-                  "Record the patient's measurements before the check-up."
+                  "Visit Details",
+                  "Record the reason, notes and available measurements. Leave measurements blank when not recorded."
                 )}
 
                 <div className="max-w-2xl space-y-4">
@@ -901,51 +888,31 @@ export default function RhuTriage() {
                     </div>
                   )}
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-1.5 block text-sm font-medium text-brand-ink">Height *</label>
-                      <div className="relative">
+                    {VITAL_FIELDS.map(({ key, label, unit }) => (
+                      <div key={key}>
+                        <label htmlFor={`triage-${key}`} className="mb-1.5 block text-sm font-medium text-brand-ink">{label} <span className="font-normal text-brand-gray">({unit}, optional)</span></label>
                         <input
-                          type="number"
-                          min="0"
-                          placeholder="e.g. 170"
-                          value={vitals.heightCm}
-                          onChange={(e) => setVitals((prev) => ({ ...prev, heightCm: e.target.value }))}
-                          className={`${inputCls(errors.heightCm)} pr-12`}
+                          id={`triage-${key}`}
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="Not recorded"
+                          value={vitals[key]}
+                          onChange={(e) => setVitals((prev) => ({ ...prev, [key]: e.target.value }))}
+                          aria-invalid={Boolean(errors[key])}
+                          aria-describedby={errors[key] ? `triage-${key}-error` : undefined}
+                          className={inputCls(errors[key])}
                         />
-                        <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-brand-gray">
-                          cm
-                        </span>
+                        {errors[key] && <p id={`triage-${key}-error`} className="mt-1 text-xs text-brand-danger">{errors[key]}</p>}
                       </div>
-                      {errors.heightCm && <p className="mt-1 text-xs text-brand-danger">{errors.heightCm}</p>}
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-sm font-medium text-brand-ink">Weight *</label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="e.g. 65"
-                          value={vitals.weightKg}
-                          onChange={(e) => setVitals((prev) => ({ ...prev, weightKg: e.target.value }))}
-                          className={`${inputCls(errors.weightKg)} pr-12`}
-                        />
-                        <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-brand-gray">
-                          kg
-                        </span>
-                      </div>
-                      {errors.weightKg && <p className="mt-1 text-xs text-brand-danger">{errors.weightKg}</p>}
-                    </div>
+                    ))}
                   </div>
 
-                  {/* Auto-computed BMI */}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-brand-ink">BMI</label>
                     <div className="flex items-center gap-3 rounded-btn border border-dashed border-brand-blue/40 bg-brand-blue/5 px-3.5 py-2.5">
-                      <span className="text-lg font-semibold text-brand-blue">{bmi.value || "—"}</span>
+                      <span className="text-lg font-semibold text-brand-blue">{bmiPreview || "Not recorded"}</span>
                       <span className="text-xs text-brand-gray">
-                        {bmi.value
-                          ? "Auto-computed from height and weight"
-                          : "Enter height and weight to compute automatically"}
+                        {bmiPreview ? "Automatically calculated preview; verified by the server when saved." : "Enter valid height and weight to calculate BMI automatically."}
                       </span>
                     </div>
                   </div>
@@ -953,42 +920,22 @@ export default function RhuTriage() {
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-brand-ink">
-                        Blood Pressure * <span className="font-normal text-brand-gray">(mmHg)</span>
+                        Blood Pressure <span className="font-normal text-brand-gray">(mmHg, optional)</span>
                       </label>
                       <input
+                        aria-label="Blood Pressure"
                         type="text"
                         placeholder="e.g. 120/80"
                         value={vitals.bloodPressure}
                         onChange={(e) => setVitals((prev) => ({ ...prev, bloodPressure: e.target.value }))}
                         className={inputCls(errors.bloodPressure)}
+                        aria-invalid={Boolean(errors.bloodPressure)}
                       />
                       {errors.bloodPressure && <p className="mt-1 text-xs text-brand-danger">{errors.bloodPressure}</p>}
                     </div>
-                    <div>
-                      <label className="mb-1.5 block text-sm font-medium text-brand-ink">
-                        Blood Sugar * <span className="font-normal text-brand-gray">(mg/dL)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="e.g. 100"
-                        value={vitals.bloodSugar}
-                        onChange={(e) => setVitals((prev) => ({ ...prev, bloodSugar: e.target.value }))}
-                        className={inputCls(errors.bloodSugar)}
-                      />
-                      {errors.bloodSugar && <p className="mt-1 text-xs text-brand-danger">{errors.bloodSugar}</p>}
-                    </div>
                   </div>
                 </div>
-
-                {backContinue(continueFromVitals)}
-              </div>
-            )}
-
-            {/* ============ STEP 3 · REASON FOR VISIT ============ */}
-            {currentStep === "reason" && (
-              <div>
-                {stepIndicator(3, "Reason for Visit", "Why is the patient here today?")}
+                <h4 className="mb-3 mt-6 text-sm font-semibold text-brand-ink">Reason for Visit *</h4>
 
                 <div className="flex max-w-2xl flex-wrap gap-2">
                   {REASON_OPTIONS.map((opt) => {
@@ -1011,10 +958,11 @@ export default function RhuTriage() {
                   })}
                 </div>
 
-                {reason === "Other" && (
+                {(reason === "Other" || errors.reasonDetail) && (
                   <div className="mt-3 max-w-2xl">
                     <label className="mb-1.5 block text-sm font-medium text-brand-ink">Describe the reason:</label>
                     <input
+                      aria-label="Describe the reason"
                       type="text"
                       placeholder="e.g. fever for 2 days..."
                       value={reasonDetail}
@@ -1025,17 +973,21 @@ export default function RhuTriage() {
                   </div>
                 )}
                 {errors.reason && <p className="mt-2 text-xs text-brand-danger">{errors.reason}</p>}
-
-                {backContinue(continueFromReason)}
+                <div className="mt-4 max-w-2xl">
+                  <label htmlFor="triage-notes" className="mb-1.5 block text-sm font-medium text-brand-ink">Notes / Clinical History <span className="font-normal text-brand-gray">(optional)</span></label>
+                  <textarea id="triage-notes" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Additional symptoms, history or screening notes" className={inputCls(errors.notes)} aria-invalid={Boolean(errors.notes)} />
+                  {errors.notes && <p className="mt-1 text-xs text-brand-danger">{errors.notes}</p>}
+                </div>
+                {backContinue(continueFromDetails, "Review Triage")}
               </div>
             )}
 
-            {/* ============ STEP 4 · REVIEW ============ */}
+            {/* ============ STEP 3 · REVIEW ============ */}
             {currentStep === "review" && (
               <div>
 
             {stepIndicator(
-              4,
+              3,
               "Review",
               "Check the details before sending the patient to the consultation station."
               )}
@@ -1052,33 +1004,25 @@ export default function RhuTriage() {
                       Vital Signs & Measurements
                     </p>
                     <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-                      <div>
-                        <p className="text-xs text-brand-gray">Height</p>
-                        <p className="font-medium text-brand-ink">{vitals.heightCm ? `${vitals.heightCm} cm` : "—"}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-brand-gray">Weight</p>
-                        <p className="font-medium text-brand-ink">{vitals.weightKg ? `${vitals.weightKg} kg` : "—"}</p>
-                      </div>
+                      {VITAL_FIELDS.map(({ key, label, unit }) => <div key={key}><p className="text-xs text-brand-gray">{label}</p><p className="font-medium text-brand-ink">{isRecorded(vitals[key]) ? `${vitals[key]} ${unit}` : "Not recorded"}</p></div>)}
                       <div>
                         <p className="text-xs text-brand-gray">BMI</p>
-                        <p className="font-medium text-brand-blue">{bmi.value || "—"}</p>
+                        <p className="font-medium text-brand-blue">{bmiPreview || "Not recorded"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-brand-gray">Blood Pressure</p>
-                        <p className="font-medium text-brand-ink">{vitals.bloodPressure ? `${vitals.bloodPressure} mmHg` : "—"}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-brand-gray">Blood Sugar</p>
-                        <p className="font-medium text-brand-ink">{vitals.bloodSugar ? `${vitals.bloodSugar} mg/dL` : "—"}</p>
+                        <p className="font-medium text-brand-ink">{isRecorded(vitals.bloodPressure) ? `${vitals.bloodPressure} mmHg` : "Not recorded"}</p>
                       </div>
                     </div>
                   </div>
+
+                  {flags.length > 0 && <div role="status" className="rounded-btn border border-amber-300 bg-amber-50 p-4"><p className="text-sm font-semibold text-brand-ink">Review Flags</p><p className="mt-1 text-xs text-brand-gray">Screening prompts only; interpretation depends on the patient and age. Recorded values are unchanged.</p><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-brand-ink">{flags.map((flag) => <li key={flag}>{flag}</li>)}</ul></div>}
 
                   <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Reason for Visit</p>
                     <p className="mt-0.5 text-sm font-semibold text-brand-ink">{finalReason}</p>
                   </div>
+                  <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4"><p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">Notes / Clinical History</p><p className="mt-1 whitespace-pre-wrap text-sm text-brand-ink">{notes.trim() || "Not recorded"}</p></div>
 
                   <div className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">
@@ -1097,6 +1041,7 @@ export default function RhuTriage() {
                   <button
                     type="button"
                     onClick={goBack}
+                    disabled={sending}
                     className="inline-flex items-center justify-center gap-1.5 rounded-btn border border-brand-border bg-white px-5 py-3 text-sm font-medium text-brand-gray transition-colors hover:text-brand-ink sm:py-2.5"
                   >
                     <ArrowLeft className="h-4 w-4" /> Back
@@ -1180,7 +1125,7 @@ export default function RhuTriage() {
                           {p.reason || p.triage?.chiefComplaint}
                         </p>
                         <p className="truncate text-xs text-brand-gray">
-                          Screening recorded by: {p.raw?.recordedByName || user?.name || "Your account"}
+                          Screening recorded by: {p.triage?.personnel || "Not recorded"}
                         </p>
                         <p className="truncate text-xs text-brand-gray">
                           Screening submitted: {p.raw?.submittedAt ? new Date(p.raw.submittedAt).toLocaleString() : "Date not recorded"}
@@ -1198,7 +1143,7 @@ export default function RhuTriage() {
                       <details className="rounded-btn bg-brand-bg/60 px-3 py-2 text-xs md:col-span-5">
                         <summary className="cursor-pointer font-medium text-brand-blue">Review screening details</summary>
                         <div className="mt-2 grid gap-2 text-brand-gray sm:grid-cols-2">
-                          <p><strong className="text-brand-ink">Screening:</strong> Submitted successfully; required information passed server validation.</p>
+                          <p><strong className="text-brand-ink">Screening:</strong> Saved encounter in the consultation workflow.</p>
                           <p><strong className="text-brand-ink">Next step:</strong> {p.status === CHECKUP_STATUS.WAITING ? "Awaiting consultation review." : p.status === CHECKUP_STATUS.IN_CHECKUP ? "Consultation is in progress." : "Consultation is complete."}</p>
                           <p><strong className="text-brand-ink">Vital signs:</strong> {[p.triage?.bloodPressure && `BP ${p.triage.bloodPressure}`, p.triage?.temperature && `Temp ${p.triage.temperature} °C`, p.triage?.pulseRate && `HR ${p.triage.pulseRate}`, p.triage?.respiratoryRate && `RR ${p.triage.respiratoryRate}`, p.triage?.oxygenSaturation && `O₂ ${p.triage.oxygenSaturation}%`, p.triage?.heightCm && `Height ${p.triage.heightCm} cm`, p.triage?.weight && `Weight ${p.triage.weight} kg`].filter(Boolean).join(" · ") || "Not recorded"}</p>
                           <p><strong className="text-brand-ink">Initial screening findings:</strong> {p.triage?.notes || "Not recorded"}</p>

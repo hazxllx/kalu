@@ -9,18 +9,37 @@ import * as systemLogsService from '../services/systemLogs.service.js';
 import { FEATURE_ROLES } from '../config/roles.js';
 
 /**
- * Administration observability.
+ * Administration observability routes (Audit Trail & System Logs).
  *
- *   GET /api/audit-trail  business events (approvals, record CRUD) — the Audit Trail
- *   GET /api/system-logs  request-level runtime events      — the System Log
+ * Role in KALUSAGAP:
+ * Provides read-only administrative visibility into domain-level business audits
+ * (`public.health_audit_logs` — approvals, clinical/account CRUD) and HTTP/runtime
+ * request telemetry (`public.system_logs`).
  *
- * Both are administrator-only, mirroring the existing `system.audit.view` and
- * `system.activity.view` permission ids in the frontend role matrix. The
- * underlying tables carry their own RLS: health_audit_logs is readable by
- * active staff, system_logs by administrators only.
+ * Architectural pipeline:
+ *   route -> authenticate -> authorize(FEATURE_ROLES.system, permission)
+ *         -> inline controller handler -> auditTrail/systemLogs.service -> Supabase
+ *
+ * Security & RLS:
+ * Both endpoints are restricted to system administrators (`FEATURE_ROLES.system`),
+ * enforcing `system.audit.view` and `system.activity.view` from the role-permission
+ * matrix. Underlying tables also enforce RLS (`health_audit_logs` readable by active
+ * staff for scoped history views; `system_logs` restricted to administrators only).
  */
 const router = Router();
 
+/**
+ * GET /audit-trail
+ * Lists paginated business audit events (`system.audit.view`).
+ * Query parameters:
+ * - `q`      : Free-text search across actor, target, or summary
+ * - `action` : Exact action type filter
+ * - `module` : Subsystem/module filter
+ * - `role`   : Actor role filter
+ * - `from` / `to` : ISO date/timestamp range bounds
+ * - `limit` / `offset` : Pagination controls
+ * Passes `req.user` + query filters to `auditTrailService.list` and returns via `sendData`.
+ */
 router.get(
   '/audit-trail',
   authenticate,
@@ -41,6 +60,15 @@ router.get(
   }),
 );
 
+/**
+ * GET /system-logs
+ * Lists paginated runtime/request telemetry entries (`system.activity.view`).
+ * Query parameters:
+ * - `q`      : Free-text search across path, message, or request metadata
+ * - `status` : HTTP status / severity filter
+ * - `limit` / `offset` : Pagination controls
+ * Delegates to `systemLogsService.list` and returns the result via `sendData`.
+ */
 router.get(
   '/system-logs',
   authenticate,

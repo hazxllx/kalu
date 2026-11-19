@@ -1,8 +1,27 @@
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { matchPath, Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';
+import { usePermissions } from '@/context/PermissionsContext';
 import { homeForRole } from '@/lib/roles';
 import { FullPageSkeleton } from '@/components/common/Skeleton';
+import UnauthorizedPage from '@/pages/UnauthorizedPage';
+
+const submittedReportPaths = [
+  '/app/phn/tcls',
+  '/app/phn/reports',
+  '/app/mho/submissions',
+  '/app/mho/reports',
+  '/app/health_supervisor/reports',
+];
+
+function ReportAccess({ user }) {
+  const { can, matrixLoadState } = usePermissions();
+  if (!user?.municipalityId || (user.role === 'health_supervisor' && !user.barangayId)) {
+    return <UnauthorizedPage />;
+  }
+  if (matrixLoadState.status === 'loading') return <FullPageSkeleton />;
+  return can('reports.view') ? <Outlet /> : <UnauthorizedPage />;
+}
 
 /**
  * Route guard.
@@ -43,7 +62,9 @@ export default function ProtectedRoute({ allow = [] }) {
     return <Navigate to="/change-password" replace />;
   }
 
+  const reportRoute = submittedReportPaths.some((path) => matchPath(path, location.pathname));
   if (allow.length > 0 && !allow.includes(role)) {
+    if (reportRoute) return <UnauthorizedPage />;
     // An authenticated user whose role doesn't match this area is sent to their
     // OWN dashboard rather than a dead /unauthorized page. This is what makes a
     // post-approval refresh unlock the resident: once the session role has been
@@ -58,5 +79,6 @@ export default function ProtectedRoute({ allow = [] }) {
     return <Navigate to="/unauthorized" replace />;
   }
 
+  if (reportRoute) return <ReportAccess user={user} />;
   return <Outlet />;
 }

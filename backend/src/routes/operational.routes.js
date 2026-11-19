@@ -1,10 +1,22 @@
 /**
- * Operational tracking endpoints (follow-ups, TCL forms, maternal visits, immunizations, notifications).
+ * Operational tracking routes (follow-ups, TCL forms, maternal records/visits,
+ * immunizations, and user notifications).
  *
- * Generic CRUD routes for various operational record types scoped by resident.
- * Permissions are determined dynamically based on the record kind and operation.
- * All records are scoped to the caller's barangay assignment (if applicable) or
- * municipality-wide for MHO/PHN/Admin.
+ * Role in KALUSAGAP:
+ * Exposes generic resident-scoped CRUD endpoints across core community health
+ * operational tables, plus recipient-scoped in-app notification state updates.
+ *
+ * Architectural pipeline:
+ *   route -> authenticate -> resolveBarangayScope -> withKind(kind)
+ *         -> authorize(roles, dynamicPermission) -> [operationalIdempotency]
+ *         -> operational.controller -> operational.service -> Supabase
+ *
+ * Scope & security:
+ * Clinical/operational kinds are restricted to `staff` (`admin`, `mho`, `phn`,
+ * `health_supervisor`) and scoped to the caller's assigned barangay (or
+ * municipality-wide for MHO/PHN/Admin). Notifications are additionally open to
+ * `rhu_personnel`, `bhw`, `resident`, and `resident-limited`, strictly scoped
+ * by the service to the authenticated recipient's own rows.
  */
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
@@ -21,6 +33,9 @@ const kinds = ['followups', 'tcl', 'maternal', 'maternalvisits', 'immunizations'
 const staff = ['admin', 'mho', 'phn', 'health_supervisor'];
 router.use(authenticate, resolveBarangayScope);
 
+// Durable `Idempotency-Key` middleware for offline-capable POST/PUT writes.
+// Before replaying a cached response, `validateReplay` re-verifies that the
+// current caller still has geography/ownership scope over the cached record ID.
 const operationalIdempotency = createIdempotencyMiddleware({
   durable: true,
   validateReplay: async (req, responseBody) => {
@@ -42,6 +57,17 @@ const withKind = (kind) => (req, _res, next) => {
   next();
 };
 
+/**
+ * Resolves granular RBAC permission IDs when `req.params.kind === 'followups'`.
+ * Returns an empty array for all other operational kinds so role-level checks govern.
+ * - GET  -> `followups.view`
+ * - POST -> `followups.create`
+ * - PUT  -> `followups.complete` when transitioning `status` to `Completed` or `Missed`;
+ *           otherwise `followups.edit`.
+ *
+ * @param {string} method - HTTP verb (`GET`, `POST`, or `PUT`).
+ * @returns {Function} Request-aware permission resolver for `authorize`.
+ */
 export const followUpPermission = (method) => (req) => {
   if (req.params.kind !== 'followups') return [];
   if (method === 'GET') return ['followups.view'];
@@ -53,6 +79,13 @@ export const followUpPermission = (method) => (req) => {
   return ['followups.edit'];
 };
 
+// Dynamically mount routes for each operational `kind`:
+// - GET    /:kind           : Lists scoped records (query filters: residentId, status, pagination).
+// - PUT    /notifications/read-all : Marks all caller notifications read (`controller.markAllRead`).
+// - PUT    /notifications/:id      : Updates read state of notification `:id` (`controller.update`).
+// - POST   /:kind           : Creates a clinical/operational record from `req.body` (idempotent).
+// - PUT    /:kind/:id       : Updates record `:id` from `req.body` (idempotent).
+// - DELETE /maternal/:id    : Deletes maternal record `:id` (`controller.remove`).
 for (const kind of kinds) {
   const roles = kind === 'notifications' ? ['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw', 'resident', 'resident-limited'] : staff;
   router.get(

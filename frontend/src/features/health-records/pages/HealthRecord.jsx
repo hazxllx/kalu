@@ -725,7 +725,7 @@ export default function HealthRecord() {
       ) : (
         <>
           <Card className="mb-5 rounded-lg px-5 py-5 shadow-none">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm md:grid-cols-6">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 xl:grid-cols-6">
               {[
                 ["Resident name", resident?.name],
                 ["Barangay", resident?.barangay],
@@ -734,8 +734,8 @@ export default function HealthRecord() {
                 ["Sex", resident?.sex],
               ].map(([label, value]) => (
                 <div key={label} className="min-w-0">
-                  <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</p>
-                  <p className="mt-1.5 truncate text-sm text-brand-ink">{dash(value)}</p>
+                  <p className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">{label}</p>
+                  <p className="mt-1.5 min-w-0 break-words text-[13px] text-brand-ink">{dash(value)}</p>
                 </div>
               ))}
               <div>

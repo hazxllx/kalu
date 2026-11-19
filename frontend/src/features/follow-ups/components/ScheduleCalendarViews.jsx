@@ -508,10 +508,10 @@ export function ScheduleDetailModal({ schedule, onClose, actions = null, variant
     { icon: User, label: "Healthcare Provider", value: schedule.provider },
   ];
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <Card className="max-h-[92vh] w-full max-w-lg overflow-y-auto">
-        <div className="p-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Follow-up Details">
+      <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto break-words [overflow-wrap:anywhere]">
+        <div className="p-4 sm:p-6">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold text-brand-ink">Follow-up Details</h3>
               <p className="mt-0.5 text-sm text-brand-gray">

@@ -4,17 +4,21 @@ import ApiError from '../utils/apiError.js';
 import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE } from '../validators/documents.validators.js';
 
 /**
- * Multer upload for personnel-registration verification documents.
+ * @module middleware/uploadStaffDocuments
+ *
+ * Personnel-registration verification document upload middleware for KALUSAGAP.
+ * Position in request pipeline:
+ *   `route -> rateLimit -> uploadStaffDocuments -> validate -> controller -> service -> Supabase Storage`
  *
  * Files arrive under the multipart field `documents` (0..8 files); a parallel
  * `documentTypes` text field carries a JSON array of the document-type labels
  * in the SAME order, so each file keeps its human type without a fragile
  * per-role field map. Files are kept in memory (no disk) and converted to Node
- * File objects.
+ * `File` objects on `req.staffDocuments`.
  *
  * The request is a public multipart submission; a plain JSON registration has
  * no multipart body, so this middleware is a no-op for it (multer only handles
- * multipart/form-data) and the endpoint stays backward compatible.
+ * `multipart/form-data`) and the endpoint stays backward compatible.
  */
 
 const upload = multer({
@@ -29,6 +33,12 @@ const upload = multer({
   limits: { fileSize: MAX_FILE_SIZE, files: 8 },
 });
 
+/**
+ * Wraps a Multer in-memory file descriptor into a standard Node `File` object.
+ *
+ * @param {Object} multerFile - Multer file descriptor (`buffer`, `originalname`, `mimetype`).
+ * @returns {File} Node `File` instance for downstream storage upload.
+ */
 const toNodeFile = (multerFile) => {
   const { buffer, originalname, mimetype } = multerFile;
   const ext = path.extname(originalname || '').toLowerCase();
@@ -36,6 +46,13 @@ const toNodeFile = (multerFile) => {
   return new File([buffer], name, { type: mimetype });
 };
 
+/**
+ * Verifies leading magic bytes against approved PDF (`%PDF`), PNG, and JPEG
+ * signatures so spoofed or corrupted files cannot bypass MIME filtering.
+ *
+ * @param {Object} file - Multer file descriptor with `buffer` and `mimetype`.
+ * @returns {boolean} `true` when binary header matches the declared format.
+ */
 const hasExpectedSignature = (file) => {
   const bytes = file.buffer;
   if (!bytes || bytes.length < 4) return false;
@@ -45,6 +62,14 @@ const hasExpectedSignature = (file) => {
   return false;
 };
 
+/**
+ * Parses the JSON-encoded `documentTypes` multipart text field into an ordered
+ * array of string labels aligned by index with `req.files`, returning `[]` on
+ * empty or malformed JSON.
+ *
+ * @param {string|undefined} raw - Raw `req.body.documentTypes` string.
+ * @returns {Array<string>} Normalized document type labels.
+ */
 const parseTypes = (raw) => {
   if (!raw) return [];
   try {
@@ -55,6 +80,17 @@ const parseTypes = (raw) => {
   }
 };
 
+/**
+ * Express middleware accepting up to 8 `'documents'` files on staff registration
+ * submissions. Maps Multer size/count/field errors to 400 `ApiError`, skips files
+ * whose binary signature does not match an approved format, pairs each valid file
+ * with its positional `documentType` (defaulting to `'Supporting Document'`), and
+ * populates `req.staffDocuments`.
+ *
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @param {Function} next - Express next callback.
+ */
 export const uploadStaffDocuments = (req, res, next) => {
   upload.array('documents', 8)(req, res, (err) => {
     if (err) {

@@ -20,6 +20,7 @@ import { toLocalISODate, formatDateRange } from "@/lib/dateUtils";
 import { authorizedViewsApi } from "@/services/api/authorizedViewsApi";
 import useAuthorizedData from "@/hooks/useAuthorizedData";
 import { healthTrendScope, metricValue, lastActivityPeriod, optionalSeries } from "@/lib/legacyAnalytics";
+import { normalizeRiskDistribution, RISK_PRESENTATION } from "@/lib/riskLevel";
 
 const tooltipStyle = (darkMode) => ({
   fontSize: "12px",
@@ -37,8 +38,6 @@ const SUMMARY_ICONS = [
 ];
 
 const CONDITION_PALETTE = ["#0B5CAD", "#2A7DE1", "#F5B400", "#28B463", "#E74C3C", "#5B6472"];
-const RISK_COLORS = { "Low Risk": "#28B463", "Moderate Risk": "#0B5CAD", "High Risk": "#F5B400", Critical: "#E74C3C", Unassessed: "#94A3B8" };
-const SUPERVISOR_RISK_COLORS = { "Low Risk": "#357558", "Moderate Risk": "#A87B24", "High Risk": "#B3202C", Critical: "#871B27", Unassessed: "#94A3B8" };
 const SUPERVISOR_CONDITION_PALETTE = ["#0B4A8F", "#457BA3", "#83A8BC", "#A78234", "#586877", "#C2CED9"];
 
 export default function HealthTrends() {
@@ -82,59 +81,17 @@ export default function HealthTrends() {
     return { from: toLocalISODate(start), to: toLocalISODate(end) };
   })() : lastActivityPeriod(period === "3m" ? 3 : period === "6m" ? 6 : 12);
   
-  const activityCaption = period === "monthly" ? new Date(`${selectedMonth}-01`).toLocaleDateString("en-PH", { month: "long", year: "numeric" }) 
+  const activityCaption = period === "monthly" ? new Date(`${selectedMonth}-01T12:00:00`).toLocaleDateString("en-PH", { month: "long", year: "numeric" })
     : period === "quarterly" ? `Q${selectedQuarter.quarter} ${selectedQuarter.year}`
     : period === "yearly" ? `${selectedYear}`
     : formatDateRange(activityRange.from, activityRange.to);
 
-  const muniRange = useMemo(() => {
-    const now = new Date();
-    const iso = (d) => toLocalISODate(d);
-    if (period === "monthly") {
-      const [year, month] = selectedMonth.split('-');
-      const start = new Date(parseInt(year), parseInt(month) - 1, 1);
-      const end = new Date(parseInt(year), parseInt(month), 0);
-      return { from: iso(start), to: iso(end) };
-    }
-    if (period === "quarterly") {
-      const quarterStartMonth = (selectedQuarter.quarter - 1) * 3;
-      const start = new Date(selectedQuarter.year, quarterStartMonth, 1);
-      const end = new Date(selectedQuarter.year, quarterStartMonth + 3, 0);
-      return { from: iso(start), to: iso(end) };
-    }
-    if (period === "yearly") {
-      const start = new Date(selectedYear, 0, 1);
-      const end = new Date(selectedYear, 11, 31);
-      return { from: iso(start), to: iso(end) };
-    }
-    const months = period === "3m" ? 3 : period === "6m" ? 6 : 12;
-    return { from: iso(new Date(now.getFullYear(), now.getMonth() - months, now.getDate())), to: iso(now) };
-  }, [period, selectedMonth, selectedQuarter, selectedYear]);
+  const muniRange = activityRange;
 
   const load = useCallback(async (options) => {
     if (supervisor && !assignedBarangay) throw new Error("A valid barangay assignment is required to view health trends.");
     if (supervisor && !canViewAnalytics) throw new Error("Your account is not permitted to view health analytics.");
-    const getRangeForPeriod = () => {
-      if (period === "monthly") {
-        const [year, month] = selectedMonth.split('-');
-        const start = new Date(parseInt(year), parseInt(month) - 1, 1);
-        const end = new Date(parseInt(year), parseInt(month), 0);
-        return { from: toLocalISODate(start), to: toLocalISODate(end) };
-      }
-      if (period === "quarterly") {
-        const quarterStartMonth = (selectedQuarter.quarter - 1) * 3;
-        const start = new Date(selectedQuarter.year, quarterStartMonth, 1);
-        const end = new Date(selectedQuarter.year, quarterStartMonth + 3, 0);
-        return { from: toLocalISODate(start), to: toLocalISODate(end) };
-      }
-      if (period === "yearly") {
-        const start = new Date(selectedYear, 0, 1);
-        const end = new Date(selectedYear, 11, 31);
-        return { from: toLocalISODate(start), to: toLocalISODate(end) };
-      }
-      return lastActivityPeriod(period === '3m' ? 3 : period === '6m' ? 6 : 12);
-    };
-    const warningRequest = authorizedViewsApi.earlyWarning({ barangay: assignedBarangay, ...getRangeForPeriod() }, options);
+    const warningRequest = authorizedViewsApi.earlyWarning({ barangay: assignedBarangay, from: muniRange.from, to: muniRange.to }, options);
     if (supervisor) {
       const ew = await warningRequest;
       if (ew.scope?.barangay !== assignedBarangay || ew.activity?.rows?.some((row) => row.barangay !== assignedBarangay)) throw new Error("Health trends are outside your assigned barangay.");
@@ -167,7 +124,6 @@ export default function HealthTrends() {
   }, [muniEW, periodMonths]);
   
   const conditionPalette = supervisor ? SUPERVISOR_CONDITION_PALETTE : CONDITION_PALETTE;
-  const riskPalette = supervisor ? SUPERVISOR_RISK_COLORS : RISK_COLORS;
   
   const scopedData = useMemo(() => {
     if (!base || !muniEW) return null;
@@ -177,12 +133,12 @@ export default function HealthTrends() {
         ...row,
         color: conditionPalette[index % conditionPalette.length]
       })),
-      riskDistribution: muniEW.riskDistribution.map((row) => ({
+      riskDistribution: normalizeRiskDistribution(muniEW.reportingRiskDistribution ?? muniEW.riskDistribution).map((row) => ({
         ...row,
-        color: riskPalette[row.name] || "#94A3B8"
+        color: RISK_PRESENTATION[row.name].color
       }))
     };
-  }, [base, muniEW?.riskDistribution, conditionPalette, riskPalette]);
+  }, [base, muniEW?.reportingRiskDistribution, muniEW?.riskDistribution, conditionPalette]);
 
   if (resource.error) return <><PageHeader crumbs={supervisor ? ["Monitoring", "Health Trends"] : ["Analytics", "Health Trends"]} title="Health Trends" subtitle="Authorized recorded health activity." /><Card className="p-5"><ErrorState compact={supervisor} title="Health trends unavailable" message={resource.error} onRetry={resource.refresh} /></Card></>;
   if (supervisor && !assignedBarangay) return <><PageHeader crumbs={["Monitoring", "Health Trends"]} title="Health Trends" subtitle="Barangay assignment required" /><Card><ErrorState compact title="Health trends unavailable" message="No valid barangay assignment is available for this account. Municipal coverage is not available to an unassigned Health Supervisor." /></Card></>;
@@ -282,8 +238,6 @@ export default function HealthTrends() {
                        type="number"
                        value={selectedQuarter.year}
                        onChange={(e) => setSelectedQuarter({ ...selectedQuarter, year: parseInt(e.target.value) })}
-                       min="2020"
-                       max="2099"
                        className="rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 w-[90px]"
                        aria-label="Select year"
                      />
@@ -296,8 +250,6 @@ export default function HealthTrends() {
                      type="number"
                      value={selectedYear}
                      onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                     min="2020"
-                     max="2099"
                      className="rounded-btn border border-brand-border bg-white px-2.5 py-1.5 text-sm font-medium text-brand-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30 w-[90px]"
                      aria-label="Select year"
                    />
@@ -412,7 +364,7 @@ export default function HealthTrends() {
             </div> : <EmptyState compact title="No scheduled follow-ups in this period" description="A completion percentage requires scheduled follow-ups." />}
           </Card> : <Card className="p-5">
             <h3 className="font-semibold text-brand-ink mb-1">Risk Classification Distribution</h3>
-            <p className="text-xs text-brand-gray mb-3">Latest recorded consultation per resident</p>
+            <p className="text-xs text-brand-gray mb-3">{muniEW.reportingRiskDistribution ? `Latest consultation per resident in ${activityCaption}` : "Latest recorded consultation per resident"}</p>
             {s.riskDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie isAnimationActive={!supervisor} data={s.riskDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
@@ -468,8 +420,8 @@ export default function HealthTrends() {
   const disease = (Array.isArray(ew.diseaseDistribution) ? ew.diseaseDistribution : [])
     .filter((x) => (x.value || 0) > 0)
     .map((x, i) => ({ ...x, color: CONDITION_PALETTE[i % CONDITION_PALETTE.length] }));
-  const risk = (Array.isArray(ew.riskDistribution) ? ew.riskDistribution : [])
-    .map((x) => ({ ...x, color: RISK_COLORS[x.name] || "#0B5CAD" }));
+  const risk = normalizeRiskDistribution(ew.reportingRiskDistribution ?? ew.riskDistribution)
+    .map((x) => ({ ...x, color: RISK_PRESENTATION[x.name].color }));
   const mapBarangays = Array.isArray(muniMap?.barangays) ? muniMap.barangays : [];
 
   const trendsHaveData = trends.some((t) => (t.consultations || 0) > 0 || (t.referrals || 0) > 0);
@@ -479,11 +431,12 @@ export default function HealthTrends() {
     { ...SUMMARY_ICONS[0], label: "Consultations This Month", value: metricValue(sm.consultationsThisMonth), sub: "recorded this month" },
     { ...SUMMARY_ICONS[1], label: "Referrals This Month", value: metricValue(sm.referralsThisMonth), sub: "created this month" },
     { ...SUMMARY_ICONS[2], label: "Top Condition", value: sm.topCondition || "No recorded condition", sub: `${sm.topConditionCases ?? 0} case${(sm.topConditionCases ?? 0) === 1 ? "" : "s"}` },
-    { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: metricValue(sm.highRiskResidents), sub: "from recorded vitals" },
+    { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: metricValue(ew.reportingRiskDistribution
+      ? risk.find((row) => row.name === 'High')?.value ?? 0 : sm.highRiskResidents), sub: ew.reportingRiskDistribution ? "recorded in reporting period" : "from recorded vitals" },
   ];
 
   const barangayStatus = (b) => {
-    if ((b.highRiskResidents || 0) > 0) return { status: "Needs Attention", tone: "text-brand-danger bg-brand-danger/10", dot: "bg-brand-danger" };
+    if ((b.reportingHighRiskResidents ?? b.highRiskResidents ?? 0) > 0) return { status: "Needs Attention", tone: "text-brand-danger bg-brand-danger/10", dot: "bg-brand-danger" };
     if ((b.caseCount || 0) > 0) return { status: "Monitoring", tone: "text-brand-blue bg-brand-blue/10", dot: "bg-brand-blue" };
     return { status: "No health data", tone: "text-brand-gray bg-brand-gray/10", dot: "bg-brand-gray" };
   };
@@ -530,8 +483,6 @@ export default function HealthTrends() {
           <input
             id="municipal-health-trends-year"
             type="number"
-            min="2020"
-            max="2099"
             value={selectedQuarter.year}
             onChange={(event) => setSelectedQuarter((current) => ({ ...current, year: Number(event.target.value) }))}
             className="min-h-9 w-24 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-sm text-brand-ink"
@@ -544,8 +495,6 @@ export default function HealthTrends() {
           <input
             id="municipal-health-trends-year-only"
             type="number"
-            min="2020"
-            max="2099"
             value={selectedYear}
             onChange={(event) => setSelectedYear(Number(event.target.value))}
             className="min-h-9 w-24 rounded-md border border-brand-border bg-white px-2.5 py-1.5 text-sm text-brand-ink"
@@ -607,7 +556,7 @@ export default function HealthTrends() {
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${st.tone}`}>{st.status}</span>
                       </div>
                       <p className="mt-2 text-xs text-brand-gray">{(b.residents ?? 0).toLocaleString()} residents</p>
-                      <p className="text-xs text-brand-gray">{b.caseCount ?? 0} consultations · {b.highRiskResidents ?? 0} high-risk</p>
+                      <p className="text-xs text-brand-gray">{b.caseCount ?? 0} consultations · {b.reportingHighRiskResidents ?? b.highRiskResidents ?? 0} high-risk</p>
                     </div>
                   );
                 })}
@@ -618,7 +567,7 @@ export default function HealthTrends() {
           <div className="grid lg:grid-cols-3 gap-5 mt-6">
             <Card className="lg:col-span-2 p-6">
               <h3 className="font-semibold text-brand-ink mb-1">Consultation &amp; Referral Trends</h3>
-              <p className="text-xs text-brand-gray mb-4">Monthly count over the past 12 months</p>
+              <p className="text-xs text-brand-gray mb-4">{activityCaption} | Monthly recorded counts</p>
               {trendsHaveData ? (
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={trends} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
@@ -633,7 +582,7 @@ export default function HealthTrends() {
                 </ResponsiveContainer>
               ) : (
                 <div className="flex h-[280px] items-center justify-center rounded-xl border border-dashed border-brand-border bg-brand-bg text-center">
-                  <p className="max-w-xs text-sm text-brand-gray">No consultations or referrals have been recorded in the last 12 months yet. This chart updates automatically as records are captured.</p>
+                  <p className="max-w-xs text-sm text-brand-gray">No consultations or referrals have been recorded in the selected period.</p>
                 </div>
               )}
             </Card>
@@ -692,7 +641,7 @@ export default function HealthTrends() {
 
             <Card className="p-6">
               <h3 className="font-semibold text-brand-ink mb-1">Risk Classification Distribution</h3>
-              <p className="text-xs text-brand-gray mb-4">Municipality-wide resident risk levels</p>
+              <p className="text-xs text-brand-gray mb-4">{ew.reportingRiskDistribution ? `Resident risk in ${activityCaption}` : "Latest recorded municipality-wide resident risk"}</p>
               {riskHaveData ? (
                 <ResponsiveContainer width="100%" height={220}>
                   <PieChart>

@@ -1,17 +1,20 @@
 /**
- * AI Provider Error Classification
- * 
- * Classifies provider errors into distinct categories:
- * - PROVIDER_CAPACITY: 503 Service Unavailable (retryable with backoff)
- * - RATE_LIMIT: 429 Too Many Requests (retryable with Retry-After)
- * - INSUFFICIENT_BALANCE: Payment/quota exhausted (non-retryable)
- * - INVALID_REQUEST: 4xx validation errors (non-retryable)
- * - AUTHENTICATION: Invalid API key/token (non-retryable)
- * - PERMISSION: Access denied / model not available (non-retryable)
- * - NETWORK: Connection failure (retryable)
- * - UNKNOWN: Unclassified error (retryable with caution)
+ * AI Provider Error Classification (`services/aiProvider/errors.js`).
+ *
+ * Fits into KALUSAGAP's AI integration pipeline (`service -> AIProviderClient -> classifyProviderError`),
+ * translating raw HTTP status codes, provider JSON error payloads, and Node/fetch
+ * network exceptions into normalized categories and safe user-facing messages:
+ * - `PROVIDER_CAPACITY`: 503 Service Unavailable (retryable + fallback-eligible)
+ * - `RATE_LIMIT`: 429 Too Many Requests (retryable respecting `Retry-After` + fallback-eligible)
+ * - `INSUFFICIENT_BALANCE`: 402 quota/billing exhausted (terminal)
+ * - `INVALID_REQUEST`: 400 / 4xx validation errors (terminal)
+ * - `AUTHENTICATION`: 401 invalid API key/token (terminal)
+ * - `PERMISSION`: 403 access denied / model unavailable (terminal)
+ * - `NETWORK` / `TIMEOUT`: Connection failure or aborted request (retryable)
+ * - `UNKNOWN`: 5xx or unclassified failure (retryable; 5xx is fallback-eligible)
  */
 
+/** Canonical error type codes attached to classified provider failures. */
 export const PROVIDER_ERROR_TYPE = Object.freeze({
   PROVIDER_CAPACITY: 'provider_capacity',
   RATE_LIMIT: 'rate_limit',
@@ -24,6 +27,7 @@ export const PROVIDER_ERROR_TYPE = Object.freeze({
   UNKNOWN: 'unknown',
 });
 
+/** High-level retry/failover disposition categories for classified errors. */
 export const PROVIDER_ERROR_CATEGORY = Object.freeze({
   RETRYABLE: 'retryable',
   TERMINAL: 'terminal',
@@ -210,14 +214,21 @@ export const classifyProviderError = (error, statusCode = 0, responseBody = {}) 
 };
 
 /**
- * Check if error is retryable
+ * Check whether a classified provider error is eligible for automatic retry.
+ *
+ * @param {Object} classification - Result returned by `classifyProviderError`
+ * @returns {boolean} `true` if the error is transient and retryable
  */
 export const isRetryable = (classification) => {
   return classification?.retryable === true;
 };
 
 /**
- * Check if error is eligible for provider fallback
+ * Check whether a classified provider error allows failing over to a secondary
+ * `fallbackProvider` after primary retries are exhausted (true for 503, 429, and 5xx).
+ *
+ * @param {Object} classification - Result returned by `classifyProviderError`
+ * @returns {boolean} `true` if secondary provider failover is permitted
  */
 export const isFallbackEligible = (classification) => {
   return classification?.fallbackEligible === true;

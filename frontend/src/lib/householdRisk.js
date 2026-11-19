@@ -13,14 +13,18 @@ export const RISK_LEVELS = {
   MONITOR: "monitor",
   INTERVENTION: "intervention",
   PRIORITY: "priority",
+  UNASSESSED: "unassessed",
 };
 
 export const RISK_LEVEL_LABELS = {
   [RISK_LEVELS.STABLE]: "Stable",
   [RISK_LEVELS.MONITOR]: "Monitor",
-  [RISK_LEVELS.INTERVENTION]: "Needs Intervention",
-  [RISK_LEVELS.PRIORITY]: "Priority Review",
+  [RISK_LEVELS.INTERVENTION]: "Intervention",
+  [RISK_LEVELS.PRIORITY]: "Priority",
+  [RISK_LEVELS.UNASSESSED]: "Unassigned",
 };
+
+export const RISK_LEVEL_UNASSIGNED = "Unassigned";
 
 /**
  * Semantic dot tone key per level (no emojis). The actual dot color is defined
@@ -32,6 +36,7 @@ export const RISK_LEVEL_DOT = {
   [RISK_LEVELS.MONITOR]: "gold",
   [RISK_LEVELS.INTERVENTION]: "accent",
   [RISK_LEVELS.PRIORITY]: "danger",
+  [RISK_LEVELS.UNASSESSED]: "neutral",
 };
 
 /** Professional level descriptions + basis copy (no emojis, no diagnosis). */
@@ -113,16 +118,18 @@ export const RISK_CLASSIFICATION_BASIS = {
  * a medical diagnosis — it describes monitoring indicators and workflow rules.
  */
 export const householdRiskBasis = ({ level, count, indicators = [] }) => {
-  const basis = RISK_CLASSIFICATION_BASIS[level] || RISK_CLASSIFICATION_BASIS[RISK_LEVELS.STABLE];
+  const basis = RISK_CLASSIFICATION_BASIS[level];
   return {
     level,
-    headline: count === 0
+    headline: !basis
+      ? "No household risk cluster assignment is recorded."
+      : count === 0
       ? "No significant risk indicators detected."
       : `${count} relevant risk ${count === 1 ? "indicator" : "indicators"} detected`,
     contributing: indicators.map((i) => i.label),
-    summary: basis.summary,
-    typicalState: basis.typicalState,
-    recommendedResponse: basis.recommendedResponse,
+    summary: basis?.summary || "The household risk cluster has not been assessed.",
+    typicalState: basis?.typicalState || [],
+    recommendedResponse: basis?.recommendedResponse || "No response recommendation is available without a cluster assignment.",
   };
 };
 

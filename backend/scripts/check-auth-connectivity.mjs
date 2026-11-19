@@ -1,6 +1,9 @@
-import { lookup } from 'node:dns/promises';
 import env from '../src/config/env.js';
+import { lookup } from 'node:dns/promises';
 import { publicSupabaseConfigurationError } from '../../shared/authConnectivity.js';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
+
+assertLocalScriptEnvironment();
 
 // Read-only diagnostics: never submit credentials, create users, or send email.
 const configurationError = publicSupabaseConfigurationError(env.supabaseUrl, env.supabaseAnonKey);
@@ -15,7 +18,7 @@ const results = {
 
 const probe = async (url, options = {}) => {
   try {
-    const response = await fetch(url, { ...options, signal: AbortSignal.timeout(10000) });
+    const response = await localFetch(url, { ...options, signal: AbortSignal.timeout(10000) });
     return {
       reachable: true,
       status: response.status,

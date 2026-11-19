@@ -4,18 +4,37 @@ import { hasControlChars, isStrongPassword, isUuid, isStrictMobile, text, valid,
 import { isApprovedBarangayName } from '../config/barangays.js';
 
 /**
- * Staff account registration + verification request validation.
+ * @file Health personnel self-registration & account approval validators (server-authoritative).
  *
- * The applicant's identity, the approving officer and the decision outcome are
- * never accepted from the client beyond the request payload itself: the
- * reviewer always comes from the authenticated session and the resulting
- * `profiles` row is written by the service, not by the browser.
+ * Executed by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> rateLimit/authenticate -> authorize -> validate -> controller -> service -> Supabase`).
+ *
+ * Approving officer identity and resulting `profiles` row state are controlled strictly
+ * by the service layer from `req.user` rather than client input; these validators
+ * sanitize applicant registration details, RHU station selection, credential references,
+ * and reviewer decision remarks.
  */
 
 const LIMITS = { short: 80, notes: 2000 };
 
 const clean = (value, max) => text(value).slice(0, max);
 
+/**
+ * Validates operational health personnel self-registration requests (`POST /staff-accounts/register`).
+ *
+ * Enforces:
+ * - Full name (no control characters), valid lowercase email, strict 11-digit PH mobile (`09XXXXXXXXX`),
+ *   and strong password policy.
+ * - Role restricted to `REQUESTABLE_ROLES` (preventing self-registration as system admin).
+ * - Optional barangay/facility assignment (UUID or canonical name resolved server-side).
+ * - Station exclusivity: `rhu_personnel` applicants must select exactly 1 station
+ *   (`Triage` or `Consultation`), whereas all other roles must have zero stations.
+ * - Up to 20 supporting credential metadata entries (accepting `'Type—Name'` strings or
+ *   `{ type, name, path }` descriptors without persisting raw file contents here).
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const registerPersonnelValidator = (input = {}) => {
   const errors = {};
 
@@ -119,6 +138,12 @@ export const registerPersonnelValidator = (input = {}) => {
   });
 };
 
+/**
+ * Validates `:id` route parameters for staff account request endpoints as UUIDs.
+ *
+ * @param {Object} [params] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const staffAccountIdParamValidator = (params = {}) => {
   const id = text(params.id);
   if (!id) return invalid({ id: 'An account request reference is required.' });
@@ -126,6 +151,13 @@ export const staffAccountIdParamValidator = (params = {}) => {
   return valid({ ...params, id });
 };
 
+/**
+ * Validates reviewer approval/rejection decision payloads on a staff account application,
+ * enforcing a minimum 5-character `reason` when supplied and capping `remarks`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { reason, remarks } }` or `{ error }`.
+ */
 export const staffAccountDecisionValidator = (input = {}) => {
   const errors = {};
   const reason = text(input?.reason);

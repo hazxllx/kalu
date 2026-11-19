@@ -1,3 +1,14 @@
+/**
+ * KALUSAGAP — official document header & logo branding configuration.
+ *
+ * Architectural role: consumed in the `route -> authenticate -> authorize ->
+ * controller -> service -> repository/Supabase` flow when System Administrators
+ * upload/manage official seal logos and when clinical/reporting services build
+ * printable government document headers (Medical Certificates, FHSIS M1
+ * monthly reports, and Barangay-to-RHU Referral Forms).
+ */
+
+/** Allowlisted official seal/logo slots managed by System Administrators (`municipal` LGU seal and `rhu` facility seal). */
 export const OFFICIAL_LOGO_TYPES = Object.freeze(['municipal', 'rhu']);
 
 /**

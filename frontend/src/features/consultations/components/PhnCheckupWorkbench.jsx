@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, CheckCircle2, Send, CalendarClock, Activity, Stethoscope, AlertTriangle, FileText, Pill } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import { consultationLocationFor } from "@/lib/consultationLocations";
@@ -17,7 +17,11 @@ export const CHECKUP_STATUS_TONES = {
 const RISK_TONES = {
   High: "bg-brand-danger/10 text-brand-danger",
   Medium: "bg-brand-yellow/15 text-[#B07E00]",
+  Moderate: "bg-brand-yellow/15 text-[#B07E00]",
   Low: "bg-brand-green/10 text-brand-green",
+  Incomplete: "bg-brand-yellow/15 text-[#B07E00]",
+  Unavailable: "bg-slate-100 text-slate-600",
+  Unassessed: "bg-slate-100 text-slate-600",
 };
 
 const HEALTH_CONCERNS = [
@@ -36,19 +40,13 @@ const inputCls = (error) =>
     error ? "border-brand-danger" : "border-brand-border"
   }`;
 
-/** Human-readable one-line summary of a structured prescription entry. */
-const formatMedicationLine = (m = {}) => {
-  const name = [m.genericName, m.strength, m.dosageForm].map((p) => String(p || "").trim()).filter(Boolean).join(" ");
-  const sig = [m.dose, m.route, m.frequency, m.duration].map((p) => String(p || "").trim()).filter(Boolean).join(" · ");
-  const qty = String(m.quantity || "").trim() ? `Qty ${String(m.quantity).trim()}` : "";
-  const instructions = String(m.instructions || "").trim();
-  return [name || "(unnamed medicine)", sig, qty, instructions].filter(Boolean).join(" — ");
-};
+const hasValue = (value) => value !== null && value !== undefined && String(value).trim() !== "";
+const measurement = (value, unit = "") => hasValue(value) ? `${value}${unit ? ` ${unit}` : ""}` : null;
 
-const InfoItem = ({ label, value, fallback = "—" }) => (
+const InfoItem = ({ label, value, fallback = "Not recorded" }) => (
   <div>
     <p className="text-xs text-brand-gray mb-1">{label}</p>
-    <p className="text-sm font-medium text-brand-ink">{value || fallback}</p>
+    <p className="break-words text-sm font-medium text-brand-ink">{hasValue(value) ? value : fallback}</p>
   </div>
 );
 
@@ -57,7 +55,7 @@ const DateTimeItem = ({ label, value }) => {
   return (
     <div>
       <p className="text-xs text-brand-gray mb-1">{label}</p>
-      <p className="text-sm font-medium text-brand-ink">{formatted.date}</p>
+      <p className="text-sm font-medium text-brand-ink">{formatted.date === "—" ? "Not recorded" : formatted.date}</p>
       {formatted.time !== "—" ? <p className="text-xs text-brand-gray">{formatted.time}</p> : null}
     </div>
   );
@@ -73,8 +71,8 @@ const SectionTitle = ({ step, title }) => (
 );
 
 const RiskPill = ({ level }) => (
-  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${RISK_TONES[level] || RISK_TONES.Medium}`}>
-    {level}
+  <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${RISK_TONES[level] || RISK_TONES.Unassessed}`}>
+    {level || "Unassessed"}
   </span>
 );
 
@@ -113,7 +111,13 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const [medications, setMedications] = useState(/** @type {any[]} */ ([]));
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const [justCompleted, setJustCompleted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [certOpen, setCertOpen] = useState(false);
+  const submittingRef = useRef(false);
+  const hydratedRecord = useRef(null);
+  const certOpenRef = useRef(false);
+  certOpenRef.current = certOpen;
   const { user } = useAuth();
 
   const completed = Boolean(patient?.checkup) || patient?.status === "Consultation Completed";
@@ -123,26 +127,32 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   const consultationLocation = consultationLocationFor(patient || {});
 
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKey = (e) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !submittingRef.current && !certOpenRef.current) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKey);
     };
   }, [onClose]);
 
   useEffect(() => {
-    if (checkup) {
-      setAssessment(checkup.assessment || "");
-      setHealthConcern(checkup.healthConcern || "");
-      setClinicalNotes(checkup.clinicalNotes || "");
-      setRecommendations(checkup.recommendations || "");
-      setMedications(Array.isArray(checkup.medications) ? checkup.medications : []);
-    }
-  }, [checkup]);
+    const identity = `${patient?.id || ""}:${completed}`;
+    if (hydratedRecord.current === identity) return;
+    hydratedRecord.current = identity;
+    const saved = checkup || patient?.checkupDraft;
+    setAssessment(saved?.assessment || "");
+    setHealthConcern(saved?.healthConcern || "");
+    setClinicalNotes(saved?.clinicalNotes || "");
+    setRecommendations(saved?.recommendations || "");
+    setMedications(Array.isArray(saved?.medications) ? saved.medications : []);
+    setErrors({});
+    setSubmitError("");
+    setJustCompleted(false);
+  }, [patient?.id, patient?.checkupDraft, checkup, completed]);
 
   useEffect(() => {
     setHealthServiceId(patient?.serviceId || patient?.raw?.healthServiceId || "");
@@ -174,39 +184,51 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   // residentRisk.js), resolved onto the patient row by mapVisitToPatient. A
   // client-side prototype engine must not override the stored clinical risk.
   const autoRisk = {
-    level: patient?.riskLevel ?? patient?.checkup?.riskLevel ?? "Unassessed",
-    reason: patient?.riskFactors?.length
-      ? (Array.isArray(patient.riskFactors) ? patient.riskFactors : []).map((factor) =>
-          typeof factor === "string" ? factor : factor?.label || factor?.message || factor?.reason || "")
-          .filter(Boolean).join("; ")
-      : "Backend assessment on file; no factors were returned.",
+    level: patient?.riskAssessmentStatus === "incomplete" ? "Incomplete"
+      : patient?.riskAssessmentStatus === "unavailable" ? "Unavailable"
+        : patient?.riskLevel ?? patient?.checkup?.riskLevel ?? "Unassessed",
+    reason: patient?.riskReason || patient?.checkup?.riskReason || (Array.isArray(patient?.riskFactors)
+      ? patient.riskFactors.map((factor) => typeof factor === "string" ? factor : factor?.name || factor?.label || factor?.message || factor?.reason || "").filter(Boolean).join("; ")
+      : "") || "The backend assessment breakdown is unavailable. Reload the record to verify the assessment.",
   };
 
   const validate = () => {
     const next = {};
     if (!assessment.trim()) next.assessment = "Please record your assessment or findings.";
     if (!healthConcern.trim()) next.healthConcern = "Health concern is required.";
+    if (!recommendations.trim()) next.recommendations = "Record the actual treatment or recommendations before completing the consultation.";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
+    if (submittingRef.current) return;
     if (!validate()) return;
+    submittingRef.current = true;
     const recorded = {
       assessment: assessment.trim(),
       healthConcern: healthConcern.trim(),
       consultationLocation,
       clinicalNotes: clinicalNotes.trim(),
       recommendations: recommendations.trim(),
-      // Structured prescriptions (may be empty — a check-up without a
-      // prescription is valid). Only medicines with a name are kept.
-      medications: (Array.isArray(medications) ? medications : []).filter(
-        (m) => String(m?.genericName || "").trim(),
-      ),
+      medications,
       healthServiceId: healthServiceId || null,
+      expectedUpdatedAt: patient?.raw?.updatedAt,
     };
-    setJustCompleted(true);
-    onComplete?.(recorded);
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      if (typeof onComplete !== "function") throw new Error("Saving is unavailable. Reopen this consultation from the queue.");
+      await onComplete(recorded);
+      setJustCompleted(true);
+    } catch (error) {
+      const fieldErrors = error?.payload?.error?.errors || error?.payload?.error?.details || {};
+      setErrors(Object.fromEntries(Object.entries(fieldErrors).filter(([field]) => field.startsWith("medications"))));
+      setSubmitError(error?.message || "Could not save this check-up. Your entries are still available; retry when ready.");
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
 
   const statusTone = CHECKUP_STATUS_TONES[patient?.status] || "bg-slate-100 text-slate-600";
@@ -248,12 +270,12 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
-        <Card role="dialog" aria-modal="true" aria-label={`PHN check-up for ${patient?.patient}`} className="flex max-h-[92vh] flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4" onClick={() => { if (!submitting) onClose(); }}>
+      <div className="w-full max-w-3xl min-w-0" onClick={(e) => e.stopPropagation()}>
+        <Card role="dialog" aria-modal="true" aria-label={`PHN check-up for ${patient?.patient}`} className="flex h-[min(92dvh,780px)] min-h-0 flex-col overflow-hidden sm:max-h-[92dvh]">
           {/* Header */}
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-6 py-4">
-            <div className="flex items-center gap-3 min-w-0">
+          <div className="flex shrink-0 items-start gap-3 border-b border-brand-border px-4 py-3 sm:items-center sm:px-6 sm:py-4">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-blue text-white text-sm font-semibold">
                 {(patient?.patient || "?")
                   .split(" ")
@@ -262,30 +284,32 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   .join("")}
               </div>
               <div className="min-w-0">
-                <h3 className="truncate text-base font-semibold text-brand-ink">{patient?.patient}</h3>
+                <h3 className="break-words text-base font-semibold leading-snug text-brand-ink" title={patient?.patient}>{patient?.patient}</h3>
                 <p className="text-xs text-brand-gray">
                   PHN Check-up {completed ? "Record" : "in progress"}
                 </p>
+                <span className={`mt-1 inline-flex max-w-full whitespace-normal rounded-full px-2.5 py-1 text-[11px] font-medium leading-tight sm:whitespace-nowrap sm:text-xs ${statusTone}`}>
+                  {patient?.status}
+                </span>
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${statusTone}`}>
-                {patient?.status}
-              </span>
-              <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink" aria-label="Close">
+            <div className="flex shrink-0 items-center">
+              <button onClick={onClose} disabled={submitting} className="flex h-9 w-9 items-center justify-center rounded-lg text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink disabled:opacity-50" aria-label="Close">
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
+            {submitError && <p className="mb-4 rounded-btn border border-brand-danger/30 bg-brand-danger/5 px-3 py-2.5 text-sm text-brand-danger" role="alert">{submitError}</p>}
             {/* Patient Information */}
             <div className="mb-6">
               <SectionTitle step={1} title="Patient Information" />
               <div className="grid grid-cols-2 gap-3 rounded-btn bg-brand-bg/60 border border-brand-border px-4 py-3 sm:grid-cols-4">
                 <InfoItem label="Patient Name" value={patient?.patient} />
-                <InfoItem label="Age" value={patient?.age !== undefined && patient?.age !== null ? `${patient.age} yrs` : null} />
+                <InfoItem label="Age at Triage" value={measurement(patient?.age, "yrs")} />
                 <InfoItem label="Sex" value={patient?.sex} />
+                <InfoItem label="Patient ID" value={patient?.residentId} />
                 <DateTimeItem label="Date of Visit" value={patient?.visitDate} />
                 <InfoItem label="Barangay" value={residenceBarangay} />
                 <InfoItem label="Consultation Location" value={consultationLocation} />
@@ -300,23 +324,31 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   <div className="sm:col-span-2 lg:col-span-3">
                     <InfoItem label="Chief Complaint / Reason for Visit" value={patient?.triage?.chiefComplaint || patient?.reason} />
                   </div>
-                  <InfoItem label="Temperature" value={patient?.triage?.temperature ? `${patient.triage.temperature} °C` : null} />
-                  <InfoItem label="Blood Pressure" value={patient?.triage?.bloodPressure ? `${patient.triage.bloodPressure} mmHg` : null} />
-                  <InfoItem label="Pulse Rate" value={patient?.triage?.pulseRate ? `${patient.triage.pulseRate} bpm` : null} />
-                  <InfoItem label="Respiratory Rate" value={patient?.triage?.respiratoryRate ? `${patient.triage.respiratoryRate} /min` : null} />
-                  {patient?.triage?.oxygenSaturation ? (
-                    <InfoItem label="O2 Saturation" value={`${patient.triage.oxygenSaturation} %`} />
-                  ) : null}
-                  {patient?.triage?.weight ? <InfoItem label="Weight" value={`${patient.triage.weight} kg`} /> : null}
-                  <DateTimeItem label="Triage Date" value={patient?.triage?.date} />
+                  <InfoItem label="Height" value={measurement(patient?.triage?.heightCm, "cm")} />
+                  <InfoItem label="Weight" value={measurement(patient?.triage?.weight, "kg")} />
+                  <InfoItem label="BMI" value={measurement(patient?.triage?.bmi, "kg/m²")} />
+                  <InfoItem label="Blood Pressure" value={measurement(patient?.triage?.bloodPressure, "mmHg")} />
+                  <InfoItem label="Blood Sugar" value={measurement(patient?.triage?.bloodSugar, "mg/dL")} />
+                  <InfoItem label="Temperature" value={measurement(patient?.triage?.temperature, "°C")} />
+                  <InfoItem label="Pulse Rate" value={measurement(patient?.triage?.pulseRate, "bpm")} />
+                  <InfoItem label="Respiratory Rate" value={measurement(patient?.triage?.respiratoryRate, "/min")} />
+                  <InfoItem label="O2 Saturation" value={measurement(patient?.triage?.oxygenSaturation, "%")} />
+                  <DateTimeItem label="Triage Date and Time" value={patient?.triage?.date} />
                   <InfoItem label="Triage Personnel" value={patient?.triage?.personnel} />
+                  <InfoItem label="Triage / Encounter ID" value={patient?.triage?.id || patient?.id} />
                 </div>
-                {patient?.triage?.notes ? (
-                  <div className="mt-3 border-t border-brand-border pt-3">
-                    <p className="text-xs text-brand-gray mb-1">Triage Notes</p>
-                    <p className="text-sm text-brand-ink whitespace-pre-line">{patient.triage.notes}</p>
+                <div className="mt-3 border-t border-brand-border pt-3">
+                  <p className="text-xs text-brand-gray mb-1">Triage Notes</p>
+                  <p className="text-sm text-brand-ink whitespace-pre-line">{patient?.triage?.notes || "Not recorded"}</p>
+                </div>
+                {patient?.triage?.warnings?.length > 0 && (
+                  <div className="mt-3 rounded-btn border border-brand-accent/30 bg-brand-accent/5 p-3 text-xs text-brand-ink" role="note">
+                    <p className="font-semibold">Measurements flagged for clinical review</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4">
+                      {patient.triage.warnings.map((warning, index) => <li key={index}>{typeof warning === "string" ? warning : warning.message}</li>)}
+                    </ul>
                   </div>
-                ) : null}
+                )}
               </div>
             </div>
 
@@ -324,72 +356,74 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
             {completed && checkup ? (
               <div>
                 <SectionTitle step={3} title="PHN Check-up Record" />
-                <div className="rounded-btn border border-brand-border px-4 py-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <InfoItem label="Assessment / Findings" value={checkup.assessment} />
-                    <InfoItem label="Health Concern" value={checkup.healthConcern} />
-                    <InfoItem
-                      label="Health Service"
-                      value={patient?.serviceName || patient?.raw?.healthServiceName}
-                      fallback="No specific health service"
-                    />
-                    <div>
-                      <p className="text-xs text-brand-gray mb-1">Risk Level</p>
-                      <RiskPill level={checkup.riskLevel || autoRisk.level} />
+                <div className="space-y-3">
+                  <section className="rounded-btn border border-brand-border bg-white px-4 py-3">
+                    <h5 className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">Assessment</h5>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      <InfoItem label="Assessment / Findings" value={checkup.assessment} />
+                      <InfoItem label="Health Concern" value={checkup.healthConcern} />
+                      <InfoItem label="Health Service" value={patient?.serviceName || patient?.raw?.healthServiceName} fallback="No specific health service" />
+                      <div>
+                        <p className="text-xs text-brand-gray mb-1">Risk Level</p>
+                        <RiskPill level={checkup.riskLevel || autoRisk.level} />
+                      </div>
                     </div>
-                    <InfoItem label="Consultation Location" value={checkup.consultationLocation || consultationLocation} />
-                    <InfoItem label="Assessed By" value={checkup.personnel} />
-                    <InfoItem label="Completed By" value={checkup.completedBy} />
-                    <InfoItem label="Completed" value={checkup.completedAt} />
-                  </div>
-                  {(checkup.riskReason || autoRisk.reason) ? (
-                    <div className="mt-3 border-t border-brand-border pt-3">
-                      <p className="text-xs text-brand-gray mb-1">Risk Reason</p>
-                      <p className="text-sm text-brand-ink">{checkup.riskReason || autoRisk.reason}</p>
-                    </div>
-                  ) : null}
-                  {checkup.clinicalNotes ? (
-                    <div className="mt-3">
-                      <p className="text-xs text-brand-gray mb-1">Clinical Notes</p>
-                      <p className="text-sm text-brand-ink whitespace-pre-line">{checkup.clinicalNotes}</p>
-                    </div>
-                  ) : null}
-                  {checkup.recommendations ? (
-                    <div className="mt-3">
-                      <p className="text-xs text-brand-gray mb-1">Recommendations</p>
-                      <p className="text-sm text-brand-ink whitespace-pre-line">{checkup.recommendations}</p>
-                    </div>
-                  ) : null}
-                  <div className="mt-3">
-                    <p className="text-xs text-brand-gray mb-1">Medications / Prescriptions</p>
+                    <p className="mt-3 border-t border-brand-border pt-3 text-sm text-brand-ink break-words">
+                      <span className="text-xs text-brand-gray">Risk Reason: </span>{checkup.riskReason || autoRisk.reason}
+                    </p>
+                  </section>
+
+                  <section className="rounded-btn border border-brand-border bg-white px-4 py-3">
+                    <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Clinical Notes</h5>
+                    <p className="whitespace-pre-wrap break-words text-sm text-brand-ink">{checkup.clinicalNotes || "No clinical notes recorded."}</p>
+                  </section>
+
+                  <section className="rounded-btn border border-brand-border bg-white px-4 py-3">
+                    <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Recommendations</h5>
+                    <p className="whitespace-pre-wrap break-words text-sm text-brand-ink">{checkup.recommendations || "No recommendations recorded."}</p>
+                  </section>
+
+                  <section className="rounded-btn border border-brand-border bg-white px-4 py-3">
+                    <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">Medications / Prescriptions</h5>
                     {Array.isArray(checkup.medications) && checkup.medications.length > 0 ? (
                       <ul className="space-y-1.5">
                         {checkup.medications.map((m, i) => (
-                          <li key={`${m.medicineId || "custom"}-${i}`} className="flex items-start gap-2 text-sm text-brand-ink">
+                          <li key={`${m.medicineId || "custom"}-${i}`} className="rounded-btn border border-brand-border p-3 text-sm text-brand-ink">
+                            <div className="mb-3 flex items-start gap-2">
                             <Pill className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
-                            <span>{formatMedicationLine(m)}</span>
+                              <span className="min-w-0 break-words font-medium">{[m.genericName, m.brandName && `(${m.brandName})`, m.strength, m.dosageForm].filter(Boolean).join(" ") || "Medication name not recorded"}</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                              <InfoItem label="Prescribed Dosage" value={m.dose} fallback="Not provided" />
+                              <InfoItem label="Frequency" value={m.frequency} fallback="Not provided" />
+                              <InfoItem label="Route" value={m.route} fallback="Not provided" />
+                              <InfoItem label="Duration" value={m.duration} fallback="Not provided" />
+                              <InfoItem label="Quantity" value={m.quantity} fallback="Not provided" />
+                              <InfoItem label="Special Instructions" value={m.instructions} fallback="Not provided" />
+                            </div>
+                            {![m.dose, m.frequency, m.route, m.duration, m.instructions].some(hasValue) && <p className="mt-2 text-xs text-brand-gray">Prescription details have not yet been provided.</p>}
                           </li>
                         ))}
                       </ul>
                     ) : (
                       <p className="text-sm text-brand-gray">No medication prescribed for this check-up.</p>
                     )}
-                  </div>
-                </div>
+                  </section>
 
-                {/* OUTCOME */}
-                <div className="mt-5">
-                  <SectionTitle step={4} title="Outcome" />
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    <OutcomeItem label="Consultation Status" value={patient?.status} />
-                    <OutcomeItem label="Outcome" value={checkup.outcome || "No Further Action"} />
-                    <OutcomeItem label="Referral" value={checkup.referralStatus || "—"} />
-                    <OutcomeItem label="Follow-up" value={checkup.followUpStatus || "—"} />
-                    <OutcomeItem
-                      label="Monitoring / Health Service"
-                      value={checkup.serviceStatus || "—"}
-                    />
-                  </div>
+                  <section className="rounded-btn border border-brand-border bg-white px-4 py-3">
+                    <h5 className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">Outcome</h5>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      <InfoItem label="Consultation Location" value={checkup.consultationLocation || consultationLocation} />
+                      <InfoItem label="Assessed By" value={checkup.personnel} />
+                      <InfoItem label="Completed By" value={checkup.completedBy} />
+                      <InfoItem label="Completed" value={checkup.completedAt} />
+                      <OutcomeItem label="Consultation Status" value={patient?.status} />
+                      <OutcomeItem label="Outcome" value={checkup.outcome || "No Further Action"} />
+                      <OutcomeItem label="Referral" value={checkup.referralStatus || "—"} />
+                      <OutcomeItem label="Follow-up" value={checkup.followUpStatus || "—"} />
+                      <OutcomeItem label="Monitoring / Health Service" value={checkup.serviceStatus || "—"} />
+                    </div>
+                  </section>
                 </div>
                 {justCompleted && (
                   <div className="mt-4 flex items-center gap-2 rounded-btn bg-brand-green/10 border border-brand-green/20 px-4 py-3 text-sm text-brand-green">
@@ -397,6 +431,14 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                     Check-up completed. The patient record now reflects the full triage â†’ check-up workflow.
                   </div>
                 )}
+                {onOutcome ? renderOutcomeActions() : null}
+              </div>
+            ) : completed ? (
+              <div>
+                <SectionTitle step={3} title="PHN Check-up Record" />
+                <p className="rounded-btn border border-brand-border bg-brand-bg/40 px-4 py-3 text-sm text-brand-gray" role="status">
+                  This consultation is marked completed, but the clinical summary is unavailable. No new record will be created from this view.
+                </p>
                 {onOutcome ? renderOutcomeActions() : null}
               </div>
             ) : (
@@ -443,10 +485,11 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   </div>
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-sm font-medium text-brand-ink block mb-1.5">
+                      <label htmlFor="phn-assessment" className="text-sm font-medium text-brand-ink block mb-1.5">
                         Assessment / Findings <span className="text-brand-danger">*</span>
                       </label>
                       <textarea
+                        id="phn-assessment"
                         rows={3}
                         placeholder="e.g. BP re-check shows 140/90 after rest..."
                         value={assessment}
@@ -454,15 +497,16 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                           setAssessment(e.target.value);
                           if (errors.assessment) setErrors((prev) => ({ ...prev, assessment: "" }));
                         }}
-                        className={`${inputCls(errors.assessment)} resize-none`}
+                        className={`${inputCls(errors.assessment)} max-h-40 resize-y`}
                       />
                       {errors.assessment && <p className="text-xs text-brand-danger mt-1">{errors.assessment}</p>}
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-brand-ink block mb-1.5">
+                      <label htmlFor="phn-health-concern" className="text-sm font-medium text-brand-ink block mb-1.5">
                         Health Concern <span className="text-brand-danger">*</span>
                       </label>
                       <input
+                        id="phn-health-concern"
                         type="text"
                         list="phn-health-concerns"
                         placeholder="e.g. Hypertension"
@@ -486,37 +530,42 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                   <div>
                     <div className="flex items-center gap-2 mb-1.5">
                       <label className="text-sm font-medium text-brand-ink">Risk Level</label>
-                      <span className="text-[11px] text-brand-gray">
-                        Risk calculated automatically based on current findings.
+                    <span className="text-[11px] text-brand-gray">
+                        Backend assessment from the recorded triage measurements.
                       </span>
                     </div>
-                    <div className="flex items-center gap-3 rounded-btn border border-brand-border bg-brand-bg/40 px-4 py-3">
+                    <div className="flex flex-col items-start gap-2 rounded-btn border border-brand-border bg-brand-bg/40 px-3 py-3 sm:flex-row sm:items-center sm:gap-3 sm:px-4">
                       <RiskPill level={autoRisk.level} />
                       <p className="text-sm text-brand-ink">
-                        <span className="text-brand-gray">Reason:</span> {autoRisk.reason}
+                        <span className="text-brand-gray">Reason:</span> <span className="break-words">{autoRisk.reason}</span>
                       </p>
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium text-brand-ink block mb-1.5">Clinical Notes</label>
+                    <label htmlFor="phn-clinical-notes" className="text-sm font-medium text-brand-ink block mb-1.5">Clinical Notes</label>
                     <textarea
+                      id="phn-clinical-notes"
                       rows={2}
                       placeholder="e.g. Patient reports occasional dizziness. BP remains elevated."
                       value={clinicalNotes}
                       onChange={(e) => setClinicalNotes(e.target.value)}
-                      className={`${inputCls()} resize-none`}
+                        className={`${inputCls()} max-h-32 resize-y`}
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-brand-ink block mb-1.5">Recommendations</label>
+                    <label htmlFor="phn-recommendations" className="text-sm font-medium text-brand-ink block mb-1.5">Treatment / Recommendations *</label>
                     <textarea
+                      id="phn-recommendations"
                       rows={2}
-                      placeholder="e.g. Continue prescribed maintenance medication and schedule follow-up for BP monitoring."
+                      placeholder="Record the treatment or recommendations actually given during this consultation."
                       value={recommendations}
                       onChange={(e) => setRecommendations(e.target.value)}
-                      className={`${inputCls()} resize-none`}
+                      aria-invalid={!!errors.recommendations}
+                      aria-describedby={errors.recommendations ? 'phn-recommendations-error' : undefined}
+                      className={`${inputCls(!!errors.recommendations)} max-h-32 resize-y`}
                     />
+                    {errors.recommendations && <p id="phn-recommendations-error" className="mt-1 text-xs text-brand-danger">{errors.recommendations}</p>}
                   </div>
                   <div>
                     <label className="text-sm font-medium text-brand-ink block mb-1.5">
@@ -525,6 +574,7 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
                     <MedicineSelector
                       value={medications}
                       onChange={setMedications}
+                      errors={errors}
                     />
                   </div>
                   <div>
@@ -544,19 +594,22 @@ export default function PhnCheckupWorkbench({ patient, onClose, onComplete = und
           </div>
 
           {/* Footer */}
-          <div className="flex shrink-0 justify-end gap-3 border-t border-brand-border bg-white px-6 py-4">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-brand-border bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:gap-3 sm:px-6 sm:py-4">
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors"
+              disabled={submitting}
+              className="min-h-10 px-3 py-2 rounded-btn text-sm font-medium text-brand-gray hover:bg-brand-bg transition-colors disabled:opacity-50"
             >
               {completed ? "Close" : "Cancel"}
             </button>
             {!completed && (
               <button
                 onClick={handleComplete}
-                className="flex items-center gap-2 px-4 py-2 rounded-btn text-sm font-medium bg-brand-green text-white hover:opacity-90 transition-colors"
+                disabled={submitting}
+                className="flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-green px-3 py-2 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:cursor-wait disabled:opacity-60 sm:px-4 sm:text-sm"
               >
-                <CheckCircle2 className="w-4 h-4" /> Complete Check-up
+                {submitting ? <Activity className="h-4 w-4 animate-pulse" /> : <CheckCircle2 className="w-4 h-4" />}
+                {submitting ? "Saving…" : "Complete Check-up"}
               </button>
             )}
           </div>

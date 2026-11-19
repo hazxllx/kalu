@@ -10,12 +10,16 @@ import {
 import { isApprovedBarangayName } from '../config/barangays.js';
 
 /**
- * Household profiling input validation (shared by create/update/member routes).
+ * @file Household profiling, member roster, and field-visit validators (server-authoritative).
  *
- * Server-side rules mirror the database CHECK constraints and the service's
- * semantic checks. The risk classification is never accepted from the client —
- * `riskScore`/`riskLevel`/`riskFactors`/`flags` are dropped here as well as in
- * the service.
+ * Executed by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> authenticate -> authorize -> barangayScope -> validate -> controller -> service -> Supabase`).
+ *
+ * Server-side rules mirror PostgreSQL CHECK constraints and service-level semantic checks
+ * for BHW/Health Supervisor household profiling (FHSIS environmental health indicators,
+ * NHTS/IP/PhilHealth socioeconomic tags, quarterly visit tracking, and member rosters).
+ * Risk classification fields (`riskScore`, `riskLevel`, `riskFactors`, `flags`) are
+ * intentionally omitted from the whitelist here and recomputed authoritatively in the service.
  */
 
 export const HH_STATUSES = Object.freeze([
@@ -24,21 +28,27 @@ export const HH_STATUSES = Object.freeze([
 ]);
 export const APPROVAL_STATUSES = Object.freeze(['Not yet approved', 'Approved', 'Needs revision']);
 export const VERIFICATION_STATUSES = Object.freeze(['Pending Verification', 'Verified', 'Returned for Correction']);
+/** FHSIS water-supply classifications (Level I point source, Level II communal faucet, Level III waterworks, or unimproved). */
 export const WATER_SOURCES = Object.freeze(['level1', 'level2', 'level3', 'unimproved']);
+/** FHSIS sanitary/unsanitary toilet facility classifications (water-sealed own/shared, open pit, Antipolo, or none). */
 export const TOILET_TYPES = Object.freeze(['ws_own', 'ws_shared', 'open_pit', 'antipolo', 'none']);
 export const PHILHEALTH_VALUES = Object.freeze(['member', 'non-member']);
 export const HOUSEHOLD_VISIT_REASONS = Object.freeze(['Initial Profiling', 'Updating Household Information', 'Verification', 'Follow-up', 'Monitoring', 'Other']);
 export const HOUSEHOLD_UPDATE_SECTIONS = Object.freeze(['Household Information', 'Household Details', 'Respondent Information', 'HH Head PhilHealth Information', 'Water Source and Sanitation Details', 'Household Members']);
 export const SEX_VALUES = Object.freeze(['Male', 'Female']);
 
+/** Short alphanumeric/hyphen household code (e.g. `HH-...`, max 32 chars). */
 const SAFE_HH_ID = /^[A-Za-z0-9_-]{1,32}$/;
 // Household member ids are database UUIDs (gen_random_uuid, 36 chars), which are
 // longer than the short HH- household id, so they need their own pattern.
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
- * Validates the household route params in one step and returns ALL params so
- * `validate(..., 'params')` never drops `memberId`.
+ * Validates household route params (`:id` and optional `:memberId`) in one step
+ * and returns all validated params so `validate(..., 'params')` never strips `memberId`.
+ *
+ * @param {Object} [params] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
  */
 export const householdParamsValidator = (params = {}) => {
   const errors = {};
@@ -56,12 +66,19 @@ export const householdParamsValidator = (params = {}) => {
   return valid(memberId === undefined ? { id } : { id, memberId });
 };
 
+/** Trims an optional text input and records an error if it exceeds `max` characters. */
 const optionalText = (value, max, field, label, errors) => {
   const out = text(value);
   if (out.length > max) errors[field] = `${label} is too long (max ${max} characters).`;
   return out;
 };
 
+/**
+ * Validates and normalizes a single household member entry at `members[index]`.
+ * Supports either linking an existing `residentId` or supplying an inline `newResident`
+ * stub (`firstName`, `lastName`, `birthDate`, optional `sex` and `birthPlace`) for
+ * automatic resident record creation during profiling.
+ */
 const validateMember = (member, index, errors) => {
   const prefix = `members[${index}]`;
   const name = text(member?.name);
@@ -118,7 +135,10 @@ const validateMember = (member, index, errors) => {
   return normalized;
 };
 
-/** Shared field extraction for create (full) and update (partial) payloads. */
+/**
+ * Shared field extractor and validator for full household creation (`partial: false`)
+ * and partial updates (`partial: true`), unwrapping `{ household }` or flat payloads.
+ */
 const runHouseholdValidator = (input, { partial }) => {
   const body = input && typeof input.household === 'object' && input.household !== null ? input.household : input || {};
   const errors = {};
@@ -260,6 +280,7 @@ const runHouseholdValidator = (input, { partial }) => {
   if (body.respondentMaiden !== undefined) out.respondentMaiden = optionalText(body.respondentMaiden, TEXT_LIMITS.medium, 'respondentMaiden', "Respondent mother's maiden name", errors);
   if (body.collectorName !== undefined) out.collectorName = optionalText(body.collectorName, TEXT_LIMITS.medium, 'collectorName', 'Collector name', errors);
 
+  // Initial profiling visit date and client-generated request UUID (accepted on create only).
   if (!partial && body.initialVisitDate !== undefined) {
     const value = text(body.initialVisitDate);
     const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00.000Z`) : null;
@@ -287,9 +308,29 @@ const runHouseholdValidator = (input, { partial }) => {
   return valid({ household: out });
 };
 
+/**
+ * Validates `POST /households` full household profiling payloads (`headName`, `purok`,
+ * `streetAddress`, and approved `barangay` required; `families` defaults to `1`).
+ *
+ * @param {Object} [input] - Raw request body (`{ household }` or flat).
+ * @returns {Object} Validation result `{ value: { household } }` or `{ error }`.
+ */
 export const createHouseholdValidator = (input = {}) => runHouseholdValidator(input, { partial: false });
+
+/**
+ * Validates `PUT`/`PATCH /households/:id` partial household profile updates.
+ *
+ * @param {Object} [input] - Raw request body (`{ household }` or flat).
+ * @returns {Object} Validation result `{ value: { household } }` or `{ error }`.
+ */
 export const updateHouseholdValidator = (input = {}) => runHouseholdValidator(input, { partial: true });
 
+/**
+ * Validates standalone household member create/update payloads (`{ member }` or flat).
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { member } }` or `{ error }`.
+ */
 export const householdMemberValidator = (input = {}) => {
   const body = input && typeof input.member === 'object' && input.member !== null ? input.member : input || {};
   const errors = {};
@@ -298,6 +339,14 @@ export const householdMemberValidator = (input = {}) => {
   return valid({ member });
 };
 
+/**
+ * Validates household field-visit log entries (`{ visit }` or flat), requiring a strict
+ * calendar `visitDate`, idempotency/tracking `requestId` UUID, controlled `visitReason`,
+ * and deduplicated `updatedSections`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { visit } }` or `{ error }`.
+ */
 export const householdVisitValidator = (input = {}) => {
   const body = input && typeof input.visit === 'object' && input.visit !== null ? input.visit : input || {};
   const errors = {};

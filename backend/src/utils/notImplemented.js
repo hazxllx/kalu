@@ -1,17 +1,28 @@
 import ApiError from './apiError.js';
 
 /**
- * Controller placeholder for endpoints whose implementation depends on the
- * verified KALUSAGAP database structure (ERD).
+ * @module utils/notImplemented
+ * @description Placeholder controller factory for routes awaiting a verified database schema (ERD).
  *
- * It intentionally throws 501 instead of returning fake data, so the API never
- * pretends a database operation succeeded. Each usage names the resource and
- * the schema it is blocked on, which surfaces clearly in the response and logs.
+ * Architectural layer:
+ *   `route -> authenticate -> authorize -> controller (notImplemented) -> errorHandler`
  *
- *   router.get('/', authenticate, authorize(roles), notImplemented('residents'));
+ * Keeps authentication and role-based authorization active on scaffolded endpoints
+ * while intentionally throwing `501 Not Implemented` (`ApiError.notImplemented`)
+ * instead of returning mock or fabricated records. Once a resource's Supabase
+ * tables and repository queries are verified, replace this placeholder with a real
+ * controller delegating to a service.
+ */
+
+/**
+ * Creates a controller handler that immediately throws a `501 Not Implemented`
+ * `ApiError` naming the unverified resource or action.
  *
- * Replace with a real controller (delegating to a service) once the schema for
- * that resource is confirmed.
+ * @example
+ *   router.get('/', authenticate, authorize(roles), asyncHandler(notImplemented('residents')));
+ *
+ * @param {string} resource - Resource or action identifier (e.g., `'residents'` or `'immunizations.list'`) surfaced in logs and error responses.
+ * @returns {Function} Express handler function that throws `ApiError` with HTTP status 501.
  */
 const notImplemented = (resource) => () => {
   throw ApiError.notImplemented(

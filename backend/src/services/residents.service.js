@@ -1258,8 +1258,9 @@ export const createResident = async ({
           payload.password || undefined,
       });
 
-    const resident =
-      await insertResidentIdempotent(user, operationKey, {
+    let resident;
+    try {
+      resident = await insertResidentIdempotent(user, operationKey, {
         ...ids,
 
         authUserId:
@@ -1319,6 +1320,16 @@ export const createResident = async ({
         createdByRole:
           user?.role || '',
       });
+    } catch (error) {
+      // Auth and the resident row use separate Supabase APIs. Compensate for a
+      // failed row write so a retry does not encounter a stranded invitation.
+      try {
+        await getServiceClient().auth.admin.deleteUser(account.authUserId);
+      } catch {
+        // Preserve the original insert failure; cleanup is best effort.
+      }
+      throw error;
+    }
 
     return {
       ...resident,

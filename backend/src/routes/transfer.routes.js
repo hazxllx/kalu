@@ -1,12 +1,24 @@
 /**
- * Resident transfer workflow endpoints (barangay-to-barangay movement).
+ * Resident barangay-to-barangay transfer workflow routes.
  *
- * Two-phase workflow:
- * 1. Resident self-service: initiate request, upload documents, submit to Health Supervisor
- * 2. Health personnel review: accept/reject and route to destination barangay PHN/MHO
+ * Role in KALUSAGAP:
+ * Orchestrates resident relocation across barangays/municipalities so demographic
+ * profiles and longitudinal health records transition cleanly without duplicate
+ * registrations.
  *
- * Permissions are dynamically enforced: residents can only modify their own requests,
- * staff can only review requests for residents in their scope.
+ * Architectural pipeline:
+ *   route -> authenticate -> authorize(roles, permission) -> [uploadDocumentFile]
+ *         -> transfer.controller -> transfer.service -> Supabase
+ *
+ * Two-phase workflow & scope guarantees:
+ * 1. Resident self-service (`self` chain — `FEATURE_ROLES.residentSelf`):
+ *    Identity is derived strictly from `req.user`; residents initiate a draft
+ *    transfer, upload/remove proof-of-residency documents, submit to the origin/
+ *    destination review queue, or cancel their own pending request.
+ * 2. Health personnel review (`staff` chain — Admin, MHO, PHN, Health Supervisor
+ *    with `residents.transfer.approve`):
+ *    Reviewers inspect requests scoped to their barangay/municipality and
+ *    approve, reject, or request document resubmission.
  */
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
@@ -25,7 +37,16 @@ const staff = [
   }),
 ];
 
-// Resident self-service (identity always derived from the authenticated session).
+// ---------------------------------------------------------------------------
+// Resident Self-Service Endpoints (`self` chain — session-derived ownership)
+// - GET    /transfer-requests/context                    : Returns origin barangay, destination options, and eligibility.
+// - GET    /transfer-requests/me                         : Lists the authenticated resident's own transfer requests.
+// - POST   /transfer-requests                            : Starts a draft transfer request from `req.body` (destination/reason).
+// - POST   /transfer-requests/:id/documents              : Validates & uploads a supporting file via `uploadDocumentFile`.
+// - DELETE /transfer-requests/:id/documents/:documentId  : Deletes attachment `:documentId` from editable request `:id`.
+// - POST   /transfer-requests/:id/submit                 : Submits transfer request `:id` for staff review.
+// - POST   /transfer-requests/:id/cancel                 : Cancels the resident's draft/pending transfer request `:id`.
+// ---------------------------------------------------------------------------
 router.get('/transfer-requests/context', ...self, asyncHandler(controller.getContext));
 router.get('/transfer-requests/me', ...self, asyncHandler(controller.getMine));
 router.post('/transfer-requests', ...self, asyncHandler(controller.startTransfer));
@@ -34,7 +55,14 @@ router.delete('/transfer-requests/:id/documents/:documentId', ...self, asyncHand
 router.post('/transfer-requests/:id/submit', ...self, asyncHandler(controller.submit));
 router.post('/transfer-requests/:id/cancel', ...self, asyncHandler(controller.cancel));
 
-// Authorized health personnel review.
+// ---------------------------------------------------------------------------
+// Authorized Health Personnel Review Endpoints (`staff` chain + `residents.transfer.approve`)
+// - GET  /transfer-requests/queue                      : Lists scoped transfer requests (query filters: status, search, pagination).
+// - GET  /transfer-requests/:id/review                 : Fetches transfer dossier + uploaded proof documents for `:id`.
+// - POST /transfer-requests/:id/approve                : Approves transfer `:id` (notes in `req.body`) and updates resident scope.
+// - POST /transfer-requests/:id/reject                 : Rejects transfer `:id` with reviewer reason in `req.body`.
+// - POST /transfer-requests/:id/request-resubmission   : Requests resident correction/resubmission for `:id` (`req.body` reason).
+// ---------------------------------------------------------------------------
 router.get('/transfer-requests/queue', ...staff, asyncHandler(controller.listQueue));
 router.get('/transfer-requests/:id/review', ...staff, asyncHandler(controller.getForReview));
 router.post('/transfer-requests/:id/approve', ...staff, asyncHandler(controller.approve));

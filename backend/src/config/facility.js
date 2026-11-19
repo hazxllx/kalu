@@ -1,6 +1,11 @@
 /**
  * KALUSAGAP facility + referral reference data for RHU Pili (Pili, Camarines Sur).
  *
+ * Architectural role: consumed in the `route -> authenticate -> authorize ->
+ * controller -> service -> repository/Supabase` pipeline by intake, triage,
+ * consultation, and referral services/validators to enforce valid encounter
+ * workflow states and populate facility metadata.
+ *
  * Single source of truth used when rendering intake records and RHU referral
  * documents. Referral data is stored against the snapshot at the time the PHN
  * processes the record, so later edits to these constants never silently
@@ -31,6 +36,7 @@ export const RECEIVING_FACILITIES = Object.freeze([
   { name: 'Other Facility', address: '' },
 ]);
 
+/** Clinical specialty / service categories selectable when issuing an RHU referral. */
 export const REFERRAL_CATEGORIES = Object.freeze([
   'Medical',
   'Surgical',
@@ -41,6 +47,7 @@ export const REFERRAL_CATEGORIES = Object.freeze([
   'Other',
 ]);
 
+/** Primary-care outpatient service tracks offered during barangay intake and RHU triage/consultation. */
 export const OUTPATIENT_SERVICES = Object.freeze([
   'General Outpatient',
   'Prenatal / Maternal Care',
@@ -73,6 +80,7 @@ export const SUBMISSION_STATUS = Object.freeze({
   COMPLETED: 'completed',
 });
 
+/** Human-readable uppercase status badges rendered in queues, detail views, and printed summaries. */
 export const SUBMISSION_STATUS_LABELS = Object.freeze({
   draft: 'DRAFT',
   submitted: 'SUBMITTED',
@@ -82,6 +90,7 @@ export const SUBMISSION_STATUS_LABELS = Object.freeze({
   completed: 'COMPLETED',
 });
 
+/** Canonical forward progression order of `SUBMISSION_STATUS` values across the intake-to-PHN lifecycle. */
 export const SUBMISSION_STATUS_ORDER = Object.freeze([
   SUBMISSION_STATUS.DRAFT,
   SUBMISSION_STATUS.SUBMITTED,

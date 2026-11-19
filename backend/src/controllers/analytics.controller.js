@@ -3,13 +3,54 @@ import { isApprovedBarangayName } from '../config/barangays.js';
 import ApiError from '../utils/apiError.js';
 import { sendData } from '../utils/apiResponse.js';
 
+/**
+ * Community Health Analytics & Spatial Surveillance Controller.
+ *
+ * Fits into the KALUSAGAP request pipeline as:
+ *   route -> authenticate -> authorize -> resolveBarangayScope -> controller -> analytics.service -> repository / Supabase RPC
+ *
+ * Exposes read-only endpoints for the Early Warning dashboard, Community Health
+ * Map (barangay case counts and monthly disease trends), supported condition
+ * filter options, and aggregated Household Map markers. Enforces strict input
+ * validation on date ranges, reporting years, condition names, risk levels,
+ * and workflow statuses before delegating to `analytics.service.js`.
+ */
+
+/**
+ * Extracts and trims a string query parameter from `req.query`, returning
+ * `null` when absent, non-string, or blank.
+ *
+ * @param {Object} req - Express request object.
+ * @param {string} key - Query parameter name.
+ * @returns {string|null} Trimmed query value or `null`.
+ */
 const qstr = (req, key) => (typeof req.query?.[key] === 'string' ? req.query[key].trim() : '') || null;
+
+/**
+ * Validates that a string is a real calendar date in `YYYY-MM-DD` format,
+ * rejecting impossible calendar rollovers (such as `2026-02-30`).
+ *
+ * @param {string} value - Candidate ISO date string.
+ * @returns {boolean} `true` if `value` is a valid calendar date.
+ */
 const isDateOnly = (value) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 };
 
+/**
+ * Builds the caller's geographic analytics scope from the verified session and
+ * optional `?barangay=` drill-down filter.
+ *
+ * Barangay-assigned staff (`req.assignedBarangay` populated by `resolveBarangayScope`)
+ * are pinned to their assigned barangay. Municipality-wide callers may filter
+ * by an approved barangay name (`422` if unrecognized).
+ *
+ * @param {Object} req - Authenticated Express request.
+ * @returns {Object} Scope descriptor `{ actorId, barangay, municipalityId }`.
+ * @throws {ApiError} 422 when `?barangay=` is not an approved barangay name.
+ */
 const authenticatedScope = (req) => {
   const requestedBarangay = qstr(req, 'barangay');
   if (requestedBarangay && !isApprovedBarangayName(requestedBarangay)) {
@@ -24,7 +65,13 @@ const authenticatedScope = (req) => {
   };
 };
 
-/** Injectable RPC/repository dependencies without replacing module globals. */
+/**
+ * Factory creating analytics route handlers with injectable service/RPC
+ * dependencies (enabling isolated unit/integration tests without mutating globals).
+ *
+ * @param {Object} [options] - Optional `service` override and extra repository/RPC dependencies.
+ * @returns {Object} Bound analytics controller handlers.
+ */
 export const createAnalyticsController = ({ service = analyticsService, ...dependencies } = {}) => {
 
 /**
@@ -35,6 +82,10 @@ export const createAnalyticsController = ({ service = analyticsService, ...depen
  * Supervisor always receives their own barangay's data only, regardless of
  * any filter, URL parameter or id they supply. Municipality-wide callers may
  * optionally drill down with `?barangay=`.
+ *
+ * Query params: `barangay` (optional), `from` (`YYYY-MM-DD`), `to` (`YYYY-MM-DD`),
+ * `year` (4-digit reporting year). Validates date ordering and year format (`422`
+ * on invalid inputs), calls `service.getEarlyWarning`, and returns `200` via `sendData`.
  */
 const getEarlyWarning = async (req, res) => {
   // Health Supervisor -> their assigned barangay (from the session). MHO and
@@ -152,7 +203,12 @@ const getCommunityMapTrends = async (req, res) => {
   sendData(res, data);
 };
 
-/** GET /api/analytics/conditions — the disease filter option list. */
+/**
+ * GET /api/analytics/conditions
+ *
+ * Returns the canonical disease/condition filter vocabulary from
+ * `service.getConditionOptions()` via `sendData` (`200 OK`) for analytics UI dropdowns.
+ */
 const getConditions = async (req, res) => {
   sendData(res, await service.getConditionOptions());
 };
@@ -162,6 +218,8 @@ const getConditions = async (req, res) => {
  *
  * Aggregated household totals at stored barangay reference points. Exact
  * household coordinates, identifiers and resident identities are not returned.
+ * Resolves caller scope via `authenticatedScope(req)`, delegates to
+ * `service.getHouseholdMap`, and responds with `200 OK` via `sendData`.
  */
 const getHouseholdMap = async (req, res) => {
   const data = await service.getHouseholdMap(authenticatedScope(req), dependencies);

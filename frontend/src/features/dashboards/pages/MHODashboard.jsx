@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Map, Users, Stethoscope, Send, ShieldAlert, Activity, RefreshCw, AlertTriangle } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
@@ -12,6 +12,7 @@ import {
   fetchConditions,
 } from "@/services/api/earlyWarningApi";
 import CommunityHealthMap from "@/features/analytics/components/CommunityHealthMap";
+import HouseholdClusterSummary from "@/features/households/components/HouseholdClusterSummary";
 import { formatDateRange, toLocalISODate } from "@/lib/dateUtils";
 
 /**
@@ -74,6 +75,15 @@ const resolveMapRange = (period, custom) => {
   }
 };
 
+export const reportingYearLabel = ({ from, to }) => {
+  // Reporting dates are calendar dates, so read their years without UTC parsing.
+  const yearOf = (value) => /^(\d{4})-\d{2}-\d{2}$/.exec(value || "")?.[1];
+  const first = yearOf(from);
+  const last = yearOf(to);
+  if (first && last) return first === last ? first : `${first}-${last}`;
+  return first || last || "All years";
+};
+
 export default function MHODashboard() {
   const [map, setMap] = useState(null);
   const [referrals, setReferrals] = useState(null);
@@ -92,11 +102,14 @@ export default function MHODashboard() {
   const [mapPeriod, setMapPeriod] = useState("year");
   const [customRange, setCustomRange] = useState({ from: "", to: "" });
   const [selectedName, setSelectedName] = useState(null);
+  const mapRequest = useRef(0);
 
   const mapRange = useMemo(() => resolveMapRange(mapPeriod, customRange), [mapPeriod, customRange]);
 
   const loadMap = useCallback(async () => {
+    const request = ++mapRequest.current;
     setMapStatus({ loading: true, error: null });
+    setMap(null);
     try {
       const result = await fetchCommunityMap({
         condition,
@@ -104,9 +117,11 @@ export default function MHODashboard() {
         from: mapRange.from,
         to: mapRange.to,
       });
+      if (request !== mapRequest.current) return;
       setMap(result);
       setMapStatus({ loading: false, error: null });
     } catch (err) {
+      if (request !== mapRequest.current) return;
       setMap(null);
       setMapStatus({ loading: false, error: err?.message || "Unable to load community health data." });
     }
@@ -168,7 +183,10 @@ export default function MHODashboard() {
     void Promise.all([loadMap(), loadReferrals(), loadFollowUps(), loadEarlyWarning(), loadSubmissionReviews()]);
   }, [loadMap, loadReferrals, loadFollowUps, loadEarlyWarning, loadSubmissionReviews]);
 
-  useEffect(() => { void loadMap(); }, [loadMap]);
+  useEffect(() => {
+    void loadMap();
+    return () => { mapRequest.current += 1; };
+  }, [loadMap]);
   useEffect(() => { void loadReferrals(); }, [loadReferrals]);
   useEffect(() => { void loadFollowUps(); }, [loadFollowUps]);
   useEffect(() => { void loadEarlyWarning(); }, [loadEarlyWarning]);
@@ -188,7 +206,7 @@ export default function MHODashboard() {
       ? barangays.reduce((sum, b) => sum + (b.residents || 0), 0)
       : null;
     const highRisk = registryScopeComplete
-      ? barangays.reduce((sum, b) => sum + (b.highRiskResidents || 0), 0)
+      ? barangays.reduce((sum, b) => sum + (b.reportingHighRiskResidents ?? b.highRiskResidents ?? 0), 0)
       : null;
     const pendingReferrals = (referrals || []).filter((r) => OPEN_REFERRAL_STATUSES.has(r.status)).length;
     return {
@@ -206,7 +224,7 @@ export default function MHODashboard() {
     name: b.name,
     registryAvailable: b.registryAvailable !== false,
     residents: b.residents,
-    highRisk: b.highRiskResidents,
+    highRisk: b.reportingHighRiskResidents ?? b.highRiskResidents,
     pendingReferrals: (referrals || []).filter((r) => barangayOf(r) === b.name && OPEN_REFERRAL_STATUSES.has(r.status)).length,
     overdueFollowUps: (followUps || []).filter((f) => barangayOf(f) === b.name && isFollowUpDue(f)).length,
   })), [barangays, referrals, followUps]);
@@ -265,9 +283,7 @@ export default function MHODashboard() {
   const periodLabel = mapRange.from || mapRange.to
     ? formatDateRange(mapRange.from, mapRange.to)
     : "All records";
-  const reportingYear = mapRange.to || mapRange.from
-    ? new Date(mapRange.to || mapRange.from).getFullYear()
-    : "All years";
+  const reportingYear = reportingYearLabel(mapRange);
 
   return (
     <>
@@ -302,6 +318,8 @@ export default function MHODashboard() {
           </motion.div>
         ))}
       </KpiHorizontal>
+
+      <HouseholdClusterSummary />
 
       <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-card dark:border-border dark:bg-card">
         <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -373,6 +391,7 @@ export default function MHODashboard() {
             visibleConditions={conditionNames}
             showCountLabels
             periodLabel={periodLabel}
+            metricLabel="Recorded cases"
           />
           <div className="hidden">
             <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Relative case intensity</p>

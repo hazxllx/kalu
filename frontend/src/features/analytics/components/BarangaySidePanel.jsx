@@ -7,8 +7,8 @@ import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 
-const tooltipStyle = { borderRadius: 12, border: "1px solid #E5EAF1", fontSize: 12, fontFamily: "DM Sans" };
-const tickStyle = { fill: "#5B6472", fontSize: 11, fontFamily: "DM Sans" };
+const tooltipStyle = { borderRadius: 12, border: "1px solid #E5EAF1", fontSize: 12, fontFamily: "Public Sans" };
+const tickStyle = { fill: "#5B6472", fontSize: 11, fontFamily: "Public Sans" };
 
 const alertDotColor = {
   warning: "bg-brand-yellow",

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, Activity, HeartPulse, NotebookPen, Lock, CheckCircle2 } from "lucide-react";
-import { Card } from "@/components/common/Card";
+import HouseholdDialog from "./HouseholdDialog";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { SkeletonList } from "@/components/common/Skeleton";
@@ -55,7 +55,7 @@ const EMPTY_FORM = {
 const numberOrBlank = (v) => (v === null || v === undefined ? "" : String(v));
 
 const inputCls =
-  "mt-1.5 w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none transition-colors focus:border-brand-blue disabled:cursor-not-allowed disabled:bg-brand-bg disabled:text-brand-gray";
+  "mt-1.5 min-h-11 w-full min-w-0 max-w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none transition-colors focus:border-brand-blue disabled:cursor-not-allowed disabled:bg-brand-bg disabled:text-brand-gray";
 
 const roField = (label, value) => (
   <div>
@@ -193,20 +193,19 @@ export default function MemberHealthModal({ householdId, member, verificationSta
     .join(" · ");
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <Card className="max-h-[90vh] w-full max-w-xl overflow-y-auto">
-        <div onClick={(e) => e.stopPropagation()} className="p-6">
-          <div className="mb-5 flex items-start justify-between gap-3">
+    <HouseholdDialog label="Member health profile" className="max-w-xl" onClose={onClose}>
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-2 sm:px-6">
             <div className="min-w-0">
               <p className="gov-kicker text-[11px] text-brand-gray">Member Health Profile</p>
-              <h3 className="truncate text-lg font-semibold text-brand-ink">{member.name}</h3>
+              <h3 className="line-clamp-2 text-lg font-semibold text-brand-ink [overflow-wrap:anywhere]">{member.name}</h3>
               {memberMeta && <p className="mt-0.5 text-xs text-brand-gray">{memberMeta}</p>}
             </div>
-            <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
+            <button type="button" onClick={onClose} className="grid h-11 w-11 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close member health profile">
               <X className="h-5 w-5" />
             </button>
           </div>
 
+          <div className="min-h-0 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere] sm:p-6">
           {loading && <SkeletonList rows={5} />}
 
           {!loading && loadError && (
@@ -378,7 +377,7 @@ export default function MemberHealthModal({ householdId, member, verificationSta
                 </p>
               )}
 
-              <div className="flex items-center justify-end gap-3">
+              <div className="flex flex-wrap items-center justify-end gap-2 [&>button]:min-h-11">
                 {saved && (
                   <span className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-green">
                     <CheckCircle2 className="h-4 w-4" /> {savedOffline ? "Saved offline" : "Saved"}
@@ -401,7 +400,6 @@ export default function MemberHealthModal({ householdId, member, verificationSta
             </>
           )}
         </div>
-      </Card>
-    </div>
+    </HouseholdDialog>
   );
 }

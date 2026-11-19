@@ -2,7 +2,6 @@ import { useCallback } from "react";
 import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import { useAuth } from "@/context/AuthContext";
 import { classifySyncError, SYNC_ERROR } from "@/services/offline/errors";
-import { OfflineActionRequiredError, MUTATION_TIER } from "@/services/offline/mutationPolicy";
 import useAuthorizedData from './useAuthorizedData.js';
 
 /**
@@ -42,24 +41,11 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
   const error = workflow.error;
 
   const sendToPhnQueue = useCallback(async (payload) => {
-    try {
-      await phnWorkflowApi.sendToPhnQueue(payload);
-      await refresh();
-      return false;
-    } catch (error) {
-      // The apiClient turns an offline RHU hand-off into an ONLINE_ONLY error
-      // (and never auto-submits). Treat that boundary — and a genuine network
-      // failure — as the save-offline signal. Validation/auth failures rethrow.
-      const requiresOfflineDraft =
-        error instanceof OfflineActionRequiredError ||
-        error?.code === MUTATION_TIER.ONLINE_ONLY ||
-        classifySyncError(error).code === SYNC_ERROR.NETWORK;
-      if (!requiresOfflineDraft) throw error;
-      await phnWorkflowApi.saveTriageDraft(ownerId, payload);
-      await refresh();
-      return true;
-    }
-  }, [ownerId, refresh]);
+    const result = await phnWorkflowApi.sendToPhnQueue(payload);
+    // A list refresh failure cannot undo an acknowledged database commit.
+    await refresh().catch(() => {});
+    return result;
+  }, [refresh]);
 
   const startCheckup = useCallback(async (id) => {
     await phnWorkflowApi.startCheckup(id);
@@ -68,7 +54,7 @@ export function usePhnWorkflow({ source = "queue" } = {}) {
 
   const completeCheckup = useCallback(async (id, recorded) => {
     await phnWorkflowApi.completeCheckup(id, recorded);
-    await refresh();
+    await refresh().catch(() => {});
   }, [refresh]);
 
   return { patients, loading, error, refresh, sendToPhnQueue, startCheckup, completeCheckup };

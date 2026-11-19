@@ -15,17 +15,23 @@ test('normalizePhnVisit forwards and normalizes structured medications', () => {
       { medicineId: 'm1', genericName: 'Amlodipine', strength: '5 mg', dosageForm: 'Tablet', dose: '1 tab', route: 'Oral', frequency: 'OD', custom: false, source: 'yakap' },
       // Manual / custom entry
       { genericName: 'Paracetamol', dose: '500 mg', frequency: 'PRN' },
-      // Nameless entry must be dropped by the normalizer
-      { genericName: '   ', dose: '1 tab' },
     ],
   });
   assert.ok(Array.isArray(patch.medications));
-  assert.equal(patch.medications.length, 2, 'nameless medicine is dropped');
+  assert.equal(patch.medications.length, 2);
   assert.equal(patch.medications[0].genericName, 'Amlodipine');
   assert.equal(patch.medications[0].custom, false);
   assert.equal(patch.medications[0].source, 'yakap');
   assert.equal(patch.medications[1].genericName, 'Paracetamol');
   assert.equal(patch.medications[1].custom, true);
+});
+
+test('normalizePhnVisit rejects invalid prescription rows instead of silently dropping them', () => {
+  assert.throws(
+    () => normalizePhnVisit({ medications: [{ dose: '1 tab' }] }),
+    (error) => error.statusCode === 422
+      && error.details['medications[0].genericName'] === 'This field is required.',
+  );
 });
 
 test('normalizePhnVisit does NOT set medications when the field is absent (no accidental clear)', () => {

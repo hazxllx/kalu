@@ -1,9 +1,8 @@
 import React from "react";
+import { normalizeRiskDistribution, RISK_PRESENTATION } from "@/lib/riskLevel";
 
 const RISK_ROWS = [
-  { label: "High Risk", color: "bg-brand-danger", valueColor: "text-brand-danger" },
-  { label: "Moderate Risk", color: "bg-brand-blue", valueColor: "text-brand-blue" },
-  { label: "Low Risk", color: "bg-brand-green", valueColor: "text-brand-green" },
+  "High", "Moderate", "Low", "Unassessed",
 ];
 
 export default function RiskOverview({
@@ -13,11 +12,13 @@ export default function RiskOverview({
   error = "",
   emptyMessage = "No consultations with vitals have been recorded yet, so no risk levels can be computed.",
 }) {
-  const counts = RISK_ROWS.map(({ label, color, valueColor }) => ({
+  const normalized = normalizeRiskDistribution(distribution);
+  const labels = normalized.some((row) => row.name === "Critical") ? ["Critical", ...RISK_ROWS] : RISK_ROWS;
+  const counts = labels.map((label) => ({
     label,
-    color,
-    valueColor,
-    value: Number(distribution.find((row) => row.name === label)?.value || 0),
+    color: RISK_PRESENTATION[label].bar,
+    valueColor: RISK_PRESENTATION[label].text,
+    value: normalized.find((row) => row.name === label)?.value || 0,
   }));
   const assessed = counts.reduce((total, row) => total + row.value, 0);
 
@@ -48,7 +49,7 @@ export default function RiskOverview({
           </div>
         );
       })}
-      {assessed === 0 && (
+      {!counts.some((row) => row.label !== "Unassessed" && row.value > 0) && (
         <p className="text-xs text-brand-gray">
           {emptyMessage}
         </p>

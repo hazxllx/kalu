@@ -188,6 +188,7 @@ export const NAV = {
           label: "TCL",
           icon: "ClipboardList",
           path: "/app/phn/tcls",
+          permission: "reports.view",
         },
         {
           label: "PHN Check-ups",
@@ -512,6 +513,7 @@ children: [
       label: "TCL & M1 Submissions",
       icon: "ClipboardList",
       path: "/app/mho/submissions",
+      permission: "reports.view",
       group: "Submissions",
     },
     {

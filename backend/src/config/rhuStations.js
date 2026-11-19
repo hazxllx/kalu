@@ -2,6 +2,10 @@
  * RHU station assignment + station-level authorization (single source of truth
  * for the API).
  *
+ * Architectural role: enforced in the `route -> authenticate -> authorize ->
+ * authorizeStation -> controller -> service -> repository/Supabase` pipeline to
+ * gate RHU Triage, RHU Consultation, and medical certificate initiation routes.
+ *
  * RHU work is modelled as an ASSIGNMENT on a personnel identity, deliberately
  * separate from the person's system role (`profiles.role`) and from their
  * barangay assignment (`profiles.barangay_id`). One account can therefore be:
@@ -30,11 +34,13 @@
  * to Consultation cannot triage.
  */
 
+/** Canonical RHU station identifiers stored in `profiles.rhu_stations`. */
 export const RHU_STATIONS = Object.freeze({
   TRIAGE: 'triage',
   CONSULTATION: 'consultation',
 });
 
+/** Allowlisted RHU station string values used during input normalization and validation. */
 export const RHU_STATION_VALUES = Object.freeze(Object.values(RHU_STATIONS));
 
 /** Roles that may hold an RHU station assignment. */
@@ -83,9 +89,16 @@ export const normalizeStations = (input) => {
   return out;
 };
 
-/** The stations held by a session/profile user. */
+/** The normalized RHU stations held by a session or profile user (`rhuStations` / `rhu_stations`). */
 export const stationsOf = (user) => normalizeStations(user?.rhuStations ?? user?.rhu_stations);
 
+/**
+ * Check whether `user` holds a specific RHU `station` assignment.
+ *
+ * @param {Object} user - Authenticated session user or profile row
+ * @param {string} station - Station identifier from `RHU_STATIONS`
+ * @returns {boolean}
+ */
 export const hasStation = (user, station) => stationsOf(user).includes(station);
 
 /**
@@ -130,7 +143,14 @@ export const composePosition = (designation, stations) => {
   return `${base ? `${base} — ` : ''}${labels.join(' + ')}`;
 };
 
-/** True when the user may work the RHU Triage station. */
+/**
+ * True when the user may work the RHU Triage / community intake workflow:
+ * RHU Personnel require the `triage` station, while Health Supervisors retain
+ * barangay/community intake capability independent of RHU station assignment.
+ *
+ * @param {Object} user
+ * @returns {boolean}
+ */
 export const canTriage = (user) => {
   if (!user) return false;
   if (user.role === 'rhu_personnel') return hasStation(user, RHU_STATIONS.TRIAGE);
@@ -140,7 +160,14 @@ export const canTriage = (user) => {
   return false;
 };
 
-/** True when the user may work the RHU Consultation station. */
+/**
+ * True when the user may work the RHU Consultation station: always allowed for
+ * `phn`, and allowed for `rhu_personnel` or `health_supervisor` only when
+ * explicitly assigned the `consultation` station.
+ *
+ * @param {Object} user
+ * @returns {boolean}
+ */
 export const canConsult = (user) => {
   if (!user) return false;
   if (user.role === 'phn') return true;
@@ -148,7 +175,14 @@ export const canConsult = (user) => {
   return hasStation(user, RHU_STATIONS.CONSULTATION);
 };
 
-/** True when the user may initiate (but never issue) a medical certificate request. */
+/**
+ * True when an RHU Triage user may initiate (with status `'For Review'`, never
+ * issue or sign) a medical certificate request; PHN/MHO prepare and issue
+ * certificates directly through their clinical role instead.
+ *
+ * @param {Object} user
+ * @returns {boolean}
+ */
 export const canInitiateCertificate = (user) =>
   user?.role === 'rhu_personnel' && hasStation(user, RHU_STATIONS.TRIAGE);
 

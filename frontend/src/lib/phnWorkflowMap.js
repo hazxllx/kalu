@@ -41,11 +41,12 @@ const fullName = (resident = {}) =>
     .replace(/\s+/g, " ")
     .trim();
 
-const ageFromBirthDate = (birthDate) => {
+const ageFromBirthDate = (birthDate, referenceDate) => {
   if (!birthDate) return "";
   const dob = new Date(birthDate);
   if (Number.isNaN(dob.getTime())) return "";
-  const now = new Date();
+  const now = referenceDate ? new Date(referenceDate) : new Date();
+  if (Number.isNaN(now.getTime())) return "";
   let age = now.getFullYear() - dob.getFullYear();
   const m = now.getMonth() - dob.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
@@ -62,31 +63,60 @@ export const mapVisitToPatient = (visit) => {
   const status = mapVisitStatus(visit.status);
   if (!status) return null;
   const resident = visit.resident || {};
-  const vitals = visit.vitals || {};
+  const snapshot = visit.triageSnapshot || null;
+  const residentId = visit.residentId || resident.id || null;
+  if ((resident.id && residentId !== resident.id) ||
+      (snapshot && (!snapshot.residentId || snapshot.residentId !== residentId)) ||
+      (snapshot?.resident?.id && snapshot.resident.id !== residentId)) {
+    throw new Error("The encounter's patient identity could not be verified. Reload the record before continuing.");
+  }
+  const triageRecord = snapshot || visit;
+  const triageResident = snapshot ? snapshot.resident || {} : resident;
+  const vitals = triageRecord.vitals || {};
   const phn = visit.phn || {};
   const completed = status === CHECKUP_STATUS.COMPLETED;
+  const clinicalDetails = {
+    assessment: visit.findings || phn.assessment || "",
+    healthConcern: phn.assessment || "",
+    healthServiceName: visit.healthServiceName || "",
+    clinicalNotes: phn.notes || "",
+    recommendations: visit.recommendation || visit.treatmentGiven || "",
+    medications: Array.isArray(visit.medications) ? visit.medications : [],
+    riskLevel: Object.hasOwn(visit, 'riskLevel') ? visit.riskLevel : visit.risk_level ?? resident.riskLevel ?? null,
+    riskReason: visit.riskReason || '',
+    riskAssessmentStatus: visit.riskAssessmentStatus || '',
+    outcome: visit.outcome || "",
+    personnel: phn.personnel || "",
+    completedBy: visit.completedByName || "",
+    completedAt: visit.completedAt || "",
+  };
 
   return {
     id: visit.id,
-    residentId: visit.residentId || resident.id || null,
-    patient: fullName(resident) || resident.name || "Unnamed patient",
-    age: resident.age ?? ageFromBirthDate(resident.birthDate),
-    sex: resident.sex || "",
-    barangay: resident.barangay || null,
-    residenceBarangay: resident.barangay || null,
-    reason: visit.chiefComplaint || "",
+    residentId,
+    patient: fullName(triageResident) || triageResident.name || "Patient name not recorded",
+    age: triageResident.age ?? ageFromBirthDate(triageResident.birthDate, triageRecord.visitDate),
+    sex: triageResident.sex || "",
+    barangay: triageResident.barangay || null,
+    residenceBarangay: triageResident.barangay || null,
+    reason: triageRecord.chiefComplaint || "",
     serviceId: visit.healthServiceId || null,
     serviceName: visit.healthServiceName || "",
     status,
-    riskLevel: visit.riskLevel ?? visit.risk_level ?? resident.riskLevel ?? resident.risk_level ?? null,
-    riskScore: visit.riskScore ?? visit.risk_score ?? resident.riskScore ?? resident.risk_score ?? null,
-    riskFactors: visit.riskFactors ?? visit.risk_factors ?? resident.riskFactors ?? resident.risk_factors ?? [],
+    riskLevel: Object.hasOwn(visit, 'riskLevel') ? visit.riskLevel : visit.risk_level ?? resident.riskLevel ?? resident.risk_level ?? null,
+    riskScore: Object.hasOwn(visit, 'riskScore') ? visit.riskScore : visit.risk_score ?? resident.riskScore ?? resident.risk_score ?? null,
+    riskFactors: visit.riskFactors ?? visit.risk_factors ?? [],
+    riskReason: visit.riskReason || '',
+    riskAssessmentStatus: visit.riskAssessmentStatus || '',
+    riskAssessedAt: visit.riskAssessedAt || null,
     facilityId: visit.facilityId ?? visit.facility_id ?? null,
     municipalityId: resident.municipalityId ?? resident.municipality_id ?? null,
     visitDate: visit.visitDate || "",
     triage: {
-      date: visit.visitDate || "",
-      chiefComplaint: visit.chiefComplaint || "",
+      id: visit.id,
+      residentId,
+      date: triageRecord.submittedAt || visit.submittedAt || triageRecord.visitDate || "",
+      chiefComplaint: triageRecord.chiefComplaint || "",
       temperature: vitals.temperature ?? null,
       bloodPressure: vitals.bp ?? null,
       pulseRate: vitals.hr ?? null,
@@ -96,24 +126,13 @@ export const mapVisitToPatient = (visit) => {
       heightCm: vitals.heightCm ?? null,
       bmi: vitals.bmi ?? null,
       bloodSugar: vitals.bloodSugar ?? null,
-      notes: visit.clinicalHistory || "",
-      personnel: visit.recordedByName || "RHU Personnel",
+      notes: triageRecord.clinicalHistory || "",
+      personnel: triageRecord.recordedByName || "",
+      personnelId: triageRecord.recordedBy || null,
+      warnings: triageRecord.triageWarnings || visit.triageWarnings || [],
     },
-    checkup: completed
-      ? {
-          assessment: visit.findings || phn.assessment || "",
-          healthConcern: phn.assessment || "",
-          healthServiceName: visit.healthServiceName || "",
-          clinicalNotes: phn.notes || "",
-          recommendations: visit.recommendation || visit.treatmentGiven || "",
-          medications: Array.isArray(visit.medications) ? visit.medications : [],
-          riskLevel: visit.riskLevel ?? resident.riskLevel ?? null,
-          outcome: visit.outcome || "No Further Action",
-          personnel: phn.personnel || "",
-          completedBy: visit.completedByName || "PHN",
-          completedAt: visit.completedAt || "",
-        }
-      : undefined,
+    checkup: completed ? clinicalDetails : undefined,
+    checkupDraft: completed ? undefined : clinicalDetails,
     raw: visit,
   };
 };
@@ -124,30 +143,31 @@ export const mapVisitsToPatients = (visits = []) =>
 
 /**
  * Split a free-text walk-in name into { firstName, lastName } for the intake
- * endpoint, which requires both. A single-word name is used for both parts.
+ * endpoint. A single-word name must not be duplicated into a fabricated surname.
  */
 export const splitWalkInName = (name = "") => {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return { firstName: "", lastName: "" };
-  if (parts.length === 1) return { firstName: parts[0], lastName: parts[0] };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
 };
 
 /** Build the intake visit payload (vitals) from a triage form payload. */
 export const triageToVisitPayload = (payload = {}) => ({
-  visitDate: new Date().toISOString(),
+  visitDate: payload.visitDate || new Date().toISOString(),
   chiefComplaint: payload.chiefComplaint || payload.reason || "",
   clinicalHistory: payload.notes || "",
   // The triage performer is recorded server-side from the authenticated user;
   // no personnel name is sent from the client.
   vitals: {
     bp: payload.bloodPressure || null,
-    temperature: payload.temperature != null ? Number(payload.temperature) : null,
-    hr: payload.pulseRate != null ? Number(payload.pulseRate) : null,
-    rr: payload.respiratoryRate != null ? Number(payload.respiratoryRate) : null,
-    o2sat: payload.oxygenSaturation != null ? Number(payload.oxygenSaturation) : null,
-    heightCm: payload.heightCm != null && payload.heightCm !== "" ? Number(payload.heightCm) : null,
-    weightKg: payload.weight != null && payload.weight !== "" ? Number(payload.weight) : null,
-    bloodSugar: payload.bloodSugar != null && payload.bloodSugar !== "" ? Number(payload.bloodSugar) : null,
+    // Preserve raw input so the API can reject malformed readings explicitly.
+    temperature: payload.temperature === "" ? null : payload.temperature ?? null,
+    hr: payload.pulseRate === "" ? null : payload.pulseRate ?? null,
+    rr: payload.respiratoryRate === "" ? null : payload.respiratoryRate ?? null,
+    o2sat: payload.oxygenSaturation === "" ? null : payload.oxygenSaturation ?? null,
+    heightCm: payload.heightCm === "" ? null : payload.heightCm ?? null,
+    weightKg: payload.weight === "" ? null : payload.weight ?? null,
+    bloodSugar: payload.bloodSugar === "" ? null : payload.bloodSugar ?? null,
   },
 });

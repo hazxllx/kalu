@@ -67,10 +67,8 @@ test('browser configuration rejects server credentials, user tokens, malformed e
 });
 
 test('the existing backend Supabase password grant reports actual transport failure as 503, not invalid credentials', async () => {
-  process.env.NODE_ENV = 'test';
-  process.env.SUPABASE_URL = 'https://auth-connectivity-tests.invalid';
-  process.env.SUPABASE_ANON_KEY = 'test-only-public-key';
-  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-only-server-key';
+  const { configureLocalTestEnvironment } = await import('./helpers/localEnv.js');
+  configureLocalTestEnvironment();
   const auth = await import('../src/services/auth.service.js');
   const originalFetch = globalThis.fetch;
   const originalError = console.error;

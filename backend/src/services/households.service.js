@@ -1,6 +1,16 @@
 /**
  * Household Profiling service (BHW collection -> HS verification -> risk).
  *
+ * Architectural layer:
+ *   route -> authenticate -> authorize -> households.controller
+ *         -> households.service -> repository / householdWorkflow / Supabase
+ *
+ * Manages household registration (with offline idempotency via `clientOperationKey`),
+ * optimistic-concurrency updates (`revision` / `If-Match`), BHW zone/purok visit
+ * monitoring and visit history snapshots, household member roster management
+ * (linking existing residents or creating pending resident profiles), and 1:1
+ * member anthropometric/mortality health profiles.
+ *
  * Scope rules (mirrored by the database RLS policies):
  *   - barangay-scoped callers (BHW, Health Supervisor) only ever see their own
  *     barangay's households; anything else is a 404 (out of scope) or 403
@@ -44,7 +54,14 @@ const WORKER_READER_ROLES = [...READ_ROLES, 'mho'];
 const WORKER_PAGE_SIZE = 200;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Limited assignment directory, not an account-management or contact list. */
+/**
+ * List active personnel (`bhw`, `health_supervisor`, `phn`) eligible to be
+ * assigned to a household risk workflow within the caller's municipality/barangay.
+ *
+ * Barangay-scoped callers (BHW, HS) are restricted to their own barangay (plus
+ * municipality-level PHNs with no fixed `barangay_id` who coordinate across
+ * barangays). Limited assignment directory, not an account-management or contact list.
+ */
 export const listHouseholdWorkers = async ({ user, barangayId = null, supabase = getServiceClient() } = {}) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
   if (!WORKER_READER_ROLES.includes(user.role)) throw ApiError.forbidden();
@@ -82,7 +99,11 @@ export const listHouseholdWorkers = async ({ user, barangayId = null, supabase =
   return workers;
 };
 
-/** Validate the same stable IDs shown by the directory at write time. */
+/**
+ * Resolve and validate a single `workerId` UUID against the authorized barangay
+ * worker directory (`listHouseholdWorkers`) at write time. Throws 422 if the
+ * worker is missing, inactive, or outside the household's barangay scope.
+ */
 export const resolveHouseholdWorker = async ({ user, workerId, barangayId = null, supabase = getServiceClient() } = {}) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
   if (!WORKER_READER_ROLES.includes(user.role)) throw ApiError.forbidden();
@@ -184,7 +205,12 @@ const getScopedHousehold = async (id, user, repo = repository) => {
   return household;
 };
 
-/** Re-run the server-side risk classification from stored + patched data. */
+/**
+ * Re-run the server-side risk classification (`computeHouseholdRisk` +
+ * `householdFlags`) from stored household fields merged with `patch` and `members`.
+ * Evaluates water source, toilet facility, sanitation access, monthly income,
+ * member vulnerability classifications, PWD status, age, and PhilHealth coverage.
+ */
 const recomputeRisk = (household, patch = {}, members) => {
   const roster = members || household.members || [];
   const computed = computeHouseholdRisk({
@@ -247,6 +273,11 @@ export const normalizeMembers = (members) => {
   return { members: normalized, errors };
 };
 
+/**
+ * Search existing `residents` (up to 20 matches) within the caller's barangay
+ * or municipality scope so household profiling forms can link an existing
+ * resident record instead of creating a duplicate person.
+ */
 export const searchHouseholdResidents = async ({ user, q = '', repo = repository } = {}) => {
   if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
   const query = text(q);
@@ -278,6 +309,12 @@ export const searchHouseholdResidents = async ({ user, q = '', repo = repository
   }));
 };
 
+/**
+ * List households with search (`q`) and pagination (`limit` clamped 1..100, `offset >= 0`).
+ * Enforces barangay isolation for BHW / Health Supervisor accounts (403 on
+ * cross-barangay filter or missing approved barangay assignment) while allowing
+ * PHN accounts to query across or filter within their municipality.
+ */
 export const listHouseholds = async ({ user, q = '', barangay = '', limit = 50, offset = 0 } = {}) => {
   const scope = assignedBarangay(user);
   const requested = text(barangay);
@@ -310,6 +347,11 @@ export const listHouseholds = async ({ user, q = '', barangay = '', limit = 50, 
   });
 };
 
+/**
+ * Aggregate BHW zone/purok visit coverage for the caller's assigned barangay.
+ * Groups households by `purok` (sorted naturally) and counts visited vs unvisited
+ * households based on `latestVisitNumber`. Restricted to BHW accounts.
+ */
 export const getHouseholdMonitoring = async ({ user, repo = repository } = {}) => {
   if (user?.role !== 'bhw') throw ApiError.forbidden('Zone monitoring is available to BHW accounts only.');
   const barangay = assignedBarangay(user);
@@ -335,10 +377,15 @@ export const getHouseholdMonitoring = async ({ user, repo = repository } = {}) =
   };
 };
 
+/** Retrieve a single household by ID after enforcing municipality/barangay scope (404 otherwise). */
 export const getHousehold = async ({ id, user }) => {
   return getScopedHousehold(id, user);
 };
 
+/**
+ * Record the initial profiling visit when a BHW registers a new household,
+ * reusing `initialVisitRequestId` or a valid UUID `idempotencyKey` for deduplication.
+ */
 const recordInitialHouseholdVisit = async ({ householdId, user, payload, idempotencyKey, repo, household }) => {
   if (user?.role !== 'bhw' || !payload?.initialVisitDate) return null;
   if (typeof repo.recordHouseholdVisit !== 'function') {
@@ -360,6 +407,11 @@ const recordInitialHouseholdVisit = async ({ householdId, user, payload, idempot
   });
 };
 
+/**
+ * Best-effort wrapper around `recordInitialHouseholdVisit` so a post-commit
+ * visit-logging failure returns a `visitWarning` string instead of failing a
+ * household creation that has already been persisted.
+ */
 const tryRecordInitialHouseholdVisit = async (args) => {
   try {
     await recordInitialHouseholdVisit(args);
@@ -373,12 +425,19 @@ const tryRecordInitialHouseholdVisit = async (args) => {
   }
 };
 
+/** List recorded household visits for a scoped household (`READ_ROLES`). */
 export const listHouseholdVisits = async ({ id, user, repo = repository }) => {
   if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
   await getScopedHousehold(id, user, repo);
   return repo.listHouseholdVisits(id);
 };
 
+/**
+ * Record a BHW household visit against an existing scoped household.
+ * Validates a strict calendar `visitDate`, RFC-4122 UUID `requestId` (for
+ * idempotency), `HOUSEHOLD_VISIT_REASONS`, and `updatedSections`, attaching a
+ * snapshot of the current household profile.
+ */
 export const recordHouseholdVisit = async ({ id, user, payload = {}, repo = repository }) => {
   if (user?.role !== 'bhw') throw ApiError.forbidden('Only a BHW can record a household visit.');
   const household = await getScopedHousehold(id, user, repo);
@@ -417,6 +476,22 @@ export const recordHouseholdVisit = async ({ id, user, payload = {}, repo = repo
   });
 };
 
+/**
+ * Register a new household profile and its initial member roster.
+ *
+ * Key business rules:
+ *   - enforces barangay scope and active approved barangay lookup;
+ *   - requires `initialVisitDate` and `initialVisitRequestId` for BHW callers;
+ *   - supports offline replay idempotency via `idempotencyKey` (`clientOperationKey`),
+ *     re-verifying current caller scope before returning a replayed record;
+ *   - validates paired GPS coordinates (never fabricated), linked same-barangay
+ *     resident IDs, and duplicate household head + address within the barangay;
+ *   - computes initial risk score/level/factors/flags server-side and forces
+ *     `approvalStatus` to `'Not yet approved'` (separation of duties);
+ *   - uses transactional `repo.createHouseholdWithMembers` when available (falling
+ *     back to sequential insert with `23505` idempotency recovery), logs the
+ *     initial BHW visit, and writes `HOUSEHOLD_CREATED` to the health audit log.
+ */
 export const createHousehold = async ({ user, payload = {}, idempotencyKey = null, repo = repository }) => {
   if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
   if (user?.role === 'bhw' && (!payload.initialVisitDate || !payload.initialVisitRequestId)) {
@@ -612,6 +687,21 @@ export const createHousehold = async ({ user, payload = {}, idempotencyKey = nul
   return { household: full, visitWarning };
 };
 
+/**
+ * Update an existing household profile, including BHW submission/resubmission
+ * and Health Supervisor verification/return-for-correction transitions.
+ *
+ * Key business rules:
+ *   - enforces `WRITE_ROLES` and municipality/barangay scope (`getScopedHousehold`);
+ *   - enforces optimistic concurrency via `expectedRevision` (`If-Match`), throwing
+ *     `ApiError.staleRevision` (409/412) on version mismatch and incrementing `revision`;
+ *   - restricts verification/approval fields (`verificationStatus`, `approvalStatus`,
+ *     `hhStatus === 'Approved'`) to `VERIFY_ROLES` (`health_supervisor`) and requires
+ *     a `correctionReason` when returning for correction;
+ *   - gates approval/verification behind `missingForVerification` completeness checks;
+ *   - strips server-owned ownership/audit/risk fields, recomputes household risk
+ *     server-side, and triggers `emitHouseholdWorkflow` audit + notifications.
+ */
 export const updateHousehold = async ({ id, user, patch = {}, expectedRevision = null, repo = repository }) => {
   if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
   patch = { ...patch };
@@ -763,6 +853,18 @@ export const updateHousehold = async ({ id, user, patch = {}, expectedRevision =
   return full;
 };
 
+/**
+ * Add a member to an existing scoped household and recompute household risk.
+ *
+ * Supports three modes:
+ *   1. `member.newResident`: creates a new `pending` resident record in the
+ *      household's barangay (after checking `findResidentByIdentity` for duplicates)
+ *      and links its ID;
+ *   2. `member.residentId`: links an existing resident verified to belong to the
+ *      same barangay and not already on this household's roster;
+ *   3. unlinked roster entry.
+ * Persists atomically via `repo.addHouseholdMemberWithRisk` when supported.
+ */
 export const addHouseholdMember = async ({ id, user, member = {}, repo = repository }) => {
   if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
   const household = await getScopedHousehold(id, user, repo);
@@ -822,9 +924,6 @@ export const addHouseholdMember = async ({ id, user, member = {}, repo = reposit
     }
   }
 
-  if (residentId && (household.members || []).some((m) => m.residentId === residentId)) {
-    throw ApiError.duplicate('That resident is already a member of this household.');
-  }
   const memberPayload = {
     ...newMember,
     residentId,
@@ -849,6 +948,11 @@ export const addHouseholdMember = async ({ id, user, member = {}, repo = reposit
   return { member: created, household: await repo.getHousehold(household.id) };
 };
 
+/**
+ * Remove a member from an existing scoped household and recompute the household's
+ * server-side risk classification atomically (`removeHouseholdMemberWithRisk`
+ * with sequential fallback).
+ */
 export const removeHouseholdMember = async ({ id, memberId, user, repo = repository }) => {
   if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
   const household = await getScopedHousehold(id, user, repo);
@@ -872,6 +976,11 @@ export const removeHouseholdMember = async ({ id, memberId, user, repo = reposit
   return { success: true, household: await repo.getHousehold(household.id) };
 };
 
+/**
+ * Update an existing household member's attributes (restricted to BHW accounts),
+ * preventing duplicate `residentId` links within the same household and
+ * recomputing household risk atomically (`updateHouseholdMemberWithRisk`).
+ */
 export const updateHouseholdMember = async ({ id, memberId, member = {}, user, repo = repository }) => {
   if (user?.role !== 'bhw') throw ApiError.forbidden('Only a BHW can update household member details.');
   const household = await getScopedHousehold(id, user, repo);
@@ -931,6 +1040,10 @@ const getScopedMember = async (id, memberId, user) => {
   return { household, member };
 };
 
+/**
+ * Retrieve a household member along with their 1:1 anthropometric/mortality
+ * health profile (`null` when not yet recorded), enforcing household scope.
+ */
 export const getMemberHealth = async ({ id, memberId, user }) => {
   if (!READ_ROLES.includes(user?.role)) throw ApiError.forbidden();
   const { member } = await getScopedMember(id, memberId, user);
@@ -938,6 +1051,15 @@ export const getMemberHealth = async ({ id, memberId, user }) => {
   return { member, profile: profile || null };
 };
 
+/**
+ * Upsert the 1:1 health profile (`heightCm`, `weightKg`, server-computed `bmi`,
+ * `dateOfDeath`, `causeOfDeath`, `transOut`, `remarks`) for a scoped household member.
+ *
+ * Blocks edits by non-supervisor roles while `household.verificationStatus === 'Verified'`,
+ * validates plausible anthropometric bounds (`0 < heightCm < 300`, `0 < weightKg < 500`)
+ * and non-future death dates, recomputes BMI via `computeBMI`, and logs
+ * `HOUSEHOLD_MEMBER_HEALTH_UPDATED` to `health_audit_logs`.
+ */
 export const saveMemberHealth = async ({ id, memberId, user, payload = {} }) => {
   if (!WRITE_ROLES.includes(user?.role)) throw ApiError.forbidden();
   const { household } = await getScopedMember(id, memberId, user);

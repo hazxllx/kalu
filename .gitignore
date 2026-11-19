@@ -55,3 +55,8 @@ evidence1/
 test-results/
 playwright-report/
 playwright/.cache/
+
+# Machine-local Supabase state and preserved deployment settings.
+supabase/.temp/
+supabase/.branches/
+supabase/config.production.toml

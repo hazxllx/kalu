@@ -1,3 +1,5 @@
+import { normalizeRiskDistribution } from './riskLevel.js';
+
 export const metricValue = (value) => Number.isFinite(value) ? value.toLocaleString() : 'Unavailable';
 const activityMetrics = {
   followUpCompletion: { monthly: true, numerator: ['followUps', 'completed'], denominator: ['followUps', 'scheduled'] },
@@ -91,10 +93,12 @@ export const healthTrendScope = (data, months = 12) => {
       consultationsThisMonth: { value: metricValue(data.summary.consultationsThisMonth), change, up: changeAvailable ? last >= previous : null },
       referralsThisMonth: { value: metricValue(data.summary.referralsThisMonth), change: 'Recorded referrals this month', up: null },
       topCondition: { name: data.summary.topCondition || 'No recorded condition', cases: `${metricValue(data.summary.topConditionCases)} recorded cases` },
-      highRiskResidents: { value: metricValue(data.summary.highRiskResidents), change: 'Recorded risk assessments', up: null },
+      highRiskResidents: { value: metricValue(Array.isArray(data.reportingRiskDistribution)
+        ? normalizeRiskDistribution(data.reportingRiskDistribution).find((row) => row.name === 'High')?.value ?? 0
+        : data.summary.highRiskResidents), change: data.reportingRiskDistribution ? 'Recorded risk in reporting period' : 'Recorded risk assessments', up: null },
     },
     consultationTrends,
-    riskDistribution: data.riskDistribution,
+    riskDistribution: data.reportingRiskDistribution ?? data.riskDistribution,
     barangayOverview: {
       name: data.scope?.barangay || data.barangayOverview?.name || 'Authorized scope',
       residents: `${metricValue(data.summary.residents)} registered residents`,

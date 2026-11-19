@@ -20,7 +20,6 @@ import {
   btnGhost,
 } from "@/features/registration/components/RegistrationDesign";
 import { ButtonSelectGroup } from "@/components/system";
-import DatePicker from "@/components/common/DatePicker";
 import { REGISTRATION_OTP_LENGTH, isValidRegistrationOtp } from "@/features/registration/otp";
 import { supabase } from "@/lib/supabase";
 import { registrationApi } from "@/services/api";
@@ -49,6 +48,7 @@ import {
   signupResponseIssue,
   classifySignupError,
   rateLimitRetrySeconds,
+  signupErrorMessage,
 } from "@/features/registration/signupResponse";
 import { isSendCodeDisabled } from "@/features/registration/sendCodeGate";
 import {
@@ -57,6 +57,7 @@ import {
   SEX_OPTIONS,
   ZONE_VALUES,
   dateOfBirth,
+  ageFromDateOnly,
   digitsOnly,
   email as validateEmail,
   enumValue,
@@ -120,22 +121,14 @@ const screeningRequestErrorMessage = (error, pair = false) => {
 const OTP_LENGTH = REGISTRATION_OTP_LENGTH;
 
 function calcAge(dob) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob || "")) return "";
-  const [year, month, day] = dob.split("-").map(Number);
-  const birth = new Date(Date.UTC(year, month - 1, day));
-  if (
-    birth.getUTCFullYear() !== year
-    || birth.getUTCMonth() !== month - 1
-    || birth.getUTCDate() !== day
-  ) return "";
-  const now = new Date();
-  let age = now.getUTCFullYear() - year;
-  if (
-    now.getUTCMonth() < month - 1
-    || (now.getUTCMonth() === month - 1 && now.getUTCDate() < day)
-  ) age -= 1;
-  return age >= 0 && age <= 120 ? String(age) : "";
+  const age = ageFromDateOnly(dob);
+  return !dateOfBirth(dob) && age !== null ? String(age) : "";
 }
+
+const passwordError = (value) => !value
+  ? "Password is required."
+  : checkStrength(value).score === 5 ? ""
+    : "Use at least 8 characters with uppercase, lowercase, a number, and a special character.";
 
 function checkStrength(pw) {
   const checks = [
@@ -258,6 +251,18 @@ export default function NewResidentRegistration() {
   /** @type {[RegistrationErrors, React.Dispatch<React.SetStateAction<RegistrationErrors>>]} */
   const [errors, setErrors] = useState({});
 
+  useEffect(() => {
+    // Android keyboards resize the visual viewport after focus has already fired.
+    const keepFocusedFieldVisible = () => {
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && focused.matches("input, select, textarea")) {
+        focused.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    };
+    window.visualViewport?.addEventListener("resize", keepFocusedFieldVisible);
+    return () => window.visualViewport?.removeEventListener("resize", keepFocusedFieldVisible);
+  }, []);
+
   // Automated screening state, one entry per required slot. Both ID sides are
   // screened independently and cross-checked when both current files exist.
   const [screening, setScreening] = useState(initialScreeningState);
@@ -271,7 +276,7 @@ export default function NewResidentRegistration() {
   const governmentIdPairSeq = useRef(0);
 
   // Email verification (real Supabase Confirm Signup OTP — no local/fake OTP)
-  // emailPhase: "idle" | "sending" | "sent" | "verifying" | "verified"
+  // emailPhase: "idle" | "sending" | "sent" | "retry" | "expired" | "verifying" | "verified"
   const [emailPhase, setEmailPhase] = useState(/** @type {string} */ ("idle"));
   const [otpDigits, setOtpDigits] = useState(new Array(OTP_LENGTH).fill(""));
   const [otpError, setOtpError] = useState("");
@@ -289,6 +294,10 @@ export default function NewResidentRegistration() {
   const [emailDuplicate, setEmailDuplicate] = useState(false);
   const otpRefs = useRef(new Array(OTP_LENGTH).fill(null));
   const signupInFlightRef = useRef(false);
+  const verificationInFlightRef = useRef(false);
+  const emailRequestRef = useRef(0);
+  const autoConfirmedEmailRef = useRef("");
+  const restoreSessionRef = useRef(true);
 
   // 60-second resend cooldown
   useEffect(() => {
@@ -313,18 +322,19 @@ export default function NewResidentRegistration() {
 
   const emailVerified = emailPhase === "verified";
 
-  const sendCode = async () => {
+  const sendCode = async (forceResend = false) => {
+    const isForcedResend = forceResend === true;
     if (signupInFlightRef.current || emailVerified || emailPhase === "sending" || emailPhase === "verifying") return;
     const normalizedEmail = normalizeRegistrationEmail(form.email);
     const emailErr = validateEmail(normalizedEmail, { label: "Email address" });
     if (emailErr) { setErrors((p) => ({ ...p, email: emailErr })); return; }
     // A previously confirmed duplicate must never trigger another signup/send.
-    if (emailDuplicate) return;
-    const isResend = emailPhase === "sent";
+    if (emailDuplicate && !isForcedResend) return;
+    const isResend = isForcedResend || emailPhase === "sent" || emailPhase === "retry" || emailPhase === "expired";
     // During the cooldown the resend request would be rejected by the server
     // (max_frequency = 60s). Block it client-side too so no duplicate request
     // is ever issued from a stray click.
-    if (isResend && (resendIn > 0 || resending)) return;
+    if (resendIn > 0 || resending) return;
     setForm((p) => ({ ...p, email: normalizedEmail }));
     setErrors((p) => ({ ...p, email: "", emailVerified: "" }));
     if (!supabase) {
@@ -332,6 +342,7 @@ export default function NewResidentRegistration() {
       return;
     }
     signupInFlightRef.current = true;
+    const request = ++emailRequestRef.current;
     // A resend keeps the OTP card on screen and shows its own spinner; the first
     // send flips the whole block into the "sending" state.
     if (isResend) setResending(true);
@@ -358,11 +369,11 @@ export default function NewResidentRegistration() {
           const array = new Uint8Array(20);
           crypto.getRandomValues(array);
           // Convert entire password from secure random bytes
-          // Base36 encoding + uppercase letter for complexity requirement
+          // Guarantee every configured character class alongside the random bytes.
           tempPassword = Array.from(array)
             .map(byte => byte.toString(36).padStart(2, '0'))
             .join('')
-            .slice(0, 22) + 'K' + array[19].toString(10);
+             .slice(0, 22) + 'kK!' + array[19].toString(10);
         } catch (cryptoError) {
           // If crypto is unavailable (non-secure context), fail gracefully
           // DO NOT fall back to Math.random()
@@ -375,7 +386,7 @@ export default function NewResidentRegistration() {
         
         // SECURITY FIX (FE-01a): Held only in memory (not persisted to browser storage).
         // This means users must keep the registration tab open to complete the process.
-        // The password never appears in the DOM, logs, network payloads, or browser storage.
+        // Only Supabase Auth receives this password over the secure connection.
         tempPasswordRef.current = tempPassword;
         const { data, error } = await supabase.auth.signUp({
           email: normalizedEmail,
@@ -387,6 +398,14 @@ export default function NewResidentRegistration() {
             },
           },
         });
+        if (request !== emailRequestRef.current) return;
+        // Auto-confirmed signups do not prove that a verification email was sent.
+        if (!error && data?.session) {
+          autoConfirmedEmailRef.current = normalizedEmail;
+          setEmailPhase("idle");
+          setSendError("Email confirmation is not enabled on the authentication service. Please contact the RHU to restore email verification.");
+          return;
+        }
         const responseIssue = signupResponseIssue({ data, error, email: normalizedEmail });
         if (responseIssue === "duplicate_email") {
           tempPasswordRef.current = "";
@@ -423,21 +442,24 @@ export default function NewResidentRegistration() {
           throw new Error("We could not verify the signup response. Please try again.");
         }
       }
+      if (request !== emailRequestRef.current) return;
       setEmailPhase("sent");
+      setEmailDuplicate(false);
       clearOtp();
       setResendIn(60);
       setSendNotice(
         isResend
-          ? "A new verification code has been sent to your email."
-          : "A verification code has been sent to your email."
+          ? "A new verification code was requested. If this account is still unverified, check your inbox and spam folder."
+          : "The email service accepted your verification code. Check your inbox and spam folder."
       );
     } catch (err) {
-      const msg = err?.message || "";
+      if (request !== emailRequestRef.current) return;
       // Use the same classifier as the signUp response path so both stay
       // consistent (duplicate vs. profile conflict vs. rate limit vs. generic).
       const errClass = classifySignupError(err);
       const duplicateEmail = errClass === "duplicate_email";
-      setEmailPhase(duplicateEmail ? "idle" : (isResend ? "sent" : "idle"));
+      const emailDeliveryFailure = errClass === "smtp_auth_failed" || errClass === "email_delivery_failed";
+      setEmailPhase(duplicateEmail ? "idle" : (isResend ? emailPhase : (emailDeliveryFailure ? "retry" : "idle")));
       if ((duplicateEmail || errClass === "profile_conflict") && !isResend) {
         tempPasswordRef.current = "";
       }
@@ -458,12 +480,11 @@ export default function NewResidentRegistration() {
         setSendError(
           "We couldn't start verification for this email due to a record conflict. Please contact the RHU, or use a different email address you control."
         );
+      } else if (emailDeliveryFailure) {
+        setResendIn(60);
+        setSendError(signupErrorMessage(err, { isResend }));
       } else {
-        setSendError(
-          isResend
-            ? (msg || "Unable to resend the code. Please try again.")
-            : (msg || "Could not send the verification code. Please try again.")
-        );
+        setSendError(signupErrorMessage(err, { isResend }));
       }
     } finally {
       signupInFlightRef.current = false;
@@ -472,7 +493,7 @@ export default function NewResidentRegistration() {
   };
 
   const verifyEmail = async () => {
-    if (emailVerified || emailPhase === "verifying") return;
+    if (emailVerified || verificationInFlightRef.current || signupInFlightRef.current || emailPhase !== "sent") return;
     // Keep the code as a STRING so leading zeros (e.g. "012345") are preserved.
     const code = otpDigits.join("");
     if (!isValidRegistrationOtp(code)) {
@@ -483,6 +504,8 @@ export default function NewResidentRegistration() {
       setOtpError("Authentication is not configured. Please try again later.");
       return;
     }
+    verificationInFlightRef.current = true;
+    const request = emailRequestRef.current;
     setEmailPhase("verifying");
     setOtpError("");
     setSendNotice("");
@@ -493,19 +516,28 @@ export default function NewResidentRegistration() {
         token: code,
         type: "email",
       });
+      if (request !== emailRequestRef.current) return;
       if (error) throw error;
+      if (!data?.session?.access_token || !data?.user?.email_confirmed_at
+        || normalizeRegistrationEmail(data.user.email) !== normalizeRegistrationEmail(form.email)) {
+        throw new Error("Email verification was not confirmed. Request a new code and try again.");
+      }
       verifiedSessionRef.current = data?.session || null;
       setEmailPhase("verified");
       clearOtp();
       setResendIn(0);
     } catch (err) {
-      setEmailPhase("sent");
+      if (request !== emailRequestRef.current) return;
       const msg = err?.message || "";
+      // Auth may combine "expired or invalid" even for a simple typo. Allow correction.
+      setEmailPhase(/expired/i.test(msg) && !/invalid/i.test(msg) ? "expired" : "sent");
       if (/expired|invalid otp/i.test(msg)) {
         setOtpError("This code is invalid or has expired. Please check the email and try again, or request a new code.");
       } else {
         setOtpError(msg || "Verification failed. Please check the code from the email and try again.");
       }
+    } finally {
+      verificationInFlightRef.current = false;
     }
   };
 
@@ -609,6 +641,16 @@ export default function NewResidentRegistration() {
       const digits = digitsOnly(val).slice(0, 11);
       setForm((p) => ({ ...p, mobile: digits }));
       if (errors.mobile) setErrors((p) => ({ ...p, mobile: "" }));
+      return;
+    }
+    if (key === "password" || key === "confirmPassword") {
+      const password = key === "password" ? val : form.password;
+      const confirmation = key === "confirmPassword" ? val : form.confirmPassword;
+      setForm((previous) => ({ ...previous, [key]: val }));
+      setErrors((previous) => ({ ...previous,
+        password: passwordError(password),
+        confirmPassword: confirmation && password !== confirmation ? "Passwords do not match." : "",
+      }));
       return;
     }
     if (key === "identity") {
@@ -852,6 +894,10 @@ export default function NewResidentRegistration() {
 
   // Changing the email invalidates any in-flight or completed verification.
   const setEmailValue = (val) => {
+    emailRequestRef.current += 1;
+    verifiedSessionRef.current = null;
+    tempPasswordRef.current = "";
+    setSendNotice("");
     setForm((p) => ({ ...p, email: val }));
     if (errors.email || errors.emailVerified) {
       setErrors((p) => ({ ...p, email: "", emailVerified: "" }));
@@ -863,7 +909,6 @@ export default function NewResidentRegistration() {
       setOtpDigits(new Array(OTP_LENGTH).fill(""));
       setOtpError("");
       setSendError("");
-      setResendIn(0);
     }
   };
 
@@ -900,16 +945,18 @@ export default function NewResidentRegistration() {
   // second verification.
   useEffect(() => {
     const email = normalizeRegistrationEmail(form.email);
-    if (!email || emailPhase !== "idle" || !supabase) return;
+    if (!restoreSessionRef.current || !email || email === autoConfirmedEmailRef.current || emailPhase !== "idle" || !supabase) return;
     let active = true;
-    supabase.auth.getSession().then(({ data }) => {
+    // getUser checks the token with Auth rather than trusting browser session data.
+    supabase.auth.getUser().then(async ({ data, error }) => {
       if (!active) return;
-      const ses = data?.session;
-      if (ses?.user?.email?.toLowerCase() === email) {
-        verifiedSessionRef.current = ses;
+      if (!error && data?.user?.email_confirmed_at && normalizeRegistrationEmail(data.user.email) === email) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!active || !sessionData?.session) return;
+        verifiedSessionRef.current = sessionData.session;
         setEmailPhase("verified");
       }
-    });
+    }).catch(() => { /* A failed session check never grants verification. */ });
     return () => { active = false; };
   }, [form.email, emailPhase]);
 
@@ -930,11 +977,15 @@ export default function NewResidentRegistration() {
     if (s === 2) {
       errs = validateFields(form, {
         email: (v) => validateEmail(v, { label: "Email address" }),
-        password: (v) => required(v, "Password"),
+        password: passwordError,
         mobile: (v) => validateStrictMobile(v, { label: "Mobile number" }),
-        barangay: (v) => required(v, "Barangay"),
+        barangay: (v) => enumValue(v, BARANGAYS, { label: "barangay" }),
         zone: (v) => validateZone(v, { label: "Zone" }),
+        province: (v) => required(v, "Province"),
+        municipality: (v) => required(v, "Municipality"),
       });
+      const dobError = personalRules.dob(form.dob);
+      if (dobError || applicantAge === "") errs.dob = dobError || "Select a valid birth date.";
       if (form.password !== form.confirmPassword) errs.confirmPassword = "Passwords do not match";
       if (!emailVerified) errs.emailVerified = "Please verify your email address before continuing.";
       if (!form.agree || !form.agreePrivacy) errs.agree = "You must accept Terms and Privacy Policy";
@@ -979,7 +1030,7 @@ export default function NewResidentRegistration() {
       if (!form.agreeReview) errs.agreeReview = "Please confirm your information for review to continue";
     }
     setErrors(errs);
-    if (s === 1 && Object.keys(errs).length) {
+    if ((s === 1 || s === 2) && Object.keys(errs).length) {
       const fieldIds = {
         firstName: "resident-first-name",
         middleName: "resident-middle-name",
@@ -988,6 +1039,15 @@ export default function NewResidentRegistration() {
         dob: "resident-birth-date",
         sex: "resident-sex",
         civilStatus: "resident-civil-status",
+        email: "resident-email",
+        emailVerified: "resident-email-verification",
+        password: "resident-password",
+        confirmPassword: "resident-confirm-password",
+        mobile: "resident-mobile",
+        province: "resident-province",
+        municipality: "resident-municipality",
+        barangay: "resident-barangay",
+        zone: "resident-zone",
       };
       const firstInvalid = fieldIds[Object.keys(errs)[0]];
       window.requestAnimationFrame(() => {
@@ -1004,10 +1064,19 @@ export default function NewResidentRegistration() {
 
   const next = () => { if (validateStep(step)) setStep((p) => Math.min(p + 1, 4)); };
   const back = () => setStep((p) => Math.max(p - 1, 1));
-  const goTo = (s) => setStep(s);
+  const goTo = (s) => {
+    for (let previous = 1; previous < s; previous += 1) {
+      if (!validateStep(previous)) { setStep(previous); return; }
+    }
+    setStep(s);
+  };
 
   const submit = async () => {
     if (submitting) return; // guard against duplicate submissions
+    // Recheck earlier steps after edits from the review page as well as Next.
+    for (const requiredStep of [1, 2, 3]) {
+      if (!validateStep(requiredStep)) { setStep(requiredStep); return; }
+    }
 
     // Never submit while a required document is missing, rejected, unchecked or
     // still being checked. The backend enforces this again when each file is
@@ -1100,7 +1169,8 @@ export default function NewResidentRegistration() {
         session = signInData?.session || null;
       }
 
-      if (!session) {
+      if (!session?.user?.email_confirmed_at
+        || normalizeRegistrationEmail(session.user.email) !== normalizeRegistrationEmail(form.email)) {
         throw new Error('Your email could not be used to sign in. Please verify your email and try again.');
       }
       // Clear temporary password from memory (defensive cleanup, not from storage)
@@ -1396,23 +1466,23 @@ export default function NewResidentRegistration() {
                     ))}
                   </select>
                 </Field>
-                <Field id="resident-birth-date" label="Birth Date" required error={errors.dob}>
-                  <DatePicker
+                <Field id="resident-birth-date" label="Birth Date" required error={errors.dob} hint="Select a date or enter it in your browser's displayed date format.">
+                  {/* Native date input provides the mobile picker and canonical date-only value. */}
+                  <input
                     id="resident-birth-date"
+                    type="date"
+                    autoComplete="bday"
                     value={form.dob}
-                    typeable
-                    max={new Date().toISOString().slice(0, 10)}
-                    error={Boolean(errors.dob)}
-                    ariaInvalid={Boolean(errors.dob)}
-                    ariaDescribedby={errors.dob ? "resident-birth-date-error" : undefined}
-                    placeholder="Select birth date..."
-                    onChange={setDateOfBirth}
-                    onInvalidInput={setDateOfBirth}
+                    max={`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`}
+                    aria-invalid={Boolean(errors.dob)}
+                    aria-describedby={errors.dob ? "resident-birth-date-error" : undefined}
+                    onChange={(event) => setDateOfBirth(event.target.value)}
                     onBlur={personalBlur("dob")}
+                    className={`${inputCls(errors.dob)} min-w-0`}
                   />
                 </Field>
-                <Field label="Age" hint="Calculated automatically from the date of birth.">
-                  <input type="text" value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" className={`${inputCls()} cursor-not-allowed text-slate-500`} />
+                <Field id="resident-age" label="Age" hint="Calculated automatically from the date of birth.">
+                  <input id="resident-age" type="text" value={calcAge(form.dob)} readOnly placeholder="Auto-calculated" className={`${inputCls()} cursor-not-allowed text-slate-500`} />
                 </Field>
                 <Field id="resident-sex" label="Sex" required error={errors.sex}>
                   <ButtonSelectGroup
@@ -1449,11 +1519,18 @@ export default function NewResidentRegistration() {
             {/* STEP 2: Account & Contact */}
             {step === 2 && (
               <div className="space-y-4">
-                <Field label="Email Address" required error={errors.email}>
+                <Field id="resident-email" label="Email Address" required error={errors.email}>
                   {emailPhase === "idle" || emailPhase === "sending" ? (
                     <div className="space-y-2.5">
                       <input
                         type="email"
+                        id="resident-email"
+                        inputMode="email"
+                        autoComplete="email"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        aria-invalid={Boolean(errors.email)}
+                        aria-describedby={errors.email ? "resident-email-error" : undefined}
                         placeholder="you@example.com"
                         value={form.email}
                         onChange={set("email")}
@@ -1463,9 +1540,10 @@ export default function NewResidentRegistration() {
                       <div className="flex flex-wrap items-center gap-2.5">
                         <button
                           type="button"
+                          id="resident-email-verification"
                           onClick={sendCode}
                           disabled={isSendCodeDisabled({ email: form.email, emailPhase, resendIn, emailDuplicate })}
-                          className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {emailPhase === "sending" ? (
                             <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending</>
@@ -1473,7 +1551,7 @@ export default function NewResidentRegistration() {
                             <><Mail className="h-3.5 w-3.5" /> {/** @type {string} */ (emailPhase) === "sent" ? "Send Code Again" : "Send Verification Code"}</>
                           )}
                         </button>
-                        {/** @type {string} */ (emailPhase) === "sent" && resendIn > 0 && (
+                        {resendIn > 0 && (
                           <span className="text-[12px] font-medium text-slate-500 tabular-nums">Resend code in {resendIn}s</span>
                         )}
                       </div>
@@ -1487,17 +1565,25 @@ export default function NewResidentRegistration() {
                             <Link to="/forgot-password" className="font-semibold text-brand-blue underline underline-offset-2">reset your password</Link>.
                             If you don't recognize it, enter a different email address you control.
                           </p>
+                          <button
+                            type="button"
+                            onClick={() => sendCode(true)}
+                            disabled={resending || resendIn > 0}
+                            className="mt-2 font-semibold text-brand-blue underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {resending ? "Requesting code…" : resendIn > 0 ? `Try again in ${resendIn}s` : "If you have not verified this email, resend the code"}
+                          </button>
                         </div>
                       )}
-                      {sendError && <p className="text-[11.5px] font-medium text-brand-danger">{sendError}</p>}
+                        {sendError && <p role="alert" className="text-[11.5px] font-medium text-brand-danger">{sendError}</p>}
                       {errors.emailVerified && <p className="text-[11.5px] font-medium text-brand-danger">{errors.emailVerified}</p>}
                     </div>
                   ) : null}
 
-                  {(emailPhase === "sent" || emailPhase === "verifying" || emailPhase === "verified") && (
+                  {(emailPhase === "sent" || emailPhase === "retry" || emailPhase === "expired" || emailPhase === "verifying" || emailPhase === "verified") && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
                       {emailPhase === "verified" ? (
-                        <div className="flex items-center gap-2.5 text-[12.5px] font-semibold text-brand-green">
+                        <div role="status" className="flex items-center gap-2.5 text-[12.5px] font-semibold text-brand-green">
                           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-green/15">
                             <Check className="h-3.5 w-3.5" strokeWidth={3} />
                           </span>
@@ -1505,15 +1591,19 @@ export default function NewResidentRegistration() {
                         </div>
                       ) : (
                         <>
-                          <div className="flex items-start gap-3">
+                          <div className="flex min-w-0 items-start gap-3">
                             <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-blue/10">
                               <Mail className="h-[18px] w-[18px] text-brand-blue" strokeWidth={1.9} />
                             </span>
-                            <div>
-                              <p className="text-[13px] font-bold text-brand-ink">Check your email</p>
+                            <div className="min-w-0">
+                              <p id="resident-email-verification" tabIndex={-1} role="status" className="text-[13px] font-bold text-brand-ink">
+                                {emailPhase === "expired" ? "Expired: request a new code" : emailPhase === "retry" ? "Email delivery needs retry" : "Pending: check your email"}
+                              </p>
                               <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">
-                                We've sent a verification code to{" "}
-                                <span className="font-semibold text-slate-700">{form.email}</span>.
+                                {emailPhase === "retry"
+                                  ? "The previous request did not confirm delivery. You can safely request another code."
+                                  : <>A verification code was requested for{" "}
+                                    <span className="break-all font-semibold text-slate-700">{form.email}</span>.</>}
                               </p>
                             </div>
                           </div>
@@ -1531,24 +1621,27 @@ export default function NewResidentRegistration() {
                                 onChange={handleOtpChange(i)}
                                 onKeyDown={handleOtpKeyDown(i)}
                                 aria-label={`Verification digit ${i + 1}`}
-                                className={`h-12 w-full rounded-lg border bg-white text-center font-stat text-lg font-bold text-brand-ink outline-none transition-colors focus:border-brand-blue ${
+                                disabled={emailPhase === "verifying" || resending || emailPhase === "expired" || emailPhase === "retry"}
+                                className={`h-12 min-w-0 flex-1 rounded-lg border bg-white text-center font-stat text-lg font-bold text-brand-ink outline-none transition-colors focus:border-brand-blue ${
                                   otpError ? "border-brand-danger/60" : "border-slate-300"
                                 }`}
                               />
                             ))}
                           </div>
 
-                          {otpError && <p className="mt-2 text-[11.5px] font-medium text-brand-danger">{otpError}</p>}
+                          {otpError && <p role="alert" className="mt-2 text-[11.5px] font-medium text-brand-danger">{otpError}</p>}
+                          {sendError && <p role="alert" className="mt-2 text-[11.5px] font-medium text-brand-danger">{sendError}</p>}
+                          {errors.emailVerified && <p role="alert" className="mt-2 text-[11.5px] font-medium text-brand-danger">{errors.emailVerified}</p>}
                           {!otpError && sendNotice && (
-                            <p className="mt-2 text-[11.5px] font-medium text-brand-green">{sendNotice}</p>
+                            <p role="status" className="mt-2 text-[11.5px] font-medium text-brand-green">{sendNotice}</p>
                           )}
 
                           <div className="mt-3.5 flex flex-wrap items-center gap-2.5">
                             <button
                               type="button"
                               onClick={verifyEmail}
-                              disabled={emailPhase === "verifying" || resending}
-                              className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={emailPhase !== "sent" || resending}
+                              className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_10px_22px_-14px_rgba(42,125,225,0.9)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {emailPhase === "verifying"
                                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying</>
@@ -1559,7 +1652,7 @@ export default function NewResidentRegistration() {
                               onClick={sendCode}
                               disabled={emailPhase === "verifying" || resending || resendIn > 0}
                               aria-label={resendIn > 0 ? `Resend available in ${resendIn} seconds` : "Resend verification code"}
-                              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-[12.5px] font-semibold text-brand-ink transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-[12.5px] font-semibold text-brand-ink transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {resending
                                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending</>
@@ -1568,11 +1661,21 @@ export default function NewResidentRegistration() {
                           </div>
                         </>
                       )}
+                      <button
+                        type="button"
+                        disabled={emailPhase === "verifying" || resending}
+                        onClick={() => {
+                          restoreSessionRef.current = false;
+                          setEmailValue(form.email);
+                        }}
+                        className="mt-3 min-h-11 text-[12px] font-semibold text-brand-blue underline underline-offset-2 disabled:opacity-50"
+                      >Change email address</button>
                     </div>
                   )}
                 </Field>
 
                 <Field
+                  id="resident-password"
                   label="Password"
                   required
                   error={errors.password}
@@ -1581,13 +1684,14 @@ export default function NewResidentRegistration() {
                       type="button"
                       onClick={() => setShow(!show)}
                       aria-label={show ? "Hide password" : "Show password"}
-                      className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-brand-ink"
+                      aria-pressed={show}
+                      className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-brand-ink"
                     >
                       {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   }
                 >
-                  <input type={show ? "text" : "password"} placeholder="Create a password" value={form.password} onChange={set("password")} className={`${inputCls(errors.password)} pr-12`} />
+                  <input id="resident-password" autoComplete="new-password" autoCapitalize="none" spellCheck={false} aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? "resident-password-error" : undefined} type={show ? "text" : "password"} placeholder="Create a password" value={form.password} onChange={set("password")} className={`${inputCls(errors.password)} pr-12`} />
                 </Field>
 
                 {form.password && (
@@ -1627,6 +1731,7 @@ export default function NewResidentRegistration() {
                 )}
 
                 <Field
+                  id="resident-confirm-password"
                   label="Confirm Password"
                   required
                   error={errors.confirmPassword}
@@ -1635,21 +1740,25 @@ export default function NewResidentRegistration() {
                       type="button"
                       onClick={() => setShowConfirm(!showConfirm)}
                       aria-label={showConfirm ? "Hide password" : "Show password"}
-                      className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-brand-ink"
+                      aria-pressed={showConfirm}
+                      className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-brand-ink"
                     >
                       {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   }
                 >
-                  <input type={showConfirm ? "text" : "password"} placeholder="Re-enter password" value={form.confirmPassword} onChange={set("confirmPassword")} className={`${inputCls(errors.confirmPassword)} pr-12`} />
+                  <input id="resident-confirm-password" autoComplete="new-password" autoCapitalize="none" spellCheck={false} aria-invalid={Boolean(errors.confirmPassword)} aria-describedby={errors.confirmPassword ? "resident-confirm-password-error" : undefined} type={showConfirm ? "text" : "password"} placeholder="Re-enter password" value={form.confirmPassword} onChange={set("confirmPassword")} className={`${inputCls(errors.confirmPassword)} pr-12`} />
                 </Field>
 
                 <div className="border-t border-slate-100 pt-5">
                   <SectionKicker>Contact Information</SectionKicker>
                   <div className="mt-4 space-y-4">
-                    <Field label="Mobile Number" required error={errors.mobile} hint="Enter your 11-digit Philippine mobile number (must start with 09).">
+                    <Field id="resident-mobile" label="Mobile Number" required error={errors.mobile} hint="Enter your 11-digit Philippine mobile number (must start with 09).">
                         <input
                           type="tel"
+                          id="resident-mobile"
+                          aria-invalid={Boolean(errors.mobile)}
+                          aria-describedby={errors.mobile ? "resident-mobile-error" : undefined}
                           inputMode="numeric"
                           autoComplete="tel"
                           pattern="[0-9]*"
@@ -1657,6 +1766,7 @@ export default function NewResidentRegistration() {
                           placeholder="09XXXXXXXXX"
                           value={form.mobile}
                           onChange={set("mobile")}
+                          onBlur={() => setErrors((previous) => ({ ...previous, mobile: validateStrictMobile(form.mobile) }))}
                           onKeyDown={(e) => {
                             // Block anything that is not a digit or an editing key.
                             const allowed = ["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"];
@@ -1667,18 +1777,19 @@ export default function NewResidentRegistration() {
                         />
                       </Field>
                     <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
-                      <Field label="Province">
-                        <input type="text" value={form.province} onChange={set("province")} className={inputCls()} />
+                      <Field id="resident-province" label="Province" required error={errors.province}>
+                        <input id="resident-province" autoComplete="address-level1" type="text" value={form.province} onChange={set("province")} className={inputCls(errors.province)} />
                       </Field>
-                      <Field label="Municipality">
-                        <input type="text" value={form.municipality} onChange={set("municipality")} className={inputCls()} />
+                      <Field id="resident-municipality" label="Municipality" required error={errors.municipality}>
+                        <input id="resident-municipality" autoComplete="address-level2" type="text" value={form.municipality} onChange={set("municipality")} className={inputCls(errors.municipality)} />
                       </Field>
                     </div>
 
-                    <Field label="Barangay" required error={errors.barangay}>
+                    <Field id="resident-barangay" label="Barangay" required error={errors.barangay}>
                       <div className="relative">
                         <button
                           type="button"
+                          id="resident-barangay"
                           onClick={() => setBarangayOpen(!barangayOpen)}
                           className={`${inputCls(errors.barangay)} flex cursor-pointer items-center gap-2 text-left`}
                         >
@@ -1721,6 +1832,7 @@ export default function NewResidentRegistration() {
 
                     <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
                       <SelectField
+                        id="resident-zone"
                         label="Zone"
                         required
                         error={errors.zone}

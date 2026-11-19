@@ -4,7 +4,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
-import { assessVitals, hasAssessableVitals, healthDataFromVitals } from '../src/utils/residentRisk.js';
+import { assessVitals, healthDataFromVitals } from '../src/utils/residentRisk.js';
 import { DEFAULT_RISK_CONFIG } from '../src/config/riskConfig.js';
 import { getCommunityMap, getCommunityMapTrends, getEarlyWarning, getHouseholdMap } from '../src/services/analytics.service.js';
 
@@ -302,14 +302,16 @@ test('all configured fields/operators/weights/disabled criteria and BMI normaliz
       const expected = assessVitals(vitals, config);
       const result = (await query('select public.analytics_assess_vitals($1,$2,$3,$4,$5,$6,$7,$8) as result',
         [vitals.bp, vitals.o2sat, vitals.temperature, vitals.hr, vitals.rr, vitals.heightCm, vitals.weightKg, JSON.stringify(config)]))[0].result;
-      assert.deepEqual(result, { riskScore: expected.score, riskLevel: expected.level, riskFactors: expected.factors }, `${field}/${operator}`);
+      assert.deepEqual(result, { riskScore: expected.score, riskLevel: expected.level, riskFactors: expected.factors,
+        riskAssessmentStatus: expected.status, missingMeasurements: expected.missingMeasurements, riskReason: expected.reason }, `${field}/${operator}`);
     }
   }
   for (const vitals of [{}, { bp: 'bad' }, { bp: 'value 140/090 recorded' }, { o2sat: 'NaN' }, { o2sat: 90 }]) {
-    const expected = hasAssessableVitals(vitals) ? assessVitals(vitals, DEFAULT_RISK_CONFIG) : null;
+    const expected = assessVitals(vitals, DEFAULT_RISK_CONFIG);
     const result = (await query('select public.analytics_assess_vitals($1,$2,null,null,null,null,null,$3) as result',
       [vitals.bp || '', vitals.o2sat ?? null, JSON.stringify(DEFAULT_RISK_CONFIG)]))[0].result;
-    assert.deepEqual(result, { riskScore: expected?.score ?? null, riskLevel: expected?.level ?? null, riskFactors: expected?.factors || [] });
+    assert.deepEqual(result, { riskScore: expected.score, riskLevel: expected.level, riskFactors: expected.factors,
+      riskAssessmentStatus: expected.status, missingMeasurements: expected.missingMeasurements, riskReason: expected.reason });
   }
 });
 
@@ -320,7 +322,10 @@ test('aggregate risk honors changed stored thresholds/criteria and does not reus
     assert.equal(result.summary.highRiskResidents, 0);
     assert.equal(result.riskDistribution.find((row) => row.name === 'Moderate Risk').value, 6000);
     await db.exec("update public.risk_criteria set enabled=false where code='bp_systolic_high'");
-    assert.equal((await rpc(actors.supervisor, 'early-warning')).riskDistribution.find((row) => row.name === 'Low Risk').value, 6000);
+    const incomplete = await rpc(actors.supervisor, 'early-warning');
+    assert.equal(incomplete.riskDistribution.find((row) => row.name === 'Low Risk').value, 0);
+    assert.equal(incomplete.riskDistribution.find((row) => row.name === 'Unassessed').value, 6000,
+      'disabling the matching BP rule cannot establish Low while configured oxygen measurements are missing');
   } finally {
     await db.exec("update public.risk_settings set high_min=70,moderate_min=40; update public.risk_criteria set enabled=true where code='bp_systolic_high'");
   }

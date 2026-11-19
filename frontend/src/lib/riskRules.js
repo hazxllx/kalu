@@ -228,14 +228,14 @@ export const calculateRiskLevel = (patient = {}, triage = {}, checkup = {}) => {
  * @returns {{ level: string, reason: string }}
  */
 export const riskOfPatient = (patient = {}) => {
-  const checkup = patient?.checkup;
-  if (checkup && checkup.riskLevel) {
-    const reason =
-      checkup.riskReason ||
-      calculateRiskLevel(patient, patient?.triage, checkup).reason;
-    return { level: checkup.riskLevel, reason };
-  }
-  return calculateRiskLevel(patient || {}, patient?.triage || {}, checkup || {});
+  const status = patient.riskAssessmentStatus;
+  const level = status === 'incomplete' ? 'Incomplete' : status === 'unavailable' ? 'Unavailable'
+    : patient.riskLevel ?? patient.checkup?.riskLevel ?? 'Unassessed';
+  const factors = Array.isArray(patient.riskFactors) ? patient.riskFactors : [];
+  const reason = patient.riskReason || patient.checkup?.riskReason || factors.map((factor) =>
+    typeof factor === 'string' ? factor : factor?.name || factor?.label || factor?.message || factor?.reason || '')
+    .filter(Boolean).join('; ');
+  return { level, reason: reason || 'The backend assessment breakdown is unavailable. Reload the record to verify the assessment.' };
 };
 
 export default calculateRiskLevel;

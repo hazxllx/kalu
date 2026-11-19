@@ -1,14 +1,24 @@
 
 import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import { resolve } from 'path'
 import { VitePWA } from 'vite-plugin-pwa'
 import { publicSupabaseConfigurationError } from '../shared/authConnectivity.js'
 import { normalizeApiBaseUrl } from './src/services/api/apiBaseUrl.js'
+import { loadLocalEnvironment, localIsolationPlugin } from './config/localDevelopment.js'
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, __dirname, 'VITE_')
+export default defineConfig(({ mode, command, isPreview }) => {
+  if (isPreview) {
+    throw new Error('Use npm run dev for local isolation; preview can serve a stale production bundle.')
+  }
+  if (mode === 'production' && command === 'serve') {
+    throw new Error('Local servers must use development mode. Production mode is reserved for deployment builds.')
+  }
+  const local = mode !== 'production'
+  const env = local
+    ? loadLocalEnvironment(mode, __dirname)
+    : Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('VITE_')))
   const required = [
     'VITE_API_URL',
     ...(mode === 'production' ? ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] : []),
@@ -28,18 +38,33 @@ export default defineConfig(({ mode }) => {
   }
 
   // Stop before a browser bundle can expose a misconfigured server credential.
-  if (env.VITE_SUPABASE_URL || env.VITE_SUPABASE_ANON_KEY) {
+  if (env.VITE_SUPABASE_ANON_KEY || (!local && env.VITE_SUPABASE_URL)) {
     const configurationError = publicSupabaseConfigurationError(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
     if (configurationError) throw new Error(`Frontend authentication configuration is invalid. ${configurationError}`)
   }
 
   return {
+  // Deployment builds use hosting-provided variables, never developer .env values.
+  envDir: false,
+  ...(local ? {
+    // Local variables are loaded explicitly and checked above.
+    envPrefix: [],
+    define: Object.fromEntries(Object.entries(env).map(([name, value]) => [`import.meta.env.${name}`, JSON.stringify(value)])),
+    server: {
+      host: new URL(env.VITE_APP_BASE_URL).hostname.replace(/^\[|\]$/g, ''),
+      port: Number(new URL(env.VITE_APP_BASE_URL).port) || (new URL(env.VITE_APP_BASE_URL).protocol === 'https:' ? 443 : 80),
+      strictPort: true,
+      open: false,
+      cors: { origin: new URL(env.VITE_APP_BASE_URL).origin },
+    },
+  } : {}),
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
     },
   },
   plugins: [
+    ...(local ? [localIsolationPlugin(env)] : []),
     react(),
     // Offline/PWA foundation. The service worker is authored explicitly in
     // `src/sw.js` (injectManifest) so we can guarantee authenticated API

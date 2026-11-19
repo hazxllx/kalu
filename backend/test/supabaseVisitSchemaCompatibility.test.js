@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-process.env.SUPABASE_URL = 'http://127.0.0.1:54321';
-process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+import { configureLocalTestEnvironment } from './helpers/localEnv.js';
+configureLocalTestEnvironment();
 
 const originalFetch = globalThis.fetch;
 const requests = [];
@@ -43,22 +43,21 @@ globalThis.fetch = async (input, init = {}) => {
 
 const { default: repository } = await import('../src/repositories/supabaseRepository.js');
 
-test('insertVisit retries without optional consultation fields when health-service columns are missing', async () => {
+test('insertVisit fails closed on missing clinical columns instead of retrying without prescriptions or service linkage', async () => {
   try {
-    const result = await repository.insertVisit({
+    await assert.rejects(() => repository.insertVisit({
       id: 'SUB-1',
       residentId: 'RES-1',
       recordedById: 'staff-1',
       recordedByRole: 'rhu_personnel',
       healthServiceId: 'service-1',
       healthServiceName: 'Consultation',
-      medications: [],
+      medications: [{ genericName: 'Synthetic medicine', dose: 'Clinician-entered dose' }],
       bpClassification: 'normal',
       referralRequired: false,
-    });
+    }), /health_service_id/);
 
-    assert.equal(result.id, 'SUB-1');
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 1);
     assert.equal(requests[0].health_service_id, 'service-1');
     for (const column of [
       'health_service_id',
@@ -67,8 +66,9 @@ test('insertVisit retries without optional consultation fields when health-servi
       'bp_classification',
       'referral_required',
     ]) {
-      assert.equal(Object.hasOwn(requests[1], column), false, `${column} should be omitted on retry`);
+      assert.equal(Object.hasOwn(requests[0], column), true, `${column} must remain in the original failed write`);
     }
+    assert.equal(requests[0].medications[0].dose, 'Clinician-entered dose');
   } finally {
     globalThis.fetch = originalFetch;
   }

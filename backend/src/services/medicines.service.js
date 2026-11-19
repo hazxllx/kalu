@@ -5,15 +5,14 @@
  * Backs public.medicines. Each entry carries generic/brand names, strength,
  * dosage form, category, intended use/indication, basic safety notes and
  * contraindications, the prescription requirement (OTC vs prescription-only)
- * and standard dosage instructions. Reads are available to active clinical
+ * and optional catalog reference text. Reads are available to active clinical
  * staff (so the consultation form can search by generic OR brand name); writes
  * are admin-only, deduplicated on the identity triple (generic name + strength
  * + dosage form), validated and audited in health_audit_logs. There is NO
  * stock/inventory tracking or availability indicator on medicines.
  *
- * Dosage instructions are entered/verified by an authorized System
- * Administrator; the verifier id and timestamp are recorded on the entry
- * (dosageVerifiedBy / dosageVerifiedAt) whenever the instructions are set.
+ * Catalog reference text is not evidence of a verified regimen and is never
+ * copied into a patient-specific prescription.
  *
  * Medications on a consultation are stored BY VALUE (see consultations.service
  * `toVisit`), so deactivating or editing a catalog entry never alters a
@@ -25,7 +24,48 @@ import ApiError from '../utils/apiError.js';
 import { MEDICINE_SOURCES, PRESCRIPTION_REQUIREMENTS, medicineIdentityKey } from '../config/medicineCatalog.js';
 
 const text = (v) => String(v ?? '').trim();
-const clip = (v, max) => text(v).slice(0, max);
+const CATALOG_FIELDS = Object.freeze({
+  genericName: 160,
+  brandName: 160,
+  strength: 80,
+  dosageForm: 80,
+  category: 80,
+  indication: 400,
+  safetyNotes: 600,
+  contraindications: 600,
+  dosageInstructions: 600,
+});
+const MEDICATION_FIELDS = Object.freeze({
+  genericName: 160,
+  brandName: 160,
+  strength: 80,
+  dosageForm: 80,
+  dose: 120,
+  route: 80,
+  frequency: 120,
+  duration: 120,
+  quantity: 80,
+  instructions: 400,
+  medicineId: 160,
+});
+const MEDICATION_KEYS = new Set([
+  ...Object.keys(MEDICATION_FIELDS), 'name', 'source', 'custom',
+]);
+
+const validatedText = (value, max, field, errors, { required = false, preserve = false } = {}) => {
+  if (value === undefined || value === null) {
+    if (required) errors[field] = 'This field is required.';
+    return '';
+  }
+  if (typeof value !== 'string') {
+    errors[field] = 'Use a text value.';
+    return '';
+  }
+  const normalized = preserve ? value : value.trim();
+  if (normalized.length > max) errors[field] = `Use ${max} characters or fewer.`;
+  if (required && !normalized.trim()) errors[field] = 'This field is required.';
+  return normalized;
+};
 
 const safe = async (fn, fallback) => {
   try {
@@ -56,27 +96,31 @@ const audit = async ({ user, action, entityId, previous, next }) => {
 
 /** Validate + normalize an incoming catalog entry. */
 export const normalizeCatalogEntry = (payload = {}) => {
-  const genericName = clip(payload.genericName, 160);
-  const errors = [];
-  if (!genericName) errors.push('A generic medicine name is required.');
-  const source = MEDICINE_SOURCES.includes(text(payload.source)) ? text(payload.source) : 'local';
-  const prescriptionRequirement = PRESCRIPTION_REQUIREMENTS.includes(text(payload.prescriptionRequirement))
-    ? text(payload.prescriptionRequirement)
-    : 'rx';
-  if (errors.length) throw ApiError.unprocessable('Please correct the medicine entry.', errors);
+  const isObject = payload && typeof payload === 'object' && !Array.isArray(payload);
+  const input = isObject ? payload : {};
+  const errors = {};
+  if (!isObject) errors.medicine = 'Use a medicine object.';
+  const entry = Object.fromEntries(Object.entries(CATALOG_FIELDS).map(([field, max]) => [
+    field,
+    validatedText(input[field], max, field, errors, { required: field === 'genericName' }),
+  ]));
+  const source = input.source === undefined ? 'local' : text(input.source);
+  const prescriptionRequirement = input.prescriptionRequirement === undefined
+    ? 'rx'
+    : text(input.prescriptionRequirement);
+  if (!MEDICINE_SOURCES.includes(source)) errors.source = 'Choose a supported medicine source.';
+  if (!PRESCRIPTION_REQUIREMENTS.includes(prescriptionRequirement)) {
+    errors.prescriptionRequirement = 'Choose a supported prescription requirement.';
+  }
+  if (input.active !== undefined && typeof input.active !== 'boolean') {
+    errors.active = 'Use true or false.';
+  }
+  if (Object.keys(errors).length) throw ApiError.unprocessable('Please correct the medicine entry.', errors);
   return {
-    genericName,
-    brandName: clip(payload.brandName, 160),
-    strength: clip(payload.strength, 80),
-    dosageForm: clip(payload.dosageForm, 80),
-    category: clip(payload.category, 80),
+    ...entry,
     source,
-    indication: clip(payload.indication, 400),
-    safetyNotes: clip(payload.safetyNotes, 600),
-    contraindications: clip(payload.contraindications, 600),
     prescriptionRequirement,
-    dosageInstructions: clip(payload.dosageInstructions, 600),
-    active: payload.active === undefined ? true : Boolean(payload.active),
+    active: input.active === undefined ? true : input.active,
   };
 };
 
@@ -98,11 +142,6 @@ export const createMedicine = async ({ user, payload = {}, repo = repository } =
     if (existing) {
       throw ApiError.conflict('A medicine with the same generic name, strength and dosage form already exists.');
     }
-  }
-  // Dosage instructions are verified by the authorized administrator entering them.
-  if (entry.dosageInstructions) {
-    entry.dosageVerifiedBy = user?.id || null;
-    entry.dosageVerifiedAt = new Date().toISOString();
   }
   const saved = await repo.insertMedicine({ ...entry, createdBy: user?.id || null });
   await audit({ user, action: 'MEDICINE_CREATED', entityId: saved.id, previous: null, next: saved });
@@ -126,14 +165,12 @@ export const updateMedicine = async ({ user, id, payload = {}, repo = repository
       throw ApiError.conflict('Another medicine with the same generic name, strength and dosage form already exists.');
     }
   }
-  // Re-stamp verification whenever the dosage instructions change (verified by
-  // the authorized administrator making the edit). Clear it when emptied.
-  if (!entry.dosageInstructions) {
+  // Editing reference text does not establish clinical provenance. Clear any
+  // prior verification metadata if the text changes; leave unchanged metadata
+  // untouched so an unrelated catalog edit does not discard its audit trail.
+  if (entry.dosageInstructions !== (before.dosageInstructions || '')) {
     entry.dosageVerifiedBy = null;
     entry.dosageVerifiedAt = null;
-  } else if (entry.dosageInstructions !== (before.dosageInstructions || '')) {
-    entry.dosageVerifiedBy = user?.id || null;
-    entry.dosageVerifiedAt = new Date().toISOString();
   }
   const saved = await repo.updateMedicine(key, entry);
   await audit({ user, action: 'MEDICINE_UPDATED', entityId: key, previous: before, next: saved });
@@ -162,34 +199,64 @@ export const setMedicineActive = async ({ user, id, active, repo = repository } 
 
 /**
  * Normalize the medications array recorded on a consultation. Each entry must
- * carry a non-empty generic name; everything else is optional free text. Custom
- * (non-catalog) entries are flagged and preserved verbatim. Returns a clean,
- * length-bounded array safe to persist by value.
+ * carry a non-empty generic name; everything else is optional free text. Invalid
+ * or overlong content is rejected with per-field errors rather than dropped or
+ * truncated. Prescription text is preserved verbatim and bounded before save.
  */
 export const normalizeMedications = (medications) => {
-  if (!Array.isArray(medications)) return [];
-  const out = [];
-  for (const raw of medications.slice(0, 50)) {
-    if (!raw || typeof raw !== 'object') continue;
-    const genericName = clip(raw.genericName ?? raw.name, 160);
-    if (!genericName) continue;
-    const medicineId = raw.medicineId != null && text(raw.medicineId) ? text(raw.medicineId) : null;
-    const source = MEDICINE_SOURCES.includes(text(raw.source)) ? text(raw.source) : (medicineId ? 'local' : 'custom');
-    out.push({
-      medicineId,
-      genericName,
-      brandName: clip(raw.brandName, 160),
-      strength: clip(raw.strength, 80),
-      dosageForm: clip(raw.dosageForm, 80),
-      dose: clip(raw.dose, 120),
-      route: clip(raw.route, 80),
-      frequency: clip(raw.frequency, 120),
-      duration: clip(raw.duration, 120),
-      quantity: clip(raw.quantity, 80),
-      instructions: clip(raw.instructions, 400),
-      custom: medicineId ? false : true,
-      source: medicineId ? (MEDICINE_SOURCES.includes(source) ? source : 'local') : 'custom',
+  if (medications === undefined) return [];
+  if (!Array.isArray(medications)) {
+    throw ApiError.unprocessable('Please correct the medication details.', {
+      medications: 'Use a list of prescription entries.',
     });
+  }
+  if (medications.length > 50) {
+    throw ApiError.unprocessable('Please correct the medication details.', {
+      medications: 'Add no more than 50 medication entries.',
+    });
+  }
+
+  const errors = {};
+  const out = [];
+  for (const [index, raw] of medications.entries()) {
+    const prefix = `medications[${index}]`;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      errors[prefix] = 'Use a medication object.';
+      continue;
+    }
+    for (const key of Object.keys(raw)) {
+      if (!MEDICATION_KEYS.has(key)) errors[`${prefix}.${key}`] = 'This prescription field is not supported.';
+    }
+
+    const entry = Object.fromEntries(Object.entries(MEDICATION_FIELDS).map(([field, max]) => {
+      const value = field === 'genericName' ? (raw.genericName ?? raw.name) : raw[field];
+      return [field, validatedText(value, max, `${prefix}.${field}`, errors, {
+        required: field === 'genericName',
+        preserve: !['genericName', 'medicineId'].includes(field),
+      })];
+    }));
+    const medicineId = entry.medicineId || null;
+    const source = raw.source === undefined ? '' : raw.source;
+    if (source !== '' && (typeof source !== 'string' || ![...MEDICINE_SOURCES, 'custom'].includes(source))) {
+      errors[`${prefix}.source`] = 'Choose a supported medicine source.';
+    }
+    if ((medicineId && source === 'custom') || (!medicineId && source && source !== 'custom')) {
+      errors[`${prefix}.source`] = 'The source must match whether the medicine is a catalog entry.';
+    }
+    if (raw.custom !== undefined && typeof raw.custom !== 'boolean') {
+      errors[`${prefix}.custom`] = 'Use true or false.';
+    }
+    out.push({
+      ...entry,
+      medicineId,
+      custom: medicineId ? false : true,
+      source: medicineId
+        ? (MEDICINE_SOURCES.includes(source) ? source : 'local')
+        : 'custom',
+    });
+  }
+  if (Object.keys(errors).length) {
+    throw ApiError.unprocessable('Please correct the medication details.', errors);
   }
   return out;
 };

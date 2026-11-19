@@ -1,16 +1,27 @@
 /**
- * KALUSAGAP — minor / parent-or-guardian relationship service.
+ * KALUSAGAP — Minor / Parent-or-Guardian Relationship Service (`guardianLinks.service.js`).
  *
- * Owns the lifecycle of `resident_guardian_links`:
- *   - search eligible guardian candidates (staff, scoped)
- *   - create a link for a MINOR resident (staff or the minor's own account)
- *   - verify / reject / correct a link (authorized staff only)
+ * Architectural layer:
+ *   `guardianLinks.routes -> authenticate -> authorize -> guardianLinks.controller -> guardianLinks.service -> repository`
+ *
+ * Owns the lifecycle of `resident_guardian_links` (and the denormalized
+ * `residents.guardian_status` mirror column):
+ *   - search eligible guardian candidates (`searchGuardianCandidates` — staff, scoped)
+ *   - create a link for a MINOR resident (`createGuardianLink` — staff or minor's own account)
+ *   - request / accept / decline / cancel account-to-account guardian requests
+ *     (`requestOwnGuardianLink`, `listIncomingGuardianRequests`,
+ *     `respondToGuardianRequest`, `cancelOwnGuardianRequest`, `listOwnGuardianLinks`)
+ *   - verify / reject / correct a link (`reviewGuardianLink`, `correctGuardianLink` — authorized staff only)
  *
  * Invariants enforced here (and again by RLS + DB constraints):
- *   - only a minor (age < MINOR_AGE_THRESHOLD) may be the link's minor side;
+ *   - only a minor (age < MINOR_AGE_THRESHOLD) may be the link's minor side, and
+ *     a minor may never be linked as another resident's guardian;
  *   - the link never points at the minor itself (no self-reference);
- *   - at most one ACTIVE link per minor (a rejected link does not block a
- *     corrected replacement);
+ *   - at most one ACTIVE link per minor (a rejected or cancelled link does not
+ *     block a corrected replacement);
+ *   - when linked to an existing resident account (`guardianAuthUserId`), the
+ *     account holder must accept (`pending_guardian_acceptance` -> `pending_verification`)
+ *     before staff can verify the relationship;
  *   - creating or updating a link NEVER changes any resident's verification
  *     status or grants the guardian access to the minor's records
  *     (GUARDIAN_ACCESS_NOT_GRANTED — a pending policy decision).
@@ -50,6 +61,10 @@ const coversBarangay = (user, minor) => {
   return true;
 };
 
+/**
+ * Load a resident record, verify the caller's barangay/municipality coverage,
+ * and (when `requireMinor` is true) ensure the resident is under `MINOR_AGE_THRESHOLD`.
+ */
 const loadMinorInScope = async (user, minorResidentId, { requireMinor = true } = {}) => {
   const minor = await repository.getResident(minorResidentId);
   if (!minor) throw ApiError.notFound('Resident record not found.');
@@ -64,6 +79,7 @@ const loadMinorInScope = async (user, minorResidentId, { requireMinor = true } =
   return minor;
 };
 
+/** Serialize a full guardian link record (including guardian details and audit attribution) for authorized staff views. */
 const publicLink = (link, minor) => ({
   id: link.id,
   minorResidentId: link.minorResidentId,
@@ -99,6 +115,7 @@ const publicLink = (link, minor) => ({
   updatedAt: link.updatedAt || null,
 });
 
+/** Serialize a minimal, PII-stripped guardian link summary for the minor's own resident portal view. */
 const publicResidentLink = (link) => ({
   id: link.id,
   relationshipType: link.relationshipType,
@@ -146,6 +163,10 @@ export const searchGuardianCandidates = async ({ user, q = '', repo = repository
   }));
 };
 
+/**
+ * Validate required guardian link input fields, relationship enum membership,
+ * strict 11-digit Philippine mobile number format, and identity number length.
+ */
 const validateGuardianDetails = (payload = {}) => {
   const errors = {};
   const minorResidentId = text(payload.minorResidentId);
@@ -183,8 +204,9 @@ const validateGuardianDetails = (payload = {}) => {
  *    details (no referencing other residents' full records — candidates are
  *    matched by identity only and the resulting link still needs staff review).
  *
- * The link is ALWAYS created with verificationStatus 'pending_verification'.
- * Nothing here verifies anyone or grants any access.
+ * The link is created with `verificationStatus: 'pending_guardian_acceptance'`
+ * when linked to an existing resident account (`linkedGuardian.authUserId`), or
+ * `'pending_verification'` otherwise. Nothing here verifies anyone or grants any access.
  */
 export const createGuardianLink = async ({ user, payload = {} }) => {
   const isStaff = GUARDIAN_LINK_CREATE_ROLES.includes(user.role) || user.role === 'admin';
@@ -308,6 +330,7 @@ export const createGuardianLink = async ({ user, payload = {} }) => {
   return publicLink(link, minor);
 };
 
+/** Serialize an incoming guardian request DTO showing minimal minor details (`id`, `name`, `barangay`) to the prospective guardian. */
 const publicIncomingRequest = (link, minor) => ({
   id: link.id,
   relationshipType: link.relationshipType,
@@ -321,7 +344,18 @@ const publicIncomingRequest = (link, minor) => ({
   } : null,
 });
 
-/** Requester is always derived from the authenticated resident account. */
+/**
+ * Minor resident self-service: send a guardian link request by email address.
+ *
+ * Requester identity is derived strictly from `user.id`. To prevent email/account
+ * enumeration, returns the exact same `pending_guardian_acceptance` acknowledgement
+ * whether the target email is unknown, belongs to the minor themselves, belongs to
+ * another minor, or already has an active link — creating the underlying
+ * `resident_guardian_links` row only when an eligible adult resident account matches.
+ *
+ * @param {Object} params - Request parameters (`user`, `email`, `relationshipType`).
+ * @returns {Promise<Object>} Uniform anti-enumeration acknowledgement object.
+ */
 export const requestOwnGuardianLink = async ({ user, email, relationshipType }) => {
   if (!['resident', 'resident-limited'].includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may request a guardian link.');
@@ -377,6 +411,16 @@ export const requestOwnGuardianLink = async ({ user, email, relationshipType }) 
   return acknowledgement;
 };
 
+/**
+ * Resident self-service: retrieve the authenticated minor's guardian link status and history.
+ *
+ * Unaccepted `pending_guardian_acceptance` rows are filtered out of `links` so
+ * the minor cannot infer whether an invited email matched an existing account
+ * before the recipient responds. Non-minor residents receive `{ isMinor: false, status: 'not_applicable', links: [] }`.
+ *
+ * @param {Object} params - Call parameters (`user`).
+ * @returns {Promise<Object>} `{ isMinor, status, links }`.
+ */
 export const listOwnGuardianLinks = async ({ user }) => {
   if (!['resident', 'resident-limited'].includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may view its guardian links.');
@@ -394,6 +438,13 @@ export const listOwnGuardianLinks = async ({ user }) => {
   };
 };
 
+/**
+ * Resident self-service: list pending incoming guardian requests (`pending_guardian_acceptance`)
+ * addressed to the authenticated adult resident's `authUserId`.
+ *
+ * @param {Object} params - Call parameters (`user`).
+ * @returns {Promise<Array<Object>>} Hydrated incoming request summaries.
+ */
 export const listIncomingGuardianRequests = async ({ user }) => {
   if (!['resident', 'resident-limited'].includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may view incoming guardian requests.');
@@ -408,6 +459,16 @@ export const listIncomingGuardianRequests = async ({ user }) => {
   return requests;
 };
 
+/**
+ * Resident self-service: accept or decline an incoming guardian link request
+ * addressed to `user.id` (`link.guardianAuthUserId`).
+ *
+ * Accepting advances the link (and `minor.guardianStatus`) to `pending_verification`
+ * for authorized staff review; declining marks both as `rejected`.
+ *
+ * @param {Object} params - Decision parameters (`user`, `linkId`, `decision`).
+ * @returns {Promise<Object>} Updated incoming request DTO.
+ */
 export const respondToGuardianRequest = async ({ user, linkId, decision }) => {
   if (!['resident', 'resident-limited'].includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may respond to guardian requests.');
@@ -432,6 +493,14 @@ export const respondToGuardianRequest = async ({ user, linkId, decision }) => {
   return publicIncomingRequest(updated, minor);
 };
 
+/**
+ * Minor resident self-service: cancel the caller's own pending guardian request
+ * (`pending_guardian_acceptance` or `pending_verification`) and set
+ * `minor.guardianStatus` to `'cancelled'`.
+ *
+ * @param {Object} params - Call parameters (`user`).
+ * @returns {Promise<Object>} `{ status: 'cancelled' }`.
+ */
 export const cancelOwnGuardianRequest = async ({ user }) => {
   if (!['resident', 'resident-limited'].includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may cancel its guardian request.');

@@ -1,8 +1,11 @@
 /**
- * Retry and Backoff Utilities
- * 
- * Implements exponential backoff with symmetric jitter to prevent thundering herd
- * and respect Retry-After headers from provider responses.
+ * Retry and Exponential Backoff Utilities (`services/aiProvider/retry.js`).
+ *
+ * Used by `AIProviderClient.executeWithRetry` in KALUSAGAP's AI service layer
+ * (`controller -> service -> AIProviderClient -> retryWithBackoff`) to absorb
+ * transient 503 capacity spikes, 429 rate limits, and network hiccups.
+ * Implements capped exponential backoff with symmetric random jitter to prevent
+ * thundering-herd retries, while honoring explicit `Retry-After` intervals when present.
  */
 
 /**
@@ -44,9 +47,18 @@ export const computeBackoffMs = (
 };
 
 /**
- * Retry configuration builder
+ * Encapsulates retry bounds, jitter amplitude, and `Retry-After` policy for
+ * `retryWithBackoff`. Clamps inputs to safe operational ranges on construction.
  */
 export class RetryConfig {
+  /**
+   * @param {Object} [options] - Retry policy options
+   * @param {number} [options.maxAttempts=5] - Maximum total attempts (clamped to 1..10)
+   * @param {number} [options.baseDelayMs=1000] - Initial backoff delay in ms (min 100)
+   * @param {number} [options.maxDelayMs=60000] - Maximum backoff delay cap in ms (min `baseDelayMs`)
+   * @param {number} [options.jitterRatio=0.25] - Symmetric jitter fraction (clamped to 0..1)
+   * @param {boolean} [options.respectRetryAfter=true] - Whether to prefer `retryAfterSeconds` over computed backoff
+   */
   constructor({
     maxAttempts = 5,
     baseDelayMs = 1000,

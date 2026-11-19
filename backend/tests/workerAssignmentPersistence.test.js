@@ -13,6 +13,17 @@ const midwifeId = '30000000-0000-4000-8000-000000000002';
 const outsideId = '30000000-0000-4000-8000-000000000003';
 const user = { id: 'test-supervisor', role: 'health_supervisor', municipalityId: municipality, barangayId: barangay, barangay: 'San Isidro' };
 
+test('TCL register fails closed when a PHN has no municipality or the resident is unassigned', async () => {
+  const phn = { id: 'test-phn', role: 'phn', municipalityId: municipality };
+  const unassigned = { ...phn, municipalityId: null };
+  const supabase = memoryClient({ residents: [{ id: 'resident-a', municipality_id: null, barangay_id: barangay }] });
+  const payload = { resident_id: 'resident-a', program: 'NCD' };
+  await assert.rejects(list({ user: unassigned, kind: 'tcl', supabase }), { statusCode: 403 });
+  await assert.rejects(create({ user: unassigned, kind: 'tcl', payload, supabase }), { statusCode: 403 });
+  await assert.rejects(create({ user: phn, kind: 'tcl', payload, supabase }), { statusCode: 404 });
+  assert.deepEqual(supabase.tables.tcl_entries, []);
+});
+
 const memoryClient = (extra = {}) => {
   const tables = {
     profiles: [
@@ -101,7 +112,7 @@ test('unrelated TCL edits preserve recorded historical name-only assignment with
 });
 
 test('TCL lists retrieve all scoped pages rather than silently cutting off at 200', async () => {
-  const entries = Array.from({ length: 425 }, (_, i) => ({ id: `tcl-${i}`, resident_id: 'resident-a', barangay_id: barangay, assigned_bhw_id: workerId, assigned_bhw_name: 'Authorized Worker' }));
+  const entries = Array.from({ length: 425 }, (_, i) => ({ id: `tcl-${i}`, resident_id: 'resident-a', municipality_id: municipality, barangay_id: barangay, assigned_bhw_id: workerId, assigned_bhw_name: 'Authorized Worker' }));
   const supabase = memoryClient({ tcl_entries: entries });
   const rows = await list({ user, kind: 'tcl', supabase });
   assert.equal(rows.length, 425);

@@ -20,7 +20,7 @@
  * efficient listing.
  */
 import repository from '../repositories/index.js';
-import { assessVitals, hasAssessableVitals } from '../utils/residentRisk.js';
+import { assessVitals, isLaterVisit } from '../utils/residentRisk.js';
 import { getRiskConfig, setRecalcHandler } from './riskConfig.service.js';
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
@@ -43,23 +43,22 @@ const latestVisitMap = (visits = []) => {
   const map = new Map();
   for (const v of visits) {
     const cur = map.get(v.residentId);
-    const vt = String(v.visitDate || v.createdAt || '');
-    if (!cur || vt > String(cur.visitDate || cur.createdAt || '')) map.set(v.residentId, v);
+    if (isLaterVisit(v, cur)) map.set(v.residentId, v);
   }
   return map;
 };
 
 /** Assess a single resident from a (latest) visit + config. */
 const assessFromVisit = (visit, config) => {
-  if (!visit || !hasAssessableVitals(visit.vitals)) {
-    return { riskScore: null, riskLevel: null, riskFactors: [], riskAssessedAt: null };
-  }
-  const { score, level, factors } = assessVitals(visit.vitals, config);
+  const { score, level, factors, status, missingMeasurements, reason } = assessVitals(visit?.vitals, config);
   return {
     riskScore: score,
     riskLevel: level,
     riskFactors: factors,
-    riskAssessedAt: visit.visitDate || visit.createdAt || null,
+    riskAssessedAt: level === null ? null : visit?.visitDate || visit?.createdAt || null,
+    riskAssessmentStatus: status,
+    missingMeasurements,
+    riskReason: reason,
   };
 };
 
@@ -80,9 +79,7 @@ export const attachRiskToResidents = async (residents = [], { repo = repository,
     const latest = latestVisitMap(visits || []);
     return residents.map((r) => ({ ...r, ...assessFromVisit(latest.get(r.id), cfg) }));
   } catch {
-    return residents.map((r) => ({
-      ...r, riskScore: r.riskScore ?? null, riskLevel: r.riskLevel ?? null, riskFactors: r.riskFactors ?? [], riskAssessedAt: r.riskAssessedAt ?? null,
-    }));
+    throw new ApiError(503, 'Resident risk assessment is unavailable. Reload the records to retry.').withCode('RISK_SOURCE_UNAVAILABLE');
   }
 };
 
@@ -168,18 +165,20 @@ export const getRiskSummary = async ({ barangay = null, municipalityId = null, r
     const { riskLevel } = assessFromVisit(latest.get(resident.id), cfg);
     if (riskLevel) { counts[riskLevel] += 1; assessed += 1; }
   }
-  const highPct = assessed > 0 ? Math.round((counts.High / assessed) * 100) : 0;
+  const highPct = assessed > 0 ? Math.round((counts.High / assessed) * 100) : null;
   return {
     totalResidents: residents.length,
     assessed,
     high: counts.High,
     moderate: counts.Moderate,
     low: counts.Low,
+    unassessed: residents.length - assessed,
     highRiskPercentage: highPct,
     distribution: [
       { name: 'Low Risk', value: counts.Low },
       { name: 'Moderate Risk', value: counts.Moderate },
       { name: 'High Risk', value: counts.High },
+      { name: 'Unassessed', value: residents.length - assessed },
     ],
   };
 };

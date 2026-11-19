@@ -1,30 +1,43 @@
 /**
- * Appointment booking validators (server-authoritative).
+ * @file Appointment booking & clinic schedule validators (server-authoritative).
  *
- * Convention with middleware/validate.js:
+ * Fits into the KALUSAGAP request pipeline (`route -> authenticate -> authorize ->
+ * validate -> controller -> service -> repository/Supabase`) via `middleware/validate.js`:
  *   validator(input, req) -> { value }            // accepted, replaces req[part]
- *                         -> { error: { field } } // rejected with 400 + details
+ *                         -> { error: { field } } // rejected with HTTP 400 + details
  *
- * These re-validate every request before it reaches the service. The service
- * still enforces authorization, ownership, scope and slot capacity — these
- * validators only normalize shape and reject obviously invalid input.
+ * These validators normalize camelCase/snake_case request payloads and reject
+ * malformed dates, times, UUIDs, and over-length notes before controller execution.
+ * Downstream appointment services still enforce RBAC, resident ownership,
+ * barangay/RHU scope, blackout dates, and per-slot capacity limits.
  */
 import { invalid, valid, text, isUuid, parseDateOnly } from './common.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** 24-hour clock format `HH:MM` (`00:00` through `23:59`). */
 const TIME_24H = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** JavaScript `Date.prototype.getUTCDay()` / `getDay()` indices (`0` = Sunday .. `6` = Saturday). */
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 const REASON_MAX = 500;
 const NOTE_MAX = 500;
 
 const isTime = (value) => TIME_24H.test(text(value));
 const isDateOnly = (value) => parseDateOnly(text(value)) !== null;
+/** Coerces a scalar input to a finite integer, returning `null` for blanks or non-integers. */
 const toInt = (value) => {
   const n = Number(text(value));
   return Number.isInteger(n) ? n : null;
 };
 
-/** POST /resident/appointments — a resident books a service slot. */
+/**
+ * Validates `POST /resident/appointments` payloads when a resident books a health service slot.
+ * Accepts camelCase or snake_case field aliases (`serviceId`/`service_id`,
+ * `date`/`requestedDate`/`requested_date`, `time`/`requestedTime`/`requested_time`)
+ * and normalizes them into `{ serviceId, date, time, reason }`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const bookValidator = (input = {}) => {
   const errors = {};
   const serviceId = text(input.serviceId || input.service_id);
@@ -41,7 +54,14 @@ export const bookValidator = (input = {}) => {
   return valid({ serviceId, date, time, reason });
 };
 
-/** GET /resident/appointments/availability?serviceId=&date= */
+/**
+ * Validates `GET /resident/appointments/availability` query parameters (`serviceId` and `date`).
+ * Ensures both the target health service UUID and strict `YYYY-MM-DD` calendar date are present
+ * before slot availability is computed.
+ *
+ * @param {Object} [input] - Raw query string object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const availabilityQueryValidator = (input = {}) => {
   const errors = {};
   const serviceId = text(input.serviceId || input.service_id);
@@ -52,14 +72,26 @@ export const availabilityQueryValidator = (input = {}) => {
   return valid({ serviceId, date });
 };
 
-/** Optional reason body (resident cancel, decline a proposal). */
+/**
+ * Validates optional free-text reason payloads (e.g., resident appointment cancellation).
+ *
+ * @param {Object} [input] - Raw request body containing optional `reason`.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const reasonBodyValidator = (input = {}) => {
   const reason = text(input.reason);
   if (reason.length > NOTE_MAX) return invalid({ reason: `Reason must be ${NOTE_MAX} characters or fewer.` });
   return valid({ reason });
 };
 
-/** Staff approve: optionally override the confirmed schedule. */
+/**
+ * Validates staff appointment approval payloads.
+ * Allows health personnel to confirm the resident's requested slot as-is (`date: null, time: null`)
+ * or override the confirmed schedule, enforcing that `date` and `time` are supplied together.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const approveValidator = (input = {}) => {
   const errors = {};
   const date = text(input.date || input.confirmedDate || input.confirmed_date);
@@ -75,7 +107,13 @@ export const approveValidator = (input = {}) => {
   return valid({ date: date || null, time: time || null, note });
 };
 
-/** Staff decline: a reason is required. */
+/**
+ * Validates staff appointment decline payloads, requiring a non-empty explanation
+ * so the resident knows why the booking request was turned down.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const declineValidator = (input = {}) => {
   const reason = text(input.reason);
   if (!reason) return invalid({ reason: 'A reason is required to decline a request.' });
@@ -83,7 +121,13 @@ export const declineValidator = (input = {}) => {
   return valid({ reason });
 };
 
-/** Staff propose an alternative schedule: date + time required. */
+/**
+ * Validates staff reschedule-proposal payloads when offering an alternative `date` and `time`
+ * to a resident (accepts `proposedDate`/`proposed_date` and `proposedTime`/`proposed_time` aliases).
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const proposeValidator = (input = {}) => {
   const errors = {};
   const date = text(input.date || input.proposedDate || input.proposed_date);
@@ -96,7 +140,13 @@ export const proposeValidator = (input = {}) => {
   return valid({ date, time, note });
 };
 
-/** Staff set final attendance outcome: completed | missed. */
+/**
+ * Validates staff post-appointment attendance outcomes (`completed` or `missed`)
+ * along with an optional clinical/administrative note.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const outcomeValidator = (input = {}) => {
   const status = text(input.status).toLowerCase();
   if (!['completed', 'missed'].includes(status)) {
@@ -107,7 +157,13 @@ export const outcomeValidator = (input = {}) => {
   return valid({ status, note });
 };
 
-/** Resident response to a proposed schedule: accept | decline. */
+/**
+ * Validates a resident's response (`accept` or `decline`) to a staff-proposed reschedule,
+ * with an optional reason when declining.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const proposalResponseValidator = (input = {}) => {
   const decision = text(input.decision).toLowerCase();
   if (!['accept', 'decline'].includes(decision)) {
@@ -118,7 +174,15 @@ export const proposalResponseValidator = (input = {}) => {
   return valid({ decision, reason });
 };
 
-/** Create / update a service availability schedule row (staff). */
+/**
+ * Validates recurring weekly availability schedule definitions created/updated by health staff.
+ * Enforces valid weekday (`0..6`), `endTime > startTime`, slot duration (`5..480` minutes,
+ * default `30`), per-slot capacity (`1..100`, default `1`), optional barangay UUID scope,
+ * and `active` flag (default `true`).
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const scheduleValidator = (input = {}) => {
   const errors = {};
   const serviceId = text(input.serviceId || input.service_id);
@@ -157,7 +221,13 @@ export const scheduleValidator = (input = {}) => {
   });
 };
 
-/** Create a blackout (closure) date for a service. */
+/**
+ * Validates service blackout/closure date payloads (`date`/`blackoutDate`/`blackout_date`)
+ * used to block appointment bookings on holidays or clinic closure days.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const blackoutValidator = (input = {}) => {
   const errors = {};
   const serviceId = text(input.serviceId || input.service_id);
@@ -172,12 +242,23 @@ export const blackoutValidator = (input = {}) => {
   return valid({ serviceId, date, reason, barangayId: barangayId || null });
 };
 
-/** :id path param must be a UUID. */
+/**
+ * Validates `:id` route parameters for appointment endpoints as UUIDs.
+ *
+ * @param {Object} [input] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const idParamValidator = (input = {}) => {
   if (!UUID.test(text(input.id))) return invalid({ id: 'Appointment not found.' });
   return valid(input);
 };
 
+/**
+ * Validates `:id` route parameters for availability schedule and blackout endpoints as UUIDs.
+ *
+ * @param {Object} [input] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const scheduleIdParamValidator = (input = {}) => {
   if (!UUID.test(text(input.id))) return invalid({ id: 'Schedule not found.' });
   return valid(input);

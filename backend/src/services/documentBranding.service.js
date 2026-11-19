@@ -7,6 +7,25 @@ import {
 } from '../config/documentBranding.js';
 import ApiError from '../utils/apiError.js';
 
+/**
+ * KALUSAGAP — Official Document Branding & Logo Management Service (`documentBranding.service.js`).
+ *
+ * Architectural layer:
+ *   `documentBranding.routes -> authenticate -> authorize / upload -> documentBranding.controller -> documentBranding.service -> Supabase Storage & PostgreSQL`
+ *
+ * Responsibilities:
+ *   - Manages municipality-scoped official seals/logos (`municipal`, `rhu`) stored
+ *     privately in the Supabase Storage `documents` bucket and indexed in the
+ *     `official_logos` table via atomic RPCs (`save_official_logo`, `remove_official_logo`).
+ *   - Provides short-lived signed preview URLs (`SIGNED_URL_SECONDS = 600`) for the
+ *     System Administrator branding configuration screen (`getAdminLogoSettings`).
+ *   - Resolves complete branding payloads for official health documents and
+ *     certificates (`getDocumentBranding`), combining template metadata
+ *     (`DOCUMENT_BRANDING_TEMPLATES`), inline base64 data URLs for configured logos,
+ *     municipality and RHU facility records (`municipalities`, `facilities`), and
+ *     active Municipal Health Officer (`mho`) signatory credentials (`profiles`).
+ */
+
 const BUCKET = 'documents';
 const SIGNED_URL_SECONDS = 600;
 const ALLOWED_ROLES = new Set([
@@ -18,12 +37,25 @@ const ALLOWED_ROLES = new Set([
   'bhw',
 ]);
 
+/** Ensure the requested logo slot is a supported official logo type (`municipal` or `rhu`). */
 const assertLogoType = (logoType) => {
   if (!OFFICIAL_LOGO_TYPES.includes(logoType)) {
     throw ApiError.notFound('Official logo type not found.');
   }
 };
 
+/**
+ * Resolve the municipality UUID governing the caller's branding operations.
+ *
+ * Staff accounts use their assigned `user.municipalityId`. Unassigned `admin`
+ * accounts automatically resolve to the sole active municipality in single-LGU
+ * deployments, or receive `409 Conflict` in multi-municipality deployments until
+ * explicitly assigned.
+ *
+ * @param {Object} user - Authenticated user context.
+ * @param {Object} supabase - Supabase service client.
+ * @returns {Promise<string>} Resolved municipality UUID.
+ */
 const requireMunicipality = async (user, supabase) => {
   if (user?.municipalityId) return user.municipalityId;
   if (user?.role === 'admin') {
@@ -41,6 +73,7 @@ const requireMunicipality = async (user, supabase) => {
   throw ApiError.conflict('Your account must be assigned to a municipality to use official branding.');
 };
 
+/** Strip directory components and ASCII control characters from an uploaded logo filename. */
 const cleanFilename = (name) =>
   path.basename(String(name || 'official-logo'))
     .replace(/[\u0000-\u001f\u007f]/g, '')
@@ -54,6 +87,7 @@ const throwOnSupabaseError = (error, message) => {
   }
 };
 
+/** Fetch all active `official_logos` metadata rows for a municipality. */
 const getLogoRows = async (supabase, municipalityId) => {
   const { data, error } = await supabase
     .from('official_logos')
@@ -63,6 +97,7 @@ const getLogoRows = async (supabase, municipalityId) => {
   return data || [];
 };
 
+/** Generate a 10-minute signed preview URL and metadata DTO for a stored `official_logos` row. */
 const signedLogo = async (supabase, row) => {
   const { data, error } = await supabase.storage
     .from(BUCKET)
@@ -85,6 +120,15 @@ const signedLogo = async (supabase, row) => {
   };
 };
 
+/**
+ * Retrieve the municipality details and signed preview URLs for configured
+ * `municipal` and `rhu` logos for the System Administrator settings panel.
+ *
+ * Restricted strictly to `admin` callers (`403 Forbidden` otherwise).
+ *
+ * @param {Object} [params] - Call parameters (`user`).
+ * @returns {Promise<Object>} `{ municipality, logos: { municipal, rhu } }`.
+ */
 export const getAdminLogoSettings = async ({ user } = {}) => {
   if (user?.role !== 'admin') {
     throw ApiError.forbidden('Only the System Administrator may view official logo settings.');
@@ -192,6 +236,18 @@ const loadOrganizationAndSignatory = async (supabase, municipalityId, documentTy
   };
 };
 
+/**
+ * Assemble the complete official branding payload required to render or issue a
+ * specific `documentType` (e.g. medical certificate, referral, FHSIS report).
+ *
+ * Downloads required logos from private storage and encodes them as `base64`
+ * data URLs so client/PDF renderers never need direct bucket access, reports any
+ * unconfigured slots in `missingLogoTypes`, and attaches municipality, RHU
+ * facility, and active MHO signatory metadata.
+ *
+ * @param {Object} [params] - Branding lookup parameters (`user`, `documentType`, `supabase`).
+ * @returns {Promise<Object>} Resolved branding bundle (`logos`, `missingLogoTypes`, `organization`, `signatory`).
+ */
 export const getDocumentBranding = async ({ user, documentType, supabase } = {}) => {
   if (!ALLOWED_ROLES.has(user?.role)) {
     throw ApiError.forbidden('Your account cannot use official document branding.');
@@ -241,6 +297,19 @@ export const getDocumentBranding = async ({ user, documentType, supabase } = {})
   };
 };
 
+/**
+ * Upload and activate a new official logo (`municipal` or `rhu`) for the
+ * administrator's municipality.
+ *
+ * Writes the validated image buffer to `official-logos/<municipalityId>/<logoType>/<uuid><ext>`
+ * in private storage, commits the active pointer via the `save_official_logo` RPC
+ * (rolling back the uploaded object if the RPC fails), and performs best-effort
+ * deletion of any superseded `previousStoragePath` (returning `cleanupWarning`
+ * if storage cleanup fails).
+ *
+ * @param {Object} [params] - Upload parameters (`user`, `logoType`, `file`, `format`).
+ * @returns {Promise<Object>} `{ logo, cleanupWarning }` with a fresh signed preview URL.
+ */
 export const uploadOfficialLogo = async ({ user, logoType, file, format } = {}) => {
   if (user?.role !== 'admin') {
     throw ApiError.forbidden('Only the System Administrator may upload official logos.');
@@ -303,6 +372,14 @@ export const uploadOfficialLogo = async ({ user, logoType, file, format } = {}) 
   };
 };
 
+/**
+ * Deactivate and remove a configured official logo (`municipal` or `rhu`) for
+ * the administrator's municipality via the `remove_official_logo` RPC, then
+ * delete the underlying object from private storage on a best-effort basis.
+ *
+ * @param {Object} [params] - Removal parameters (`user`, `logoType`).
+ * @returns {Promise<Object>} `{ removed: true, cleanupWarning }`.
+ */
 export const removeOfficialLogo = async ({ user, logoType } = {}) => {
   if (user?.role !== 'admin') {
     throw ApiError.forbidden('Only the System Administrator may remove official logos.');

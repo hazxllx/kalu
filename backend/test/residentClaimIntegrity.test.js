@@ -1,18 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-// All repository operations below are isolated in-memory substitutes. Auth is
-// deliberately unconfigured, including the best-effort confirmation call.
+// All repository operations below are isolated in-memory substitutes. Auth uses
+// a fake service client so the server-side confirmation guard is still tested.
 process.env.SUPABASE_URL = '';
 process.env.SUPABASE_SERVICE_ROLE_KEY = '';
 const repository = (await import('../src/repositories/index.js')).default;
+const env = (await import('../src/config/env.js')).default;
+const { getServiceClient } = await import('../src/config/supabase.js');
 const { registerResident, activateExistingResident } = await import('../src/services/registration.service.js');
+
+env.isSupabaseConfigured = true;
+env.supabaseUrl = 'https://registration-claims.invalid';
+env.supabaseServiceRoleKey = 'registration-test-service-key';
+const authAdmin = getServiceClient().auth.admin;
+authAdmin.getUserById = async (id) => ({
+  data: { user: { id, email_confirmed_at: '2026-11-18T00:00:00Z' } },
+  error: null,
+});
 
 const USER = { id: '11111111-1111-4111-8111-111111111111', role: 'resident' };
 const OTHER = '22222222-2222-4222-8222-222222222222';
 const PAYLOAD = {
   firstName: 'Ana', lastName: 'Santos', middleName: '', birthDate: '1990-05-20',
   sex: 'Female', civilStatus: 'Single', barangay: 'San Isidro', identityNo: 'CLAIM-TEST-ID',
+  cellphoneNo: '+63 917-123-4567',
 };
 const RESIDENT = {
   id: 'RES-000123', healthRecordNo: 'RHU-000123', ...PAYLOAD,
@@ -168,6 +180,7 @@ test('new registration preserves scope and simultaneous same-account inserts rec
   assert.equal(harness.rows[0].municipalityId, 'municipality-test');
   assert.equal(harness.rows[0].barangayId, 'barangay-test');
   assert.equal(harness.rows[0].verificationStatus, 'pending');
+  assert.equal(harness.rows[0].cellphoneNo, '09171234567');
   assert.equal(harness.calls.activated.length, 0);
   assert.equal((await registerResident({ user: USER })).id, results[0].id);
 });

@@ -3,10 +3,30 @@ import ApiError from '../utils/apiError.js';
 import { sendCreated, sendData, sendNoContent } from '../utils/apiResponse.js';
 
 /**
+ * Resident Identity & Residency Verification Documents Controller.
+ *
+ * Fits into the KALUSAGAP request pipeline as:
+ *   route -> [authenticate -> authorize] -> [multipart upload middleware] -> controller -> documents.service -> Supabase Storage & repository
+ *
+ * Supports three workflows:
+ * 1. Pre-submission automated screening (`screenResidentDocument` and
+ *    `screenResidentGovernmentIdPair`) during registration Step 3 — runs quality,
+ *    OCR, and front/back ID cross-verification without storing files.
+ * 2. Resident self-service document upload, viewing, listing, and deletion
+ *    (`uploadResidentDocument`, `getMyDocument`, `listMyDocuments`, `deleteResidentDocument`).
+ * 3. Staff verification review (`listResidentDocuments`, `getResidentDocument`,
+ *    `reviewResidentDocument`) scoped to the reviewer's barangay/municipality.
+ */
+
+/**
  * Screen an uploaded document WITHOUT persisting it. Used by resident
  * registration Step 3 to show the deterministic automated result before the
  * registration is submitted. The result is advisory (a hard rejection blocks
  * submission; flagged/manual-review may proceed). No file is stored.
+ *
+ * Requires `req.file` (`400` if missing), reads optional `documentType`
+ * (default `'proof_of_residency'`) and `governmentIdType` from `req.body`,
+ * calls `documentsService.screenUploadedDocument`, and returns `{ screening }` (`200 OK`).
  */
 export const screenResidentDocument = async (req, res) => {
   if (!req.file) {
@@ -31,6 +51,13 @@ export const screenResidentDocument = async (req, res) => {
   });
 };
 
+/**
+ * Screens a front/back government ID upload pair (`req.governmentIdPair`) without
+ * persisting either file, evaluating image quality, OCR presence, and front-to-back
+ * cross-verification for `req.body.governmentIdType`.
+ * Calls `documentsService.screenUploadedGovernmentIdPair` and returns per-side
+ * screening summaries plus `crossVerification` (`200 OK` via `sendData`).
+ */
 export const screenResidentGovernmentIdPair = async (req, res) => {
   const pair = req.governmentIdPair || {};
   const screening = await documentsService.screenUploadedGovernmentIdPair({
@@ -62,6 +89,13 @@ export const screenResidentGovernmentIdPair = async (req, res) => {
   });
 };
 
+/**
+ * Uploads and persists a resident verification document (`req.file` or
+ * `req.governmentIdPair`) for `req.body.residentId` (`400` if missing).
+ * Passes `req.user`, `documentType`, `governmentIdType`, `governmentIdTypeOther`,
+ * and `req.requestId` to `documentsService.uploadResidentDocument`, responding
+ * with `{ document }` (`201 Created` via `sendCreated`).
+ */
 export const uploadResidentDocument = async (req, res) => {
   const file = req.file;
   const body = req.body || {};
@@ -88,6 +122,11 @@ export const uploadResidentDocument = async (req, res) => {
   sendCreated(res, { document: result });
 };
 
+/**
+ * Retrieves the authenticated resident's primary verification document for
+ * `residentId` (from `req.query.residentId` or `req.params.residentId`; `400` if missing).
+ * Ownership is verified in `documentsService.getMyDocument`; returns `{ document }` (`200 OK`).
+ */
 export const getMyDocument = async (req, res) => {
   const residentId = req.query?.residentId || req.params?.residentId;
   if (!residentId) {
@@ -102,6 +141,11 @@ export const getMyDocument = async (req, res) => {
   sendData(res, { document: result });
 };
 
+/**
+ * Lists all verification documents belonging to the authenticated resident for
+ * `req.query.residentId` (`400` if missing) via `documentsService.listMyDocuments`.
+ * Returns `{ documents }` (`200 OK`).
+ */
 export const listMyDocuments = async (req, res) => {
   const residentId = req.query?.residentId;
   if (!residentId) throw ApiError.badRequest('Resident ID is required.');
@@ -109,12 +153,22 @@ export const listMyDocuments = async (req, res) => {
   sendData(res, { documents });
 };
 
+/**
+ * Lists all submitted verification documents for `req.params.residentId` on behalf
+ * of authorized health/admin staff (`req.user`). Calls `documentsService.listResidentDocuments`
+ * and returns `{ documents }` (`200 OK`).
+ */
 export const listResidentDocuments = async (req, res) => {
   const { residentId } = req.params;
   const documents = await documentsService.listResidentDocuments({ user: req.user, residentId });
   sendData(res, { documents });
 };
 
+/**
+ * Retrieves metadata and signed access details for a single resident document
+ * (`req.params.residentId`, `req.params.documentId`) for authorized staff (`req.user`).
+ * Calls `documentsService.getResidentDocument` and returns `{ document }` (`200 OK`).
+ */
 export const getResidentDocument = async (req, res) => {
   const { residentId, documentId } = req.params;
 
@@ -127,6 +181,11 @@ export const getResidentDocument = async (req, res) => {
   sendData(res, { document: result });
 };
 
+/**
+ * Records a staff verification review decision/notes (`req.body`) on document
+ * `req.params.documentId` belonging to `req.params.residentId`.
+ * Calls `documentsService.reviewResidentDocument` and returns `{ document }` (`200 OK`).
+ */
 export const reviewResidentDocument = async (req, res) => {
   const { residentId, documentId } = req.params;
   const patch = req.body || {};
@@ -141,6 +200,11 @@ export const reviewResidentDocument = async (req, res) => {
   sendData(res, { document: result });
 };
 
+/**
+ * Deletes resident document `req.params.id` for `req.body.residentId` (`400` if missing)
+ * after verifying ownership/permissions for `req.user` in `documentsService.deleteResidentDocument`.
+ * Responds with `204 No Content` via `sendNoContent`.
+ */
 export const deleteResidentDocument = async (req, res) => {
   const { id } = req.params;
   const residentId = req.body?.residentId;

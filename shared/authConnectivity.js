@@ -6,6 +6,14 @@ export const AUTH_NETWORK_FAILURE_MESSAGE = 'Cannot connect to the authenticatio
 export const AUTH_SESSION_CHANGED_MESSAGE = 'Your authentication session changed unexpectedly. Please sign in again.';
 export const AUTH_SESSION_EXPIRED_MESSAGE = 'Your session expired. Please sign in again.';
 
+export const hostedSupabaseProjectRef = (value) => {
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port
+    || url.pathname !== '/' || url.search || url.hash) return null;
+  return url.hostname.match(/^([a-z0-9][a-z0-9-]*)\.supabase\.co$/)?.[1] || null;
+};
+
 export const isAuthNetworkFailure = (error) => {
   if (!error) return false;
   const status = Number(error.status ?? error.statusCode);

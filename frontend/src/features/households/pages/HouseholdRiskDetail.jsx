@@ -9,7 +9,7 @@ import { householdsApi } from "@/services/api/householdsApi";
 import { householdRiskApi } from "@/services/api/householdRiskApi";
 import { toRiskCluster, daysSince } from "../lib/riskClusterAdapter";
 import {
-  RISK_LEVELS, RISK_LEVEL_LABELS, householdRiskBasis,
+  RISK_LEVELS, RISK_LEVEL_LABELS,
 } from "@/lib/householdRisk";
 import {
   Home, PhoneCall, UserPlus, ArrowUpRight, RefreshCw, ChevronRight, Users, MapPin, FileText, Activity, CalendarDays, Plus,
@@ -21,6 +21,7 @@ const levelTone = {
   [RISK_LEVELS.MONITOR]: { chip: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400", dot: "bg-brand-yellow" },
   [RISK_LEVELS.INTERVENTION]: { chip: "bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400", dot: "bg-brand-accent" },
   [RISK_LEVELS.PRIORITY]: { chip: "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400", dot: "bg-brand-danger" },
+  [RISK_LEVELS.UNASSESSED]: { chip: "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400", dot: "bg-slate-400" },
 };
 
 const formatDate = (iso) => {
@@ -52,7 +53,7 @@ const visitLabel = (number) => {
 /** Information cell used across the risk profile. */
 function InfoCell({ icon: Icon, label, value }) {
   return (
-    <div className="rounded-btn bg-brand-bg/60 dark:bg-card-nested px-3 py-2.5">
+    <div className="min-w-0 rounded-btn bg-brand-bg/60 dark:bg-card-nested px-3 py-2.5 [overflow-wrap:anywhere]">
       <div className="flex items-center gap-1.5">
         {Icon && <Icon className="h-3.5 w-3.5 text-brand-gray" strokeWidth={1.8} />}
         <p className="text-[11px] text-brand-gray uppercase tracking-wide">{label}</p>
@@ -80,6 +81,7 @@ export default function HouseholdRiskDetail() {
   const [visitRequestId, setVisitRequestId] = useState(newVisitRequestId());
   const [savingVisit, setSavingVisit] = useState(false);
   const [visitError, setVisitError] = useState("");
+  const [savingClusterLevel, setSavingClusterLevel] = useState(false);
 
   // Load the real household (server risk classification + members) and merge
   // its persisted risk workflow. Out-of-scope households resolve as 404 (the
@@ -160,8 +162,6 @@ export default function HouseholdRiskDetail() {
 
   const backPath = locationPathForRole();
 
-  const basis = household ? householdRiskBasis({ level: household.risk.level, count: household.risk.count, indicators: household.risk.indicators }) : null;
-
   // Loading skeleton
   if (phase === "loading") {
     return (
@@ -225,7 +225,22 @@ export default function HouseholdRiskDetail() {
   }
 
   const h = household;
-  const tone = levelTone[h.risk.level];
+  const tone = levelTone[h.risk.level] || levelTone[RISK_LEVELS.UNASSESSED];
+  const riskLabel = RISK_LEVEL_LABELS[h.risk.level] || RISK_LEVEL_LABELS[RISK_LEVELS.UNASSESSED];
+
+  const saveClusterLevel = async (level) => {
+    setSavingClusterLevel(true);
+    try {
+      await persistWorkflow(
+        { riskClusterLevel: level || null },
+        level ? `Cluster assignment changed to ${RISK_LEVEL_LABELS[level]}.` : "Cluster assignment cleared.",
+      );
+    } catch {
+      // persistWorkflow displays the server error in the page toast.
+    } finally {
+      setSavingClusterLevel(false);
+    }
+  };
 
   return (
     <>
@@ -248,15 +263,15 @@ export default function HouseholdRiskDetail() {
                 </button>
               </>
             )}
-            <Link to={backPath} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
-              <ChevronRight className="h-4 w-4 rotate-180" /> Back to Risk Overview
+             <Link to={backPath} className="inline-flex min-h-11 items-center gap-1.5 rounded-btn border border-brand-border bg-white px-3.5 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:bg-card dark:hover:bg-hover">
+               <ChevronRight className="h-4 w-4 rotate-180" /> {user?.role === "bhw" ? "Back to Households" : "Back to Risk Overview"}
             </Link>
           </div>
         }
       />
 
       {toast && (
-        <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
+        <div role="status" className="fixed bottom-4 right-4 z-[80] flex max-w-[calc(100%-2rem)] items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
           <span className="text-sm">{toast}</span>
         </div>
       )}
@@ -295,50 +310,50 @@ export default function HouseholdRiskDetail() {
               )}
             </div>
 
-            {canCreateVisits && <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-              <label className="w-full max-w-xs text-sm font-medium text-brand-ink">
+            {canCreateVisits && <form onSubmit={(event) => { event.preventDefault(); saveVisit(); }} className="mt-4 grid grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto]">
+              <label className="min-w-0 text-sm font-medium text-brand-ink">
                 Visit date
                 <input
                   type="date"
+                  required
                   value={visitDate}
                   onChange={(event) => {
                     setVisitDate(event.target.value);
                     setVisitRequestId(newVisitRequestId());
                   }}
-                  className="mt-1.5 w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue"
+                  className="mt-1.5 block min-h-11 w-full min-w-0 max-w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue"
                 />
               </label>
-              <label className="w-full max-w-xs text-sm font-medium text-brand-ink">
+              <label className="min-w-0 text-sm font-medium text-brand-ink">
                 Visit reason
                 <select
                   value={visitReason}
                   onChange={(event) => setVisitReason(event.target.value)}
-                  className="mt-1.5 w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue"
+                  className="mt-1.5 block min-h-11 w-full min-w-0 rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue"
                 >
                   {VISIT_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
                 </select>
               </label>
               <button
-                type="button"
-                onClick={saveVisit}
+                type="submit"
                 disabled={!visitDate || savingVisit}
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-2 sm:justify-self-start lg:col-span-1"
               >
                 <Plus className="h-4 w-4" /> {savingVisit ? "Saving…" : "Record Visit"}
               </button>
-            </div>}
+             </form>}
             {visitError && <p role="alert" className="mt-2 text-sm text-red-600">{visitError}</p>}
 
             <div className="mt-5">
               {visits.length ? (
                 <ol className="space-y-2">
                   {visits.map((visit, index) => (
-                    <li key={visit.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 ${index === 0 ? "border-brand-blue/30 bg-brand-blue/5" : "border-brand-border bg-white"}`}>
+                    <li key={visit.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 [overflow-wrap:anywhere] ${index === 0 ? "border-brand-blue/30 bg-brand-blue/5" : "border-brand-border bg-white"}`}>
                       <div className="flex min-w-0 items-center gap-3">
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue">
                           <CalendarDays className="h-4 w-4" />
                         </span>
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-brand-ink">{visitLabel(visit.visitNumber)}{index === 0 ? " · Most recent" : ""}</p>
                           <p className="text-sm text-brand-gray">{formatDate(visit.visitDate)}</p>
                           <p className="text-xs text-brand-gray">{visit.visitReason || "Follow-up"}</p>
@@ -347,13 +362,13 @@ export default function HouseholdRiskDetail() {
                           )}
                         </div>
                       </div>
-                      <div className="text-right text-xs text-brand-gray">
+                      <div className="min-w-0 text-xs text-brand-gray sm:text-right">
                         {visit.recordedByName && <p>Recorded by {visit.recordedByName}</p>}
                         {visit.status && <p className="mt-0.5">{visit.status}</p>}
                       </div>
                       {visit.profileSnapshot && (
                         <details className="w-full border-t border-brand-border pt-2">
-                          <summary className="cursor-pointer text-xs font-medium text-brand-blue">View profile saved at this visit</summary>
+                          <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium text-brand-blue">View profile saved at this visit</summary>
                           <div className="mt-2 grid gap-2 text-xs text-brand-gray sm:grid-cols-2">
                             <p>Head: {visit.profileSnapshot.headName || "—"}</p>
                             <p>Zone / Purok: {visit.profileSnapshot.purok || "—"}</p>
@@ -380,35 +395,51 @@ export default function HouseholdRiskDetail() {
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h3 className="text-sm font-semibold text-brand-ink">Risk &amp; Early Intervention</h3>
             <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${tone.chip}`}>
-              <span className={`h-2 w-2 rounded-full ${tone.dot}`} /> {RISK_LEVEL_LABELS[h.risk.level]}
+              <span className={`h-2 w-2 rounded-full ${tone.dot}`} /> {riskLabel}
             </span>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <InfoCell icon={Activity} label="Risk Level" value={RISK_LEVEL_LABELS[h.risk.level]} />
-            <InfoCell icon={FileText} label="Risk Indicators" value={h.risk.count} />
-            <InfoCell icon={Activity} label="Risk Score" value={h.risk.score} />
+            <InfoCell icon={Activity} label="Cluster Assignment" value={riskLabel} />
+            <InfoCell icon={FileText} label="Environmental Risk" value={h.environmentalRisk.level || "Unassessed"} />
+            <InfoCell icon={Activity} label="Environmental Score" value={h.environmentalRisk.score ?? "—"} />
             <InfoCell icon={Home} label="Last Household Visit" value={daysSince(visits[0]?.visitDate || h.lastHouseholdVisit) === null ? "—" : `${daysSince(visits[0]?.visitDate || h.lastHouseholdVisit)} days ago`} />
           </div>
 
-          {/* Basis + contributing indicators */}
+          {canEditWorkflow && (
+            <label className="mt-4 block max-w-sm text-sm font-medium text-brand-ink">
+              Community cluster assignment
+              <select
+                value={h.riskClusterLevel === RISK_LEVELS.UNASSESSED ? "" : h.riskClusterLevel}
+                disabled={savingClusterLevel}
+                onChange={(event) => { void saveClusterLevel(event.target.value); }}
+                className="mt-1.5 block min-h-11 w-full rounded-input border border-brand-border bg-white px-3.5 py-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue"
+              >
+                <option value="">Unassigned</option>
+                {[RISK_LEVELS.PRIORITY, RISK_LEVELS.INTERVENTION, RISK_LEVELS.MONITOR, RISK_LEVELS.STABLE].map((level) => (
+                  <option key={level} value={level}>{RISK_LEVEL_LABELS[level]}</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs font-normal text-brand-gray">This is an explicit community assignment and is separate from environmental risk.</span>
+            </label>
+          )}
+
+          {/* Keep the independent environmental assessment distinct from the cluster assignment. */}
           <div className="rounded-2xl border border-slate-200 dark:border-border bg-brand-bg/60 dark:bg-card-nested p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-1">Risk Classification Basis</p>
-            <p className="text-sm text-brand-ink">{basis.headline}</p>
-            {basis.contributing.length > 0 ? (
+            <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-1">Environmental Assessment</p>
+            {h.environmentalRisk.factors.length > 0 ? (
               <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
-                {basis.contributing.map((c) => (
-                  <li key={c} className="flex items-start gap-2 text-sm text-brand-gray">
-                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" /> {c}
+                {h.environmentalRisk.factors.map((factor) => (
+                  <li key={factor} className="flex items-start gap-2 text-sm text-brand-gray">
+                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" /> {factor}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="mt-1 text-sm text-brand-gray">No significant indicators detected.</p>
+              <p className="mt-1 text-sm text-brand-gray">No environmental factors are recorded.</p>
             )}
-            <p className="mt-3 text-sm text-brand-ink">{h.risk.recommendedAction}</p>
             <p className="mt-1 text-xs text-brand-gray">
-              Risk Score reflects configured household monitoring criteria — it is not a clinical diagnosis.
+              Environmental values are shown separately and do not determine the community cluster assignment.
             </p>
           </div>
 
@@ -423,7 +454,7 @@ export default function HouseholdRiskDetail() {
                   <div key={`${entry.month}-${entry.year}`} className="flex items-center justify-between gap-3 text-sm">
                     <span className="text-brand-gray">{entry.month} {entry.year}</span>
                     <span className="inline-flex items-center gap-1.5 text-brand-ink">
-                      <span className={`h-2 w-2 rounded-full ${levelTone[entry.level].dot}`} /> {RISK_LEVEL_LABELS[entry.level]}
+                      <span className={`h-2 w-2 rounded-full ${(levelTone[entry.level] || levelTone[RISK_LEVELS.UNASSESSED]).dot}`} /> {RISK_LEVEL_LABELS[entry.level] || RISK_LEVEL_LABELS[RISK_LEVELS.UNASSESSED]}
                       <span className="ml-1.5 text-xs text-brand-gray">({entry.count} indicators)</span>
                     </span>
                   </div>

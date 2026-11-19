@@ -3,17 +3,16 @@
 // All configuration comes from environment variables so no secrets, URLs, or
 // production data live in the test files. The guard below is the single safety
 // gate: specs only run when the operator has positively declared an ISOLATED,
-// writable test environment. In every other case (including this repo's default
-// .env, which points at the real production Supabase project) the specs skip
-// with an explicit BLOCKED reason rather than writing to production.
+// writable loopback test environment. In every other case the specs skip with
+// an explicit BLOCKED reason before any browser or network use.
 
 import { test } from '@playwright/test';
 import { isIsolatedEnv as evalIsolated, isolationBlockedReason } from './isolation.js';
 
 /**
  * True only when the operator has explicitly opted into an isolated, writable
- * test environment AND every destination (frontend + backend + optional
- * Supabase) is verified-local or explicitly allowlisted. Fail-closed; never
+ * test environment AND every destination (frontend + backend + Supabase)
+ * uses an exact loopback HTTP(S) URL. Fail-closed; never
  * infer "safe" from a .env file. See helpers/isolation.js for the full rules.
  */
 export function isIsolatedEnv() {

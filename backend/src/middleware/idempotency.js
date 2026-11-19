@@ -6,30 +6,47 @@ import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 /**
- * Idempotency middleware.
+ * @module middleware/idempotency
+ *
+ * Idempotency and offline-synchronization deduplication middleware for KALUSAGAP.
+ * Position in request pipeline:
+ *   `route -> authenticate -> authorize -> idempotency -> validate -> controller -> service -> repository/Supabase`
  *
  * When a request carries an `Idempotency-Key`, the backend records the completed
  * success response for `(user_id, key)` in `public.sync_operations`. A later
- * request with the SAME key and user replays that response instead of executing
- * the handler again — so an interrupted offline upload can be retried freely
- * without ever creating a duplicate record. This is the server half of the
- * offline synchronization guarantee.
+ * request with the SAME key, user, and request fingerprint replays that response
+ * instead of executing the handler again — so an interrupted offline upload from
+ * field BHWs or RHU staff can be retried freely without ever creating duplicate
+ * clinical, resident, or household records.
  *
- * Properties:
- *   - scoped per authenticated user; a key can never replay another user's
- *     response;
- *   - only 2xx responses are recorded; a failed request releases the claim so a
- *     retry re-executes and returns the same authoritative error;
- *   - a concurrent duplicate while the first is still processing gets 425 (Too
- *     Early) — a RETRYABLE signal, not a data conflict;
- *   - when Supabase is not configured (local JSON driver) the middleware is a
- *     pass-through.
+ * Security & reliability guarantees:
+ *   - Scoped per authenticated user (`user_id`); a key can never replay another
+ *     user's response.
+ *   - Bound to a SHA-256 `requestFingerprint` (method + path + canonical JSON body);
+ *     reusing a key with different parameters fails with 409 Conflict.
+ *   - Only 2xx responses are committed (before flushing the HTTP body); failed
+ *     requests release their `'processing'` claim so retries re-execute cleanly.
+ *   - Concurrent duplicates while the first request is in flight receive 425
+ *     (Too Early) — a retryable signal, with automatic stale-lock reclamation
+ *     after `STALE_PROCESSING_MS` (60 seconds).
+ *   - Supports `durable: true` mode for critical clinical writes (failing closed
+ *     with 400/401/503 when headers, auth, or the ledger are missing/unavailable)
+ *     and optional-ledger pass-through when Supabase is unconfigured.
  */
 
 const HEADER = 'idempotency-key';
 const MAX_KEY_LENGTH = 200;
+/** Maximum age (ms) of an in-flight `'processing'` claim before a retry may reclaim it. */
 const STALE_PROCESSING_MS = 60_000;
 
+/**
+ * Strictly extracts and validates the single `Idempotency-Key` header from `req`.
+ * Rejects duplicate headers, non-strings, control characters (`\r`, `\n`, `\0`),
+ * blank strings, and keys exceeding `MAX_KEY_LENGTH` with 400 `ApiError`.
+ *
+ * @param {Object} req - Express request object.
+ * @returns {string|null} Trimmed idempotency key, or `null` when header is absent.
+ */
 const readKey = (req) => {
   const headers = req?.headers || {};
   const hasLower = Object.prototype.hasOwnProperty.call(headers, HEADER);
@@ -53,7 +70,12 @@ const readKey = (req) => {
   return trimmed;
 };
 
-/** Pure header reader (exported for tests; returns null instead of throwing on invalid input). */
+/**
+ * Pure header reader (exported for tests; returns `null` instead of throwing on invalid input).
+ *
+ * @param {Object} [headers={}] - Raw HTTP headers map.
+ * @returns {string|null} Validated idempotency key or `null`.
+ */
 export const readIdempotencyKey = (headers = {}) => {
   try {
     return readKey({ headers });
@@ -62,7 +84,13 @@ export const readIdempotencyKey = (headers = {}) => {
   }
 };
 
-/** Deterministic JSON with sorted object keys, so equivalent payloads hash equal. */
+/**
+ * Serializes any JSON-compatible value deterministically with sorted object keys
+ * so semantically identical payloads hash to the same fingerprint.
+ *
+ * @param {*} value - Value to serialize.
+ * @returns {string} Canonical JSON string.
+ */
 export const stableStringify = (value) => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value ?? null);
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
@@ -71,13 +99,34 @@ export const stableStringify = (value) => {
 };
 
 /**
- * Fingerprint of the request an idempotency key was first used for. A duplicate
- * key with a different fingerprint is a client error, not a replay: rejecting it
- * prevents returning an unrelated (possibly sensitive) response body.
+ * Computes a SHA-256 fingerprint of the HTTP method, URL path, and canonical body
+ * that an idempotency key was first used for. A duplicate key presenting a
+ * different fingerprint is rejected (409) to prevent replaying unrelated or
+ * sensitive responses.
+ *
+ * @param {Object} [params={}] - Request attributes to hash.
+ * @param {string} [params.method='GET'] - HTTP method.
+ * @param {string} [params.path=''] - Request URL/path.
+ * @param {*} [params.body=null] - Parsed request body.
+ * @returns {string} Hex-encoded SHA-256 digest.
  */
 export const requestFingerprint = ({ method = 'GET', path = '', body = null } = {}) =>
   createHash('sha256').update(`${method}\n${path}\n${stableStringify(body)}`).digest('hex');
 
+/**
+ * Marks the claimed row in `public.sync_operations` as `'completed'` alongside
+ * the HTTP status code and JSON response body. When `claimId` is provided
+ * (`durable` mode), fences the update to that exact row ID and verifies one row
+ * was updated, throwing 503 if the ledger write cannot be confirmed.
+ *
+ * @param {Object} supabase - Supabase service-role client.
+ * @param {string} userId - Authenticated caller UUID.
+ * @param {string} key - Normalized idempotency key.
+ * @param {number} status - HTTP 2xx status code.
+ * @param {*} body - JSON payload to cache for future replays.
+ * @param {string|null} [claimId=null] - Optional row ID fence for durable claims.
+ * @returns {Promise<void>}
+ */
 const persistResponse = async (supabase, userId, key, status, body, claimId = null) => {
   let query = supabase
     .from('sync_operations')
@@ -96,6 +145,17 @@ const persistResponse = async (supabase, userId, key, status, body, claimId = nu
   }
 };
 
+/**
+ * Deletes an uncommitted `'processing'` claim from `public.sync_operations`
+ * when a downstream handler returns a non-2xx response or outcome persistence
+ * fails, allowing subsequent client retries to execute normally.
+ *
+ * @param {Object} supabase - Supabase service-role client.
+ * @param {string} userId - Authenticated caller UUID.
+ * @param {string} key - Normalized idempotency key.
+ * @param {string|null} [claimId=null] - Optional row ID fence for durable claims.
+ * @returns {Promise<void>}
+ */
 const releaseClaim = async (supabase, userId, key, claimId = null) => {
   let query = supabase
     .from('sync_operations')
@@ -107,6 +167,22 @@ const releaseClaim = async (supabase, userId, key, claimId = null) => {
   if (error) throw new ApiError(503, 'The operation claim could not be released. Retry the original operation.');
 };
 
+/**
+ * Factory creating an Express idempotency middleware backed by `public.sync_operations`.
+ * Attaches `req.isSyncRequest` (when an idempotency key or `X-Kalusagap-Sync` header
+ * is supplied) and `req.idempotencyKey` for downstream controller/service deduplication.
+ *
+ * @param {Object} [options={}] - Middleware configuration options.
+ * @param {Function} [options.validateReplay] - Optional async hook `(req, responseBody)`
+ *   invoked before replaying a cached `'completed'` response (e.g. scope/access re-check).
+ * @param {boolean} [options.durable=false] - When `true`, enforces fail-closed guarantees
+ *   (requires auth, requires `Idempotency-Key` on sync POSTs, fences claims by ID, and
+ *   throws 503 if `sync_operations` is unreachable).
+ * @param {Function} [options.getKey=readKey] - Custom key extractor `(req) => string|null`.
+ * @param {Function} [options.getClient=getServiceClient] - Supabase client factory.
+ * @param {Function} [options.isConfigured] - Predicate returning whether Supabase is configured.
+ * @returns {Function} Express middleware `(req, res, next)`.
+ */
 export const createIdempotencyMiddleware = ({ validateReplay, durable = false, getKey = readKey,
   getClient = getServiceClient, isConfigured = () => env.isSupabaseConfigured } = {}) =>
   asyncHandler(async (req, res, next) => {
@@ -280,6 +356,10 @@ export const createIdempotencyMiddleware = ({ validateReplay, durable = false, g
   return next();
   });
 
+/**
+ * Default non-durable idempotency middleware instance used by standard mutation
+ * routes that accept optional `Idempotency-Key` headers during offline sync.
+ */
 const idempotency = createIdempotencyMiddleware();
 
 export default idempotency;

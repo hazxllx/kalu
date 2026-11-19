@@ -2,15 +2,27 @@ import { CERT_PURPOSES, CERT_STATUSES } from '../services/medicalCertificates.se
 import { invalid, isUuid, text, valid } from './common.js';
 
 /**
- * Medical certificate request validation.
+ * @file Medical certificate request & clinical status validators (server-authoritative).
  *
- * The resident is referenced by id only — its scope, name and sex are resolved
- * from the database by the service, so a client cannot file a certificate
- * against a resident it is not allowed to see.
+ * Executed by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> authenticate -> authorize/authorizeStation -> validate -> controller -> service -> Supabase`).
+ *
+ * The target resident is referenced strictly by ID (`residentId` / `resident_id`);
+ * resident name, sex, age, and barangay/municipality scope are resolved from the
+ * database in `medicalCertificates.service.js` so callers cannot forge demographics
+ * or file certificates outside their authorized coverage area.
  */
 
 const LIMITS = { short: 120, notes: 2000 };
 
+/**
+ * Extracts and validates shared clinical/metadata fields for certificate creation and edits.
+ *
+ * @param {Object} input - Raw request body.
+ * @param {Object} errors - Mutable field-error accumulator.
+ * @param {Object} options - `{ requireClinical: boolean }` toggle for mandatory findings/officer checks.
+ * @returns {Object} Sanitized certificate field map.
+ */
 const certificateFields = (input, errors, { requireClinical }) => {
   const row = {};
 
@@ -49,6 +61,15 @@ const certificateFields = (input, errors, { requireClinical }) => {
   return row;
 };
 
+/**
+ * Validates `POST /medical-certificates` creation payloads.
+ * Requires `residentId` while keeping `findings` and `medicalOfficer` optional at the
+ * validator gate so Triage-station RHU Personnel can lodge an intake request that
+ * PHN/MHO clinicians subsequently complete.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const createCertificateValidator = (input = {}) => {
   const errors = {};
   const residentId = text(input?.residentId || input?.resident_id);
@@ -64,6 +85,12 @@ export const createCertificateValidator = (input = {}) => {
   return valid({ ...row, residentId });
 };
 
+/**
+ * Validates `PUT`/`PATCH /medical-certificates/:id` partial clinical content updates.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const updateCertificateValidator = (input = {}) => {
   const errors = {};
   const row = certificateFields(input, errors, { requireClinical: false });
@@ -71,6 +98,12 @@ export const updateCertificateValidator = (input = {}) => {
   return valid(row);
 };
 
+/**
+ * Validates `:id` route parameters for medical certificate endpoints as UUIDs.
+ *
+ * @param {Object} [params] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const certificateIdParamValidator = (params = {}) => {
   const id = text(params.id);
   if (!id) return invalid({ id: 'A certificate reference is required.' });
@@ -78,6 +111,13 @@ export const certificateIdParamValidator = (params = {}) => {
   return valid({ ...params, id });
 };
 
+/**
+ * Validates medical certificate lifecycle status transitions (`CERT_STATUSES`).
+ * Requires non-empty explanatory `notes` whenever `status === 'Rejected'`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { status, notes } }` or `{ error }`.
+ */
 export const changeStatusValidator = (input = {}) => {
   const errors = {};
   const status = text(input?.status);

@@ -1,6 +1,5 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
-import { assignedBarangay } from '../config/scope.js';
 import { SCHEMAS } from '../config/programFormSchemas.js';
 import {
   M1_INDICATORS,
@@ -8,7 +7,6 @@ import {
   isValidIndicatorCode,
   catalogTree,
   manualIndicators,
-  sourceMapping,
   FP_MEASURES,
   fpMethodToIndicatorCodes,
 } from '../config/m1Catalog.js';
@@ -297,10 +295,10 @@ const residentInScope = async (supabase, user, residentId) => {
     .maybeSingle();
   throwOnError(error, 'Could not load resident');
   if (!data) throw ApiError.notFound('Resident record not found.');
-  const scope = assignedBarangay(user);
-  const outOfBarangay = scope && text(data.barangay).toLowerCase() !== text(scope).toLowerCase();
-  const outOfMunicipality = user.municipalityId && data.municipality_id && user.municipalityId !== data.municipality_id;
-  if (outOfBarangay || outOfMunicipality) throw ApiError.notFound('Resident record not found.');
+  if ((user.municipalityId && data.municipality_id !== user.municipalityId) ||
+      (BARANGAY_ROLES.has(user.role) && data.barangay_id !== user.barangayId)) {
+    throw ApiError.notFound('Resident record not found.');
+  }
   return data;
 };
 
@@ -314,10 +312,10 @@ const householdInScope = async (supabase, user, householdId) => {
     .maybeSingle();
   throwOnError(error, 'Could not load household');
   if (!data) throw ApiError.notFound('Household record not found.');
-  const scope = assignedBarangay(user);
-  const outOfBarangay = scope && text(data.barangay).toLowerCase() !== text(scope).toLowerCase();
-  const outOfMunicipality = user.municipalityId && data.municipality_id && user.municipalityId !== data.municipality_id;
-  if (outOfBarangay || outOfMunicipality) throw ApiError.notFound('Household record not found.');
+  if ((user.municipalityId && data.municipality_id !== user.municipalityId) ||
+      (BARANGAY_ROLES.has(user.role) && data.barangay_id !== user.barangayId)) {
+    throw ApiError.notFound('Household record not found.');
+  }
   return data;
 };
 
@@ -353,6 +351,8 @@ const sanitizeRecord = (payload = {}) => {
 
 export const createRecord = async ({ user, payload = {}, supabase = getServiceClient() }) => {
   assertWriter(user);
+  if (user.role !== 'admin' && !user.municipalityId) throw ApiError.forbidden('Your account has no municipality assignment.');
+  if (BARANGAY_ROLES.has(user.role) && !user.barangayId) throw ApiError.forbidden('Your account has no barangay assignment.');
   const code = text(payload.indicator_code ?? payload.indicatorCode);
   if (!isValidIndicatorCode(code)) throw ApiError.unprocessable(`Unknown M1 indicator code: ${code}`);
   const indicator = getIndicator(code);

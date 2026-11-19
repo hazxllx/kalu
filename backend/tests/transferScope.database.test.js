@@ -30,7 +30,7 @@ const records = async (table) => (await query(`select coalesce(jsonb_agg(to_json
   order by to_jsonb(t)::text),'[]'::jsonb) as rows from public.${table} t`))[0].rows;
 const snapshot = async () => Object.fromEntries(await Promise.all(preservedTables.map(async (table) => [table, await records(table)])));
 const withoutScope = (row) => Object.fromEntries(Object.entries(row)
-  .filter(([key]) => !['barangay_id', 'barangay', 'municipality_id', 'updated_at'].includes(key)));
+  .filter(([key]) => !['barangay_id', 'barangay', 'municipality_id', 'updated_at', 'revision'].includes(key)));
 const asClient = async (role, actorId, run, claimRole = role) => {
   await query("select set_config('request.jwt.claim.sub',$1,false),set_config('request.jwt.claim.role',$2,false)", [actorId || '', claimRole]);
   await db.exec(`set role ${role}`);
@@ -283,9 +283,13 @@ test('normal same-municipality approval atomically moves canonical resident/prof
   for (const table of scopeTables) {
     assert.equal(after[table].length, saved[table].length, `${table}: no duplicates`);
     for (const row of after[table].filter((record) => record.resident_id === main.residentId)) {
-      assert.deepEqual(withoutScope(row), withoutScope(saved[table].find((original) => original.id === row.id)), `${table}: retained original fields`);
+      const original = saved[table].find((o) => o.id === row.id);
+      assert.deepEqual(withoutScope(row), withoutScope(original), `${table}: retained original fields`);
       assert.equal(row.barangay_id, ids.target, table);
       assert.equal(row.municipality_id, ids.municipality, table);
+      if (original.revision != null) {
+        assert.equal(row.revision, original.revision + 1, `${table}: revision incremented by exactly 1 on scope move`);
+      }
     }
   }
   for (const table of ['referrals', 'health_referral_legacy_map', 'health_referral_history', 'households',
@@ -354,7 +358,7 @@ test('source loses moved resident/profile/visit/referral access, target gains sc
     assert.equal((await query('select id from public.health_referrals where id=$1', [invalid.health_referral_id])).length, 1);
   });
   await asClient('authenticated', people.source, async () => {
-    assert.equal((await query("update public.visits set findings='Unauthorized change' where resident_id=$1 returning id", [main.residentId])).length, 0);
+    await assert.rejects(() => query("update public.visits set findings='Unauthorized change' where resident_id=$1 returning id", [main.residentId]), (error) => error.code === '42501');
     assert.equal((await query('select id from public.household_members where resident_id=$1', [main.residentId])).length, 0);
   });
 });
@@ -429,7 +433,7 @@ test('retained duplicate account links and a staff-owned patient never trigger a
   await rejectWithoutWrites(() => approve(requestId, people.admin), '23514');
   for (const residentId of ['TRANSFER-LEGACY-OWNER-A', 'TRANSFER-LEGACY-OWNER-B']) {
     const current = (await query('select to_jsonb(r) as row from public.residents r where id=$1', [residentId]))[0].row;
-    assert.deepEqual(current, migrationBefore.residents.find((row) => row.id === residentId));
+    assert.deepEqual(current, { age: null, ...migrationBefore.residents.find((row) => row.id === residentId) });
   }
   const staffOwned = await scenario({ ownerRole: 'phn' });
   await rejectWithoutWrites(() => approve(staffOwned.requestId), '23514');

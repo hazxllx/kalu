@@ -1,6 +1,12 @@
 /**
  * KALUSAGAP canonical application roles (single source of truth for the API).
  *
+ * Architectural role: enforced across the `route -> authenticate -> authorize ->
+ * controller -> service -> repository/Supabase` pipeline. `authenticate`
+ * resolves the caller's profile from `public.profiles` (mapping unverified
+ * residents to `resident-limited`), and `authorize(FEATURE_ROLES.xxx)` checks
+ * membership before any controller or service logic executes.
+ *
  * These roles are stored on `profiles.role`. Supabase Auth metadata may carry
  * a copy, but backend authorization resolves the profile from the database.
  *
@@ -24,6 +30,7 @@ export const ROLES = Object.freeze({
   RESIDENT_LIMITED: 'resident-limited',
 });
 
+/** Flat list of every recognized KALUSAGAP role identifier, including `resident-limited`. */
 export const ALL_ROLES = Object.values(ROLES);
 
 /**
@@ -167,6 +174,12 @@ export const FEATURE_ROLES = Object.freeze({
   residentSelf: [ROLES.RESIDENT, ROLES.RESIDENT_LIMITED],
 });
 
+/**
+ * Check whether `role` is one of the canonical KALUSAGAP role strings.
+ *
+ * @param {string} role
+ * @returns {boolean}
+ */
 export const isValidRole = (role) => ALL_ROLES.includes(role);
 
 export default { ROLES, ALL_ROLES, FEATURE_ROLES, isValidRole };

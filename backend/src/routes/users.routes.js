@@ -16,32 +16,55 @@ import {
 import * as controller from '../controllers/users.controller.js';
 
 /**
- * Account / system administration — Admin User Management.
+ * System Administration — User & Personnel Account Management routes.
  *
- * Every route authenticates the Supabase token and then requires the `admin`
- * role (`FEATURE_ROLES.users`). The role is resolved server-side from the
- * `profiles` table by `authenticate`; it is never taken from the client. A PHN,
- * Health Supervisor, Resident, etc. receives 403 on every route here, and an
- * unauthenticated caller receives 401.
+ * Role in KALUSAGAP:
+ * Provides full administrative lifecycle governance over Supabase Auth identities
+ * and `public.profiles` rows (provisioning accounts, assigning roles/municipalities/
+ * barangays/RHU stations, approving/suspending/reactivating personnel, resetting
+ * credentials, inspecting audit history, and permanent deletion).
  *
- *   GET  /api/users        list accounts (search: ?q, ?role, ?status; ?limit,?offset)
- *   GET  /api/users/options assignment and role options for the admin editor
- *   GET  /api/users/summary real account totals for the summary cards
- *   POST /api/users        create a managed Supabase Auth account without email
- *   GET  /api/users/:id    read one account
- *   PUT  /api/users/:id    update profile, role and scope / status
- *   POST /api/users/:id/access-reset send a Supabase password recovery email
- *   POST /api/users/:id/lifecycle approve/reject/suspend/reactivate/invite/retry
- *   GET  /api/users/:id/history account audits and safe notification history
- *   DELETE /api/users/:id  permanently delete the Auth identity + profile
+ * Architectural pipeline:
+ *   route -> authenticate -> authorize(FEATURE_ROLES.users) -> [validate]
+ *         -> authorize(dynamicPermissions) -> users.controller
+ *         -> users.service -> Supabase Auth (service role) & DB
+ *
+ * Security & RBAC:
+ * Every route resolves the caller's role server-side from `public.profiles` via
+ * `authenticate` and requires `admin` (`FEATURE_ROLES.users`). Non-admin roles
+ * receive HTTP 403 and unauthenticated callers receive HTTP 401. Write endpoints
+ * further evaluate payload-sensitive permission sets (`accounts.create`,
+ * `accounts.edit`, `accounts.roles.manage`, `accounts.personnel.approve`,
+ * `accounts.deactivate`, `accounts.access.reset`, `accounts.delete`).
+ *
+ * Endpoints:
+ *   GET    /api/users                   List accounts (`?q`, `?role`, `?status`, `?limit`, `?offset`)
+ *   GET    /api/users/options           Role, geography, facility, and RHU station options
+ *   GET    /api/users/summary           Aggregate account totals for admin summary cards
+ *   POST   /api/users                   Provision a managed Supabase Auth + profile account
+ *   GET    /api/users/:id               Read single account details
+ *   PUT    /api/users/:id               Update profile, role, geography/station scope, or status
+ *   POST   /api/users/:id/access-reset  Trigger password recovery / credential reset
+ *   POST   /api/users/:id/lifecycle     Approve, reject, suspend, reactivate, or invite/retry
+ *   GET    /api/users/:id/history       Account audit log + sanitized notification history
+ *   DELETE /api/users/:id               Permanently delete Auth identity + profile
  */
 const router = Router();
 
 router.use(authenticate, authorize(FEATURE_ROLES.users));
 
+// Read & reference endpoints (`accounts.view`):
+// - GET /options : Assignment dropdown metadata (roles, municipalities, barangays, facilities, stations).
+// - GET /summary : Filtered/global account status counters (`userQueryValidator`).
+// - GET /        : Paginated account directory (`userQueryValidator`).
 router.get('/options', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), asyncHandler(controller.getAccountOptions));
 router.get('/summary', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), validate(userQueryValidator, 'query'), asyncHandler(controller.getAccountSummary));
 router.get('/', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), validate(userQueryValidator, 'query'), asyncHandler(controller.listUsers));
+
+// POST / : Creates a new managed user (`createUserValidator` body).
+// Dynamically requires `accounts.create` + `accounts.roles.manage`, plus
+// `accounts.personnel.approve` if pre-approving or setting a temporary password,
+// and `accounts.deactivate` if activating the account immediately.
 router.post(
   '/',
   validate(createUserValidator),
@@ -57,8 +80,16 @@ router.post(
   }),
   asyncHandler(controller.createUser),
 );
+
 const idParam = validate(userIdParamValidator, 'params');
+
+// GET /:id/history : Returns audit trail entries and safe notification history for account `:id`.
 router.get('/:id/history', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), idParam, asyncHandler(controller.getUserHistory));
+
+// POST /:id/lifecycle : Transitions account `:id` lifecycle (`personnelLifecycleValidator` body).
+// Maps `action` to granular permissions: `approve`/`reject` -> `accounts.personnel.approve`
+// (+ `accounts.deactivate` when `activate` is true), `suspend`/`reactivate` -> `accounts.deactivate`,
+// and invitation/retry actions -> `accounts.access.reset`.
 router.post(
   '/:id/lifecycle',
   idParam,
@@ -75,7 +106,14 @@ router.post(
   }),
   asyncHandler(controller.transitionUserLifecycle),
 );
+
+// GET /:id : Fetches single user profile, role, assignment scope, and lifecycle status for `:id`.
 router.get('/:id', authorize(FEATURE_ROLES.users, { permission: 'accounts.view' }), idParam, asyncHandler(controller.getUser));
+
+// PUT /:id : Updates account `:id` (`updateUserValidator` body).
+// Dynamically requires `accounts.edit` for profile/scope fields, `accounts.roles.manage`
+// when changing role or geography/facility/station assignments, and `accounts.deactivate`
+// when mutating `status`.
 router.put(
   '/:id',
   idParam,
@@ -98,6 +136,8 @@ router.put(
   }),
   asyncHandler(controller.updateUser),
 );
+
+// POST /:id/access-reset : Sends a password recovery email or resets credentials (`accessResetValidator` body).
 router.post(
   '/:id/access-reset',
   authorize(FEATURE_ROLES.users, { permission: 'accounts.access.reset' }),
@@ -105,6 +145,8 @@ router.post(
   validate(accessResetValidator),
   asyncHandler(controller.resetUserAccess),
 );
+
+// DELETE /:id : Permanently deletes Supabase Auth user and `profiles` row `:id` (`accounts.delete`).
 router.delete(
   '/:id',
   authorize(FEATURE_ROLES.users, { permission: 'accounts.delete' }),

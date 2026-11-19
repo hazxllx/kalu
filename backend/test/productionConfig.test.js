@@ -12,7 +12,17 @@ const loadEnv = (variables) => spawnSync(
     '-e',
     `import(${JSON.stringify(pathToFileURL(envModule).href)}).then(({ default: env }) => console.log(JSON.stringify(env.clientUrls)))`,
   ],
-  { env: { ...process.env, ...variables }, encoding: 'utf8' },
+  {
+    env: {
+      ...process.env,
+      SUPABASE_MODE: 'local',
+      SMTP_HOST: '127.0.0.1',
+      SMTP_USER: '',
+      SMTP_PASSWORD: '',
+      ...variables,
+    },
+    encoding: 'utf8',
+  },
 );
 
 test('production fails fast when required configuration is missing', () => {
@@ -38,6 +48,31 @@ test('development allows both localhost and 127.0.0.1 frontend origins', () => {
     SUPABASE_URL: '',
     SUPABASE_ANON_KEY: '',
     SUPABASE_SERVICE_ROLE_KEY: '',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ]);
+});
+
+test('hosted development allows only matching Supabase project credentials with explicit mode', () => {
+  const projectRef = 'abcdefghijklmnopqrst';
+  const key = (payload) => `header.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`;
+  const result = loadEnv({
+    NODE_ENV: 'development',
+    SUPABASE_MODE: 'hosted-development',
+    CLIENT_URL: 'http://localhost:5173',
+    CORS_ORIGIN: '',
+    SUPABASE_URL: `https://${projectRef}.supabase.co`,
+    SUPABASE_ANON_KEY: key({ iss: 'supabase', role: 'anon', ref: projectRef }),
+    SUPABASE_SERVICE_ROLE_KEY: key({ iss: 'supabase', role: 'service_role', ref: projectRef }),
+    DATABASE_URL: '',
+    SMTP_HOST: '127.0.0.1',
+    SMTP_USER: '',
+    SMTP_PASSWORD: '',
+    ANTHROPIC_API_KEY: '',
+    OPENAI_API_KEY: '',
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout.trim()), [

@@ -1,11 +1,24 @@
 import { hasControlChars, isEmail, text, invalid, valid } from './common.js';
 
 /**
- * Sign-in validation.
+ * @file Authentication & credential setup validators (server-authoritative).
  *
- * Only shape is validated here — never whether the email exists. The service
- * returns the same generic "Invalid email or password" for a wrong password and
- * an unknown account, so this endpoint cannot be used to enumerate users.
+ * Executed by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> rateLimit/authenticate -> validate -> controller -> service -> Supabase Auth`)
+ * to sanitize login, password-reset, and first-time personnel password setup payloads.
+ */
+
+/**
+ * Validates credential sign-in requests (`POST /auth/signin` or login endpoints).
+ *
+ * Only structural shape and length bounds (`email <= 254`, `password <= 200`) are
+ * checked here — never whether the email exists or matches password complexity rules.
+ * Note that `password` is coerced without trimming so significant leading/trailing
+ * characters are preserved, and downstream auth services return a uniform generic
+ * error for unknown accounts and wrong passwords to prevent account enumeration.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { email, password } }` or `{ error }`.
  */
 export const signInValidator = (input = {}) => {
   const errors = {};
@@ -23,6 +36,14 @@ export const signInValidator = (input = {}) => {
   return valid({ email, password });
 };
 
+/**
+ * Validates password-reset initiation payloads.
+ * Normalizes `email` to lowercase and strictly rejects any extra body keys
+ * (`errors.request`) to prevent mass-assignment or redirect/token parameter injection.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { email } }` or `{ error }`.
+ */
 export const passwordResetRequestValidator = (input = {}) => {
   const errors = {};
   const email = text(input.email).trim().toLowerCase();
@@ -32,6 +53,15 @@ export const passwordResetRequestValidator = (input = {}) => {
   return Object.keys(errors).length ? invalid(errors) : valid({ email });
 };
 
+/**
+ * Validates first-time or forced password setup payloads for health personnel accounts.
+ * Enforces strict object shape (only the `password` key is permitted) and a hardened
+ * personnel password policy: 8 to 200 characters, no whitespace or ASCII control
+ * characters, and at least one uppercase letter, lowercase letter, digit, and special character.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { password } }` or `{ error }`.
+ */
 export const personnelPasswordSetupValidator = (input = {}) => {
   const errors = {};
   if (!input || typeof input !== 'object' || Array.isArray(input)) return invalid({ password: 'A password is required.' });

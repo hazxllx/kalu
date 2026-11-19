@@ -32,7 +32,7 @@ const SourceTag = ({ source }) => {
   }
   return (
     <span className="rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-semibold text-brand-gray">
-      Local
+      {source === "yakap" ? "YAKAP" : "Local"}
     </span>
   );
 };
@@ -43,42 +43,46 @@ const SourceTag = ({ source }) => {
  * - Type to search the admin-managed catalog by generic OR brand name (e.g.
  *   "Biogesic" resolves to its generic, paracetamol), strength or form.
  * - Select a result to add it as a removable row, or add a custom (manually
- *   typed) medicine when it is not in the catalog. Selecting a catalog entry
- *   pre-fills the verified standard dosage instructions, which the prescriber
- *   can adjust per patient.
+ *   typed) medicine when it is not in the catalog. Catalog information never
+ *   pre-fills a patient-specific prescription.
  * - Each added medicine records optional dose/route/frequency/duration/quantity
  *   and instructions. Multiple medicines are supported.
  *
  * Custom entries are kept verbatim and never silently replaced by a catalog
  * entry. The value is an array of medication objects owned by the parent form.
  */
-export default function MedicineSelector({ value = [], onChange }) {
+export default function MedicineSelector({ value = [], onChange, errors = {} }) {
   const medications = Array.isArray(value) ? value : [];
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const debounceRef = useRef(null);
 
   // Debounced catalog search (matches generic name, brand name, strength, form).
   useEffect(() => {
+    let active = true;
     const term = query.trim();
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!term) {
       setResults([]);
       setLoading(false);
+      setSearchError("");
       return undefined;
     }
+    setResults([]);
+    setSearchError("");
     setLoading(true);
     debounceRef.current = setTimeout(() => {
       medicinesApi
         .list({ q: term })
-        .then((res) => setResults(res?.medicines || []))
-        .catch(() => setResults([]))
-        .finally(() => setLoading(false));
+        .then((res) => { if (active) setResults(res?.medicines || []); })
+        .catch(() => { if (active) setSearchError("The medication catalog could not be loaded. Retry the search before selecting a catalog medicine."); })
+        .finally(() => { if (active) setLoading(false); });
     }, 250);
-    return () => debounceRef.current && clearTimeout(debounceRef.current);
+    return () => { active = false; clearTimeout(debounceRef.current); };
   }, [query]);
 
   useEffect(() => {
@@ -105,8 +109,6 @@ export default function MedicineSelector({ value = [], onChange }) {
         brandName: m.brandName || "",
         strength: m.strength || "",
         dosageForm: m.dosageForm || "",
-        // Pre-fill the verified standard dosage; the prescriber adjusts per patient.
-        instructions: m.dosageInstructions || "",
         custom: false,
         source: m.source || "local",
       })
@@ -166,6 +168,13 @@ export default function MedicineSelector({ value = [], onChange }) {
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
+
+              {!([m.dose, m.route, m.frequency, m.duration, m.quantity, m.instructions]
+                .some((field) => String(field ?? "").trim())) && (
+                <p className="mt-2 text-xs font-medium text-brand-amber" role="status">
+                  Prescription not yet provided
+                </p>
+              )}
 
               <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
                 {m.custom ? (
@@ -240,6 +249,9 @@ export default function MedicineSelector({ value = [], onChange }) {
                   className={`${inputCls} col-span-2 sm:col-span-3`}
                 />
               </div>
+              {Object.entries(errors).filter(([field]) => field.startsWith(`medications[${i}]`)).map(([field, message]) => (
+                <p key={field} className="mt-1 text-xs text-brand-danger" role="alert">{field.split(".").pop()}: {String(message)}</p>
+              ))}
             </li>
           ))}
         </ul>
@@ -289,11 +301,12 @@ export default function MedicineSelector({ value = [], onChange }) {
                     </button>
                   </li>
                 ))}
-              {!loading && visibleResults.length === 0 && (
+              {!loading && !searchError && visibleResults.length === 0 && (
                 <li className="px-3 py-2 text-sm text-brand-gray">
                   No matching medicine in the catalog.
                 </li>
               )}
+              {searchError && <li className="px-3 py-2 text-sm text-brand-danger" role="alert">{searchError}</li>}
               {!loading && !exactMatch && (
                 <li className="border-t border-brand-border">
                   <button
@@ -310,6 +323,7 @@ export default function MedicineSelector({ value = [], onChange }) {
           </div>
         )}
       </div>
+      {errors.medications && <p className="mt-1 text-xs text-brand-danger" role="alert">{errors.medications}</p>}
       <p className="mt-1.5 text-xs text-brand-gray">
         Search the catalog or add a custom medicine. Add as many as needed; each can be removed.
       </p>

@@ -1,15 +1,28 @@
 import ApiError from '../utils/apiError.js';
 
 /**
- * Lightweight validation middleware factory.
+ * @module middleware/validate
  *
- * Accepts a validator function that receives the chosen request part (body by
- * default) and returns either `{ value }` on success or `{ error }` on failure.
- * This keeps controllers free of input-shape checks and gives a consistent 400
- * response. It is intentionally schema-library-agnostic: a validator can be a
- * plain function now and a zod/joi schema wrapper later.
+ * Request-input validation and sanitization middleware factory for KALUSAGAP.
+ * Position in request pipeline:
+ *   `route -> [authenticate -> authorize] -> validate(validator, part) -> controller -> service -> repository/Supabase`
+ *
+ * Accepts a validator function receiving `(req[part], req)` and returning either
+ * `{ value }` on success (replacing `req[part]` with normalized/coerced input)
+ * or `{ error }` on failure (forwarded as a 400 `ApiError.badRequest` whose
+ * field errors are formatted under `details` / `errors` by `errorHandler`).
+ * Intentionally schema-library-agnostic so plain JS validators and schema
+ * wrappers share the same contract:
  *
  *   router.post('/', validate(createResidentValidator), controller.create);
+ */
+
+/**
+ * Creates an Express middleware that validates and normalizes `req[part]`.
+ *
+ * @param {Function} validator - Validator `(input, req) => { value?, error? }`.
+ * @param {string} [part='body'] - Request property to validate (`'body'`, `'query'`, `'params'`).
+ * @returns {Function} Express middleware `(req, res, next)`.
  */
 const validate = (validator, part = 'body') => (req, res, next) => {
   try {

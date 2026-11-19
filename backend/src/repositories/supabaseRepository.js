@@ -1,14 +1,21 @@
 /**
- * Supabase (PostgreSQL) repository driver.
+ * Supabase (PostgreSQL) repository driver for KALUSAGAP
+ * (`route -> authenticate -> authorize -> controller -> service -> supabaseRepository`).
  *
- * Implements the same repository contract as the file driver. The API uses the
- * service-role client after `authenticate` + `authorize` have run, so
- * application-level RBAC is enforced in the service layer; the SQL migration
- * additionally enables RLS policies for defense in depth (see
- * supabase/migrations).
- *
- * Human-readable identifiers (RES-/SUB-/REF-) are minted from the
- * `record_counters` table so records look identical across drivers.
+ * Implements the canonical async repository contract backed by PostgreSQL tables,
+ * PostgREST embeds, and transactional PL/pgSQL RPCs:
+ *  - Service-role vs RLS: Queries execute through `getServiceClient()` AFTER
+ *    `authenticate`, `authorize`, `authorizeStation`, and `barangayScope` plus
+ *    service-layer RBAC/scope guards have verified the caller. PostgreSQL RLS
+ *    policies (`supabase/migrations`) remain enabled for defense in depth, while
+ *    `createAuthClient()` (anon key) is used strictly for public Auth flows such
+ *    as password-recovery email dispatch.
+ *  - Identifiers: Human-readable IDs (`RES-`, `RHU-`, `SUB-`, `REF-`, `HH-`) are
+ *    allocated atomically via `public.increment_counter` on `record_counters`.
+ *  - Security & schema resilience: Explicit column allow-lists (`TRANSFER_SAFE_COLUMNS`,
+ *    `PROFILE_ADMIN_COLUMNS`) prevent leaking OTP hashes or credential metadata,
+ *    and additive-column/RPC fallbacks keep core workflows running if optional
+ *    migrations have not yet been applied.
  */
 import { createAuthClient, getServiceClient } from '../config/supabase.js';
 import { randomBytes } from 'node:crypto';
@@ -16,6 +23,7 @@ import env from '../config/env.js';
 import { isApprovedBarangayName } from '../config/barangays.js';
 import ApiError from '../utils/apiError.js';
 
+/** Core PostgreSQL table names referenced across repository operations. */
 const TABLES = Object.freeze({
   residents: 'residents',
   visits: 'visits',
@@ -29,11 +37,13 @@ const TABLES = Object.freeze({
   documents: 'documents',
 });
 
+/** Parses a Purok/Zone label (e.g., `'Purok 3'`, `'Zone 2'`, `'4'`) into numeric zone 1-8, or `null`. */
 const zoneNumberFromPurok = (value) => {
   const match = String(value || '').trim().match(/^(?:(?:purok|zone)\s*)*([1-8])$/i);
   return match ? Number(match[1]) : null;
 };
 
+/** Extracts a numeric Purok/Zone (1-8) mentioned inside a free-text street/barangay address, or `null`. */
 const zoneNumberFromAddress = (value) => {
   const match = String(value || '').match(/\b(?:purok|zone)\s+(?:(?:purok|zone)\s+)*([1-8])\b/i);
   return match ? Number(match[1]) : null;
@@ -200,8 +210,14 @@ const DOCUMENT_TO_DB = {
 
 const DB_TO_DOCUMENT = Object.fromEntries(Object.entries(DOCUMENT_TO_DB).map(([k, v]) => [v, k]));
 
+/** Converts a PostgreSQL `documents` row into the camelCase domain document object. */
 const documentFromRow = (row) => (row ? mapBack(row, DB_TO_DOCUMENT) : null);
 
+/**
+ * Loads all `household_members` rows for `householdId` (oldest first) and enriches
+ * each member with read-only `accountStatus` (`'active'`, `'disabled'`, `'pending'`,
+ * or `'none'`) resolved via batch lookups on `residents.auth_user_id` -> `profiles.status`.
+ */
 async function listHouseholdMembersFor(supabase, householdId) {
   const { data, error } = await supabase
     .from(TABLES.householdMembers)
@@ -271,6 +287,7 @@ const RESIDENT_TO_DB = {
   middleName: 'middle_name',
   suffix: 'suffix',
   birthDate: 'birth_date',
+  age: 'age',
   birthPlace: 'birth_place',
   sex: 'sex',
   civilStatus: 'civil_status',
@@ -346,6 +363,8 @@ const VISIT_TO_DB = {
   healthServiceName: 'health_service_name',
   clientOperationKey: 'client_operation_key',
   clientOperationPayloadHash: 'client_operation_payload_hash',
+  clientSubmissionId: 'client_submission_id',
+  clientSubmissionFingerprint: 'client_submission_fingerprint',
   consultationDetails: 'consultation_details',
   consultationEffectsCompletedAt: 'consultation_effects_completed_at',
   recordedAt: 'recorded_at',
@@ -356,6 +375,7 @@ const VISIT_TO_DB = {
   reviewedAt: 'reviewed_at',
   referredAt: 'referred_at',
   completedAt: 'completed_at',
+  triageSnapshot: 'triage_snapshot',
 };
 
 const DB_TO_VISIT = Object.fromEntries(Object.entries(VISIT_TO_DB).map(([k, v]) => [v, k]));
@@ -387,6 +407,7 @@ const REFERRAL_TO_DB = {
 
 const DB_TO_REFERRAL = Object.fromEntries(Object.entries(REFERRAL_TO_DB).map(([k, v]) => [v, k]));
 
+/** Projects defined camelCase domain properties onto snake_case DB column names using `mapping`. */
 const mapKeys = (obj, mapping) => {
   const out = {};
   for (const [from, to] of Object.entries(mapping)) {
@@ -395,6 +416,7 @@ const mapKeys = (obj, mapping) => {
   return out;
 };
 
+/** Projects defined snake_case DB row columns back onto camelCase domain keys using `mapping`. */
 const mapBack = (row, mapping) => {
   const out = {};
   for (const [dbKey, domainKey] of Object.entries(mapping)) {
@@ -403,7 +425,9 @@ const mapBack = (row, mapping) => {
   return out;
 };
 
+/** Maps a domain resident object to `residents` table columns. */
 const residentToRow = (resident) => mapKeys(resident, RESIDENT_TO_DB);
+/** Maps a `residents` row to the domain shape, stripping write-only `clientOperationKey`. */
 const residentFromRow = (row) => {
   if (!row) return null;
   const resident = mapBack(row, DB_TO_RESIDENT);
@@ -538,6 +562,7 @@ const vitalsFromRow = (row) => {
   return vitals;
 };
 
+/** Flattens a domain visit (including nested `vitals` and `phn` fields) into `visits` table columns. */
 const visitToRow = (visit) => {
   const row = mapKeys(visit, VISIT_TO_DB);
   if (visit.vitals) {
@@ -561,9 +586,11 @@ const visitToRow = (visit) => {
   return row;
 };
 
+/** Reconstructs a domain visit (with nested `vitals` and `phn` objects when populated) from a `visits` row. */
 const visitFromRow = (row) => {
   if (!row) return null;
   const out = mapBack(row, DB_TO_VISIT);
+  if (row.triage_snapshot !== null && row.triage_snapshot !== undefined) out.triageSnapshot = row.triage_snapshot;
   const vitals = vitalsFromRow(row);
   if (Object.keys(vitals).length) out.vitals = vitals;
   if (row.phn_assessment !== null || row.phn_notes !== null || row.phn_personnel !== null) {
@@ -575,6 +602,7 @@ const visitFromRow = (row) => {
   return out;
 };
 
+/** Maps a domain referral (including JSONB `patientSnapshot` and `visitSnapshot`) to `referrals` columns. */
 const referralToRow = (referral) => {
   const row = mapKeys(referral, REFERRAL_TO_DB);
   if (referral.patientSnapshot) row.patient_snapshot = referral.patientSnapshot;
@@ -582,6 +610,7 @@ const referralToRow = (referral) => {
   return row;
 };
 
+/** Maps a `referrals` DB row back into the camelCase domain referral shape. */
 const referralFromRow = (row) => {
   if (!row) return null;
   const out = mapBack(row, DB_TO_REFERRAL);
@@ -641,6 +670,7 @@ const SELECT_RESIDENT = Object.keys(DB_TO_RESIDENT)
 const TRANSFER_SAFE_COLUMNS =
   'id, auth_user_id, status, resident_id, target_resident_id, from_barangay_id, to_barangay_id, reason, resubmission_instructions, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at';
 
+/** Throws an `Error` preserving the raw PostgREST error object on `err.details` when `error` is truthy. */
 const throwOnError = (error, fallback) => {
   if (error) {
     const err = new Error(error.message || fallback);
@@ -688,35 +718,6 @@ const isMissingRpc = (error) => {
     code === 'PGRST202' ||
     /could not find the function|function .* does not exist|schema cache/i.test(message)
   );
-};
-
-/**
- * True when a visit write failed only because optional consultation columns
- * are not present yet — i.e. the medicine-catalog / BP-threshold migration
- * (20261011120000) or health-service link migration (20261026000000) has not
- * been applied. Lets the consultation save keep working against a database
- * that has not received those migrations.
- */
-const CONSULTATION_EXTRA_COLUMNS = [
-  'medications',
-  'bp_classification',
-  'referral_required',
-  'health_service_id',
-  'health_service_name',
-];
-const isMissingConsultationColumn = (error) => {
-  const code = error?.code || error?.details?.code || '';
-  const message = error?.message || error?.details?.message || '';
-  return (
-    code === 'PGRST204' ||
-    code === '42703' ||
-    (/medications|bp_classification|referral_required|health_service_id|health_service_name/i.test(message) && /column/i.test(message))
-  );
-};
-const stripConsultationExtras = (row) => {
-  const out = { ...row };
-  for (const column of CONSULTATION_EXTRA_COLUMNS) delete out[column];
-  return out;
 };
 
 // ----- resident free-text search -------------------------------------------
@@ -778,6 +779,11 @@ const PERSONNEL_NOTIFICATION_COLUMNS =
 const PROFILE_ADMIN_BASE_SELECT = `${PROFILE_ADMIN_COLUMNS},personnel_account:personnel_accounts!account_id(${PERSONNEL_ACCOUNT_COLUMNS}),notifications:personnel_notification_outbox!account_id(${PERSONNEL_NOTIFICATION_COLUMNS})`;
 const PROFILE_ADMIN_SELECT = `${PROFILE_ADMIN_BASE_SELECT},barangay:barangays(name),municipality:municipalities(name),facility:facilities(name)`;
 
+/**
+ * Maps PostgreSQL SQLSTATE error codes from personnel/account RPCs (`42501`,
+ * `P0002`, `23505`, `40001`/`P0001`, `23514`, `22023`/`22P02`) to curated
+ * `ApiError` responses without leaking raw Auth/SQL details or credentials.
+ */
 const throwAccountError = (error, fallback) => {
   if (!error) return;
   // Provider details can contain credential payloads. Expose only our messages,
@@ -796,6 +802,11 @@ const throwAccountError = (error, fallback) => {
   throw new ApiError(503, fallback);
 };
 
+/**
+ * Applies Admin User Management filters (role, status, scope, search `q`, and
+ * composite personnel `lifecycleState`: `pending`, `rejected`, `suspended`,
+ * `awaiting_setup`, `active`, `approved_inactive`) onto a `profiles` query.
+ */
 const applyAccountFilters = (query, {
   q, role, status, municipalityId, barangayId, personnelOnly, approvalStatus, lifecycleState,
 } = {}) => {
@@ -819,6 +830,7 @@ const applyAccountFilters = (query, {
   return lifecycleState === 'active' ? query.eq('status', 'active') : query.neq('status', 'active');
 };
 
+/** Maps a `personnel_notification_outbox` row to a safe Admin UI delivery summary. */
 const notificationToAdminSummary = (row) => row ? {
   id: row.id,
   accountId: row.account_id,
@@ -845,6 +857,7 @@ const ACCOUNT_AUDIT_FIELDS = new Set([
   'account_id', 'activation_requested_by', 'created_by', 'created_at', 'updated_by', 'updated_at',
   'attempts', 'performed_by', 'requested_by',
 ]);
+/** Recursively filters `health_audit_logs.metadata` through `ACCOUNT_AUDIT_FIELDS` so secrets never leak. */
 const safeAccountAuditMetadata = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const result = {};
@@ -913,6 +926,10 @@ export const profileToAdminUser = (row) => {
   };
 };
 
+/**
+ * Atomically increments a named sequence in `record_counters` via the
+ * `public.increment_counter` RPC, retrying once on transient network failures.
+ */
 const counterRpc = async (name) => {
   const supabase = getServiceClient();
   // One retry on transport failures only. supabase-js surfaces those either as
@@ -940,21 +957,25 @@ const counterRpc = async (name) => {
 export const supabaseRepository = {
   driver: 'supabase',
 
+  /** Allocates the next sequential `{ id: 'RES-XXXXXX', healthRecordNo: 'RHU-XXXXXX' }` from `record_counters`. */
   async nextResidentIds() {
     const n = await counterRpc('residents');
     return { id: `RES-${String(n).padStart(6, '0')}`, healthRecordNo: `RHU-${String(n).padStart(6, '0')}` };
   },
 
+  /** Allocates the next sequential visit/submission `{ id: 'SUB-XXXXXX' }` from `record_counters`. */
   async nextSubmissionId() {
     const n = await counterRpc('submissions');
     return { id: `SUB-${String(n).padStart(6, '0')}` };
   },
 
+  /** Allocates the next sequential referral `{ id: 'REF-XXXXXX' }` from `record_counters`. */
   async nextReferralId() {
     const n = await counterRpc('referrals');
     return { id: `REF-${String(n).padStart(6, '0')}` };
   },
 
+  /** Allocates the next sequential household `{ id: 'HH-XXX' }` (3-digit minimum pad) from `record_counters`. */
   async nextHouseholdId() {
     const n = await counterRpc('households');
     return { id: `HH-${String(n).padStart(3, '0')}` };
@@ -1178,6 +1199,7 @@ export const supabaseRepository = {
     return [...assignments.values()];
   },
 
+  /** Merges and deduplicates household-purok and address-derived numeric zone assignments per `(residentId, zone)`. */
   async listDerivedZoneAssignments({ barangayId, municipalityId } = {}) {
     const [householdAssignments, addressAssignments] = await Promise.all([
       this.listHouseholdZoneAssignments({ barangayId, municipalityId }),
@@ -1248,8 +1270,9 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     let query = supabase
       .from(TABLES.households)
-      .select('*, members:household_members(count)', { count: 'exact' })
+      .select('*, members:household_members(count), cluster_assignment:household_risk_workflow(risk_cluster_level)', { count: 'exact' })
       .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
       .range(offset, offset + limit - 1);
     if (q) {
       const term = String(q).trim();
@@ -1261,16 +1284,31 @@ export const supabaseRepository = {
     if (barangayId) query = query.eq('barangay_id', barangayId);
     if (municipalityId) query = query.eq('municipality_id', municipalityId);
     const { data, error, count } = await query;
+    if (error && /risk_cluster_level|household_risk_workflow|relationship.*household_risk_workflow/i.test(String(error.message || ''))) {
+      throw Object.assign(
+        new Error('Household cluster storage is unavailable. Apply migration 20261119050000_household_cluster_assignment.sql and reload the API schema.'),
+        { statusCode: 503, code: 'HOUSEHOLD_CLUSTER_SCHEMA_REQUIRED', details: error },
+      );
+    }
     throwOnError(error, 'Could not list households');
+    if (!Array.isArray(data) || !Number.isInteger(count) || count < data.length) {
+      throw Object.assign(new Error('Could not list households because the exact total count is unavailable.'), { statusCode: 500 });
+    }
     return {
-      rows: (data || []).map((row) => ({
+      rows: data.map((row) => ({
         ...householdFromRow(row),
         memberCount: row.members?.[0]?.count ?? 0,
+        riskClusterLevel: (Array.isArray(row.cluster_assignment) ? row.cluster_assignment[0] : row.cluster_assignment)?.risk_cluster_level ?? null,
       })),
-      total: count ?? (data || []).length,
+      total: count,
     };
   },
 
+  /**
+   * Paginates all households in `barangayId` with embedded `household_visits` to
+   * summarize BHW follow-up monitoring (`latestVisitNumber`, `latestVisitDate`,
+   * and `isInitialProfileVisit` when only initial profiling has occurred).
+   */
   async listHouseholdMonitoring({ barangayId }) {
     const supabase = getServiceClient();
     const pageSize = 500;
@@ -1309,15 +1347,17 @@ export const supabaseRepository = {
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from(TABLES.households)
-      .select('*')
+      .select('*, cluster_assignment:household_risk_workflow(risk_cluster_level)')
       .eq('id', id)
       .maybeSingle();
     throwOnError(error, 'Could not load household');
     if (!data) return null;
     const members = await listHouseholdMembersFor(supabase, id);
-    return { ...householdFromRow(data), members };
+    const assignment = Array.isArray(data.cluster_assignment) ? data.cluster_assignment[0] : data.cluster_assignment;
+    return { ...householdFromRow(data), members, riskClusterLevel: assignment?.risk_cluster_level ?? null };
   },
 
+  /** Lists recorded `household_visits` rows for `householdId`, ordered by `visit_number` descending. */
   async listHouseholdVisits(householdId) {
     const supabase = getServiceClient();
     const { data, error } = await supabase
@@ -1341,6 +1381,10 @@ export const supabaseRepository = {
     }));
   },
 
+  /**
+   * Atomically records a numbered BHW household monitoring visit via the
+   * `public.record_household_visit` RPC with `requestId` idempotency and optional profile snapshot.
+   */
   async recordHouseholdVisit({ householdId, visitDate, recordedBy, recordedByName, requestId, visitReason, updatedSections = [], profileSnapshot = null }) {
     const supabase = getServiceClient();
     const { data, error } = await supabase.rpc('record_household_visit', {
@@ -1404,6 +1448,10 @@ export const supabaseRepository = {
     }));
   },
 
+  /**
+   * Inserts a new `households` row, retrying without `client_operation_key` if
+   * the offline-sync migration is absent and surfacing SQLSTATE `23505` on duplicate operation keys.
+   */
   async insertHousehold(household) {
     const supabase = getServiceClient();
     const row = householdToRow(household);
@@ -1489,6 +1537,10 @@ export const supabaseRepository = {
     return data ? householdFromRow(data) : null;
   },
 
+  /**
+   * Updates a `households` row by `id` with optional optimistic concurrency
+   * (`expectedRevision`), returning `null` if missing or when a concurrent write bumped `revision`.
+   */
   async updateHousehold(id, patch, { expectedRevision = null } = {}) {
     const supabase = getServiceClient();
     const usesConcurrency = expectedRevision !== null && expectedRevision !== undefined;
@@ -1528,6 +1580,7 @@ export const supabaseRepository = {
     return (data || [])[0] || null;
   },
 
+  /** Inserts a `household_members` row for `householdId`, mapping duplicate `(household_id, resident_id)` to HTTP 409. */
   async addHouseholdMember(householdId, member) {
     const supabase = getServiceClient();
     const { data, error } = await supabase
@@ -1547,6 +1600,10 @@ export const supabaseRepository = {
     return memberFromRow(data);
   },
 
+  /**
+   * Atomically inserts a household member and updates parent household risk via
+   * `public.add_household_member_with_risk` (returns `null` if the RPC is not yet deployed).
+   */
   async addHouseholdMemberWithRisk(householdId, member, riskPatch) {
     const supabase = getServiceClient();
     const { data, error } = await supabase.rpc('add_household_member_with_risk', {
@@ -1571,6 +1628,7 @@ export const supabaseRepository = {
     };
   },
 
+  /** Updates a `household_members` row scoped to `(householdId, memberId)`. */
   async updateHouseholdMember(householdId, memberId, member) {
     const supabase = getServiceClient();
     const { data, error } = await supabase
@@ -1584,6 +1642,10 @@ export const supabaseRepository = {
     return data ? memberFromRow(data) : null;
   },
 
+  /**
+   * Atomically updates a household member and recomputed household risk via
+   * `public.update_household_member_with_risk` (returns `null` if the RPC is not yet deployed).
+   */
   async updateHouseholdMemberWithRisk(householdId, memberId, member, riskPatch) {
     const supabase = getServiceClient();
     const { data, error } = await supabase.rpc('update_household_member_with_risk', {
@@ -1609,6 +1671,7 @@ export const supabaseRepository = {
     };
   },
 
+  /** Deletes a `household_members` row scoped to `(householdId, memberId)`, returning whether a row was removed. */
   async removeHouseholdMember(householdId, memberId) {
     const supabase = getServiceClient();
     const { data, error } = await supabase
@@ -1622,6 +1685,10 @@ export const supabaseRepository = {
     return Boolean(data);
   },
 
+  /**
+   * Atomically removes a household member and updates parent household risk via
+   * `public.remove_household_member_with_risk` (returns `null` if the RPC is not yet deployed).
+   */
   async removeHouseholdMemberWithRisk(householdId, memberId, riskPatch) {
     const supabase = getServiceClient();
     const { data, error } = await supabase.rpc('remove_household_member_with_risk', {
@@ -1683,6 +1750,10 @@ export const supabaseRepository = {
     return memberHealthFromRow(data);
   },
 
+  /**
+   * Deduplication lookup on `residents` matching `identity_no` (when given) or
+   * case-insensitive `last_name` + `first_name` (+ optional `middle_name`, `birth_date`, `municipality_id`).
+   */
   async findResidentByIdentity({ lastName, firstName, middleName, birthDate, identityNo, municipalityId } = {}) {
     const supabase = getServiceClient();
     let query = supabase
@@ -1709,6 +1780,7 @@ export const supabaseRepository = {
     return exact ? residentFromRow(exact) : null;
   },
 
+  /** Fetches a single resident row from `residents` by permanent ID (`RES-...`), or `null`. */
   async getResident(id) {
     const supabase = getServiceClient();
     const { data, error } = await supabase.from(TABLES.residents).select('*').eq('id', id).maybeSingle();
@@ -1716,6 +1788,10 @@ export const supabaseRepository = {
     return residentFromRow(data);
   },
 
+  /**
+   * Inserts a `residents` row, falling back if `client_operation_key` is unmigrated
+   * and surfacing SQLSTATE `23505` on duplicate offline operation keys as HTTP 409.
+   */
   async insertResident(resident) {
     const supabase = getServiceClient();
     const row = residentToRow(resident);
@@ -1759,6 +1835,10 @@ export const supabaseRepository = {
     return data ? residentFromRow(data) : null;
   },
 
+  /**
+   * Updates a `residents` row by `id` with optional optimistic concurrency filters
+   * (`expectedRevision`, `expectedUpdatedAt`); returns `null` when missing or stale.
+   */
   async updateResident(id, patch, { expectedRevision = null, expectedUpdatedAt = null } = {}) {
     const supabase = getServiceClient();
     let query = supabase
@@ -2326,18 +2406,41 @@ export const supabaseRepository = {
   async insertVisit(visit) {
     const supabase = getServiceClient();
     const row = visitToRow(visit);
-    let { data, error } = await supabase.from(TABLES.visits).insert(row).select().single();
-    // Gracefully degrade when optional consultation columns are not present
-    // yet: retry without them so older database schemas can still save visits.
-    if (error && !visit.clientOperationKey && !visit.consultationDetails && isMissingConsultationColumn(error)) {
-      ({ data, error } = await supabase.from(TABLES.visits).insert(stripConsultationExtras(row)).select().single());
-    }
+    const { data, error } = await supabase.from(TABLES.visits).insert(row).select().single();
     if (error?.code === '23505' && visit.clientOperationKey) {
       throw Object.assign(new Error('A visit for this consultation operation already exists.'), { code: '23505' });
     }
     throwOnError(error, 'Could not create submission');
     const resident = await this.getResident(visit.residentId);
     return { ...visitFromRow(data), resident };
+  },
+
+  async createSubmittedTriage({ resident = null, residentId = null, visit, submissionId, fingerprint, actorId }) {
+    const residentIds = resident ? await this.nextResidentIds() : null;
+    const visitIds = visit.id ? { id: visit.id } : await this.nextSubmissionId();
+    const residentRow = resident ? residentToRow({
+      ...resident, id: residentIds.id, healthRecordNo: residentIds.healthRecordNo,
+      createdById: actorId, createdByRole: visit.recordedByRole,
+    }) : null;
+    const visitRow = visitToRow({
+      ...visit, id: visitIds.id, residentId: residentId || residentRow?.id,
+      clientSubmissionId: submissionId, clientSubmissionFingerprint: fingerprint,
+    });
+    const { data, error } = await getServiceClient().rpc('create_submitted_triage', {
+      p_submission_id: submissionId,
+      p_fingerprint: fingerprint,
+      p_actor_id: actorId,
+      p_resident: residentRow,
+      p_visit: visitRow,
+    });
+    if (error) {
+      if (error.code === '23505') throw ApiError.conflict('A matching resident or triage operation already exists. Retry the same operation or select the existing resident.');
+      if (error.code === '42501') throw ApiError.forbidden('The resident or visit is outside your current assignment.');
+      if (error.code === '22023' || error.code === '23514') throw ApiError.badRequest('The triage submission contains invalid fields.');
+      throwOnError(error, 'Could not submit triage atomically');
+    }
+    if (!data?.visit || !data?.resident) throw new ApiError(503, 'The triage operation returned an incomplete result.');
+    return { ...visitFromRow(data.visit), resident: residentFromRow(data.resident), deduplicated: data.deduplicated === true };
   },
 
   async findVisitByOperationKey(clientOperationKey) {
@@ -2443,22 +2546,21 @@ export const supabaseRepository = {
     return { rows, total: count ?? rows.length };
   },
 
-  async updateVisit(id, patch) {
+  async updateVisit(id, patch, { expectedUpdatedAt, allowedStatuses } = {}) {
     const supabase = getServiceClient();
     const row = visitToRow(patch);
     row.updated_at = new Date().toISOString();
-    const runUpdate = (updateRow) => supabase
+    const runUpdate = (updateRow) => {
+      let query = supabase
       .from(TABLES.visits)
       .update(updateRow)
-      .eq('id', id)
-      .select(`*, resident:residents(${SELECT_RESIDENT})`)
-      .maybeSingle();
-    let { data, error } = await runUpdate(row);
-    // Retry without optional consultation columns when the database has not
-    // received the migrations that add them yet.
-    if (error && !patch.consultationDetails && isMissingConsultationColumn(error)) {
-      ({ data, error } = await runUpdate(stripConsultationExtras(row)));
-    }
+      .eq('id', id);
+      if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt);
+      if (allowedStatuses) query = query.in('status', allowedStatuses);
+      return query.select(`*, resident:residents(${SELECT_RESIDENT})`).maybeSingle();
+    };
+    const { data, error } = await runUpdate(row);
+    // Missing clinical migrations must fail the entire write.
     throwOnError(error, 'Could not update submission');
     if (!data) return null;
     return { ...visitFromRow(data), resident: residentFromRow(data.resident) };

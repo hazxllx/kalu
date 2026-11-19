@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 
-process.env.NODE_ENV = 'test';
-process.env.SUPABASE_URL = 'https://personnel-transport-tests.invalid';
-process.env.SUPABASE_SERVICE_ROLE_KEY = 'personnel-test-service-key';
-process.env.SUPABASE_ANON_KEY = 'personnel-test-anon-key';
+import { configureLocalTestEnvironment } from './helpers/localEnv.js';
+configureLocalTestEnvironment();
 
 const repository = (await import('../src/repositories/supabaseRepository.js')).default;
 const { getServiceClient } = await import('../src/config/supabase.js');
@@ -46,7 +44,7 @@ const withTransport = async (handler, run) => {
 test('personnel list sends exact filters and pagination through real Supabase query builder', async () => {
   await withTransport(async (url, request) => {
     assert.equal(url.pathname, '/rest/v1/profiles');
-    assert.equal(request.headers.get('authorization'), 'Bearer personnel-test-service-key');
+    assert.equal(request.headers.get('authorization'), `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`);
     assert.equal(url.searchParams.get('role'), 'in.(mho,phn,health_supervisor,rhu_personnel,bhw)');
     assert.equal(url.searchParams.get('personnel_account.approval_status'), 'eq.approved');
     assert.equal(url.searchParams.get('personnel_account.suspended_at'), 'is.null');
@@ -143,7 +141,7 @@ test('silent custom-id Auth creation recovers the reserved identity using actual
   const paths = [];
   await withTransport(async (url, request) => {
     paths.push([request.method, url.pathname]);
-    assert.equal(request.headers.get('authorization'), 'Bearer personnel-test-service-key');
+    assert.equal(request.headers.get('authorization'), `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`);
     if (request.method === 'GET') {
       assert.equal(url.pathname, `/auth/v1/admin/users/${TARGET}`);
       return authUser ? respond(authUser) : respond({ code: 'user_not_found', msg: 'Not found' }, { status: 404 });
@@ -173,7 +171,7 @@ test('real Supabase token lookup and admin password update do not demote the sin
       assert.equal(request.headers.get('authorization'), 'Bearer owner-token');
       return respond({ id: TARGET, email: EMAIL, email_confirmed_at: '2026-10-31T09:00:00Z', app_metadata: { personnel_managed: true } });
     }
-    assert.equal(request.headers.get('authorization'), 'Bearer personnel-test-service-key');
+    assert.equal(request.headers.get('authorization'), `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`);
     if (url.pathname === '/rest/v1/profiles') {
       assert.equal(url.searchParams.get('id'), `eq.${TARGET}`);
       return respond(rawProfile());

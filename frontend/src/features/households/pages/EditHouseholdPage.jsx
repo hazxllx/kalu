@@ -321,14 +321,21 @@ export default function EditHouseholdPage() {
     </form></Card>
   </div>;
 
-  return <div className="mx-auto max-w-4xl space-y-5">
-    <button type="button" onClick={() => navigate(householdsPath)} className="inline-flex items-center gap-2 text-sm font-medium text-brand-blue hover:underline"><ArrowLeft className="h-4 w-4" /> Back to households</button>
+  return <div className="mx-auto max-w-4xl space-y-5 [overflow-wrap:anywhere] [&_input]:max-w-full [&_select]:max-w-full">
+    <button type="button" onClick={() => navigate(householdsPath)} className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-brand-blue hover:underline"><ArrowLeft className="h-4 w-4" /> Back to households</button>
     <header><h1 className="text-2xl font-semibold text-brand-ink">Household Profile</h1><p className="mt-1 text-sm text-brand-gray">{householdId} · Saved information is loaded from this household’s existing profile. {syncStatus.online ? '' : 'Working offline.'}</p></header>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
-    {user?.role === 'bhw' && <Card className="flex flex-wrap items-end gap-3 p-4">
-      <label className="text-sm font-medium text-brand-ink">Visit date<input type="date" value={visitDate} onChange={(event) => setVisitDate(event.target.value)} className="mt-1.5 block rounded-input border border-brand-border bg-white px-3 py-2.5" /></label>
-      <button type="button" onClick={recordVisit} className="inline-flex items-center gap-2 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-bg"><RotateCcw className="h-4 w-4" /> Record visit without profile changes</button>
+    {user?.role === 'bhw' && <Card className="p-4">
+      <form className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={(event) => { event.preventDefault(); recordVisit(); }}>
+        <label className="min-w-0 text-sm font-medium text-brand-ink">
+          Visit date
+          <input type="date" required value={visitDate} onChange={(event) => setVisitDate(event.target.value)} className="mt-1.5 block min-h-11 w-full min-w-0 rounded-input border border-brand-border bg-white px-3 py-2.5" />
+        </label>
+        <button type="submit" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-btn border border-brand-border px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-bg">
+          <RotateCcw className="h-4 w-4 shrink-0" /> Record visit without profile changes
+        </button>
+      </form>
     </Card>}
     {SECTIONS.map((section) => {
       const sectionDirty = section.fields.some(([field]) => JSON.stringify(form[field] ?? null) !== JSON.stringify(savedForm?.[field] ?? null));
@@ -356,7 +363,7 @@ export default function EditHouseholdPage() {
         const savedMember = savedMembers.find((item) => item.id === member.id);
         const memberDirty = MEMBER_FIELDS.some(([field]) => JSON.stringify(member[field] ?? null) !== JSON.stringify(savedMember?.[field] ?? null));
         return <div key={member.id || `${member.name}-${index}`} className="rounded-xl border border-brand-border p-4">
-        <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-sm font-semibold text-brand-ink">{member.name || `Member ${index + 1}`}{member.residentId ? <span className="ml-2 text-xs font-normal text-emerald-700">Linked resident</span> : null}</p>{memberDirty && <p className="mt-1 text-xs font-medium text-amber-700">Unsaved changes</p>}</div><div className="flex gap-2">{memberDirty && <button type="button" onClick={() => setMembers((current) => current.map((row) => row.id === member.id ? { ...savedMember } : row))} className="rounded-btn border border-brand-border px-3 py-2 text-xs font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>}<button type="button" disabled={!member.id || !memberDirty || Boolean(savingMember)} onClick={() => saveMember(member)} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-3 py-2 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"><Save className="h-3.5 w-3.5" />{savingMember === member.id ? 'Saving…' : 'Save member'}</button></div></div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="min-w-0 flex-1 basis-40"><p className="text-sm font-semibold text-brand-ink">{member.name || `Member ${index + 1}`}{member.residentId ? <span className="ml-2 text-xs font-normal text-emerald-700">Linked resident</span> : null}</p>{memberDirty && <p className="mt-1 text-xs font-medium text-amber-700">Unsaved changes</p>}</div><div className="flex flex-wrap gap-2 [&>button]:min-h-11">{memberDirty && <button type="button" onClick={() => setMembers((current) => current.map((row) => row.id === member.id ? { ...savedMember } : row))} className="rounded-btn border border-brand-border px-3 py-2 text-xs font-medium text-brand-gray hover:bg-brand-bg">Cancel</button>}<button type="button" disabled={!member.id || !memberDirty || Boolean(savingMember)} onClick={() => saveMember(member)} className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-3 py-2 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"><Save className="h-3.5 w-3.5" />{savingMember === member.id ? 'Saving…' : 'Save member'}</button></div></div>
         <div className="grid gap-3 sm:grid-cols-2">{MEMBER_FIELDS.map(([field, label, type = 'text', options]) => <Field key={field} label={label} type={type} options={options || []} value={member[field]} onChange={(value) => setMembers((current) => current.map((row) => row.id === member.id ? { ...row, [field]: value } : row))} />)}</div>
       </div>;
       })}{members.length === 0 && <p className="text-sm text-brand-gray">No household members are recorded.</p>}</div>

@@ -3,6 +3,11 @@
  * and thresholds for the single authoritative risk engine
  * (`utils/residentRisk.js`).
  *
+ * Architectural role: consumed in the `route -> authenticate -> authorize ->
+ * controller -> service -> repository/Supabase` pipeline by
+ * `services/riskConfig.service.js`, resident directory/detail risk breakdowns,
+ * and municipality/barangay analytics dashboards.
+ *
  * SOURCE OF TRUTH: resident risk is derived HEALTH DATA -> RISK CRITERIA ->
  * RISK SCORE -> RISK LEVEL. The criteria and thresholds below are the fallback
  * configuration used when the database configuration tables
@@ -44,6 +49,7 @@ export const RISK_FIELDS = Object.freeze([
   { field: 'bmi', label: 'Body mass index', unit: 'kg/m²' },
 ]);
 
+/** Comparison operators supported by risk criteria (`between` evaluates an inclusive `[value, value2]` range). */
 export const RISK_OPERATORS = Object.freeze(['gte', 'gt', 'lte', 'lt', 'eq', 'between']);
 
 /** Seed criteria. `code` is the stable identifier; `priority` orders the
@@ -87,6 +93,7 @@ export const DEFAULT_RISK_CRITERIA = Object.freeze([
   },
 ]);
 
+/** Complete fallback `{ thresholds, criteria }` configuration bundle used when DB risk tables are empty. */
 export const DEFAULT_RISK_CONFIG = Object.freeze({
   thresholds: DEFAULT_RISK_THRESHOLDS,
   criteria: DEFAULT_RISK_CRITERIA,

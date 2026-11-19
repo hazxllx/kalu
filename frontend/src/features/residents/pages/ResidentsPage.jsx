@@ -390,6 +390,7 @@ export default function ResidentsPage() {
   const [form, setForm] = useState(/** @type {ResidentForm} */ (initialFromUser(user)));
   const [errors, setErrors] = useState(/** @type {ValidationErrors} */ ({}));
   const [submitting, setSubmitting] = useState(false);
+  const accountCreateKey = useRef(null);
   const [formError, setFormError] = useState(/** @type {string|null} */ (null));
   const [editForm, setEditForm] = useState(/** @type {Record<string, string>} */ ({ contact: "", barangay: "", civilStatus: "", currentAddress: "", philhealthNo: "", religion: "", employmentStatus: "", fatherName: "", motherName: "", birthPlace: "" }));
   const [editErrors, setEditErrors] = useState(/** @type {ValidationErrors} */ ({}));
@@ -778,10 +779,15 @@ export default function ResidentsPage() {
         payload.createLoginAccount = true;
         payload.email = form.email.trim();
       }
+      const idempotencyKey = form.createAccount
+        ? (accountCreateKey.current ||= crypto.randomUUID())
+        : undefined;
       const result = await createResidentOffline({
         ownerId: user?.id,
         payload: { resident: payload },
+        ...(idempotencyKey ? { idempotencyKey } : {}),
       });
+      accountCreateKey.current = null;
       setShowAddModal(false);
       setErrors({});
       const record = result?.resident;

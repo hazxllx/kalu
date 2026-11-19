@@ -2,17 +2,26 @@ import { SERVICE_CATEGORIES } from '../services/healthServices.service.js';
 import { invalid, isUuid, text, valid } from './common.js';
 
 /**
- * Health service request validation. Municipality/barangay scope is taken from
- * the authenticated session in the service (a Health Supervisor is forced to
- * their own barangay) and the barangay is DERIVED from the chosen facility, so
- * the client never submits a barangay. Only content + an optional facility
- * reference (an existing id OR a new free-typed name) + an optional
- * municipality-wide flag + personnel references are accepted here.
+ * @file Health service program & resident attendance validators (server-authoritative).
+ *
+ * Executed by `middleware/validate.js` in the KALUSAGAP pipeline
+ * (`route -> authenticate -> authorize -> validate -> controller -> service -> Supabase`)
+ * for community/RHU health service management, personnel assignment, and resident
+ * attendance + immunization encounter documentation.
+ *
+ * Municipality and barangay scope are resolved from the authenticated session in
+ * `healthServices.service.js` (e.g. a Health Supervisor is bound to their own barangay)
+ * and the barangay is derived server-side from the chosen facility, so the client never
+ * submits a barangay directly. Only service content, mutually exclusive facility coverage
+ * (`facilityId`, free-typed `facilityName`, or `municipalityWide`), schedule bounds,
+ * personnel UUIDs, and clinical attendance/immunization fields are accepted here.
  */
 
 const LIMITS = { name: 160, description: 2000, facilityName: 160 };
+/** Allowed attendance lifecycle statuses for scheduled clinic visits and walk-in encounters. */
 const ATTENDANCE_STATUSES = Object.freeze(['scheduled', 'attended', 'absent', 'cancelled', 'walk_in']);
 
+/** Strict calendar `YYYY-MM-DD` check that rejects out-of-range rollover dates. */
 const isDateOnly = (value) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -31,6 +40,15 @@ const atKey = (date, time) => `${date}T${time}`;
 
 const isDateTime = (value) => value === null || (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Date.parse(value)));
 
+/**
+ * Validates `POST /health-services` payloads when creating a community or RHU health service.
+ * Enforces mutually exclusive facility selection (`facilityId` vs `facilityName` vs `municipalityWide`),
+ * defaults omitted `endDate` to `startDate` for single-day events, and checks chronological ordering
+ * (`registrationDeadline <= start <= end`).
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const createServiceValidator = (input = {}) => {
   const errors = {};
   const name = text(input?.name);
@@ -130,6 +148,13 @@ const hasActiveFlag = (input) =>
   input?.active === true || input?.active === false || input?.active === 'true' || input?.active === 'false';
 const normalizeActive = (input) => !(input?.active === false || input?.active === 'false');
 
+/**
+ * Validates `PUT`/`PATCH /health-services/:id` payloads, supporting either a status-only
+ * `{ active }` toggle or a full service definition update delegated to `createServiceValidator`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const updateServiceValidator = (input = {}) => {
   const hasContent = CONTENT_KEYS.some((k) => {
     if (input == null || !Object.prototype.hasOwnProperty.call(input, k)) return false;
@@ -151,6 +176,12 @@ export const updateServiceValidator = (input = {}) => {
   return result;
 };
 
+/**
+ * Validates personnel assignment payloads (`personnelId` / `personnel_id` UUID) for a health service.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { personnelId } }` or `{ error }`.
+ */
 export const assignValidator = (input = {}) => {
   const personnelId = text(input?.personnelId || input?.personnel_id);
   if (!personnelId) return invalid({ personnelId: 'Select a personnel to assign.' });
@@ -158,6 +189,12 @@ export const assignValidator = (input = {}) => {
   return valid({ personnelId });
 };
 
+/**
+ * Validates `:id` route parameters for health service endpoints as UUIDs.
+ *
+ * @param {Object} [params] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const serviceIdParamValidator = (params = {}) => {
   const id = text(params.id);
   if (!id) return invalid({ id: 'A service reference is required.' });
@@ -165,6 +202,18 @@ export const serviceIdParamValidator = (params = {}) => {
   return valid({ ...params, id });
 };
 
+/**
+ * Validates creation of a resident service attendance record (and optional linked immunization entry).
+ *
+ * Domain rules enforced:
+ * - `service_provided` is mandatory whenever `status === 'attended'`.
+ * - `follow_up_date` is mandatory whenever `follow_up_required === true`.
+ * - When `vaccine` is populated, validates dose/date fields and requires `administered_date`
+ *   if `immunization_status` is `'Completed'` (defaulting omitted status to `'Completed'`).
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const createAttendanceValidator = (input = {}) => {
   const errors = {};
   const serviceId = text(input?.service_id);
@@ -205,6 +254,13 @@ export const createAttendanceValidator = (input = {}) => {
   return valid({ service_id: serviceId, resident_id: residentId, scheduled_date: scheduledDate, status, notes, service_provided: serviceProvided, assessment, recommendations, follow_up_required: followUpRequired, follow_up_date: followUpDate || null, ...(vaccine ? { vaccine, dose, administered_date: administeredDate, next_dose: nextDose, immunization_status: immunizationStatus || 'Completed' } : {}) });
 };
 
+/**
+ * Validates query filters for listing attendance records (`service_id`, `resident_id`, `from`, `to`).
+ * Rejects supplying both `service_id` and `resident_id` simultaneously and ensures `from <= to`.
+ *
+ * @param {Object} [query] - Raw query parameters.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const attendanceListQueryValidator = (query = {}) => {
   const errors = {};
   const serviceId = text(query?.service_id);
@@ -224,6 +280,15 @@ export const attendanceListQueryValidator = (query = {}) => {
   return valid({ service_id: serviceId, resident_id: residentId, from, to });
 };
 
+/**
+ * Validates partial updates to an existing service attendance record (and optional immunization details).
+ * Enforces non-empty patch payloads (`errors._root`) plus the same clinical completeness rules
+ * as creation (`attended` requires `service_provided`, `follow_up_required` requires `follow_up_date`,
+ * and `'Completed'` immunizations require `administered_date`).
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const updateAttendanceValidator = (input = {}) => {
   const errors = {};
   const value = {};
@@ -280,6 +345,12 @@ export const updateAttendanceValidator = (input = {}) => {
   return valid(value);
 };
 
+/**
+ * Validates `:id` route parameters for attendance endpoints as UUIDs.
+ *
+ * @param {Object} [params] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const attendanceIdParamValidator = (params = {}) => {
   const id = text(params.id);
   if (!id || !isUuid(id)) return invalid({ id: 'The attendance reference is not valid.' });

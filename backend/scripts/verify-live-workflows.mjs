@@ -1,5 +1,5 @@
 /**
- * Live workflow verification against the real Supabase project + running API.
+ * Live workflow verification against local Supabase and the local API.
  *
  * Signs in as every operational role and checks the behaviour the KALUSAGAP
  * brief requires, end to end — through Express authorization, the services and
@@ -25,12 +25,15 @@
  * identifiable. Override the accounts it uses with the OFFICIAL_* env vars when
  * a run should target specific accounts.
  */
-import 'dotenv/config';
+import '../src/config/env.js';
 import { createClient } from '@supabase/supabase-js';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
+
+assertLocalScriptEnvironment();
 
 const API = process.env.API_URL || 'http://localhost:5000/api';
-const ANON = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
-const SERVICE = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const clientOptions = { global: { fetch: localFetch } };
+const SERVICE = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, clientOptions);
 const FOCUS = (() => {
   const args = process.argv.slice(2);
   const idx = args.findIndex((arg) => arg === '--focus' || arg.startsWith('--focus='));
@@ -48,14 +51,14 @@ const check = (name, ok, extra = '') => {
 };
 
 async function signIn(email, password) {
-  const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, clientOptions);
   const { data, error } = await c.auth.signInWithPassword({ email, password });
   if (error) throw new Error(`${email}: ${error.message}`);
   return data.session.access_token;
 }
 
 const api = async (token, path, options = {}) => {
-  const res = await fetch(`${API}${path}`, {
+  const res = await localFetch(`${API}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

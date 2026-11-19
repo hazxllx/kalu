@@ -1,21 +1,31 @@
 /**
- * Resident visit-plan validators (server-authoritative).
+ * @file Resident health-service visit-plan validators (server-authoritative).
  *
- * Convention with middleware/validate.js:
+ * Executed by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> authenticate -> authorize -> validate -> controller -> service -> repository/Supabase`):
  *   validator(input, req) -> { value }            // accepted, replaces req[part]
- *                         -> { error: { field } } // rejected with 400 + details
+ *                         -> { error: { field } } // rejected with HTTP 400 + details
  *
- * These normalize shape and reject obviously invalid input. The service still
- * enforces authorization, ownership, barangay/RHU scope, the active-weekday
- * rule and closures — these validators are the first gate, not the only one.
+ * Normalizes camelCase/snake_case fields and rejects malformed UUIDs, calendar dates,
+ * and over-length notes (`<= 140` chars). Downstream visit-plan services still enforce
+ * resident authorization/ownership, barangay/RHU service visibility, active scheduled
+ * weekdays, and blackout closures.
  */
 import { invalid, valid, text, isUuid, parseDateOnly } from './common.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Short note limit (140 chars) for lightweight resident visit-intent entries. */
 const NOTE_MAX = 140;
 const isDateOnly = (value) => parseDateOnly(text(value)) !== null;
 
-/** POST /resident/visit-plans — a resident records a visit intent. */
+/**
+ * Validates `POST /resident/visit-plans` payloads when a resident logs an intended clinic visit date.
+ * Accepts `serviceId`/`service_id` and `plannedDate`/`planned_date`/`date` aliases,
+ * normalizing into `{ serviceId, plannedDate, note }`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const createPlanValidator = (input = {}) => {
   const errors = {};
   const serviceId = text(input.serviceId || input.service_id);
@@ -30,7 +40,13 @@ export const createPlanValidator = (input = {}) => {
   return valid({ serviceId, plannedDate, note });
 };
 
-/** GET /resident/health-services/:id/availability?from=&to= */
+/**
+ * Validates `GET /resident/health-services/:id/availability` optional date-window query parameters
+ * (`from` and `to` as strict `YYYY-MM-DD` strings, normalized to `null` when omitted).
+ *
+ * @param {Object} [input] - Raw query parameters.
+ * @returns {Object} Validation result `{ value: { from, to } }` or `{ error }`.
+ */
 export const availabilityQueryValidator = (input = {}) => {
   const from = text(input.from);
   const to = text(input.to);
@@ -41,20 +57,36 @@ export const availabilityQueryValidator = (input = {}) => {
   return valid({ from: from || null, to: to || null });
 };
 
-/** GET /resident/visit-plans?service_id= (optional filter). */
+/**
+ * Validates `GET /resident/visit-plans` query filters, normalizing optional `service_id`/`serviceId`
+ * into `{ serviceId }`.
+ *
+ * @param {Object} [input] - Raw query parameters.
+ * @returns {Object} Validation result `{ value: { serviceId } }` or `{ error }`.
+ */
 export const listQueryValidator = (input = {}) => {
   const serviceId = text(input.service_id || input.serviceId);
   if (serviceId && !isUuid(serviceId)) return invalid({ service_id: 'A valid service reference is required.' });
   return valid({ serviceId: serviceId || '' });
 };
 
-/** :id path param must be a UUID. */
+/**
+ * Validates `:id` route parameters for visit-plan endpoints as UUIDs.
+ *
+ * @param {Object} [input] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const idParamValidator = (input = {}) => {
   if (!UUID.test(text(input.id))) return invalid({ id: 'Visit plan not found.' });
   return valid(input);
 };
 
-/** :id path param for the service availability route. */
+/**
+ * Validates `:id` route parameters for resident health-service availability lookups as UUIDs.
+ *
+ * @param {Object} [input] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const serviceIdParamValidator = (input = {}) => {
   if (!UUID.test(text(input.id))) return invalid({ id: 'Health service not found.' });
   return valid(input);

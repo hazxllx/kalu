@@ -8,14 +8,31 @@ import env from '../config/env.js';
 import { sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service.js';
 
 /**
- * Authentication business logic (Supabase Auth + profiles).
+ * Authentication & Personnel Credential Lifecycle Service (`services/auth.service.js`).
  *
- * The frontend can either talk to Supabase Auth directly (current default, via
- * `@/lib/supabase`) or through these endpoints. Either way the role, account
- * status and coverage assignment are resolved from the `profiles` table —
- * never chosen by the client.
+ * Fits into KALUSAGAP's authentication pipeline:
+ *   `auth.routes -> (rateLimit / authenticate) -> auth.controller -> auth.service -> Supabase Auth + public.profiles + personnel lifecycle repository`
+ *
+ * Responsibilities & security invariants:
+ * - Password sign-in (`signIn`) executes on a disposable `createAuthClient()` instance
+ *   so user JWTs never pollute the shared service-role singleton, immediately revoking
+ *   issued tokens via `auth.admin.signOut` if profile gates or temporary-password expiry fail.
+ * - Authoritative role, approval status, and barangay/municipality coverage are always
+ *   resolved from `public.profiles` (`loadSessionProfile`) — never trusted from client claims.
+ * - Password recovery (`requestPasswordReset`) prevents account enumeration by returning
+ *   `{ accepted: true }` for unknown/ineligible emails while routing unconfirmed approved
+ *   staff accounts to a fresh `invite` setup link instead of a dead `recovery` token.
+ * - Enforces two-phase confirmation for initial personnel password setup and temporary
+ *   password rotation (`auth.admin.updateUserById` + repository lifecycle state transition).
  */
 
+/**
+ * Fallback session user projection constructed from Supabase Auth metadata when
+ * a `public.profiles` row is not yet available (pre-migration fallback).
+ *
+ * @param {Object} user - Supabase `auth.users` object
+ * @returns {Object} Minimal session user descriptor
+ */
 const metadataUser = (user) => ({
   id: user.id,
   email: user.email,
@@ -24,6 +41,16 @@ const metadataUser = (user) => ({
   status: null,
 });
 
+/**
+ * Authenticate a user with email and password against Supabase Auth and enforce
+ * KALUSAGAP's profile approval, suspension, and temporary-password expiry gates.
+ *
+ * @param {Object} credentials - Login credentials
+ * @param {string} credentials.email - User email address
+ * @param {string} credentials.password - Plaintext password
+ * @returns {Promise<Object>} Resolved `{ user, profileResolved, session }` payload
+ * @throws {ApiError} `400` missing fields, `401` invalid credentials or expired temp password, `429` rate limit, `503` upstream outage
+ */
 export const signIn = async ({ email, password }) => {
   if (!email || !password) throw ApiError.badRequest('Email and password are required');
 
@@ -88,6 +115,16 @@ export const signIn = async ({ email, password }) => {
   };
 };
 
+/**
+ * Verify a Bearer JWT against Supabase Auth and resolve the caller's current
+ * authoritative session user from `public.profiles`.
+ *
+ * Rejects expired temporary passwords with `403 Forbidden` and maps upstream
+ * Supabase connectivity failures to `503 Service Unavailable`.
+ *
+ * @param {string} accessToken - Supabase JWT access token
+ * @returns {Promise<Object>} Session user object with `mustChangePassword` flag
+ */
 export const getCurrentUser = async (accessToken) => {
   const supabase = getServiceClient();
   let result;
@@ -113,6 +150,13 @@ export const getCurrentUser = async (accessToken) => {
     : metadataUser(data.user);
 };
 
+/**
+ * Revoke the caller's Supabase session via the service-role Admin API.
+ * Swallows token/revocation errors so client logout is idempotent and always succeeds.
+ *
+ * @param {string} accessToken - Bearer access token to revoke
+ * @returns {Promise<Object>} `{ success: true }`
+ */
 export const signOut = async (accessToken) => {
   const supabase = getServiceClient();
   // Best-effort: revoke the caller's session. Ignore token-shape errors so a
@@ -125,8 +169,23 @@ export const signOut = async (accessToken) => {
   return { success: true };
 };
 
-/** Send password recovery through the backend SMTP account without exposing
- * whether an email belongs to a KALUSAGAP account. */
+/**
+ * Initiate password recovery (or resend an initial staff setup link) via KALUSAGAP's
+ * backend SMTP mailer without disclosing whether the email is registered.
+ *
+ * Security & workflow rules:
+ * - Unknown, mismatched, suspended, or unapproved emails silently return `{ accepted: true }`
+ *   to prevent user enumeration.
+ * - Unconfirmed (`!email_confirmed_at`) approved staff accounts with `setupRequired === true`
+ *   receive an `'invite'` link via `sendPasswordSetupEmail` so expired/consumed setup links
+ *   can be self-recovered through Forgot Password.
+ * - Confirmed accounts receive a `'recovery'` link via `sendPasswordResetEmail` targeting
+ *   `${frontendOrigin}/reset-password?token_hash=...&type=...`.
+ *
+ * @param {Object} [options] - Request payload
+ * @param {string} [options.email] - Submitted email address
+ * @returns {Promise<Object>} `{ accepted: true }`
+ */
 export const requestPasswordReset = async ({ email } = {}) => {
   const normalizedEmail = String(email || '').trim().toLowerCase();
   const supabase = getServiceClient();
@@ -209,6 +268,13 @@ export const requestPasswordReset = async ({ email } = {}) => {
   return { accepted: true };
 };
 
+/**
+ * Validate a Bearer JWT for personnel password-setup/rotation endpoints using
+ * `supabase.auth.getUser`, mapping upstream 5xx/network errors to `503`.
+ *
+ * @param {string} accessToken - Bearer access token from `Authorization` header
+ * @returns {Promise<Object>} Verified Supabase `auth.users` record
+ */
 const verifySetupOwner = async (accessToken) => {
   if (!accessToken) throw ApiError.unauthorized('Missing Bearer access token');
   let result;
@@ -224,6 +290,7 @@ const verifySetupOwner = async (accessToken) => {
   return result.data.user;
 };
 
+/** Project raw personnel lifecycle repository fields into a client-safe setup status summary. */
 const setupStatus = (account) => ({
   setupRequired: account?.setupRequired === true,
   mustChangePassword: account?.mustChangePassword === true,
@@ -238,6 +305,10 @@ const setupStatus = (account) => ({
   passwordChangedAt: account?.passwordChangedAt ?? null,
 });
 
+/**
+ * Load the personnel lifecycle row for `owner.id`, rejecting half-provisioned
+ * `personnel_managed` accounts (`lifecycleVersion === null`) with `503`.
+ */
 const loadSetupAccount = async (owner) => {
   const account = await repository.getPersonnelSetupAccount(owner.id);
   if (owner.app_metadata?.personnel_managed === true && (!account || account.lifecycleVersion === null)) {
@@ -246,11 +317,32 @@ const loadSetupAccount = async (owner) => {
   return account;
 };
 
+/**
+ * Return the authenticated personnel user's current password-setup and lifecycle status.
+ *
+ * @param {Object} [options] - Request context
+ * @param {string} [options.accessToken] - Caller's Bearer access token
+ * @returns {Promise<Object>} Normalized setup/lifecycle status flags
+ */
 export const getPersonnelSetupStatus = async ({ accessToken } = {}) => {
   const owner = await verifySetupOwner(accessToken);
   return setupStatus(await loadSetupAccount(owner));
 };
 
+/**
+ * Complete initial password setup for an invited, approved, email-confirmed staff account.
+ *
+ * Two-phase commit safety:
+ * 1. Updates the password in Supabase Auth via `auth.admin.updateUserById`.
+ * 2. Marks setup complete in PostgreSQL via `repository.completePersonnelAccountSetup`.
+ * If step 1 succeeds but step 2 fails, returns `{ passwordSaved: true, setupComplete: false, active: false }`
+ * rather than throwing a false password failure or prematurely granting active access.
+ *
+ * @param {Object} [options] - Setup payload
+ * @param {string} [options.accessToken] - Caller's Bearer access token
+ * @param {string} [options.password] - New permanent password (validated via `personnelPasswordSetupValidator`)
+ * @returns {Promise<Object>} Setup completion status payload
+ */
 export const setupPersonnelPassword = async ({ accessToken, password } = {}) => {
   const validation = personnelPasswordSetupValidator({ password });
   if (validation.error) throw ApiError.badRequest('Validation failed', validation.error);
@@ -289,6 +381,18 @@ export const setupPersonnelPassword = async ({ accessToken, password } = {}) => 
   }
 };
 
+/**
+ * Replace an administrator-assigned temporary password with a permanent password
+ * for an approved, unsuspended staff account before `temporaryPasswordExpiresAt`.
+ *
+ * Updates Supabase Auth via `auth.admin.updateUserById` and clears `mustChangePassword`
+ * via `repository.completeTemporaryPasswordChange`, throwing `503` if confirmation fails.
+ *
+ * @param {Object} [options] - Password rotation payload
+ * @param {string} [options.accessToken] - Caller's Bearer access token
+ * @param {string} [options.password] - New permanent password
+ * @returns {Promise<Object>} `{ passwordChanged, active, approvalStatus, activationRequested }`
+ */
 export const changeTemporaryPersonnelPassword = async ({ accessToken, password } = {}) => {
   const validation = personnelPasswordSetupValidator({ password });
   if (validation.error) throw ApiError.badRequest('Validation failed', validation.error);

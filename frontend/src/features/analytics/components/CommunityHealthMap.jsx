@@ -13,10 +13,11 @@ import { fetchCommunityMap } from "@/services/api/earlyWarningApi";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import { validPurokGeoJson } from "@/features/analytics/lib/purokGeometry";
+import { DEFAULT_MAP_STYLE_URL } from "@/lib/localSafety";
 
 setWorkerUrl(maplibreWorkerUrl);
 
-const BASEMAP_STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
+const BASEMAP_STYLE_URL = import.meta.env?.VITE_MAP_STYLE_URL || DEFAULT_MAP_STYLE_URL;
 const BASEMAP_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a> · <a href="https://www.openmaptiles.org/">© OpenMapTiles</a> · <a href="https://openfreemap.org">OpenFreeMap</a>';
 
@@ -225,11 +226,11 @@ export default function CommunityHealthMap({
     const selected = Array.isArray(visibleConditions) ? new Set(visibleConditions) : null;
     const counts = plotted.map((barangay) => ({
       ...barangay,
-      displayedCaseCount: showCountLabels && selected && (!dashboard || displayMetric === "caseCount")
+      displayedCaseCount: showCountLabels && selected && displayMetric === "caseCount"
         ? (barangay.conditions || [])
           .filter((item) => selected.has(item.name))
           .reduce((total, item) => total + item.value, 0)
-        : dashboard ? barangay[displayMetric] : barangay.caseCount ?? 0,
+        : barangay[displayMetric] ?? (displayMetric === "caseCount" ? 0 : null),
       displayedConditions: showCountLabels && selected
         ? (barangay.conditions || []).filter((item) => selected.has(item.name))
         : barangay.conditions || [],
@@ -237,13 +238,11 @@ export default function CommunityHealthMap({
     const maximum = Math.max(0, ...counts.map((item) => item.displayedCaseCount));
     return counts.map((item) => ({
       ...item,
-      displayedIntensity: showCountLabels
-        ? maximum > 0 ? item.displayedCaseCount / maximum : 0
-        : item.intensity ?? 0,
+      displayedIntensity: maximum > 0 ? item.displayedCaseCount / maximum : 0,
     }));
   }, [plotted, visibleConditions, showCountLabels, dashboard, displayMetric]);
   
-  const metricUnavailable = dashboard && markerData.some((row) => !Number.isSafeInteger(row.displayedCaseCount) || row.displayedCaseCount < 0);
+  const metricUnavailable = markerData.some((row) => !Number.isSafeInteger(row.displayedCaseCount) || row.displayedCaseCount < 0);
   
   // Forward-compatible authoritative purok geometry. Only a validated GeoJSON
   // FeatureCollection of Polygon/MultiPolygon with barangay_id + purok is
@@ -411,6 +410,8 @@ export default function CommunityHealthMap({
                       barangay={b}
                       onSelect={onSelect}
                       detailsHref={detailsHref}
+                      metricLabel={metricLabel}
+                      periodLabel={periodLabel}
                     />
                   </PopupCompat>
                 </CircleMarkerCompat>
@@ -437,10 +438,10 @@ export default function CommunityHealthMap({
       )}
 
       {/* Case-intensity legend + any barangays we could not plot (coordinates unavailable). */}
-      {dashboard ? <div className="hs-map-legend"><p><span aria-hidden="true" />{metricLabel} at the recorded barangay reference</p></div> : supervisor ? <div className="mt-3 space-y-1 text-caption text-brand-gray"><p className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2 w-2 rounded-sm bg-brand-blue" /><span className="font-medium text-brand-ink">Recorded cases</span> at a verified barangay reference point</p><p>Aggregated barangay data, not resident locations or clinical risk ratings.</p></div> : <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-brand-gray">
-        <span className="font-medium text-brand-ink">Case intensity</span>
-        <span className="text-[11px]">Relative to the busiest barangay in scope; not a clinical risk rating.</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#94A3B8" }} /> No data</span>
+      {dashboard ? <div className="hs-map-legend"><p><span aria-hidden="true" />{metricLabel} at the recorded barangay reference</p></div> : supervisor ? <div className="mt-3 space-y-1 text-caption text-brand-gray"><p className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2 w-2 rounded-sm bg-brand-blue" /><span className="font-medium text-brand-ink">{metricLabel}</span> at a verified barangay reference point</p><p>Aggregated barangay data, not resident locations or clinical risk ratings.</p></div> : <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-brand-gray">
+        <span className="font-medium text-brand-ink">{metricLabel}: relative intensity</span>
+        <span className="text-[11px]">Relative to the largest displayed count in scope; not a clinical risk rating.</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#94A3B8" }} /> No recorded count</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F6C453" }} /> Lower</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F59E0B" }} /> Moderate</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#EA580C" }} /> Elevated</span>
@@ -462,7 +463,8 @@ export default function CommunityHealthMap({
  * opened via `detailsHref` (or, when absent, via `onSelect` for consumers that
  * render their own detail panel). Values come from the live aggregate record.
  */
-const BarangayPopup = React.memo(function BarangayPopup({ barangay: b, onSelect, detailsHref }) {
+const BarangayPopup = React.memo(function BarangayPopup({ barangay: b, onSelect, detailsHref, metricLabel, periodLabel }) {
+  const highRiskResidents = b.reportingHighRiskResidents ?? b.highRiskResidents;
   return (
     <div className="health-map-popup-body">
       <h3 className="health-map-popup-title">{b.name}</h3>
@@ -470,13 +472,14 @@ const BarangayPopup = React.memo(function BarangayPopup({ barangay: b, onSelect,
       <dl className="health-map-popup-rows">
         <div className="health-map-popup-row">
           <dt>High-risk residents</dt>
-          <dd>{Number.isSafeInteger(b.highRiskResidents) ? b.highRiskResidents : "—"}</dd>
+          <dd>{Number.isSafeInteger(highRiskResidents) ? highRiskResidents : "—"}</dd>
         </div>
         <div className="health-map-popup-row">
-          <dt>Recorded cases</dt>
-          <dd>{Number.isSafeInteger(b.caseCount) ? b.caseCount : "—"}</dd>
+          <dt>{metricLabel}</dt>
+          <dd>{Number.isSafeInteger(b.displayedCaseCount) ? b.displayedCaseCount : "—"}</dd>
         </div>
       </dl>
+      <p className="text-xs text-brand-gray">{periodLabel}</p>
 
       {detailsHref ? (
         <Link to={detailsHref} className="health-map-popup-action">

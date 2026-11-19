@@ -2,16 +2,30 @@ import { record } from '../services/systemLogs.service.js';
 import env from '../config/env.js';
 
 /**
- * Minimal request logger.
+ * @module middleware/requestLogger
+ *
+ * Privacy-preserving HTTP request logger and runtime audit middleware for KALUSAGAP.
+ * Position in request pipeline (registered globally in `app.js` ahead of routes):
+ *   `requestLogger -> route -> authenticate -> authorize -> controller -> service -> repository/Supabase`
  *
  * Logs method, path, status, and duration only. Request bodies, headers,
  * tokens, and query strings are never logged, because they can carry
- * passwords and personal health information.
+ * passwords and personal health information (PHI).
  *
- * The same line is persisted to public.system_logs (System Management → Logs)
- * so the System Log shows real runtime activity instead of an empty table. The
- * write is fire-and-forget: it never blocks or fails the response, and it is
- * skipped entirely when Supabase is not configured.
+ * The same summary is persisted to `public.system_logs` (System Management -> Logs)
+ * via `systemLogs.service.js` so the System Log displays real runtime activity.
+ * Persistence is fire-and-forget: it never blocks or fails the HTTP response, and
+ * is skipped automatically when Supabase is not configured.
+ */
+
+/**
+ * Assigns a correlation `req.requestId`, measures high-resolution response
+ * latency, logs sanitized request metadata to stdout, and asynchronously
+ * records runtime activity to `public.system_logs` on response completion.
+ *
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @param {Function} next - Express next callback.
  */
 const requestLogger = (req, res, next) => {
   const startedAt = process.hrtime.bigint();

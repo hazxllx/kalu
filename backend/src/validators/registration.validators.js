@@ -8,7 +8,8 @@ import {
   isEmail,
   isFutureDateOnly,
   isValidPersonName,
-  isStrictMobile,
+  isPhonePH,
+  normalizePhone,
   normalizeEmail,
   toZone,
   invalid,
@@ -18,14 +19,19 @@ import {
 import { isApprovedBarangayName } from '../config/barangays.js';
 
 /**
- * Resident self-registration validation (server-authoritative).
+ * @file Resident self-registration & profile-claim validators (server-authoritative).
  *
- * Only whitelisted fields are accepted and normalised, so an unexpected key in
- * the request body can never reach the repository (no mass assignment). The
- * service still enforces ownership (the auth user id comes from the session)
- * and duplicate-identity rules.
+ * Executed by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> authenticate -> validate -> controller -> service -> repository/Supabase`).
+ *
+ * Only whitelisted demographic, address, minor-verification, and profile-claim fields
+ * are accepted and normalized so unexpected body keys can never reach the repository
+ * (preventing mass assignment of verification status or scope). Downstream registration
+ * services bind the Supabase Auth user ID from `req.user` and enforce duplicate-identity
+ * and existing-resident claim verification (`residentId` + `birthDate`).
  */
 
+/** Trims a string input, recording required/max-length errors under `errors[field]`. */
 const str = (value, max, field, label, errors, { optional = false } = {}) => {
   const out = text(value);
   if (!out) {
@@ -36,9 +42,44 @@ const str = (value, max, field, label, errors, { optional = false } = {}) => {
   return out;
 };
 
+// Date-only birthdates use the application's Philippine calendar, independent
+// of the API host's timezone or UTC day boundary.
+export const registrationDateReference = (now = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const datePart = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return new Date(Date.UTC(datePart('year'), datePart('month') - 1, datePart('day')));
+};
+
+// Accept common PH formatting, but persist one canonical 09XXXXXXXXX value.
+export const normalizeRegistrationMobile = (value) => {
+  const normalized = normalizePhone(value);
+  if (!isPhonePH(normalized)) return null;
+  return normalized.startsWith('+63') ? `0${normalized.slice(3)}` : normalized;
+};
+
+/**
+ * Validates resident onboarding payloads (`{ resident }` or flat body).
+ *
+ * Key rules enforced:
+ * - Unicode person-name validation (rejecting control characters) + controlled `NAME_SUFFIXES`.
+ * - Strict calendar `birthDate` (`0 <= age <= 120`, non-future in the Philippine timezone).
+ * - Age-gated minor (< 18) onboarding choices (`minorVerificationMethod`: `'student_id'` |
+ *   `'staff_alternative'`; `guardianLinkChoice`: `'skip'` | `'request'`), disallowed for adults.
+ * - PH mobile normalization to 11-digit `09XXXXXXXXX`, approved barangay name, controlled `zone` (`1..8`),
+ *   `permanentAddress` defaulting to `currentAddress`, and optional BHW-profile claim `residentId`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { resident } }` or `{ error }`.
+ */
 export const registerResidentValidator = (input = {}) => {
   const body = input && typeof input.resident === 'object' && input.resident !== null ? input.resident : input || {};
   const errors = {};
+  const dateReference = registrationDateReference();
 
   const firstName = str(body.firstName, TEXT_LIMITS.short, 'firstName', 'First name', errors);
   if (firstName && (hasControlChars(firstName) || !isValidPersonName(firstName))) {
@@ -59,13 +100,15 @@ export const registerResidentValidator = (input = {}) => {
 
   const birthDate = text(body.birthDate);
   if (!birthDate) errors.birthDate = 'Date of birth is required.';
-  else if (ageFromDateOnly(birthDate) === null) errors.birthDate = 'Date of birth is invalid.';
-  else if (isFutureDateOnly(birthDate)) errors.birthDate = 'Date of birth cannot be in the future.';
+  else if (ageFromDateOnly(birthDate, dateReference) === null) errors.birthDate = 'Date of birth is invalid.';
+  else if (isFutureDateOnly(birthDate, dateReference)) errors.birthDate = 'Date of birth cannot be in the future.';
   else {
-    const age = ageFromDateOnly(birthDate);
+    const age = ageFromDateOnly(birthDate, dateReference);
     if (age === null || age < 0 || age > 120) errors.birthDate = 'Date of birth is not a valid age.';
   }
-  const isMinor = ageFromDateOnly(birthDate) !== null && ageFromDateOnly(birthDate) < 18;
+  // Applicants under 18 must choose a minor identity path and guardian-linking option; adults may not supply either.
+  const applicantAge = ageFromDateOnly(birthDate, dateReference);
+  const isMinor = applicantAge !== null && applicantAge < 18;
   const minorVerificationMethod = text(body.minorVerificationMethod);
   const guardianLinkChoice = text(body.guardianLinkChoice);
   if (isMinor && !['student_id', 'staff_alternative'].includes(minorVerificationMethod)) {
@@ -87,9 +130,10 @@ export const registerResidentValidator = (input = {}) => {
   if (!civilStatus) errors.civilStatus = 'Civil status is required.';
   else if (!CIVIL_STATUSES.includes(civilStatus)) errors.civilStatus = 'Select a valid civil status.';
 
-  const cellphoneNo = str(body.cellphoneNo, 20, 'cellphoneNo', 'Mobile number', errors);
-  if (cellphoneNo && !isStrictMobile(cellphoneNo)) {
-    errors.cellphoneNo = 'Mobile number must be exactly 11 digits with no spaces or symbols (e.g. 09381829120).';
+  const cellphoneInput = str(body.cellphoneNo, 30, 'cellphoneNo', 'Mobile number', errors);
+  const cellphoneNo = normalizeRegistrationMobile(cellphoneInput);
+  if (cellphoneInput && !cellphoneNo) {
+    errors.cellphoneNo = 'Enter a valid PH mobile number (09XXXXXXXXX).';
   }
 
   const barangay = str(body.barangay, TEXT_LIMITS.medium, 'barangay', 'Barangay', errors);
@@ -152,8 +196,13 @@ export const registerResidentValidator = (input = {}) => {
 };
 
 /**
- * Login-shaped helper reused by any endpoint that accepts an email + password
- * (kept here so registration and auth rules cannot drift).
+ * Validates an email field and returns a human-readable error message (`''` when valid),
+ * shared across registration and auth flows so email formatting rules do not drift.
+ *
+ * @param {*} value - Raw email input.
+ * @param {string} [field='email'] - Field identifier.
+ * @param {string} [label='Email'] - Display label used in the required error message.
+ * @returns {string} Validation error string, or `''` when valid.
  */
 export const emailValidator = (value, field = 'email', label = 'Email') => {
   const out = normalizeEmail(value);

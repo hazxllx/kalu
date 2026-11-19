@@ -9,11 +9,11 @@ import {
   hasControlChars,
   isFutureDateOnly,
   isValidPersonName,
-  isStrictMobile,
   NAME_SUFFIXES,
   parseDateOnly,
   toZone,
 } from '../validators/common.js';
+import { normalizeRegistrationMobile, registrationDateReference } from '../validators/registration.validators.js';
 
 const SELF_ROLES = Object.freeze(['resident', 'resident-limited']);
 
@@ -33,6 +33,25 @@ const RESIDENT_ID_PATTERN = /^RES-\d{6}$/;
 const normalizeResidentId = (value) => text(value).toUpperCase();
 const CLAIM_FAILURE_MESSAGE = 'This resident record could not be linked to this account. Check your information or contact your Health Supervisor.';
 const CLAIM_UNAVAILABLE_MESSAGE = 'Resident account linking could not be confirmed. Please try again later.';
+const EMAIL_CONFIRMATION_UNAVAILABLE_MESSAGE = 'Email verification could not be confirmed. Please try again later.';
+
+// Never trust a request/profile flag for email ownership; read confirmation from Auth.
+const requireConfirmedAuthUser = async (user) => {
+  const userId = text(user?.id);
+  let result;
+  try {
+    result = await getServiceClient().auth.admin.getUserById(userId);
+  } catch {
+    throw new ApiError(503, EMAIL_CONFIRMATION_UNAVAILABLE_MESSAGE);
+  }
+  const authUser = result?.data?.user;
+  if (result?.error || authUser?.id !== userId) {
+    throw new ApiError(503, EMAIL_CONFIRMATION_UNAVAILABLE_MESSAGE);
+  }
+  if (!authUser.email_confirmed_at) {
+    throw ApiError.forbidden('Confirm your email address before completing resident registration.');
+  }
+};
 
 const toResidentResult = (resident) => ({
   id: resident.id,
@@ -139,14 +158,15 @@ const validate = (payload) => {
     errors.push('Last name can contain letters, spaces, hyphens, apostrophes, and periods only.');
   }
   if (suffix && !NAME_SUFFIXES.includes(suffix)) errors.push('Select a valid suffix.');
+  const dateReference = registrationDateReference();
   if (!birthDate) errors.push('Date of birth is required.');
   else {
-    const age = ageFromDateOnly(birthDate);
+    const age = ageFromDateOnly(birthDate, dateReference);
     if (!parseDateOnly(birthDate)) errors.push('Date of birth is invalid.');
-    else if (isFutureDateOnly(birthDate)) errors.push('Date of birth cannot be in the future.');
+    else if (isFutureDateOnly(birthDate, dateReference)) errors.push('Date of birth cannot be in the future.');
     else if (age === null || age < 0 || age > 120) errors.push('Date of birth is not a valid age.');
   }
-  const age = ageFromDateOnly(birthDate);
+  const age = ageFromDateOnly(birthDate, dateReference);
   const isMinor = age !== null && age < 18;
   const minorVerificationMethod = text(payload.minorVerificationMethod);
   const guardianLinkChoice = text(payload.guardianLinkChoice);
@@ -167,9 +187,9 @@ const validate = (payload) => {
   if (!barangay) errors.push('Barangay is required.');
   // Server-authoritative mobile + zone checks (the request validator already
   // ran, but the service never trusts the caller and re-enforces both here).
-  if (cellphoneNo && !isStrictMobile(cellphoneNo)) {
-    errors.push('Mobile number must be exactly 11 digits (e.g. 09381829120).');
-  }
+  const normalizedCellphoneNo = normalizeRegistrationMobile(cellphoneNo);
+  if (!cellphoneNo) errors.push('Mobile number is required.');
+  else if (!normalizedCellphoneNo) errors.push('Enter a valid PH mobile number (09XXXXXXXXX).');
   if (payload.zone !== undefined && text(payload.zone) !== '' && zone === null) {
     errors.push('Zone must be a number from 1 to 8.');
   }
@@ -186,7 +206,7 @@ const validate = (payload) => {
     civilStatus,
     barangay,
     identityNo,
-    cellphoneNo,
+    cellphoneNo: normalizedCellphoneNo || '',
     zone,
     ...(isMinor ? { minorVerificationMethod } : {}),
     ...(isMinor ? { guardianLinkChoice } : {}),
@@ -197,6 +217,7 @@ export const registerResident = async ({ user, payload = {} }) => {
   if (!SELF_ROLES.includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may complete resident registration.');
   }
+  await requireConfirmedAuthUser(user);
 
   const existing = await repository.getResidentByAuthUserId(user.id);
   if (existing) {
@@ -250,11 +271,6 @@ export const registerResident = async ({ user, payload = {} }) => {
       if (linked?.id !== target.id || linked.authUserId !== user.id) throw ApiError.conflict(CLAIM_FAILURE_MESSAGE);
     }
     await activateIfVerified(linked, user.id);
-    try {
-      await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
-    } catch {
-      /* best-effort: do not block linking if confirmation fails */
-    }
     return toResidentResult(linked);
   }
 
@@ -333,11 +349,6 @@ export const registerResident = async ({ user, payload = {} }) => {
       if (linkedResident?.id !== duplicate.id || linkedResident.authUserId !== user.id) throw ApiError.conflict(CLAIM_FAILURE_MESSAGE);
     }
     await activateIfVerified(linkedResident, user.id);
-    try {
-      await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
-    } catch {
-      /* best-effort: do not block linking if confirmation fails */
-    }
     return toResidentResult(linkedResident);
   }
 
@@ -387,12 +398,6 @@ export const registerResident = async ({ user, payload = {} }) => {
     await activateIfVerified(resident, user.id);
   }
 
-  try {
-    await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
-  } catch {
-    /* best-effort: do not block registration if confirmation fails */
-  }
-
   return toResidentResult(resident);
 };
 
@@ -408,6 +413,7 @@ export const activateOwnAccount = async ({ user } = {}) => {
   if (!SELF_ROLES.includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may activate itself.');
   }
+  await requireConfirmedAuthUser(user);
   const resident = repository.getResidentByAuthUserId
     ? await repository.getResidentByAuthUserId(user.id)
     : null;
@@ -467,13 +473,18 @@ export const activateExistingResident = async ({ user, residentId, birthDate } =
   if (!SELF_ROLES.includes(user?.role)) {
     throw ApiError.forbidden('Only a resident account may activate an existing record.');
   }
+  await requireConfirmedAuthUser(user);
   const id = normalizeResidentId(residentId);
   if (!RESIDENT_ID_PATTERN.test(id)) {
     throw ApiError.unprocessable('Enter a valid Resident ID (for example, RES-000123).');
   }
   const dob = text(birthDate);
+  const dateReference = registrationDateReference();
   if (!dob || !parseDateOnly(dob)) {
     throw ApiError.unprocessable('Enter the date of birth on your existing record to verify your identity.');
+  }
+  if (isFutureDateOnly(dob, dateReference)) {
+    throw ApiError.unprocessable('Enter a valid date of birth to verify your identity.');
   }
 
   // Idempotent recovery: if this account is already linked (e.g. a retry after
@@ -511,11 +522,6 @@ export const activateExistingResident = async ({ user, residentId, birthDate } =
 
   const result = await claimWithCurrentProof({ target, authUserId: user.id, birthDate: dob });
   await activateIfVerified(result, user.id);
-  try {
-    await getServiceClient().auth.admin.updateUserById(user.id, { email_confirm: true });
-  } catch {
-    /* best-effort: do not block linking if confirmation fails */
-  }
   return { ...toResidentResult(result), alreadyLinked: false };
 };
 
