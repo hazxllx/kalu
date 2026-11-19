@@ -20,7 +20,7 @@ import { startPersonnelNotificationWorker } from './services/personnelNotificati
  */
 const boot = async () => {
   if (!env.isProduction && (!env.isSupabaseConfigured || !env.supabaseAnonKey || !env.otpPepper)) {
-    throw new Error('Local Supabase credentials and OTP_PEPPER are required. Start Docker and Supabase, then run npm run local:configure from the repository root.');
+    throw new Error('Supabase URL, anon/service keys, and OTP_PEPPER are required in backend/.env.');
   }
   let stopNotificationWorker = async () => {};
   let shuttingDown = false;

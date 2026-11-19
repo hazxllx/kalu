@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 import env from './env.js';
-import { localServiceFetch } from './localSafety.js';
+import { hostedSupabaseDevelopmentFetch, localServiceFetch } from './localSafety.js';
 
 /**
  * Server-side Supabase clients.
@@ -22,6 +22,9 @@ import { localServiceFetch } from './localSafety.js';
  */
 
 let serviceClient = null;
+const developmentFetch = env.isHostedSupabaseDevelopment
+  ? hostedSupabaseDevelopmentFetch(env.supabaseUrl)
+  : localServiceFetch;
 
 const assertConfigured = () => {
   if (!env.isSupabaseConfigured) {
@@ -41,7 +44,7 @@ export const getServiceClient = () => {
   assertConfigured();
   if (!serviceClient) {
     serviceClient = createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
-      ...(!env.isProduction ? { global: { fetch: localServiceFetch } } : {}),
+      ...(!env.isProduction ? { global: { fetch: developmentFetch } } : {}),
       auth: { autoRefreshToken: false, persistSession: false },
     });
   }
@@ -64,7 +67,7 @@ export const getUserClient = (accessToken) => {
     );
   }
   return createClient(env.supabaseUrl, env.supabaseAnonKey, {
-    global: { headers: { Authorization: `Bearer ${accessToken}` }, ...(!env.isProduction ? { fetch: localServiceFetch } : {}) },
+    global: { headers: { Authorization: `Bearer ${accessToken}` }, ...(!env.isProduction ? { fetch: developmentFetch } : {}) },
     auth: { autoRefreshToken: false, persistSession: false },
   });
 };
@@ -89,7 +92,7 @@ export const createAuthClient = () => {
     );
   }
   return createClient(env.supabaseUrl, env.supabaseAnonKey, {
-    ...(!env.isProduction ? { global: { fetch: localServiceFetch } } : {}),
+    ...(!env.isProduction ? { global: { fetch: developmentFetch } } : {}),
     auth: { autoRefreshToken: false, persistSession: false },
   });
 };

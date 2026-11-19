@@ -24,6 +24,7 @@ import env from '../config/env.js';
 
 let transporter;
 const trackedTransports = new WeakSet();
+const loopbackSmtpHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 const SMTP_ERROR_CODES = new Set([
   'EAUTH', 'ENOAUTH', 'EOAUTH2', 'EDNS', 'ETLS', 'EREQUIRETLS', 'ECONNECTION',
   'ESOCKET', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN',
@@ -40,7 +41,10 @@ const SMTP_ERROR_CODES = new Set([
  * @returns {Object} Configured Nodemailer transporter instance.
  */
 export const getEmailTransporter = () => {
-  if (!env.smtpHost || !env.smtpFrom || (env.isProduction && (!env.smtpUser || !env.smtpPassword))) {
+  const requireAuthentication = env.isProduction
+    || (env.isHostedSupabaseDevelopment && !loopbackSmtpHosts.has(env.smtpHost));
+  if (!env.smtpHost || !env.smtpFrom
+    || (requireAuthentication && (!env.smtpUser || !env.smtpPassword))) {
     throw Object.assign(new Error('Email delivery is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM.'), {
       code: 'SMTP_NOT_CONFIGURED',
     });
@@ -49,9 +53,9 @@ export const getEmailTransporter = () => {
     host: env.smtpHost,
     port: env.smtpPort,
     secure: env.smtpPort === 465,
-    requireTLS: env.isProduction && env.smtpPort !== 465,
-    ignoreTLS: !env.isProduction,
-    ...(env.isProduction ? { auth: { user: env.smtpUser, pass: env.smtpPassword } } : {}),
+    requireTLS: requireAuthentication && env.smtpPort !== 465,
+    ignoreTLS: !requireAuthentication,
+    ...(requireAuthentication ? { auth: { user: env.smtpUser, pass: env.smtpPassword } } : {}),
     logger: false,
     debug: false,
     connectionTimeout: 30_000,

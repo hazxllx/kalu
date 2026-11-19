@@ -131,12 +131,13 @@ npm run install:all
 
 ### Environment Configuration
 
-Development reads `.env.development`, never the legacy `.env`. Existing
-deployment values are preserved in ignored `.env.production` files. On a fresh
-disposable local stack, run `supabase start`, then `npm run local:configure`.
-The configuration command obtains local keys without printing them.
+Each app uses one ignored `.env` file for local development. Production
+deployments use environment variables configured in Vercel/Render, not local
+`.env` files. On a fresh disposable local stack, run `supabase start`, then
+`npm run local:configure`. The configuration command obtains local keys without
+printing them.
 
-**Frontend (`frontend/.env.development`):**
+**Frontend (`frontend/.env`):**
 ```env
 VITE_API_URL=http://localhost:5000/api
 VITE_SUPABASE_URL=http://127.0.0.1:54321
@@ -144,7 +145,7 @@ VITE_SUPABASE_ANON_KEY=<local-anon-JWT>
 VITE_ANALYTICS_ENABLED=false
 ```
 
-**Backend (`backend/.env.development`):**
+**Backend (`backend/.env`):**
 ```env
 PORT=5000
 NODE_ENV=development
@@ -164,8 +165,19 @@ OTP_PEPPER=<generated-by-local-configure>
 
 **Security Notes:**
 - Never commit `.env` files.
+- Set production variables in the hosting platform's environment settings.
 - Never expose `SUPABASE_SERVICE_ROLE_KEY` to the frontend or as a `VITE_` variable. It bypasses RLS and must stay server-side.
 - Use separate credentials for staging and production.
+- To develop without Docker, use a dedicated non-production Supabase project.
+  Set `SUPABASE_MODE=hosted-development` in `backend/.env` and
+  `VITE_SUPABASE_MODE=hosted-development` in `frontend/.env`; set the matching
+  project URL/keys in each file. The frontend receives only the anon key. The
+  backend allows requests only to the configured HTTPS Supabase project origin.
+  If the backend uses a remote SMTP provider in hosted-development mode, set
+  `SMTP_USER` and `SMTP_PASSWORD`; outbound SMTP will require TLS. Local SMTP
+  capture remains available without credentials or TLS.
+  Set `OTP_PEPPER` to a new random 32-byte hex value; do not reuse a production
+  pepper.
 
 ### Vercel Authentication
 

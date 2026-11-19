@@ -48,6 +48,7 @@ import {
   signupResponseIssue,
   classifySignupError,
   rateLimitRetrySeconds,
+  signupErrorMessage,
 } from "@/features/registration/signupResponse";
 import { isSendCodeDisabled } from "@/features/registration/sendCodeGate";
 import {
@@ -275,7 +276,7 @@ export default function NewResidentRegistration() {
   const governmentIdPairSeq = useRef(0);
 
   // Email verification (real Supabase Confirm Signup OTP — no local/fake OTP)
-  // emailPhase: "idle" | "sending" | "sent" | "verifying" | "verified"
+  // emailPhase: "idle" | "sending" | "sent" | "retry" | "expired" | "verifying" | "verified"
   const [emailPhase, setEmailPhase] = useState(/** @type {string} */ ("idle"));
   const [otpDigits, setOtpDigits] = useState(new Array(OTP_LENGTH).fill(""));
   const [otpError, setOtpError] = useState("");
@@ -321,14 +322,15 @@ export default function NewResidentRegistration() {
 
   const emailVerified = emailPhase === "verified";
 
-  const sendCode = async () => {
+  const sendCode = async (forceResend = false) => {
+    const isForcedResend = forceResend === true;
     if (signupInFlightRef.current || emailVerified || emailPhase === "sending" || emailPhase === "verifying") return;
     const normalizedEmail = normalizeRegistrationEmail(form.email);
     const emailErr = validateEmail(normalizedEmail, { label: "Email address" });
     if (emailErr) { setErrors((p) => ({ ...p, email: emailErr })); return; }
     // A previously confirmed duplicate must never trigger another signup/send.
-    if (emailDuplicate) return;
-    const isResend = emailPhase === "sent" || emailPhase === "expired";
+    if (emailDuplicate && !isForcedResend) return;
+    const isResend = isForcedResend || emailPhase === "sent" || emailPhase === "retry" || emailPhase === "expired";
     // During the cooldown the resend request would be rejected by the server
     // (max_frequency = 60s). Block it client-side too so no duplicate request
     // is ever issued from a stray click.
@@ -442,21 +444,22 @@ export default function NewResidentRegistration() {
       }
       if (request !== emailRequestRef.current) return;
       setEmailPhase("sent");
+      setEmailDuplicate(false);
       clearOtp();
       setResendIn(60);
       setSendNotice(
         isResend
-          ? "The email service accepted your new verification code. Check your inbox and spam folder."
+          ? "A new verification code was requested. If this account is still unverified, check your inbox and spam folder."
           : "The email service accepted your verification code. Check your inbox and spam folder."
       );
     } catch (err) {
       if (request !== emailRequestRef.current) return;
-      const msg = err?.message || "";
       // Use the same classifier as the signUp response path so both stay
       // consistent (duplicate vs. profile conflict vs. rate limit vs. generic).
       const errClass = classifySignupError(err);
       const duplicateEmail = errClass === "duplicate_email";
-      setEmailPhase(duplicateEmail ? "idle" : (isResend ? emailPhase : "idle"));
+      const emailDeliveryFailure = errClass === "smtp_auth_failed" || errClass === "email_delivery_failed";
+      setEmailPhase(duplicateEmail ? "idle" : (isResend ? emailPhase : (emailDeliveryFailure ? "retry" : "idle")));
       if ((duplicateEmail || errClass === "profile_conflict") && !isResend) {
         tempPasswordRef.current = "";
       }
@@ -477,14 +480,11 @@ export default function NewResidentRegistration() {
         setSendError(
           "We couldn't start verification for this email due to a record conflict. Please contact the RHU, or use a different email address you control."
         );
-      } else if (/error sending confirmation email|smtp|email delivery/i.test(msg)) {
-        setSendError("The email service could not send your verification code. Please retry later or contact the RHU so they can check the email provider configuration.");
+      } else if (emailDeliveryFailure) {
+        setResendIn(60);
+        setSendError(signupErrorMessage(err, { isResend }));
       } else {
-        setSendError(
-          isResend
-            ? (msg || "Unable to resend the code. Please try again.")
-            : (msg || "Could not send the verification code. Please try again.")
-        );
+        setSendError(signupErrorMessage(err, { isResend }));
       }
     } finally {
       signupInFlightRef.current = false;
@@ -1565,6 +1565,14 @@ export default function NewResidentRegistration() {
                             <Link to="/forgot-password" className="font-semibold text-brand-blue underline underline-offset-2">reset your password</Link>.
                             If you don't recognize it, enter a different email address you control.
                           </p>
+                          <button
+                            type="button"
+                            onClick={() => sendCode(true)}
+                            disabled={resending || resendIn > 0}
+                            className="mt-2 font-semibold text-brand-blue underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {resending ? "Requesting code…" : resendIn > 0 ? `Try again in ${resendIn}s` : "If you have not verified this email, resend the code"}
+                          </button>
                         </div>
                       )}
                         {sendError && <p role="alert" className="text-[11.5px] font-medium text-brand-danger">{sendError}</p>}
@@ -1572,7 +1580,7 @@ export default function NewResidentRegistration() {
                     </div>
                   ) : null}
 
-                  {(emailPhase === "sent" || emailPhase === "expired" || emailPhase === "verifying" || emailPhase === "verified") && (
+                  {(emailPhase === "sent" || emailPhase === "retry" || emailPhase === "expired" || emailPhase === "verifying" || emailPhase === "verified") && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
                       {emailPhase === "verified" ? (
                         <div role="status" className="flex items-center gap-2.5 text-[12.5px] font-semibold text-brand-green">
@@ -1588,10 +1596,14 @@ export default function NewResidentRegistration() {
                               <Mail className="h-[18px] w-[18px] text-brand-blue" strokeWidth={1.9} />
                             </span>
                             <div className="min-w-0">
-                              <p id="resident-email-verification" tabIndex={-1} role="status" className="text-[13px] font-bold text-brand-ink">{emailPhase === "expired" ? "Expired: request a new code" : "Pending: check your email"}</p>
+                              <p id="resident-email-verification" tabIndex={-1} role="status" className="text-[13px] font-bold text-brand-ink">
+                                {emailPhase === "expired" ? "Expired: request a new code" : emailPhase === "retry" ? "Email delivery needs retry" : "Pending: check your email"}
+                              </p>
                               <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">
-                                We've sent a verification code to{" "}
-                                <span className="break-all font-semibold text-slate-700">{form.email}</span>.
+                                {emailPhase === "retry"
+                                  ? "The previous request did not confirm delivery. You can safely request another code."
+                                  : <>A verification code was requested for{" "}
+                                    <span className="break-all font-semibold text-slate-700">{form.email}</span>.</>}
                               </p>
                             </div>
                           </div>
@@ -1609,7 +1621,7 @@ export default function NewResidentRegistration() {
                                 onChange={handleOtpChange(i)}
                                 onKeyDown={handleOtpKeyDown(i)}
                                 aria-label={`Verification digit ${i + 1}`}
-                                disabled={emailPhase === "verifying" || resending || emailPhase === "expired"}
+                                disabled={emailPhase === "verifying" || resending || emailPhase === "expired" || emailPhase === "retry"}
                                 className={`h-12 min-w-0 flex-1 rounded-lg border bg-white text-center font-stat text-lg font-bold text-brand-ink outline-none transition-colors focus:border-brand-blue ${
                                   otpError ? "border-brand-danger/60" : "border-slate-300"
                                 }`}

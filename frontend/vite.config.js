@@ -1,6 +1,6 @@
 
 import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import { resolve } from 'path'
 import { VitePWA } from 'vite-plugin-pwa'
 import { publicSupabaseConfigurationError } from '../shared/authConnectivity.js'
@@ -16,7 +16,9 @@ export default defineConfig(({ mode, command, isPreview }) => {
     throw new Error('Local servers must use development mode. Production mode is reserved for deployment builds.')
   }
   const local = mode !== 'production'
-  const env = local ? loadLocalEnvironment(mode, __dirname) : loadEnv(mode, __dirname, 'VITE_')
+  const env = local
+    ? loadLocalEnvironment(mode, __dirname)
+    : Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('VITE_')))
   const required = [
     'VITE_API_URL',
     ...(mode === 'production' ? ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] : []),
@@ -42,9 +44,10 @@ export default defineConfig(({ mode, command, isPreview }) => {
   }
 
   return {
+  // Deployment builds use hosting-provided variables, never developer .env values.
+  envDir: false,
   ...(local ? {
-    // Disable Vite's implicit .env/.env.local and inherited VITE_ loading.
-    envDir: false,
+    // Local variables are loaded explicitly and checked above.
     envPrefix: [],
     define: Object.fromEntries(Object.entries(env).map(([name, value]) => [`import.meta.env.${name}`, JSON.stringify(value)])),
     server: {

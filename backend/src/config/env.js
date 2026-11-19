@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
-import { assertLocalEnvironment } from './localSafety.js';
+import { assertDevelopmentEnvironment } from './localSafety.js';
 
 /**
  * KALUSAGAP — centralized backend environment & runtime configuration.
@@ -11,12 +11,14 @@ import { assertLocalEnvironment } from './localSafety.js';
  * `route -> authenticate -> authorize -> controller -> service -> repository/Supabase`
  * stack.
  */
-// Never load a legacy .env (which may contain deployment credentials) locally.
+// Load the folder's single .env; hosting-provided variables take precedence.
 const runtimeMode = process.env.NODE_ENV || 'development';
 if (!['development', 'test', 'production'].includes(runtimeMode)) {
   throw new Error('NODE_ENV must be development, test, or production.');
 }
-dotenv.config({ path: fileURLToPath(new URL(`../../.env.${runtimeMode}`, import.meta.url)) });
+if (runtimeMode === 'development') {
+  dotenv.config({ path: fileURLToPath(new URL('../../.env', import.meta.url)) });
+}
 if ((process.env.NODE_ENV || 'development') !== runtimeMode) {
   throw new Error('Environment files cannot change NODE_ENV.');
 }
@@ -27,6 +29,7 @@ const corsOriginValue = process.env.CORS_ORIGIN || '';
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseMode = process.env.SUPABASE_MODE || 'local';
 const personnelIntervalSeconds = Number(process.env.PERSONNEL_NOTIFICATION_INTERVAL_SECONDS || 60);
 const DEVELOPMENT_CLIENT_URLS = Object.freeze([
   'http://localhost:5173',
@@ -89,7 +92,10 @@ const configuredClientUrls = [
       .map(parseHttpOrigin),
   ),
 ];
-if (!isProduction) assertLocalEnvironment(process.env);
+if (isProduction && supabaseMode === 'hosted-development') {
+  throw new Error('SUPABASE_MODE=hosted-development is only permitted in local development.');
+}
+if (!isProduction) assertDevelopmentEnvironment(process.env);
 
 /**
  * Coerce `TRUST_PROXY` env string into Express `trust proxy` format:
@@ -142,6 +148,8 @@ const env = {
   supabaseServiceRoleKey,
   // The anon key is safe to use for verifying end-user access tokens.
   supabaseAnonKey,
+  supabaseMode,
+  isHostedSupabaseDevelopment: !isProduction && supabaseMode === 'hosted-development',
 
   // --- Outbound email, background worker & OTP security --------------------
   smtpHost: process.env.SMTP_HOST || (isProduction ? '' : '127.0.0.1'),

@@ -16,6 +16,13 @@ const local = {
   VITE_SUPABASE_ANON_KEY: '',
 };
 const jwt = (claims) => `test.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.test`;
+const hostedProjectRef = 'abcdefghijklmnopqrst';
+const hosted = {
+  ...local,
+  VITE_SUPABASE_MODE: 'hosted-development',
+  VITE_SUPABASE_URL: `https://${hostedProjectRef}.supabase.co`,
+  VITE_SUPABASE_ANON_KEY: jwt({ iss: 'supabase', role: 'anon', ref: hostedProjectRef }),
+};
 
 test('blank local auth is safe, and only local anon JWT claims are accepted', () => {
   assert.doesNotThrow(() => validateLocalEnvironment(local));
@@ -52,19 +59,37 @@ test('application endpoints reject hosted targets, URL tricks and embedded crede
   assert.throws(() => validateLocalEnvironment({ ...local, VITE_SERVICE_ROLE_KEY: 'never-expose' }));
 });
 
-test('mode loader ignores legacy files and never expands shell or legacy values', () => {
+test('hosted Supabase requires an explicit mode, HTTPS project URL and matching public key', () => {
+  assert.doesNotThrow(() => validateLocalEnvironment(hosted));
+  assert.doesNotThrow(() => validateLocalEnvironment({
+    ...hosted, VITE_SUPABASE_ANON_KEY: 'sb_publishable_development',
+  }));
+  assert.throws(() => validateLocalEnvironment({ ...hosted, VITE_SUPABASE_MODE: 'local' }));
+  assert.throws(() => validateLocalEnvironment({
+    ...hosted, VITE_SUPABASE_ANON_KEY: jwt({ iss: 'supabase', role: 'anon', ref: 'other-project' }),
+  }), /does not match/);
+  assert.throws(() => validateLocalEnvironment({
+    ...hosted, VITE_SUPABASE_ANON_KEY: 'sb_secret_do-not-expose',
+  }), /must not contain a server secret/);
+  assert.throws(() => validateLocalEnvironment({
+    ...hosted, VITE_SUPABASE_URL: 'http://project.supabase.co',
+  }), /HTTPS Supabase project URL/);
+  assert.throws(() => validateLocalEnvironment({
+    ...hosted, VITE_API_URL: 'https://project.supabase.co/api',
+  }), /loopback HTTP/);
+});
+
+test('local loader reads only .env and never expands shell or other files', () => {
   const directory = mkdtempSync(resolve(frontend, 'tests/safety/.local-env-'));
   try {
-    writeFileSync(resolve(directory, '.env'), 'VITE_API_URL=https://production.example.test\nVITE_LEAKED_KEY=must-not-leak\n');
+    writeFileSync(resolve(directory, '.env'), Object.entries(local).map(([key, value]) => `${key}=${value}`).join('\n'));
     writeFileSync(resolve(directory, '.env.local'), 'VITE_API_URL=https://other.example.test\n');
     writeFileSync(resolve(directory, '.env.production'), 'VITE_API_URL=https://production.example.test\n');
-    writeFileSync(resolve(directory, '.env.development'), Object.entries(local).map(([key, value]) => `${key}=${value}`).join('\n'));
-    writeFileSync(resolve(directory, '.env.development.local'), 'VITE_API_URL=http://127.0.0.1:5001/api\n');
     const env = loadLocalEnvironment('development', directory, { NODE_ENV: 'production' });
-    assert.equal(env.VITE_API_URL, 'http://127.0.0.1:5001/api');
+    assert.equal(env.VITE_API_URL, local.VITE_API_URL);
     assert.equal(env.VITE_LEAKED_KEY, undefined);
-    assert.throws(() => loadLocalEnvironment('development', directory, { VITE_API_URL: 'https://hosted.example.test' }), /exclusively from mode files/);
-    writeFileSync(resolve(directory, '.env.development.local'), 'VITE_API_URL=${PRODUCTION_API}\n');
+    assert.throws(() => loadLocalEnvironment('development', directory, { VITE_API_URL: 'https://hosted.example.test' }), /exclusively from \.env/);
+    writeFileSync(resolve(directory, '.env'), 'VITE_APP_BASE_URL=http://localhost:5173\nVITE_API_URL=${PRODUCTION_API}\nVITE_SUPABASE_URL=http://127.0.0.1:54321\nVITE_SUPABASE_ANON_KEY=\n');
     assert.throws(() => loadLocalEnvironment('development', directory, { PRODUCTION_API: 'http://localhost:5000/api' }));
     assert.throws(() => loadLocalEnvironment('production', directory, {}));
     assert.throws(() => loadLocalEnvironment('../production', directory, {}));
@@ -85,6 +110,12 @@ test('CSP has exact local application origins and only the intentional public ma
   assert.throws(() => validateLocalEnvironment({ ...local, VITE_MAP_STYLE_URL: 'https://production.example.test/style.json' }));
 });
 
+test('hosted development CSP allows only the configured Supabase project origin', () => {
+  const policy = localContentSecurityPolicy(hosted);
+  assert.match(policy, new RegExp(`connect-src[^;]*https://${hostedProjectRef}\\.supabase\\.co`));
+  assert.doesNotMatch(policy, /connect-src[^;]*other-project\.supabase\.co/);
+});
+
 test('actual Vite startup rejects malicious inherited environments before opening a server', () => {
   for (const overrides of [
     { VITE_API_URL: 'https://production.example.test' },
@@ -97,7 +128,7 @@ test('actual Vite startup rejects malicious inherited environments before openin
     });
     assert.equal(result.error, undefined);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /exclusively from mode files/);
+    assert.match(result.stderr, /exclusively from \.env/);
     assert.doesNotMatch(result.stdout + result.stderr, /sb_secret_never-print-this-value/);
   }
 });
@@ -117,4 +148,14 @@ test('Vite CLI cannot serve production mode, stale preview bundles or non-loopba
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, reason);
   }
+});
+
+test('production builds do not load local .env values', () => {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('VITE_')));
+  const result = spawnSync(process.execPath, ['node_modules/vite/bin/vite.js', 'build'], {
+    cwd: frontend, env, encoding: 'utf8', timeout: 30_000,
+  });
+  assert.equal(result.error, undefined);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /production frontend configuration is incomplete.*VITE_API_URL/s);
 });

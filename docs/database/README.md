@@ -24,8 +24,9 @@ Local Studio is at `http://127.0.0.1:54323`. Auth and Storage are required in
 addition to PostgreSQL. Initial Supabase startup applies migrations to a fresh
 database. Local configuration is generated with `npm run local:configure`.
 
-Never link development to production. Existing deployment settings are preserved
-in ignored `.env.production` files and `supabase/config.production.toml`.
+Never link development to production. Production settings belong in the hosting
+platform's environment variables. `supabase/config.production.toml` is a local
+preservation copy and is not loaded by the CLI.
 Historical migrations contain destructive DDL, including removal of
 `medicine_facility_availability`. Review pending SQL and do not reset or replay
 the chain on populated data. No production SQL is needed for local setup.
@@ -38,7 +39,7 @@ renamed or deleted.
 
 ## Environment variables
 
-Backend (`backend/.env.development`) - server only, never in the frontend:
+Backend (`backend/.env`) - server only, never in the frontend:
 
 ```
 SUPABASE_URL=http://127.0.0.1:54321
@@ -47,7 +48,7 @@ SUPABASE_SERVICE_ROLE_KEY=<local service-role JWT>
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
 ```
 
-Frontend (`frontend/.env.development`) - public by design, protected by RLS:
+Frontend (`frontend/.env`) - public by design, protected by RLS:
 
 ```
 VITE_SUPABASE_URL=http://127.0.0.1:54321

@@ -31,11 +31,20 @@ The database password above is for the disposable local stack, never a hosted
 database. The application uses the Supabase SDK rather than a direct SQL driver;
 `DATABASE_URL` documents and validates the direct local database destination.
 
-## Preserved deployment configuration
+## Environment configuration
 
-- Existing `backend/.env` and `frontend/.env` were preserved byte-for-byte in
-  ignored `.env.production` files, without printing their values. The originals
-  were retained and are no longer loaded by development commands.
+- Each app uses one ignored `.env` for local development. Production settings
+  must be configured as environment variables in Vercel/Render; they are not
+  kept in local app `.env` files.
+- Docker-free local development may opt into a dedicated hosted Supabase
+  development project with `SUPABASE_MODE=hosted-development` in
+  `backend/.env` and `VITE_SUPABASE_MODE=hosted-development` in
+  `frontend/.env`. The URLs and keys must refer to the same non-production
+  project. Backend requests are restricted to that project origin; hosted
+  projects remain blocked by default. If backend email uses a remote SMTP
+  provider in this mode, set `SMTP_USER` and `SMTP_PASSWORD`; outbound SMTP
+  requires TLS. Local SMTP capture remains unauthenticated and is not subject
+  to the remote-provider exception.
 - The original `supabase/config.toml` was copied to ignored
   `supabase/config.production.toml` before editing. Supabase CLI does not load
   that preservation copy automatically.
@@ -111,9 +120,8 @@ frontend/tests/e2e/helpers/isolation.js
 frontend/tests/e2e/helpers/env.js
 ```
 
-Ignored machine-local files created/preserved: `backend/.env.development`,
-`frontend/.env.development`, both `.env.production` copies, and
-`supabase/config.production.toml`. No existing production file was deleted.
+Ignored machine-local files: `backend/.env`, `frontend/.env`, and
+`supabase/config.production.toml`.
 
 ## Production references removed from local execution
 
@@ -185,7 +193,7 @@ npm run dev:frontend
    necessary. If Docker or local Supabase is unavailable, stop here; never
    substitute a hosted project.
 
-The local configuration helper writes ignored `.env.development` files from
+The local configuration helper writes ignored `.env` files from
 `supabase status --output json`. It keeps the server key exclusively in the
 backend, creates a random OTP pepper, and preserves an existing generated
 pepper on reruns. It never links projects, runs migrations, resets, seeds, or
@@ -202,7 +210,7 @@ map configuration separately before rerunning it.
 | Optional map style | `VITE_MAP_STYLE_URL` |
 | Backend origins | `NODE_ENV`, `PORT`, `CLIENT_URL`, `CORS_ORIGIN` |
 | Database/Auth/Storage | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
-| Local mail and OTP | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `OTP_PEPPER`; empty `SMTP_USER`/`SMTP_PASSWORD` |
+| Local mail and OTP | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `OTP_PEPPER`; empty `SMTP_USER`/`SMTP_PASSWORD` for local capture |
 | Notification worker | `PERSONNEL_NOTIFICATION_INTERVAL_SECONDS` |
 
 - Backend development explicitly sets development mode, so an inherited
@@ -217,8 +225,8 @@ map configuration separately before rerunning it.
   authentication; local capture needs neither.
 - Supabase HTTP requests and operational script fetches disable redirects, so
   a local response cannot silently redirect application credentials to a host.
-- Development frontend configuration ignores legacy `.env` and `.env.local`,
-  takes literal values from the selected mode files, rejects inherited `VITE_`
+- Development frontend configuration reads only `.env`, ignores `.env.local`
+  and mode-suffixed files, rejects inherited `VITE_`
   variables, and validates destinations before serving or building.
 - The frontend has a local content security policy for API, Auth, images,
   fonts, sockets, and embedded documents. The intentional map provider is the

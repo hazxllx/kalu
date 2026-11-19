@@ -12,6 +12,7 @@ import {
   normalizeRegistrationEmail,
   classifySignupError,
   signupResponseIssue,
+  signupErrorMessage,
   rateLimitRetrySeconds,
 } from "../../src/features/registration/signupResponse.js";
 
@@ -61,6 +62,31 @@ test("rate-limit errors are classified separately", () => {
   assert.equal(classifySignupError({ code: "over_request_rate_limit" }), "rate_limited");
   assert.equal(classifySignupError({ status: 429, message: "For security purposes, you can only request this after 54 seconds." }), "rate_limited");
   assert.equal(classifySignupError({ message: "email rate limit exceeded" }), "rate_limited");
+});
+
+test("SMTP authentication failures are distinguished from ordinary delivery failures", () => {
+  assert.equal(
+    classifySignupError({ message: "Error sending confirmation email", details: "535 5.7.8 Authentication failed" }),
+    "smtp_auth_failed",
+  );
+  assert.equal(
+    classifySignupError({ message: "Error sending confirmation email" }),
+    "email_delivery_failed",
+  );
+  assert.equal(classifySignupError({ message: "Password is too weak" }), "signup_failed");
+});
+
+test("signup error messages are safe and never expose provider diagnostics", () => {
+  const providerDiagnostic = "535 5.7.8 Authentication failed; SMTP_PASSWORD=private-test-secret";
+  const message = signupErrorMessage({
+    message: "Error sending confirmation email",
+    details: providerDiagnostic,
+  });
+
+  assert.match(message, /provider rejected SMTP authentication/i);
+  assert.match(message, /not verified/i);
+  assert.doesNotMatch(message, /535|private-test-secret|SMTP_PASSWORD/i);
+  assert.match(signupErrorMessage({ message: "Password is too weak" }), /could not send your verification code/i);
 });
 
 test("rateLimitRetrySeconds reads the server-mandated interval", () => {

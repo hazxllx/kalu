@@ -8,13 +8,12 @@ export function loadLocalEnvironment(mode, directory, inherited = process.env) {
     throw new Error('Use a non-production Vite mode for local development.');
   }
   if (Object.keys(inherited).some((name) => name.startsWith('VITE_'))) {
-    throw new Error('Local VITE_ configuration must come exclusively from mode files; remove inherited VITE_ variables.');
+    throw new Error('Local VITE_ configuration must come exclusively from .env; remove inherited VITE_ variables.');
   }
   const env = {};
-  for (const filename of [`.env.${mode}`, `.env.${mode}.local`]) {
-    const path = resolve(directory, filename);
-    if (!existsSync(path)) continue;
-    // Literal values only: no expansion from legacy files or the shell.
+  const path = resolve(directory, '.env');
+  if (existsSync(path)) {
+    // Literal values only: no expansion from the file or the shell.
     const parsed = parseEnv(readFileSync(path, 'utf8'));
     for (const [name, value] of Object.entries(parsed)) {
       if (name.startsWith('VITE_')) env[name] = value;
