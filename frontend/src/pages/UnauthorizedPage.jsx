@@ -22,7 +22,7 @@ export default function UnauthorizedPage() {
         <div className="space-y-3">
           <h2 className="text-2xl font-medium text-slate-800">Access Restricted</h2>
           <p className="text-slate-600 leading-relaxed">
-            Your account role does not have permission to view this page.
+            Your account does not have the required permission or service-area assignment to view this page.
           </p>
         </div>
         <div className="pt-6">

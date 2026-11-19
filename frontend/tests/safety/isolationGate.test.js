@@ -96,7 +96,7 @@ test("an explicit production denylist (E2E_PRODUCTION_REFS) always wins", () => 
   assert.ok(r.reasons.some((m) => /denylisted production target/.test(m)));
 });
 
-test("a dedicated staging host is accepted ONLY when explicitly allowlisted", () => {
+test("a public staging host remains rejected even when explicitly allowlisted", () => {
   const base = {
     E2E_ISOLATED: "1",
     E2E_BASE_URL: "https://staging-app.example.test",
@@ -110,7 +110,7 @@ test("a dedicated staging host is accepted ONLY when explicitly allowlisted", ()
     ...base,
     E2E_ALLOWED_HOSTS: "staging-app.example.test, staging-api.example.test, staging-db.example.test",
   };
-  assert.equal(evaluateIsolation(allowed).ok, true);
+  assert.equal(evaluateIsolation(allowed).ok, false);
 });
 
 test("invalid URLs fail closed", () => {
@@ -123,10 +123,22 @@ test("required E2E_SUPABASE_URL is validated", () => {
   assert.ok(r.reasons.some((m) => /E2E_SUPABASE_URL host .* not a verified isolated host/.test(m)));
 });
 
-test("isIsolatedHost recognizes loopback/.local and allowlisted hosts only", () => {
+test("isIsolatedHost accepts only exact loopback hosts regardless of allowlists", () => {
   assert.equal(isIsolatedHost("localhost"), true);
   assert.equal(isIsolatedHost("127.0.0.1"), true);
-  assert.equal(isIsolatedHost("db.local"), true);
+  assert.equal(isIsolatedHost("[::1]"), true);
+  assert.equal(isIsolatedHost("db.local"), false);
+  assert.equal(isIsolatedHost("0.0.0.0"), false);
   assert.equal(isIsolatedHost("example.com"), false);
-  assert.equal(isIsolatedHost("example.com", ["example.com"]), true);
+  assert.equal(isIsolatedHost("example.com", ["example.com"]), false);
+});
+
+test("local E2E destinations reject credentials, queries, fragments and non-http schemes", () => {
+  for (const value of [
+    'ftp://localhost:5173', 'file://localhost/path', 'http://user:password@localhost:5173',
+    'http://localhost:5173?forward=production', 'http://localhost:5173/#fragment',
+    'http://local\nhost:5173',
+  ]) {
+    assert.equal(evaluateIsolation({ ...LOCAL, E2E_BASE_URL: value }).ok, false);
+  }
 });

@@ -1,5 +1,5 @@
 /**
- * KALUSAGAP — test BHW account provisioning (DEVELOPMENT / STAGING ONLY).
+ * KALUSAGAP — test BHW account provisioning (LOCAL ONLY).
  *
  * Creates (or repairs) the single synthetic BHW account used by development
  * verification:
@@ -10,8 +10,7 @@
  *   scope:  municipality "Taguig Test" / barangay "Test Poblacion"
  *
  * SAFETY — read before running:
- *   - The production project ref is HARD-BLOCKED. The script refuses to run with
- *     a non-zero exit if the target URL contains the production ref.
+ *   - Only loopback Supabase URLs and local Supabase JWTs are allowed.
  *   - Check-only by default. Only `--apply` performs writes.
  *   - Credentials come from the environment; the password is NEVER hardcoded and
  *     never printed. Configure with:
@@ -29,18 +28,11 @@
  * (it creates the Taguig Test municipality and Test Poblacion barangay). Run the
  * seed FIRST — the profile insert below fails if the scope rows are missing.
  */
+import '../src/config/env.js';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Load backend/.env (if present) but do NOT rely on it: dev runs supply the
-// values through the environment so production .env never has to change.
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
-
-/** The production project ref. Never allow a write against it. */
-const PRODUCTION_REF = 'lblawqeoixojyytkmfqy';
+assertLocalScriptEnvironment();
 
 const APPLY = process.argv.includes('--apply');
 
@@ -70,14 +62,6 @@ if (!SUPABASE_URL) {
   process.exit(1);
 }
 
-if (SUPABASE_URL.includes(PRODUCTION_REF)) {
-  console.error(
-    `REFUSING TO RUN: target URL contains the PRODUCTION project ref (${PRODUCTION_REF}).\n` +
-      'Point SUPABASE_DEV_URL at a dedicated development project. Production is read-only.',
-  );
-  process.exit(1);
-}
-
 if (!SERVICE_KEY) {
   console.error('Missing SUPABASE_DEV_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_ROLE_KEY).');
   process.exit(1);
@@ -92,9 +76,8 @@ if (APPLY && !TEST_PASSWORD) {
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: localFetch },
 });
-
-const mask = (pw) => (pw ? `${pw.slice(0, 2)}***${pw.slice(-2)} (len ${pw.length})` : '(empty)');
 
 async function findAuthUserByEmail(email) {
   let page = 1;
@@ -112,6 +95,7 @@ async function verifyPassword(email, password) {
   if (!ANON_KEY) return { ok: null, reason: 'anon key not provided — cannot verify password' };
   const client = createClient(SUPABASE_URL, ANON_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
+    global: { fetch: localFetch },
   });
   const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, reason: error.message };
@@ -161,7 +145,7 @@ async function getProfile(id) {
 
 async function main() {
   console.log(`\nKALUSAGAP test-BHW provisioning — mode: ${APPLY ? 'APPLY (writes enabled)' : 'CHECK ONLY (no writes)'}`);
-  console.log(`Target: ${SUPABASE_URL}`);
+  console.log(`Target: ${new URL(SUPABASE_URL).origin}`);
   console.log(`Email:  ${TEST_EMAIL}\n`);
 
   const scope = await resolveScope();
@@ -203,9 +187,9 @@ async function main() {
           email_confirm: true,
         });
         if (error) throw new Error(`password reset failed: ${error.message}`);
-        actions.push(`RESET password -> ${mask(TEST_PASSWORD)}`);
+        actions.push('RESET password');
       } else {
-        actions.push(`WOULD RESET password -> ${mask(TEST_PASSWORD)}`);
+        actions.push('WOULD RESET password');
       }
     } else if (check.ok) {
       actions.push('password valid');

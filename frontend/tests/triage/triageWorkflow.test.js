@@ -36,7 +36,7 @@ test("1. successful submission does not throw even if cleanup references bad sta
   });
 
   const result = await submitTriage({
-    send: async () => false,
+    send: async () => ({ confirmed: true, id: "saved-visit" }),
     reset,
     notify,
     refresh: spy(),
@@ -57,7 +57,7 @@ test("2. successful submission resets the wizard and refreshes the list, then no
   const notify = spy(() => order.push("notify"));
 
   const result = await submitTriage({
-    send: async () => false,
+    send: async () => ({ confirmed: true, id: "saved-visit" }),
     reset,
     notify,
     refresh,
@@ -71,18 +71,18 @@ test("2. successful submission resets the wizard and refreshes the list, then no
   assert.deepEqual(order, ["reset", "notify", "refresh"]);
 });
 
-test("2b. offline (queued) submission is still a success with the offline message", async () => {
-  const notify = spy();
-  const result = await submitTriage({
-    send: async () => true, // queued offline
-    reset: spy(),
-    notify,
-    refresh: spy(),
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.offline, true);
-  assert.equal(notify.calls[0][0].message, TRIAGE_MESSAGES.offline);
+test("2b. offline drafts and missing database confirmations preserve the form", async () => {
+  for (const response of [true, false, undefined, null, { confirmed: true }, { id: "draft" }, { confirmed: false, id: "draft" }]) {
+    const notify = spy();
+    const reset = spy();
+    const refresh = spy();
+    const result = await submitTriage({ send: async () => response, reset, notify, refresh });
+    assert.equal(result.ok, false);
+    assert.equal(reset.calls.length, 0);
+    assert.equal(refresh.calls.length, 0);
+    assert.equal(notify.calls[0][0].ok, false);
+    assert.match(notify.calls[0][0].message, /not confirmed/);
+  }
 });
 
 test("3. failed submission preserves state (no reset / no refresh) and shows the error", async () => {
@@ -122,14 +122,14 @@ test("3b. failure with no message falls back to the default failure toast", asyn
 
 test("4. a successful action triggers exactly one incoming-list refresh", async () => {
   const refresh = spy(async () => {});
-  await submitTriage({ send: async () => false, reset: spy(), notify: spy(), refresh });
+  await submitTriage({ send: async () => ({ confirmed: true, id: "saved-visit" }), reset: spy(), notify: spy(), refresh });
   assert.equal(refresh.calls.length, 1);
 });
 
 test("4b. a refresh failure after success does not surface as a send failure", async () => {
   const notify = spy();
   const result = await submitTriage({
-    send: async () => false,
+    send: async () => ({ confirmed: true, id: "saved-visit" }),
     reset: spy(),
     notify,
     refresh: async () => {

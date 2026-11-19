@@ -1,25 +1,33 @@
 /**
- * KALUSAGAP — rule-based automated document screening.
+ * KALUSAGAP — Rule-Based Automated Document Screening Service (`documentVerification.service.js`).
+ *
+ * Architectural layer:
+ *   `documents.routes -> authenticate -> authorize / upload -> documents.controller -> documents.service -> documentVerification.service`
  *
  * This service performs deterministic pre-screening of an uploaded resident
- * document. It is intentionally NOT AI, ML or computer-vision classification:
+ * identity or residency document. It is intentionally NOT AI, ML or
+ * computer-vision classification:
  *
  *   1. file signature (magic-byte) validation
  *   2. file size validation
  *   3. image decode + minimum-dimension validation
  *   4. deterministic image-quality metrics (brightness, contrast, dark/bright
  *      pixel share) — it never identifies people, objects, faces or animals
- *   5. local, open-source OCR (optional and failure-tolerant)
- *   6. rule-based text / document-indicator checks
+ *   5. local, open-source OCR (`tesseract.js`, optional and failure-tolerant)
+ *   6. rule-based text / document-indicator checks, SHA-256 identical-side
+ *      detection, and cross-side labelled field consistency checks for paired
+ *      front/back government IDs
  *
  * It only decides whether an upload is readable enough to be worth a staff
  * member's review. It does NOT authenticate a government ID and it never
- * permanently blocks staff from reviewing a document: every automated result is
- * advisory and stored alongside the file for the authorized reviewer.
+ * auto-approves verification: every non-rejected automated result is advisory
+ * and stored alongside the file for the authorized reviewer.
  */
 import { PNG } from 'pngjs';
 import jpeg from 'jpeg-js';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import env from '../config/env.js';
 
 import {
   IMAGE_LIMITS,
@@ -203,7 +211,11 @@ const loadTesseract = async () => {
  */
 export const extractTextWithTesseract = async (buffer) => {
   const createWorker = await loadTesseract();
-  const worker = await createWorker(OCR_LIMITS.language);
+  const worker = await createWorker(OCR_LIMITS.language, 1, env.isProduction ? {} : {
+    // Use provisioned language files only; never download models during a request.
+    langPath: fileURLToPath(new URL('../../', import.meta.url)),
+    gzip: false,
+  });
   try {
     const { data } = await worker.recognize(buffer);
     return { ok: true, text: data?.text || '', confidence: Number(data?.confidence) || 0 };
@@ -234,18 +246,24 @@ export const hasMeaningfulText = (normalized) => {
     && words.length >= OCR_LIMITS.minWords;
 };
 
+/** Return all candidate phrases whose normalized form appears as a substring of `normalized`. */
 const matchedPhrases = (normalized, phrases = []) =>
   phrases.filter((phrase) => {
     const needle = normalizeText(phrase);
     return needle.length > 0 && normalized.includes(needle);
   });
 
+/** Return candidate phrases matching on whole-word boundaries (`" <needle> "`) to avoid partial-word false positives. */
 const matchedDistinctivePhrases = (normalized, phrases = []) =>
   phrases.filter((phrase) => {
     const needle = normalizeText(phrase);
     return needle.length > 0 && ` ${normalized} `.includes(` ${needle} `);
   });
 
+/**
+ * Bounded Levenshtein edit-distance check between two normalized tokens.
+ * Exits early as soon as an entire DP row exceeds `maxDistance`.
+ */
 const editDistanceWithin = (left, right, maxDistance) => {
   if (Math.abs(left.length - right.length) > maxDistance) return false;
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
@@ -266,6 +284,11 @@ const editDistanceWithin = (left, right, maxDistance) => {
   return previous[right.length] <= maxDistance;
 };
 
+/**
+ * Match a target indicator phrase against normalized OCR output, falling back to
+ * sliding-window word-by-word fuzzy matching (0 edits for short words, <=1 edit
+ * for 7–11 chars, <=2 edits for >=12 chars) to tolerate minor OCR character errors.
+ */
 const matchesOcrPhrase = (normalized, phrase) => {
   const exact = normalizeText(phrase);
   if (exact && normalized.includes(exact)) return true;
@@ -285,6 +308,7 @@ const matchesOcrPhrase = (normalized, phrase) => {
   return false;
 };
 
+/** Return all candidate phrases matched either exactly or via OCR-tolerant fuzzy word alignment. */
 const matchedOcrPhrases = (normalized, phrases = []) =>
   phrases.filter((phrase) => matchesOcrPhrase(normalized, phrase));
 
@@ -396,6 +420,7 @@ const isGovernmentIdType = (documentType) =>
 // put through type-mismatch / indicator checks it can never satisfy.
 const GOVERNMENT_ID_VALIDATOR_TYPES = new Set(Object.keys(GOVERNMENT_ID_TYPE_DETECTORS));
 
+/** Normalize display/alias government ID type strings (e.g. `"National ID"`, `"prc"`) to canonical keys. */
 const normalizeGovernmentIdType = (value) => {
   const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
   if (['philsys / national id', 'philsys national id', 'national id'].includes(normalized)) return 'philsys';
@@ -403,6 +428,7 @@ const normalizeGovernmentIdType = (value) => {
   return normalized;
 };
 
+/** Map an internal `SCREENING_REASON` code and `documentType` slot to a resident-safe guidance message. */
 const messageForReason = (reason, documentType) => {
   switch (reason) {
     case SCREENING_REASON.NO_MEANINGFUL_TEXT:
@@ -863,7 +889,15 @@ const screeningSide = (documentType) => {
   return 'single';
 };
 
-/** Screen one document and log only safe correlation/rule metadata. */
+/**
+ * Screen one uploaded document buffer with allowlisted slot/type normalization
+ * and emit structured, PII-free diagnostic telemetry when `requestId` is supplied.
+ *
+ * Raw OCR text, image bytes, and extracted personal fields are never written to logs.
+ *
+ * @param {Object} [input] - Screening input (`buffer`, `mimeType`, `documentType`, `governmentIdType`, `sizeBytes`, `ocr`, `requestId`, `onOcrText`).
+ * @returns {Promise<Object>} Structured screening outcome (`status`, `reason`, `quality`, `ocrDetected`, `message`).
+ */
 export const screenDocument = async (input = {}) => {
   const normalizedDocumentType = String(input.documentType || 'proof_of_residency').trim().toLowerCase();
   const documentType = SAFE_DOCUMENT_TYPES.has(normalizedDocumentType) ? normalizedDocumentType : 'other';
@@ -918,6 +952,11 @@ export const screenDocument = async (input = {}) => {
   return result;
 };
 
+// ---------------------------------------------------------------------------
+// Government ID Front/Back Cross-Side Field Extraction & Comparison
+// ---------------------------------------------------------------------------
+
+/** Strip diacritics, punctuation, and spaces (mapping OCR `|` pipes to `1`) for alphanumeric token/ID comparison. */
 const normalizeComparableValue = (value) =>
   String(value || '')
     .normalize('NFKD')
@@ -926,6 +965,7 @@ const normalizeComparableValue = (value) =>
     .replace(/[|]/g, '1')
     .replace(/[^a-z0-9]/g, '');
 
+/** Strip diacritics and punctuation while preserving word boundaries (mapping OCR `|` pipes to `i`) for full-name comparison. */
 const normalizeComparableName = (value) =>
   String(value || '')
     .normalize('NFKD')
@@ -936,6 +976,13 @@ const normalizeComparableName = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+/**
+ * Extract the text value associated with one of the regex `labels` in multi-line OCR output.
+ *
+ * Supports both same-line `"Label: Value"` layouts and stacked two-line layouts
+ * where the label stands alone and the value follows on the next non-blank line,
+ * while ignoring parental labels (`"Name of Father/Mother"`) and adjacent empty field headers.
+ */
 const valueAfterLabel = (text, labels) => {
   const lines = String(text || '').split(/\r?\n/);
   const labelPattern = new RegExp(`^\\s*(?:${labels})\\s*[:#.-]?\\s*$`, 'i');
@@ -960,6 +1007,7 @@ const valueAfterLabel = (text, labels) => {
   return '';
 };
 
+/** Validate calendar year/month/day (rejecting rollovers like Feb 30) and format as `YYYY-MM-DD`. */
 const validIsoDate = (year, month, day) => {
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
@@ -970,9 +1018,15 @@ const validIsoDate = (year, month, day) => {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
+/** Expand a 2-digit year into 19xx (`>= 50`) or 20xx (`< 50`). */
 const normalizeShortYear = (year) =>
   year < 100 ? (year >= 50 ? 1900 + year : 2000 + year) : year;
 
+/**
+ * Parse textual (`Jan 5, 1998`, `5 January 1998`) or numeric (`YYYY-MM-DD`,
+ * `MM/DD/YYYY`, `DD/MM/YYYY`) birth dates from OCR text into normalized ISO
+ * candidate dates so unambiguous dates can be compared across ID sides.
+ */
 const parseComparableDate = (value) => {
   const text = String(value || '').replace(/[|]/g, '1').replace(/\s+/g, ' ').trim();
   const monthNames = {
@@ -1013,6 +1067,11 @@ const parseComparableDate = (value) => {
     : null;
 };
 
+/**
+ * Extract normalized labelled identity fields (`name`, `surname`, `givenName`,
+ * `middleName`, `dateOfBirth`, `idNumber`) from one side's raw OCR text for
+ * cross-side consistency comparison.
+ */
 const comparableFieldsFromOcr = (text) => {
   const fields = {};
   const name = valueAfterLabel(
@@ -1050,6 +1109,7 @@ const comparableFieldsFromOcr = (text) => {
   return fields;
 };
 
+/** Fast linear-time check returning `true` when two strings differ by at most 1 insertion, deletion, or substitution. */
 const editDistanceAtMostOne = (left, right) => {
   if (Math.abs(left.length - right.length) > 1) return false;
   let i = 0;
@@ -1069,6 +1129,11 @@ const editDistanceAtMostOne = (left, right) => {
   return edits + Number(i < left.length || j < right.length) <= 1;
 };
 
+/**
+ * Compare two multi-word full names extracted from front and back ID sides.
+ * Returns `null` when token counts differ or short tokens (`< 4` chars) are
+ * inconclusive, `true` when every token matches within 1 OCR edit, or `false` on conflict.
+ */
 const compareNames = (left, right) => {
   const leftParts = left.split(/\s+/).filter(Boolean);
   const rightParts = right.split(/\s+/).filter(Boolean);

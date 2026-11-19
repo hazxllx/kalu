@@ -1,16 +1,20 @@
 /**
- * Maternal health endpoints for pregnancy, prenatal care, delivery, and postpartum tracking.
+ * Maternal Health Continuum Controller (Pregnancy, Prenatal, Delivery & Postpartum Care).
  *
- * Comprehensive maternal care workflow including:
- * - Pregnancy registration and status tracking
- * - Prenatal encounters (vitals, assessments, referrals)
- * - Prenatal services (immunizations, screening, etc)
- * - Delivery records (type, location, complications, newborn status)
- * - Postpartum encounters (recovery assessment, complications, family planning)
- * - Postpartum follow-up schedules and milestones
+ * Fits into the KALUSAGAP request pipeline as:
+ *   route -> authenticate -> authorize -> controller -> kalusagap.service / Supabase (`getServiceClient()`)
  *
- * All endpoints perform authorization and scope checks in the service layer.
- * Timestamps are managed server-side; all data is transformed to camelCase for the frontend.
+ * Orchestrates the end-to-end maternal care lifecycle:
+ * - Pregnancy registration, eligibility/existing-pregnancy checks, and status/risk updates
+ * - Prenatal clinical encounters (`pregnancy_encounters`: vitals, fundal height, FHR, referrals)
+ * - Scheduled/delivered prenatal services (`prenatal_services`: immunizations, lab screenings)
+ * - Delivery outcome records (`delivery_records`: mode, attendant, APGAR, birth weight, complications)
+ * - Postpartum clinical encounters (`postpartum_encounters`: involution, newborn checks, family planning)
+ * - Automated postpartum follow-up milestones (`postpartum_follow_ups`), due/overdue tracking, and audit logs
+ *
+ * Complex domain operations (registration, encounter/service/delivery creation, full profile assembly)
+ * delegate to `kalusagap.service.js`; direct lookups and partial field updates query Supabase via
+ * `getServiceClient()` and map database `snake_case` rows to frontend `camelCase` DTOs.
  */
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
@@ -20,6 +24,12 @@ import * as kalusagapService from '../services/kalusagap.service.js';
 // PREGNANCY REGISTRATION
 // ============================================================================
 
+/**
+ * Pre-registration check for `req.params.residentId` (`400` if missing).
+ * Fetches resident demographics for form autofill (`getResidentForPregnancyRegistration`)
+ * and checks for any active/existing pregnancy (`checkExistingPregnancy`), returning
+ * `{ resident, existingPregnancy }` (`200 OK` JSON).
+ */
 export const checkPregnancyStatus = async (req, res) => {
   const { residentId } = req.params;
   
@@ -54,6 +64,11 @@ export const checkPregnancyStatus = async (req, res) => {
   });
 };
 
+/**
+ * Registers a new maternal pregnancy record from `req.body` on behalf of `req.user`
+ * via `kalusagapService.registerPregnancy` (computing EDD, gestational age, and
+ * baseline service schedule). Responds with core pregnancy identifiers (`201 Created`).
+ */
 export const registerPregnancy = async (req, res) => {
   const supabase = getServiceClient();
   
@@ -72,6 +87,12 @@ export const registerPregnancy = async (req, res) => {
   });
 };
 
+/**
+ * Retrieves the complete maternal profile for pregnancy `req.params.id` (`400` if missing)
+ * via `kalusagapService.getMaternalProfile`, transforming pregnancy, prenatal encounters,
+ * prenatal services, delivery record, postpartum encounters, and follow-up schedule
+ * into `camelCase` (`200 OK`).
+ */
 export const getPregnancy = async (req, res) => {
   const { id } = req.params;
   
@@ -94,6 +115,12 @@ export const getPregnancy = async (req, res) => {
   });
 };
 
+/**
+ * Partially updates mutable pregnancy metadata (`riskLevel`, `status`,
+ * `primaryProvider`, `notes` -> `outcome_notes`) in `maternal_pregnancies` for
+ * `req.params.id`. Validates presence (`400`/`404`), increments record `version`,
+ * refreshes `updated_at`, and returns the transformed pregnancy (`200 OK`).
+ */
 export const updatePregnancy = async (req, res) => {
   const { id } = req.params;
   
@@ -155,6 +182,11 @@ export const updatePregnancy = async (req, res) => {
 // PRENATAL ENCOUNTERS
 // ============================================================================
 
+/**
+ * Records a new prenatal clinical encounter (`req.body`) for pregnancy `req.params.id`
+ * (`400` if missing) via `kalusagapService.addPrenatalEncounter` with `req.user`.
+ * Responds with the transformed encounter (`201 Created`).
+ */
 export const addPrenatalEncounter = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -172,6 +204,10 @@ export const addPrenatalEncounter = async (req, res) => {
   res.status(201).json(transformEncounter(encounter));
 };
 
+/**
+ * Lists all prenatal encounters in `pregnancy_encounters` for pregnancy
+ * `req.params.id` ordered chronologically by `encounter_date` ascending (`200 OK`).
+ */
 export const listPrenatalEncounters = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -192,6 +228,11 @@ export const listPrenatalEncounters = async (req, res) => {
   res.json(data?.map(transformEncounter) || []);
 };
 
+/**
+ * Retrieves a single prenatal encounter (`req.params.encounterId`) belonging to
+ * pregnancy `req.params.id` from `pregnancy_encounters` (`400` if IDs missing,
+ * `404` if not found) and returns it in `camelCase` (`200 OK`).
+ */
 export const getPrenatalEncounter = async (req, res) => {
   const { id: pregnancyId, encounterId } = req.params;
   
@@ -214,6 +255,12 @@ export const getPrenatalEncounter = async (req, res) => {
   res.json(transformEncounter(data));
 };
 
+/**
+ * Partially updates vitals, fetal measurements, clinical findings, care plan, or
+ * referral fields on `pregnancy_encounters` row `req.params.encounterId` for
+ * pregnancy `req.params.id` (`400` if no updatable fields supplied, `404` if missing).
+ * Returns the updated encounter (`200 OK`).
+ */
 export const updatePrenatalEncounter = async (req, res) => {
   const { id: pregnancyId, encounterId } = req.params;
   
@@ -269,6 +316,10 @@ export const updatePrenatalEncounter = async (req, res) => {
   res.json(transformEncounter(updated));
 };
 
+/**
+ * Deletes prenatal encounter `req.params.encounterId` scoped to pregnancy
+ * `req.params.id` from `pregnancy_encounters` and responds with `204 No Content`.
+ */
 export const deletePrenatalEncounter = async (req, res) => {
   const { id: pregnancyId, encounterId } = req.params;
   
@@ -293,6 +344,11 @@ export const deletePrenatalEncounter = async (req, res) => {
 // PRENATAL SERVICES
 // ============================================================================
 
+/**
+ * Records a provided or scheduled prenatal service (e.g. tetanus toxoid, lab test,
+ * micronutrient supplementation) for pregnancy `req.params.id` (`400` if missing)
+ * via `kalusagapService.recordPrenatalService` (`201 Created`).
+ */
 export const recordPrenatalService = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -310,6 +366,10 @@ export const recordPrenatalService = async (req, res) => {
   res.status(201).json(transformService(service));
 };
 
+/**
+ * Lists prenatal services in `prenatal_services` for pregnancy `req.params.id`,
+ * optionally filtered by `req.query.status`, ordered by `created_at` ascending (`200 OK`).
+ */
 export const listPrenatalServices = async (req, res) => {
   const { id: pregnancyId } = req.params;
   const { status } = req.query;
@@ -336,6 +396,10 @@ export const listPrenatalServices = async (req, res) => {
   res.json(data?.map(transformService) || []);
 };
 
+/**
+ * Retrieves a single prenatal service record (`req.params.serviceId`) belonging
+ * to pregnancy `req.params.id` from `prenatal_services` (`404` if not found; `200 OK`).
+ */
 export const getPrenatalService = async (req, res) => {
   const { id: pregnancyId, serviceId } = req.params;
   
@@ -358,6 +422,11 @@ export const getPrenatalService = async (req, res) => {
   res.json(transformService(data));
 };
 
+/**
+ * Partially updates status, completion dates, lab/screening result values, due dates,
+ * or non-completion notes on `prenatal_services` row `req.params.serviceId` for
+ * pregnancy `req.params.id` (`400` if empty update, `404` if missing; `200 OK`).
+ */
 export const updatePrenatalService = async (req, res) => {
   const { id: pregnancyId, serviceId } = req.params;
   
@@ -407,6 +476,10 @@ export const updatePrenatalService = async (req, res) => {
   res.json(transformService(updated));
 };
 
+/**
+ * Deletes prenatal service `req.params.serviceId` belonging to pregnancy
+ * `req.params.id` from `prenatal_services` and responds with `204 No Content`.
+ */
 export const deletePrenatalService = async (req, res) => {
   const { id: pregnancyId, serviceId } = req.params;
   
@@ -431,6 +504,11 @@ export const deletePrenatalService = async (req, res) => {
 // DELIVERY RECORDS
 // ============================================================================
 
+/**
+ * Records delivery details (`req.body`) for pregnancy `req.params.id` via
+ * `kalusagapService.recordDelivery` (which also updates pregnancy outcome status
+ * and generates postpartum follow-up milestones). Responds with `201 Created`.
+ */
 export const recordDelivery = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -448,6 +526,11 @@ export const recordDelivery = async (req, res) => {
   res.status(201).json(transformDelivery(delivery));
 };
 
+/**
+ * Retrieves the delivery record in `delivery_records` for pregnancy `req.params.id`.
+ * Returns `204 No Content` when no delivery has been recorded yet, or the
+ * transformed delivery payload (`200 OK`) when present.
+ */
 export const getDeliveryRecord = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -472,6 +555,11 @@ export const getDeliveryRecord = async (req, res) => {
   res.json(transformDelivery(data));
 };
 
+/**
+ * Partially updates delivery mode, facility, attendant, newborn metrics (sex,
+ * birth weight, APGAR scores), or maternal/newborn complications in `delivery_records`
+ * for pregnancy `req.params.id` (`400` if empty update, `404` if missing; `200 OK`).
+ */
 export const updateDeliveryRecord = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -525,6 +613,12 @@ export const updateDeliveryRecord = async (req, res) => {
 // POSTPARTUM ENCOUNTERS
 // ============================================================================
 
+/**
+ * Records a new postpartum clinical encounter (`req.body`) for pregnancy `req.params.id`.
+ * Verifies that the pregnancy exists (`404` if missing) and has a recorded delivery
+ * in `delivery_records` (`409 Conflict` if not yet delivered) before delegating to
+ * `kalusagapService.addPostpartumEncounter` (`201 Created`).
+ */
 export const addPostpartumEncounter = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -561,6 +655,11 @@ export const addPostpartumEncounter = async (req, res) => {
   res.status(201).json(transformPostpartumEncounter(encounter));
 };
 
+/**
+ * Lists postpartum encounters in `postpartum_encounters` linked to the delivery
+ * record of pregnancy `req.params.id`, ordered by `encounter_date` ascending.
+ * Returns `[]` (`200 OK`) if no delivery record exists yet.
+ */
 export const listPostpartumEncounters = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -593,6 +692,10 @@ export const listPostpartumEncounters = async (req, res) => {
   res.json(data?.map(transformPostpartumEncounter) || []);
 };
 
+/**
+ * Retrieves a single postpartum encounter (`req.params.encounterId`, requiring
+ * `req.params.id` to be present) from `postpartum_encounters` (`404` if missing; `200 OK`).
+ */
 export const getPostpartumEncounter = async (req, res) => {
   const { id: pregnancyId, encounterId } = req.params;
   
@@ -614,6 +717,11 @@ export const getPostpartumEncounter = async (req, res) => {
   res.json(transformPostpartumEncounter(data));
 };
 
+/**
+ * Partially updates maternal recovery findings, vitals, micronutrient supplementation,
+ * family planning counseling, newborn checks, or referrals on `postpartum_encounters`
+ * row `req.params.encounterId` (`400` if empty update, `404` if missing; `200 OK`).
+ */
 export const updatePostpartumEncounter = async (req, res) => {
   const { id: pregnancyId, encounterId } = req.params;
   
@@ -675,6 +783,10 @@ export const updatePostpartumEncounter = async (req, res) => {
   res.json(transformPostpartumEncounter(updated));
 };
 
+/**
+ * Deletes postpartum encounter `req.params.encounterId` (requiring `req.params.id`
+ * to be present) from `postpartum_encounters` and responds with `204 No Content`.
+ */
 export const deletePostpartumEncounter = async (req, res) => {
   const { id: pregnancyId, encounterId } = req.params;
   
@@ -698,6 +810,11 @@ export const deletePostpartumEncounter = async (req, res) => {
 // POSTPARTUM FOLLOW-UP SCHEDULE
 // ============================================================================
 
+/**
+ * Lists postpartum follow-up milestones in `postpartum_follow_ups` for the delivery
+ * associated with pregnancy `req.params.id`, ordered by `expected_start_date` ascending.
+ * Returns `[]` (`200 OK`) when no delivery record exists yet.
+ */
 export const getPostpartumSchedule = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -730,6 +847,10 @@ export const getPostpartumSchedule = async (req, res) => {
   res.json(data?.map(transformFollowUp) || []);
 };
 
+/**
+ * Updates `status` and `scheduledDate` (`scheduled_date`) for follow-up milestone
+ * `req.params.milestoneId` in `postpartum_follow_ups` (`404` if missing; `200 OK`).
+ */
 export const updatePostpartumMilestone = async (req, res) => {
   const { id: pregnancyId, milestoneId } = req.params;
   
@@ -762,6 +883,10 @@ export const updatePostpartumMilestone = async (req, res) => {
 // MATERNAL PROFILE & REPORTS
 // ============================================================================
 
+/**
+ * Lists all maternal pregnancy records for `req.params.residentId` from
+ * `maternal_pregnancies`, ordered newest-first (`created_at` descending; `200 OK`).
+ */
 export const listResidentPregnancies = async (req, res) => {
   const { residentId } = req.params;
   
@@ -782,6 +907,11 @@ export const listResidentPregnancies = async (req, res) => {
   res.json(data?.map(transformPregnancy) || []);
 };
 
+/**
+ * Assembles the full `camelCase` maternal profile (pregnancy, prenatal encounters,
+ * services, delivery, postpartum encounters, and follow-up schedule) for
+ * `req.params.pregnancyId` via `kalusagapService.getMaternalProfile` (`200 OK`).
+ */
 export const getMaternalProfile = async (req, res) => {
   const { pregnancyId } = req.params;
   
@@ -803,6 +933,12 @@ export const getMaternalProfile = async (req, res) => {
   });
 };
 
+/**
+ * Queries `prenatal_services` in `pending`, `due`, or `overdue` states for
+ * pregnancy `req.params.id` and dynamically elevates `pending` items to `'due'`
+ * or `'overdue'` relative to `kalusagapService.manilaDateString()` (`Asia/Manila`
+ * current date) using `date_due` and `date_overdue_after` (`200 OK`).
+ */
 export const getServicesDueOrOverdue = async (req, res) => {
   const { id: pregnancyId } = req.params;
   
@@ -835,6 +971,10 @@ export const getServicesDueOrOverdue = async (req, res) => {
   res.json(servicesWithStatus);
 };
 
+/**
+ * Retrieves chronological audit trail entries (newest-first) from
+ * `maternal_care_audit_log` for `req.params.pregnancyId` (`200 OK`).
+ */
 export const getMaternalAuditLog = async (req, res) => {
   const { pregnancyId } = req.params;
   
@@ -859,6 +999,7 @@ export const getMaternalAuditLog = async (req, res) => {
 // TRANSFORMATION HELPERS (snake_case -> camelCase)
 // ============================================================================
 
+/** Maps a `maternal_pregnancies` database row into a `camelCase` pregnancy DTO. */
 const transformPregnancy = (pregnancy) => ({
   id: pregnancy.id,
   residentId: pregnancy.resident_id,
@@ -888,6 +1029,7 @@ const transformPregnancy = (pregnancy) => ({
   updatedAt: pregnancy.updated_at,
 });
 
+/** Maps a `pregnancy_encounters` database row into a `camelCase` prenatal encounter DTO. */
 const transformEncounter = (encounter) => ({
   id: encounter.id,
   pregnancyId: encounter.pregnancy_id,
@@ -921,6 +1063,7 @@ const transformEncounter = (encounter) => ({
   updatedAt: encounter.updated_at,
 });
 
+/** Maps a `prenatal_services` database row into a `camelCase` prenatal service DTO. */
 const transformService = (service) => ({
   id: service.id,
   pregnancyId: service.pregnancy_id,
@@ -944,6 +1087,7 @@ const transformService = (service) => ({
   updatedAt: service.updated_at,
 });
 
+/** Maps a `delivery_records` database row into a `camelCase` delivery DTO. */
 const transformDelivery = (delivery) => ({
   id: delivery.id,
   pregnancyId: delivery.pregnancy_id,
@@ -968,6 +1112,7 @@ const transformDelivery = (delivery) => ({
   updatedAt: delivery.updated_at,
 });
 
+/** Maps a `postpartum_encounters` database row into a `camelCase` postpartum encounter DTO. */
 const transformPostpartumEncounter = (encounter) => ({
   id: encounter.id,
   pregnancyId: encounter.pregnancy_id,
@@ -1009,6 +1154,7 @@ const transformPostpartumEncounter = (encounter) => ({
   updatedAt: encounter.updated_at,
 });
 
+/** Maps a `postpartum_follow_ups` database row into a `camelCase` follow-up milestone DTO. */
 const transformFollowUp = (followUp) => ({
   id: followUp.id,
   pregnancyId: followUp.pregnancy_id,

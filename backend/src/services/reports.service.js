@@ -260,6 +260,17 @@ const assertStaff = (user) => {
   }
 };
 
+const hasReportAssignment = (user) => Boolean(user.municipalityId &&
+  (user.role !== ROLES.HEALTH_SUPERVISOR || user.barangayId) &&
+  (user.role !== ROLES.RHU_PERSONNEL || user.facilityId));
+
+const matchesReportScope = (user, row) => hasReportAssignment(user) &&
+  row.municipality_id === user.municipalityId &&
+  (user.role !== ROLES.HEALTH_SUPERVISOR || row.barangay_id === user.barangayId);
+
+const isReportSender = (user, row) => matchesReportScope(user, row) &&
+  row.created_by === user.id && row.sender_role === user.role;
+
 /**
  * Reports for the caller.
  *   box = 'incoming' -> reports routed TO the caller's role within their scope
@@ -276,23 +287,20 @@ export const list = async ({ user, box = 'incoming', status = null, limit = 200,
     throw ApiError.badRequest('Report pagination requires a limit from 1 to 500 and a non-negative offset.');
   }
   const empty = () => includeTotal ? { rows: [], total: 0, limit: pageLimit, offset: pageOffset } : [];
+  if (!hasReportAssignment(user)) return empty();
+
   let query = supabase.from(TABLE).select(LIST_SELECT, includeTotal ? { count: 'exact' } : undefined).order('created_at', { ascending: false });
+  query = query.eq('municipality_id', user.municipalityId);
+  if (user.role === ROLES.HEALTH_SUPERVISOR) query = query.eq('barangay_id', user.barangayId);
 
   if (box === 'outgoing') {
-    query = query.eq('created_by', user.id);
+    query = query.eq('created_by', user.id).eq('sender_role', user.role);
   } else {
-    // MHO has read-only municipality oversight of PHN inbox submissions.
+    // PHN and MHO have read-only municipal oversight of RHU submissions.
     const recipientRoles = [user.role];
     if (user.role === ROLES.PHN || user.role === ROLES.MHO) recipientRoles.push(ROLES.RHU_PERSONNEL);
     query = query.in('recipient_role', recipientRoles);
-    if (!user.municipalityId) return empty();
-    query = query.eq('municipality_id', user.municipalityId);
-    if (user.role === ROLES.HEALTH_SUPERVISOR) {
-      if (!user.barangayId) return empty();
-      query = query.eq('barangay_id', user.barangayId);
-    }
     if (user.role === ROLES.RHU_PERSONNEL) {
-      if (!user.facilityId) return empty();
       query = query.eq('recipient_facility_id', user.facilityId);
     }
     query = query.neq('created_by', user.id);
@@ -309,20 +317,15 @@ export const list = async ({ user, box = 'incoming', status = null, limit = 200,
   return includeTotal ? { rows, total: count, limit: pageLimit, offset: pageOffset } : rows;
 };
 
-/** Whether the caller may see a specific report (sender or in-scope recipient). */
-const inScope = (user, row) => {
-  if (!row) return false;
-  if (row.created_by === user.id) return true;
-  if ([ROLES.PHN, ROLES.MHO].includes(user.role) && row.recipient_role === ROLES.RHU_PERSONNEL) {
-    return Boolean(user.municipalityId && row.municipality_id === user.municipalityId);
-  }
-  if (row.recipient_role !== user.role) return false;
-  if (!user.municipalityId || row.municipality_id !== user.municipalityId) return false;
-  if (user.role === ROLES.RHU_PERSONNEL &&
-      (!user.facilityId || row.recipient_facility_id !== user.facilityId)) return false;
-  if (user.role === ROLES.HEALTH_SUPERVISOR && row.barangay_id && row.barangay_id !== user.barangayId) return false;
-  return true;
-};
+const isReportRecipient = (user, row) => matchesReportScope(user, row) &&
+  row.created_by !== user.id && row.status !== REPORT_STATUS.DRAFT &&
+  row.recipient_role === user.role &&
+  (user.role !== ROLES.RHU_PERSONNEL || row.recipient_facility_id === user.facilityId);
+
+const canReadReport = (user, row) => isReportSender(user, row) || isReportRecipient(user, row) || (
+  matchesReportScope(user, row) && row.created_by !== user.id && row.status !== REPORT_STATUS.DRAFT &&
+  row.recipient_role === ROLES.RHU_PERSONNEL && [ROLES.PHN, ROLES.MHO].includes(user.role)
+);
 
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   assertStaff(user);
@@ -331,7 +334,7 @@ export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   
   const { data, error } = await supabase.from(TABLE).select(DETAIL_SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load report');
-  if (!data || !inScope(user, data)) throw ApiError.notFound('Report not found.');
+  if (!data || !canReadReport(user, data)) throw ApiError.notFound('Report not found.');
   const { data: history, error: historyError } = await supabase
     .from(HISTORY_TABLE)
     .select('id, action, previous_status, new_status, explanation, created_at, actor:profiles!actor_id(full_name, email, role)')
@@ -470,6 +473,7 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
 /** Persisted Generated → Draft → Submitted path used by the reports page. */
 export const submitDraft = async ({ user, id, supabase = getServiceClient() }) => {
   assertStaff(user);
+  await assertPersonnelApproved(supabase, user);
   if (!REPORT_ROUTES[user.role]) {
     throw ApiError.forbidden('Your role is not authorized to submit reports.');
   }
@@ -482,11 +486,6 @@ export const submitDraft = async ({ user, id, supabase = getServiceClient() }) =
   if (!existing || existing.created_by !== user.id) throw ApiError.notFound('Report not found.');
   if (existing.status !== REPORT_STATUS.DRAFT) {
     throw ApiError.conflict('Only a draft report can be submitted.');
-  }
-  if (existing.sender_role !== user.role ||
-      existing.municipality_id !== user.municipalityId ||
-      (user.role === ROLES.HEALTH_SUPERVISOR && existing.barangay_id !== user.barangayId)) {
-    throw ApiError.forbidden('This draft is outside your assigned reporting scope.');
   }
   const contentError = reportContentError(existing.content, existing.report_type, existing.report_period);
   if (contentError) throw ApiError.unprocessable(contentError);
@@ -544,17 +543,10 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
   }
   const { data: existing, error: readError } = await supabase.from(TABLE).select(DETAIL_SELECT).eq('id', id).maybeSingle();
   throwOnError(readError, 'Could not load report');
-  if (!existing) throw ApiError.notFound('Report not found.');
+  if (!existing || !canReadReport(user, existing)) throw ApiError.notFound('Report not found.');
 
   // Only the routed recipient (not the sender) may review.
-  const isRecipient =
-    existing.created_by !== user.id &&
-    existing.recipient_role === user.role &&
-    Boolean(user.municipalityId && existing.municipality_id === user.municipalityId) &&
-    (user.role !== ROLES.HEALTH_SUPERVISOR || existing.barangay_id === user.barangayId) &&
-    (user.role !== ROLES.RHU_PERSONNEL ||
-      Boolean(user.facilityId && existing.recipient_facility_id === user.facilityId));
-  if (!isRecipient) throw ApiError.forbidden('Only the addressed report recipient may review this report.');
+  if (!isReportRecipient(user, existing)) throw ApiError.forbidden('Only the addressed report recipient may review this report.');
   if (!(REPORT_TRANSITIONS[existing.status] || []).includes(target)) {
     throw ApiError.conflict(`A ${existing.status} report cannot be moved to ${target}.`);
   }
@@ -568,8 +560,10 @@ export const review = async ({ user, id, status, remarks = '', supabase = getSer
     reviewed_by: user.id,
     reviewed_at: new Date().toISOString(),
   };
-  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select(DETAIL_SELECT).single();
+  const { data, error } = await supabase.from(TABLE).update(row)
+    .eq('id', id).eq('status', existing.status).select(DETAIL_SELECT).maybeSingle();
   throwOnError(error, 'Could not update report');
+  if (!data) throw ApiError.conflict('This report has already changed. Refresh the report and try again.');
 
   // Notify the sender that their report advanced.
   await notifyResident({
@@ -589,7 +583,6 @@ export const resubmit = async ({ user, id, content, supabase = getServiceClient(
   assertStaff(user);
   // Defense-in-depth: verify approval status for staff members
   await assertPersonnelApproved(supabase, user);
-  
   const { data: existing, error: readError } = await supabase
     .from(TABLE)
     .select(DETAIL_SELECT)

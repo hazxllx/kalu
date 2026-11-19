@@ -15,22 +15,34 @@ import * as controller from '../controllers/reports.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 /**
- * Report submission workflow.
+ * Inter-tier health report submission and review workflow routes.
  *
- * Every route authenticates and requires `FEATURE_ROLES.reports`
- * (Health Supervisor, PHN, MHO, RHU Personnel). The service enforces the
- * sender/recipient routing and the caller's municipality/barangay scope; a
- * report is only ever visible to its sender or its routed recipient.
+ * Role in KALUSAGAP:
+ * Manages formal health report drafting, submission, recipient review (approval
+ * or return for changes), and resubmission across barangay and municipal health
+ * tiers (Health Supervisor -> PHN / RHU -> MHO).
  *
- * Authorization is split by action, matching the role brief:
- *   - read + review are recipient actions, gated by `reports.view`, so the
- *     RHU Personnel recipient inbox works without granting report authoring.
- *   - creating (submitting) a report is a SENDER action, gated by
- *     `reports.generate` AND restricted to the sender roles. RHU Personnel are
- *     deliberately excluded from submission here (defense in depth; the service
- *     also refuses to resolve a recipient for them).
+ * Architectural pipeline:
+ *   route -> authenticate -> authorize(roles, permission) -> [validate]
+ *         -> reports.controller -> reports.service -> Supabase
+ *
+ * Scope & RBAC split:
+ * - Every route requires authentication and membership in `FEATURE_ROLES.reports`
+ *   (Health Supervisor, PHN, MHO, RHU Personnel). The service enforces sender/
+ *   recipient routing and municipality/barangay scope so a report is visible
+ *   only to its sender or its routed recipient.
+ * - Read and review (`readers`, `reviewers`) are recipient-capable actions gated
+ *   by `reports.view`, enabling RHU Personnel to operate the recipient inbox
+ *   without granting report authoring.
+ * - Authoring, submitting, and resubmitting (`senders`) require `reports.generate`
+ *   AND `SENDER_ROLES` (Health Supervisor, PHN, MHO). RHU Personnel are excluded
+ *   from originating reports at both the route and service layers.
  */
 const router = Router();
+router.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 // Only roles that can originate a report. RHU Personnel are recipients, not
 // senders, so they are not permitted to POST a new report.
@@ -41,9 +53,19 @@ const reviewers = [authenticate, authorize(FEATURE_ROLES.reports, { permission: 
 const senders = [authenticate, authorize(SENDER_ROLES, { permission: 'reports.generate' })];
 const idParam = validate(reportIdParamValidator, 'params');
 
+// Read & metadata endpoints (`readers` chain):
+// - GET /meta : Returns report categories, period options, and routed recipient metadata for the caller.
+// - GET /     : Lists sent/received reports visible to the caller (query filters: status, type, period, pagination).
+// - GET /:id  : Fetches single report `:id` (`reportIdParamValidator`) including review history.
 router.get('/meta', ...readers, asyncHandler(controller.meta));
 router.get('/', ...readers, asyncHandler(controller.list));
 router.get('/:id', ...readers, idParam, asyncHandler(controller.get));
+
+// Authoring, submission & recipient review lifecycle endpoints:
+// - POST  /             : Creates a draft or immediately submitted report (`senders`, `createReportValidator` body).
+// - PATCH /:id/submit   : Submits existing draft report `:id` (`senders`, `submitReportValidator` body).
+// - PATCH /:id/review   : Records recipient review decision/remarks on `:id` (`reviewers`, `reviewReportValidator` body).
+// - PATCH /:id/resubmit : Resubmits returned report `:id` after revisions (`senders`, `resubmitReportValidator` body).
 router.post('/', ...senders, validate(createReportValidator), asyncHandler(controller.create));
 router.patch('/:id/submit', ...senders, idParam, validate(submitReportValidator), asyncHandler(controller.submitDraft));
 router.patch('/:id/review', ...reviewers, idParam, validate(reviewReportValidator), asyncHandler(controller.review));

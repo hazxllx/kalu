@@ -318,7 +318,8 @@ export const processPersonnelNotifications = ({
         const authUser = authData?.user;
         if (authUser?.id !== job.account_id || !validEmail(authUser.email)
           || emailOf(authUser.email) !== emailOf(profile.email)) throw failure('AUTH_IDENTITY_MISMATCH');
-        if (!config.smtpHost || !config.smtpUser || !config.smtpPassword || !config.smtpFrom
+        if (!config.smtpHost || !config.smtpFrom
+          || (config.isProduction !== false && (!config.smtpUser || !config.smtpPassword))
           || (transport && typeof transport.sendMail !== 'function')) throw failure('SMTP_NOT_CONFIGURED');
         smtp = transport || getEmailTransporter();
         const origin = ACCESS_EVENTS.has(job.event_type) ? clientOrigin(config) : null;

@@ -11,13 +11,11 @@
  * Usage:
  *   $env:RESET_PASSWORD='...'; node backend/scripts/reset-password.mjs <email>
  */
+import '../src/config/env.js';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+assertLocalScriptEnvironment();
 
 const email = (process.argv[2] || '').trim().toLowerCase();
 const newPassword = process.env.RESET_PASSWORD || '';
@@ -28,9 +26,13 @@ const ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 
 if (!email) { console.error('Usage: node reset-password.mjs <email> (RESET_PASSWORD env required)'); process.exit(1); }
 if (!newPassword) { console.error('RESET_PASSWORD env var is empty.'); process.exit(1); }
-if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) { console.error('Missing Supabase env in backend/.env'); process.exit(1); }
+if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) { console.error('Missing local Supabase configuration.'); process.exit(1); }
 
-const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+const clientOptions = {
+  auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: localFetch },
+};
+const admin = createClient(SUPABASE_URL, SERVICE_KEY, clientOptions);
 
 const findUser = async () => {
   let page = 1;
@@ -54,7 +56,7 @@ const getProfile = async (id) => {
 };
 
 const verify = async () => {
-  const c = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+  const c = createClient(SUPABASE_URL, ANON_KEY, clientOptions);
   const { data, error } = await c.auth.signInWithPassword({ email, password: newPassword });
   if (error) return false;
   await c.auth.signOut().catch(() => {});

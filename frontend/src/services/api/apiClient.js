@@ -26,7 +26,7 @@ import { performanceMonitor } from '../../utils/performanceMonitor.js';
  * empty state when the endpoint supplies no rows — no fabricated data is
  * rendered anywhere in the app.
  */
-const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.env?.PROD);
+const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.env?.MODE === 'production');
 
 /**
  * @typedef {Object} RequestOptions

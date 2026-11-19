@@ -1,7 +1,6 @@
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { extractExpectedRevision } from '../utils/syncConcurrency.js';
-import { assignedBarangay } from '../config/scope.js';
 import { SCHEMAS } from '../config/programFormSchemas.js';
 
 /**
@@ -39,7 +38,17 @@ const dateIsDateOnly = (value) =>
 
 const assertStaff = (user) => {
   if (!STAFF.has(user?.role)) throw ApiError.forbidden('You are not authorized to manage program health records.');
+  if (user.role === 'admin') return;
+  if (!user.municipalityId) throw ApiError.forbidden('Your account has no municipality assignment.');
+  if (user.role === 'health_supervisor' && !user.barangayId) {
+    throw ApiError.forbidden('Your account has no barangay assignment.');
+  }
 };
+
+const inScope = (user, row) => (
+  (!user.municipalityId || row.municipality_id === user.municipalityId) &&
+  (user.role !== 'health_supervisor' || row.barangay_id === user.barangayId)
+);
 
 /** Coerce + validate a single field value against its descriptor. */
 const coerceField = (field, raw, errors) => {
@@ -131,9 +140,7 @@ const residentFor = async (supabase, user, residentId) => {
     .maybeSingle();
   throwOnError(error, 'Could not load resident');
   if (!data) throw ApiError.notFound('Resident record not found.');
-  const scope = assignedBarangay(user);
-  if ((scope && text(data.barangay).toLowerCase() !== text(scope).toLowerCase())
-    || (user.municipalityId && data.municipality_id && user.municipalityId !== data.municipality_id)) {
+  if (!inScope(user, data)) {
     throw ApiError.notFound('Resident record not found.');
   }
   return data;
@@ -147,9 +154,7 @@ const householdFor = async (supabase, user, householdId) => {
     .maybeSingle();
   throwOnError(error, 'Could not load household');
   if (!data) throw ApiError.notFound('Household record not found.');
-  const scope = assignedBarangay(user);
-  if ((scope && text(data.barangay).toLowerCase() !== text(scope).toLowerCase())
-    || (user.municipalityId && data.municipality_id && user.municipalityId !== data.municipality_id)) {
+  if (!inScope(user, data)) {
     throw ApiError.notFound('Household record not found.');
   }
   return data;
@@ -192,12 +197,9 @@ export const list = async ({
   assertStaff(user);
   const col = dateColumn(schema);
   let query = supabase.from(schema.table).select(selectFor(schema)).order('created_at', { ascending: false }).limit(300);
-  if (user.role === 'health_supervisor') {
-    if (!user.barangayId) return [];
-    query = query.eq('barangay_id', user.barangayId);
-  } else if (user.role === 'phn' || user.role === 'mho') {
-    if (!user.municipalityId) return [];
+  if (user.role !== 'admin') {
     query = query.eq('municipality_id', user.municipalityId);
+    if (user.role === 'health_supervisor') query = query.eq('barangay_id', user.barangayId);
   }
   if (residentId && schema.scope === 'resident') {
     await residentFor(supabase, user, residentId);

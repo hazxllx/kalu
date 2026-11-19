@@ -40,8 +40,6 @@ export const filterScreenableReferrals = (rows) =>
  */
 export const TRIAGE_MESSAGES = Object.freeze({
   success: "Triage completed. Patient sent to the consultation queue.",
-  offline:
-    "Triage saved offline. Reconnect and submit it to the consultation queue.",
   failure:
     "Could not send the patient to the consultation queue. Please try again.",
 });
@@ -52,19 +50,18 @@ export const TRIAGE_MESSAGES = Object.freeze({
  *
  *  - Only the API call (`send`) can mark the attempt as failed. A real failure
  *    preserves the wizard/referral state (no reset) and reports the error.
- *  - Once `send` resolves, the submission is a CONFIRMED success. Post-success
+ *  - `send` must return {confirmed:true,id} after database acknowledgement.
+ *    Offline drafts, booleans and empty responses preserve the form.
+ *    Post-success
  *    cleanup (`reset`) and list refresh (`refresh`) can never turn a confirmed
  *    success into a false failure toast — their errors are swallowed.
- *  - `send` resolves to a truthy value when the triage was saved offline
- *    (queued) rather than delivered; that is still a success, with a distinct
- *    message.
  *
  * @param {object} args
- * @param {() => Promise<any>} args.send        Performs the API call; resolves truthy when queued offline.
+ * @param {() => Promise<any>} args.send        Performs the API call; returns database confirmation.
  * @param {() => void} [args.reset]             Resets the wizard + clears the active referral (success only).
  * @param {(result: {ok: boolean, offline?: boolean, message: string}) => void} args.notify  Surfaces a toast.
  * @param {() => (void | Promise<any>)} [args.refresh]  Refetches the incoming referral list (success only).
- * @param {{success: string, offline: string, failure: string}} [args.messages]
+ * @param {{success: string, failure: string}} [args.messages]
  * @returns {Promise<{ok: boolean, offline?: boolean, error?: any}>}
  */
 export async function submitTriage({
@@ -81,9 +78,12 @@ export async function submitTriage({
     throw new TypeError("submitTriage requires a `notify` function.");
   }
 
-  let wasOffline;
+  let confirmation;
   try {
-    wasOffline = await send();
+    confirmation = await send();
+    if (confirmation?.confirmed !== true || !confirmation.id) {
+      throw new Error("The server has not confirmed this triage was submitted. Your entries are preserved; reconnect and try again.");
+    }
   } catch (err) {
     // Genuine API failure: keep the current referral/wizard state intact.
     notify({ ok: false, message: err?.message || messages.failure });
@@ -92,7 +92,7 @@ export async function submitTriage({
 
   // Beyond this point the submission is a confirmed success. Nothing here may
   // produce a failure toast.
-  const offline = Boolean(wasOffline);
+  const offline = false;
 
   if (typeof reset === "function") {
     try {
@@ -105,7 +105,7 @@ export async function submitTriage({
   notify({
     ok: true,
     offline,
-    message: offline ? messages.offline : messages.success,
+    message: messages.success,
   });
 
   if (typeof refresh === "function") {

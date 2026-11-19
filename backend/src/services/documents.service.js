@@ -25,6 +25,29 @@ import {
 } from '../config/documentScreening.js';
 import { isMinorAge } from '../config/guardianPolicy.js';
 
+/**
+ * KALUSAGAP — Resident Identity & Residency Documents Service (`documents.service.js`).
+ *
+ * Architectural layer:
+ *   `documents.routes -> authenticate -> authorize / upload -> documents.controller -> documents.service -> repository / storage.service / documentVerification.service`
+ *
+ * Responsibilities:
+ *   - Provides stateless pre-submission screening (`screenUploadedDocument`,
+ *     `screenUploadedGovernmentIdPair`) used during registration/resubmission so
+ *     applicants receive readability feedback without creating orphaned rows or files.
+ *   - Orchestrates authenticated resident document uploads (`uploadResidentDocument`):
+ *     validates file metadata and minor-only `student_id` eligibility, runs
+ *     deterministic screening and front/back government ID cross-verification
+ *     (including SHA-256 identical-image rejection), blocks `automated_rejected`
+ *     uploads before touching storage, replaces any prior `pending` document in
+ *     the same slot, and persists private storage objects + screening metadata.
+ *   - Enforces strict access control on reads, deletions, and reviews:
+ *     residents (`resident`, `resident-limited`) may only view or delete their
+ *     own `pending` documents, while reviewers (`health_supervisor` for own
+ *     barangay, `phn` for own municipality, and `admin`) inspect signed URLs and
+ *     record `approved`, `rejected`, or `resubmission_required` decisions.
+ */
+
 const SELF_ROLES = ['resident', 'resident-limited'];
 const REVIEW_ROLES = ['health_supervisor', 'phn', 'admin'];
 const COMPARABLE_FIELD_NAMES = new Set([
@@ -36,6 +59,12 @@ const COMPARABLE_FIELD_NAMES = new Set([
   'idNumber',
 ]);
 
+/**
+ * Encode both cross-side government ID comparison metadata (plus whitelisted
+ * conflicting field names, never field values) and the single-side screening
+ * reason into a compact `screening_reason` column string
+ * (e.g. `"ID_SIDE_FIELDS_CONFLICT|surname,dateOfBirth;SIDE:DOCUMENT_INDICATORS_DETECTED"`).
+ */
 const screeningReasonForStorage = (screening) => {
   const comparison = screening?.crossVerification;
   if (!comparison) return screening?.reason || null;
@@ -186,6 +215,14 @@ export const screenUploadedGovernmentIdPair = async ({
   return applyGovernmentIdCrossVerification(frontScreening, backScreening, comparison);
 };
 
+/**
+ * Validate and persist both sides (`government_id_front` and `government_id_back`)
+ * of a paired government ID submission.
+ *
+ * Rejects the entire pair (`422 Unprocessable Entity`) if either side was
+ * `automated_rejected`, uploads both files to private storage, inserts their
+ * `resident_documents` rows, and deletes any superseded `pending` front/back rows.
+ */
 const persistGovernmentIdPair = async ({
   user,
   residentId,
@@ -296,6 +333,19 @@ const persistGovernmentIdPair = async ({
   };
 };
 
+/**
+ * Validate, pre-screen, cross-verify, and persist a resident document upload.
+ *
+ * Enforces self-ownership (`resident.authUserId === user.id`), restricts
+ * `student_id` uploads to minors (`< 18`), cross-verifies paired or pending
+ * counterpart government ID sides (re-downloading a pending counterpart from
+ * private storage when needed), blocks `automated_rejected` files before writing
+ * to storage, replaces any existing `pending` document in the same slot, and
+ * updates counterpart screening metadata when applicable.
+ *
+ * @param {Object} params - Upload parameters (`user`, `residentId`, `file`, `documentType`, `governmentIdType`, `governmentIdTypeOther`, `governmentIdPair`, `ocr`, `requestId`).
+ * @returns {Promise<Object>} Persisted document metadata with a signed URL and resident-safe screening summary.
+ */
 export const uploadResidentDocument = async ({
   user,
   residentId,
@@ -590,6 +640,13 @@ export const uploadResidentDocument = async ({
   };
 };
 
+/**
+ * Retrieve the authenticated resident's most recently uploaded document with a
+ * fresh signed URL, or `null` if none exists.
+ *
+ * @param {Object} params - Lookup parameters (`user`, `residentId`).
+ * @returns {Promise<Object|null>} Latest document record with `url`, or `null`.
+ */
 export const getMyDocument = async ({ user, residentId }) => {
   if (!SELF_ROLES.includes(user?.role)) {
     throw ApiError.forbidden();
@@ -608,6 +665,13 @@ export const getMyDocument = async ({ user, residentId }) => {
   return { ...latest, url };
 };
 
+/**
+ * List all documents uploaded by the authenticated resident (latest first),
+ * generating a short-lived signed URL for each private storage object.
+ *
+ * @param {Object} params - Lookup parameters (`user`, `residentId`).
+ * @returns {Promise<Array<Object>>} Resident-facing document summaries with signed URLs.
+ */
 export const listMyDocuments = async ({ user, residentId }) => {
   if (!SELF_ROLES.includes(user?.role)) throw ApiError.forbidden();
   const resident = await repository.getResident(residentId);
@@ -671,6 +735,13 @@ export const listResidentDocuments = async ({ user, residentId }) => {
   );
 };
 
+/**
+ * Staff: retrieve a single resident document by ID with a fresh signed URL,
+ * enforcing reviewer role (`health_supervisor`, `phn`, `admin`) and geographic scope.
+ *
+ * @param {Object} params - Lookup parameters (`user`, `residentId`, `documentId`).
+ * @returns {Promise<Object>} Document record with `url`.
+ */
 export const getResidentDocument = async ({ user, residentId, documentId }) => {
   // BUG-015: this read must allow the SAME reviewers the route authorizes and
   // that listResidentDocuments already allows — Admin, Health Supervisor (own
@@ -694,6 +765,16 @@ export const getResidentDocument = async ({ user, residentId, documentId }) => {
   return { ...document, url };
 };
 
+/**
+ * Staff: record a verification review decision (`approved`, `rejected`, or
+ * `resubmission_required`) on a resident's uploaded document within caller scope.
+ *
+ * Requires a non-empty `rejectionReason` when rejecting and blocks `student_id`
+ * verification for adult residents (`>= 18`).
+ *
+ * @param {Object} params - Review parameters (`user`, `residentId`, `documentId`, `patch`).
+ * @returns {Promise<Object>} Updated document record with reviewer attribution and timestamp.
+ */
 export const reviewResidentDocument = async ({ user, residentId, documentId, patch }) => {
   if (!REVIEW_ROLES.includes(user?.role)) {
     throw ApiError.forbidden('You are not authorized to review documents.');
@@ -738,6 +819,14 @@ export const reviewResidentDocument = async ({ user, residentId, documentId, pat
   return updated;
 };
 
+/**
+ * Resident self-service: delete one of the caller's own `pending` documents from
+ * both private Supabase Storage and the repository. Already-reviewed documents
+ * (`approved`, `rejected`, `resubmission_required`) cannot be deleted.
+ *
+ * @param {Object} params - Deletion parameters (`user`, `residentId`, `documentId`).
+ * @returns {Promise<Object>} `{ success: true }`.
+ */
 export const deleteResidentDocument = async ({ user, residentId, documentId }) => {
   if (!SELF_ROLES.includes(user?.role)) {
     throw ApiError.forbidden();

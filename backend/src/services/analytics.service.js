@@ -1,23 +1,36 @@
 /**
- * Early Warning analytics service.
+ * Early Warning & Community Health Map Analytics Service (`services/analytics.service.js`).
  *
- * Production reads use one PostgreSQL RPC returning only aggregates. Its scope
- * is derived from the authenticated actor's stored profile, not a municipality
- * supplied by a client. Row-based helpers are retained only for the explicitly
- * selected file driver and pure local tests.
+ * Fits into KALUSAGAP's backend pipeline:
+ *   `analytics.routes -> authenticate -> authorize -> analytics.controller -> analytics.service -> scoped_aggregate_analytics RPC (or file-driver repository)`
  *
- * Condition and risk classification use documented, conservative heuristics
- * over the recorded chief complaints and vitals until the verified FHSIS
- * coding schema is connected.
+ * Surfaces backed by this module:
+ * - `early-warning`: Monthly consultation/referral KPIs, disease & vitals-risk distributions, and 12-month trend.
+ * - `community-map`: Per-barangay case counts, active TB program merge, risk/status breakdowns, and heatmap intensity.
+ * - `community-map-trends`: 12-month calendar-year case progression for selected map filters.
+ * - `household-map`: Privacy-preserving barangay-level household and active-case household totals (never exposes raw household GPS or IDs).
+ *
+ * Production reads execute a single PostgreSQL RPC (`scoped_aggregate_analytics`) returning
+ * only aggregates, deriving geographic scope strictly from the authenticated actor's stored
+ * profile rather than client-supplied municipality IDs. Row-based helpers are retained only
+ * for the explicitly selected `'file'` repository driver and deterministic local unit tests.
+ *
+ * Condition and risk classification apply documented, conservative heuristics over chief
+ * complaints, findings, and recorded vitals (`utils/residentRisk`) until verified FHSIS
+ * ICD/M1 coding schemas are connected.
  */
 import repository from '../repositories/index.js';
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
-import { assessVitals, hasAssessableVitals } from '../utils/residentRisk.js';
+import { assessVitals, isLaterVisit } from '../utils/residentRisk.js';
 import { DEFAULT_RISK_CONFIG } from '../config/riskConfig.js';
 import { getRiskConfig } from './riskConfig.service.js';
 import { APPROVED_BARANGAYS, isApprovedBarangayName } from '../config/barangays.js';
 
+/**
+ * Ordered keyword rules used to classify free-text chief complaints and clinical
+ * findings into KALUSAGAP's surveillance condition categories (first match wins).
+ */
 const CONDITION_RULES = [
   { name: 'Tuberculosis', keywords: ['tuberculosis', 'tb', 'ptb', 'koch'] },
   { name: 'Dengue', keywords: ['dengue', 'hemorrhagic fever'] },
@@ -50,12 +63,22 @@ const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 const aggregateRpc = (name, params) => getServiceClient().rpc(name, params);
 const isLocalRepository = (repo) => (repo.mode ?? repo.driver) === 'file';
 
+/**
+ * Translate PostgreSQL / PostgREST errors from `scoped_aggregate_analytics` into `ApiError`s:
+ * - `42501` (`insufficient_privilege`) -> `403 Forbidden`
+ * - `22023`, `22007`, `22008`, `22P02` (invalid parameter / date / enum syntax) -> `422 Unprocessable`
+ * - Any other failure or malformed payload -> `503 Service Unavailable`
+ */
 const aggregateError = (error) => {
   if (error?.code === '42501') return ApiError.forbidden(error.message);
   if (['22023', '22007', '22008', '22P02'].includes(error?.code)) return ApiError.unprocessable(error.message);
   return Object.assign(new ApiError(503, 'Aggregate analytics could not be loaded.'), { cause: error });
 };
 
+/**
+ * Execute the production `scoped_aggregate_analytics` PostgreSQL RPC for a specific
+ * analytics surface (`kind`) and validate that required top-level array/summary keys exist.
+ */
 const loadAggregate = async (kind, { actorId, barangay, condition, status, riskLevel, from, to, year, distinctResidents }, rpc) => {
   if (!actorId) throw ApiError.unauthorized('An authenticated analytics actor is required.');
   let result;
@@ -91,6 +114,7 @@ const loadAggregate = async (kind, { actorId, barangay, condition, status, riskL
   return data;
 };
 
+/** Asia/Manila (`+08:00`) calendar formatter used for consistent FHSIS/LGU day & month bucketing. */
 const reportingCalendar = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
 });
@@ -103,20 +127,11 @@ const reportingDay = (value) => {
   const parts = reportingParts(value);
   return parts ? `${parts.year}-${parts.month}-${parts.day}` : null;
 };
+/** Convert `YYYY-MM-DD` bounds into inclusive Asia/Manila (`+08:00`) epoch millisecond timestamps. */
 const dateRangeTimestamps = (from, to) => ({
   fromTs: from ? Date.parse(`${from}T00:00:00+08:00`) : null,
   toTs: to ? Date.parse(`${to}T00:00:00+08:00`) + 86_400_000 - 1 : null,
 });
-const isLaterVisit = (visit, current) => {
-  if (!current) return true;
-  for (const field of ['visitDate', 'updatedAt', 'createdAt']) {
-    const a = Date.parse(visit[field] || visit.createdAt || '') || 0;
-    const b = Date.parse(current[field] || current.createdAt || '') || 0;
-    if (a !== b) return a > b;
-  }
-  return String(visit.id || '') > String(current.id || '');
-};
-
 const sameBarangay = (resident, barangay) =>
   String(resident?.barangay ?? '').trim().toLowerCase() === String(barangay).trim().toLowerCase();
 
@@ -124,6 +139,10 @@ const isActiveApprovedBarangay = (row) =>
   isApprovedBarangayName(row?.name) &&
   String(row?.status ?? 'active').toLowerCase() === 'active';
 
+/**
+ * Filter registry rows down to active, approved barangays within the caller's
+ * municipality (and optional single-barangay scope), ordered by `APPROVED_BARANGAYS`.
+ */
 const barangayScopeRows = (barangays, barangay, municipalityId) => {
   const activeApproved = barangays.filter((row) => isActiveApprovedBarangay(row) &&
     (!municipalityId || !(row.municipality_id || row.municipalityId) ||
@@ -146,6 +165,10 @@ const barangayScopeRows = (barangays, barangay, municipalityId) => {
     .filter(Boolean);
 };
 
+/**
+ * Check whether a resident belongs to `barangayRow` within `municipalityId`,
+ * matching on stable `barangayId` first and falling back to case-insensitive name.
+ */
 const residentInBarangay = (resident, barangayRow, municipalityId) => {
   const expectedMunicipality = municipalityId || barangayRow.municipality_id || barangayRow.municipalityId;
   if (resident?.barangayId && barangayRow.id) return resident.barangayId === barangayRow.id &&
@@ -156,6 +179,7 @@ const residentInBarangay = (resident, barangayRow, municipalityId) => {
 
 const isTbProgram = (program) => /\btb\b|tuberculosis/i.test(String(program || ''));
 
+/** Classify clinical text against `CONDITION_RULES`, falling back to `'Others'`. */
 const classifyCondition = (text) => {
   const haystack = String(text || '').toLowerCase();
   const rule = CONDITION_RULES.find((r) => r.keywords.some((k) => haystack.includes(k)));
@@ -191,7 +215,7 @@ export const topConditionFrom = (distribution = []) => {
  * changes.
  */
 export const riskFromVitals = (vitals, config = DEFAULT_RISK_CONFIG) =>
-  hasAssessableVitals(vitals) ? assessVitals(vitals, config).level : null;
+  assessVitals(vitals, config).level;
 
 const isSameMonth = (isoDate, reference) => {
   const date = reportingParts(isoDate);
@@ -209,6 +233,21 @@ const lastTwelveMonths = (reference) => {
   return months;
 };
 
+/**
+ * Compute Early Warning surveillance analytics for the caller's authorized scope.
+ *
+ * In production, delegates to `scoped_aggregate_analytics` (`p_kind = 'early-warning'`).
+ * Under the `'file'` repository driver, aggregates scoped visits, referrals, and
+ * residents in memory:
+ * - Counts current-month consultations and referrals (Asia/Manila calendar).
+ * - Classifies `chiefComplaint + findings` into `diseaseDistribution` and picks `topCondition`.
+ * - Evaluates each resident's latest visit vitals via `riskFromVitals` (`Low`, `Moderate`, `High`, `Unassessed`).
+ * - Builds a 12-month consultation & referral trend series and overall barangay/municipal health status.
+ *
+ * @param {Object} [params] - Scope and date filter parameters
+ * @param {Object} [deps] - Injectable `{ repo, rpc, now }` dependencies for testing
+ * @returns {Promise<Object>} Early Warning KPIs, distributions, 12-month trends, and status
+ */
 export const getEarlyWarning = async (
   { actorId = null, barangay = null, municipalityId = null, from = null, to = null, year = null } = {},
   { repo = repository, rpc = aggregateRpc, now = new Date() } = {},
@@ -274,11 +313,11 @@ export const getEarlyWarning = async (
     }
   });
   const riskCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
-  latestVisitByResident.forEach((visit) => {
+  scopedResidents.forEach((resident) => {
     // A visit without assessable vitals is UNASSESSED — never silently counted
     // as Low (consistent with the resident directory/detail/dashboard, which
     // report null for the same resident).
-    const level = riskFromVitals(visit.vitals, riskConfig);
+    const level = riskFromVitals(latestVisitByResident.get(resident.id)?.vitals, riskConfig);
     riskCounts[level || 'Unassessed'] += 1;
   });
   const riskDistribution = [
@@ -287,6 +326,22 @@ export const getEarlyWarning = async (
     { name: 'High Risk', value: riskCounts.High },
     { name: 'Unassessed', value: riskCounts.Unassessed },
   ];
+  const reportingFrom = from || (year ? `${String(year).padStart(4, '0')}-01-01` : null);
+  const reportingTo = to || (year ? `${String(year).padStart(4, '0')}-12-31` : null);
+  const reportingBounds = dateRangeTimestamps(reportingFrom, reportingTo);
+  const reportingLatest = new Map();
+  for (const visit of scopedVisits) {
+    if (inDateRange(visit.visitDate || visit.createdAt, reportingBounds.fromTs, reportingBounds.toTs)
+        && isLaterVisit(visit, reportingLatest.get(visit.residentId))) reportingLatest.set(visit.residentId, visit);
+  }
+  const reportingCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
+  for (const resident of scopedResidents) {
+    const level = riskFromVitals(reportingLatest.get(resident.id)?.vitals, riskConfig);
+    reportingCounts[level || 'Unassessed'] += 1;
+  }
+  const reportingRiskDistribution = Object.entries(reportingCounts).map(([level, value]) => ({
+    name: level === 'Unassessed' ? level : `${level} Risk`, value,
+  }));
 
   // --- 12-month consultation & referral trend -------------------------------
   const months = lastTwelveMonths(now);
@@ -318,6 +373,8 @@ export const getEarlyWarning = async (
     consultationTrends,
     diseaseDistribution,
     riskDistribution,
+    reportingRiskDistribution,
+    reportingPeriod: { from: reportingFrom, to: reportingTo, year },
     barangayOverview: {
       name: barangay || 'Municipality of Pili',
       residents: scopedResidents.length,
@@ -425,11 +482,14 @@ export const getCommunityMap = async ({
   const latestVisitByResident = new Map();
   let latestUpdatedTs = null;
   let latestUpdatedAt = null;
+  const reportingLatestByResident = new Map();
   visits.forEach((v) => {
     const current = latestVisitByResident.get(v.residentId);
     if (isLaterVisit(v, current)) {
       latestVisitByResident.set(v.residentId, v);
     }
+    if (inDateRange(v.visitDate || v.createdAt, fromTs, toTs)
+        && isLaterVisit(v, reportingLatestByResident.get(v.residentId))) reportingLatestByResident.set(v.residentId, v);
   });
 
   const rows = scopedBarangays.map((b) => {
@@ -443,6 +503,7 @@ export const getCommunityMap = async ({
         hasCoordinates: false,
         residents: null,
         highRiskResidents: null,
+        reportingHighRiskResidents: null,
         caseCount: null,
         newCases: null,
         activeCases: null,
@@ -556,9 +617,11 @@ export const getCommunityMap = async ({
     const topCondition = topConditionFrom(conditions);
 
     let highRiskResidents = 0;
+    let reportingHighRiskResidents = 0;
     residents.forEach((r) => {
       const v = latestVisitByResident.get(r.id);
       if (v && riskFromVitals(v.vitals, riskConfig) === 'High') highRiskResidents += 1;
+      if (riskFromVitals(reportingLatestByResident.get(r.id)?.vitals, riskConfig) === 'High') reportingHighRiskResidents += 1;
     });
 
     const latitude = Number(b.latitude);
@@ -581,6 +644,7 @@ export const getCommunityMap = async ({
       hasCoordinates,
       residents: residents.length,
       highRiskResidents,
+      reportingHighRiskResidents,
       caseCount,
       newCases,
       activeCases,

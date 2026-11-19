@@ -6,9 +6,33 @@ import { resolveBarangayScope } from '../middleware/barangayScope.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import * as controller from '../controllers/kalusagap.controller.js';
 
+/**
+ * Maternal Care and Pregnancy Tracking routes in KALUSAGAP.
+ *
+ * Request pipeline:
+ *   route -> authenticate -> resolveBarangayScope -> authorize(roles, permission) -> [idempotency] -> controller -> service -> Supabase
+ *
+ * Covers the end-to-end maternal health continuum:
+ *   1. Pregnancy registration and active-pregnancy pre-checks (`/pregnancies`)
+ *   2. Prenatal clinical encounters (`/pregnancies/:id/encounters`)
+ *   3. Prenatal preventive services, immunizations, and supplementation (`/pregnancies/:id/services`)
+ *   4. Delivery outcome capture and automatic postpartum milestone generation (`/pregnancies/:id/delivery`)
+ *   5. Postpartum clinical encounters (`/pregnancies/:id/postpartum-encounters`)
+ *   6. Postpartum follow-up milestone tracking (`24h`, `3d`, `7-14d`, `6wk` at `/pregnancies/:id/postpartum-schedule`)
+ *   7. Consolidated maternal care profiles and protocol due/overdue alerts (`/maternal-profile/...`, `/pregnancies/:id/services-due`)
+ *   8. Maternal care record audit trail (`/maternal-care/audit-log/:pregnancyId`)
+ *
+ * All routes enforce active authentication and session barangay/municipality scope.
+ * Mutating `POST`/`PUT` endpoints include `idempotency` middleware so retries or
+ * intermittent clinical network connections never duplicate maternal records. Destructive
+ * `DELETE` operations and delivery-record edits are restricted to `admin`.
+ */
 const router = Router();
+
+// Authorized clinical and administrative staff roles eligible for maternal care workflows.
 const staff = ['admin', 'mho', 'phn', 'health_supervisor', 'rhu_personnel', 'bhw'];
 
+// Authenticate caller and attach barangay/municipality data scope across all maternal care routes.
 router.use(authenticate, resolveBarangayScope);
 
 // ============================================================================
@@ -17,7 +41,8 @@ router.use(authenticate, resolveBarangayScope);
 
 /**
  * GET /pregnancies/:residentId/check
- * Check if resident has an existing active pregnancy and retrieve autofill data.
+ * Check if `:residentId` has an existing active pregnancy and retrieve demographic/obstetric autofill data.
+ * Middleware: `authorize(staff, { permission: ['pregnancies.view'] })` -> `controller.checkPregnancyStatus`.
  */
 router.get(
   '/pregnancies/:residentId/check',
@@ -27,8 +52,9 @@ router.get(
 
 /**
  * POST /pregnancies
- * Register a new pregnancy for a resident.
- * Body: { residentId, lmpDate, lmpReliability, gravida, para, socioEconomicStatus }
+ * Register a new pregnancy for a resident (`idempotency` protected).
+ * Body: `{ residentId, lmpDate, lmpReliability, gravida, para, socioEconomicStatus }`.
+ * Middleware: `authorize(staff, { permission: ['pregnancies.create'] })`, `idempotency` -> `controller.registerPregnancy`.
  */
 router.post(
   '/pregnancies',
@@ -39,7 +65,8 @@ router.post(
 
 /**
  * GET /pregnancies/:id
- * Get pregnancy details and consolidated maternal profile.
+ * Retrieve pregnancy `:id` details and maternal summary within the caller's barangay/municipality scope.
+ * Middleware: `authorize(staff, { permission: ['pregnancies.view'] })` -> `controller.getPregnancy`.
  */
 router.get(
   '/pregnancies/:id',
@@ -49,7 +76,8 @@ router.get(
 
 /**
  * PUT /pregnancies/:id
- * Update pregnancy record (e.g., change LMP, update risk level, change status).
+ * Update pregnancy `:id` record (e.g., LMP revision, risk level, or pregnancy status; `idempotency` protected).
+ * Middleware: `authorize(staff, { permission: ['pregnancies.edit'] })`, `idempotency` -> `controller.updatePregnancy`.
  */
 router.put(
   '/pregnancies/:id',
@@ -64,8 +92,9 @@ router.put(
 
 /**
  * POST /pregnancies/:id/encounters
- * Record a prenatal visit/encounter.
- * Body: { encounterDate, weight, height, bp, gestationalAge, findings, assessments, ... }
+ * Record a prenatal clinical visit/encounter for pregnancy `:id` (`idempotency` protected).
+ * Body: `{ encounterDate, weight, height, bp, gestationalAge, findings, assessments, ... }`.
+ * Middleware: `authorize(staff, { permission: ['encounters.create'] })`, `idempotency` -> `controller.addPrenatalEncounter`.
  */
 router.post(
   '/pregnancies/:id/encounters',
@@ -76,7 +105,8 @@ router.post(
 
 /**
  * GET /pregnancies/:id/encounters
- * List all prenatal encounters for a pregnancy.
+ * List all recorded prenatal encounters for pregnancy `:id`.
+ * Middleware: `authorize(staff, { permission: ['encounters.view'] })` -> `controller.listPrenatalEncounters`.
  */
 router.get(
   '/pregnancies/:id/encounters',
@@ -86,7 +116,8 @@ router.get(
 
 /**
  * GET /pregnancies/:id/encounters/:encounterId
- * Get details of a specific prenatal encounter.
+ * Retrieve clinical details of prenatal encounter `:encounterId` under pregnancy `:id`.
+ * Middleware: `authorize(staff, { permission: ['encounters.view'] })` -> `controller.getPrenatalEncounter`.
  */
 router.get(
   '/pregnancies/:id/encounters/:encounterId',
@@ -96,7 +127,8 @@ router.get(
 
 /**
  * PUT /pregnancies/:id/encounters/:encounterId
- * Update a prenatal encounter record.
+ * Update prenatal encounter `:encounterId` under pregnancy `:id` (`idempotency` protected).
+ * Middleware: `authorize(staff, { permission: ['encounters.edit'] })`, `idempotency` -> `controller.updatePrenatalEncounter`.
  */
 router.put(
   '/pregnancies/:id/encounters/:encounterId',
@@ -107,7 +139,8 @@ router.put(
 
 /**
  * DELETE /pregnancies/:id/encounters/:encounterId
- * Delete a prenatal encounter (admin only).
+ * Delete prenatal encounter `:encounterId` (restricted to `admin` role + `encounters.delete` permission).
+ * Handler: `controller.deletePrenatalEncounter`.
  */
 router.delete(
   '/pregnancies/:id/encounters/:encounterId',
@@ -121,8 +154,9 @@ router.delete(
 
 /**
  * POST /pregnancies/:id/services
- * Record a prenatal service (immunization, screening, supplementation, etc.).
- * Body: { serviceCategory, serviceType, serviceName, status, dateProvided, resultStatus, ... }
+ * Record a prenatal preventive service (immunization, lab screening, micronutrient supplementation, etc.).
+ * Body: `{ serviceCategory, serviceType, serviceName, status, dateProvided, resultStatus, ... }`.
+ * Middleware: `authorize(staff, { permission: ['services.create'] })`, `idempotency` -> `controller.recordPrenatalService`.
  */
 router.post(
   '/pregnancies/:id/services',
@@ -133,8 +167,8 @@ router.post(
 
 /**
  * GET /pregnancies/:id/services
- * List all prenatal services for a pregnancy.
- * Query params: ?status=pending|due|completed|...
+ * List prenatal services recorded for pregnancy `:id` (optional query filter: `?status=pending|due|completed|...`).
+ * Middleware: `authorize(staff, { permission: ['services.view'] })` -> `controller.listPrenatalServices`.
  */
 router.get(
   '/pregnancies/:id/services',
@@ -144,7 +178,8 @@ router.get(
 
 /**
  * GET /pregnancies/:id/services/:serviceId
- * Get details of a specific prenatal service.
+ * Retrieve details of prenatal service `:serviceId` for pregnancy `:id`.
+ * Middleware: `authorize(staff, { permission: ['services.view'] })` -> `controller.getPrenatalService`.
  */
 router.get(
   '/pregnancies/:id/services/:serviceId',
@@ -154,7 +189,8 @@ router.get(
 
 /**
  * PUT /pregnancies/:id/services/:serviceId
- * Update a prenatal service record (e.g., mark as completed, change result).
+ * Update prenatal service `:serviceId` (e.g., mark completed or record lab result; `idempotency` protected).
+ * Middleware: `authorize(staff, { permission: ['services.edit'] })`, `idempotency` -> `controller.updatePrenatalService`.
  */
 router.put(
   '/pregnancies/:id/services/:serviceId',
@@ -165,7 +201,8 @@ router.put(
 
 /**
  * DELETE /pregnancies/:id/services/:serviceId
- * Delete a prenatal service (admin only).
+ * Delete prenatal service `:serviceId` (restricted to `admin` role + `services.delete` permission).
+ * Handler: `controller.deletePrenatalService`.
  */
 router.delete(
   '/pregnancies/:id/services/:serviceId',
@@ -179,8 +216,9 @@ router.delete(
 
 /**
  * POST /pregnancies/:id/delivery
- * Record delivery outcome and auto-generate postpartum follow-up schedule.
- * Body: { deliveryDate, deliveryOutcome, typeOfDelivery, birthWeight, ... }
+ * Record delivery outcome for pregnancy `:id` and auto-generate the postpartum follow-up milestone schedule.
+ * Body: `{ deliveryDate, deliveryOutcome, typeOfDelivery, birthWeight, ... }`.
+ * Middleware: `authorize(staff, { permission: ['delivery.create'] })`, `idempotency` -> `controller.recordDelivery`.
  */
 router.post(
   '/pregnancies/:id/delivery',
@@ -191,7 +229,8 @@ router.post(
 
 /**
  * GET /pregnancies/:id/delivery
- * Get delivery record for a pregnancy.
+ * Retrieve the recorded delivery outcome for pregnancy `:id`.
+ * Middleware: `authorize(staff, { permission: ['delivery.view'] })` -> `controller.getDeliveryRecord`.
  */
 router.get(
   '/pregnancies/:id/delivery',
@@ -201,7 +240,8 @@ router.get(
 
 /**
  * PUT /pregnancies/:id/delivery
- * Update delivery record (admin only).
+ * Amend delivery outcome details for pregnancy `:id` (restricted to `admin` + `delivery.edit`, `idempotency` protected).
+ * Handler: `controller.updateDeliveryRecord`.
  */
 router.put(
   '/pregnancies/:id/delivery',
@@ -216,8 +256,9 @@ router.put(
 
 /**
  * POST /pregnancies/:id/postpartum-encounters
- * Record a postpartum visit/encounter.
- * Body: { encounterDate, scheduledMilestone, vitalSigns, assessment, ... }
+ * Record a postpartum visit/encounter for pregnancy `:id` (`idempotency` protected).
+ * Body: `{ encounterDate, scheduledMilestone, vitalSigns, assessment, ... }`.
+ * Middleware: `authorize(staff, { permission: ['postpartum_encounters.create'] })`, `idempotency` -> `controller.addPostpartumEncounter`.
  */
 router.post(
   '/pregnancies/:id/postpartum-encounters',
@@ -228,7 +269,8 @@ router.post(
 
 /**
  * GET /pregnancies/:id/postpartum-encounters
- * List all postpartum encounters for a pregnancy.
+ * List all postpartum encounters recorded for pregnancy `:id`.
+ * Middleware: `authorize(staff, { permission: ['postpartum_encounters.view'] })` -> `controller.listPostpartumEncounters`.
  */
 router.get(
   '/pregnancies/:id/postpartum-encounters',
@@ -238,7 +280,8 @@ router.get(
 
 /**
  * GET /pregnancies/:id/postpartum-encounters/:encounterId
- * Get details of a specific postpartum encounter.
+ * Retrieve details of postpartum encounter `:encounterId` under pregnancy `:id`.
+ * Middleware: `authorize(staff, { permission: ['postpartum_encounters.view'] })` -> `controller.getPostpartumEncounter`.
  */
 router.get(
   '/pregnancies/:id/postpartum-encounters/:encounterId',
@@ -248,7 +291,8 @@ router.get(
 
 /**
  * PUT /pregnancies/:id/postpartum-encounters/:encounterId
- * Update a postpartum encounter record.
+ * Update postpartum encounter `:encounterId` under pregnancy `:id` (`idempotency` protected).
+ * Middleware: `authorize(staff, { permission: ['postpartum_encounters.edit'] })`, `idempotency` -> `controller.updatePostpartumEncounter`.
  */
 router.put(
   '/pregnancies/:id/postpartum-encounters/:encounterId',
@@ -259,7 +303,8 @@ router.put(
 
 /**
  * DELETE /pregnancies/:id/postpartum-encounters/:encounterId
- * Delete a postpartum encounter (admin only).
+ * Delete postpartum encounter `:encounterId` (restricted to `admin` role + `postpartum_encounters.delete` permission).
+ * Handler: `controller.deletePostpartumEncounter`.
  */
 router.delete(
   '/pregnancies/:id/postpartum-encounters/:encounterId',
@@ -273,7 +318,8 @@ router.delete(
 
 /**
  * GET /pregnancies/:id/postpartum-schedule
- * Get postpartum follow-up schedule (24h, 3d, 7-14d, 6wk milestones).
+ * Retrieve the postpartum follow-up schedule (`24h`, `3d`, `7-14d`, and `6wk` milestones) for pregnancy `:id`.
+ * Middleware: `authorize(staff, { permission: ['postpartum_schedule.view'] })` -> `controller.getPostpartumSchedule`.
  */
 router.get(
   '/pregnancies/:id/postpartum-schedule',
@@ -283,7 +329,8 @@ router.get(
 
 /**
  * PUT /pregnancies/:id/postpartum-schedule/:milestoneId
- * Update postpartum follow-up milestone status (mark as completed, etc.).
+ * Update status or completion metadata on postpartum follow-up milestone `:milestoneId` (`idempotency` protected).
+ * Middleware: `authorize(staff, { permission: ['postpartum_schedule.edit'] })`, `idempotency` -> `controller.updatePostpartumMilestone`.
  */
 router.put(
   '/pregnancies/:id/postpartum-schedule/:milestoneId',
@@ -297,8 +344,9 @@ router.put(
 // ============================================================================
 
 /**
- * GET /maternal-profile/:residendId/pregnancies
- * List all pregnancies for a resident (active and historical).
+ * GET /maternal-profile/:residentId/pregnancies
+ * List all active and historical pregnancies recorded for `:residentId` within scope.
+ * Middleware: `authorize(staff, { permission: ['pregnancies.view'] })` -> `controller.listResidentPregnancies`.
  */
 router.get(
   '/maternal-profile/:residentId/pregnancies',
@@ -308,8 +356,9 @@ router.get(
 
 /**
  * GET /maternal-profile/:pregnancyId
- * Get consolidated maternal care profile for a pregnancy.
- * Returns: pregnancy details, encounters, services, delivery, postpartum info.
+ * Retrieve the consolidated maternal care profile for `:pregnancyId` (pregnancy details,
+ * prenatal encounters, services, delivery record, and postpartum follow-up info).
+ * Middleware: `authorize(staff, { permission: ['pregnancies.view'] })` -> `controller.getMaternalProfile`.
  */
 router.get(
   '/maternal-profile/:pregnancyId',
@@ -322,8 +371,9 @@ router.get(
 // ============================================================================
 
 /**
- * GET /pregnancies/:id/services/due
- * Get list of services that are due or overdue based on clinical protocols.
+ * GET /pregnancies/:id/services-due
+ * Compute and list prenatal/maternal services currently due or overdue for pregnancy `:id` per clinical protocol.
+ * Middleware: `authorize(staff, { permission: ['services.view'] })` -> `controller.getServicesDueOrOverdue`.
  */
 router.get(
   '/pregnancies/:id/services-due',
@@ -337,7 +387,8 @@ router.get(
 
 /**
  * GET /maternal-care/audit-log/:pregnancyId
- * Get audit trail for a pregnancy (created, updated, status changes).
+ * Retrieve the chronological audit trail for `:pregnancyId` (creation, edits, and status transitions).
+ * Middleware: `authorize(staff, { permission: ['audit.view'] })` -> `controller.getMaternalAuditLog`.
  */
 router.get(
   '/maternal-care/audit-log/:pregnancyId',

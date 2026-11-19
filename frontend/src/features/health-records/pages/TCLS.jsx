@@ -140,6 +140,13 @@ function ModalShell({ title, subtitle, onClose, children }) {
 
 export default function TCLS() {
   const { user } = useAuth();
+  if (!user?.municipalityId || (user.role === "health_supervisor" && !user.barangayId)) {
+    return <TclPageHeader crumb="Program Enrollment" title="Target Client List" subtitle="TCL records are unavailable without a valid service-area assignment." />;
+  }
+  return <TclRegister key={`${user.id}:${user.role}:${user.municipalityId}:${user.barangayId || ""}`} user={user} />;
+}
+
+function TclRegister({ user }) {
   const { online, lastSyncedAt } = useSyncStatus();
   const directory = useHouseholdWorkers();
   const request = useRef(0);
@@ -147,6 +154,7 @@ export default function TCLS() {
   const [allResidents, setAllResidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [residentLookupError, setResidentLookupError] = useState(null);
   const [loadedOwner, setLoadedOwner] = useState(null);
   const [cacheInfo, setCacheInfo] = useState({ source: null, cachedAt: null, stale: false });
 
@@ -154,6 +162,7 @@ export default function TCLS() {
     const current = ++request.current;
     setLoading(true);
     setLoadError(null);
+    setResidentLookupError(null);
     setAllTcls([]);
     setAllResidents([]);
     setCacheInfo({ source: null, cachedAt: null, stale: false });
@@ -174,7 +183,10 @@ export default function TCLS() {
     };
     return Promise.all([
       listTclOffline({ ownerId: user.id, fetchFn: () => tclApi.list(), online: () => online }),
-      loadResidents(),
+      loadResidents().catch((error) => {
+        if (current === request.current) setResidentLookupError(error?.message || "The resident directory could not be loaded.");
+        return [];
+      }),
     ])
       .then(([tclResult, residentResult]) => {
         if (current !== request.current) return;
@@ -480,9 +492,11 @@ export default function TCLS() {
         filterValue={cat || ""}
         filterOptions={TCL_CATEGORIES.map((category) => ({ value: category.id, label: category.name }))}
         onExport={exportRecords}
-        onNew={openAdd}
+        onNew={residentLookupError || loadError ? undefined : openAdd}
         loading={loading || saving}
       />
+
+      {residentLookupError && !loadError && <p role="alert" className="mb-4 text-sm text-brand-danger">New enrollment is unavailable. {residentLookupError} <button type="button" onClick={loadData} className="underline">Retry resident lookup</button></p>}
 
       {loadError ? (
         <Card className="p-10 text-center">
@@ -501,7 +515,7 @@ export default function TCLS() {
           title={recordQuery || cat ? "No matching records found" : cacheInfo.source === "cache" ? "No saved records available offline." : "No enrolled clients yet"}
           description={recordQuery || cat ? "Try adjusting your search or filters." : cacheInfo.source === "cache" ? "Reconnect to load and save TCL records for offline viewing." : "Residents enrolled in community health programs will appear here."}
           type={recordQuery || cat ? "search" : "empty"}
-          action={!(recordQuery || cat) ? (
+          action={!(recordQuery || cat) ? !residentLookupError && (
             <button onClick={openAdd} className="ui-tcl-control ui-tcl-control-primary">
               <Plus className="h-4 w-4" /> Add TCL
             </button>

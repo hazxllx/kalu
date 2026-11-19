@@ -1,7 +1,7 @@
 /**
  * KALUSAGAP — official/QA account provisioning + credential check.
  *
- * Reads backend/.env for SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (and the
+ * Reads local SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY settings (and the
  * anon key for password verification). For each account in ACCOUNTS it:
  *   1. checks whether the Supabase Auth user exists,
  *   2. verifies the intended password via a real anon sign-in,
@@ -16,14 +16,11 @@
  *   node backend/scripts/provision-official-accounts.mjs            # check only
  *   node backend/scripts/provision-official-accounts.mjs --apply    # create/fix
  */
+import '../src/config/env.js';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Load backend/.env regardless of the current working directory.
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+assertLocalScriptEnvironment();
 
 const APPLY = process.argv.includes('--apply');
 
@@ -32,16 +29,17 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in backend/.env');
+  console.error('Missing local SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.');
   process.exit(1);
 }
 if (!ANON_KEY) {
-  console.error('Missing SUPABASE_ANON_KEY in backend/.env (needed to verify passwords)');
+  console.error('Missing local SUPABASE_ANON_KEY (needed to verify passwords).');
   process.exit(1);
 }
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: localFetch },
 });
 
 // Municipality / barangay used for scoped roles.
@@ -59,7 +57,7 @@ const DEFAULT_SUPERVISOR_BARANGAY = 'San Isidro';
 const requirePassword = (envName) => {
   const value = process.env[envName];
   if (!value) {
-    console.error(`Missing ${envName} in backend/.env — set every official-account password before provisioning.`);
+    console.error(`Missing ${envName}. Set every official-account password before provisioning.`);
     process.exit(1);
   }
   return value;
@@ -73,8 +71,6 @@ const ACCOUNTS = [
   { email: 'supervisor@kalusagap.test',     password: requirePassword('KALUSAGAP_SUPERVISOR_PASSWORD'), role: 'health_supervisor', status: 'active', scope: 'barangay',     fullName: 'Health Supervisor', barangay: DEFAULT_SUPERVISOR_BARANGAY },
   { email: 'mollie.greenholt@forms.lat',    password: requirePassword('KALUSAGAP_RESIDENT_PASSWORD'),   role: 'resident',          status: 'active', scope: 'none',         fullName: 'Mollie Greenholt' },
 ];
-
-const mask = (pw) => (pw ? `${pw.slice(0, 2)}***${pw.slice(-2)} (len ${pw.length})` : '(empty)');
 
 async function listAllAuthUsers() {
   const byEmail = new Map();
@@ -93,6 +89,7 @@ async function verifyPassword(email, password) {
   // Brand-new anon client per attempt; discarded immediately.
   const c = createClient(SUPABASE_URL, ANON_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
+    global: { fetch: localFetch },
   });
   const { data, error } = await c.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, reason: error.message };
@@ -155,7 +152,7 @@ function buildProfilePatch(acct, profile, scope) {
 
 async function main() {
   console.log(`\nKALUSAGAP account provisioning — mode: ${APPLY ? 'APPLY (writes enabled)' : 'CHECK ONLY (no writes)'}`);
-  console.log(`Supabase project: ${SUPABASE_URL}\n`);
+  console.log(`Supabase origin: ${new URL(SUPABASE_URL).origin}\n`);
 
   const scope = await resolveScopeIds();
   const authUsers = await listAllAuthUsers();
@@ -207,9 +204,9 @@ async function main() {
             email_confirm: true,
           });
           if (error) throw new Error(`password reset(${acct.email}) failed: ${error.message}`);
-          line.actions.push(`RESET password -> ${mask(acct.password)}`);
+          line.actions.push('RESET password');
         } else {
-          line.actions.push(`WOULD RESET password -> ${mask(acct.password)}`);
+          line.actions.push('WOULD RESET password');
         }
       }
     }

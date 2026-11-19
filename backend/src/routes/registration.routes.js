@@ -10,31 +10,44 @@ import * as registrationController from '../controllers/registration.controller.
 import asyncHandler from '../utils/asyncHandler.js';
 
 /**
- * Resident self-registration.
+ * Resident self-registration and existing-record account linking routes.
  *
- *   POST /registration/resident   create the `residents` row for the signed-in
- *                                 account (Auth account is created client-side)
+ * Role in KALUSAGAP:
+ * Handles onboarding for residents after client-side Supabase Auth sign-up or
+ * staff-issued email invitation: creating new `public.residents` + verification
+ * records, completing invitation activation, checking Resident ID eligibility,
+ * and linking an authenticated account to a pre-existing barangay health record.
  *
- * Authenticated and rate-limited. A resident can only create their OWN record:
- * the service derives the auth user id from the verified session.
+ * Architectural pipeline:
+ *   route -> [authenticate -> authorize(residentSelf)] -> [rateLimit]
+ *         -> [validate] -> registration.controller -> registration.service -> Supabase
+ *
+ * Security guarantees:
+ * - Authenticated endpoints bind ownership strictly from `req.user` (the verified
+ *   session token) so a resident can only create or link their own account.
+ * - Public lookup (`/existing/lookup`) returns only an eligibility enum (never PII)
+ *   and enforces a stricter rate limit to blunt Resident ID enumeration.
  */
 const router = Router();
 
+// Per-client rate limit (10 attempts / hour) for resident registration and existing-record linking.
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
   message: 'Too many registration attempts. Please try again later.',
 });
 
-// A tighter limiter for the PUBLIC existing-record lookup to blunt Resident ID
-// enumeration (the endpoint returns no personal data, only an eligibility
-// state, but we still rate-limit it per client).
+// Tighter per-client rate limit (20 lookups / 15 minutes) for the public Resident ID
+// eligibility check to mitigate automated Resident ID enumeration.
 const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: 'Too many lookups. Please try again later.',
 });
 
+// POST /resident : Creates the `residents` record and initial verification submission
+// for the signed-in `resident` / `resident-limited` user using validated demographic,
+// barangay, and identity-proof fields in `req.body` (`registerResidentValidator`).
 router.post(
   '/resident',
   authenticate,
@@ -44,9 +57,9 @@ router.post(
   asyncHandler(registrationController.registerResident),
 );
 
-// Resident self-service account activation (after accepting an invitation link
-// and setting a password). Authenticated; the resident is derived from the
-// session. Safe no-op unless the resident record is Verified.
+// POST /activate : Finalizes resident self-service account activation after accepting
+// a staff invitation link and setting a password. Resident identity is derived from
+// the authenticated session; safe no-op unless the linked resident record is Verified.
 router.post(
   '/activate',
   authenticate,
@@ -54,16 +67,14 @@ router.post(
   asyncHandler(registrationController.activateAccount),
 );
 
-// Existing-resident activation — simplified "I already have a barangay health
-// record" flow.
-//
-//   POST /registration/existing/lookup    public: validate a Resident ID and
-//                                          report ONLY an eligibility state
-//                                          (no personal data is returned)
-//   POST /registration/existing/activate  authenticated: link the signed-in
-//                                          (email-verified) account to the
-//                                          existing record after a server-side
-//                                          date-of-birth identity check
+// ---------------------------------------------------------------------------
+// Existing-Resident Account Claiming ("I already have a barangay health record")
+// - POST /existing/lookup   : Public, rate-limited (`lookupLimiter`). Checks `req.body`
+//                             Resident ID and returns ONLY an eligibility state (no PII).
+// - POST /existing/activate : Authenticated (`residentSelf`) + rate-limited (`registerLimiter`).
+//                             Links the signed-in, email-verified account to the existing
+//                             resident record after server-side Resident ID + DOB verification.
+// ---------------------------------------------------------------------------
 router.post(
   '/existing/lookup',
   lookupLimiter,

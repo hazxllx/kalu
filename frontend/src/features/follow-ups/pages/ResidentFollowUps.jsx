@@ -197,7 +197,7 @@ export default function ResidentFollowUps() {
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: Math.min(i * 0.035, 0.2) }}
-                  className="rounded-lg border border-brand-border bg-white p-4 transition-colors hover:border-brand-blue/30"
+                  className="min-w-0 break-words rounded-lg border border-brand-border bg-white p-4 transition-colors hover:border-brand-blue/30 [overflow-wrap:anywhere]"
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -294,8 +294,8 @@ export default function ResidentFollowUps() {
         const s = schedules.find((x) => x.id === confirmTarget);
         if (!s) return null;
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
-            <Card className="w-full max-w-md">
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Confirm Follow-up">
+            <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto break-words">
               <div className="p-6">
                 <h3 className="text-lg font-semibold text-brand-ink">Confirm Follow-up</h3>
                 <p className="mt-2 text-sm leading-relaxed text-brand-gray">
@@ -325,7 +325,7 @@ export default function ResidentFollowUps() {
       })()}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 z-[90] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
+        <div role="status" className="fixed bottom-4 right-4 z-[90] flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
           <CheckCircle2 className="h-4 w-4 text-brand-green" />
           <span className="text-sm">{toast}</span>
         </div>
@@ -344,8 +344,8 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
     onSubmit(reason.trim());
   };
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
-      <Card className="w-full max-w-md">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Can't Attend">
+      <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto break-words">
         <div className="p-6">
           <div className="mb-1 flex items-start justify-between gap-3">
             <div>
@@ -358,8 +358,9 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
           </div>
           <p className="mt-2 text-sm text-brand-gray">Please tell your health team why you can't attend.</p>
           <div className="mt-4">
-            <label className="text-sm font-medium text-brand-ink">Reason <span className="text-brand-danger">*</span></label>
+            <label htmlFor="follow-up-rejection-reason" className="text-sm font-medium text-brand-ink">Reason <span className="text-brand-danger">*</span></label>
             <textarea
+              id="follow-up-rejection-reason"
               rows={4}
               value={reason}
               onChange={(e) => { setReason(e.target.value); if (error) setError(""); }}

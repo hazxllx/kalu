@@ -1,9 +1,15 @@
 /**
- * Health services service — real, scoped, database-backed catalog + personnel
- * assignment.
+ * Health services service — real, scoped, database-backed catalog, personnel
+ * assignment, resident registration roster, attendance tracking, and attachments.
  *
- * Backs public.health_services + public.health_service_assignments (see
- * supabase/migrations/20260928180000_health_services.sql) and replaces the
+ * Architectural layer:
+ *   route -> authenticate -> authorize -> healthServices.controller
+ *         -> healthServices.service -> Supabase (service-role) / storage.service / operational.service
+ *
+ * Backs public.health_services, public.health_service_assignments,
+ * public.health_service_attendance, and public.health_service_attachments (see
+ * supabase/migrations/20260928180000_health_services.sql), while cross-referencing
+ * public.visit_plans, public.appointments, and public.immunizations. Replaces the
  * browser-only catalog that could not follow an assignment across accounts.
  *
  * SCOPE / VISIBILITY MODEL:
@@ -61,6 +67,11 @@ const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
 };
 
+/**
+ * Paginate through a PostgREST query in `PAGE_SIZE` (500-row) windows so large
+ * catalogs, attendance rosters, or visit plans are never silently truncated by
+ * Supabase's default row cap.
+ */
 const readAllRows = async (query, fallback) => {
   const rows = [];
   for (let offset = 0; ; offset += PAGE_SIZE) {
@@ -117,6 +128,15 @@ const ASSIGN_EMBED = `${ASSIGN_TABLE}(id, personnel_id, active, personnel:profil
 const ATTACHMENTS_EMBED = `${ATTACHMENTS_TABLE}(id, attachment_type, filename, mime_type, file_size, storage_path, created_at)`;
 const SELECT = `*, ${FACILITY_EMBED}, ${BARANGAY_EMBED}, ${ASSIGN_EMBED}, ${ATTACHMENTS_EMBED}`;
 
+/**
+ * Determine whether a personnel profile is eligible to hold or receive a health
+ * service assignment within `municipalityId`. Verifies:
+ *   - active profile status and valid personnel role in an active municipality;
+ *   - approved, completed-setup, non-suspended `personnel_accounts` state;
+ *   - active, approved barangay assignment for barangay-scoped roles (HS / BHW);
+ *   - RHU facility assignment (`type === 'rhu'`) for `rhu_personnel`;
+ *   - facility-to-municipality and BHS-to-barangay alignment when `facility_id` is set.
+ */
 const personnelIsEligible = (profile, municipalityId) => {
   if (!profile || !isUuid(profile.id) || profile.status !== 'active' || !PERSONNEL_ROLES.has(profile.role)
     || !municipalityId || profile.municipality_id !== municipalityId
@@ -135,15 +155,21 @@ const personnelIsEligible = (profile, municipalityId) => {
   return true;
 };
 
+/** True when the authenticated user holds valid municipality (and, if required, barangay) scope to view resident data. */
 const hasResidentScope = (user) => user.role === ROLES.ADMIN || Boolean(user.municipalityId
   && PERSONNEL_ROLES.has(user.role) && (!BARANGAY_SCOPED_ROLES.has(user.role) || user.barangayId));
 
+/** True when `resident` falls within `user`'s municipality and (for HS/BHW) barangay scope. */
 const residentVisibleTo = (user, resident) => Boolean(resident?.id && hasResidentScope(user)
   && (user.role === ROLES.ADMIN || (resident.municipality_id === user.municipalityId
     && (!BARANGAY_SCOPED_ROLES.has(user.role) || resident.barangay_id === user.barangayId))));
 
-// The resident relationship is authoritative; service coverage and a plan's
-// historical barangay snapshot cannot authorize disclosure of resident data.
+/**
+ * Constrain a joined `resident:residents!inner(...)` PostgREST query to the
+ * caller's municipality and barangay scope. The resident relationship is
+ * authoritative; service coverage and a plan's historical barangay snapshot
+ * cannot authorize disclosure of resident data.
+ */
 const scopeResidentQuery = (user, query) => {
   if (user.role === ROLES.ADMIN) return query;
   let scoped = query.eq('resident.municipality_id', user.municipalityId);
@@ -151,6 +177,11 @@ const scopeResidentQuery = (user, query) => {
   return scoped;
 };
 
+/**
+ * Map a raw `public.health_services` row (with embedded facility, barangay,
+ * assignments, and attachments) into the normalized API response object.
+ * Filters `assignedPersonnel` to active, currently eligible staff only.
+ */
 const toService = (row) => {
   if (!row) return null;
   const assignments = Array.isArray(row[ASSIGN_TABLE]) ? row[ASSIGN_TABLE] : [];
@@ -219,6 +250,7 @@ const toService = (row) => {
   };
 };
 
+/** Enforce that the caller is authenticated and holds a service-management role (MHO, PHN, or Health Supervisor). */
 const assertManager = (user) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
   if (!MANAGE_ROLES.has(user.role)) {
@@ -306,6 +338,10 @@ export const list = async ({ user, mine = false, category = null, supabase = get
   return attachRegistrationCounts(user, dedupeById(results).map(toService), supabase);
 };
 
+/**
+ * Fetch a single health service by ID after enforcing the catalog visibility
+ * scope (`serviceVisibleTo`). Throws 404 when absent or outside the caller's scope.
+ */
 export const getById = async ({ user, id, supabase = getServiceClient() }) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
   const { data, error } = await supabase.from(TABLE).select(SELECT).eq('id', id).maybeSingle();
@@ -371,6 +407,7 @@ const manageableService = async (user, serviceId, supabase) => {
   return data;
 };
 
+/** Validate a strict calendar `YYYY-MM-DD` string (rejecting impossible dates such as Feb 30 via ISO round-trip). */
 const attendanceDate = (value) =>
   typeof value === 'string'
   && /^\d{4}-\d{2}-\d{2}$/.test(value)
@@ -379,6 +416,11 @@ const attendanceDate = (value) =>
 
 const isImmunizationService = (service) => text(service?.category).toLowerCase() === 'immunization';
 
+/**
+ * Create or update the linked `public.immunizations` record (keyed on
+ * `health_service_attendance_id`) via `operationalService` whenever an
+ * Immunization-category service attendance supplies vaccine details.
+ */
 const syncImmunizationForAttendance = async ({ user, attendanceId, residentId, payload, supabase }) => {
   const vaccine = text(payload?.vaccine);
   if (!vaccine) return null;
@@ -409,6 +451,16 @@ const applyAttendanceDateRange = (query, { from, to }) => {
   return ranged;
 };
 
+/**
+ * Record or update (idempotent per `service_id + resident_id + scheduled_date`)
+ * a resident's attendance for a health service.
+ *
+ * Enforces manager authorization, service management scope (`manageableService`),
+ * resident visibility (`residentVisibleTo`), mandatory `service_provided` (and
+ * `vaccine` for Immunization services) when marking `attended`, follow-up date
+ * consistency, automatic `attended_at` / `provided_by` stamping, and linked
+ * `immunizations` synchronization.
+ */
 export const createHealthServiceAttendance = async ({ user, payload = {}, supabase = getServiceClient() }) => {
   assertManager(user);
   const serviceId = text(payload.service_id);
@@ -480,6 +532,11 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   return data;
 };
 
+/**
+ * List attendance rows for a specific health service (`query.service_id`),
+ * optionally bounded by `query.from` / `query.to`. Confirms service visibility
+ * first and restricts returned rows to residents within the caller's scope.
+ */
 export const listAttendanceByService = async ({ user, query = {}, supabase = getServiceClient() }) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
   const serviceId = text(query.service_id);
@@ -497,6 +554,10 @@ export const listAttendanceByService = async ({ user, query = {}, supabase = get
     .map(({ resident, ...attendance }) => attendance);
 };
 
+/**
+ * List health service attendance history for a specific resident (`query.resident_id`),
+ * verifying that both the resident and each linked service are visible to the caller.
+ */
 export const listAttendanceByResident = async ({ user, query = {}, supabase = getServiceClient() }) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
   const residentId = text(query.resident_id);
@@ -578,6 +639,15 @@ export const listScopeAttendance = async ({ user, query = {}, supabase = getServ
   return visibleRows;
 };
 
+/**
+ * Partially update an existing `public.health_service_attendance` row (`params.id`).
+ *
+ * Validates service management scope and resident visibility, enforces clinical
+ * completeness when transitioning to or remaining in `attended` status, blocks
+ * reverting an `attended` service to `absent` (409 Conflict), stamps
+ * `attended_at` / `provided_by` on initial completion, and syncs any linked
+ * `immunizations` record.
+ */
 export const updateHealthServiceAttendance = async ({ user, params = {}, payload = {}, supabase = getServiceClient() }) => {
   assertManager(user);
   const id = text(params.id);
@@ -930,6 +1000,7 @@ const resolveScope = async (user, payload, supabase) => {
   return { municipalityId, facilityId: facility ? facility.id : null, customLocation, barangayId };
 };
 
+/** Dispatch in-app notifications (`public.notifications`) to each newly assigned personnel profile. */
 const notifyAssignees = async (supabase, { serviceName, personnelIds, assignedBy }) => {
   await Promise.all(
     (personnelIds || []).filter(Boolean).map((personnelId) =>
@@ -945,6 +1016,7 @@ const notifyAssignees = async (supabase, { serviceName, personnelIds, assignedBy
   );
 };
 
+/** Normalize, deduplicate, and UUID-validate an array of personnel IDs supplied for service assignment. */
 const assignmentPersonnelIds = (values) => {
   if (values == null) return [];
   if (!Array.isArray(values)) throw ApiError.unprocessable('Select personnel from the authorized directory.');
@@ -953,6 +1025,11 @@ const assignmentPersonnelIds = (values) => {
   return ids;
 };
 
+/**
+ * Load active personnel profiles in the manager's authorized scope (municipality-wide
+ * for MHO/PHN, own barangay for Health Supervisor), filtering through
+ * `personnelIsEligible` and excluding QA verification artifact accounts.
+ */
 const loadAssignableProfiles = async (user, personnelIds, supabase) => {
   if (!user.municipalityId || (user.role === ROLES.HEALTH_SUPERVISOR && !user.barangayId)) return [];
   let query = supabase.from('profiles').select(PERSONNEL_SELECT)
@@ -965,6 +1042,7 @@ const loadAssignableProfiles = async (user, personnelIds, supabase) => {
     && !isVerificationArtifactAccount(profile.email));
 };
 
+/** Ensure every requested `personnelIds` entry belongs to the service municipality and passes `loadAssignableProfiles`. */
 const validatePersonnelAssignments = async (user, service, personnelIds, supabase) => {
   if (personnelIds.length === 0) return;
   if (!user.municipalityId || service.municipality_id !== user.municipalityId) {
@@ -981,6 +1059,14 @@ const validatePersonnelAssignments = async (user, service, personnelIds, supabas
   }
 };
 
+/**
+ * Create a new health service in `public.health_services`.
+ *
+ * Enforces manager role, validates optional initial `personnelIds`, derives
+ * municipality/facility/barangay coverage via `resolveScope`, defaults single-day
+ * `end_date` to `start_date`, upserts initial `health_service_assignments`, and
+ * notifies assigned personnel.
+ */
 export const create = async ({ user, payload = {}, supabase = getServiceClient() }) => {
   assertManager(user);
   const name = text(payload.name);
@@ -1184,6 +1270,10 @@ export const remove = async ({ user, serviceId, supabase = getServiceClient() })
   return { id: serviceId, name: service.name, deleted: true };
 };
 
+/**
+ * Assign (or re-activate) a single eligible personnel member on a manageable
+ * health service (`public.health_service_assignments`) and notify them.
+ */
 export const assign = async ({ user, serviceId, personnelId, supabase = getServiceClient() }) => {
   assertManager(user);
   const pid = text(personnelId);
@@ -1198,6 +1288,10 @@ export const assign = async ({ user, serviceId, personnelId, supabase = getServi
   return getById({ user, id: serviceId, supabase });
 };
 
+/**
+ * Soft-deactivate (`active = false`) a personnel member's assignment on a
+ * manageable health service, preserving historical attribution on attendance rows.
+ */
 export const unassign = async ({ user, serviceId, personnelId, supabase = getServiceClient() }) => {
   assertManager(user);
   await manageableService(user, serviceId, supabase); // BUG-004: scope + management check
@@ -1234,6 +1328,7 @@ export const assignablePersonnel = async ({ user, supabase = getServiceClient() 
   }));
 };
 
+/** Return the static health service category vocabulary (`SERVICE_CATEGORIES`). */
 export const meta = () => ({ categories: SERVICE_CATEGORIES });
 
 /**
@@ -1278,8 +1373,13 @@ export const reference = async ({ user, supabase = getServiceClient() }) => {
 };
 
 /**
- * Upload a health service attachment (memo or pubmat).
- * Validates file type, stores in Supabase Storage, and persists metadata in DB.
+ * Upload or replace a health service attachment (`memo` or `pubmat`).
+ *
+ * Enforces manager scope (`manageableService`), MIME allowlists, and size caps
+ * (10 MB PDF/DOC/DOCX for `memo`; 5 MB JPG/PNG/WebP for `pubmat`). Uploads to
+ * Supabase Storage first, upserts metadata in `public.health_service_attachments`
+ * (rolling back the new object on DB error), and finally cleans up any superseded
+ * storage object.
  */
 export const uploadAttachment = async ({ user, serviceId, attachmentType, file, supabase = getServiceClient() }) => {
   assertManager(user);
@@ -1424,7 +1524,8 @@ export const deleteAttachment = async ({ user, serviceId, attachmentType, supaba
 };
 
 /**
- * Get a signed URL for a health service attachment.
+ * Get a temporary signed download URL for a health service attachment (`memo` or
+ * `pubmat`) after verifying that the service is visible to the caller (`getById`).
  */
 export const getAttachmentSignedUrl = async ({ user, serviceId, attachmentType, supabase = getServiceClient() }) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');

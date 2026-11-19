@@ -7,29 +7,30 @@
  * Risk Overview / Detail pages render.
  *
  * This replaces the obsolete client-only sessionStorage store as the data
- * source (BUG-009). Risk classification comes from the server (risk_level /
- * risk_score / risk_factors, recomputed server-side on every write — never from
- * the client); follow-up / assignment / escalation state comes from the
- * scope-enforced workflow table. No demo/mock/hardcoded households are used, and
+ * source (BUG-009). Community cluster levels come only from the separate,
+ * persisted riskClusterLevel assignment in the scope-enforced workflow table.
+ * Environmental risk_level / risk_score / risk_factors remain independent and
+ * are displayed separately. No demo/mock/hardcoded households are used, and
  * barangay/municipality scope + role permissions remain enforced by the API and
  * RLS (this module never sends a scope id and cannot widen access).
  */
-import { RISK_LEVELS, RISK_CLASSIFICATION_BASIS } from "../../../lib/householdRisk.js";
+import {
+  RISK_LEVELS, RISK_LEVEL_LABELS,
+} from "../../../lib/householdRisk.js";
 
-/**
- * The server risk model is 3-level (Low / Moderate / High); the retained
- * overview UI is 4-level. Map High -> Priority Review, Moderate -> Needs
- * Intervention, Low -> Stable so the "priority households" section surfaces the
- * households that actually need attention.
- */
-const SERVER_TO_DISPLAY = {
-  High: RISK_LEVELS.PRIORITY,
-  Moderate: RISK_LEVELS.INTERVENTION,
-  Low: RISK_LEVELS.STABLE,
+const LEVEL_BY_LABEL = Object.fromEntries(
+  Object.entries(RISK_LEVEL_LABELS).map(([key, label]) => [label.toLowerCase(), key]),
+);
+
+/** Normalize only explicit four-tier cluster assignments; unknown stays unassigned. */
+export const mapServerRiskLevel = (level) => {
+  if (typeof level !== "string") return null;
+  const value = level.trim().toLowerCase();
+  return Object.values(RISK_LEVELS).includes(value) ? value : LEVEL_BY_LABEL[value] || null;
 };
 
-export const mapServerRiskLevel = (level) =>
-  SERVER_TO_DISPLAY[level] || RISK_LEVELS.STABLE;
+const environmentalLevel = (level) =>
+  ["Low", "Moderate", "High"].includes(level) ? level : null;
 
 /** Whole days since an ISO date (yyyy-mm-dd), or null when unset/invalid. */
 export const daysSince = (iso) => {
@@ -52,18 +53,21 @@ const toDateOnly = (value) => (value ? String(value).slice(0, 10) : "");
  * workflow row (or null when none has been recorded yet).
  */
 export const toRiskCluster = (household = {}, workflow = null) => {
-  const level = mapServerRiskLevel(household.riskLevel);
-  const factors = Array.isArray(household.riskFactors) ? household.riskFactors : [];
-  const indicators = factors.map((f) => ({ key: String(f), label: String(f) }));
-  const basis = RISK_CLASSIFICATION_BASIS[level] || RISK_CLASSIFICATION_BASIS[RISK_LEVELS.STABLE];
+  const assignment = Object.prototype.hasOwnProperty.call(workflow || {}, 'riskClusterLevel')
+    ? workflow.riskClusterLevel : household.riskClusterLevel;
+  const level = mapServerRiskLevel(assignment) || RISK_LEVELS.UNASSESSED;
+  const environmentalFactors = Array.isArray(household.riskFactors) ? household.riskFactors : [];
+  const environmentalScore = household.riskScore == null || household.riskScore === ""
+    ? null
+    : Number(household.riskScore);
 
   const risk = {
     level,
-    score: Number(household.riskScore) || 0,
-    count: factors.length,
-    indicators,
+    score: null,
+    count: 0,
+    indicators: [],
     hasEscalation: false,
-    recommendedAction: basis.recommendedResponse,
+    recommendedAction: "",
   };
 
   const memberCount = Array.isArray(household.members)
@@ -82,7 +86,13 @@ export const toRiskCluster = (household = {}, workflow = null) => {
     purok: household.purok || "",
     address: household.address || household.streetAddress || "",
     members: memberCount,
-    riskLevelRaw: household.riskLevel || "Low",
+    riskClusterLevel: level,
+    riskLevelRaw: household.riskLevel ?? null,
+    environmentalRisk: {
+      level: environmentalLevel(household.riskLevel),
+      score: Number.isFinite(environmentalScore) ? environmentalScore : null,
+      factors: environmentalFactors.map(String),
+    },
     risk,
     // Persisted workflow (server-side, survives refresh/logout/device).
     workflowStatus: workflow?.workflowStatus || "",
@@ -93,10 +103,63 @@ export const toRiskCluster = (household = {}, workflow = null) => {
     lastFollowUpAt: toDateOnly(workflow?.lastFollowUpAt),
     lastHouseholdVisit: toDateOnly(workflow?.lastFollowUpAt),
     escalation,
-    history: Array.isArray(workflow?.history) ? workflow.history : [],
+    history: Array.isArray(workflow?.history) ? workflow.history.map((entry) => ({
+      ...entry,
+      level: mapServerRiskLevel(entry.level) || RISK_LEVELS.UNASSESSED,
+    })) : [],
     lastAssessment: toDateOnly(household.updatedAt),
     lastNote: workflow?.lastNote || "",
   };
 };
 
-export default { mapServerRiskLevel, daysSince, toRiskCluster };
+/** Read every scoped household page, then load workflow state with bounded concurrency. */
+export const loadRiskClusters = async ({
+  listHouseholds,
+  getWorkflow,
+  includeWorkflow = false,
+  pageSize = 100,
+  concurrency = 8,
+} = {}) => {
+  const rows = [];
+  const ids = new Set();
+  let expectedTotal = null;
+  for (let offset = 0; ; ) {
+    const page = await listHouseholds({ limit: pageSize, offset });
+    if (!Array.isArray(page?.rows) || !Number.isInteger(page.total) || page.total < 0) {
+      throw new Error("Household list returned an incomplete page or total count.");
+    }
+    if (expectedTotal === null) expectedTotal = page.total;
+    if (page.total !== expectedTotal) throw new Error("Household list total count changed while loading.");
+    const pageRows = page.rows;
+    if (pageRows.length > pageSize || offset + pageRows.length > page.total) {
+      throw new Error("Household list returned an inconsistent page count.");
+    }
+    for (const row of pageRows) {
+      if (!row?.id || ids.has(row.id)) throw new Error("Household list returned a missing or duplicate household ID.");
+      ids.add(row.id);
+    }
+    rows.push(...pageRows);
+    offset += pageRows.length;
+    if (!pageRows.length && offset < page.total) {
+      throw new Error("Household list pagination ended before all rows were returned.");
+    }
+    if (offset >= page.total) break;
+    if (pageRows.length < pageSize) {
+      throw new Error("Household list pagination returned a short page before the total count.");
+    }
+  }
+  if (rows.length !== expectedTotal) throw new Error("Household list total count changed while loading.");
+  const workflows = new Array(rows.length).fill(null);
+  if (includeWorkflow && getWorkflow) {
+    let nextIndex = 0;
+    await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, async () => {
+      while (nextIndex < rows.length) {
+        const index = nextIndex++;
+        workflows[index] = await getWorkflow(rows[index].id);
+      }
+    }));
+  }
+  return rows.map((row, index) => toRiskCluster(row, workflows[index]));
+};
+
+export default { mapServerRiskLevel, daysSince, toRiskCluster, loadRiskClusters };

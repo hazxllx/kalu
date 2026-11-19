@@ -3,10 +3,38 @@ import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import ApiError from '../utils/apiError.js';
 
+/**
+ * @module middleware/uploadOfficialLogo
+ *
+ * Official municipality/barangay/RHU branding logo upload and image-safety
+ * validation middleware for KALUSAGAP.
+ * Position in request pipeline:
+ *   `route -> authenticate -> authorize -> uploadOfficialLogo -> controller -> service -> Supabase Storage`
+ *
+ * Keeps logo uploads in memory (`multer.memoryStorage()`) and performs defense-in-depth
+ * screening beyond MIME type checks:
+ *   1. Caps raw upload size at 5 MB (`MAX_OFFICIAL_LOGO_SIZE`).
+ *   2. Verifies binary PNG (`PNG_SIGNATURE`) or JPEG (`FF D8 FF`) magic bytes.
+ *   3. Enforces a 20-megapixel ceiling (`MAX_IMAGE_PIXELS`) and 128 MB JPEG
+ *      decoder memory limit to guard against image decompression bombs.
+ *   4. Decodes full pixel data (`pngjs` / `jpeg-js`) to reject truncated,
+ *      corrupted, or polyglot files before storage.
+ */
+
+/** Maximum allowed byte size (5 MB) for an official seal/logo image. */
 export const MAX_OFFICIAL_LOGO_SIZE = 5 * 1024 * 1024;
+/** Maximum total pixel count (20 MP) permitted to prevent decompression bombs. */
 const MAX_IMAGE_PIXELS = 20_000_000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
+/**
+ * Validates an uploaded logo's binary signature, pixel dimensions, and full
+ * image decode integrity for PNG and JPEG formats. Throws a 400 `ApiError` when
+ * the buffer is empty, malformed, oversized in dimensions, or undecodable.
+ *
+ * @param {Object} file - Multer file object containing `buffer` and `mimetype`.
+ * @returns {Object} Verified format descriptor `{ mimeType, extension }`.
+ */
 export const validateOfficialLogo = (file) => {
   const buffer = file?.buffer;
   if (!Buffer.isBuffer(buffer) || buffer.length < 8) {
@@ -14,6 +42,8 @@ export const validateOfficialLogo = (file) => {
   }
 
   if (file.mimetype === 'image/png') {
+    // PNG header requires 8-byte signature followed by IHDR chunk containing
+    // big-endian 32-bit width (offset 16) and height (offset 20).
     if (buffer.length < 24 || !buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
       throw ApiError.badRequest('The uploaded file is not a valid PNG image.');
     }
@@ -38,6 +68,7 @@ export const validateOfficialLogo = (file) => {
       throw ApiError.badRequest('The uploaded file is not a valid JPEG image.');
     }
     try {
+      // Bound both pixel resolution and decoder heap usage during JPEG decompression.
       const decoded = jpeg.decode(buffer, {
         useTArray: true,
         maxResolutionInMP: MAX_IMAGE_PIXELS / 1_000_000,
@@ -67,6 +98,15 @@ const upload = multer({
   limits: { fileSize: MAX_OFFICIAL_LOGO_SIZE, files: 1 },
 });
 
+/**
+ * Express middleware handling single `'file'` official logo uploads. Normalizes
+ * Multer errors to 400 `ApiError`, validates image bytes via `validateOfficialLogo`,
+ * and attaches `req.officialLogoFormat = { mimeType, extension }` alongside `req.file`.
+ *
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @param {Function} next - Express next callback.
+ */
 export const uploadOfficialLogo = (req, res, next) => {
   upload.single('file')(req, res, (error) => {
     if (error instanceof multer.MulterError) {

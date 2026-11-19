@@ -36,8 +36,28 @@ const ALIASES = {
  * @returns {('Low'|'Moderate'|'High'|'Critical'|'Unassessed'|null)} null for empty/unknown.
  */
 export const canonicalRiskLevel = (value) => {
-  const key = String(value ?? '').trim().toLowerCase();
+  const key = String(value ?? '').trim().toLowerCase().replace(/\s+risk$/, '');
   return ALIASES[key] || null;
+};
+
+// Critical remains a distinct legacy category; it shares the high-risk tone.
+export const RISK_PRESENTATION = Object.freeze({
+  Low: { color: '#047857', tone: 'green', badge: 'bg-emerald-50 text-emerald-700', bar: 'bg-emerald-700', text: 'text-emerald-700' },
+  Moderate: { color: '#b45309', tone: 'amber', badge: 'bg-amber-50 text-amber-700', bar: 'bg-amber-700', text: 'text-amber-700' },
+  High: { color: '#be123c', tone: 'red', badge: 'bg-rose-50 text-rose-700', bar: 'bg-rose-700', text: 'text-rose-700' },
+  Critical: { color: '#be123c', tone: 'red', badge: 'bg-rose-50 text-rose-700', bar: 'bg-rose-700', text: 'text-rose-700' },
+  Unassessed: { color: '#64748b', tone: 'slate', badge: 'bg-slate-100 text-slate-600', bar: 'bg-slate-500', text: 'text-slate-600' },
+});
+
+export const normalizeRiskDistribution = (distribution = []) => {
+  const counts = new Map();
+  for (const row of distribution) {
+    const name = canonicalRiskLevel(row.name) || RISK_LEVELS.UNASSESSED;
+    const value = Number(row.value);
+    if (!Number.isFinite(value) || value < 0) continue;
+    counts.set(name, (counts.get(name) || 0) + value);
+  }
+  return [...counts].map(([name, value]) => ({ name, value }));
 };
 
 export default { RISK_LEVELS, canonicalRiskLevel };

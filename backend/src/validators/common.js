@@ -1,16 +1,19 @@
 /**
- * Shared validation primitives (server-authoritative).
+ * @file Shared validation primitives and result envelopes (server-authoritative).
  *
- * These are the single source of truth for input rules on the backend. The
- * matching frontend helpers live in `frontend/src/utils/validation`, but the
- * frontend is only a convenience: every request is re-validated here before it
- * reaches a service, and services still enforce authorization and ownership.
+ * Single source of truth for foundational input rules across KALUSAGAP's backend
+ * validation layer (`route -> authenticate -> authorize -> validate -> controller ->
+ * service -> repository/Supabase`). Matching frontend helpers live in
+ * `frontend/src/utils/validation` for UX feedback only — every request is
+ * re-validated server-side here before reaching controllers/services, while
+ * services continue to enforce RBAC, barangay/RHU scope, and record ownership.
  *
  * Convention with `middleware/validate.js`:
  *   validator(input, req) -> { value }            // accepted, replaces req[part]
  *                         -> { error: { field } } // rejected with 400 + details
  */
 
+/** Standard maximum character lengths aligned with KALUSAGAP database column bounds. */
 export const TEXT_LIMITS = Object.freeze({
   short: 80,
   medium: 120,
@@ -19,13 +22,16 @@ export const TEXT_LIMITS = Object.freeze({
   notes: 2000,
 });
 
+/** Controlled generational name suffixes accepted on resident profiles. */
 export const NAME_SUFFIXES = Object.freeze(['', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V']);
 export const SEX_OPTIONS = Object.freeze(['Male', 'Female']);
 export const CIVIL_STATUSES = Object.freeze(['Single', 'Married', 'Widowed', 'Separated']);
+/** Minimum non-whitespace character count required for rejection/revision explanations. */
 export const MIN_REJECTION_REASON = 5;
+/** Baseline password rule: at least 8 characters containing both a letter and a digit. */
 const PASSWORD_POLICY = /^(?=.*[A-Za-z])(?=.*[0-9]).{8,}$/;
 
-/** PH mobile number: 09XXXXXXXXX or +639XXXXXXXXX (spaces/dashes tolerated). */
+/** PH mobile number: 09XXXXXXXXX or +639XXXXXXXXX (spaces/dashes tolerated via `normalizePhone`). */
 const PH_MOBILE = /^(?:\+63|0)9\d{9}$/;
 /**
  * STRICT registration mobile rule: exactly 11 numeric digits, no separators,
@@ -37,34 +43,43 @@ const PH_MOBILE = /^(?:\+63|0)9\d{9}$/;
 const PH_MOBILE_STRICT = /^09\d{9}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Unicode person-name pattern allowing letters, combining marks, spaces, hyphens, apostrophes, and initials. */
 const PERSON_NAME = /^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+|(?:\.[\p{L}\p{M}]+)*\.?)*$/u;
 
-/** Controlled Zone values for a resident/household address. */
+/** Controlled Zone values (1..8) for a resident/household address. */
 export const ZONE_VALUES = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8]);
 
+/** Safely converts any value to a string, mapping `null` and `undefined` to `''`. */
 export const asString = (value) => (value === null || value === undefined ? '' : String(value));
+/** Converts a value to a trimmed string (`null`/`undefined` become `''`). */
 export const text = (value) => asString(value).trim();
 export const isBlank = (value) => text(value) === '';
+/** Detects ASCII C0 control characters (`U+0000..U+001F`) and `DEL` (`U+007F`). */
 export const hasControlChars = (value) => /[\u0000-\u001F\u007F]/.test(asString(value));
 export const isValidPersonName = (value) => PERSON_NAME.test(text(value));
 
+/** Checks raw string length against `max`; `hasMinLength` checks trimmed length against `min`. */
 export const hasMaxLength = (value, max) => asString(value).length <= max;
 export const hasMinLength = (value, min) => text(value).length >= min;
 export const isStrongPassword = (value) => PASSWORD_POLICY.test(asString(value));
 
+/** Strips common phone formatting characters (spaces, parentheses, hyphens, dots). */
 export const normalizePhone = (value) => asString(value).replace(/[\s()\-.]/g, '');
 export const normalizeEmail = (value) => text(value).toLowerCase();
 export const isPhonePH = (value) => PH_MOBILE.test(normalizePhone(value));
 /**
  * Strict mobile check for registration: the raw value must be EXACTLY 11
- * numeric digits starting 09 â€” no spaces, dashes, letters or +63 prefix. The
+ * numeric digits starting 09 — no spaces, dashes, letters or +63 prefix. The
  * value is NOT normalised first: separators or letters cause rejection.
  */
 export const isStrictMobile = (value) => PH_MOBILE_STRICT.test(asString(value));
 export const isEmail = (value) => EMAIL.test(normalizeEmail(value));
 export const isUuid = (value) => UUID.test(text(value));
 
-/** Coerce a Zone input to an integer 1..8, or null when out of range/blank. */
+/**
+ * Coerces a Zone input (e.g. `3`, `'3'`, or `'Zone 3'`) to an integer `1..8`,
+ * or `null` when blank, non-numeric, or outside `ZONE_VALUES`.
+ */
 export const toZone = (value) => {
   const raw = text(value).replace(/^zone\s*/i, '');
   if (raw === '') return null;
@@ -74,7 +89,7 @@ export const toZone = (value) => {
 };
 export const isZone = (value) => toZone(value) !== null;
 
-/** Parse "YYYY-MM-DD" (or ISO) into a date at local midnight, or null. */
+/** Parse "YYYY-MM-DD" (at local midnight) or an ISO datetime string into a `Date`, or `null`. */
 export const parseDate = (value) => {
   const raw = text(value);
   if (!raw) return null;
@@ -85,7 +100,10 @@ export const parseDate = (value) => {
 /** Strict YYYY-MM-DD validator: 4-digit year, 01..12 month, valid calendar day. */
 export const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Parse a date-only value as a UTC calendar date, rejecting rollover dates. */
+/**
+ * Parses a strict `YYYY-MM-DD` string as a UTC midnight `Date`, explicitly
+ * rejecting calendar rollover dates (such as `2025-02-30` rolling into March).
+ */
 export const parseDateOnly = (value) => {
   const raw = text(value);
   if (!DATE_ONLY_PATTERN.test(raw)) return null;
@@ -99,7 +117,7 @@ export const parseDateOnly = (value) => {
   return date;
 };
 
-/** Age in whole calendar years using UTC dates on both client and server. */
+/** Computes completed age in whole calendar years using timezone-independent UTC dates. */
 export const ageFromDateOnly = (value, now = new Date()) => {
   const date = parseDateOnly(value);
   if (!date) return null;
@@ -109,6 +127,7 @@ export const ageFromDateOnly = (value, now = new Date()) => {
   return age;
 };
 
+/** Returns `true` when a strict `YYYY-MM-DD` date falls after today's UTC calendar date. */
 export const isFutureDateOnly = (value, now = new Date()) => {
   const date = parseDateOnly(value);
   if (!date) return false;
@@ -116,6 +135,7 @@ export const isFutureDateOnly = (value, now = new Date()) => {
   return date.getTime() > today;
 };
 
+/** Local-timezone date comparison helpers (`parseDate`-based, accepting ISO timestamps). */
 export const isFutureDate = (value, now = new Date()) => {
   const d = parseDate(value);
   if (!d) return false;
@@ -123,6 +143,7 @@ export const isFutureDate = (value, now = new Date()) => {
   return d.getTime() > today.getTime();
 };
 
+/** Computes completed age in whole calendar years using local-timezone `Date` components. */
 export const ageFromDate = (value, now = new Date()) => {
   const d = parseDate(value);
   if (!d) return null;
@@ -137,8 +158,12 @@ export const isFiniteNumber = (value) => value !== '' && value !== null && value
 export const inRange = (value, min, max) => isFiniteNumber(value) && Number(value) >= min && Number(value) <= max;
 
 /**
- * Rejection / resubmission reason rule shared by the API and the UI:
- * required, whitespace-only rejected, minimum length.
+ * Validates a rejection or resubmission reason shared by API validators and UI forms:
+ * requires non-whitespace text of at least `min` characters, returning `''` when valid.
+ *
+ * @param {*} reason - Raw reason input.
+ * @param {Object} [options] - Optional minimum length and custom error copy overrides.
+ * @returns {string} Error message string, or `''` if valid.
  */
 export const rejectionReasonError = (reason, { min = MIN_REJECTION_REASON, requiredMessage, minMessage } = {}) => {
   const value = text(reason);
@@ -147,7 +172,7 @@ export const rejectionReasonError = (reason, { min = MIN_REJECTION_REASON, requi
   return '';
 };
 
-/** Adds a field error only when the message is non-empty. */
+/** Mutates `errors` to record `field -> message` only when `message` is truthy. */
 export const addError = (errors, field, message) => {
   if (message) errors[field] = message;
   return errors;
@@ -155,7 +180,7 @@ export const addError = (errors, field, message) => {
 
 export const hasErrors = (errors) => Object.keys(errors).length > 0;
 
-/** Public, non-sensitive result of a validator. */
+/** Wraps field errors or normalized values in the `{ error }` / `{ value }` envelope expected by `middleware/validate.js`. */
 export const invalid = (errors) => ({ error: errors });
 export const valid = (value) => ({ value });
 

@@ -1,14 +1,17 @@
 /**
- * AI Provider Integration
- * 
- * Handles requests to external AI providers (OpenAI, Anthropic, etc.) with:
- * - 503 capacity error detection and retry
- * - Exponential backoff with jitter
- * - Retry-After header respect
- * - Request deduplication (idempotency)
- * - Provider fallback support
- * - Comprehensive error classification
- * - Secure logging without exposing sensitive data
+ * AI Provider HTTP Client & Factory (`services/aiProvider/client.js`).
+ *
+ * Fits into KALUSAGAP's backend architecture beneath domain/AI services:
+ *   `route -> authenticate -> authorize -> controller -> service -> AIProviderClient -> External LLM API`
+ *
+ * Responsibilities:
+ * - Executes authenticated JSON requests against external AI providers (Anthropic, OpenAI).
+ * - Deduplicates concurrent identical requests in memory via idempotency keys.
+ * - Retries transient failures (503 capacity, 429 rate limits, 5xx, network/timeouts)
+ *   using exponential backoff with symmetric jitter and `Retry-After` header support.
+ * - Automatically fails over to a secondary `fallbackProvider` when primary retries
+ *   are exhausted on fallback-eligible errors.
+ * - Emits structured, credential-redacted telemetry logs via `ProviderLogger`.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -17,9 +20,22 @@ import { RetryConfig, retryWithBackoff } from './retry.js';
 import { ProviderLogger, createProviderRequestLog, createRetryLog, createRetryExhaustedLog, createFallbackLog } from './logging.js';
 
 /**
- * Configuration for provider integration
+ * Immutable-style configuration container for a single external AI provider.
+ * Clamps retry counts and timeout/backoff bounds to safe operational ranges.
  */
 export class ProviderConfig {
+  /**
+   * @param {Object} [options] - Provider configuration parameters
+   * @param {string} options.name - Logical provider identifier (e.g., `'anthropic'`, `'openai'`)
+   * @param {string} options.apiKey - Secret bearer token (never written to logs)
+   * @param {string} options.baseUrl - Base origin URL (e.g., `'https://api.anthropic.com'`)
+   * @param {number} [options.maxRetries=5] - Total attempts allowed per request (clamped to 1..10)
+   * @param {number} [options.requestTimeoutMs=30000] - Per-attempt HTTP abort timeout in ms (min 1000)
+   * @param {number} [options.retryBackoffBaseMs=1000] - Initial backoff delay in ms (min 100)
+   * @param {number} [options.retryBackoffMaxMs=60000] - Upper bound on backoff delay in ms
+   * @param {boolean} [options.respectRetryAfter=true] - Whether to honor provider `Retry-After` delays
+   * @param {ProviderConfig|null} [options.fallbackProvider=null] - Secondary provider used if primary exhausts retries
+   */
   constructor({
     name,
     apiKey,
@@ -46,6 +62,11 @@ export class ProviderConfig {
     this.fallbackProvider = fallbackProvider; // Another ProviderConfig instance
   }
 
+  /**
+   * Build a `RetryConfig` instance derived from this provider's backoff settings.
+   *
+   * @returns {RetryConfig} Retry policy configuration
+   */
   getRetryConfig() {
     return new RetryConfig({
       maxAttempts: this.maxRetries,
@@ -57,9 +78,14 @@ export class ProviderConfig {
 }
 
 /**
- * AI Provider Client with retry and error handling
+ * Resilient HTTP client for a configured AI provider with in-flight request
+ * deduplication, exponential backoff retries, and secondary provider failover.
  */
 export class AIProviderClient {
+  /**
+   * @param {ProviderConfig} config - Validated provider configuration
+   * @param {ProviderLogger|null} [logger=null] - Optional custom logger; defaults to provider-scoped logger
+   */
   constructor(config, logger = null) {
     if (!(config instanceof ProviderConfig)) {
       throw new TypeError('Expected config to be ProviderConfig instance');
@@ -134,7 +160,16 @@ export class AIProviderClient {
   }
 
   /**
-   * Internal: Execute request with retry and backoff
+   * Internal: Execute a provider request wrapped in `retryWithBackoff`.
+   *
+   * If all retry attempts fail (or a terminal error occurs), classifies the final
+   * error. When the classification is fallback-eligible (503, 429, 5xx) and a
+   * `fallbackProvider` is configured, delegates to `executeFallback`. Otherwise
+   * throws an enriched `Error` carrying `classification`, `statusCode`, `provider`,
+   * and `requestId` for upstream service error mapping.
+   *
+   * @param {Object} options - Internal execution parameters
+   * @returns {Promise<Object>} Parsed JSON response body
    */
   async executeWithRetry({
     model,
@@ -234,7 +269,15 @@ export class AIProviderClient {
   }
 
   /**
-   * Execute fallback to alternative provider
+   * Fail over to the configured secondary `fallbackProvider` after primary retries
+   * are exhausted on a capacity, rate-limit, or server error.
+   *
+   * Preserves the original `requestId` as `idempotencyKey` for end-to-end tracing.
+   * Re-throws `originalError` if the fallback provider also fails so callers see
+   * the primary failure context.
+   *
+   * @param {Object} options - Fallback execution context and original failure metadata
+   * @returns {Promise<Object>} Parsed JSON response from the fallback provider
    */
   async executeFallback({
     provider,
@@ -289,7 +332,15 @@ export class AIProviderClient {
   }
 
   /**
-   * Make the actual HTTP request to provider
+   * Perform a single raw HTTP request attempt to the provider endpoint.
+   *
+   * Enforces `config.requestTimeoutMs` via `AbortController` (unless an external
+   * `signal` is supplied), attaches bearer auth and `X-Request-ID` headers, and
+   * normalizes non-2xx responses and abort timeouts into structured `Error` objects
+   * with `statusCode`, `responseBody`, and `headers` for `classifyProviderError`.
+   *
+   * @param {Object} options - Single HTTP attempt options
+   * @returns {Promise<Object>} Parsed JSON body on 2xx response
    */
   async makeRequest({
     model,
@@ -354,7 +405,7 @@ export class AIProviderClient {
 }
 
 /**
- * Factory for creating configured provider clients
+ * Registry and factory for named `ProviderConfig` definitions and `AIProviderClient` instances.
  */
 export class ProviderClientFactory {
   constructor() {
@@ -363,7 +414,9 @@ export class ProviderClientFactory {
   }
 
   /**
-   * Register a provider configuration
+   * Register or overwrite a provider configuration by `config.name`.
+   *
+   * @param {ProviderConfig} config - Validated provider configuration
    */
   register(config) {
     if (!(config instanceof ProviderConfig)) {
@@ -373,7 +426,10 @@ export class ProviderClientFactory {
   }
 
   /**
-   * Get or create a client for the provider
+   * Create a new `AIProviderClient` bound to the named provider configuration.
+   *
+   * @param {string} providerName - Registered provider key (e.g., `'anthropic'`, `'openai'`)
+   * @returns {AIProviderClient} Configured client instance
    */
   getClient(providerName) {
     const config = this.configs.get(providerName);
@@ -384,7 +440,9 @@ export class ProviderClientFactory {
   }
 
   /**
-   * List registered providers
+   * Return the names of all currently registered AI providers.
+   *
+   * @returns {Array<string>} Registered provider names
    */
   listProviders() {
     return Array.from(this.configs.keys());

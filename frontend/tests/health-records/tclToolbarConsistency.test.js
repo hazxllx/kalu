@@ -73,7 +73,7 @@ test('every client-record TCL variant uses a functional shared toolbar', () => {
   assert.doesNotMatch(programPage, /onRefresh=/);
 
   assert.match(registry, /onExport=\{exportRecords\}/);
-  assert.match(registry, /onNew=\{openAdd\}/);
+  assert.match(registry, /onNew=\{residentLookupError \|\| loadError \? undefined : openAdd\}/);
   assert.doesNotMatch(registry, /onRefresh=|showRefresh=|showExport=\{false\}/);
 
   assert.match(maternal, /onExport=\{handleMaternalExport\}/);

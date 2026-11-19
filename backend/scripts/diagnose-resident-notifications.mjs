@@ -21,22 +21,23 @@
  * Usage:
  *   node backend/scripts/diagnose-resident-notifications.mjs <email>
  */
+import '../src/config/env.js';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+assertLocalScriptEnvironment();
 
 const email = (process.argv[2] || '').trim().toLowerCase();
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 if (!email) { console.error('Usage: node diagnose-resident-notifications.mjs <email>'); process.exit(1); }
-if (!SUPABASE_URL || !SERVICE_KEY) { console.error('Missing Supabase env in backend/.env'); process.exit(1); }
+if (!SUPABASE_URL || !SERVICE_KEY) { console.error('Missing local Supabase configuration.'); process.exit(1); }
 
-const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: localFetch },
+});
 
 const findUser = async () => {
   let page = 1;

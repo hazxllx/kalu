@@ -1,10 +1,42 @@
 import { hasControlChars, isStrictMobile, isUuid, text, valid, invalid } from './common.js';
 
+/**
+ * @file Admin User & Personnel Account Lifecycle validators (server-authoritative).
+ *
+ * Executed by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> authenticate -> authorize -> validate -> controller -> service -> Supabase`).
+ *
+ * Enforces strict separation between profile attribute edits (`updateUserValidator`)
+ * and audited lifecycle transitions (`personnelLifecycleValidator`), prevents
+ * administrator-chosen passwords (credentials are generated/emailed by the service),
+ * and requires client-supplied `operationId` UUIDs for idempotent account actions.
+ */
+
+/** Explicit lifecycle transitions supported by the personnel management endpoint. */
 export const PERSONNEL_ACTIONS = Object.freeze(['approve', 'reject', 'suspend', 'reactivate', 'invite', 'retry_email']);
 export const APPROVAL_STATUSES = Object.freeze(['pending', 'approved', 'rejected']);
+/** Operational lifecycle states filterable in admin personnel listings. */
 export const PERSONNEL_STATES = Object.freeze(['active', 'pending', 'rejected', 'awaiting_setup', 'approved_inactive', 'suspended']);
 
 const objectInput = (input) => input && typeof input === 'object' && !Array.isArray(input);
+
+/**
+ * Shared validator for admin user creation (`create: true`) and profile edits (`create: false`).
+ *
+ * Security & lifecycle invariants:
+ * - Unwraps `{ user }` or flat payloads and rejects administrator-supplied `password`
+ *   or `temporaryPassword` fields so admins never know a staff member's credentials.
+ * - Requires an `operationId` UUID on create (and validates it whenever supplied on update).
+ * - Normalizes organizational assignment UUIDs (`municipalityId`, `barangayId`, `facilityId`).
+ * - On create, enforces strict 11-digit PH mobile (`09XXXXXXXXX`) for operational health roles
+ *   (`mho`, `phn`, `health_supervisor`, `rhu_personnel`, `bhw`).
+ * - On update, blocks lifecycle state columns (`approvalStatus`, `activate`, `suspendedAt`, etc.)
+ *   so state changes must flow through `personnelLifecycleValidator`.
+ *
+ * @param {Object} body - Raw request body.
+ * @param {Object} [options] - `{ create?: boolean }` mode flag.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 const fieldsValidator = (body, { create = false } = {}) => {
   const input = body?.user ?? body;
   if (!objectInput(input)) return invalid({ user: 'An account object is required.' });
@@ -54,14 +86,40 @@ const fieldsValidator = (body, { create = false } = {}) => {
   return Object.keys(errors).length ? invalid(errors) : valid(value);
 };
 
+/**
+ * Validates `POST /users` admin-provisioned account creation payloads.
+ *
+ * @param {Object} [input] - Raw request body (`{ user }` or flat).
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const createUserValidator = (input = {}) => fieldsValidator(input, { create: true });
+
+/**
+ * Validates `PATCH`/`PUT /users/:id` admin profile update payloads (excluding lifecycle transitions).
+ *
+ * @param {Object} [input] - Raw request body (`{ user }` or flat).
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const updateUserValidator = (input = {}) => fieldsValidator(input);
 
+/**
+ * Validates and lowercases `:id` route parameters for user management endpoints as UUIDs.
+ *
+ * @param {Object} [params] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const userIdParamValidator = (params = {}) => {
   if (typeof params.id !== 'string' || !isUuid(params.id)) return invalid({ id: 'Use a valid account UUID.' });
   return valid({ ...params, id: text(params.id).toLowerCase() });
 };
 
+/**
+ * Validates `GET /users` filter query parameters (`personnelOnly`, `approvalStatus`,
+ * `lifecycleState`, `municipalityId`, `barangayId`), coercing `personnelOnly` to boolean.
+ *
+ * @param {Object} [input] - Raw query parameters.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const userQueryValidator = (input = {}) => {
   const value = { ...input };
   const errors = {};
@@ -77,6 +135,14 @@ export const userQueryValidator = (input = {}) => {
   return Object.keys(errors).length ? invalid(errors) : valid(value);
 };
 
+/**
+ * Validates explicit personnel lifecycle action payloads (`approve`, `reject`, `suspend`,
+ * `reactivate`, `invite`, `retry_email`). Requires a non-empty `reason` for `reject` and
+ * `suspend` actions and a mandatory `operationId` UUID for idempotency.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const personnelLifecycleValidator = (input = {}) => {
   if (!objectInput(input)) return invalid({ action: 'A lifecycle action object is required.' });
   const errors = {};
@@ -96,6 +162,13 @@ export const personnelLifecycleValidator = (input = {}) => {
   });
 };
 
+/**
+ * Validates administrator-triggered account access/password reset payloads (`{ user }` or flat),
+ * optionally normalizing an idempotency `operationId` UUID.
+ *
+ * @param {Object} [body] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const accessResetValidator = (body = {}) => {
   const input = body?.user ?? body;
   if (!objectInput(input)) return invalid({ operationId: 'Use an account action object.' });

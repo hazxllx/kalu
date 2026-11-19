@@ -1,10 +1,18 @@
 /**
- * File-backed repository driver. Implements the same repository contract as the
- * Supabase driver (see `supabaseRepository.js`) but persists to the local JSON
- * store, so the full resident -> RHU -> PHN workflow runs without Supabase.
+ * File-backed repository driver for KALUSAGAP's local development and test mode
+ * (`route -> authenticate -> authorize -> controller -> service -> fileRepository`).
  *
- * All records use the canonical camelCase domain shape. Lists join residents
- * into visit/referral rows under a `resident` field.
+ * Implements the same async repository contract as `supabaseRepository.js` on top
+ * of `fileStore.js` so the end-to-end resident -> BHW/RHU intake -> PHN review ->
+ * verification/transfer/consultation workflows run without a live Supabase project.
+ *
+ * Design notes:
+ *  - All domain records use canonical camelCase keys (except raw `transfer_requests`
+ *    and consultation `followUps`/`notifications` where dual or snake_case fields
+ *    preserve parity with Supabase row shapes).
+ *  - Deep cloning (`clone`) isolates callers from mutating in-memory store arrays.
+ *  - Supabase-only subsystems (e.g., `households`) fail closed with HTTP 503 rather
+ *    than returning synthetic data.
  */
 import store from './fileStore.js';
 import { residentId, healthRecordNo, submissionId, referralId } from './ids.js';
@@ -14,48 +22,60 @@ import { APPROVED_BARANGAYS } from '../config/barangays.js';
 import { randomUUID } from 'node:crypto';
 import ApiError from '../utils/apiError.js';
 
+/** Deep-clones JSON-serializable values so callers cannot mutate live store state. */
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
 /** Approved dev barangays (single-municipality file driver). */
 const DEV_BARANGAYS = APPROVED_BARANGAYS;
 
+/** Trims, lowercases, and collapses internal whitespace for case-insensitive matching. */
 const normalizeText = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** Extracts a numeric Purok/Zone (1-8) from a resident's current or permanent address text, or null. */
 const zoneFromResidentAddress = (resident) => {
   const text = `${resident?.currentAddress || ''} ${resident?.permanentAddress || ''}`;
   const match = text.match(/\b(?:purok|zone)\s+(?:(?:purok|zone)\s+)*([1-8])\b/i);
   return match ? Number(match[1]) : null;
 };
+
+/** Checks whether `resident` belongs to `zone` (`'unassigned'` or numeric 1-8 via `zone` field or address). */
 const matchesZone = (resident, zone) => {
   if (zone === 'unassigned') return (resident.zone === null || resident.zone === undefined || resident.zone === '') && !zoneFromResidentAddress(resident);
   return Number(resident.zone) === Number(zone) || zoneFromResidentAddress(resident) === Number(zone);
 };
 
+/** Embeds the linked `resident` record (or `null`) onto a visit row. */
 const attachResidentToVisit = (visit, residentsById) => ({
   ...visit,
   resident: residentsById[visit.residentId] || null,
 });
 
+/** Embeds the linked `resident` record (or `null`) onto a referral row. */
 const attachResidentToReferral = (referral, residentsById) => ({
   ...referral,
   resident: residentsById[referral.residentId] || null,
 });
 
+/** Increments the resident counter inside a store mutation and mints `{ id, healthRecordNo }`. */
 const nextResident = (data) => {
   data.counters.residents += 1;
   const n = data.counters.residents;
   return { id: residentId(n), healthRecordNo: healthRecordNo(n) };
 };
 
+/** Increments the submission counter inside a store mutation and mints `{ id }`. */
 const nextSubmission = (data) => {
   data.counters.submissions += 1;
   return { id: submissionId(data.counters.submissions) };
 };
 
+/** Increments the referral counter inside a store mutation and mints `{ id }`. */
 const nextReferral = (data) => {
   data.counters.referrals += 1;
   return { id: referralId(data.counters.referrals) };
 };
 
+/** Case-insensitive substring filter across resident identifiers, name parts, contact, and address. */
 const matchesQuery = (row, q) => {
   const query = normalizeText(q);
   if (!query) return true;
@@ -79,8 +99,11 @@ export const fileRepository = {
   driver: 'file',
 
   // ----- identifiers -------------------------------------------------------
+  /** Atomically allocates the next sequential `{ id: 'RES-...', healthRecordNo: 'RHU-...' }` pair. */
   nextResidentIds: () => store.mutate((data) => nextResident(data)),
+  /** Atomically allocates the next sequential visit/submission `{ id: 'SUB-...' }`. */
   nextSubmissionId: () => store.mutate((data) => nextSubmission(data)),
+  /** Atomically allocates the next sequential referral `{ id: 'REF-...' }`. */
   nextReferralId: () => store.mutate((data) => nextReferral(data)),
 
   // ----- residents ---------------------------------------------------------
@@ -100,8 +123,10 @@ export const fileRepository = {
     return { rows: clone(rows.slice(offset, offset + limit)), total };
   },
 
+  /** Returns `[]` in the file driver since household records are Supabase-backed only. */
   verifiedHouseholdResidentIds: async () => [],
 
+  /** Fetches residents matching `ids` filtered by search query, barangay, zone, and municipality. */
   listResidentsByIds: async ({ ids = [], q = '', barangay = null, barangayId = null, zone = null, municipalityId = null } = {}) => {
     let rows = store.residents.filter((r) => ids.includes(r.id) && matchesQuery(r, q));
     if (barangay) rows = rows.filter((r) => r.barangay === barangay);
@@ -111,6 +136,7 @@ export const fileRepository = {
     return clone(rows);
   },
 
+  /** Resolves an approved dev barangay case-insensitively to `{ id: 'dev-<Name>', name, municipalityId: null }`. */
   findBarangayByName: async (name) => {
     const match = DEV_BARANGAYS.find(
       (b) => b.toLowerCase() === String(name || '').trim().toLowerCase(),
@@ -123,6 +149,7 @@ export const fileRepository = {
     id: `dev-${name}`, name, municipality_id: null, status: 'active',
   })),
 
+  /** Returns distinct sorted numeric zones (`zones`) and `hasUnassigned` flag for residents in scope. */
   listResidentZoneOptions: async ({ barangayId, municipalityId } = {}) => {
     const rows = store.residents.filter((r) =>
       (!barangayId || r.barangayId === barangayId)
@@ -143,6 +170,7 @@ export const fileRepository = {
   // Household records are Supabase-backed only; the local
   // file driver has no household store, so these fail closed with a clear
   // message instead of returning fake data.
+  /** Fails closed with HTTP 503 whenever household operations are invoked against the local file driver. */
   householdsUnsupported: async () => {
     throw Object.assign(new Error('Household records require the Supabase data driver. Configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env.'), { statusCode: 503 });
   },
@@ -157,6 +185,8 @@ export const fileRepository = {
   removeHouseholdMember: async function () { return this.householdsUnsupported(); },
   getMemberHealthProfile: async function () { return this.householdsUnsupported(); },
   upsertMemberHealthProfile: async function () { return this.householdsUnsupported(); },
+
+  /** Free-text resident autocomplete/typeahead search scoped by barangay and municipality. */
   searchResidents: async ({ q = '', limit = 20, barangay = null, municipalityId = null } = {}) => {
     const residents = store.residents
       .filter((r) => matchesQuery(r, q))
@@ -166,6 +196,10 @@ export const fileRepository = {
     return clone(residents);
   },
 
+  /**
+   * Deduplication lookup matching either exact `identityNo` (when supplied) or
+   * normalized `lastName` + `firstName` (+ optional `middleName` and `birthDate`).
+   */
   findResidentByIdentity: async ({ lastName, firstName, middleName, birthDate, identityNo } = {}) => {
     if (identityNo) {
       const match = store.residents.find((r) => r.identityNo && r.identityNo === String(identityNo).trim());
@@ -185,11 +219,13 @@ export const fileRepository = {
     return match ? clone(match) : null;
   },
 
+  /** Fetches a single resident by permanent ID (`RES-...`), defaulting `revision` to `1`. */
   getResident: async (id) => {
     const found = store.residents.find((r) => r.id === id);
     return found ? clone({ ...found, revision: found.revision ?? 1 }) : null;
   },
 
+  /** Inserts a new resident row with `revision: 1`, stripping derived `age` so DOB remains authoritative. */
   insertResident: async (resident) => {
     return store.mutate((data) => {
       const now = new Date().toISOString();
@@ -201,12 +237,16 @@ export const fileRepository = {
         ...resident,
         revision: 1,
       };
-      delete row.age;
       data.residents.push(row);
       return clone(row);
     });
   },
 
+  /**
+   * Updates a resident record with optional optimistic concurrency checks
+   * (`expectedRevision` / `expectedUpdatedAt`); returns `null` if missing or stale,
+   * otherwise increments `revision` and returns the updated clone.
+   */
   updateResident: async (id, patch, { expectedRevision = null, expectedUpdatedAt = null } = {}) => {
     return store.mutate((data) => {
       const row = data.residents.find((r) => r.id === id);
@@ -248,6 +288,7 @@ export const fileRepository = {
   /** The file driver has no accounts, so there is no profile status to sync. */
   setProfileStatus: async () => null,
 
+  /** Appends an immutable verification decision entry (`RVL-XXXXXX`) to `residentVerificationLogs`. */
   insertResidentVerificationLog: async (log) => {
     return store.mutate((data) => {
       const row = {
@@ -265,6 +306,7 @@ export const fileRepository = {
     });
   },
 
+  /** Lists verification audit logs for a single resident, newest first. */
   listResidentVerificationLogs: async (residentId, { limit = 50 } = {}) => {
     const rows = store.residentVerificationLogs
       .filter((l) => l.residentId === residentId)
@@ -273,6 +315,7 @@ export const fileRepository = {
     return clone(rows);
   },
 
+  /** Lists recent verification decisions across scope with resident name/barangay joined, newest first. */
   listRecentResidentVerificationLogs: async ({ actions = null, barangay = null, municipalityId = null, limit = 100, offset = 0 } = {}) => {
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
     let rows = store.residentVerificationLogs.map((l) => {
@@ -292,6 +335,10 @@ export const fileRepository = {
   },
 
   // ----- visits / submissions ----------------------------------------------
+  /**
+   * Inserts a new visit/submission, enforcing uniqueness on `id` and case-insensitive
+   * `clientOperationKey` (throwing SQLSTATE `23505` on replay), and attaches the linked resident.
+   */
   insertVisit: async (visit) => {
     return store.mutate((data) => {
       if (data.visits.some((row) => row.id === visit.id
@@ -307,6 +354,51 @@ export const fileRepository = {
     });
   },
 
+  /** Atomic patient-plus-submitted-visit adapter for local tests and development. */
+  createSubmittedTriage: async ({ resident = null, residentId = null, visit, submissionId, fingerprint, actorId, storeAdapter = store }) =>
+    storeAdapter.mutate((data) => {
+      const existing = data.visits.find((row) => String(row.clientSubmissionId || '').toLowerCase() === String(submissionId).toLowerCase());
+      if (existing) {
+        if (existing.recordedById !== actorId || existing.clientSubmissionFingerprint !== fingerprint) {
+          throw ApiError.conflict('This triage operation belongs to a different author or payload.');
+        }
+        const linked = data.residents.find((row) => row.id === existing.residentId);
+        if (!linked) throw ApiError.notFound('The patient record for this encounter is no longer available.');
+        if (existing.facilityId !== visit.facilityId) throw ApiError.forbidden('The saved encounter is outside the current facility.');
+        return { ...attachResidentToVisit(clone(existing), Object.fromEntries(data.residents.map((r) => [r.id, r]))), deduplicated: true, resident: clone(linked) };
+      }
+      let linked = residentId ? data.residents.find((row) => row.id === residentId) : null;
+      if (resident) {
+        if (data.residents.some((row) => normalizeText(row.lastName) === normalizeText(resident.lastName)
+          && normalizeText(row.firstName) === normalizeText(resident.firstName)
+          && normalizeText(row.middleName) === normalizeText(resident.middleName)
+          && (!resident.birthDate || String(row.birthDate || '') === String(resident.birthDate)))) {
+          throw ApiError.conflict('A matching resident already exists.');
+        }
+        const ids = nextResident(data);
+        const now = new Date().toISOString();
+        linked = { ...clone(resident), ...ids, createdAt: now, updatedAt: now, createdById: actorId, createdByRole: visit.recordedByRole, revision: 1 };
+        data.residents.push(linked);
+      }
+      if (!linked) throw ApiError.notFound('Resident record not found.');
+      const now = new Date().toISOString();
+      const prior = visit.referralId ? data.visits.find((row) => row.referralId === visit.referralId) : null;
+      if (prior && (prior.status !== 'draft' || prior.recordedById !== actorId || prior.residentId !== linked.id || prior.facilityId !== visit.facilityId)) {
+        throw ApiError.conflict('This referral already has an encounter or belongs to a different assignment.');
+      }
+      const row = { ...clone(prior || {}), ...clone(visit), id: prior?.id || nextSubmission(data).id, residentId: linked.id, recordedById: actorId, status: 'submitted', submittedAt: now, clientSubmissionId: submissionId.toLowerCase(), clientSubmissionFingerprint: fingerprint, createdAt: prior?.createdAt || now, updatedAt: now };
+      if (row.triageSnapshot) {
+        row.triageSnapshot.residentId = linked.id;
+        row.triageSnapshot.resident.id = linked.id;
+        row.triageSnapshot.recordedBy = actorId;
+        row.triageSnapshot.submittedAt = now;
+      }
+      if (prior) Object.assign(prior, row);
+      else data.visits.push(row);
+      return { ...attachResidentToVisit(clone(row), Object.fromEntries(data.residents.map((r) => [r.id, r]))), deduplicated: false };
+    }),
+
+  /** Looks up an existing visit by its case-insensitive idempotency `clientOperationKey`, with resident attached. */
   findVisitByOperationKey: async (key) => {
     const found = store.visits.find((visit) => visit.clientOperationKey?.toLowerCase() === key.toLowerCase());
     if (!found) return null;
@@ -314,9 +406,17 @@ export const fileRepository = {
     return attachResidentToVisit(clone(found), residentsById);
   },
 
+  /** Returns `true` if `residentId` has legacy visits created before `clientOperationKey` idempotency was added. */
   hasUnkeyedVisitsForResident: async (residentId) => store.visits.some((visit) =>
     visit.residentId === residentId && !visit.clientOperationKey),
 
+  /**
+   * Idempotently finalizes side effects for a consultation visit (`complete_consultation_operation` parity):
+   *  - Verifies the visit exists, carries a `clientOperationKey`, and was recorded by `creatorId`.
+   *  - Creates a deduplicated `followUps` entry (keyed by `consultation-followup:<id>:<nextVisitDate>`) when scheduled.
+   *  - Emits deduplicated resident notifications (when `resident.authUserId` is linked) and audit logs.
+   *  - Stamps `consultationEffectsCompletedAt` so retries short-circuit safely.
+   */
   completeConsultationOperation: async ({ id, creatorId }) => store.mutate((data) => {
     const visit = data.visits.find((row) => row.id === id);
     if (!visit || !visit.clientOperationKey || visit.recordedById !== creatorId) {
@@ -374,6 +474,7 @@ export const fileRepository = {
     return { completed: true, consultationId: id, followUpId: followUp?.id || null };
   }),
 
+  /** Fetches a single visit/submission by ID (`SUB-...`) with its linked resident attached. */
   getVisit: async (id) => {
     const found = store.visits.find((v) => v.id === id);
     if (!found) return null;
@@ -381,6 +482,11 @@ export const fileRepository = {
     return attachResidentToVisit(clone(found), residentsById);
   },
 
+  /**
+   * Lists visits/submissions with resident records joined, filtered by workflow status,
+   * recorder, resident, geographic scope, clinical date range (`from`/`to`), health service,
+   * and free-text query, sorted newest-updated first.
+   */
   listVisits: async ({ q = '', statuses = null, submittedById = null, residentId = null, from = null, to = null, serviceId = null,
     municipalityId = null, barangayId = null, barangay = null, limit = 100, offset = 0 } = {}) => {
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
@@ -409,12 +515,22 @@ export const fileRepository = {
     return { rows: rows.slice(offset, offset + limit), total: rows.length };
   },
 
+  /** Target Client List (TCL) stub for the file driver (TCL entries live in Supabase `tcl_entries`). */
   listTclEntries: async () => ({ rows: [], total: 0 }),
 
-  updateVisit: async (id, patch) => {
+  /**
+   * Updates a visit/submission while enforcing immutability of operation key,
+   * payload hash, linked resident, and original recorder fields on keyed consultations.
+   */
+  updateVisit: async (id, patch, { expectedUpdatedAt, allowedStatuses } = {}) => {
     return store.mutate((data) => {
       const row = data.visits.find((v) => v.id === id);
       if (!row) return null;
+      if ((expectedUpdatedAt && row.updatedAt !== expectedUpdatedAt) || (allowedStatuses && !allowedStatuses.includes(row.status))) return null;
+      if (row.triageSnapshot && ['triageSnapshot', 'residentId', 'vitals', 'chiefComplaint', 'clinicalHistory', 'visitDate', 'recordedById', 'recordedByName', 'submittedAt', 'clientSubmissionId', 'clientSubmissionFingerprint']
+        .some((field) => Object.hasOwn(patch, field) && JSON.stringify(patch[field]) !== JSON.stringify(row[field]))) {
+        throw ApiError.conflict('Original triage information is immutable after handoff.');
+      }
       if (row.clientOperationKey && ['clientOperationKey', 'clientOperationPayloadHash', 'residentId',
         'recordedById', 'recordedByRole', 'recordedByName', 'recordedAt'].some((field) =>
         patch[field] !== undefined && patch[field] !== row[field])) {
@@ -428,10 +544,12 @@ export const fileRepository = {
   },
 
   // ----- referrals ----------------------------------------------------------
+  /** Blocks writes to legacy referrals; active referral workflows use the canonical referral service. */
   insertReferral: async () => {
     throw ApiError.conflict('Historical referrals are read-only. Use the canonical referral service.');
   },
 
+  /** Fetches a historical referral by ID (`REF-...`) with its linked resident attached. */
   getReferral: async (id) => {
     const found = store.referrals.find((r) => r.id === id);
     if (!found) return null;
@@ -439,6 +557,7 @@ export const fileRepository = {
     return attachResidentToReferral(clone(found), residentsById);
   },
 
+  /** Fetches the historical referral associated with `visitId`, if any, with resident attached. */
   getReferralByVisitId: async (visitId) => {
     const found = store.referrals.find((r) => r.visitId === visitId);
     if (!found) return null;
@@ -446,10 +565,12 @@ export const fileRepository = {
     return attachResidentToReferral(clone(found), residentsById);
   },
 
+  /** Blocks updates to legacy referrals; active referral workflows use the canonical referral service. */
   updateReferral: async () => {
     throw ApiError.conflict('Historical referrals are read-only. Use the canonical referral service.');
   },
 
+  /** Lists historical referrals with resident records joined, optionally filtered by `residentId` or query `q`. */
   listReferrals: async ({ q = '', residentId = null, limit = 100, offset = 0 } = {}) => {
     const residentsById = Object.fromEntries(store.residents.map((r) => [r.id, r]));
     let rows = store.referrals.map((r) => attachResidentToReferral(clone(r), residentsById));
@@ -472,6 +593,7 @@ export const fileRepository = {
     return found ? clone(found) : null;
   },
 
+  /** Atomically links an unlinked resident record matching `identityNo` and `birthDate` to `authUserId`. */
   claimResidentForAccount: async ({ authUserId, identityNo, birthDate }) => {
     return store.mutate((data) => {
       const found = data.residents.find(
@@ -484,9 +606,10 @@ export const fileRepository = {
     });
   },
 
-  // Dev-driver parity for the existing-resident activation RPC
-  // (activate_resident_by_id). Links an UNLINKED record by Resident ID when the
-  // date of birth matches; returns null otherwise.
+  /**
+   * Dev-driver parity for the `activate_resident_by_id` RPC: links an UNLINKED
+   * resident record by permanent Resident ID when `birthDate` matches; returns `null` otherwise.
+   */
   activateResidentById: async ({ authUserId, residentId, birthDate }) => {
     return store.mutate((data) => {
       const found = data.residents.find(
@@ -501,6 +624,11 @@ export const fileRepository = {
     });
   },
 
+  // ----- barangay transfer requests (dev driver) --------------------------
+  /**
+   * Creates a transfer request storing both camelCase and snake_case keys so
+   * services reading raw `transfer_requests` columns work identically across drivers.
+   */
   createTransferRequest: async ({
     authUserId, residentId = null, fromBarangayId = null, toBarangayId = null,
     reason = '', status = 'draft', otpHash = null, otpExpiresAt = null,
@@ -520,14 +648,17 @@ export const fileRepository = {
     data.transferRequests.push(row);
     return clone(row);
   }),
+  /** Fetches a transfer request by `id`, optionally asserting ownership by `authUserId`. */
   getTransferRequest: async (id, authUserId = null) => {
     const row = store.transferRequests.find((item) => item.id === id && (!authUserId || item.authUserId === authUserId));
     return row ? clone(row) : null;
   },
+  /** Returns the most recently created transfer request for `authUserId`, or `null`. */
   getLatestTransferRequest: async (authUserId) => {
     const rows = store.transferRequests.filter((item) => item.authUserId === authUserId);
     return rows.length ? clone(rows[rows.length - 1]) : null;
   },
+  /** Lists all transfer requests created by `authUserId`, newest first. */
   listTransferRequestsByUser: async (authUserId) => {
     const rows = store.transferRequests
       .filter((item) => item.authUserId === authUserId)
@@ -535,29 +666,38 @@ export const fileRepository = {
       .reverse();
     return clone(rows);
   },
+  /** Applies an unconditional patch to a transfer request row by `id`. */
   updateTransferRequest: async (id, patch) => store.mutate((data) => {
     const row = data.transferRequests.find((item) => item.id === id);
     if (!row) return null;
     Object.assign(row, patch, { updatedAt: new Date().toISOString() });
     return clone(row);
   }),
+  /** Conditionally updates a transfer request only when its status is `'pending'` or `'under_review'`. */
   updateTransferRequestForReview: async (id, patch) => store.mutate((data) => {
     const row = data.transferRequests.find((item) => item.id === id);
     if (!row || !['pending', 'under_review'].includes(row.status)) return null;
     Object.assign(row, patch, { updatedAt: new Date().toISOString() });
     return clone(row);
   }),
+  /** Conditionally updates a transfer request for submission only from `'draft'` or `'resubmission_required'`. */
   updateTransferRequestForSubmission: async (id, patch) => store.mutate((data) => {
     const row = data.transferRequests.find((item) => item.id === id);
     if (!row || !['draft', 'resubmission_required'].includes(row.status)) return null;
     Object.assign(row, patch, { updatedAt: new Date().toISOString() });
     return clone(row);
   }),
+  /** Lists transfer requests with optional `status` filtering and pagination (`{ rows, total }`). */
   listTransferRequests: async ({ status = null, limit = 100, offset = 0 } = {}) => {
     let rows = store.transferRequests.slice();
     if (status) rows = rows.filter((row) => row.status === status);
     return { rows: clone(rows.slice(offset, offset + limit)), total: rows.length };
   },
+  /**
+   * Atomically approves a `'pending'`/`'under_review'` transfer request (`approve_transfer_request` parity):
+   * records `fromBarangayId` for history, updates the resident's `barangayId` and synced
+   * display `barangay` name without altering Resident ID or medical records, and stamps reviewer metadata.
+   */
   approveTransferRequest: async ({ requestId, reviewerId }) => store.mutate((data) => {
     const request = data.transferRequests.find((row) => row.id === requestId);
     if (!request || !['pending', 'under_review'].includes(request.status)) return null;
@@ -582,17 +722,21 @@ export const fileRepository = {
     request.reviewedAt = new Date().toISOString();
     return clone(request);
   }),
+  /** Appends an audit entry to `transferRequestAuditLogs` for a transfer lifecycle transition. */
   insertTransferAuditLog: async ({ transferRequestId, actorId, action, metadata = {} }) => store.mutate((data) => {
     const row = { id: crypto.randomUUID(), transferRequestId, actorId, action, metadata, createdAt: new Date().toISOString() };
     data.transferRequestAuditLogs.push(row);
     return clone(row);
   }),
+  /** Lists transfer request audit entries in chronological order (`createdAt` ascending). */
   listTransferAuditLogs: async (transferRequestId) => clone(
     store.transferRequestAuditLogs
       .filter((row) => row.transferRequestId === transferRequestId)
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))),
   ),
+  /** Stub returning `[]` in the file driver (uploaded documents require Supabase Storage). */
   listDocumentsByTransferRequest: async () => [],
+  /** No-op document delete stub returning `true` in the file driver. */
   deleteDocument: async () => true,
   // Dev driver has no staff profiles; the receiving-supervisor notification is a
   // no-op here (notifications require a configured Supabase backend anyway).
@@ -602,13 +746,16 @@ export const fileRepository = {
   // Mirrors the Supabase risk_criteria / risk_settings tables. The config
   // service falls back to the documented defaults when these are empty, so the
   // store only needs to persist administrator overrides.
+  /** Returns persisted risk criteria overrides (empty until first admin customization). */
   listRiskCriteria: async () => clone(store.riskCriteria),
 
+  /** Looks up a persisted risk criterion override by `code`, or `null`. */
   getRiskCriterion: async (code) => {
     const found = store.riskCriteria.find((c) => c.code === code);
     return found ? clone(found) : null;
   },
 
+  /** Upserts a risk criterion by `code`, seeding `DEFAULT_RISK_CRITERIA` on first write. */
   upsertRiskCriterion: async (criterion) => store.mutate((data) => {
     // Seed the defaults on first edit so a single change does not drop the rest.
     if (!data.riskCriteria.length) {
@@ -625,6 +772,7 @@ export const fileRepository = {
     return clone(row);
   }),
 
+  /** Deletes a risk criterion by `code` (seeding defaults first if uninitialized); returns whether a row was removed. */
   deleteRiskCriterion: async (code) => store.mutate((data) => {
     if (!data.riskCriteria.length) {
       data.riskCriteria = DEFAULT_RISK_CRITERIA.map((c) => ({ ...c }));
@@ -634,8 +782,10 @@ export const fileRepository = {
     return before !== data.riskCriteria.length;
   }),
 
+  /** Returns persisted risk score threshold settings (`{ moderateMin, highMin }`), or `null` when using defaults. */
   getRiskSettings: async () => (store.riskSettings ? clone(store.riskSettings) : null),
 
+  /** Persists administrator risk score thresholds (`moderateMin`, `highMin`). */
   saveRiskSettings: async ({ moderateMin, highMin }) => store.mutate((data) => {
     const now = new Date().toISOString();
     data.riskSettings = {
@@ -646,6 +796,7 @@ export const fileRepository = {
     return clone(data.riskSettings);
   }),
 
+  /** Appends a health/configuration audit record (`HAL-XXXXXX`) to `healthAuditLogs`. */
   insertHealthAuditLog: async (log) => store.mutate((data) => {
     const row = {
       id: `HAL-${String(data.healthAuditLogs.length + 1).padStart(6, '0')}`,
@@ -663,16 +814,20 @@ export const fileRepository = {
   }),
 
   // ----- blood-pressure thresholds (dev driver) ----------------------------
+  /** Returns persisted BP classification threshold overrides, or `null` when using defaults. */
   getBpThresholdSettings: async () => (store.bpThresholdSettings ? clone(store.bpThresholdSettings) : null),
 
+  /** Persists administrator BP classification threshold settings. */
   saveBpThresholdSettings: async (settings) => store.mutate((data) => {
     data.bpThresholdSettings = { ...settings, updatedAt: new Date().toISOString() };
     return clone(data.bpThresholdSettings);
   }),
 
   // ----- medicine catalog (dev driver) --------------------------------------
-  // Seeds the documented default catalog on first access so the dev/test
-  // backend behaves like a freshly-migrated database.
+  /**
+   * Lists catalog medicines filtered by search query `q`, `source`, and active state,
+   * seeding `DEFAULT_MEDICINES` into the store on first access so dev matches a migrated DB.
+   */
   listMedicines: async ({ q = '', source = '', includeInactive = false } = {}) => store.mutate((data) => {
     if (!data.medicines.length) {
       const now = new Date().toISOString();
@@ -710,17 +865,20 @@ export const fileRepository = {
       .map((m) => clone(m));
   }),
 
+  /** Fetches a single medicine catalog entry by UUID, or `null`. */
   getMedicine: async (id) => {
     const found = store.medicines.find((m) => m.id === id);
     return found ? clone(found) : null;
   },
 
+  /** Looks up an existing medicine matching the normalized `(genericName, strength, dosageForm)` identity key. */
   findMedicineByIdentity: async (entry) => {
     const key = medicineIdentityKey(entry);
     const found = store.medicines.find((m) => medicineIdentityKey(m) === key);
     return found ? clone(found) : null;
   },
 
+  /** Inserts a new medicine catalog record with a generated UUID. */
   insertMedicine: async (medicine) => store.mutate((data) => {
     const now = new Date().toISOString();
     const row = {
@@ -747,6 +905,7 @@ export const fileRepository = {
     return clone(row);
   }),
 
+  /** Applies partial updates to an existing medicine catalog record by UUID; returns `null` when missing. */
   updateMedicine: async (id, patch) => store.mutate((data) => {
     const idx = data.medicines.findIndex((m) => m.id === id);
     if (idx < 0) return null;
@@ -754,7 +913,7 @@ export const fileRepository = {
     return clone(data.medicines[idx]);
   }),
 
-  // The file (dev) driver has no facilities registry.
+  /** Stub returning `[]` since the local dev file driver has no `facilities` table. */
   listFacilities: async () => [],
 
 };

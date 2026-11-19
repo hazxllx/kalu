@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-process.env.NODE_ENV = 'test';
-process.env.SUPABASE_URL = 'https://personnel-tests.invalid';
-process.env.SUPABASE_SERVICE_ROLE_KEY = 'personnel-test-service-key';
-process.env.SUPABASE_ANON_KEY = 'personnel-test-anon-key';
+import { configureLocalTestEnvironment } from './helpers/localEnv.js';
+configureLocalTestEnvironment();
 
 const repository = (await import('../src/repositories/supabaseRepository.js')).default;
 const { profileToAdminUser } = await import('../src/repositories/supabaseRepository.js');

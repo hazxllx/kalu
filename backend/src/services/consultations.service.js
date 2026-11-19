@@ -11,6 +11,35 @@ import { classifyWithConfig } from './bpConfig.service.js';
 import { classifyBloodPressure as classifyBpWithThresholds } from '../config/bpThresholds.js';
 import { requestFingerprint } from '../middleware/idempotency.js';
 
+/**
+ * KALUSAGAP — Clinical Consultations Service (`consultations.service.js`).
+ *
+ * Architectural layer:
+ *   `consultations.routes -> authenticate -> authorize / idempotency -> consultations.controller -> consultations.service -> repository / Supabase`
+ *
+ * Responsibilities:
+ *   - Manages clinical consultation records stored in the canonical `visits`
+ *     repository/table, hydrating attending personnel and facility details from
+ *     Supabase `profiles` and `facilities`.
+ *   - Enforces strict role-based and geographic scope rules: staff mutations are
+ *     restricted to `health_supervisor` (assigned barangay) and `phn` (assigned
+ *     municipality), while `resident` callers may only read consultations tied
+ *     to their authenticated `auth_user_id`.
+ *   - Restricts consultation creation to verified residents (individually
+ *     `approved` or members of a `Verified` household) and validates selected
+ *     `health_services` / `health_service_assignments` entries against caller scope.
+ *   - Validates plausible clinical vitals ranges, computes BMI (`computeBMI`),
+ *     and snapshots blood-pressure classifications (`bpConfig.service` /
+ *     `bpThresholds`) and structured prescriptions (`medicines.service`) so
+ *     later catalog or threshold changes never alter historical clinical records.
+ *   - Guarantees idempotent, crash-safe consultation creation via client
+ *     operation UUIDs (`clientOperationKey`), payload fingerprinting, and
+ *     row-locked side-effect completion (`completeConsultationOperation`).
+ *   - Coordinates post-save side effects: canonical `follow_ups` reconciliation
+ *     (awaiting resident confirmation), authoritative resident risk recomputation
+ *     (`persistResidentRisk`), and privacy-safe resident notifications.
+ */
+
 const STAFF_ROLES = new Set(['health_supervisor', 'phn']);
 const text = (value) => String(value ?? '').trim();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -84,6 +113,14 @@ const inRange = (value, lo, hi) => {
 };
 const present = (value) => value !== undefined && value !== null && String(value).trim() !== '';
 
+/**
+ * Derive the human-readable blood pressure category label for a `"SYS/DIA"` reading
+ * using the shared reference classifier (`config/bpThresholds.js`), or `null` when
+ * the reading is absent or unparseable.
+ *
+ * @param {string} bloodPressure - Raw `"systolic/diastolic"` string (e.g. `"120/80"`).
+ * @returns {string|null} Category label or `null`.
+ */
 export const classifyBloodPressure = (bloodPressure) => {
   // Single source of truth: delegate to the authoritative, admin-configurable
   // classifier (config/bpThresholds.js) and return its human label (or null).
@@ -96,6 +133,13 @@ export const classifyBloodPressure = (bloodPressure) => {
   return result ? result.label : null;
 };
 
+/**
+ * Validate optional clinical vitals fields against physiologically plausible
+ * data-integrity bounds, returning a field-keyed map of validation messages.
+ *
+ * @param {Object} [payload] - Consultation request payload containing vital sign fields.
+ * @returns {Object} Map of `{ [fieldName]: errorMessage }` for any out-of-range or malformed vital.
+ */
 const validateVitalsByField = (payload = {}) => {
   const errors = {};
   const check = (field, label, lo, hi) => {
@@ -130,6 +174,12 @@ const validateVitalsByField = (payload = {}) => {
   return errors;
 };
 
+/**
+ * Validate optional clinical vitals and return a flat list of human-readable error strings.
+ *
+ * @param {Object} [payload] - Consultation request payload.
+ * @returns {Array<string>} Validation error messages (empty when all provided vitals are valid).
+ */
 export const validateVitals = (payload = {}) => Object.values(validateVitalsByField(payload));
 
 /**
@@ -163,10 +213,26 @@ export const validateFollowUp = (payload = {}) => {
   return { errors, normalized };
 };
 
+/**
+ * Ensure the authenticated caller holds a clinical consultation staff role
+ * (`health_supervisor` or `phn`); throws `403 Forbidden` otherwise.
+ *
+ * @param {Object} user - Authenticated user context (`req.user`).
+ */
 const assertStaff = (user) => {
   if (!STAFF_ROLES.has(user?.role)) throw ApiError.forbidden('You are not authorized to manage consultations.');
 };
 
+/**
+ * Verify that the target resident exists and falls within the staff caller's
+ * assigned barangay and/or municipality coverage area.
+ *
+ * Throws `404 Not Found` (rather than `403`) for out-of-scope records so callers
+ * cannot enumerate resident IDs belonging to other barangays or municipalities.
+ *
+ * @param {Object} user - Authenticated staff user context.
+ * @param {Object|null} resident - Target resident record.
+ */
 const assertResidentScope = (user, resident) => {
   if (!resident) throw ApiError.notFound('Resident record not found.');
   const barangay = assignedBarangay(user);
@@ -218,6 +284,15 @@ export const isResidentConsultationEligible = async (resident, repo = repository
   return false;
 };
 
+/**
+ * Enforce that a resident is verified (individually `approved` or linked to a
+ * `Verified` household) before allowing a consultation to be recorded; throws
+ * `422 Unprocessable Entity` with a `residentId` field error otherwise.
+ *
+ * @param {Object} resident - Target resident record.
+ * @param {Object} [repo] - Repository instance for household verification lookup.
+ * @returns {Promise<void>}
+ */
 const assertResidentEligibleForConsultation = async (resident, repo = repository) => {
   const eligible = await isResidentConsultationEligible(resident, repo);
   if (!eligible) {
@@ -345,6 +420,13 @@ const normalizeClinicalFindings = (payload = {}) => {
   };
 };
 
+/**
+ * Build the structured `consultationDetails` JSON snapshot from normalized
+ * clinical text fields while preserving any existing extra keys in `payload.consultationDetails`.
+ *
+ * @param {Object} payload - Normalized consultation payload.
+ * @returns {Object} Structured clinical details object persisted on the visit row.
+ */
 const clinicalDetails = (payload) => {
   const { findings, diagnosis } = normalizeClinicalFindings(payload);
   return ({
@@ -360,6 +442,21 @@ const clinicalDetails = (payload) => {
 
 const numericVital = (value) => present(value) ? Number(value) : null;
 
+/**
+ * Transform a validated consultation payload into a `visits` repository write object.
+ *
+ * Combines legacy delimiter-formatted text columns (`findings`, `treatmentGiven`,
+ * `recommendation`) with structured JSON columns (`consultationDetails`,
+ * `medications`, `bpClassification`, `vitals`), computes BMI via `computeBMI`
+ * (defaulting `bmiCategory` to `''` to satisfy the `NOT NULL` database constraint),
+ * and formats `visitDate` in Philippine Standard Time (`+08:00`).
+ *
+ * @param {Object} [payload] - Validated consultation input payload.
+ * @param {Object} user - Recording staff user context.
+ * @param {string} residentId - Target resident UUID.
+ * @param {Object} [extra] - Pre-resolved snapshots (`status`, `recordedAt`, `bpClassification`, `healthServiceId`, `healthServiceName`).
+ * @returns {Object} Visit record ready for `insertVisit` or `updateVisit`.
+ */
 export const toVisit = (payload = {}, user, residentId, extra = {}) => {
   const { findings, diagnosis } = normalizeClinicalFindings(payload);
   return ({
@@ -421,6 +518,18 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => {
   });
 };
 
+/**
+ * Hydrate a raw `visits` repository row into an API-ready consultation DTO.
+ *
+ * Resolves the recording staff member's profile and facility name from Supabase
+ * (`profiles` -> `facilities`), unpacks structured medications or legacy
+ * `"\nMedication: "` / `"\nDiagnosis: "` delimiters for backwards compatibility,
+ * and attaches historical or fallback blood-pressure classification metadata.
+ *
+ * @param {Object} visit - Raw visit record from the repository.
+ * @param {Object|null} [supabase] - Supabase service client (null when using the file driver).
+ * @returns {Promise<Object>} Hydrated consultation response object.
+ */
 export const fromVisit = async (visit, supabase = serviceClientFor()) => {
   const resident = visit.resident || {};
   const details = visit.consultationDetails || {};
@@ -719,6 +828,17 @@ const notifyResidentOfConsultation = async ({ resident = null, residentId = null
   }
 };
 
+/**
+ * List consultations with pagination, search, and date/service/status filters.
+ *
+ * - Resident callers (`role === 'resident'`): strictly scoped to the resident
+ *   record linked to `user.id` (`auth_user_id`), ignoring any external resident filter.
+ * - Staff callers (`health_supervisor`, `phn`): scoped by assigned municipality
+ *   and barangay, with per-row `assertResidentScope` verification as defense in depth.
+ *
+ * @param {Object} params - Query parameters (`user`, `q`, `filters`, `limit`, `offset`, `repo`, `supabase`).
+ * @returns {Promise<Object>} Paginated `{ rows, total }` consultation list.
+ */
 export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0,
   repo = repository, supabase = serviceClientFor(repo) }) => {
   const pageSize = Number(limit);
@@ -756,6 +876,13 @@ export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0
     total: filtered.length === result.rows.length ? result.total : filtered.length };
 };
 
+/**
+ * Retrieve a single consultation by visit ID, enforcing either resident
+ * self-ownership (`resident.authUserId === user.id`) or staff geographic scope.
+ *
+ * @param {Object} params - Lookup parameters (`user`, `id`, `repo`, `supabase`).
+ * @returns {Promise<Object>} Hydrated consultation DTO.
+ */
 export const get = async ({ user, id, repo = repository, supabase = serviceClientFor(repo) }) => {
   const isResidentSelf = user?.role === 'resident';
   if (!isResidentSelf) assertStaff(user);
@@ -770,6 +897,14 @@ export const get = async ({ user, id, repo = repository, supabase = serviceClien
   return fromVisit(visit, supabase);
 };
 
+/**
+ * Validate required clinical consultation fields, date/time/ISO-timestamp formats,
+ * vitals ranges, findings/diagnosis presence, and follow-up date consistency.
+ *
+ * @param {Object} [payload] - Consultation submission payload.
+ * @param {Object} [options] - Validation options (`requireResident`: require `residentId` on create).
+ * @returns {Object} Field-keyed validation error map (empty when valid).
+ */
 const consultationFieldErrors = (payload = {}, { requireResident = false } = {}) => {
   const errors = validateVitalsByField(payload);
   const required = (field, message) => {
@@ -804,6 +939,15 @@ const consultationFieldErrors = (payload = {}, { requireResident = false } = {})
   return errors;
 };
 
+/**
+ * Resolve and validate the mandatory UUID operation key used for idempotent
+ * consultation creation, ensuring header (`Idempotency-Key`) and body
+ * (`clientOperationKey`) values do not conflict.
+ *
+ * @param {Object} [payload] - Consultation request payload.
+ * @param {string|null} [idempotencyKey] - Optional `Idempotency-Key` header value.
+ * @returns {string} Lowercase UUID operation key.
+ */
 export const consultationOperationKey = (payload = {}, idempotencyKey = null) => {
   const key = text(idempotencyKey || payload.clientOperationKey).toLowerCase();
   if (!UUID.test(key)) {
@@ -817,11 +961,13 @@ export const consultationOperationKey = (payload = {}, idempotencyKey = null) =>
   return key;
 };
 
+/** Compute a deterministic fingerprint over the clinical payload (excluding `clientOperationKey`). */
 const operationHash = (payload) => {
   const { clientOperationKey, ...clinical } = payload;
   return requestFingerprint({ method: 'POST', path: '/consultations', body: clinical });
 };
 
+/** Ensure a replayed operation key matches the original recording user, resident, and clinical payload hash. */
 const assertOperationOwner = (visit, user, payload, hash) => {
   if (visit.recordedById !== user.id || visit.residentId !== payload.residentId
     || visit.clientOperationPayloadHash !== hash) {
@@ -846,6 +992,23 @@ export const validateCreateReplay = async (req, body, { repo = repository, supab
     existingServiceId: visit.healthServiceId, supabase });
 };
 
+/**
+ * Create a new clinical consultation record idempotently and execute post-save side effects.
+ *
+ * Workflow:
+ *   1. Validates staff role, operation UUID/hash ownership, clinical fields,
+ *      resident barangay/municipality scope, verified-resident eligibility, and
+ *      selected `health_services` scope/active status.
+ *   2. Inserts the `visits` row with BP/BMI/medication/service snapshots (recovering
+ *      cleanly from PostgreSQL `23505` unique-key races on `clientOperationKey`, and
+ *      blocking ambiguous legacy unkeyed offline drafts).
+ *   3. Completes durable side effects via `repo.completeConsultationOperation` and
+ *      recomputes authoritative resident risk (`persistResidentRisk`) before
+ *      confirming `consultationEffectsCompletedAt`.
+ *
+ * @param {Object} params - Creation parameters (`user`, `payload`, `idempotencyKey`, `repo`, `supabase`, `classifyBp`, `persistRisk`).
+ * @returns {Promise<Object>} Newly created (or replayed) hydrated consultation DTO.
+ */
 export const create = async ({ user, payload = {}, idempotencyKey = null, repo = repository,
   supabase = serviceClientFor(repo), classifyBp = classifyWithConfig, persistRisk = persistResidentRisk }) => {
   assertStaff(user);
@@ -912,6 +1075,18 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
   return fromVisit(completed, supabase);
 };
 
+/**
+ * Update an existing consultation record while preserving immutable audit and workflow fields.
+ *
+ * Prevents reassigning `residentId` or mutating `clientOperationKey`, blocks edits
+ * while the initial create operation's side effects are still incomplete, preserves
+ * the original `recordedBy*` attribution and visit workflow `status` (`draft`,
+ * `in_review`, `referred`, etc.), and triggers follow-up reconciliation, resident
+ * risk recomputation, and idempotent resident notification.
+ *
+ * @param {Object} params - Update parameters (`user`, `id`, `payload`, `repo`, `supabase`, `classifyBp`, `persistRisk`, `syncFollowUp`, `notify`).
+ * @returns {Promise<Object>} Updated hydrated consultation DTO.
+ */
 export const update = async ({ user, id, payload = {}, repo = repository, supabase = serviceClientFor(repo),
   classifyBp = classifyWithConfig, persistRisk = persistResidentRisk,
   syncFollowUp = syncConsultationFollowUp, notify = notifyResidentOfConsultation }) => {

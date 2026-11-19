@@ -314,7 +314,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
               ].map((item) => (
                 <div key={item.label} className="min-w-0 border-b border-brand-border pb-3">
                   <dt className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">{item.label}</dt>
-                  <dd className="mt-1.5 truncate text-[13px] text-brand-ink">
+                  <dd className="mt-1.5 min-w-0 break-words text-[13px] text-brand-ink">
                     {accountLoading ? "Loading…" : item.value || "—"}
                   </dd>
                 </div>

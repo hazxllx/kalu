@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 import env from './env.js';
+import { localServiceFetch } from './localSafety.js';
 
 /**
  * Server-side Supabase clients.
@@ -40,6 +41,7 @@ export const getServiceClient = () => {
   assertConfigured();
   if (!serviceClient) {
     serviceClient = createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
+      ...(!env.isProduction ? { global: { fetch: localServiceFetch } } : {}),
       auth: { autoRefreshToken: false, persistSession: false },
     });
   }
@@ -62,7 +64,7 @@ export const getUserClient = (accessToken) => {
     );
   }
   return createClient(env.supabaseUrl, env.supabaseAnonKey, {
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    global: { headers: { Authorization: `Bearer ${accessToken}` }, ...(!env.isProduction ? { fetch: localServiceFetch } : {}) },
     auth: { autoRefreshToken: false, persistSession: false },
   });
 };
@@ -87,6 +89,7 @@ export const createAuthClient = () => {
     );
   }
   return createClient(env.supabaseUrl, env.supabaseAnonKey, {
+    ...(!env.isProduction ? { global: { fetch: localServiceFetch } } : {}),
     auth: { autoRefreshToken: false, persistSession: false },
   });
 };

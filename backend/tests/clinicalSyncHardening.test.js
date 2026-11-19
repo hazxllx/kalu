@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import { Duplex } from 'node:stream';
 import test from 'node:test';
+import app from '../src/app.js';
+import env from '../src/config/env.js';
 import { createIdempotencyMiddleware } from '../src/middleware/idempotency.js';
 import * as operationalController from '../src/controllers/operational.controller.js';
 import * as operationalService from '../src/services/operational.service.js';
@@ -762,4 +766,32 @@ test('role and barangay restrictions block BHW and cross-barangay staff on sync 
     assert.throws(() => extractExpectedRevision({ ifMatch: invalid }), { statusCode: 400 });
   }
   assert.throws(() => extractExpectedRevision({ ifMatch: '2', bodyRevision: 3 }), { statusCode: 400 });
+});
+
+test('CORS preflight allows Idempotency-Key, If-Match, and X-Kalusagap-Sync headers without opening a socket', async () => {
+  const allowedOrigin = env.clientUrls[0] || 'http://localhost:5173';
+  const socket = new Duplex({ read() {}, write(_chunk, _enc, cb) { cb(); } });
+  const req = new http.IncomingMessage(socket);
+  req.method = 'OPTIONS';
+  req.url = '/api/operational/tcl';
+  req.headers = {
+    origin: allowedOrigin,
+    'access-control-request-method': 'PUT',
+    'access-control-request-headers': 'authorization,content-type,idempotency-key,if-match,x-kalusagap-sync',
+  };
+  const res = new http.ServerResponse(req);
+  res.assignSocket(socket);
+
+  await new Promise((resolve, reject) => {
+    res.on('finish', resolve);
+    res.on('error', reject);
+    app(req, res);
+  });
+
+  assert.equal(res.statusCode, 204);
+  assert.equal(res.getHeader('access-control-allow-origin'), allowedOrigin);
+  const allowHeaders = String(res.getHeader('access-control-allow-headers') || '');
+  assert.match(allowHeaders, /Idempotency-Key/i);
+  assert.match(allowHeaders, /If-Match/i);
+  assert.match(allowHeaders, /X-Kalusagap-Sync/i);
 });

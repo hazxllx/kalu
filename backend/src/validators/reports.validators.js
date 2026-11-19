@@ -2,13 +2,18 @@ import { REPORT_STATUS, reportContentError } from '../services/reports.service.j
 import { invalid, isUuid, text, valid } from './common.js';
 
 /**
- * Report request validation. The sender, sender role, municipality and barangay
- * scope are all taken from the authenticated session in the service — never
- * from the body — so only the report content and the (optional) recipient role
- * are accepted here.
+ * @file Hierarchical health report submission & review validators (server-authoritative).
+ *
+ * Executed by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> authenticate -> authorize -> validate -> controller -> service -> Supabase`)
+ * for FHSIS/barangay/RHU report generation, draft submission, recipient review, and resubmission.
+ *
+ * Sender identity, sender role, municipality and barangay scope are derived exclusively
+ * from `req.user` in `reports.service.js` — never from the request body.
  */
 
 const LIMITS = { short: 120, notes: 2000 };
+/** Review outcomes an authorized recipient (e.g. Health Supervisor, PHN, MHO) may record. */
 const RECIPIENT_DECISIONS = [
   REPORT_STATUS.RECEIVED,
   REPORT_STATUS.REVIEWED,
@@ -16,6 +21,12 @@ const RECIPIENT_DECISIONS = [
   REPORT_STATUS.REJECTED,
 ];
 
+/**
+ * Validates `POST /reports` payloads when saving a draft or submitting a health report.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const createReportValidator = (input = {}) => {
   const errors = {};
   const reportType = text(input?.reportType || input?.report_type);
@@ -51,6 +62,13 @@ export const createReportValidator = (input = {}) => {
   return valid(row);
 };
 
+/**
+ * Validates recipient review decisions (`RECEIVED`, `REVIEWED`, `NEEDS_REVISION`, `REJECTED`).
+ * Requires non-empty `remarks` whenever returning a report for revision or rejecting it.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { status, remarks } }` or `{ error }`.
+ */
 export const reviewReportValidator = (input = {}) => {
   const errors = {};
   const status = text(input?.status);
@@ -63,6 +81,13 @@ export const reviewReportValidator = (input = {}) => {
   return valid({ status, remarks });
 };
 
+/**
+ * Validates `POST`/`PATCH` report resubmission payloads after `NEEDS_REVISION`,
+ * ensuring the updated `content` snapshot passes `reportContentError`.
+ *
+ * @param {Object} [input] - Raw request body containing `{ content }`.
+ * @returns {Object} Validation result `{ value: { content } }` or `{ error }`.
+ */
 export const resubmitReportValidator = (input = {}) => {
   const content = input?.content;
   const contentError = reportContentError(
@@ -74,6 +99,13 @@ export const resubmitReportValidator = (input = {}) => {
   return valid({ content });
 };
 
+/**
+ * Validates draft-to-submitted promotion requests, enforcing an empty request body
+ * so promoting an existing draft cannot silently overwrite its stored snapshot or metadata.
+ *
+ * @param {Object} [input] - Raw request body (expected empty).
+ * @returns {Object} Validation result `{ value: {} }` or `{ error }`.
+ */
 export const submitReportValidator = (input = {}) => {
   if (input && Object.keys(input).length > 0) {
     return invalid({ body: 'Submitting a draft does not accept report changes.' });
@@ -81,6 +113,12 @@ export const submitReportValidator = (input = {}) => {
   return valid({});
 };
 
+/**
+ * Validates `:id` route parameters for report endpoints as UUIDs.
+ *
+ * @param {Object} [params] - Route params object.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const reportIdParamValidator = (params = {}) => {
   const id = text(params.id);
   if (!id) return invalid({ id: 'A report reference is required.' });

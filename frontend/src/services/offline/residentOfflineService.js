@@ -34,12 +34,16 @@ const triggerSync = () => {
 const unwrapResident = (result) => result?.resident ?? result;
 const hasResidentId = (resident) => resident && (typeof resident.id === 'string' || typeof resident.id === 'number');
 
-export const createResidentOffline = async ({ ownerId, payload }) => {
+export const createResidentOffline = async ({ ownerId, payload, idempotencyKey = null }) => {
   const residentPayload = payload?.resident || payload;
   if (!ownerId) throw new Error('A signed-in user is required to save a resident.');
   if (residentPayload?.createLoginAccount || residentPayload?.email) {
     if (!isNavigatorOnline()) throw new Error(OFFLINE_ACTION_REQUIRED_MESSAGE);
-    const result = await residentsApi.create(payload, { ownerId, offlineMutationType: MUTATION_TIER.ONLINE_ONLY });
+    const result = await residentsApi.create(payload, {
+      ownerId,
+      ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
+      offlineMutationType: MUTATION_TIER.ONLINE_ONLY,
+    });
     const resident = unwrapResident(result);
     if (!hasResidentId(resident)) throw new Error('The resident service did not confirm the created record.');
     await cacheRecord({ entity: 'resident', remoteId: resident.id, ownerId, data: resident, revision: residentRevisionOf(resident) });

@@ -1,8 +1,11 @@
 /**
- * Example AI Service
- * 
- * Demonstrates how to use the AIProviderClient with proper error handling
- * and user-friendly error messages.
+ * High-Level AI Generation Service (`services/aiProvider/service.js`).
+ *
+ * Fits into KALUSAGAP's backend pipeline (`route -> authenticate -> authorize -> controller -> aiProvider/service -> AIProviderClient`),
+ * providing domain-ready helpers for chat completions, single-prompt completions,
+ * and fault-isolated batch text generation backed by the singleton `ProviderClientFactory`.
+ * Translates low-level provider failures into sanitized `Error` objects carrying
+ * `userMessage`, `errorType`, `provider`, `requestId`, and `statusCode`.
  */
 
 import { getProviderFactory } from './config.js';
@@ -72,14 +75,17 @@ export const generateChatCompletion = async ({
 };
 
 /**
- * Generate text using AI provider with streaming support
- * 
- * @param {object} options - Options
- * @param {string} options.model - Model name
- * @param {string} options.prompt - Input prompt
- * @param {number} options.maxTokens - Max output tokens
- * @param {string} options.providerName - Provider name
- * @returns {Promise<string>} Generated text
+ * Generate a single-prompt text completion via the provider's `/v1/complete` endpoint.
+ *
+ * Wraps provider execution errors into a sanitized `Error` exposing `userMessage`,
+ * `errorType`, `provider`, and `requestId` for upstream controllers.
+ *
+ * @param {Object} options - Completion options
+ * @param {string} options.model - Model identifier
+ * @param {string} options.prompt - Input prompt text
+ * @param {number} [options.maxTokens=1000] - Maximum output tokens
+ * @param {string} [options.providerName='anthropic'] - Registered provider key
+ * @returns {Promise<string>} Generated completion string
  */
 export const generateText = async ({
   model,
@@ -128,10 +134,14 @@ export const generateText = async ({
 };
 
 /**
- * Batch text generation with fallback provider support
- * 
- * @param {Array<object>} requests - Array of generation requests
- * @returns {Promise<Array<object>>} Results with success/error for each
+ * Execute multiple single-prompt generation requests concurrently with per-item
+ * fault isolation via `Promise.allSettled`.
+ *
+ * Individual failures never reject the batch; each item resolves to either
+ * `{ ...req, success: true, text }` or `{ ...req, success: false, error, errorType, provider, requestId }`.
+ *
+ * @param {Array<Object>} requests - Non-empty array of `generateText` option objects
+ * @returns {Promise<Array<Object>>} Per-request outcome objects in input order
  */
 export const batchGenerateText = async (requests) => {
   if (!Array.isArray(requests) || requests.length === 0) {

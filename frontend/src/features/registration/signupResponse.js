@@ -28,6 +28,8 @@ const isProfileConflictError = (error) =>
 // Too many verification emails in a short window.
 const isRateLimitError = (error) =>
   codeOf(error) === 'over_email_send_rate_limit'
+  || codeOf(error) === 'over_request_rate_limit'
+  || Number(error?.status) === 429
   || /rate limit|too many requests|frequency/i.test(messageOf(error));
 
 /**

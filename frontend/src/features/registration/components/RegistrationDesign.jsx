@@ -25,7 +25,7 @@ export const labelCls =
   "block text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-500";
 
 export const inputCls = (error) =>
-  `w-full rounded-xl border bg-slate-50/60 px-4 py-2.5 text-sm text-brand-ink outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-blue/10 ${
+  `min-h-11 min-w-0 w-full scroll-mt-24 rounded-xl border bg-slate-50/60 px-4 py-2.5 text-base sm:text-sm text-brand-ink outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-brand-blue focus:bg-white focus:ring-4 focus:ring-brand-blue/10 ${
     error
       ? "border-brand-danger bg-rose-50/50 focus:border-brand-danger focus:ring-brand-danger/10"
       : "border-slate-200 hover:border-slate-300"
@@ -44,7 +44,7 @@ export function Field({
   className = "",
 }) {
   return (
-    <div className={`group ${className}`}>
+    <div className={`group min-w-0 ${className}`}>
       <label htmlFor={id} className={`${labelCls} transition-colors group-focus-within:text-brand-blue`}>
         {label}
         {required && <span className="ml-0.5 font-medium text-brand-danger">*</span>}
@@ -447,13 +447,13 @@ export function StepIndicator({ current, steps, flowLabel, showStepCount = true 
 /* -------------------------------------------------------------------------- */
 
 export const btnPrimary =
-  "group inline-flex items-center justify-center gap-2 rounded-xl bg-brand-blue px-6 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.1em] text-white transition-all hover:bg-brand-dark hover:shadow-[0_8px_20px_-6px_rgba(18,81,143,0.5)] focus-visible:ring-4 focus-visible:ring-brand-blue/20 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-brand-blue disabled:hover:shadow-none";
+  "group inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-brand-blue px-6 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.1em] text-white transition-all hover:bg-brand-dark hover:shadow-[0_8px_20px_-6px_rgba(18,81,143,0.5)] focus-visible:ring-4 focus-visible:ring-brand-blue/20 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-brand-blue disabled:hover:shadow-none";
 
 export const btnSecondary =
   "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.1em] text-brand-dark transition-colors hover:border-brand-blue hover:text-brand-blue focus-visible:ring-4 focus-visible:ring-brand-blue/10 disabled:cursor-not-allowed disabled:opacity-60";
 
 export const btnGhost =
-  "group inline-flex items-center gap-2 rounded-xl px-4 py-2 text-[12.5px] font-semibold text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand-ink";
+  "group inline-flex min-h-11 items-center gap-2 rounded-xl px-4 py-2 text-[12.5px] font-semibold text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand-ink";
 
 /* -------------------------------------------------------------------------- */
 /* Shell + card                                                                */
@@ -462,7 +462,7 @@ export const btnGhost =
 /** Navy portal background + KALUSAGAP masthead + centered content column. */
 export function RegistrationShell({ children, footer = undefined }) {
   return (
-    <div className="relative flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden gov-navy-panel px-4 py-4 sm:px-6 sm:py-6">
+    <div className="relative flex min-h-dvh w-full flex-col items-center justify-center overflow-x-clip gov-navy-panel px-4 py-4 sm:px-6 sm:py-6">
       <div
         className="pointer-events-none absolute inset-0"
         aria-hidden="true"

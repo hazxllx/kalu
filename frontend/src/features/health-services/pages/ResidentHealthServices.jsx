@@ -63,7 +63,12 @@ export default function ResidentHealthServices() {
 
   useEffect(() => {
     if (!previewPubmat && !previewMemo) return undefined;
-    const closeOnEscape = (event) => { if (event.key === "Escape") setPreviewPubmat(null); };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") {
+        setPreviewPubmat(null);
+        setPreviewMemo(null);
+      }
+    };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [previewPubmat, previewMemo]);
@@ -140,23 +145,23 @@ export default function ResidentHealthServices() {
 
       {state === "ready" && (
         <div className="space-y-5">
-          <section className="flex flex-col gap-3 rounded-lg border border-brand-border bg-white px-5 py-4 md:flex-row md:items-end md:justify-between">
+          <section className="flex flex-col flex-wrap gap-3 rounded-lg border border-brand-border bg-white px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h2 className="font-display text-base text-brand-ink">Find a health service</h2>
               <p className="mt-0.5 text-xs text-brand-gray">Filter by availability and the facility offering the service.</p>
             </div>
-            <div className="flex flex-wrap gap-3">
-              <label className="grid gap-1.5 text-xs font-medium text-brand-gray">
+            <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
+              <label className="grid min-w-0 flex-1 gap-1.5 text-xs font-medium text-brand-gray sm:flex-none">
                 Availability
-                <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 min-w-[160px] rounded-full border border-brand-border bg-white px-3.5 text-xs text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                <select aria-label="Availability" value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 w-full min-w-0 rounded-full border border-brand-border bg-white px-3.5 text-xs text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 sm:min-w-[160px]">
                   <option value="all">All services</option>
                   <option value="open">Open for registration</option>
                   <option value="closed">Closed for registration</option>
                 </select>
               </label>
-              <label className="grid gap-1.5 text-xs font-medium text-brand-gray">
+              <label className="grid min-w-0 flex-1 gap-1.5 text-xs font-medium text-brand-gray sm:flex-none">
                 Facility
-                <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 min-w-[180px] rounded-full border border-brand-border bg-white px-3.5 text-xs text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                <select aria-label="Facility" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 w-full min-w-0 rounded-full border border-brand-border bg-white px-3.5 text-xs text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 sm:min-w-[180px]">
                   <option value="all">All facilities</option>
                   <option value="bhc">Barangay Health Center</option>
                   <option value="rhu">Rural Health Unit (RHU)</option>
@@ -276,7 +281,7 @@ export default function ResidentHealthServices() {
       {toast && (
         <div
           role="status"
-          className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg"
+          className="fixed bottom-4 right-4 z-[80] flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg"
         >
           <CheckCircle2 className="h-4 w-4 text-brand-green" aria-hidden="true" />
           <span className="text-sm">{toast}</span>
@@ -421,7 +426,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
   );
 
   return (
-    <article className="group flex h-full flex-col overflow-hidden rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40">
+    <article className="group flex h-full min-w-0 flex-col overflow-hidden break-words rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40 [overflow-wrap:anywhere]">
       {service.pubmatUrl && !pubmatFailed ? (
         <button
           type="button"
@@ -488,7 +493,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
           {service.facilityName && (
             <p className="flex items-center gap-1.5">
               <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
-              <span className="truncate">{service.facilityName}</span>
+              <span className="min-w-0 break-words">{service.facilityName}</span>
             </p>
           )}
           {!serviceSchedule && !schedule && !window && (
@@ -548,13 +553,13 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
       aria-modal="true"
       aria-label="Cancel registration"
     >
-      <Card className="w-full max-w-[380px] p-4 sm:p-5">
+      <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-[380px] overflow-y-auto p-4 sm:p-5">
         <h2 className="text-[15px] font-semibold text-brand-ink">Cancel this registration?</h2>
         <p className="mt-1.5 text-[13px] text-brand-gray">
           The health center will be notified.
           {plan?.plannedDate ? ` Your registration for ${formatPlanDate(plan.plannedDate)} will be released.` : ""}
         </p>
-        <div className="mt-5 flex items-center justify-end gap-2">
+        <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}

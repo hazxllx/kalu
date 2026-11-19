@@ -156,7 +156,11 @@ export const buildReportContent = (preview) => {
 
 /** True when a persisted report row carries a usable content snapshot. */
 export const hasSnapshot = (content) =>
-  Boolean(content && typeof content === "object" && Array.isArray(content.columns));
+  Boolean(content && typeof content === "object" &&
+    Array.isArray(content.columns) && content.columns.length > 0 &&
+    content.columns.every((column) => typeof column?.label === "string") &&
+    Array.isArray(content.rows) && content.rows.every((row) =>
+      Array.isArray(row) && row.length === content.columns.length && row.every((value) => typeof value === "string")));
 
 export default {
   REPORT_CONTENT_SCHEMA_VERSION,

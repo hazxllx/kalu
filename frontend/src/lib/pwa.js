@@ -53,7 +53,7 @@ const trackInstalling = (registration) => {
  */
 export const registerServiceWorker = () => {
   if (!pwaSupported()) return;
-  if (!(import.meta.env && import.meta.env.PROD)) {
+  if (import.meta.env?.MODE !== 'production') {
     // A production PWA may already be registered for localhost from a previous
     // preview/build. That worker can keep serving an old app shell while Vite is
     // running, making local fixes appear not to take effect. Remove only this

@@ -1,3 +1,5 @@
+import { requireLocalUrl } from '../../lib/localSafety.js';
+
 export const DEFAULT_LOCAL_API_URL = 'http://localhost:5000/api';
 
 export const normalizeApiBaseUrl = (apiUrl) => {
@@ -29,5 +31,7 @@ export const resolveApiBaseUrl = (apiUrl, isProduction = false) => {
   if (!String(apiUrl || '').trim() && isProduction) {
     throw new Error('VITE_API_URL is required for production builds.');
   }
-  return normalizeApiBaseUrl(apiUrl || DEFAULT_LOCAL_API_URL);
+  const resolved = normalizeApiBaseUrl(apiUrl || DEFAULT_LOCAL_API_URL);
+  if (!isProduction) requireLocalUrl(resolved, 'VITE_API_URL');
+  return resolved;
 };

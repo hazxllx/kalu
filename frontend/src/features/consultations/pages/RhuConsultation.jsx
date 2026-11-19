@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
 import { CHECKUP_STATUS } from "@/lib/phnWorkflowMap";
 import { usePhnWorkflow } from "@/hooks/usePhnWorkflow";
+import { phnWorkflowApi } from "@/services/api/phnWorkflow";
 import PhnCheckupWorkbench, { CHECKUP_STATUS_TONES } from "@/features/consultations/components/PhnCheckupWorkbench";
 import {
   partitionConsultationQueue,
@@ -60,7 +61,9 @@ export default function RhuConsultation() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [activePatientId, setActivePatientId] = useState(null);
+  const [activePatient, setActivePatient] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
+  const openingRef = useRef(false);
   const [toast, setToast] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [activePage, setActivePage] = useState(1);
@@ -115,19 +118,23 @@ export default function RhuConsultation() {
     setCompletedPage((page) => Math.min(page, Math.max(1, Math.ceil(handled.length / queuePageSize))));
   }, [active.length, handled.length, queuePageSize]);
 
-  const activePatient = activePatientId ? patients.find((p) => p.id === activePatientId) || null : null;
-
   const handleAction = async (p) => {
-    if (p.status === CHECKUP_STATUS.WAITING) {
-      try {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    setOpeningId(p.id);
+    try {
+      if (p.status === CHECKUP_STATUS.WAITING) {
         await startCheckup(p.id);
-        showToast("Consultation started.");
-        setActivePatientId(p.id);
-      } catch (err) {
-        showToast(err?.message || "Could not start the consultation.");
       }
-    } else {
-      setActivePatientId(p.id);
+      // Always load this specific persisted encounter. Cached queue rows are
+      // useful offline for browsing, but cannot authorize a clinical edit.
+      const saved = await phnWorkflowApi.getCheckup(p.id, p.residentId);
+      setActivePatient(saved);
+    } catch (err) {
+      showToast(err?.message || "Could not load this consultation. Refresh the queue and retry.");
+    } finally {
+      openingRef.current = false;
+      setOpeningId(null);
     }
   };
 
@@ -141,9 +148,10 @@ export default function RhuConsultation() {
     try {
       await completeCheckup(patientId, recorded);
       showToast("Consultation completed successfully.");
-      setActivePatientId(null);
+      setActivePatient(null);
     } catch (err) {
       showToast(err?.message || "Could not complete the consultation.");
+      throw err;
     }
   };
 
@@ -157,14 +165,14 @@ export default function RhuConsultation() {
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-brand-ink">{p.patient}</p>
             <p className="truncate text-xs text-brand-gray">
-              {[p.age ? `${p.age} yrs` : null, p.sex].filter(Boolean).join(" · ") || "—"}
+              {[p.age !== "" && p.age != null ? `${p.age} yrs` : null, p.sex].filter(Boolean).join(" · ") || "Not recorded"}
             </p>
           </div>
         </div>
       </td>
       <td className="px-4 py-3">
         <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${p.barangay ? "bg-brand-blue/10 text-brand-blue" : "bg-slate-100 text-slate-600"}`}>
-          {p.barangay || "Walk-in"}
+          {p.barangay || "Not recorded"}
         </span>
       </td>
       <td className="px-4 py-3 text-sm text-brand-ink">{p.reason || p.triage?.chiefComplaint || "—"}</td>
@@ -178,9 +186,10 @@ export default function RhuConsultation() {
       <td className="px-4 py-3">
         <button
           onClick={() => handleAction(p)}
+          disabled={openingId !== null}
           className="text-sm font-medium text-brand-blue hover:underline whitespace-nowrap focus-visible:outline-none focus-visible:underline"
         >
-          {actionLabel(p)}
+          {openingId === p.id ? "Loading consultation..." : actionLabel(p)}
         </button>
       </td>
     </tr>
@@ -392,8 +401,9 @@ export default function RhuConsultation() {
 
       {activePatient && (
         <PhnCheckupWorkbench
+          key={activePatient.id}
           patient={activePatient}
-          onClose={() => setActivePatientId(null)}
+          onClose={() => setActivePatient(null)}
           onComplete={(recorded) => handleComplete(activePatient.id, recorded)}
         />
       )}

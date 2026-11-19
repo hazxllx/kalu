@@ -183,6 +183,8 @@ const isOverdue = (row) => {
 };
 const FOLLOW_UP_STATUS_FILTERS = [
   "All",
+  "Overdue",
+  "Pending",
   "Today",
   "Upcoming",
   "Scheduled",
@@ -214,7 +216,7 @@ export default function MidwifeFollowUp() {
   const inScope = (f) => !supervisor || Boolean(assignedBarangay) &&
     String(f.barangay || "").trim().toLowerCase() === assignedBarangay.toLowerCase();
   const followUpParam = supervisor ? searchParams.get("followup") || "" : "";
-  const statusParam = supervisor && ["Overdue", "Pending", ...FOLLOW_UP_STATUS_FILTERS].includes(searchParams.get("status")) ? searchParams.get("status") : "All";
+  const statusParam = FOLLOW_UP_STATUS_FILTERS.includes(searchParams.get("status")) ? searchParams.get("status") : "All";
 
   // A FOLLOW-UP happens within the Health Supervisor's own assigned barangay
   // context, so its venue is their assigned Barangay Health Station (or a Home
@@ -230,6 +232,7 @@ export default function MidwifeFollowUp() {
 
   const [followUps, setFollowUps] = useState([]);
   const [residentsFromApi, setResidentsFromApi] = useState([]);
+  const [residentDirectoryOwner, setResidentDirectoryOwner] = useState(null);
   const [personnelFromApi, setPersonnelFromApi] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -276,6 +279,7 @@ export default function MidwifeFollowUp() {
     setLoading(true);
     setLoadError(null);
     setDirectoryLoadError(null);
+    setResidentDirectoryOwner(null);
     setFollowUpSource(null);
     if (supervisor && (!assignedBarangay || !canViewFollowUps)) {
       setFollowUps([]);
@@ -319,6 +323,7 @@ export default function MidwifeFollowUp() {
 
         if (residentResult.status === "fulfilled") {
           setResidentsFromApi(residentResult.value?.rows || residentResult.value || []);
+          setResidentDirectoryOwner(user?.id);
         } else {
           setResidentsFromApi([]);
           directoryErrors.push(residentResult.reason?.message || "Unable to load the resident directory.");
@@ -350,8 +355,8 @@ export default function MidwifeFollowUp() {
   }, [lastSyncedAt, load]);
 
   useEffect(() => {
-    if (supervisor) setStatusFilter(statusParam);
-  }, [supervisor, statusParam]);
+    setStatusFilter(statusParam);
+  }, [statusParam]);
   useEffect(() => {
     setSelectedFollowUp(null);
     setShowDetailPanel(false);
@@ -462,9 +467,9 @@ export default function MidwifeFollowUp() {
 
   const filteredFollowUps = filterFollowUps(authorizedFollowUps, {
     search: searchQuery,
-    status: supervisor && statusFilter === "Overdue" ? "All" : statusFilter,
+    status: statusFilter === "Overdue" ? "All" : statusFilter,
     priority: priorityFilter,
-  }).filter((row) => !supervisor || statusFilter !== "Overdue" || isOverdue(row));
+  }).filter((row) => statusFilter !== "Overdue" || isOverdue(row));
   const pageFollowUps = filteredFollowUps.slice((followUpPage - 1) * followUpPageSize, followUpPage * followUpPageSize);
   useEffect(() => { setFollowUpPage(1); }, [searchQuery, statusFilter, priorityFilter]);
   useEffect(() => {
@@ -937,7 +942,7 @@ export default function MidwifeFollowUp() {
   // the check-up is re-typed.
   useEffect(() => {
     const draft = location.state?.followUpDraft;
-    if (!draft || !canScheduleFollowUp) return;
+    if (!draft || !canScheduleFollowUp || !user?.id || residentDirectoryOwner !== user.id) return;
     const notes = [
       draft.consultationLocation ? `Consultation Location: ${draft.consultationLocation}` : "",
       draft.reason ? `Reason for visit: ${draft.reason}` : "",
@@ -947,15 +952,9 @@ export default function MidwifeFollowUp() {
       .filter(Boolean)
       .join("\n");
 
-    // Match the draft's resident against the real directory (by id, then name).
-    const matched =
-      residentsFromApi.find((r) => r.id === draft.residentId) ||
-      (!supervisor && residentsFromApi.find(
-        (r) =>
-          [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" ").toLowerCase() ===
-          String(draft.resident || "").toLowerCase(),
-      )) ||
-      null;
+    const matched = draft.residentId
+      ? residentOptions.find((resident) => resident.id === draft.residentId)
+      : null;
 
     setScheduleForm({
       ...emptyScheduleForm(defaultPersonnel),
@@ -964,19 +963,12 @@ export default function MidwifeFollowUp() {
       priority: ["Low", "Medium", "High"].includes(draft.riskLevel) ? draft.riskLevel : "Medium",
       notes,
     });
-    setSelectedResident(
-      matched
-        ? {
-            ...matched,
-            name: [matched.firstName, matched.middleName, matched.lastName].filter(Boolean).join(" "),
-            gender: matched.sex || "",
-          }
-        : null,
-    );
+    setSelectedResident(matched || null);
+    setSelectedFollowUp(null);
     setTouched({});
     setShowScheduleModal(true);
-    navigate(location.pathname, { replace: true, state: null });
-  }, [location.state, location.pathname, navigate, residentsFromApi, defaultPersonnel, supervisor, canScheduleFollowUp]);
+    navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, { replace: true, state: null });
+  }, [location, navigate, residentDirectoryOwner, residentOptions, user?.id, defaultPersonnel, defaultFollowUpLocation, canScheduleFollowUp]);
 
   // Inline validation — fields are flagged once touched, not on every keystroke.
   const scheduleErrors = {
@@ -1150,7 +1142,7 @@ export default function MidwifeFollowUp() {
           Search Follow-ups
           <div className="supervisor-input mt-1 flex items-center gap-2"><Search className="h-4 w-4 shrink-0" aria-hidden="true" /><input id="followup-search" type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Resident, purpose, personnel or location" className="w-full min-w-0 bg-transparent outline-none" /></div>
         </label>
-        <label htmlFor="followup-status" className="text-caption font-medium text-brand-gray">Status<select id="followup-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="supervisor-input mt-1 block w-full sm:w-36">{["All", "Overdue", "Pending", ...FOLLOW_UP_STATUS_FILTERS.filter((status) => status !== "All")].map((status) => <option key={status} value={status}>{status === "All" ? "All Status" : status}</option>)}</select></label>
+         <label htmlFor="followup-status" className="text-caption font-medium text-brand-gray">Status<select id="followup-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="supervisor-input mt-1 block w-full sm:w-36">{FOLLOW_UP_STATUS_FILTERS.map((status) => <option key={status} value={status}>{status === "All" ? "All Status" : status}</option>)}</select></label>
         <label htmlFor="followup-priority" className="text-caption font-medium text-brand-gray">Priority<select id="followup-priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="supervisor-input mt-1 block w-full sm:w-36">{["All", "High", "Medium", "Low"].map((priority) => <option key={priority} value={priority}>{priority === "All" ? "All priorities" : priority}</option>)}</select></label>
         {filtersActive && <button type="button" className="supervisor-button is-quiet" onClick={() => { setSearchQuery(""); setStatusFilter("All"); setPriorityFilter("All"); }}>Clear filters</button>}
       </Card> : <Card className="p-4 mb-5">
@@ -1158,6 +1150,8 @@ export default function MidwifeFollowUp() {
           <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 flex-1 max-w-md">
             <Search className="w-4 h-4 text-brand-gray" />
             <input
+              type="search"
+              aria-label="Search follow-ups"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search resident..."
@@ -1166,15 +1160,17 @@ export default function MidwifeFollowUp() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <select
+              aria-label="Follow-up status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue"
             >
               {FOLLOW_UP_STATUS_FILTERS.map((status) => (
-                <option key={status} value={status}>{status}</option>
+                 <option key={status} value={status}>{status === "All" ? "All Status" : status}</option>
               ))}
             </select>
             <select
+              aria-label="Follow-up priority"
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
               className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue"
@@ -1182,8 +1178,9 @@ export default function MidwifeFollowUp() {
               <option value="All">All Priorities</option>
               <option value="High">High</option>
               <option value="Medium">Medium</option>
-              <option value="Low">Low</option>
-            </select>
+               <option value="Low">Low</option>
+             </select>
+             {filtersActive && <button type="button" className="text-sm font-medium text-brand-blue hover:underline" onClick={() => { setSearchQuery(""); setStatusFilter("All"); setPriorityFilter("All"); }}>Clear filters</button>}
           </div>
         </div>
       </Card>}
@@ -1214,19 +1211,23 @@ export default function MidwifeFollowUp() {
                       <p className="text-xs text-brand-gray break-words">{f.barangay}</p>
                     </div>
                   </td>
-                  <td data-label="Purpose" className="px-3 py-2.5 text-sm text-brand-ink max-w-[150px]">
+                   <td data-label="Purpose" className="px-3 py-2.5 text-sm text-brand-ink md:max-w-[150px]">
+                     <div>
                     <p className="truncate" title={f.purpose}>{f.purpose}</p>
                     {f.consultation && (
                       <p className="mt-0.5 text-[10px] text-brand-gray truncate">
                         Consultation {f.consultation.id}
                         {f.consultation.visit_date ? ` · ${formatDate(f.consultation.visit_date)}` : ""}
                       </p>
-                    )}
+                     )}
+                     </div>
                   </td>
                   <td data-label="Assigned" className="px-3 py-2.5 text-sm text-brand-ink break-words" title={f.assignedMidwife}>{f.assignedMidwife || "Not assigned"}</td>
-                  <td data-label="Scheduled" className="px-3 py-2.5">
-                    <div className="text-sm text-brand-ink">{supervisor ? formatDate(f.scheduledDateRaw, true) : f.scheduledDate}</div>
-                    <div className="text-xs text-brand-gray">{f.scheduledTime}</div>
+                   <td data-label="Scheduled" className="px-3 py-2.5">
+                     <div>
+                       <div className="text-sm text-brand-ink">{supervisor ? formatDate(f.scheduledDateRaw, true) : f.scheduledDate}</div>
+                       <div className="text-xs text-brand-gray">{f.scheduledTime}</div>
+                     </div>
                   </td>
                    <td data-label="Location" className="px-3 py-2.5 text-sm text-brand-ink">
                      <div className="flex items-start gap-1.5">

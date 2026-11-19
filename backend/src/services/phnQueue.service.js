@@ -28,7 +28,15 @@ import { markCompletedFromVisit } from './referrals.service.js';
 import * as canonicalReferrals from './referrals.service.js';
 import { getServiceClient } from '../config/supabase.js';
 import { getRiskConfig } from './riskConfig.service.js';
-import { assessVitals, hasAssessableVitals } from '../utils/residentRisk.js';
+import { assessVitals } from '../utils/residentRisk.js';
+
+/** Preserve the configured score while distinguishing missing inputs from a negative finding. */
+export const assessPhnVisitRisk = (visit, config) => {
+  const risk = assessVitals(visit?.vitals, config);
+  return { ...visit, riskLevel: risk.level, riskScore: risk.score,
+    riskFactors: risk.factors, riskAssessedAt: risk.level === null ? null : visit.visitDate || visit.createdAt || null,
+    riskAssessmentStatus: risk.status, missingMeasurements: risk.missingMeasurements, riskReason: risk.reason };
+};
 
 const isPHN = (user) => user?.role === 'phn';
 
@@ -107,11 +115,7 @@ export const listQueue = async ({ statuses = null, q = '', user } = {}) => {
     if (page.length < 100 || (Number.isFinite(result?.total) && offset + page.length >= result.total)) break;
   }
   const config = await getRiskConfig({ repo: repository });
-  const assessed = rows.map((visit) => {
-    const risk = hasAssessableVitals(visit.vitals) ? assessVitals(visit.vitals, config) : null;
-    return { ...visit, riskLevel: risk?.level ?? null, riskScore: risk?.score ?? null,
-      riskFactors: risk?.factors ?? [], riskAssessedAt: risk ? visit.visitDate || visit.createdAt : null };
-  });
+  const assessed = rows.map((visit) => assessPhnVisitRisk(visit, config));
   return { rows: assessed, total: assessed.length };
 };
 
@@ -134,10 +138,14 @@ export const viewSubmission = async ({ id, user }) => {
     // Staff other than the recorder cannot view drafts.
     if (!isRecorder) throw ApiError.notFound('Submission not found');
   }
-  return submission;
+  return assessPhnVisitRisk(submission, await getRiskConfig({ repo: repository }));
 };
 
 export const normalizePhnVisit = (visit = {}) => {
+  if (visit.vitals !== undefined) {
+    const errors = validateVitals(visit.vitals);
+    if (Object.keys(errors).length) throw ApiError.badRequest('Invalid vital signs.', errors);
+  }
   const pickText = (value) => String(value ?? '').trim();
   const vitals = visit.vitals
     ? (() => {
@@ -151,6 +159,7 @@ export const normalizePhnVisit = (visit = {}) => {
           rr: num(visit.vitals.rr),
           o2sat: num(visit.vitals.o2sat),
           temperature: num(visit.vitals.temperature),
+          bloodSugar: num(visit.vitals.bloodSugar),
           heightCm,
           weightKg,
           bmi,
@@ -241,14 +250,39 @@ export const updateSubmissionForPhn = async ({
   patch = {},
   user,
   repo = repository,
-  supabase = getServiceClient(),
+  supabase,
+  complete = false,
 }) => {
   assertCanProcessConsultation(user);
   const submission = await repo.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   assertSubmissionScope(user, submission);
+  if (submission.status === SUBMISSION_STATUS.COMPLETED && complete) {
+    const requested = normalizePhnVisit(patch);
+    const comparable = (value) => {
+      if (Array.isArray(value)) return value.map(comparable);
+      if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, comparable(value[key])]));
+      return value ?? '';
+    };
+    const same = Object.entries(requested).every(([key, value]) => {
+      if (key === 'phn') return Object.entries(value).every(([field, text]) => String(submission.phn?.[field] || '').trim() === text);
+      const saved = key === 'medications' ? normalizeMedications(submission.medications || []) : submission[key];
+      return JSON.stringify(comparable(saved)) === JSON.stringify(comparable(value));
+    });
+    if (same) return submission;
+    throw ApiError.conflict('This consultation has already been completed with different details. Reopen its saved record to review it.');
+  }
   if (!PHN_EDITABLE_STATUSES.includes(submission.status)) {
     throw ApiError.forbidden('This submission is not open for PHN processing.');
+  }
+  if (patch.expectedUpdatedAt && patch.expectedUpdatedAt !== submission.updatedAt) {
+    throw ApiError.conflict('This consultation changed after it was opened. Your entries are preserved; reload the saved record before editing.');
+  }
+
+  if (submission.triageSnapshot) {
+    const protectedFields = ['vitals', 'visitDate', 'chiefComplaint', 'clinicalHistory'];
+    const errors = Object.fromEntries(protectedFields.filter((field) => Object.hasOwn(patch, field)).map((field) => [field, 'Original triage information is read-only after handoff.']));
+    if (Object.keys(errors).length) throw ApiError.badRequest('The original triage record cannot be changed during consultation.', errors);
   }
 
   const normalized = normalizePhnVisit(patch);
@@ -263,7 +297,7 @@ export const updateSubmissionForPhn = async ({
       const service = await resolveConsultationHealthService({
         user,
         serviceId: normalized.healthServiceId,
-        supabase,
+        supabase: supabase || getServiceClient(),
       });
       normalized.healthServiceName = service.name;
     }
@@ -281,9 +315,21 @@ export const updateSubmissionForPhn = async ({
     ...(normalized.vitals || {}),
   };
   const errors = validateVitals(vitals);
-  if (errors.length) throw ApiError.badRequest('Invalid vital signs.', errors);
+  if (Object.keys(errors).length) throw ApiError.badRequest('Invalid vital signs.', errors);
 
-  const updated = await repo.updateVisit(id, normalized);
+  if (complete) {
+    const final = { ...submission, ...normalized };
+    const errors = {};
+    if (!String(final.findings || '').trim()) errors.findings = 'Clinical assessment is required before completing the consultation.';
+    if (!String(final.treatmentGiven || '').trim()) errors.treatmentGiven = 'Treatment or recommendations are required before completing the consultation.';
+    if (Object.keys(errors).length) throw ApiError.badRequest('Please complete the consultation assessment.', errors);
+    const now = new Date().toISOString();
+    Object.assign(normalized, { status: SUBMISSION_STATUS.COMPLETED, completedAt: now, receivedAt: submission.receivedAt || now, reviewedAt: submission.reviewedAt || now });
+  }
+  // The database status/clinical update is one statement. A competing completion
+  // cannot be overwritten after the initial read.
+  const updated = await repo.updateVisit(id, normalized, { expectedUpdatedAt: submission.updatedAt, allowedStatuses: PHN_EDITABLE_STATUSES });
+  if (!updated) throw ApiError.conflict('The consultation changed while saving. Reload its saved record before continuing.');
   return updated;
 };
 
@@ -321,11 +367,16 @@ export const markInReview = async ({ id, user }) => {
   });
 };
 
-export const completeSubmission = async ({ id, user }) => {
+export const completeSubmission = async ({ id, user, patch, repo = repository, supabase }) => {
+  if (patch !== undefined) {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw ApiError.badRequest('Enter consultation details in their separate fields.');
+    return updateSubmissionForPhn({ id, patch, user, repo, supabase, complete: true });
+  }
   assertCanProcessConsultation(user);
-  const submission = await repository.getVisit(id);
+  const submission = await repo.getVisit(id);
   if (!submission) throw ApiError.notFound('Submission not found');
   assertSubmissionScope(user, submission);
+  if (submission.status === SUBMISSION_STATUS.COMPLETED) return submission;
   guardTransition(
     submission,
     [SUBMISSION_STATUS.IN_REVIEW, SUBMISSION_STATUS.REFERRED, SUBMISSION_STATUS.RECEIVED, SUBMISSION_STATUS.SUBMITTED],
@@ -345,16 +396,17 @@ export const completeSubmission = async ({ id, user }) => {
   }
 
   const now = new Date().toISOString();
-  const updated = await repository.updateVisit(id, {
+  const updated = await repo.updateVisit(id, {
     status: SUBMISSION_STATUS.COMPLETED,
     receivedAt: submission.receivedAt || now,
     reviewedAt: submission.reviewedAt || now,
     completedAt: now,
-  });
+  }, { expectedUpdatedAt: submission.updatedAt, allowedStatuses: PHN_EDITABLE_STATUSES });
+  if (!updated) throw ApiError.conflict('The consultation changed while completing. Reload the saved record.');
 
   // If this RHU encounter is linked to a barangay referral, mark it completed
   // from the referral side so the Health Supervisor sees the unified stage advance.
-  if (updated.referralId) {
+  if (updated.referralId && repo.driver !== 'supabase') {
     await markCompletedFromVisit(updated.referralId);
   }
 

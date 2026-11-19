@@ -1,18 +1,29 @@
 /**
- * BMI + vital-sign helpers shared by intake services and referral generation.
+ * @module utils/bmi
+ * @description Server-authoritative BMI calculation, vital-sign validation, blood-pressure
+ * parsing, and clinical document timestamp formatting utilities.
  *
- * BMI = weight (kg) / (height (m))^2. Height is captured in centimetres and
- * converted to metres internally. The value is NEVER accepted from the client:
- * it is always recomputed server-side from the stored height/weight.
+ * Architectural layer:
+ *   `route -> authenticate -> authorize -> controller -> service (uses utils/bmi) -> repository/Supabase`
+ *
+ * Shared across clinical consultation intake services, resident risk evaluation
+ * (`utils/residentRisk.js`), and referral document generation. BMI is computed as
+ * `weight (kg) / (height (m))^2` (converting centimetres to metres internally) and
+ * is NEVER trusted from client payloads — it is always recomputed server-side from
+ * recorded height and weight.
  */
 
+/** Rounds a numeric value to one decimal place. */
 const round1 = (value) => Math.round(value * 10) / 10;
 
 /**
- * @param {number|string|null|undefined} heightCm  height in centimetres
- * @param {number|string|null|undefined} weightKg  weight in kilograms
- * @returns {{ bmi: number|null, category: string|null }}
- *          nulls when either input is missing/not a positive number
+ * Computes Body Mass Index (rounded to 1 decimal place) and its WHO adult category
+ * from height in centimetres and weight in kilograms.
+ *
+ * @param {number|string|null|undefined} heightCm - Recorded height in centimetres.
+ * @param {number|string|null|undefined} weightKg - Recorded weight in kilograms.
+ * @returns {Object} `{ bmi: number|null, category: string|null }` — both properties
+ *   are `null` when either input is missing, non-numeric, or `<= 0`.
  */
 export const computeBMI = (heightCm, weightKg) => {
   const h = Number(heightCm);
@@ -26,8 +37,14 @@ export const computeBMI = (heightCm, weightKg) => {
 };
 
 /**
- * WHO adult BMI classification for a computed BMI value.
- * @param {number|null} bmi
+ * Classifies a computed BMI value using standard WHO adult cutoffs:
+ *   - `< 18.5`  -> `'Underweight'`
+ *   - `18.5–24.9` -> `'Normal'`
+ *   - `25.0–29.9` -> `'Overweight'`
+ *   - `>= 30.0` -> `'Obese'`
+ *
+ * @param {number|null|undefined} bmi - Computed numeric BMI.
+ * @returns {string|null} WHO BMI category label, or `null` when `bmi` is null/non-finite.
  */
 export const bmiCategory = (bmi) => {
   if (bmi === null || !Number.isFinite(bmi)) return null;
@@ -38,9 +55,16 @@ export const bmiCategory = (bmi) => {
 };
 
 /**
- * Validates that a recorded vital sign is a plausible positive number.
- * @param {*} value
- * @param {{ min?: number, max?: number, required?: boolean }} opts
+ * Checks whether a recorded vital sign falls within an inclusive `[min, max]`
+ * physiological range. Empty values (`null`, `undefined`, `''`) pass only when
+ * `required` is explicitly set to `false`.
+ *
+ * @param {*} value - Raw vital-sign value to validate.
+ * @param {Object} [opts={}] - Validation range and presence rules.
+ * @param {number} [opts.min=0] - Minimum allowed numeric value (inclusive).
+ * @param {number} [opts.max=Infinity] - Maximum allowed numeric value (inclusive).
+ * @param {boolean} [opts.required=true] - Whether empty values should be rejected.
+ * @returns {boolean} `true` if the value satisfies presence and range constraints.
  */
 export const isPlausibleVital = (value, { min = 0, max = Infinity, required = true } = {}) => {
   if (value === null || value === undefined || value === '') return !required;
@@ -49,8 +73,12 @@ export const isPlausibleVital = (value, { min = 0, max = Infinity, required = tr
 };
 
 /**
- * Parses a blood-pressure string ("120/80") into systolic/diastolic numbers.
- * Returns nulls when the shape is not a valid two-part BP.
+ * Parses a slash-delimited blood-pressure reading (e.g., `"120/80"`) into
+ * numeric systolic and diastolic components.
+ *
+ * @param {*} value - Raw blood-pressure string or value.
+ * @returns {Object|null} `{ systolic: number, diastolic: number }`, or `null` when
+ *   empty or not a valid two-part finite numeric reading.
  */
 export const parseBP = (value) => {
   const raw = String(value ?? '').trim();
@@ -64,8 +92,12 @@ export const parseBP = (value) => {
 };
 
 /**
- * Formats an ISO date-time string for document headers, e.g.
- * "September 3, 2026, 9:30 AM". Locale-independent.
+ * Formats an ISO-8601 date-time string for printable clinical/referral document
+ * headers (e.g., `"September 3, 2026, 9:30 AM"`), pinned to the `'en-PH'` locale
+ * so output does not vary with the host OS locale.
+ *
+ * @param {string|Date|null|undefined} iso - ISO timestamp or Date-compatible input.
+ * @returns {string} Formatted date-time string, `''` if empty, or raw `String(iso)` if unparseable.
  */
 export const formatDateTimeForDocument = (iso) => {
   if (!iso) return '';

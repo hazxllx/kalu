@@ -171,10 +171,23 @@ const assertStaff = (user) => {
   if (!STAFF.has(user?.role)) throw ApiError.forbidden('You are not authorized to manage operational health records.');
 };
 
-const residentFor = async (supabase, user, residentId) => {
+const assertTclAssignment = (user, kind) => {
+  if (kind !== 'tcl' || user.role === 'admin') return;
+  if (!user.municipalityId) throw ApiError.forbidden('Your account has no municipality assignment.');
+  if (user.role === 'health_supervisor' && !user.barangayId) throw ApiError.forbidden('Your account has no barangay assignment.');
+};
+
+const residentFor = async (supabase, user, residentId, kind) => {
   const { data, error } = await supabase.from('residents').select('id, barangay, barangay_id, municipality_id, auth_user_id').eq('id', residentId).maybeSingle();
   throwOnError(error, 'Could not load resident');
   if (!data) throw ApiError.notFound('Resident record not found.');
+  if (kind === 'tcl') {
+    if ((user.municipalityId && data.municipality_id !== user.municipalityId) ||
+        (user.role === 'health_supervisor' && data.barangay_id !== user.barangayId)) {
+      throw ApiError.notFound('Resident record not found.');
+    }
+    return data;
+  }
   const scope = assignedBarangay(user);
   if ((scope && text(data.barangay).toLowerCase() !== text(scope).toLowerCase()) || (user.municipalityId && data.municipality_id && user.municipalityId !== data.municipality_id)) {
     throw ApiError.notFound('Resident record not found.');
@@ -409,17 +422,19 @@ export const list = async ({ user, kind, residentId = null, status = null, from 
     if (!ownResident) return [];
     residentId = ownResident.id;
   }
+  assertTclAssignment(user, normalizedKind);
   const select = selectFor(normalizedKind);
   let query = supabase.from(tableName).select(select).order('created_at', { ascending: false });
   if (!['followups', 'tcl', 'maternalvisits'].includes(normalizedKind)) query = query.limit(FOLLOW_UP_PAGE_SIZE);
   if (user.role === 'health_supervisor') {
     if (!user.barangayId) return [];
     query = query.eq('barangay_id', user.barangayId);
+    if (normalizedKind === 'tcl') query = query.eq('municipality_id', user.municipalityId);
   } else if (user.role === 'phn' || user.role === 'mho') {
     if (!user.municipalityId) return [];
     query = query.eq('municipality_id', user.municipalityId);
   }
-  if (residentId) { await residentFor(supabase, user, residentId); query = query.eq('resident_id', residentId); }
+  if (residentId) { await residentFor(supabase, user, residentId, normalizedKind); query = query.eq('resident_id', residentId); }
   if (status) query = query.eq('status', status);
   if (normalizedKind === 'followups') {
     if (from) query = query.gte('scheduled_date', from);
@@ -491,10 +506,11 @@ export const verifyRecordScope = async ({ user, kind, id, supabase = getServiceC
     throw ApiError.badRequest('Unknown operational record type.');
   }
   assertStaff(user);
+  assertTclAssignment(user, normalizedKind);
   const { data: existing, error } = await supabase.from(table).select('id, resident_id').eq('id', id).maybeSingle();
   throwOnError(error, `Could not load ${normalizedKind}`);
   if (!existing) throw ApiError.notFound('Operational record not found.');
-  await residentFor(supabase, user, existing.resident_id);
+  await residentFor(supabase, user, existing.resident_id, normalizedKind);
   return existing;
 };
 
@@ -538,6 +554,7 @@ const assertNoDuplicateFollowUp = async ({ supabase, residentId, row }) => {
 export const create = async ({ user, kind, payload = {}, idempotencyKey = null, isSync = false, supabase = getServiceClient() }) => {
   const normalizedKind = normalizeKind(kind);
   assertStaff(user);
+  assertTclAssignment(user, normalizedKind);
   const table = TABLES[normalizedKind] || TABLES[kind];
   if (!table || normalizedKind === 'notifications') throw ApiError.badRequest('Unknown operational record type.');
   const opKey = idempotencyKey == null ? null : text(idempotencyKey);
@@ -547,7 +564,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   if (isSync && !opKey) {
     throw ApiError.badRequest('Synchronization create requires an Idempotency-Key.').withCode('IDEMPOTENCY_KEY_REQUIRED');
   }
-  const resident = await residentFor(supabase, user, payload.residentId || payload.resident_id);
+  const resident = await residentFor(supabase, user, payload.residentId || payload.resident_id, normalizedKind);
   const row = { ...payload, resident_id: resident.id, created_by: user.id };
   delete row.residentId;
   delete row.consultationId;
@@ -691,6 +708,7 @@ export const update = async ({
     throw ApiError.badRequest('Unknown operational record type.');
   }
   assertStaff(user);
+  assertTclAssignment(user, normalizedKind);
   const precondition = extractExpectedRevision({
     ifMatch: expectedUpdatedAt,
     bodyRevision: expectedRevision ?? payload?.expected_revision ?? payload?.expectedRevision ?? payload?.baseRevision,
@@ -702,7 +720,7 @@ export const update = async ({
   const { data: existing, error: readError } = await supabase.from(table).select('*').eq('id', id).maybeSingle();
   throwOnError(readError, `Could not load ${normalizedKind}`);
   if (!existing) throw ApiError.notFound('Operational record not found.');
-  const resident = await residentFor(supabase, user, existing.resident_id);
+  const resident = await residentFor(supabase, user, existing.resident_id, normalizedKind);
 
   const staleMessage = normalizedKind === 'followups'
     ? 'This follow-up changed on the server. Reload it before applying the queued changes.'

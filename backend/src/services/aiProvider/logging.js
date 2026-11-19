@@ -1,10 +1,13 @@
 /**
- * Secure Logging for AI Provider Operations
- * 
- * Logs provider, HTTP status, request ID, retry count, and timestamp
- * WITHOUT exposing API keys, tokens, or sensitive request data.
+ * Credential-Safe Structured Logging for AI Provider Operations (`services/aiProvider/logging.js`).
+ *
+ * Fits into KALUSAGAP's `aiProvider` subsystem (`AIProviderClient` & `retryWithBackoff`),
+ * emitting JSON-formatted operational telemetry (provider, HTTP status, request ID,
+ * attempt count, latency, and timestamps) while recursively redacting API keys,
+ * bearer tokens, and secrets before writing to standard output.
  */
 
+/** Supported log severity levels ordered from most verbose (`debug`) to most severe (`error`). */
 export const LOG_LEVEL = Object.freeze({
   DEBUG: 'debug',
   INFO: 'info',
@@ -46,9 +49,15 @@ const sanitizeData = (data) => {
 };
 
 /**
- * Logger instance for AI provider operations
+ * Structured JSON logger for AI provider operations with minimum-level filtering
+ * and automatic recursive redaction of sensitive context keys.
  */
 export class ProviderLogger {
+  /**
+   * @param {string} [name='ai-provider'] - Logical logger namespace included in every entry
+   * @param {string} [minLevel=LOG_LEVEL.INFO] - Minimum severity threshold to emit
+   * @param {Function} [logFn=console.log] - Output sink receiving serialized JSON strings
+   */
   constructor(name = 'ai-provider', minLevel = LOG_LEVEL.INFO, logFn = console.log) {
     this.name = name;
     this.minLevel = minLevel;
@@ -57,14 +66,22 @@ export class ProviderLogger {
   }
 
   /**
-   * Check if level should be logged
+   * Determine whether a log message at `level` meets or exceeds `this.minLevel`.
+   *
+   * @param {string} level - Candidate `LOG_LEVEL` value
+   * @returns {boolean} `true` when the entry should be emitted
    */
   isEnabled(level) {
     return this.levelOrder.indexOf(level) >= this.levelOrder.indexOf(this.minLevel);
   }
 
   /**
-   * Format and log message with sanitized context
+   * Sanitize `context`, attach ISO timestamp and logger metadata, and write a
+   * single-line JSON string via `this.logFn` when `level` is enabled.
+   *
+   * @param {string} level - Severity level from `LOG_LEVEL`
+   * @param {string} message - Event identifier or short summary
+   * @param {Object} [context={}] - Additional structured fields (redacted before output)
    */
   log(level, message, context = {}) {
     if (!this.isEnabled(level)) return;

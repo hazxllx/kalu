@@ -37,30 +37,36 @@ import bpConfigRoutes from './bpConfig.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
- * API route index — every endpoint is mounted here under `/api`.
+ * Central KALUSAGAP API router — every HTTP endpoint group is mounted here under `/api`.
  *
- * Request flow for every resource:
- *   route -> authenticate -> authorize(roles) -> controller -> service -> data
+ * Standard request flow across feature routers:
+ *   route -> [rateLimit] -> [authenticate] -> [resolveBarangayScope] -> [authorize / authorizeStation] -> [upload / validate / idempotency] -> controller -> service -> repository / Supabase
  *
- * `/api/health` is public. Authentication uses Supabase Auth; protected routes
- * verify the token and load the active application profile. Database-backed
- * workflows are mounted below; legacy resource groups return 501 until their
- * storage is connected.
+ * `/api/health` and `/api/barangays/public` are public; `/api/auth` and
+ * `/api/registration` expose public sign-in/onboarding entry points alongside
+ * token-protected routes. All other endpoints verify the Supabase bearer token
+ * and enforce active profile status, RBAC role/permission gates, and
+ * barangay/municipality scope. Legacy resource placeholders return 501 Not
+ * Implemented via `createResourceRouter` until their database tables are wired.
  */
 const router = Router();
 
-// Public
+// Public readiness probe (`/api/health` — unauthenticated).
 router.use('/health', healthRoutes);
 
-// Authentication
+// Authentication, personnel password setup, recovery, and session profile (`/api/auth`).
 router.use('/auth', authRoutes);
 
 // Resident self-registration (creates the linked residents row; the Supabase
 // Auth account is created client-side by supabase.auth.signUp).
 router.use('/registration', registrationRoutes);
+
+// Clinical consultations — vitals, assessments, treatments, and durable offline idempotency (`/api/consultations`).
 router.use('/consultations', consultationsRoutes);
 // Compatibility path shares the real visit controller/service and permissions.
 router.use('/health-records', consultationsRoutes);
+
+// Operational staff workflows — follow-ups, notifications, and daily task coordination (`/api/operational`).
 router.use('/operational', operationalRoutes);
 
 // Program-specific official TCL / health forms (NCD Parts 1-3, Oral Health,
@@ -77,7 +83,7 @@ router.use('/staff-accounts', staffAccountsRoutes);
 router.use('/medical-certificates', medicalCertificatesRoutes);
 
 // Administration observability — Audit Trail (business events) and System Log
-// (request-level events). Both are backed by real database tables.
+// (request-level events). Mounted at `/api` root; backed by real database tables.
 router.use(observabilityRoutes);
 
 // Resident self-service follow-ups (list/read own + approve/reject). Separate
@@ -179,8 +185,9 @@ router.use('/appointments', appointmentsRoutes);
 // Early Warning analytics — barangay scope enforced from the session
 router.use('/analytics', analyticsRoutes);
 
-// Resident document upload and review
+// Resident document pre-screening, upload, and verification review (`/api/resident-documents/...`, `/api/verifications/:residentId/documents/...`).
 router.use(documentsRoutes);
+// Resident inter-barangay / inter-municipality transfer workflows (mounted at `/api` root).
 router.use(transferRoutes);
 
 // Minor / parent-or-guardian linking (Phase 2.2): create pending links for

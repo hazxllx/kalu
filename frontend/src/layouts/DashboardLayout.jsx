@@ -307,15 +307,24 @@ export default function DashboardLayout({ roleKey }) {
   useEffect(() => {
     if (!open) return undefined;
 
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const onDesktop = () => { if (desktop.matches) setOpen(false); };
+    if (desktop.matches) {
+      setOpen(false);
+      return undefined;
+    }
+
     const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event) => {
       if (event.key === "Escape") setOpen(false);
     };
 
     document.body.style.overflow = "hidden";
+    desktop.addEventListener("change", onDesktop);
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
+      desktop.removeEventListener("change", onDesktop);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);

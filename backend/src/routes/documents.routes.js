@@ -1,11 +1,18 @@
 /**
- * Document upload and verification endpoints (government ID, resident documents, screening).
+ * Resident identity document upload, rule-based pre-screening, and verification review routes.
  *
- * Handles document upload for registration verification and clinical records.
- * Includes pre-screening (no persistence), persistent upload with verification queue,
- * and verification review workflows. All file uploads are validated for type, size,
- * and file signature authenticity. OCR results are cached server-side for identity
- * cross-checking without retransmitting sensitive data.
+ * Mounted directly under `/api` (`/api/resident-documents/...` and
+ * `/api/verifications/:residentId/documents/...`).
+ *
+ * Request pipeline:
+ *   route -> authenticate -> authorize(roles) -> [upload middleware] -> [validate] -> controller -> service -> Supabase Storage + DB
+ *
+ * Handles document upload for resident registration verification and clinical
+ * identity checks. Includes non-persistent pre-screening, persistent multipart
+ * upload into the verification queue, resident self-inspection/deletion of pending
+ * uploads, and barangay-scoped staff verification review. All uploaded files are
+ * validated for MIME type, size, and binary file-signature authenticity, while OCR
+ * results are cached server-side for cross-checking without exposing raw text.
  */
 import { Router } from 'express';
 
@@ -23,10 +30,9 @@ import { validateDocumentUpload, validateDocumentReview } from '../validators/do
 
 const router = Router();
 
-// Pre-screen a document WITHOUT storing it (registration Step 3). Runs the same
-// deterministic rule-based screening used at upload time, so the resident sees
-// the result immediately and submission can be blocked before it reaches the
-// server. No file is persisted here.
+// POST /api/resident-documents/screen — Pre-screen a single document WITHOUT storing it (registration Step 3).
+// Runs deterministic rule-based screening via `uploadDocumentFile` multipart input so the resident sees
+// immediate feedback before submission; no file is persisted.
 router.post(
   '/resident-documents/screen',
   authenticate,
@@ -35,8 +41,8 @@ router.post(
   asyncHandler(documentsController.screenResidentDocument),
 );
 
-// Pre-screen both current ID images together. OCR text stays in memory and only
-// the advisory side results plus value-free comparison metadata are returned.
+// POST /api/resident-documents/screen-id-pair — Pre-screen front and back government ID images together (`uploadGovernmentIdPairFiles`).
+// OCR text remains in server memory; returns only advisory per-side results and value-free comparison metadata.
 router.post(
   '/resident-documents/screen-id-pair',
   authenticate,
@@ -45,8 +51,8 @@ router.post(
   asyncHandler(documentsController.screenResidentGovernmentIdPair),
 );
 
-// Upload a resident registration document (proof of residency, government ID
-// front/back, identity photo). The file arrives as multipart field `file`.
+// POST /api/resident-documents/upload — Persist a resident registration document (proof of residency, government ID
+// front/back, or identity photo) via `uploadResidentDocumentFiles` and `validateDocumentUpload`.
 router.post(
   '/resident-documents/upload',
   authenticate,
@@ -56,7 +62,7 @@ router.post(
   asyncHandler(documentsController.uploadResidentDocument),
 );
 
-// Get the signed-in resident's own document.
+// GET /api/resident-documents/me — Retrieve the authenticated resident's primary/latest verification document summary.
 router.get(
   '/resident-documents/me',
   authenticate,
@@ -64,6 +70,7 @@ router.get(
   asyncHandler(documentsController.getMyDocument),
 );
 
+// GET /api/resident-documents/me/list — List all verification documents uploaded by the authenticated resident.
 router.get(
   '/resident-documents/me/list',
   authenticate,
@@ -71,7 +78,7 @@ router.get(
   asyncHandler(documentsController.listMyDocuments),
 );
 
-// Remove the signed-in resident's own pending document.
+// DELETE /api/resident-documents/:id — Delete the authenticated resident's own pending document (`:id` param).
 router.delete(
   '/resident-documents/:id',
   authenticate,
@@ -79,7 +86,7 @@ router.delete(
   asyncHandler(documentsController.deleteResidentDocument),
 );
 
-// Staff: list a resident's uploaded documents (signed URLs; scope-enforced).
+// GET /api/verifications/:residentId/documents — Staff: list a resident's uploaded documents with signed URLs (`FEATURE_ROLES.verification`; barangay-scoped in service).
 router.get(
   '/verifications/:residentId/documents',
   authenticate,
@@ -87,7 +94,7 @@ router.get(
   asyncHandler(documentsController.listResidentDocuments),
 );
 
-// Staff: view a single resident document (scope-enforced in service).
+// GET /api/verifications/:residentId/documents/:documentId — Staff: retrieve metadata and signed URL for a single resident document (scope-enforced in service).
 router.get(
   '/verifications/:residentId/documents/:documentId',
   authenticate,
@@ -95,7 +102,7 @@ router.get(
   asyncHandler(documentsController.getResidentDocument),
 );
 
-// Staff: approve/reject a resident's document.
+// PATCH /api/verifications/:residentId/documents/:documentId/review — Staff: approve or reject a resident document (`validateDocumentReview` on `req.body`).
 router.patch(
   '/verifications/:residentId/documents/:documentId/review',
   authenticate,

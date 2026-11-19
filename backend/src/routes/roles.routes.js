@@ -7,19 +7,31 @@ import * as rolesController from '../controllers/roles.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 /**
- * Role & permission matrix (BUG-011).
+ * Role & permission matrix routes (BUG-011).
  *
- *   GET   /roles/permissions         authenticated user (own role; full matrix for admin)
- *   PATCH /roles/:role/permissions   administrators only
+ * Role in KALUSAGAP:
+ * Serves the server-authoritative RBAC permission matrix (`public.role_permissions`)
+ * to hydrate client UI capability flags and allows system administrators to
+ * customize non-locked permissions per role.
  *
- * The authoritative matrix lives in public.role_permissions; writes are
- * admin-only at BOTH this layer and RLS, so browser-storage tampering can never
- * grant access.
+ * Architectural pipeline:
+ *   route -> authenticate -> [authorize(FEATURE_ROLES.users, 'accounts.roles.manage')]
+ *         -> roles.controller -> roles.service -> Supabase
+ *
+ * Security & RLS:
+ * Writes are restricted to administrators at BOTH this Express middleware layer
+ * and Supabase RLS, ensuring client-side storage tampering can never escalate
+ * backend privileges.
  */
 const router = Router();
 router.use(authenticate);
 
+// GET /permissions : Returns effective permissions for the authenticated caller's role,
+// or the full multi-role matrix + metadata when requested by an administrator.
 router.get('/permissions', asyncHandler(rolesController.getPermissions));
+
+// PATCH /:role/permissions : Updates the granted permission list in `req.body` for
+// target `:role` (`FEATURE_ROLES.users` + `accounts.roles.manage`).
 router.patch(
   '/:role/permissions',
   authorize(FEATURE_ROLES.users, { permission: 'accounts.roles.manage' }),

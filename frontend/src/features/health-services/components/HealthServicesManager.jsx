@@ -31,7 +31,7 @@ import {
  * the API and revalidates after every mutation.
  *
  * REDESIGN: a compact management dashboard — summary counts, search, category
- * and status filters, and a responsive 3/2/1-column grid of compact cards with
+ * and status filters, and a responsive grid of compact cards with
  * a per-card action menu (Edit / Activate-Deactivate / Delete). Create and Edit
  * reuse ONE shared form. Delete is dependency-aware: the backend refuses to
  * destroy a service that has registrations/attendance and the UI offers the
@@ -955,7 +955,7 @@ export default function HealthServicesManager({ subtitle }) {
         </Card>
        ) : (
          <>
-           <div className="grid sm:grid-cols-2 lg:grid-cols-2 gap-6 mb-6">
+            <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-6">
              {pageServices.map((s) => {
                const status = deriveStatus(s);
                const personnelList = s.assignedPersonnel || [];
@@ -963,67 +963,36 @@ export default function HealthServicesManager({ subtitle }) {
                  ? user?.name || user?.email
                  : personnel.find((person) => person.id === s.createdBy)?.name;
                const createdDate = s.createdAt ? new Date(s.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
-               const barangayLevel = Boolean(s.barangayId || s.barangay);
-               return (
-                 <div key={s.id} className="health-service-card flex flex-col h-full bg-white border border-[#E4DED2] rounded dark:bg-card dark:border-border">
-                    {/* Header — Horizontal layout with image on left */}
-                    <div className="health-service-card-header flex gap-5 p-6 border-b border-[#E4DED2] dark:border-border" style={{ minHeight: '150px' }}>
-                      {/* Left: Service Image Thumbnail */}
-                      <div className="shrink-0">
-                        {s.attachments?.pubmat ? (
-                          <img
-                            src={pubmatUrls[s.id] || PUBMAT_PLACEHOLDER}
-                            alt={s.name}
-                            className="w-[72px] h-[100px] object-cover rounded border border-[#D4CCBF]"
-                            style={{ borderColor: '#D4CCBF' }}
-                            onError={(event) => {
-                              if (event.currentTarget.src !== PUBMAT_PLACEHOLDER) {
-                                setPubmatUrls((current) => ({ ...current, [s.id]: null }));
-                              }
-                            }}
-                          />
-                        ) : (
-                          <img
-                            src={PUBMAT_PLACEHOLDER}
-                            alt={s.name}
-                            className="w-[72px] h-[100px] object-cover rounded border border-[#D4CCBF]"
-                            style={{ borderColor: '#D4CCBF' }}
-                          />
-                        )}
-                      </div>
-
-                     {/* Right: Service Information */}
-                     <div className="flex-1 flex flex-col justify-between min-w-0">
-                       <div>
-                         {/* Category */}
-                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400" style={{ letterSpacing: '0.8px' }}>
-                           {CATEGORY_LABELS[s.category] || s.category}
-                         </p>
-                         <span className="mt-1 inline-flex rounded-full bg-brand-blue/10 px-2 py-0.5 text-[11px] font-medium text-brand-blue dark:bg-brand-blue/20 dark:text-blue-300">
-                           {barangayLevel ? `Barangay-level${s.barangay ? ` · ${s.barangay}` : ""}` : "Municipality-wide"}
-                         </span>
-                         {/* Service Title — Serif font */}
-                         <h3 className="mt-1 text-2xl font-medium text-brand-ink dark:text-foreground" style={{ fontFamily: 'Georgia, serif', fontSize: '26px' }}>
-                           {s.name}
-                         </h3>
-                         {s.description && (
-                           <details className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                             <summary className="line-clamp-2 cursor-pointer list-none leading-5 hover:text-brand-blue dark:hover:text-blue-300">{s.description}</summary>
-                             <p className="mt-2 whitespace-pre-wrap border-l-2 border-brand-blue/30 pl-3 leading-5">{s.description}</p>
-                           </details>
-                         )}
-                       </div>
-                       
-                       {/* Status Badge */}
-                       <div className="mt-2">
-                         {isSupervisor ? <StatusBadge value={status} /> : <span className={`inline-block text-xs font-medium uppercase px-2 py-1 rounded border ${STATUS_BADGE[status]}`}>{status}</span>}
-                       </div>
-                     </div>
-
-                     {/* Three-dot menu — top right */}
-                     <div className="shrink-0 flex items-start">
-                      {(canEdit || canDelete) && (
-                          <ActionMenu
+                const barangayLevel = Boolean(s.barangayId || s.barangay);
+                const deadline = deadlineSummary(s.schedule);
+                const metadata = [
+                  ["Facility", s.facilityMeta?.label || s.facility || "—"],
+                  ["Coverage", barangayLevel ? s.barangay || "—" : "Municipality-wide"],
+                  ["Schedule", scheduleSummary(s.schedule) || "—"],
+                  ["Personnel", personnelList.map((person) => person.name).filter(Boolean).join(", ") || "—"],
+                  ...(deadline ? [["Register By", deadline]] : []),
+                  ["Date Created", createdDate],
+                  ...(creator ? [["Created By", creator]] : []),
+                ];
+                return (
+                  <article key={s.id} className="health-service-card flex h-full min-w-0 flex-col rounded border border-[#E4DED2] bg-white dark:border-border dark:bg-card">
+                    <div className="health-service-card-header flex flex-col gap-3 border-b border-[#E4DED2] p-4 dark:border-border xl:flex-row xl:gap-5 xl:p-6">
+                      <img
+                        src={pubmatUrls[s.id] || PUBMAT_PLACEHOLDER}
+                        alt={pubmatUrls[s.id] ? s.name : ""}
+                        className="h-24 w-full shrink-0 rounded border border-brand-border bg-brand-bg object-contain dark:border-border xl:h-[100px] xl:w-[72px] xl:object-cover"
+                        onError={() => {
+                          if (pubmatUrls[s.id]) setPubmatUrls((current) => ({ ...current, [s.id]: null }));
+                        }}
+                      />
+                      <div className="min-w-0 flex-1 break-words">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{CATEGORY_LABELS[s.category] || s.category}</p>
+                            {isSupervisor ? <StatusBadge value={status} /> : <span className={`inline-block rounded border px-2 py-1 text-xs font-medium uppercase ${STATUS_BADGE[status]}`}>{status}</span>}
+                          </div>
+                          {(canEdit || canDelete) && (
+                           <ActionMenu
                             service={s}
                             open={menuOpenId === s.id}
                             onToggle={() => setMenuOpenId((cur) => (cur === s.id ? null : s.id))}
@@ -1035,62 +1004,37 @@ export default function HealthServicesManager({ subtitle }) {
                             onEdit={() => openEdit(s)}
                             onToggleActive={() => setActive(s, s.active === false)}
                             onDelete={() => openDelete(s)}
-                          />
+                           />
+                          )}
+                        </div>
+                        <h3 className="mt-1 font-display text-xl font-medium leading-tight text-brand-ink dark:text-foreground xl:text-2xl">{s.name}</h3>
+                        <span className="mt-2 inline-block rounded-full bg-brand-blue/10 px-2 py-0.5 text-[11px] font-medium text-brand-blue dark:bg-brand-blue/20 dark:text-blue-300">
+                          {barangayLevel ? `Barangay-level${s.barangay ? ` · ${s.barangay}` : ""}` : "Municipality-wide"}
+                        </span>
+                        {s.description && (
+                          <details className="group mt-2 text-sm leading-5 text-slate-600 dark:text-slate-300">
+                            <summary className="cursor-pointer list-none text-brand-blue hover:underline dark:text-blue-300 [&::-webkit-details-marker]:hidden">
+                              <span className="mb-1 line-clamp-2 text-slate-600 group-open:hidden dark:text-slate-300">{s.description}</span>
+                              <span className="group-open:hidden">View Details</span>
+                              <span className="hidden group-open:inline">Hide Details</span>
+                            </summary>
+                            <p className="mt-2 whitespace-pre-wrap border-l-2 border-brand-blue/30 pl-3">{s.description}</p>
+                          </details>
                         )}
-                     </div>
-                   </div>
+                      </div>
+                    </div>
 
-                   {/* Information Section — Two-column layout */}
-                   <div className="flex-1 px-6 py-5 grid grid-cols-2 gap-x-8 gap-y-5">
-                     {/* Left Column */}
-                     <div className="space-y-5">
-                       {/* Facility */}
-                       <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Facility</p>
-                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{s.facilityMeta?.label || s.facility || "—"}</p>
-                       </div>
-
-                       {/* Schedule */}
-                       <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Schedule</p>
-                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{scheduleSummary(s.schedule) || "—"}</p>
-                       </div>
-
-                       {/* Register By — only when applicable */}
-                       {deadlineSummary(s.schedule) && (
-                         <div>
-                           <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Register By</p>
-                           <p className="text-sm font-semibold text-[#C54040]" style={{ color: '#C54040' }}>{deadlineSummary(s.schedule)}</p>
-                         </div>
-                       )}
-                     </div>
-
-                     {/* Right Column */}
-                     <div className="space-y-5">
-                       {/* Coverage */}
-                       <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Coverage</p>
-                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{s.barangay === null || s.barangay === "" ? "Municipality-wide" : s.barangay || "—"}</p>
-                       </div>
-
-                       {/* Personnel */}
-                       <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Personnel</p>
-                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{personnelList.length ? personnelList.map((person) => person.name).filter(Boolean).join(", ") : "—"}</p>
-                       </div>
-                       <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Date Created</p>
-                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{createdDate}</p>
-                       </div>
-                       {creator && <div>
-                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5" style={{ letterSpacing: '0.8px' }}>Created By</p>
-                         <p className="text-sm font-medium text-brand-ink dark:text-foreground">{creator}</p>
-                       </div>}
-                     </div>
-                   </div>
+                    <dl className="grid flex-1 content-start gap-x-6 gap-y-3 px-4 py-4 sm:grid-cols-2 xl:px-6">
+                      {metadata.map(([label, value]) => (
+                        <div key={label} className="min-w-0 break-words">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</dt>
+                          <dd className={`mt-0.5 text-sm font-medium ${label === "Register By" ? "text-brand-danger" : "text-brand-ink dark:text-foreground"}`}>{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
 
                     {/* Footer — Separate section */}
-                    <div className="border-t border-[#E4DED2] px-6 py-4 flex items-center justify-between dark:border-border" style={{ minHeight: '48px' }}>
+                     <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-t border-[#E4DED2] px-4 py-3 dark:border-border xl:px-6">
                       <button
                         onClick={() => openRegistrations(s)}
                         className="text-xs font-medium uppercase tracking-wide text-brand-blue transition-colors hover:underline dark:text-blue-300"
@@ -1103,10 +1047,10 @@ export default function HealthServicesManager({ subtitle }) {
                         className="text-xs font-medium uppercase tracking-wide text-brand-green transition-colors hover:underline dark:text-emerald-300"
                         style={{ letterSpacing: '0.8px' }}
                       >
-                        Assign
-                      </button>}
-                    </div>
-                 </div>
+                         Assign
+                       </button>}
+                     </div>
+                  </article>
                );
              })}
            </div>
@@ -1594,7 +1538,7 @@ function ActionMenu({ service, open, onToggle, onClose, canEdit, canDelete, acti
   };
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative shrink-0">
       <button
         type="button"
         onClick={onToggle}
@@ -1602,7 +1546,7 @@ function ActionMenu({ service, open, onToggle, onClose, canEdit, canDelete, acti
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Service actions"
-        className="rounded-btn p-1 text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink disabled:opacity-60 dark:hover:bg-hover"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-btn text-brand-gray transition-colors hover:bg-brand-bg hover:text-brand-ink disabled:opacity-60 dark:hover:bg-hover xl:h-8 xl:w-8"
       >
         <MoreVertical className="h-4 w-4" />
       </button>

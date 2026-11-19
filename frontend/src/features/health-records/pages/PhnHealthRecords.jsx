@@ -197,6 +197,7 @@ export default function PhnHealthRecords() {
       setNotice({ message: "PHN check-up completed and persisted." });
     } catch (error) {
       if (guard()) setNotice({ error: true, message: error?.message || "Could not complete the PHN check-up." });
+      throw error;
     }
   };
   const field = (name, type = "text") => <label key={name} className="block text-xs font-medium text-brand-gray">{fieldNames[name]}<input type={type} value={form[name]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} className={`${inputCls} mt-1`} />{errors[name] && <span className="mt-1 block text-xs text-brand-danger">{errors[name]}</span>}</label>;

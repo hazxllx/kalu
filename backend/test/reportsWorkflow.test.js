@@ -377,6 +377,51 @@ test('a legacy report row with no snapshot reports content unavailable', async (
   assert.equal(record.hasContent, false);
 });
 
+test('report detail and history enforce draft ownership, municipality, and RHU facility', async () => {
+  const base = {
+    id: 'r1', created_by: 'hs-1', sender_role: 'health_supervisor', recipient_role: 'rhu_personnel',
+    municipality_id: 'm1', barangay_id: 'b1', recipient_facility_id: 'f1', status: 'Submitted',
+    content: SAMPLE_CONTENT, content_schema_version: 1,
+  };
+  const phn = { id: 'phn-1', role: 'phn', municipalityId: 'm1' };
+  const mho = { id: 'mho-1', role: 'mho', municipalityId: 'm1' };
+  const rhu = { id: 'rhu-1', role: 'rhu_personnel', municipalityId: 'm1', facilityId: 'f1' };
+  const hs = { id: 'hs-1', role: 'health_supervisor', municipalityId: 'm1', barangayId: 'b1' };
+  const cases = [
+    [base, phn, true], [base, mho, true], [base, rhu, true],
+    [base, { ...phn, municipalityId: 'm2' }, false],
+    [base, { ...mho, municipalityId: null }, false],
+    [base, { ...mho, municipalityId: 'm2' }, false],
+    [base, { ...rhu, facilityId: 'f2' }, false],
+    [base, { ...hs, id: 'hs-other' }, false],
+    [base, { ...hs, barangayId: 'b2' }, false],
+    [{ ...base, recipient_role: 'mho' }, phn, false],
+    [{ ...base, status: 'Draft' }, phn, false],
+    [{ ...base, status: 'Draft' }, rhu, false],
+    [{ ...base, status: 'Draft', recipient_role: 'mho' }, mho, false],
+    [{ ...base, status: 'Draft' }, hs, true],
+    [{ ...base, status: 'Draft' }, { ...hs, barangayId: null }, false],
+    [{ ...base, created_by: 'other', recipient_role: 'health_supervisor', barangay_id: null }, hs, false],
+    [{ ...base, created_by: 'other', recipient_role: 'health_supervisor', barangay_id: 'b2' }, hs, false],
+  ];
+  for (const [row, user, allowed] of cases) {
+    const tables = [];
+    const supabase = { from(table) {
+      tables.push(table);
+      const chain = {
+        select: () => chain, eq: () => chain, order: () => chain,
+        maybeSingle: async () => ({ data: table === 'reports' ? row : { approval_status: 'approved' } }),
+        then: (resolve) => Promise.resolve({ data: [] }).then(resolve),
+      };
+      return chain;
+    } };
+    const result = getById({ user, id: row.id, supabase });
+    if (allowed) assert.deepEqual((await result).content, SAMPLE_CONTENT);
+    else await assert.rejects(result, (error) => error.statusCode === 404);
+    assert.equal(tables.includes('report_status_history'), allowed);
+  }
+});
+
 test('createReportValidator accepts an object snapshot and rejects bad shapes/sizes', () => {
   const ok = createReportValidator({
     reportType: 'Follow-up Report',
@@ -441,15 +486,14 @@ test('report status transitions require receipt before decision and keep termina
   assert.deepEqual(REPORT_TRANSITIONS.Rejected, []);
 });
 
-const reviewStub = (existing) => {
-  const state = { update: null };
+const reviewStub = (existing, { concurrent = false } = {}) => {
+  const state = { update: null, updateFilters: {} };
   const chain = {
     from() { return chain; },
     select() { return chain; },
-    eq() { return chain; },
-    maybeSingle: async () => ({ data: existing, error: null }),
+    eq(column, value) { if (state.update) state.updateFilters[column] = value; return chain; },
+    maybeSingle: async () => ({ data: state.update && concurrent ? null : { ...existing, ...state.update }, error: null }),
     update(row) { state.update = row; return chain; },
-    single: async () => ({ data: { ...existing, ...state.update }, error: null }),
   };
   return { supabase: chain, state };
 };
@@ -473,7 +517,13 @@ test('only the addressed MHO can acknowledge and decide municipal reports', asyn
   });
   assert.equal(state.update.status, 'Reviewed');
   assert.equal(state.update.reviewed_by, 'mho-1');
+  assert.equal(state.updateFilters.status, 'Received');
   assert.equal(report.status, 'Reviewed');
+
+  await assert.rejects(review({
+    user: { id: 'mho-1', role: ROLES.MHO, municipalityId: 'm1' },
+    id: 'r1', status: 'Reviewed', supabase: reviewStub(existing, { concurrent: true }).supabase,
+  }), (error) => error.statusCode === 409);
 
   const oversight = reviewStub({ ...existing, recipient_role: ROLES.RHU_PERSONNEL });
   await assert.rejects(
@@ -500,7 +550,7 @@ test('MHO cannot decide an unreceived or draft report; rejection requires an exp
         status: 'Reviewed',
         supabase: stub.supabase,
       }),
-      (error) => error.statusCode === 409,
+      (error) => error.statusCode === (status === 'Draft' ? 404 : 409),
     );
   }
   assert.ok(reviewReportValidator({ status: 'Rejected' }).error.remarks);
@@ -520,6 +570,7 @@ test('sender can resubmit a report marked Needs Revision with a new snapshot', a
   const original = {
     id: 'r1',
     created_by: 'hs-1',
+    sender_role: ROLES.HEALTH_SUPERVISOR,
     report_type: 'Follow-up Report',
     report_period: '2026-09',
     recipient_role: ROLES.RHU_PERSONNEL,
@@ -584,7 +635,7 @@ test('only the report sender can resubmit a Needs Revision report', async () => 
 
 test('a report sender cannot review their own MHO-routed submission', async () => {
   const ownReport = reviewStub({
-    id: 'r1', created_by: 'mho-1', report_type: 'Monthly Report',
+    id: 'r1', created_by: 'mho-1', sender_role: ROLES.MHO, report_type: 'Monthly Report',
     recipient_role: ROLES.MHO, municipality_id: 'm1', status: 'Received', remarks: '',
   });
   await assert.rejects(

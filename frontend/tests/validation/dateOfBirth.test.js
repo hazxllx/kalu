@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { dateOfBirth, personName } from '../../src/utils/validation/index.js';
+import { ageFromDateOnly, dateOfBirth, personName } from '../../src/utils/validation/index.js';
 
 // Helper to freeze the calendar day "today" (UTC) for stable assertions.
 const fakeNow = { getUTCFullYear: () => 2026, getUTCMonth: () => 9 /* Oct */, getUTCDate: () => 14 };
@@ -100,4 +100,25 @@ test('person names reject blank required names and non-name characters', () => {
 test('middle names are optional but validated when provided', () => {
   assert.equal(personName('   ', { label: 'Middle name', isRequired: false }), '');
   assert.match(personName('Middle2', { label: 'Middle name', isRequired: false }), /letters/i);
+});
+
+test('age changes on the birthday, including leap-day birthdays', () => {
+  assert.equal(ageFromDateOnly('2000-11-19', new Date(2026, 10, 18, 12)), 25);
+  assert.equal(ageFromDateOnly('2000-11-19', new Date(2026, 10, 19, 12)), 26);
+  assert.equal(ageFromDateOnly('2000-02-29', new Date(2025, 1, 28, 12)), 24);
+  assert.equal(ageFromDateOnly('2000-02-29', new Date(2025, 2, 1, 12)), 25);
+  assert.equal(ageFromDateOnly('2000032005'), null);
+  assert.equal(ageFromDateOnly('2025-02-29'), null);
+});
+
+test('age uses the local calendar day when UTC is still yesterday', () => {
+  const localMidnight = {
+    getFullYear: () => 2026,
+    getMonth: () => 10,
+    getDate: () => 19,
+    getUTCFullYear: () => 2026,
+    getUTCMonth: () => 10,
+    getUTCDate: () => 18,
+  };
+  assert.equal(ageFromDateOnly('2000-11-19', localMidnight), 26);
 });

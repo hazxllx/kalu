@@ -24,6 +24,7 @@
 // Enumerations (documented in PART 16 of the spec)
 // ---------------------------------------------------------------------------
 
+/** Top-level FHSIS M1 report sections (A through H) in official printed sequence. */
 export const SECTIONS = Object.freeze([
   { key: 'A', title: 'Family Planning Services for Women of Reproductive Age' },
   { key: 'B', title: 'Maternal Care and Services' },
@@ -35,8 +36,10 @@ export const SECTIONS = Object.freeze([
   { key: 'H', title: 'Mortality and Natality' },
 ]);
 
+/** Reporting cadences supported by M1 indicators (`november` is used for annual school-based immunization rounds). */
 export const FREQUENCIES = Object.freeze(['monthly', 'quarterly', 'annual', 'november']);
 
+/** Supported rollup modes used by the M1 aggregation engine when computing monthly/quarterly/annual totals. */
 export const AGGREGATIONS = Object.freeze([
   'COUNT_UNIQUE_RESIDENTS',
   'COUNT_EVENTS',
@@ -119,14 +122,16 @@ export const FP_METHOD_MAPPING = Object.freeze([
   { rosterValue: 'None', codes: [], automatic: false },
 ]);
 
+const text = (v) => String(v ?? '').trim();
+
 /**
- * Map a stored roster FP method value to the M1 indicator code(s) it
- * automatically contributes to. Returns [] when the method has no automatic
- * M1 indicator (ambiguous / manual-only).
+ * Map a stored roster FP method value (`household_members.fp_method`) to the
+ * M1 indicator code(s) it automatically contributes to. Returns `[]` when the
+ * method has no automatic M1 indicator (ambiguous or manual-only).
+ *
  * @param {string} rosterValue
  * @returns {string[]}
  */
-const text = (v) => String(v ?? '').trim();
 export const fpMethodToIndicatorCodes = (rosterValue) => {
   const key = text(rosterValue);
   const entry = FP_METHOD_MAPPING.find((m) => m.rosterValue === key);
@@ -567,8 +572,13 @@ export const M1_INDICATORS = Object.freeze(rows.map((r) => Object.freeze(r)));
 
 const BY_CODE = new Map(M1_INDICATORS.map((r) => [r.code, r]));
 
+/** Look up an M1 indicator definition by its canonical code, or `null` if unknown. */
 export const getIndicator = (code) => BY_CODE.get(code) || null;
+
+/** Check whether `code` is a registered M1 indicator code in `M1_INDICATORS`. */
 export const isValidIndicatorCode = (code) => BY_CODE.has(code);
+
+/** Return all M1 indicators belonging to `sectionKey` (`'A'`..`'H'`) in display order. */
 export const indicatorsBySection = (sectionKey) =>
   M1_INDICATORS.filter((r) => r.section === sectionKey);
 
@@ -635,6 +645,7 @@ const SOURCE_TYPE = Object.freeze({
   m1_manual: 'manual_reporting',
 });
 
+/** Recursively collect database column names referenced by a nested `{ field, and }` filter descriptor. */
 const flattenCondFields = (cond, acc = []) => {
   if (!cond) return acc;
   if (cond.field) acc.push(cond.field);
@@ -659,6 +670,7 @@ const sourceFieldsFor = (r) => {
   return ['value', 'age_group', 'sex']; // m1_manual
 };
 
+/** Human-readable descriptions of each `AGGREGATIONS` mode surfaced in `sourceMapping()`. */
 const AGG_METHOD = Object.freeze({
   COUNT_UNIQUE_RESIDENTS: 'count distinct residents',
   COUNT_EVENTS: 'count',

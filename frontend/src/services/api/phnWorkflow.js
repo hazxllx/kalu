@@ -1,5 +1,5 @@
 import { api } from "./apiClient";
-import { mapVisitsToPatients, splitWalkInName, triageToVisitPayload } from "@/lib/phnWorkflowMap";
+import { mapVisitToPatient, mapVisitsToPatients, splitWalkInName, triageToVisitPayload } from "@/lib/phnWorkflowMap";
 import { cacheRecord, listCachedRecords } from "@/services/offline/records";
 import { queueOfflineDraft } from "@/services/offline/queue";
 import { listDrafts } from "@/services/offline/drafts";
@@ -38,6 +38,16 @@ export const phnWorkflowApi = {
   listQueue: async (options = {}) => {
     const payload = await api.get("/phn/submissions", options);
     return queuePatients(payload, "GET /phn/submissions");
+  },
+  getCheckup: async (id, residentId) => {
+    const payload = await api.get(`/phn/submissions/${id}/consultation`);
+    const record = payload?.submission;
+    if (record?.id !== id || !residentId || record.residentId !== residentId) {
+      throw new Error("The consultation record does not match the selected patient. Refresh the queue before continuing.");
+    }
+    const patient = mapVisitToPatient(record);
+    if (!patient) throw new Error("This encounter is not available for consultation.");
+    return patient;
   },
   listQueueOffline: async (ownerId) => {
     if (!ownerId) throw new Error("A signed-in user is required.");
@@ -173,11 +183,10 @@ export const phnWorkflowApi = {
   },
 
   /**
-   * RHU triage hand-off: create the visit (existing resident or new walk-in)
-   * then SUBMIT it, which persists the record and transfers it to the PHN
-   * queue. Returns the created submission id.
+   * RHU triage hand-off is one atomic, replayable database operation.
    */
   sendToPhnQueue: async (payload) => {
+    if (!payload.clientSubmissionId) throw new Error("The submission identity is missing. Reopen the triage form before saving.");
     const visit = triageToVisitPayload(payload);
     // When the patient arrived via a barangay referral, the referral is
     // authoritative for identity + is linked to this encounter server-side.
@@ -187,17 +196,26 @@ export const phnWorkflowApi = {
       : {
           resident: {
             ...splitWalkInName(payload.patient),
+            age: payload.age,
             sex: payload.sex || "",
             barangay: payload.barangay || "",
           },
           visit,
           referralId,
         };
-    const created = await api.post("/intake/visits", body);
+    const created = await api.post("/intake/visits", {
+      ...body,
+      submit: true,
+      clientSubmissionId: payload.clientSubmissionId,
+    });
     const id = created?.submission?.id;
-    if (!id) throw new Error("Intake submission failed.");
-    await api.post(`/intake/visits/${id}/submit`);
-    return id;
+    if (!id || !["submitted", "received", "in_review", "referred", "completed"].includes(created.submission.status)) {
+      throw new Error("The saved triage handoff could not be confirmed. Your entries are preserved; retry to verify it.");
+    }
+    if (payload.residentId && created.submission.residentId !== payload.residentId) {
+      throw new Error("The saved encounter does not match the selected patient. Reload the record before continuing.");
+    }
+    return { confirmed: true, id };
   },
 
   /** PHN starts the check-up: move the submission into review. */
@@ -207,16 +225,12 @@ export const phnWorkflowApi = {
   },
 
   /**
-   * PHN completes the check-up: persist findings/treatment/assessment, then
-   * transition the visit to completed. `recorded` is the workbench payload.
+   * Save clinician-entered outputs and complete this encounter atomically.
    */
   completeCheckup: async (id, recorded = {}) => {
     const patch = {
       findings: recorded.assessment || "",
-      // The backend requires a non-empty treatment at completion; fall back to
-      // the recommendations / clinical notes / health concern the PHN recorded.
-      treatmentGiven:
-        recorded.recommendations || recorded.clinicalNotes || recorded.healthConcern || "",
+      treatmentGiven: recorded.recommendations || "",
       recommendation: recorded.recommendations || "",
       // The workbench captures an optional health-service association; forward
       // it verbatim so the backend persists visits.health_service_id. When the
@@ -227,6 +241,7 @@ export const phnWorkflowApi = {
       // Forwarded verbatim (never renamed/dropped) so the backend persists them
       // to visits.medications; an empty array clears nothing it did not set.
       medications: Array.isArray(recorded.medications) ? recorded.medications : [],
+      ...(recorded.expectedUpdatedAt ? { expectedUpdatedAt: recorded.expectedUpdatedAt } : {}),
       phn: {
         assessment: recorded.healthConcern || recorded.assessment || "",
         notes: recorded.clinicalNotes || "",
@@ -234,9 +249,11 @@ export const phnWorkflowApi = {
         // user; it is never sent from the client.
       },
     };
-    await api.put(`/phn/submissions/${id}`, { submission: patch });
-    const payload = await api.post(`/phn/submissions/${id}/complete`);
-    return payload?.submission;
+    const payload = await api.post(`/phn/submissions/${id}/complete`, { submission: patch });
+    if (payload?.submission?.id !== id || payload.submission.status !== 'completed') {
+      throw new Error('The consultation save could not be confirmed. Your entries are preserved; retry using the same form.');
+    }
+    return payload.submission;
   },
 };
 

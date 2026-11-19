@@ -5,7 +5,7 @@
 // explicitly declared an ISOLATED, writable test environment via env vars:
 //
 //   E2E_ISOLATED=1            — explicit opt-in that the target is NOT production
-//   E2E_BASE_URL=http://...   — the running app under test (an isolated instance)
+//   E2E_BASE_URL=http://...   — the running app under test (loopback only)
 //   E2E_API_URL=http://...    — the isolated backend (must match VITE_API_URL)
 //   E2E_SUPABASE_URL=http://... — isolated Auth/DB (must match VITE_SUPABASE_URL)
 //   E2E_<ROLE>_EMAIL/PASSWORD — synthetic test-account credentials (never hardcoded)
@@ -46,7 +46,7 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  // No webServer auto-start: the target must be an explicitly-provided isolated
-  // instance. Starting the repo's dev server would point the app at the
-  // production Supabase project configured in .env, which is prohibited.
+  // No webServer auto-start: write-based specs require an explicitly provided
+  // local instance and synthetic accounts. The no-service network smoke is a
+  // separate command: npm run test:local-browser.
 });

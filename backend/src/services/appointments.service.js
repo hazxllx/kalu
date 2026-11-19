@@ -1,26 +1,28 @@
 /**
- * Resident appointment booking service.
+ * Resident Appointment Booking & Clinic Schedule Service (`services/appointments.service.js`).
  *
- * Backs public.appointments + public.appointment_schedules +
- * public.appointment_blackouts (migration
- * supabase/migrations/20261013000000_resident_appointment_booking.sql).
+ * Fits into KALUSAGAP's backend pipeline:
+ *   `appointments.routes -> authenticate -> authorize -> appointments.controller -> appointments.service -> Supabase (appointments, appointment_schedules, appointment_blackouts, book_resident_appointment RPC)`
  *
- * One consistent lifecycle across resident + staff:
- *   pending -> approved | reschedule_proposed | declined | cancelled
- *   reschedule_proposed -> approved | declined | cancelled
- *   approved -> completed | missed | cancelled
- * Residents may only ever book, cancel their own still-pending request, and
- * accept/decline a staff proposal. They can never set approved/completed/missed.
+ * Backs `public.appointments` + `public.appointment_schedules` +
+ * `public.appointment_blackouts` (migration
+ * `supabase/migrations/20261013000000_resident_appointment_booking.sql`).
  *
- * Scope is derived from the authenticated session (never from client input):
- *   - a resident only ever sees/acts on their OWN appointments
- *     (residents.auth_user_id = auth.uid());
- *   - barangay-scoped staff (health_supervisor / bhw) are confined to their
- *     assigned barangay; municipality-wide staff (phn / mho) to their
- *     municipality.
- * Supabase RLS mirrors the same visibility boundary independently.
+ * Unified state lifecycle across residents and health personnel:
+ *   `pending -> approved | reschedule_proposed | declined | cancelled`
+ *   `reschedule_proposed -> approved | declined | cancelled`
+ *   `approved -> completed | missed | cancelled`
+ * Residents may only ever book (`book_resident_appointment` concurrency-safe RPC),
+ * cancel their own still-pending/proposed request, and accept/decline a staff
+ * reschedule proposal. Only authorized staff (`bhw`, `health_supervisor`, `phn`, `mho`)
+ * may approve, propose reschedules, cancel confirmed bookings, or record `completed`/`missed`.
  *
- * `supabase` is injectable so the unit tests can drive it without a live DB.
+ * Geographic & ownership scope is derived strictly from the authenticated session:
+ *   - Residents only ever see/act on their OWN appointments (`residents.auth_user_id = user.id`).
+ *   - Barangay-scoped staff (`health_supervisor`, `bhw`) are confined to `user.barangayId`.
+ *   - Municipality-wide staff (`phn`, `mho`, `rhu_personnel`) are confined to `user.municipalityId`.
+ * Supabase RLS mirrors the same visibility boundary independently, and `supabase`
+ * is injectable so unit tests can exercise all workflows without a live database.
  */
 import { getServiceClient } from '../config/supabase.js';
 import { ROLES } from '../config/roles.js';
@@ -89,6 +91,11 @@ const toAppointment = (row, { includeResident = false } = {}) => {
 // ---------------------------------------------------------------------------
 // Resolve the authenticated caller's own resident record.
 // ---------------------------------------------------------------------------
+
+/**
+ * Look up the `public.residents` row linked to the authenticated user (`auth_user_id = user.id`).
+ * Throws `404 Not Found` if the user account has no linked resident profile.
+ */
 const ownResident = async (supabase, user) => {
   const { data, error } = await supabase
     .from('residents')
@@ -100,6 +107,7 @@ const ownResident = async (supabase, user) => {
   return data;
 };
 
+/** Resolve `residents.auth_user_id` for a given `residentId` when dispatching notifications. */
 const residentAuthUser = async (supabase, residentId) => {
   const { data, error } = await supabase
     .from('residents')
@@ -119,6 +127,7 @@ const toMinutes = (t) => {
 };
 const fromMinutes = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 
+/** Generate discrete `HH:MM` slot start times within `[startTime, endTime)` spaced by `slotMinutes`. */
 const generateTimes = (startTime, endTime, slotMinutes) => {
   const out = [];
   const end = toMinutes(endTime);
@@ -128,12 +137,21 @@ const generateTimes = (startTime, endTime, slotMinutes) => {
   return out;
 };
 
+/** Compute UTC day-of-week (`0` = Sunday .. `6` = Saturday) for a `YYYY-MM-DD` date string. */
 const weekdayOf = (dateStr) => {
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 };
 
-/** Services (active, with at least one active schedule) a resident may book. */
+/**
+ * List active health services offered in the authenticated resident's municipality
+ * and barangay that also have at least one active booking schedule in scope.
+ *
+ * @param {Object} options - Query context
+ * @param {Object} options.user - Authenticated resident user
+ * @param {Object} [options.supabase] - Injectable Supabase client
+ * @returns {Promise<Array<Object>>} Bookable service descriptors (`{ id, name, category, description }`)
+ */
 export const listAvailableServices = async ({ user, supabase = getServiceClient() }) => {
   const resident = await ownResident(supabase, user);
   if (!resident.municipality_id) return [];
@@ -170,7 +188,10 @@ export const listAvailableServices = async ({ user, supabase = getServiceClient(
     .map((s) => ({ id: s.id, name: s.name, category: s.category || 'Other', description: s.description || '' }));
 };
 
-/** Capacity + taken count for one (service, barangay, date, time) slot. */
+/**
+ * Count active appointments per `HH:MM` slot on `dateStr`, preferring `confirmed_date`/`confirmed_time`
+ * over `requested_date`/`requested_time` so approved reschedules occupy their confirmed slot.
+ */
 const slotTaken = (appointments, dateStr) => {
   const map = new Map();
   for (const a of appointments || []) {
@@ -182,7 +203,21 @@ const slotTaken = (appointments, dateStr) => {
   return map;
 };
 
-/** Available dates/time slots for a service on a given date, for the resident. */
+/**
+ * Compute slot-by-slot clinic availability for a health service on a target date.
+ *
+ * Verifies service active state and resident geographic eligibility, checks clinic
+ * schedules for the date's weekday alongside `appointment_blackouts` closures, merges
+ * overlapping schedule capacities (`Math.max` matching the booking RPC), deducts active
+ * bookings, and marks elapsed slots on or before current local time unavailable.
+ *
+ * @param {Object} options - Availability query parameters
+ * @param {Object} options.user - Authenticated resident user
+ * @param {string} options.serviceId - Target `health_services.id`
+ * @param {string} options.date - Target date (`YYYY-MM-DD`)
+ * @param {Object} [options.supabase] - Injectable Supabase client
+ * @returns {Promise<Object>} `{ date, slots, available, message }`
+ */
 export const availability = async ({ user, serviceId, date, supabase = getServiceClient() }) => {
   const resident = await ownResident(supabase, user);
 
@@ -278,6 +313,8 @@ export const availability = async ({ user, serviceId, date, supabase = getServic
 // ---------------------------------------------------------------------------
 // Resident actions
 // ---------------------------------------------------------------------------
+
+/** Error tokens raised inside `book_resident_appointment` PostgreSQL RPC mapped to `ApiError`s. */
 const RPC_ERRORS = {
   RESIDENT_NOT_FOUND: () => ApiError.notFound('No resident record is linked to your account.'),
   SERVICE_UNAVAILABLE: () => ApiError.unprocessable('This service is not available for booking.'),
@@ -288,6 +325,7 @@ const RPC_ERRORS = {
   DUPLICATE_APPOINTMENT: () => ApiError.conflict('You already have a request for this service at that time.'),
 };
 
+/** Translate a raw `book_resident_appointment` RPC error into the corresponding HTTP `ApiError`. */
 const mapRpcError = (error) => {
   const message = String(error?.message || '');
   for (const key of Object.keys(RPC_ERRORS)) {
@@ -296,6 +334,7 @@ const mapRpcError = (error) => {
   return Object.assign(new Error(message || 'Could not book the appointment'), { statusCode: 500, details: error });
 };
 
+/** Best-effort notification fan-out to all active personnel assigned to `serviceId`. */
 const notifyServicePersonnel = async (supabase, { serviceId, reference, serviceName, barangay }) => {
   const { data, error } = await supabase
     .from(ASSIGN_TABLE)
@@ -320,7 +359,20 @@ const notifyServicePersonnel = async (supabase, { serviceId, reference, serviceN
   );
 };
 
-/** A resident books a service slot. Concurrency-safe via the booking RPC. */
+/**
+ * Book a clinic slot for the authenticated resident via the concurrency-safe
+ * `book_resident_appointment` PostgreSQL RPC, record an `APPOINTMENT_REQUESTED`
+ * audit entry, and notify both the resident and assigned service personnel.
+ *
+ * @param {Object} options - Booking payload
+ * @param {Object} options.user - Authenticated resident user
+ * @param {string} options.serviceId - Target `health_services.id`
+ * @param {string} options.date - Requested date (`YYYY-MM-DD`)
+ * @param {string} options.time - Requested slot start time (`HH:MM`)
+ * @param {string} [options.reason=''] - Optional visit reason / chief note
+ * @param {Object} [options.supabase] - Injectable Supabase client
+ * @returns {Promise<Object>} Newly created appointment view model
+ */
 export const book = async ({ user, serviceId, date, time, reason = '', supabase = getServiceClient() }) => {
   const resident = await ownResident(supabase, user);
 
@@ -364,6 +416,14 @@ export const book = async ({ user, serviceId, date, time, reason = '', supabase 
   return mapped;
 };
 
+/**
+ * List up to 200 appointments belonging to the authenticated resident, newest requested date first.
+ *
+ * @param {Object} options - Query context
+ * @param {Object} options.user - Authenticated resident user
+ * @param {Object} [options.supabase] - Injectable Supabase client
+ * @returns {Promise<Array<Object>>} Resident's appointment view models
+ */
 export const listOwn = async ({ user, supabase = getServiceClient() }) => {
   const resident = await ownResident(supabase, user);
   const { data, error } = await supabase
@@ -376,6 +436,7 @@ export const listOwn = async ({ user, supabase = getServiceClient() }) => {
   return (data || []).map((row) => toAppointment(row));
 };
 
+/** Load one appointment row and enforce strict resident ownership (404 on mismatch). */
 const ownAppointment = async (supabase, resident, id) => {
   const { data, error } = await supabase.from(TABLE).select(BASE_SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load the appointment');
@@ -383,6 +444,15 @@ const ownAppointment = async (supabase, resident, id) => {
   return data;
 };
 
+/**
+ * Retrieve a single appointment belonging to the authenticated resident by ID.
+ *
+ * @param {Object} options - Lookup parameters
+ * @param {Object} options.user - Authenticated resident user
+ * @param {string} options.id - Appointment UUID
+ * @param {Object} [options.supabase] - Injectable Supabase client
+ * @returns {Promise<Object>} Resident appointment view model
+ */
 export const getOwn = async ({ user, id, supabase = getServiceClient() }) => {
   const resident = await ownResident(supabase, user);
   const row = await ownAppointment(supabase, resident, id);
@@ -460,6 +530,8 @@ export const respondToProposal = async ({ user, id, decision, reason = '', supab
 // ---------------------------------------------------------------------------
 // Staff actions
 // ---------------------------------------------------------------------------
+
+/** Verify the caller is authenticated and holds an appointment-management role (`bhw`, `health_supervisor`, `phn`, `mho`). */
 const assertManager = (user) => {
   if (!user?.id) throw ApiError.unauthorized('Not authenticated.');
   if (!MANAGE_ROLES.has(user.role)) {
@@ -467,7 +539,7 @@ const assertManager = (user) => {
   }
 };
 
-/** Confine a query to the caller's barangay / municipality. */
+/** Confine a Supabase query builder to the staff caller's assigned barangay or municipality. */
 const applyStaffScope = (query, user) => {
   if (BARANGAY_SCOPED.has(user.role)) {
     if (!user.barangayId) throw ApiError.forbidden('Your account has no barangay assignment.');
@@ -480,12 +552,23 @@ const applyStaffScope = (query, user) => {
   throw ApiError.forbidden('Your role is not authorized to manage appointments.');
 };
 
+/** Check whether a loaded appointment row falls within the staff caller's geographic scope. */
 const appointmentInScope = (user, row) => {
   if (BARANGAY_SCOPED.has(user.role)) return row.barangay_id === user.barangayId;
   if (MUNICIPALITY_WIDE.has(user.role)) return row.municipality_id === user.municipalityId;
   return false;
 };
 
+/**
+ * List up to 500 appointments within the staff caller's geographic scope,
+ * filtered optionally by `status`, `serviceId`, exact `date`, or `from`..`to` requested date bounds.
+ *
+ * @param {Object} options - Staff list parameters
+ * @param {Object} options.user - Authenticated staff session user
+ * @param {Object} [options.query={}] - Optional filter query parameters
+ * @param {Object} [options.supabase] - Injectable Supabase client
+ * @returns {Promise<Array<Object>>} Staff appointment view models (including resident display info)
+ */
 export const staffList = async ({ user, query = {}, supabase = getServiceClient() }) => {
   assertManager(user);
   let request = supabase.from(TABLE).select(STAFF_SELECT);
@@ -507,6 +590,7 @@ export const staffList = async ({ user, query = {}, supabase = getServiceClient(
   return (data || []).map((row) => toAppointment(row, { includeResident: true }));
 };
 
+/** Load one appointment row and enforce staff geographic scope (404 if missing or out of scope). */
 const loadForStaff = async (supabase, user, id) => {
   const { data, error } = await supabase.from(TABLE).select(STAFF_SELECT).eq('id', id).maybeSingle();
   throwOnError(error, 'Could not load the appointment');
@@ -514,12 +598,22 @@ const loadForStaff = async (supabase, user, id) => {
   return data;
 };
 
+/**
+ * Retrieve a single appointment within the staff caller's scope, including resident details.
+ *
+ * @param {Object} options - Lookup parameters
+ * @param {Object} options.user - Authenticated staff session user
+ * @param {string} options.id - Appointment UUID
+ * @param {Object} [options.supabase] - Injectable Supabase client
+ * @returns {Promise<Object>} Staff appointment view model
+ */
 export const staffGet = async ({ user, id, supabase = getServiceClient() }) => {
   assertManager(user);
   const row = await loadForStaff(supabase, user, id);
   return toAppointment(row, { includeResident: true });
 };
 
+/** Apply an update patch to `public.appointments` and return the refreshed joined row (or throw 409). */
 const applyUpdate = async (supabase, id, patch) => {
   const { data, error } = await supabase.from(TABLE).update(patch).eq('id', id).select(STAFF_SELECT).maybeSingle();
   throwOnError(error, 'Could not update the appointment');
@@ -527,7 +621,11 @@ const applyUpdate = async (supabase, id, patch) => {
   return data;
 };
 
-/** Count active appointments on a slot (optionally excluding one id). */
+/**
+ * Verify that `(serviceId, date, time)` falls within active clinic hours and has remaining
+ * slot capacity among `ACTIVE_STATUSES` appointments (excluding `excludeId` when rescheduling/approving).
+ * Throws `422` if outside clinic hours or `409 Conflict` if full.
+ */
 const assertSlotHasRoom = async (supabase, { serviceId, date, time, excludeId = null }) => {
   const weekday = weekdayOf(date);
   const { data: schedules, error: schedErr } = await supabase
@@ -559,7 +657,10 @@ const assertSlotHasRoom = async (supabase, { serviceId, date, time, excludeId = 
 
 const stampDecision = (user) => ({ decided_by: user.id, decided_at: new Date().toISOString() });
 
-/** Staff approve the (requested or overridden) schedule. */
+/**
+ * Approve a `pending` or `reschedule_proposed` appointment after verifying slot capacity,
+ * recording `APPOINTMENT_APPROVED` in `health_audit_logs` and notifying the resident.
+ */
 export const approve = async ({ user, id, date = null, time = null, note = '', supabase = getServiceClient() }) => {
   assertManager(user);
   const row = await loadForStaff(supabase, user, id);
@@ -587,6 +688,10 @@ export const approve = async ({ user, id, date = null, time = null, note = '', s
   return toAppointment(updated, { includeResident: true });
 };
 
+/**
+ * Decline a `pending` or `reschedule_proposed` appointment request with a mandatory
+ * decision reason, logging `APPOINTMENT_DECLINED` and notifying the resident.
+ */
 export const decline = async ({ user, id, reason, supabase = getServiceClient() }) => {
   assertManager(user);
   const row = await loadForStaff(supabase, user, id);

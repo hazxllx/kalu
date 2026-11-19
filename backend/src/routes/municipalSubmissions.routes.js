@@ -7,26 +7,38 @@ import * as controller from '../controllers/municipalSubmissions.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 /**
- * MHO municipal submission review (BUG-010).
+ * MHO municipal submission review routes (BUG-010).
  *
- *   GET  /municipal-submissions/reviews   municipality staff (scope-enforced)
- *   POST /municipal-submissions/reviews   MHO (or admin) only
+ * Role in KALUSAGAP:
+ * Exposes the municipal-level review log and decision endpoint for consolidated
+ * health report submissions routed to the Municipal Health Officer (MHO).
  *
- * The authoritative review decisions live in
- * public.municipal_submission_reviews; the municipality is bound from the
- * authenticated profile and enforced by RLS.
+ * Architectural pipeline:
+ *   route -> authenticate -> authorize(roles)
+ *         -> municipalSubmissions.controller -> municipalSubmissions.service -> Supabase
+ *
+ * Scope & security:
+ * Authoritative review decisions persist in `public.municipal_submission_reviews`.
+ * Municipality scope is bound server-side from the authenticated user's profile
+ * and mirrored by Supabase RLS so callers cannot inspect or review another
+ * municipality's submissions.
  */
 const router = Router();
 router.use(authenticate);
 
+// GET /reviews : Lists municipal submission reviews for the caller's municipality
+// (supports query filters such as period, barangay, or status). Accessible to MHO, PHN, RHU Personnel, and Admin.
 router.get(
   '/reviews',
-  authorize([ROLES.MHO, ROLES.PHN, ROLES.RHU_PERSONNEL, ROLES.ADMIN]),
+  authorize([ROLES.MHO, ROLES.PHN, ROLES.RHU_PERSONNEL, ROLES.ADMIN], { permission: 'reports.view' }),
   asyncHandler(controller.listReviews),
 );
+
+// POST /reviews : Records an authoritative review decision (submission target, status,
+// and reviewer remarks in `req.body`). Restricted strictly to MHO and Admin.
 router.post(
   '/reviews',
-  authorize([ROLES.MHO, ROLES.ADMIN]),
+  authorize([ROLES.MHO, ROLES.ADMIN], { permission: 'reports.view' }),
   asyncHandler(controller.reviewSubmission),
 );
 

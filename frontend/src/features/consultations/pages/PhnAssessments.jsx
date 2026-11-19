@@ -25,7 +25,11 @@ const EMPTY_STATE = {
 const RISK_TONES = {
   High: "bg-brand-danger/10 text-brand-danger",
   Medium: "bg-brand-yellow/15 text-[#B07E00]",
+  Moderate: "bg-brand-yellow/15 text-[#B07E00]",
   Low: "bg-brand-green/10 text-brand-green",
+  Incomplete: "bg-brand-yellow/15 text-[#B07E00]",
+  Unavailable: "bg-slate-100 text-slate-600",
+  Unassessed: "bg-slate-100 text-slate-600",
 };
 
 const OUTCOME_MAP = {
@@ -38,8 +42,8 @@ const OUTCOME_MAP = {
 const PAGE_SIZE = 10;
 
 const RiskBadge = ({ level }) => (
-  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RISK_TONES[level] || RISK_TONES.Low}`}>
-    {level}
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RISK_TONES[level] || RISK_TONES.Unassessed}`}>
+    {level || "Unassessed"}
   </span>
 );
 
@@ -66,7 +70,7 @@ const initialsOf = (name = "") =>
 const buildDraftBase = (patient) => ({
   // The resident's real id lets the referral page file the referral directly
   // instead of making the PHN re-select the patient from the directory.
-  residentId: patient?.id || "",
+  residentId: patient?.residentId || "",
   resident: patient?.patient || "",
   age: patient?.age ?? "",
   sex: patient?.sex || "",
@@ -74,7 +78,7 @@ const buildDraftBase = (patient) => ({
   consultationLocation: consultationLocationFor(patient || {}),
   reason: patient?.reason || patient?.triage?.chiefComplaint || "",
   findings: patient?.checkup?.assessment || "",
-  riskLevel: patient?.checkup?.riskLevel || "",
+  riskLevel: patient?.riskLevel || patient?.checkup?.riskLevel || "",
   clinicalNotes: patient?.checkup?.clinicalNotes || "",
   recommendations: patient?.checkup?.recommendations || "",
   visitDate: patient?.visitDate || "",
@@ -203,6 +207,7 @@ export default function PhnCheckups() {
       showToast("Check-up completed successfully.");
     } catch (err) {
       showToast(err?.message || "Could not complete the check-up.");
+      throw err;
     }
   };
 
@@ -356,7 +361,7 @@ export default function PhnCheckups() {
               >
                 <option value="All">All Risk Levels</option>
                 <option value="High">High Risk</option>
-                <option value="Medium">Medium Risk</option>
+                <option value="Moderate">Moderate Risk</option>
                 <option value="Low">Low Risk</option>
               </select>
             </div>

@@ -1,5 +1,15 @@
 import { invalid, valid } from './common.js';
 
+/**
+ * @file Resident verification document upload & staff review validators (server-authoritative).
+ *
+ * Used by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> authenticate -> authorize -> upload -> validate -> controller -> service -> Supabase Storage`)
+ * to screen identity, proof-of-residency, student ID, and transfer-in health documents
+ * before storage persistence, as well as staff document verification decisions.
+ */
+
+/** Permitted MIME types across general verification document uploads. */
 export const ALLOWED_MIME_TYPES = Object.freeze([
   'application/pdf',
   'image/png',
@@ -17,6 +27,7 @@ export const IMAGE_MIME_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image
 // than the legacy proof-of-residency 5 MB rule.
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
+/** Whitelisted document slot identifiers for resident registration, minor verification, and transfers. */
 export const ALLOWED_DOCUMENT_TYPES = Object.freeze([
   'proof_of_residency',
   'barangay_certificate',
@@ -31,6 +42,7 @@ export const ALLOWED_DOCUMENT_TYPES = Object.freeze([
   'transfer_proof_of_address',
 ]);
 
+/** Accepted Philippine government-issued ID categories when uploading `government_id_front` / `government_id_back`. */
 export const GOVERNMENT_ID_TYPES = Object.freeze([
   'philsys',
   'drivers_license',
@@ -41,6 +53,7 @@ export const GOVERNMENT_ID_TYPES = Object.freeze([
   'other',
 ]);
 
+/** Allowed lifecycle states for an uploaded verification document. */
 export const VERIFICATION_STATUSES = Object.freeze([
   'pending',
   'approved',
@@ -48,6 +61,21 @@ export const VERIFICATION_STATUSES = Object.freeze([
   'resubmission_required',
 ]);
 
+/**
+ * Validates multipart/file document upload payloads.
+ *
+ * Enforces:
+ * - Allowed `documentType` (defaults to `'proof_of_residency'`).
+ * - Mandatory `governmentIdType` (or custom `governmentIdTypeOther` when `'other'`)
+ *   for `'government_id_front'` and `'government_id_back'` uploads.
+ * - Valid `File` instance, non-empty size (`>= 1` byte), `<= 10 MB` cap, and allowed MIME type
+ *   (restricting `'identity_photo'` holding-ID selfies strictly to JPG/PNG images).
+ * - Preserves `residentId` alongside extracted file metadata (`fileName`, `mimeType`, `sizeBytes`)
+ *   so downstream controllers can associate the upload with the resident record.
+ *
+ * @param {Object} [input] - Parsed upload payload containing `file` and metadata fields.
+ * @returns {Object} Validation result `{ value }` or `{ error }`.
+ */
 export const validateDocumentUpload = (input = {}) => {
   const errors = {};
 
@@ -127,6 +155,14 @@ export const validateDocumentUpload = (input = {}) => {
   });
 };
 
+/**
+ * Validates health staff review decisions on an uploaded resident document.
+ * Requires a non-empty `rejectionReason` whenever `verificationStatus` is
+ * `'rejected'` or `'resubmission_required'`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { verificationStatus, rejectionReason } }` or `{ error }`.
+ */
 export const validateDocumentReview = (input = {}) => {
   const errors = {};
 

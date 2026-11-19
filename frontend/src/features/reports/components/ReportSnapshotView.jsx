@@ -2,6 +2,8 @@ import React from "react";
 import { FileText } from "lucide-react";
 import { recordStatusTone, hasSnapshot } from "@/features/reports/lib/reportSnapshot";
 
+const textValue = (value) => typeof value === "string" ? value : "";
+
 /**
  * Renders a persisted report snapshot — the immutable content captured when the
  * report was submitted. It reads ONLY from the stored snapshot (summary totals,
@@ -26,10 +28,9 @@ export default function ReportSnapshotView({ content }) {
     );
   }
 
-  const summary = content.summary || null;
-  const columns = Array.isArray(content.columns) ? content.columns : [];
-  const rows = Array.isArray(content.rows) ? content.rows : [];
-  const generated = content.generatedAt
+  const summary = Number.isInteger(content.summary?.total) ? content.summary : null;
+  const { columns, rows } = content;
+  const generated = textValue(content.generatedAt)
     ? new Date(content.generatedAt)
     : null;
   const generatedLabel = generated && !Number.isNaN(generated.getTime())
@@ -37,16 +38,16 @@ export default function ReportSnapshotView({ content }) {
     : null;
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 max-w-full space-y-4 break-words">
       {/* Snapshot metadata */}
       <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
         {[
-          ["Reporting Period", content.reportPeriod || "—"],
-          ["Scope", content.scope || content.barangay || "—"],
-          ["Type", content.reportType || "—"],
+          ["Reporting Period", textValue(content.reportPeriod) || "—"],
+          ["Scope", textValue(content.scope) || textValue(content.barangay) || "—"],
+          ["Type", textValue(content.reportType) || "—"],
           ["Generated", generatedLabel || "—"],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-btn border border-brand-border bg-brand-bg/40 p-2.5">
+          <div key={label} className="min-w-0 rounded-btn border border-brand-border bg-brand-bg/40 p-2.5">
             <p className="text-[11px] uppercase tracking-wide text-brand-gray">{label}</p>
             <p className="mt-0.5 font-medium text-brand-ink">{value}</p>
           </div>
@@ -60,7 +61,7 @@ export default function ReportSnapshotView({ content }) {
             <span className="inline-flex items-center gap-2 rounded-btn bg-brand-blue/10 px-3 py-1.5 text-sm font-medium text-brand-blue">
               Total records: {summary.total ?? 0}
             </span>
-            {Object.entries(summary.byStatus || {}).map(([status, count]) => (
+            {Object.entries(summary.byStatus || {}).filter(([, count]) => Number.isInteger(count)).map(([status, count]) => (
               <span key={status} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${recordStatusTone(status)}`}>
                 {status}: {count}
               </span>
@@ -74,7 +75,7 @@ export default function ReportSnapshotView({ content }) {
         </div>
       )}
 
-      {content.note && <p className="text-xs text-brand-gray">{content.note}</p>}
+      {textValue(content.note) && <p className="text-xs text-brand-gray">{content.note}</p>}
 
       {/* Included records table */}
       {columns.length > 0 && (
@@ -84,13 +85,14 @@ export default function ReportSnapshotView({ content }) {
             <p className="mt-1 text-xs text-brand-gray">This report was submitted without any detail rows for the period.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-btn border border-brand-border">
+          <div role="region" aria-label="Submitted records table" tabIndex={0} className="max-w-full overflow-x-auto rounded-btn border border-brand-border focus-visible:outline focus-visible:outline-brand-blue">
+            <p className="border-b border-brand-border bg-brand-bg px-3 py-2 text-xs text-brand-gray sm:hidden">Swipe horizontally to view all report columns.</p>
             <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-brand-bg">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-brand-gray">#</th>
+                  <th scope="col" className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-brand-gray">#</th>
                   {columns.map((c, ci) => (
-                    <th key={`${c.label}-${ci}`} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-brand-gray">{c.label}</th>
+                    <th scope="col" key={`${c.label}-${ci}`} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-brand-gray">{c.label}</th>
                   ))}
                 </tr>
               </thead>

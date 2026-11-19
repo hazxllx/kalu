@@ -1,24 +1,50 @@
 import env from '../config/env.js';
 
 /**
- * Centralized error handler — the last middleware registered in `app.js`.
+ * @module middleware/errorHandler
  *
- * Every controller and service reports failures by throwing (see
- * `utils/apiError.js`) or by rejecting inside `utils/asyncHandler.js`, so error
- * formatting lives here instead of being repeated in every controller.
+ * Centralized Express error-handling middleware for KALUSAGAP — registered last
+ * in `app.js` at the end of the pipeline:
+ *   `route -> authenticate -> authorize -> controller -> service -> repository/Supabase -> errorHandler`
  *
- * Response shape is stable for the frontend:
- *   { "error": { "message": "...", "details": ... } }
+ * Every middleware, controller, and service reports failures by throwing an
+ * `ApiError` (see `utils/apiError.js`) or rejecting inside `utils/asyncHandler.js`,
+ * keeping HTTP error serialization consistent across the entire backend.
  *
- * Unexpected errors return a generic message in production: internal messages
- * can leak table names, file paths, and patient data.
+ * Stable JSON response envelope returned to the frontend:
+ *   `{ "error": { "message": "...", "code"?: "...", "details"?: ..., "errors"?: ... } }`
+ *
+ * Security & privacy guarantees:
+ *   - Unexpected 5xx errors return a generic message in production so internal
+ *     database errors, table names, stack traces, file paths, and patient health
+ *     information (PHI) are never leaked to clients.
+ *   - Server errors log `req.requestId` (assigned by `requestLogger`) for log
+ *     correlation without logging request bodies or headers.
+ *   - Only application-defined uppercase machine codes (`^[A-Z][A-Z0-9_]+$`) are
+ *     exposed; low-level Postgres/driver codes (e.g. `'23505'`) stay private.
+ */
+
+/**
+ * Formats operational (`ApiError`) and unhandled errors into KALUSAGAP's standard
+ * JSON error response.
+ *
+ * @param {Object} err - Thrown error or `ApiError` instance.
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @param {Function} next - Express next callback (required 4-argument signature).
  */
 // eslint-disable-next-line no-unused-vars -- Express requires the 4-arg signature
 const errorHandler = (err, req, res, next) => {
   const statusCode = err.statusCode || 500;
   const isServerError = statusCode >= 500;
+  const clinicalRequest = /(?:^|\/)(?:intake|phn)(?:\/|$)/.test(req.path || '');
 
-  if (isServerError) {
+  if (clinicalRequest) {
+    // Database error messages and URL identifiers can contain clinical data.
+    // Keep operational correlation without logging values, paths, or stacks.
+    const code = typeof err.code === 'string' && /^[A-Z0-9_]+$/.test(err.code) ? err.code : 'REQUEST_FAILED';
+    if (isServerError) console.error(`[requestId=${req.requestId || 'unknown'}] Clinical request failed`, { method: req.method, statusCode, code });
+  } else if (isServerError) {
     console.error(`[requestId=${req.requestId || 'unknown'}] Unhandled error on ${req.method} ${req.path}:`, err.message);
     if (!env.isProduction && err.stack) console.error(err.stack);
   } else if (!env.isProduction) {
@@ -33,7 +59,9 @@ const errorHandler = (err, req, res, next) => {
     );
   }
 
-  const message = isServerError && env.isProduction
+  const message = clinicalRequest && isServerError
+    ? 'The clinical operation could not be confirmed. Your entries are still available; retry using the same form.'
+    : isServerError && env.isProduction
     ? 'Something went wrong. Please try again later.'
     : err.message || 'Unexpected error';
 

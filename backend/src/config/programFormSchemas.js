@@ -1,6 +1,12 @@
 /**
  * KALUSAGAP - Program-specific TCL / health-form field schemas.
  *
+ * Architectural role: consumed in the `route -> authenticate -> authorize ->
+ * controller -> programForms.service -> Supabase` pipeline for `/api/program-forms/:kind`
+ * endpoints. Each schema also declares `scope` (`'resident'` vs `'household'`)
+ * so the service layer resolves barangay ownership through either `residents` or
+ * `households` before reading/writing the backing table.
+ *
  * One schema per official worksheet. These are the AUTHORITATIVE field
  * definitions used by programForms.service.js to:
  *   - whitelist which keys a client may send (anything else is dropped),
@@ -17,6 +23,7 @@
  * reports stay faithful to the DOH form.
  */
 
+// Canonical DOH FHSIS Target Client List (TCL) shorthand enum sets.
 const NHTS = ['NHTS', 'Non-NHTS'];
 const YN = ['Y', 'N'];
 const SEX = ['M', 'F'];
@@ -98,7 +105,10 @@ const ncdVisual = {
   ],
 };
 
-// Oral Health - Target Client List for Oral Health Care and Services
+/**
+ * Official DOH Target Client List (TCL) Oral Health procedure codes mapped to
+ * their full clinical service labels, validated inside `oral_health_records.data.services`.
+ */
 export const ORAL_SERVICE_CODES = Object.freeze({
   OE: 'Oral Examination',
   IIOHC: "Instruction on Infant's Oral Health Care",
@@ -183,6 +193,7 @@ const environmental = {
   ],
 };
 
+/** Registry of program form schemas keyed by URL `:kind` slug. */
 export const SCHEMAS = Object.freeze({
   'ncd-risk': ncdRisk,
   'ncd-cervical': ncdCervical,
@@ -191,6 +202,7 @@ export const SCHEMAS = Object.freeze({
   environmental,
 });
 
+/** Allowlisted `:kind` identifiers accepted by program-form routes and validators. */
 export const PROGRAM_KINDS = Object.freeze(Object.keys(SCHEMAS));
 
 export default { SCHEMAS, PROGRAM_KINDS, ORAL_SERVICE_CODES };

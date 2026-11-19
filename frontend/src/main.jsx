@@ -17,7 +17,12 @@ import { registerServiceWorker } from '@/lib/pwa'
  * is restored, and cached pages/assets are available offline.
  */
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <App />
+  <>
+    {import.meta.env.MODE !== 'production' && (
+      <div className="development-environment" role="status">DEVELOPMENT ENVIRONMENT</div>
+    )}
+    <App />
+  </>
 )
 
 // Register the offline service worker after boot so it never blocks first paint.

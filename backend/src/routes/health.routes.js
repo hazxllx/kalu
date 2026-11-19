@@ -1,8 +1,12 @@
 /**
- * Health check endpoint (public, no authentication required).
+ * Public system health check route (`/api/health`).
  *
- * Returns server readiness status including database connectivity.
- * Used by deployment health probes and load balancers.
+ * Request pipeline:
+ *   route -> controller -> Supabase connectivity check (no `authenticate` or `authorize`)
+ *
+ * Deliberately bypasses authentication and RBAC middleware so deployment probes,
+ * uptime monitors, and load balancers can verify API process liveness and
+ * database readiness.
  */
 import { Router } from 'express';
 
@@ -11,6 +15,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 
 const router = Router();
 
+// GET /api/health — Public readiness probe returning API uptime and database status (`healthController.getHealth`).
 router.get('/', asyncHandler(healthController.getHealth));
 
 export default router;

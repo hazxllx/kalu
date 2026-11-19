@@ -48,10 +48,15 @@ const formatDateTime = (iso) => {
 export default function IncomingReports() {
   const { can } = usePermissions();
   const { user } = useAuth();
-  // Reviewing an incoming report is a RECIPIENT action, gated by reports.view
-  // (not reports.generate) so the RHU Personnel inbox can acknowledge/review
-  // without being granted report authoring.
-  const canReview = can("reports.view");
+  if (!can("reports.view") || !user?.municipalityId ||
+      (user.role === "rhu_personnel" && !user.facilityId) ||
+      (user.role === "health_supervisor" && !user.barangayId)) {
+    return <Card className="p-4"><p role="status" className="text-sm text-brand-gray">Incoming reports are unavailable without verified report access and an assigned service area.</p></Card>;
+  }
+  return <AuthorizedInbox key={`${user.id}:${user.role}:${user.municipalityId}:${user.facilityId || ""}:${user.barangayId || ""}`} user={user} />;
+}
+
+function AuthorizedInbox({ user }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -79,11 +84,11 @@ export default function IncomingReports() {
     setLoading(true);
     setError("");
     return reportsApi
-      .list({ box: "incoming" })
-      .then((res) => setRows(res?.rows || res?.records || []))
+      .listAll({ box: "incoming" }, { ownerId: user.id })
+      .then(setRows)
       .catch((err) => setError(err?.message || "We couldn't load incoming reports. Please try again."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [user.id]);
 
   useEffect(() => {
     load();
@@ -103,25 +108,19 @@ export default function IncomingReports() {
     setDetailError("");
     setDetailContent(null);
     
-    reportsApi.get(detail.id)
-      .then((res) => {
-        if (active) {
-          // Only update if the response contains a valid record with content
-          const record = res?.record || null;
-          if (record) {
-            setDetailContent(record);
-          } else {
-            setDetailError("The report content could not be retrieved.");
-          }
-        }
+    reportsApi.get(detail.id, { ownerId: user.id })
+      .then(({ record }) => {
+        if (!active) return;
+        if (record?.id !== detail.id || record.status === "Draft") throw new Error("The submitted report was not returned.");
+        setDetailContent(record);
       })
       .catch((err) => {
         if (active) {
           // Provide more specific error messages
-          const errorMsg = err?.response?.status === 403
+          const errorMsg = err?.status === 403
             ? "You do not have permission to view this report."
-            : err?.response?.status === 404
-            ? "This report was not found or has been deleted."
+            : err?.status === 404
+            ? "This report is unavailable."
             : err?.message || "Could not load the submitted report.";
           setDetailError(errorMsg);
         }
@@ -131,7 +130,12 @@ export default function IncomingReports() {
       });
     
     return () => { active = false; };
-  }, [detail]);
+  }, [detail, user.id]);
+
+  const openedReport = detailContent && detailContent.id === detail?.id ? detailContent : null;
+  const isRecipient = openedReport?.recipientRole === user.role && openedReport.createdBy !== user.id &&
+    (user.role !== "rhu_personnel" || openedReport.recipientFacilityId === user.facilityId);
+  const reviewStatus = isRecipient ? openedReport.status : null;
 
   const sortedRows = useMemo(
     () => [...rows].sort((a, b) => String(b.submittedAt || b.createdAt || "").localeCompare(String(a.submittedAt || a.createdAt || ""))),
@@ -163,20 +167,8 @@ export default function IncomingReports() {
   }, [barangayFilter, periodFilter, search, sortedRows, statusFilter, typeFilter]);
 
   const act = async (report, status) => {
-    // Verify authorization before attempting to act
-    if (!canReview) {
-      showToast("You do not have permission to review reports.");
-      return;
-    }
-    if (user?.role !== report.recipientRole) {
-      showToast("You are not the intended recipient of this report.");
-      return;
-    }
-    // RHU Personnel: verify facility scope
-    if (user?.role === "rhu_personnel" && report.recipientFacilityId && user?.facilityId && report.recipientFacilityId !== user.facilityId) {
-      showToast("This report is routed to a different facility. You cannot act on it.");
-      return;
-    }
+    if (busy || openedReport?.id !== report.id || !(reviewStatus === "Submitted" && status === "Received" ||
+      reviewStatus === "Received" && ["Needs Revision", "Rejected", "Reviewed"].includes(status))) return;
     
     if (["Needs Revision", "Rejected"].includes(status) && !rejectReason.trim()) {
       showToast("An explanation is required.");
@@ -184,7 +176,7 @@ export default function IncomingReports() {
     }
     setBusy(true);
     try {
-      await reportsApi.review(report.id, { status, remarks: rejectReason.trim() });
+      await reportsApi.review(report.id, { status, remarks: rejectReason.trim() }, { ownerId: user.id });
       showToast(status === "Reviewed" ? "Report approved." : status === "Needs Revision" ? "Report returned for revision." : `Report marked ${status}.`);
       setDetail(null);
       setRejectReason("");
@@ -199,7 +191,7 @@ export default function IncomingReports() {
   return (
     <Card className="overflow-hidden">
       {toast && (
-        <div className="fixed bottom-4 right-4 z-[80] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
+        <div role="status" aria-live="polite" className="fixed right-4 top-4 z-[80] flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
           <CheckCircle2 className="h-4 w-4 text-brand-green" />
           <span className="text-sm">{toast}</span>
         </div>
@@ -324,8 +316,8 @@ export default function IncomingReports() {
 
       {detail && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-          <Card className="max-h-[92vh] w-full max-w-lg overflow-y-auto">
-            <div className="p-6">
+          <Card role="dialog" aria-modal="true" aria-label="Submitted report" className="max-h-[calc(100dvh-2rem)] min-w-0 w-full max-w-4xl overflow-y-auto break-words">
+            <div className="p-3 sm:p-6">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-semibold text-brand-ink">{detail.reportType}</h3>
@@ -334,29 +326,28 @@ export default function IncomingReports() {
                 <button onClick={() => setDetail(null)} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
               </div>
 
-              <div className="space-y-2.5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-card">
+              {openedReport && <dl className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-2 dark:border-border dark:bg-card">
                 {[
-                  ["From", `${detail.senderName || "—"} (${ROLE_LABELS[detail.senderRole] || detail.senderRole})`],
-                  ["Barangay", detail.barangay || "—"],
-                  ["Submitted", formatDateTime(detail.submittedAt || detail.createdAt)],
-                  ["Status", displayStatus(detail.status)],
-                  ["Workflow stage", detail.status],
-                  ["Last updated", formatDateTime(detail.updatedAt || detail.createdAt)],
-                  ["Remarks", ["Rejected", "Needs Revision"].includes(detail.status) ? "—" : detail.remarks || "—"],
-                  ["Revision / rejection explanation", ["Rejected", "Needs Revision"].includes(detail.status) ? detail.remarks || "—" : "—"],
+                  ["From", `${openedReport.senderName || "—"} (${ROLE_LABELS[openedReport.senderRole] || openedReport.senderRole})`],
+                  ["Recipient", ROLE_LABELS[openedReport.recipientRole] || openedReport.recipientRole],
+                  ["Barangay", openedReport.barangay || "—"],
+                  ["Submitted", formatDateTime(openedReport.submittedAt || openedReport.createdAt)],
+                  ["Status", displayStatus(openedReport.status)],
+                  ["Last updated", formatDateTime(openedReport.updatedAt || openedReport.createdAt)],
+                  [["Rejected", "Needs Revision"].includes(openedReport.status) ? "Revision / rejection explanation" : "Remarks", openedReport.remarks || "—"],
                 ].map(([label, value]) => (
-                  <div key={label} className="flex items-start justify-between gap-3 text-sm">
-                    <p className="shrink-0 text-brand-gray">{label}</p>
-                    <p className="min-w-0 text-right font-medium text-brand-ink">{value}</p>
+                  <div key={label} className="min-w-0 text-sm">
+                    <dt className="text-xs text-brand-gray">{label}</dt>
+                    <dd className="font-medium text-brand-ink">{value}</dd>
                   </div>
                 ))}
-              </div>
+              </dl>}
 
-              {detailContent?.history?.length > 0 && (
+              {openedReport?.history?.length > 0 && (
                 <div className="mt-4">
                   <h4 className="mb-2 text-sm font-semibold text-brand-ink">Report history</h4>
                   <ol className="space-y-2 border-l-2 border-brand-border pl-4">
-                    {detailContent.history.map((event, index) => (
+                    {openedReport.history.map((event, index) => (
                       <li key={`${event.at}-${index}`} className="text-sm">
                         <p className="font-medium text-brand-ink">{event.previousStatus ? `${event.previousStatus} → ` : ""}{event.status}</p>
                         <p className="text-xs text-brand-gray">{formatDateTime(event.at)}{event.actorName ? ` · ${event.actorName}` : ""}{event.actorRole ? ` (${ROLE_LABELS[event.actorRole] || event.actorRole})` : ""}</p>
@@ -380,11 +371,11 @@ export default function IncomingReports() {
                     {detailError}
                   </div>
                 ) : (
-                  <ReportSnapshotView content={detailContent?.content} />
+                  <ReportSnapshotView content={openedReport?.content} />
                 )}
               </div>
 
-              {canReview && user?.role === detail.recipientRole && detail.status === "Received" && (
+               {reviewStatus === "Received" && (
                 <div className="mt-4">
                   <label className="text-sm font-medium text-brand-ink">Explanation (required for revision or rejection)</label>
                   <textarea
@@ -399,10 +390,10 @@ export default function IncomingReports() {
 
               <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
                 <button onClick={() => setDetail(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Close</button>
-                {canReview && user?.role === detail.recipientRole && detail.status === "Submitted" && (
+                 {reviewStatus === "Submitted" && (
                   <button disabled={busy} onClick={() => act(detail, "Received")} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue disabled:opacity-60">Mark Received</button>
                 )}
-                {canReview && user?.role === detail.recipientRole && detail.status === "Received" && (
+                 {reviewStatus === "Received" && (
                   <>
                     <button disabled={busy || !rejectReason.trim()} onClick={() => act(detail, "Needs Revision")} className="rounded-btn border border-brand-danger/30 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 disabled:opacity-60">Return for Revision</button>
                     <button disabled={busy || !rejectReason.trim()} onClick={() => act(detail, "Rejected")} className="rounded-btn border border-brand-danger/30 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 disabled:opacity-60">Reject Report</button>

@@ -12,6 +12,7 @@ import { getBarangayHealthOverview } from "@/services/api/monitoringApi";
 import { metricValue, optionalSeries, lastActivityPeriod } from "@/lib/legacyAnalytics";
 import { useAuth } from "@/context/AuthContext";
 import { X } from "lucide-react";
+import { normalizeRiskDistribution, RISK_PRESENTATION } from "@/lib/riskLevel";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, AreaChart, Area,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend, Cell, PieChart, Pie,
@@ -19,9 +20,9 @@ import {
 
 const CHART_COLORS = { "San Antonio": "#28B463", "San Isidro": "#2A7DE1", "Old San Roque": "#E67E22" };
 const DONUT_COLORS = ["#0B5CAD", "#2A7DE1", "#28B463", "#F5B400", "#E74C3C"];
-const tooltipStyle = { borderRadius: 12, border: "1px solid #E5EAF1", fontSize: 12, fontFamily: "DM Sans" };
-const tickStyle = { fill: "#5B6472", fontSize: 12, fontFamily: "DM Sans" };
-const legendStyle = { fontSize: 12, fontFamily: "DM Sans" };
+const tooltipStyle = { borderRadius: 12, border: "1px solid #E5EAF1", fontSize: 12, fontFamily: "Public Sans" };
+const tickStyle = { fill: "#5B6472", fontSize: 12, fontFamily: "Public Sans" };
+const legendStyle = { fontSize: 12, fontFamily: "Public Sans" };
 
 const ChartCard = React.memo(function ChartCard({ title, subtitle, children, data, delay = 0 }) {
   return (
@@ -55,10 +56,11 @@ function AreaGradients({ idPrefix, names }) {
 export default function Analytics() {
   const { user } = useAuth();
   const [selected, setSelected] = useState(null);
+  const reportingPeriod = useMemo(() => lastActivityPeriod(), []);
   const load = useCallback(async (options) => {
-    const [earlyWarning, map] = await Promise.all([authorizedViewsApi.earlyWarning(lastActivityPeriod(), options), authorizedViewsApi.communityMap({}, options)]);
+    const [earlyWarning, map] = await Promise.all([authorizedViewsApi.earlyWarning(reportingPeriod, options), authorizedViewsApi.communityMap(reportingPeriod, options)]);
     return { earlyWarning, map };
-  }, []);
+  }, [reportingPeriod]);
   const resource = useAuthorizedData(load);
   useEffect(() => setSelected(null), [user?.id]);
   const data = resource.data?.earlyWarning;
@@ -74,7 +76,7 @@ export default function Analytics() {
       color: CHART_COLORS[row.name] || DONUT_COLORS[index % DONUT_COLORS.length],
       healthStatus: row.registryAvailable === false
         ? "Registry unavailable"
-        : row.highRiskResidents > 0
+         : (row.reportingHighRiskResidents ?? row.highRiskResidents) > 0
         ? "High-risk records present"
         : "Recorded health profile"
     }));
@@ -107,7 +109,7 @@ export default function Analytics() {
             </div>
           </div>
           <div className="grid lg:grid-cols-2 gap-8 items-center">
-            <CommunityHealthMap barangays={highlightedBarangays} onSelect={setSelected} />
+            <CommunityHealthMap barangays={highlightedBarangays} onSelect={setSelected} periodLabel={`${reportingPeriod.from} to ${reportingPeriod.to}`} />
             <div className="space-y-3">
               {highlightedBarangays.map((b) => (
                 <motion.button
@@ -137,7 +139,7 @@ export default function Analytics() {
 
       {/* Health Status Summary */}
       <KpiHorizontal count={3} className="gap-4 sm:grid-cols-3">
-        {data.riskDistribution.map((risk, index) => <KpiHorizontal.Item key={risk.name} label={`${risk.name.toUpperCase()} RISK`} value={risk.value} tone={risk.name === "High" ? "red" : risk.name === "Moderate" ? "amber" : "green"} description="Recorded assessments" />)}
+        {normalizeRiskDistribution(data.reportingRiskDistribution ?? data.riskDistribution).map((risk) => <KpiHorizontal.Item key={risk.name} label={risk.name.toUpperCase()} value={risk.value} tone={RISK_PRESENTATION[risk.name].tone} description={data.reportingRiskDistribution ? "Resident risk in reporting period" : "Latest recorded resident risk"} />)}
       </KpiHorizontal>
 
       {/* Community Health Trends */}
@@ -266,17 +268,20 @@ export default function Analytics() {
       </div>
 
       {/* Side Panel */}
-      {selected && <AuthorizedBarangayPanel barangay={selected} onClose={() => setSelected(null)} />}
+      {selected && <AuthorizedBarangayPanel barangay={selected} reportingPeriod={reportingPeriod} onClose={() => setSelected(null)} />}
     </>
   );
 }
 
-function AuthorizedBarangayPanel({ barangay, onClose }) {
+function AuthorizedBarangayPanel({ barangay, reportingPeriod, onClose }) {
   const load = useCallback(async (options) => {
-    const data = await authorizedViewsApi.earlyWarning({ barangay: barangay.name }, options);
+    const data = await authorizedViewsApi.earlyWarning({ barangay: barangay.name, ...reportingPeriod }, options);
     const overview = await getBarangayHealthOverview(barangay.name, { load: () => Promise.resolve(data) });
+    if (Array.isArray(data.reportingRiskDistribution)) {
+      overview.metrics.highRiskResidents = normalizeRiskDistribution(data.reportingRiskDistribution).find((row) => row.name === 'High')?.value ?? 0;
+    }
     return { data, overview };
-  }, [barangay.id, barangay.name]);
+  }, [barangay.id, barangay.name, reportingPeriod]);
   const resource = useAuthorizedData(load);
   const metrics = resource.data?.overview?.metrics;
   const data = resource.data?.data;

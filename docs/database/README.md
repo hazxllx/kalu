@@ -10,25 +10,25 @@ That folder is the single source of truth — the Supabase CLI reads it directly
 Migrations are applied in filename (timestamp) order. Do not rename or reorder
 existing files; add a new migration for every change.
 
-Applied with the Supabase CLI from the repository root:
+For development, use a fresh disposable local Supabase stack:
 
 ```bash
-supabase link --project-ref <your-project-ref>
-supabase migration list --linked   # review what is already applied
-supabase db push                   # apply supabase/migrations in order
+supabase start
+supabase migration list --local
+# Review pending SQL before explicitly applying to the LOCAL database:
+supabase migration up --local
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/seed.sql
 ```
 
-Or through the Supabase Dashboard: open **SQL Editor**, run each file in
-`supabase/migrations/` in order, then run `supabase/seed.sql` (it is idempotent
-and safe to re-run).
+Local Studio is at `http://127.0.0.1:54323`. Auth and Storage are required in
+addition to PostgreSQL. Initial Supabase startup applies migrations to a fresh
+database. Local configuration is generated with `npm run local:configure`.
 
-Before applying migrations to production, review `supabase migration list
---linked` and inspect every pending migration; `supabase db push` applies all
-pending local migrations, not just the barangay restriction. The barangay
-restriction migration preserves non-approved registry rows as inactive and
-does not delete or reassign resident, household, health, or staff records.
-Audit legacy assignments first and explicitly resolve any that should move to
-an approved barangay before deploying the restriction.
+Never link development to production. Existing deployment settings are preserved
+in ignored `.env.production` files and `supabase/config.production.toml`.
+Historical migrations contain destructive DDL, including removal of
+`medicine_facility_availability`. Review pending SQL and do not reset or replay
+the chain on populated data. No production SQL is needed for local setup.
 
 The reference seed creates the municipality of **Pili (Camarines Sur)**, its
 approved barangays (**San Antonio / San Isidro / Old San Roque**), the RHU, and
@@ -38,19 +38,20 @@ renamed or deleted.
 
 ## Environment variables
 
-Backend (`backend/.env`) — server only, never in the frontend:
+Backend (`backend/.env.development`) - server only, never in the frontend:
 
 ```
-SUPABASE_URL=https://<ref>.supabase.co
-SUPABASE_ANON_KEY=<anon key>
-SUPABASE_SERVICE_ROLE_KEY=<service role key>
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_ANON_KEY=<local anon JWT>
+SUPABASE_SERVICE_ROLE_KEY=<local service-role JWT>
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
 ```
 
-Frontend (`frontend/.env`) — public by design, protected by RLS:
+Frontend (`frontend/.env.development`) - public by design, protected by RLS:
 
 ```
-VITE_SUPABASE_URL=https://<ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon key>
+VITE_SUPABASE_URL=http://127.0.0.1:54321
+VITE_SUPABASE_ANON_KEY=<local anon JWT>
 ```
 
 The service-role key bypasses RLS, so it must stay on the server and never

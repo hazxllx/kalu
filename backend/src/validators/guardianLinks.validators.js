@@ -3,13 +3,19 @@ import { GUARDIAN_RELATIONSHIP_TYPES } from '../config/guardianPolicy.js';
 import { isEmail, normalizeEmail } from './common.js';
 
 /**
- * Guardian-link request validation (server-authoritative).
+ * @file Minor-to-guardian relationship link validators (server-authoritative).
  *
- * Only whitelisted fields are accepted and normalised (no mass assignment).
- * The service additionally enforces: minor-only rule, scope/coverage,
- * self-reference, duplicate-link and name-consistency checks.
+ * Invoked by `middleware/validate.js` in the KALUSAGAP request pipeline
+ * (`route -> authenticate -> authorize -> validate -> controller -> service -> Supabase`)
+ * across both staff-managed guardian link records (creation, verification review,
+ * non-identity metadata correction) and minor self-service email link requests/responses.
+ *
+ * Only whitelisted fields are accepted and normalized (preventing mass assignment).
+ * Downstream guardian-link services enforce the under-18 minor rule, barangay/RHU
+ * coverage scope, anti-self-reference, duplicate-link prevention, and profile name consistency.
  */
 
+/** Trims a string field, recording required/max-length validation errors into `errors[field]`. */
 const str = (value, max, label, errors, field, { optional = false } = {}) => {
   const out = text(value);
   if (!out) {
@@ -20,6 +26,15 @@ const str = (value, max, label, errors, field, { optional = false } = {}) => {
   return out;
 };
 
+/**
+ * Validates staff-initiated guardian link creation payloads (accepts `{ guardianLink }` or flat body).
+ * Requires `minorResidentId`, a valid `GUARDIAN_RELATIONSHIP_TYPES` value, and guardian first/last
+ * names; optionally validates strict 11-digit PH mobile (`09XXXXXXXXX`), existing `guardianResidentId`,
+ * `guardianIdentityNo`, and parental `consentRecorded`/`consentNote` fields.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { guardianLink } }` or `{ error }`.
+ */
 export const createGuardianLinkValidator = (input = {}) => {
   const body = input && typeof input.guardianLink === 'object' && input.guardianLink !== null ? input.guardianLink : input || {};
   const errors = {};
@@ -57,6 +72,13 @@ export const createGuardianLinkValidator = (input = {}) => {
   });
 };
 
+/**
+ * Validates staff verification decisions (`verified` or `rejected`) on a pending guardian link.
+ * Enforces a rejection `note` of at least 5 characters when `decision === 'rejected'`.
+ *
+ * @param {Object} [input] - Raw request body (`{ review }` or flat).
+ * @returns {Object} Validation result `{ value: { review } }` or `{ error }`.
+ */
 export const reviewGuardianLinkValidator = (input = {}) => {
   const body = input && typeof input.review === 'object' && input.review !== null ? input.review : input || {};
   const errors = {};
@@ -72,6 +94,15 @@ export const reviewGuardianLinkValidator = (input = {}) => {
   return valid({ review: { decision, note } });
 };
 
+/**
+ * Validates partial corrections to an existing guardian link (`{ correction }` or flat).
+ * Permits updating `relationshipType`, `guardianMiddleName`, `guardianCellphoneNo`, and
+ * `guardianIdentityNo` while rejecting empty patches (`errors._root`) and preventing
+ * changes to core linked resident identities.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { correction } }` or `{ error }`.
+ */
 export const correctGuardianLinkValidator = (input = {}) => {
   const body = input && typeof input.correction === 'object' && input.correction !== null ? input.correction : input || {};
   const errors = {};
@@ -101,6 +132,13 @@ export const correctGuardianLinkValidator = (input = {}) => {
   return valid({ correction: out });
 };
 
+/**
+ * Validates a minor resident's self-service guardian link request (`{ guardianRequest }` or flat),
+ * normalizing the target parent/guardian `email` and checking `relationshipType`.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { guardianRequest } }` or `{ error }`.
+ */
 export const ownGuardianRequestValidator = (input = {}) => {
   const body = input?.guardianRequest || input || {};
   const errors = {};
@@ -114,6 +152,13 @@ export const ownGuardianRequestValidator = (input = {}) => {
   return valid({ guardianRequest: { email, relationshipType } });
 };
 
+/**
+ * Validates a registered adult resident's response (`accepted` or `rejected`)
+ * to a minor's guardian link invitation.
+ *
+ * @param {Object} [input] - Raw request body.
+ * @returns {Object} Validation result `{ value: { decision } }` or `{ error }`.
+ */
 export const guardianResponseValidator = (input = {}) => {
   const decision = text(input?.decision);
   if (!['accepted', 'rejected'].includes(decision)) {

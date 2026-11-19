@@ -24,6 +24,13 @@ import { isApprovedBarangayName } from '../config/barangays.js';
  * RLS — so the admin gate above is the boundary for these endpoints.
  */
 
+/**
+ * Architectural & governance notes:
+ * - Pipeline: `barangays.routes -> (public | authenticate + authorize(admin)) -> barangays.controller -> barangays.service -> Supabase`
+ * - Official barangay governance (`isApprovedBarangayName`): only approved official barangays
+ *   may be registered or set `'Active'`; official names and municipality assignments are locked
+ *   against modification, while legacy unapproved rows must remain `'Inactive'`.
+ */
 const BARANGAY_SELECT =
   'id, name, status, captain, contact, health_station_name, latitude, longitude, '
   + 'municipality_id, created_at, updated_at, municipality:municipalities(id, name, province)';

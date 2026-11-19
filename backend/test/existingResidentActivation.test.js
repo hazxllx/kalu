@@ -2,8 +2,8 @@
 // health record" flow). These tests force the local file-driver repository (by
 // clearing the Supabase env BEFORE importing) and then stub the repository
 // methods the service calls, so the suite is deterministic and offline. The
-// success path's best-effort getServiceClient().auth.admin call throws 503
-// (unconfigured) and is swallowed by the service — no network is touched.
+// Supabase Auth is configured with a fake client and its admin user lookup is
+// stubbed below, so confirmation checks remain exercised without network I/O.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -12,10 +12,21 @@ process.env.SUPABASE_URL = '';
 process.env.SUPABASE_SERVICE_ROLE_KEY = '';
 
 const repository = (await import('../src/repositories/index.js')).default;
+const env = (await import('../src/config/env.js')).default;
+const { getServiceClient } = await import('../src/config/supabase.js');
 const {
   lookupExistingResident,
   activateExistingResident,
 } = await import('../src/services/registration.service.js');
+
+env.isSupabaseConfigured = true;
+env.supabaseUrl = 'https://registration-activation.invalid';
+env.supabaseServiceRoleKey = 'registration-test-service-key';
+const authAdmin = getServiceClient().auth.admin;
+authAdmin.getUserById = async (id) => ({
+  data: { user: { id, email_confirmed_at: '2026-11-18T00:00:00Z' } },
+  error: null,
+});
 
 const USER = { id: '11111111-1111-4111-8111-111111111111', role: 'resident' };
 

@@ -6,24 +6,33 @@ import asyncHandler from './asyncHandler.js';
 import notImplemented from './notImplemented.js';
 
 /**
- * Builds a standard REST resource router with authentication + role-based
- * authorization already wired in, and handlers that report 501 until the
- * verified schema is connected (see `notImplemented`).
+ * @module utils/resourceRouter
+ * @description Factory for scaffolded REST resource routers with active authentication and RBAC.
  *
- * This enforces the real security pipeline for every resource today —
- *   request -> authenticate -> authorize(roles) -> controller
- * — without faking any database result. When a resource's schema is verified,
- * replace this factory call in the route index with a dedicated
- * routes/controller/service trio for that resource.
+ * Architectural layer:
+ *   `route -> authenticate -> authorize(roles) -> controller (notImplemented) -> errorHandler`
  *
- * @param {string} name  resource label used in the 501 message
- * @param {object} opts
- * @param {string[]} opts.readRoles   roles allowed to list/read
- * @param {string[]} opts.writeRoles  roles allowed to create/update/delete
- *                                     (defaults to readRoles)
+ * Enforces the production KALUSAGAP security pipeline (`authenticate` + `authorize`)
+ * on every CRUD endpoint immediately, while delegating execution to `notImplemented`
+ * (`501 Not Implemented`) until the resource's Supabase tables and repository/service
+ * layers are verified. Once a resource schema is confirmed, replace its `createResourceRouter`
+ * mount in the route index with dedicated `routes -> controller -> service` modules.
+ */
+
+/**
+ * Builds an Express `Router` exposing standard CRUD endpoints (`GET /`, `GET /:id`,
+ * `POST /`, `PUT /:id`, `DELETE /:id`) guarded by JWT authentication and role-based
+ * access control.
+ *
+ * @param {string} name - Resource identifier prefixed onto 501 action labels (e.g., `'immunizations'`).
+ * @param {Object} [opts={}] - Role configuration for read and write operations.
+ * @param {Array<string>} [opts.readRoles=[]] - Roles permitted on `GET /` and `GET /:id`.
+ * @param {Array<string>} [opts.writeRoles] - Roles permitted on `POST /`, `PUT /:id`, and `DELETE /:id` (defaults to `readRoles` when omitted).
+ * @returns {Object} Configured Express `Router` instance.
  */
 export const createResourceRouter = (name, { readRoles = [], writeRoles } = {}) => {
   const router = Router();
+  // Fall back to readRoles when no separate write-role list is provided.
   const write = writeRoles || readRoles;
 
   router.get('/', authenticate, authorize(readRoles), asyncHandler(notImplemented(`${name}.list`)));

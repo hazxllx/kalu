@@ -10,6 +10,7 @@ import HouseholdVerificationReviewDrawer from "@/features/verification/component
 import { useAuth } from "@/context/AuthContext";
 import { householdsApi } from "@/services/api";
 import { ROLES } from "@/lib/brand";
+import { canonicalRiskLevel } from "@/lib/riskLevel";
 import { CheckCircle2, ChevronRight, History, Home } from "lucide-react";
 
 const PAGE_SIZE = 10;
@@ -64,7 +65,7 @@ const toDrawer = (h) => ({
   })),
   collector: h.collectorName || "—",
   collectedOn: h.createdAt ? new Date(h.createdAt).toLocaleDateString() : "—",
-  riskLevel: h.riskLevel || "Low",
+  riskLevel: canonicalRiskLevel(h.riskLevel) || "Unassessed",
   lastUpdated: h.updatedAt ? new Date(h.updatedAt).toLocaleDateString() : "—",
 });
 

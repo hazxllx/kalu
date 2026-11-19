@@ -1,10 +1,10 @@
+import env from '../src/config/env.js';
+import { createClient } from '@supabase/supabase-js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import dotenv from 'dotenv';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(scriptDir, '../.env') });
+assertLocalScriptEnvironment();
 
 const inputPath = process.argv[2];
 const apply = process.argv.includes('--apply');
@@ -56,8 +56,11 @@ if (!apply) {
   process.exit(0);
 }
 
-const { getServiceClient } = await import('../src/config/supabase.js');
-const storage = getServiceClient().storage.from('documents');
+if (!env.isSupabaseConfigured) throw new Error('Missing local Supabase configuration.');
+const storage = createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
+  auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: localFetch },
+}).storage.from('documents');
 let removed = 0;
 for (let offset = 0; offset < storagePaths.length; offset += 100) {
   const batch = storagePaths.slice(offset, offset + 100);

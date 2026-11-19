@@ -14,7 +14,7 @@ import { SCHEMAS } from '../src/config/programFormSchemas.js';
 const STAFF_USER = { id: 'user-1', role: 'health_supervisor', barangay: 'San Isidro', barangayId: 'brgy-1', municipalityId: 'muni-1' };
 
 const makeSupabase = ({ resident, household } = {}) => {
-  const captured = { inserts: [], updates: [] };
+  const captured = { inserts: [], updates: [], filters: [] };
   const builder = (table) => {
     const state = { table, payload: null, mode: null };
     const resolveTerminal = () => {
@@ -30,7 +30,7 @@ const makeSupabase = ({ resident, household } = {}) => {
       insert(row) { state.mode = 'insert'; state.payload = row; captured.inserts.push({ table, row }); return api; },
       update(row) { state.mode = 'update'; state.payload = row; captured.updates.push({ table, row }); return api; },
       delete() { state.mode = 'delete'; return api; },
-      eq() { return api; },
+      eq(column, value) { captured.filters.push([table, column, value]); return api; },
       gte() { return api; },
       lte() { return api; },
       order() { return api; },
@@ -98,11 +98,35 @@ test('ncd-risk: invalid enum value is rejected (422)', async () => {
 });
 
 test('resident outside caller barangay scope is not found', async () => {
-  const supabase = makeSupabase({ resident: { ...RESIDENT, barangay: 'Other Barangay' } });
+  const supabase = makeSupabase({ resident: { ...RESIDENT, barangay_id: 'brgy-2' } });
   await assert.rejects(
     () => service.create({ user: STAFF_USER, kind: 'ncd-risk', supabase, payload: { residentId: 'res-1', se_status: 'NHTS' } }),
     (err) => err.statusCode === 404,
   );
+});
+
+test('program form reads scope HS by barangay and PHN and MHO by municipality', async () => {
+  for (const role of ['health_supervisor', 'phn', 'mho']) {
+    const user = { ...STAFF_USER, role };
+    const supabase = makeSupabase();
+    await service.list({ user, kind: 'ncd-risk', supabase });
+    const filters = [['ncd_risk_assessments', 'municipality_id', 'muni-1']];
+    if (role === 'health_supervisor') filters.push(['ncd_risk_assessments', 'barangay_id', 'brgy-1']);
+    assert.deepEqual(supabase.__captured.filters, filters);
+    await assert.rejects(service.list({ user: { ...user, municipalityId: null }, kind: 'ncd-risk', supabase }), { statusCode: 403 });
+  }
+});
+
+test('PHN program form writes reject foreign and unassigned resident records', async () => {
+  const user = { ...STAFF_USER, role: 'phn' };
+  const payload = { residentId: RESIDENT.id };
+  for (const municipality_id of ['muni-2', null]) {
+    const supabase = makeSupabase({ resident: { ...RESIDENT, municipality_id } });
+    await assert.rejects(service.create({ user, kind: 'ncd-risk', payload, supabase }), { statusCode: 404 });
+    assert.deepEqual(supabase.__captured.inserts, []);
+  }
+  const supabase = makeSupabase({ resident: { ...RESIDENT, barangay_id: 'brgy-2' } });
+  assert.equal((await service.create({ user, kind: 'ncd-risk', payload, supabase })).id, 'new-id');
 });
 
 test('non-staff role cannot create program records', async () => {

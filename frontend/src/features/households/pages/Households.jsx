@@ -31,7 +31,10 @@ import {
   HeartPulse,
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
+import { canonicalRiskLevel } from "@/lib/riskLevel";
 import MemberHealthModal from "../components/MemberHealthModal";
+import HouseholdDialog from "../components/HouseholdDialog";
+import * as Popover from "@radix-ui/react-popover";
 import {
   getHouseholdOffline,
   listHouseholdsOffline,
@@ -60,7 +63,7 @@ const COLUMNS = [
   { key: "collector", label: "Assigned Data Collector", filter: "text", placeholder: "Filter collector..." },
   { key: "verification", label: "Verification", filter: "list", options: ["Pending Verification", "Verified", "Returned for Correction"] },
   { key: "approval", label: "Approval Status", filter: "list", options: APPROVAL_STATUSES },
-  { key: "risk", label: "Risk Level", filter: "list", options: ["Low", "Moderate", "High"] },
+  { key: "risk", label: "Risk Level", filter: "list", options: ["Low", "Moderate", "High", "Unassessed"] },
 ];
 
 const EMPTY_FILTERS = {
@@ -113,39 +116,33 @@ function AccountBadge({ status }) {
 /** Column header filter — text search or a dropdown of status options. */
 function ColumnFilter({ type = "list", options = [], value, onChange, placeholder, columnLabel }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
 
   const activeCount = type === "list" ? value.length : value ? 1 : 0;
 
   return (
-    <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
+    <div onClick={(e) => e.stopPropagation()}>
+      <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex h-6 w-6 items-center justify-center rounded transition-colors ${
+        className={`flex h-11 w-11 items-center justify-center rounded transition-colors ${
           activeCount > 0
             ? "bg-brand-blue/10 text-brand-blue"
             : "text-brand-gray/70 hover:bg-brand-bg hover:text-brand-ink"
         }`}
         aria-label={`Filter ${columnLabel}`}
+        aria-expanded={open}
         title={`Filter ${columnLabel}`}
       >
         <Filter className="h-3 w-3" />
       </button>
-      {open && (
-        <div className="absolute right-0 z-30 mt-1.5 w-48 rounded-btn border border-brand-border bg-white p-2 shadow-float">
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={6} collisionPadding={12} aria-label={`Filter ${columnLabel}`} className="z-40 max-h-[var(--radix-popover-content-available-height)] w-48 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-btn border border-brand-border bg-white p-2 shadow-float">
           {type === "text" ? (
             <input
               autoFocus
+              aria-label={`Filter ${columnLabel}`}
               value={value}
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
@@ -157,7 +154,7 @@ function ColumnFilter({ type = "list", options = [], value, onChange, placeholde
                 {options.map((o) => (
                   <label
                     key={o}
-                    className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-brand-ink hover:bg-brand-bg"
+                    className="flex min-h-11 cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-brand-ink hover:bg-brand-bg"
                   >
                     <input
                       type="checkbox"
@@ -182,14 +179,15 @@ function ColumnFilter({ type = "list", options = [], value, onChange, placeholde
               )}
             </>
           )}
-        </div>
-      )}
+        </Popover.Content>
+      </Popover.Portal>
+      </Popover.Root>
     </div>
   );
 }
 
 const detailCell = (label, value) => (
-  <div>
+  <div className="min-w-0 [overflow-wrap:anywhere]">
     <p className="text-[11px] uppercase tracking-wide text-brand-gray">{label}</p>
     <p className="mt-0.5 text-sm font-medium text-brand-ink">{value || "—"}</p>
   </div>
@@ -207,6 +205,7 @@ export default function Households() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const isBhw = user?.role === "bhw";
   const { lastSyncedAt } = useSyncStatus();
   const { can, canAny } = usePermissions();
   const canCreateHousehold = can("households.create");
@@ -223,7 +222,16 @@ export default function Households() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [toast, setToast] = useState(null);
-  const [view, setView] = useState("table");
+  const [view, setView] = useState(null);
+  const [wide, setWide] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+  // BHWs get cards on mobile/tablet until they explicitly choose a view.
+  const showTable = view ? view === "table" : !isBhw || wide;
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => setWide(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState({ key: "id", dir: "asc" });
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -382,7 +390,7 @@ export default function Households() {
       if (filters.approval.length && !filters.approval.includes(h.approval)) return false;
       const verificationStatus = h.verificationStatus || "Pending Verification";
       if (filters.verification.length && !filters.verification.includes(verificationStatus)) return false;
-      if (filters.risk.length && !filters.risk.includes(h.riskLevel || "Low")) return false;
+      if (filters.risk.length && !filters.risk.includes(canonicalRiskLevel(h.riskLevel) || "Unassessed")) return false;
       return true;
     });
 
@@ -567,11 +575,11 @@ export default function Households() {
         className="cursor-pointer border-b border-brand-border transition-colors last:border-0 hover:bg-brand-bg/50"
       >
         <td className="whitespace-nowrap px-4 py-3 font-semibold text-brand-ink">{h.id}</td>
-        <td className="whitespace-nowrap px-4 py-3 font-medium text-brand-ink">{h.head}</td>
+        <td className={`px-4 py-3 font-medium text-brand-ink ${isBhw ? "min-w-40 max-w-60 [overflow-wrap:anywhere]" : "whitespace-nowrap"}`}>{h.head}</td>
         <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{h.purok}</td>
         <td className="px-4 py-3 text-brand-gray">{h.streetAddress}</td>
         <td className="px-4 py-3"><HHBadge value={h.hhStatus} /></td>
-        <td className="whitespace-nowrap px-4 py-3 text-brand-gray">{h.collector || "—"}</td>
+        <td className={`px-4 py-3 text-brand-gray ${isBhw ? "max-w-60 [overflow-wrap:anywhere]" : "whitespace-nowrap"}`}>{h.collector || "—"}</td>
         <td className="px-4 py-3">
           <div className="flex flex-col items-start gap-1">
             <span
@@ -590,7 +598,7 @@ export default function Households() {
         </td>
         <td className="px-4 py-3"><HHBadge value={h.approval} /></td>
         <td className="whitespace-nowrap px-4 py-3">
-          <HHBadge value={h.riskLevel || "Low"} label={`${h.riskLevel || "Low"} Risk`} />
+          <HHBadge risk value={h.riskLevel} />
         </td>
         {user?.role === "bhw" && (
           <td className="whitespace-nowrap px-4 py-3">
@@ -606,7 +614,7 @@ export default function Households() {
                   event.stopPropagation();
                   openDetail(h.id);
                 }}
-                className="font-medium text-brand-blue hover:underline"
+                className="min-h-11 font-medium text-brand-blue hover:underline"
               >
                 View details
               </button>
@@ -626,7 +634,7 @@ export default function Households() {
         action={canCreateHousehold ? (
           <button
             onClick={openAddPage}
-            className="flex items-center gap-2 bg-brand-blue px-5 py-2.5 text-sm font-medium text-white rounded-btn transition-colors hover:bg-brand-dark"
+            className="flex min-h-11 items-center gap-2 bg-brand-blue px-5 py-2.5 text-sm font-medium text-white rounded-btn transition-colors hover:bg-brand-dark"
           >
             <Plus className="h-4 w-4" /> Add Household
           </button>
@@ -635,7 +643,7 @@ export default function Households() {
 
       {/* Toast Notification */}
       {toast && (
-        <div className="fixed bottom-4 right-4 z-50 flex animate-in slide-in-from-bottom-2 items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">
+        <div role="status" className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100%-2rem)] animate-in slide-in-from-bottom-2 items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">
           <RefreshCw className="h-4 w-4 text-brand-green" />
           <span className="text-sm text-white">{toast}</span>
         </div>
@@ -647,6 +655,8 @@ export default function Households() {
           <div className="flex w-full items-center gap-2 rounded-input border border-brand-border bg-brand-bg px-3 py-2.5 md:max-w-sm">
             <Search className="h-4 w-4 text-brand-gray" />
             <input
+              type="search"
+              aria-label="Search households"
               value={search}
               onChange={(e) => {
                 searchChangePendingRef.current = true;
@@ -654,10 +664,10 @@ export default function Households() {
                 setSearch(e.target.value);
               }}
               placeholder="Search households, heads, collectors..."
-              className="w-full bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/50"
+              className="w-full min-w-0 bg-transparent text-sm text-brand-ink outline-none placeholder:text-brand-gray/50"
             />
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-brand-gray">
               {visible.length} of {households.length} households
               {householdTotal > households.length && ` · ${householdTotal} total`}
@@ -666,31 +676,22 @@ export default function Households() {
             {activeFilterCount > 0 && (
               <button
                 onClick={() => {
+                  searchChangePendingRef.current = Boolean(search);
                   setFilters(EMPTY_FILTERS);
                   setSearch("");
                 }}
-                className="text-sm font-medium text-brand-blue hover:underline"
+                className="min-h-11 text-sm font-medium text-brand-blue hover:underline"
               >
                 Clear all
               </button>
             )}
-            <div className="flex overflow-hidden rounded-btn border border-brand-border">
-              <button
-                onClick={() => setView("table")}
-                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-                  view === "table" ? "bg-brand-blue text-white" : "bg-white text-brand-gray hover:bg-brand-bg"
-                }`}
-              >
-                <Table2 className="h-3.5 w-3.5" /> Table
-              </button>
-              <button
-                onClick={() => setView("cards")}
-                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-                  view === "cards" ? "bg-brand-blue text-white" : "bg-white text-brand-gray hover:bg-brand-bg"
-                }`}
-              >
-                <LayoutGrid className="h-3.5 w-3.5" /> Cards
-              </button>
+            <div role="group" aria-label="Household view" className="flex overflow-hidden rounded-btn border border-brand-border">
+                  <button type="button" aria-pressed={showTable} onClick={() => setView("table")} className={`flex min-h-11 items-center gap-1.5 px-3 text-xs font-medium ${showTable ? "bg-brand-blue text-white" : "bg-white text-brand-gray hover:bg-brand-bg"}`}>
+                    <Table2 className="h-3.5 w-3.5" /> Table
+                  </button>
+                  <button type="button" aria-pressed={!showTable} onClick={() => setView("cards")} className={`flex min-h-11 items-center gap-1.5 px-3 text-xs font-medium ${!showTable ? "bg-brand-blue text-white" : "bg-white text-brand-gray hover:bg-brand-bg"}`}>
+                    <LayoutGrid className="h-3.5 w-3.5" /> Cards
+                  </button>
             </div>
           </div>
         </div>
@@ -743,6 +744,7 @@ export default function Households() {
             action={
               <button
                 onClick={() => {
+                  searchChangePendingRef.current = Boolean(search);
                   setFilters(EMPTY_FILTERS);
                   setSearch("");
                 }}
@@ -755,8 +757,8 @@ export default function Households() {
         </Card>
       )}
 
-      {!loading && visible.length > 0 && view === "table" && (
-        <Card className="overflow-hidden">
+      {!loading && visible.length > 0 && showTable && (
+        <Card className="min-w-0">
           {user?.role === "bhw" && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-border bg-brand-bg/60 px-4 py-3">
               <div>
@@ -774,7 +776,7 @@ export default function Households() {
               <span className="text-xs text-brand-gray">Expand a Purok row to view its households</span>
             </div>
           )}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" role="region" aria-label="Households table" tabIndex={isBhw ? 0 : undefined}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-brand-border bg-brand-bg text-left">
@@ -786,7 +788,7 @@ export default function Households() {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => toggleSort(c.key)}
-                          className="flex items-center gap-1 transition-colors hover:text-brand-ink"
+                          className="flex min-h-11 items-center gap-1 transition-colors hover:text-brand-ink"
                           title={`Sort by ${c.label}`}
                         >
                           {c.label}
@@ -834,7 +836,7 @@ export default function Households() {
                               return next;
                             })}
                             aria-expanded={!collapsed}
-                            className="flex w-full items-center justify-between gap-3 text-left"
+                            className="flex min-h-11 w-full items-center justify-between gap-3 text-left"
                           >
                             <span className="flex items-center gap-2 font-semibold text-brand-ink">
                               <ChevronDown className={`h-4 w-4 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
@@ -857,7 +859,7 @@ export default function Households() {
         </Card>
       )}
 
-      {!loading && visible.length > 0 && view === "cards" && (
+      {!loading && visible.length > 0 && !showTable && (
         <div className="space-y-6">
           {user?.role === "bhw" && (
             <Card className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
@@ -877,34 +879,35 @@ export default function Households() {
               <section key={zoneName || "all-households"}>
                 {user?.role === "bhw" && (
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-base font-semibold text-brand-ink">{zoneName}</h2>
+                    <h2 className="min-w-0 text-base font-semibold text-brand-ink [overflow-wrap:anywhere]">{zoneName}</h2>
                     <p className="text-xs text-brand-gray">
                       {summary ? `${summary.total} total · ${summary.visited} visited · ${summary.notVisited} no visits` : `${rows.length} households shown`}
                     </p>
                   </div>
                 )}
-                <div className="grid gap-5 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                   {rows.map((raw, i) => {
                     const h = renderRow(raw);
                     const monitoring = monitoredHouseholds.get(h.id);
                     return (
                       <motion.div
                         key={h.id}
+                        className="min-w-0"
                         initial={{ opacity: 0, y: 12 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.06 }}
                       >
-                <Card className="h-full p-6">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
+                <Card className="h-full p-4 [overflow-wrap:anywhere] sm:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 basis-full xl:basis-0 xl:flex-1">
                       <p className="text-xs text-brand-gray">{h.id}</p>
                       <h3 className="mt-0.5 font-semibold text-brand-ink">{h.head}</h3>
                       <p className="mt-0.5 text-xs text-brand-gray">
                         {h.purok} · {h.streetAddress}
                       </p>
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <HHBadge value={h.riskLevel || "Low"} label={`${h.riskLevel || "Low"} Risk`} />
+                    <div className="flex min-w-0 flex-wrap items-start gap-2 xl:flex-col xl:items-end">
+                      <HHBadge risk value={h.riskLevel} />
                       <HHBadge value={h.hhStatus} />
                       <span
                         title={h.verifiedBy ? "Reviewed by " + h.verifiedBy : "Not yet reviewed"}
@@ -915,7 +918,7 @@ export default function Households() {
                       </span>
                     </div>
                   </div>
-                  <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+                  <div className="mt-5 grid grid-cols-2 gap-3 text-sm [&_svg]:shrink-0">
                     <p className="flex items-center gap-2 text-brand-gray">
                       <Users className="h-4 w-4 text-brand-blue" /> {h.memberCount ?? 0} members
                     </p>
@@ -951,9 +954,10 @@ export default function Households() {
                       </span>
                     ))}
                   </div>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
                   <button
                     onClick={() => openDetail(h.id)}
-                    className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                    className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
                   >
                     <Eye className="h-4 w-4" /> View details
                   </button>
@@ -961,11 +965,12 @@ export default function Households() {
                     <button
                       type="button"
                       onClick={() => navigate(`${location.pathname.replace(/\/+$/, "")}/${h.id}`)}
-                      className="ml-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                      className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
                     >
                       <ClipboardList className="h-4 w-4" /> Visit history
                     </button>
                   )}
+                  </div>
                 </Card>
               </motion.div>
                     );
@@ -995,9 +1000,14 @@ export default function Households() {
 
       {/* Household detail modal — info + member management */}
       {detailId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeModal}>
-          <Card className="max-h-[90vh] w-full max-w-2xl overflow-y-auto">
-            <div onClick={(e) => e.stopPropagation()} className="p-6">
+        <HouseholdDialog label="Household details" onClose={closeModal}>
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-4 py-2 sm:px-6">
+              <h2 className="text-base font-semibold text-brand-ink">Household details</h2>
+              <button type="button" onClick={closeModal} className="grid h-11 w-11 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg" aria-label="Close household details">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="min-h-0 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere] sm:p-6">
               {detailLoading && <SkeletonList rows={5} />}
               {detailError && (
                 <ErrorState
@@ -1008,22 +1018,22 @@ export default function Households() {
               )}
               {detail && (
                 <>
-                  <div className="mb-5 flex items-start justify-between gap-3">
-                    <div>
+                  <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                       <p className="text-xs text-brand-gray">{detail.id}</p>
                       <h3 className="text-lg font-semibold text-brand-ink">{detail.headName}</h3>
                       <p className="mt-0.5 text-xs text-brand-gray">
                         {detail.purok} · {detail.streetAddress} · Brgy. {detail.barangay}
                       </p>
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <HHBadge value={detail.riskLevel || "Low"} label={`${detail.riskLevel || "Low"} Risk`} />
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-col sm:items-end">
+                      <HHBadge risk value={detail.riskLevel} />
                       <HHBadge value={detail.hhStatus} />
                       {canAny(["households.create", "households.verify"]) && !detail.localId && (
                         <button
                           type="button"
                           onClick={editHousehold}
-                          className="text-xs font-medium text-brand-blue hover:underline"
+                          className="min-h-11 text-sm font-medium text-brand-blue hover:underline"
                         >
                           Edit household profile
                         </button>
@@ -1032,18 +1042,15 @@ export default function Households() {
                         <button
                           type="button"
                           onClick={() => navigate(`${location.pathname.replace(/\/+$/, "")}/${detail.id}`)}
-                          className="text-xs font-medium text-brand-blue hover:underline"
+                          className="min-h-11 text-sm font-medium text-brand-blue hover:underline"
                         >
                           Visit history &amp; full profile
                         </button>
                       )}
-                      <button onClick={closeModal} className="text-brand-gray hover:text-brand-ink" aria-label="Close">
-                        <X className="h-5 w-5" />
-                      </button>
                     </div>
                   </div>
 
-                  <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 sm:p-5">
                     <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">
                       Household Information
                     </p>
@@ -1072,8 +1079,8 @@ export default function Households() {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                    <div className="mb-3 flex items-center justify-between">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-5">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">
                         Household Members ({detail.members?.length ?? 0})
                       </p>
@@ -1083,7 +1090,7 @@ export default function Households() {
                             setShowAddMember((v) => !v);
                             setMemberError(null);
                           }}
-                          className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
+                          className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-brand-blue hover:underline"
                         >
                           <UserPlus className="h-4 w-4" /> Add member
                         </button>
@@ -1094,10 +1101,11 @@ export default function Households() {
                       <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
                         <div ref={memberSearchRef} className="relative grid grid-cols-1 gap-3 sm:grid-cols-2">
                           <div className="sm:col-span-2">
-                            <label className="text-sm font-medium text-brand-ink">
+                            <label htmlFor="household-detail-member" className="text-sm font-medium text-brand-ink">
                               Resident (search to link an existing record)
                             </label>
                             <input
+                              id="household-detail-member"
                               value={memberForm.name}
                               onChange={(e) => searchResidents(e.target.value)}
                               placeholder="Search residents by name…"
@@ -1107,12 +1115,12 @@ export default function Households() {
                               <p className="mt-1 text-xs text-brand-gray">Searching…</p>
                             )}
                             {residentResults.length > 0 && (
-                              <div className="absolute z-20 mt-1 w-full rounded-btn border border-brand-border bg-white shadow-float">
+                              <div className="mt-1 max-h-48 overflow-y-auto rounded-btn border border-brand-border bg-white">
                                 {residentResults.map((r) => (
                                   <button
                                     key={r.id}
                                     onClick={() => pickResident(r)}
-                                    className="block w-full px-3.5 py-2.5 text-left text-sm hover:bg-brand-bg"
+                                    className="block min-h-11 w-full px-3.5 py-2.5 text-left text-sm hover:bg-brand-bg"
                                   >
                                     <span className="font-medium text-brand-ink">
                                       {[r.firstName, r.middleName, r.lastName].filter(Boolean).join(" ")}
@@ -1145,6 +1153,7 @@ export default function Households() {
                             <label className="text-sm font-medium text-brand-ink">Sex *</label>
                             <ButtonSelectGroup
                               ariaLabel="Sex"
+                              variant="compact"
                               options={["Male", "Female"]}
                               value={memberForm.sex}
                               onChange={(v) => setMemberForm((p) => ({ ...p, sex: v }))}
@@ -1175,7 +1184,7 @@ export default function Households() {
                           {memberError && (
                             <p className="text-xs font-medium text-brand-danger sm:col-span-2">{memberError}</p>
                           )}
-                          <div className="flex justify-end gap-2 sm:col-span-2">
+                          <div className="flex flex-wrap justify-end gap-2 sm:col-span-2 [&>button]:min-h-11">
                             <button
                               onClick={() => setShowAddMember(false)}
                               className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg"
@@ -1197,8 +1206,8 @@ export default function Households() {
                     {detail.members && detail.members.length > 0 ? (
                       <div className="divide-y divide-slate-100">
                         {detail.members.map((m) => (
-                          <div key={m.id} className="flex items-center justify-between gap-3 py-2.5">
-                            <div className="min-w-0">
+                          <div key={m.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2.5">
+                            <div className="min-w-0 flex-1 basis-48">
                               <p className="text-sm font-medium text-brand-ink">
                                 {m.name}
                                 {m.isHead && <span className="ml-2 text-[10px] font-bold uppercase text-brand-blue">Head</span>}
@@ -1212,7 +1221,7 @@ export default function Households() {
                                   .join(" · ")}
                               </p>
                             </div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [&>button]:min-h-11">
                               <AccountBadge status={m.accountStatus} />
                               {canViewMemberHealth && (
                                 <button
@@ -1248,8 +1257,7 @@ export default function Households() {
                 </>
               )}
             </div>
-          </Card>
-        </div>
+        </HouseholdDialog>
       )}
 
       {/* Member Health Profile — opened per household member from the detail modal */}

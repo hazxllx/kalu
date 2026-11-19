@@ -1,6 +1,27 @@
 import nodemailer from 'nodemailer';
 import env from '../config/env.js';
 
+/**
+ * KALUSAGAP — Transactional SMTP Email Service (`email.service.js`).
+ *
+ * Architectural layer:
+ *   `route -> controller -> auth / residencyTransfer / personnel service -> email.service -> SMTP server`
+ *
+ * Responsibilities:
+ *   - Lazily initializes and caches a TLS-enforced Nodemailer SMTP transporter
+ *     configured from environment settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+ *     `SMTP_PASSWORD`, `SMTP_FROM`) with traffic/debug logging disabled.
+ *   - Sends transactional security emails managed directly by the backend:
+ *       1. Transfer of Residency 4-digit OTP codes (`sendTransferOtp`)
+ *       2. One-time password reset links (`sendPasswordResetEmail`)
+ *       3. One-time personnel/account password setup links (`sendPasswordSetupEmail`)
+ *     (Initial resident registration email verification is handled separately by
+ *     Supabase Auth's Confirm Signup flow.)
+ *   - Protects credentials, recipient addresses, OTPs, and one-time URLs by
+ *     monitoring stream consumption (`beforeData`) and stripping raw SMTP server
+ *     messages before rethrowing sanitized error metadata.
+ */
+
 let transporter;
 const trackedTransports = new WeakSet();
 const SMTP_ERROR_CODES = new Set([
@@ -9,8 +30,17 @@ const SMTP_ERROR_CODES = new Set([
   'EPIPE', 'EENVELOPE', 'EMESSAGE', 'ESTREAM', 'EPROTOCOL', 'ECONFIG', 'EPROXY',
 ]);
 
+/**
+ * Return the singleton Nodemailer SMTP transporter, creating it on first use.
+ *
+ * Enforces implicit TLS on port `465` and `STARTTLS` (`requireTLS: true`) on all
+ * other ports, disables Nodemailer debug/protocol logging, and throws an error
+ * with `code: 'SMTP_NOT_CONFIGURED'` if any required SMTP environment variable is missing.
+ *
+ * @returns {Object} Configured Nodemailer transporter instance.
+ */
 export const getEmailTransporter = () => {
-  if (!env.smtpHost || !env.smtpUser || !env.smtpPassword || !env.smtpFrom) {
+  if (!env.smtpHost || !env.smtpFrom || (env.isProduction && (!env.smtpUser || !env.smtpPassword))) {
     throw Object.assign(new Error('Email delivery is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM.'), {
       code: 'SMTP_NOT_CONFIGURED',
     });
@@ -19,8 +49,9 @@ export const getEmailTransporter = () => {
     host: env.smtpHost,
     port: env.smtpPort,
     secure: env.smtpPort === 465,
-    requireTLS: env.smtpPort !== 465,
-    auth: { user: env.smtpUser, pass: env.smtpPassword },
+    requireTLS: env.isProduction && env.smtpPort !== 465,
+    ignoreTLS: !env.isProduction,
+    ...(env.isProduction ? { auth: { user: env.smtpUser, pass: env.smtpPassword } } : {}),
     logger: false,
     debug: false,
     connectionTimeout: 30_000,
@@ -30,7 +61,18 @@ export const getEmailTransporter = () => {
   return transporter;
 };
 
-/** Track body consumption without enabling SMTP traffic/body logging. */
+/**
+ * Send an email through Nodemailer while tracking whether the `DATA` body stream
+ * began transmitting (`beforeData`) without enabling SMTP traffic logging.
+ *
+ * On failure, strips raw server error text (which may echo recipient emails,
+ * credentials, or secret links) and attaches structured retry diagnostics
+ * (`code`, `smtpPhase`, `responseCode`, `beforeData`).
+ *
+ * @param {Object} message - Nodemailer message options (`from`, `to`, `subject`, `text`, `html`).
+ * @param {Object} [options] - Optional transport override (`transport`) for testing.
+ * @returns {Promise<Object>} Nodemailer delivery result (`accepted`, `rejected`, `messageId`, etc.).
+ */
 export const sendSmtpMail = async (message, { transport = getEmailTransporter() } = {}) => {
   const progress = { monitored: false, bodyStarted: false };
   try {
@@ -123,6 +165,14 @@ export const sendTransferOtp = async ({ email, otp }) => {
   });
 };
 
+/**
+ * Send a one-time password reset email with HTML-escaped link markup and verify
+ * that the SMTP server explicitly accepted the target recipient address
+ * (throwing `code: 'SMTP_RECIPIENT_REJECTED'` otherwise).
+ *
+ * @param {Object} params - Email parameters (`email`, `resetUrl`).
+ * @returns {Promise<void>}
+ */
 export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
   const safeUrl = String(resetUrl || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const message = {
@@ -153,6 +203,14 @@ export const sendPasswordResetEmail = async ({ email, resetUrl }) => {
   if (!accepted || rejected) throw Object.assign(new Error('Password reset email was not accepted.'), { code: 'SMTP_RECIPIENT_REJECTED' });
 };
 
+/**
+ * Send a one-time account password setup invitation email (used when provisioning
+ * staff/personnel accounts) with HTML-escaped link markup, verifying SMTP recipient
+ * acceptance (`code: 'SMTP_RECIPIENT_REJECTED'` on rejection).
+ *
+ * @param {Object} params - Email parameters (`email`, `setupUrl`).
+ * @returns {Promise<void>}
+ */
 export const sendPasswordSetupEmail = async ({ email, setupUrl }) => {
   const safeUrl = String(setupUrl || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const message = {

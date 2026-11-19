@@ -10,20 +10,27 @@ import requestLogger from './middleware/requestLogger.js';
 import apiRoutes from './routes/index.js';
 
 /**
- * Express application wiring.
+ * KALUSAGAP Express application assembly.
  *
- * Intended request flow:  route -> authenticate -> authorize -> controller -> service -> Supabase/PostgreSQL
+ * Intended request flow:
+ *   route -> authenticate -> authorize -> controller -> service -> repository/Supabase
  *
- * `app.js` only assembles the app; `server.js` starts it. Keeping them apart
- * means tests can import the app without opening a port.
+ * `app.js` only wires middleware and mounts `/api` routes; `server.js` binds
+ * the HTTP port and background workers. Keeping them separate allows automated
+ * tests to import the Express app without opening a network listener.
  *
- * Authentication (`middleware/authenticate.js`) and role-based authorization
- * (`middleware/authorize.js`) are applied per-route in `routes/`. `/api/health`
- * stays public; `/api/auth/*` uses Supabase Auth; every other group is
- * protected and role-scoped.
+ * Authentication (`middleware/authenticate.js`) and role/station/barangay
+ * authorization (`middleware/authorize.js`, `middleware/authorizeStation.js`)
+ * are applied per-route in `routes/`. `/api/health` stays public; `/api/auth`
+ * endpoints coordinate with Supabase Auth; all clinical, community, and admin
+ * route groups require a verified session and least-privilege role checks.
  */
 const app = express();
 
+// Hide framework fingerprint, honor reverse-proxy X-Forwarded-For hops (per
+// env.trustProxy) so rate limiting and audit logs see real client IPs, and
+// apply Helmet security headers while permitting cross-origin blob/asset reads
+// from allowlisted frontend origins.
 app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxy);
 app.use(helmet({ crossOriginResourcePolicy: false }));
@@ -31,6 +38,8 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 // CORS runs before body parsing, rate limiting, routing, and authentication so
 // browser preflight requests complete without being challenged for a token.
 // Credentialed requests use an exact-origin allowlist, never a wildcard.
+// Custom headers support safe mutation replay (`Idempotency-Key`), optimistic
+// concurrency (`If-Match`), and offline queue synchronization (`X-Kalusagap-Sync`).
 app.use(cors({
   origin: env.clientUrls,
   credentials: true,
@@ -40,10 +49,14 @@ app.use(cors({
   optionsSuccessStatus: 204,
 }));
 
+// Enforce payload size caps before route handlers parse JSON or form bodies,
+// then log every incoming request with correlation metadata.
 app.use(express.json({ limit: env.requestBodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: env.requestBodyLimit }));
 app.use(requestLogger);
 
+// Global baseline rate limiter across all `/api` endpoints; sensitive auth and
+// upload routes layer stricter per-route limiters on top of this ceiling.
 const apiLimiter = rateLimit({
   windowMs: env.apiRateLimitWindowMs,
   max: env.apiRateLimitMaxRequests,
@@ -53,7 +66,7 @@ const apiLimiter = rateLimit({
 app.use('/api', apiLimiter);
 app.use('/api', apiRoutes);
 
-// Unknown routes and errors are handled last, in that order.
+// Unknown routes and uncaught operational/programming errors are handled last, in that order.
 app.use(notFoundHandler);
 app.use(errorHandler);
 

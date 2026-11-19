@@ -299,7 +299,7 @@ function RegisterPregnancyForm({
                     onChange={(e) => set("lmp")(e.target.value)}
                     className={inputCls()}
                   />
-                  {errors.weight && <p className="mt-1 text-xs text-brand-danger">{errors.weight}</p>}
+                  {errors.lmp && <p className="mt-1 text-xs text-brand-danger">{errors.lmp}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -329,7 +329,7 @@ function RegisterPregnancyForm({
                     placeholder="Total pregnancies"
                     className={inputCls()}
                   />
-                  {errors.height && <p className="mt-1 text-xs text-brand-danger">{errors.height}</p>}
+                  {errors.gravida && <p className="mt-1 text-xs text-brand-danger">{errors.gravida}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">Para (P)</label>

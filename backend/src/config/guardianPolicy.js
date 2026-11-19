@@ -67,6 +67,18 @@ export const GUARDIAN_ACCESS_NOT_GRANTED = true;
 /** Resident-facing consent wording flag (no legal effect until confirmed). */
 export const GUARDIAN_CONSENT_FLAG_DEFAULT = false;
 
+/**
+ * Determine whether a resident or applicant is legally a minor (< 18 years old)
+ * as of `now` based on a `YYYY-MM-DD` (or `Date`) birth date.
+ *
+ * Returns `false` when `birthDate` is missing, malformed, or in the future
+ * (`age === null` or `age < 0`), ensuring invalid dates never silently trigger
+ * minor-only policy branches.
+ *
+ * @param {string|Date} birthDate
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
 export const isMinorAge = (birthDate, now = new Date()) => {
   const age = ageFromDateOnly(birthDate, now);
   return age !== null && age >= 0 && age < MINOR_AGE_THRESHOLD;

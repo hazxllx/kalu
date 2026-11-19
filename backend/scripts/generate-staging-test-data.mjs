@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate synthetic test data for KALUSAGAP staging environment.
+ * Generate synthetic test data for the local KALUSAGAP environment.
  * 
  * Creates:
  * - 1000+ residents
@@ -15,15 +15,11 @@
  *   node scripts/generate-staging-test-data.mjs --apply
  */
 
+import '../src/config/env.js';
 import { createClient } from '@supabase/supabase-js';
-import { config } from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-config({ path: join(__dirname, '..', '.env') });
+assertLocalScriptEnvironment();
 
 const BARANGAYS = ['San Antonio', 'San Isidro', 'Old San Roque'];
 const FIRST_NAMES = [
@@ -86,7 +82,7 @@ async function main() {
 
   if (!apply) {
     console.log('');
-    console.log('KALUSAGAP Staging Test Data Generator');
+    console.log('KALUSAGAP Local Test Data Generator');
     console.log('======================================');
     console.log('');
     console.log('This script will generate synthetic test data:');
@@ -108,12 +104,13 @@ async function main() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !key) {
-    console.error('Error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in backend/.env');
+    console.error('Error: Set the local SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
     process.exit(1);
   }
 
   const supabase = createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false }
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: localFetch },
   });
 
   console.log('Starting test data generation...');

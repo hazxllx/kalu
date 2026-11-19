@@ -4,9 +4,17 @@ import ApiError from '../utils/apiError.js';
 import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE } from '../validators/documents.validators.js';
 
 /**
- * Multer upload for resident document endpoints. Keeps the file in memory
- * (no disk persistence) and converts it to a Node File-like object on
- * `req.file`, preserving the original filename, MIME type and byte length.
+ * @module middleware/uploadDocumentFile
+ *
+ * Resident identification and supporting document upload middleware for KALUSAGAP.
+ * Position in request pipeline:
+ *   `route -> [authenticate -> authorize] -> uploadDocumentFile / uploadGovernmentIdPairFiles / uploadResidentDocumentFiles -> controller -> service -> Supabase Storage`
+ *
+ * Buffers multipart uploads strictly in memory (`multer.memoryStorage()`, no disk
+ * persistence), enforces `ALLOWED_MIME_TYPES` (PDF, JPG, PNG) and `MAX_FILE_SIZE`
+ * (10 MB), verifies leading binary magic bytes to reject spoofed `Content-Type`
+ * headers, and converts validated uploads into standard Node `File` instances on
+ * `req.file` and/or `req.governmentIdPair`.
  */
 
 const upload = multer({
@@ -21,6 +29,13 @@ const upload = multer({
   limits: { fileSize: MAX_FILE_SIZE },
 });
 
+/**
+ * Wraps a Multer in-memory file descriptor into a Web-standard `File` instance,
+ * preserving the original filename (with extension fallback) and MIME type.
+ *
+ * @param {Object} multerFile - Multer file object containing `buffer`, `originalname`, and `mimetype`.
+ * @returns {File} Node `File` object ready for service-layer screening and Supabase Storage upload.
+ */
 const toNodeFile = (multerFile) => {
   const { buffer, originalname, mimetype } = multerFile;
   const ext = path.extname(originalname).toLowerCase();
@@ -29,6 +44,14 @@ const toNodeFile = (multerFile) => {
   return file;
 };
 
+/**
+ * Verifies that the uploaded buffer's leading magic bytes match its declared MIME
+ * type (`%PDF` for PDF, 8-byte PNG signature, or `FF D8 FF` SOI marker for JPEG),
+ * preventing renamed executables or corrupted payloads from passing MIME checks.
+ *
+ * @param {Object} file - Multer file object with `buffer` and `mimetype`.
+ * @returns {boolean} `true` when binary header matches an approved document format.
+ */
 const hasExpectedSignature = (file) => {
   const bytes = file.buffer;
   if (file.mimetype === 'application/pdf') return bytes.subarray(0, 4).toString() === '%PDF';
@@ -37,6 +60,15 @@ const hasExpectedSignature = (file) => {
   return false;
 };
 
+/**
+ * Single-document upload middleware reading multipart field `'file'`.
+ * Maps Multer size/field errors to 413/400 `ApiError`, verifies binary magic
+ * bytes (415 on mismatch), and attaches a Node `File` to `req.file`.
+ *
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @param {Function} next - Express next callback.
+ */
 export const uploadDocumentFile = (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
@@ -63,6 +95,16 @@ export const uploadDocumentFile = (req, res, next) => {
   });
 };
 
+/**
+ * Paired government-ID upload middleware reading multipart fields
+ * `'governmentIdFront'` and `'governmentIdBack'`. Requires both sides to be
+ * present and signature-valid for identity cross-checking, attaching them as
+ * Node `File` objects on `req.governmentIdPair`.
+ *
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @param {Function} next - Express next callback.
+ */
 export const uploadGovernmentIdPairFiles = (req, res, next) => {
   upload.fields([
     { name: 'governmentIdFront', maxCount: 1 },
@@ -99,6 +141,17 @@ export const uploadGovernmentIdPairFiles = (req, res, next) => {
   });
 };
 
+/**
+ * Composite resident verification upload middleware accepting a required primary
+ * `'file'` document alongside an optional `'governmentIdFront'` and
+ * `'governmentIdBack'` pair. Enforces that if either government ID side is
+ * supplied, both sides must be present and signature-verified; populates
+ * `req.file` and `req.governmentIdPair` (`{ governmentIdFront, governmentIdBack }` or `null`).
+ *
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @param {Function} next - Express next callback.
+ */
 export const uploadResidentDocumentFiles = (req, res, next) => {
   upload.fields([
     { name: 'file', maxCount: 1 },

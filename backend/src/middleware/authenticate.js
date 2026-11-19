@@ -7,25 +7,38 @@ import { isApprovedBarangayName } from '../config/barangays.js';
 import { AUTH_SERVICE_UNAVAILABLE_CODE, AUTH_SERVICE_UNAVAILABLE_MESSAGE, isAuthServiceUnavailable } from '../../../shared/authConnectivity.js';
 
 /**
- * Authentication middleware.
+ * @module middleware/authenticate
+ *
+ * Primary authentication and session-hydration middleware for KALUSAGAP.
+ * Position in request pipeline:
+ *   `route -> authenticate -> authorize -> authorizeStation/barangayScope -> controller -> service -> repository/Supabase`
  *
  * Extracts the Bearer access token issued by Supabase Auth, verifies it with
- * Supabase, then resolves the caller's APPLICATION profile (role, status and
- * municipality/barangay/facility assignment) from the `profiles` table — the
- * single server-side source of truth. The client never supplies a role or a
+ * Supabase, then resolves the caller's APPLICATION profile (role, status, and
+ * municipality/barangay/facility/station assignment) from the `profiles` table —
+ * the single server-side source of truth. The client never supplies a role or a
  * scope; both are read from the database after the token is verified.
  *
- *   req.user = { id, email, name, role, status,
- *                municipalityId, municipality, barangayId, barangay,
- *                facilityId, rhuStations, accessToken }
+ * Populates `req.user`:
+ *   `{ id, email, name, role, status, mustChangePassword, municipalityId, municipality, barangayId, barangay, facilityId, rhuStations, accessToken, authMode }`
  *
- * Account states:
- *   disabled                              -> 403 (account disabled)
- *   staff role + pending_verification     -> 403 (pending verification)
- *   resident + pending_verification       -> served as 'resident-limited'
+ * Account & credential states:
+ *   - `disabled`                          -> 403 (account disabled in `loadSessionProfile`)
+ *   - staff role + `pending_verification` -> 403 (pending verification)
+ *   - resident + `pending_verification`   -> served as `'resident-limited'`
+ *   - expired temporary password          -> 403 (`TEMPORARY_PASSWORD_EXPIRED`)
+ *   - active temporary password           -> 403 (`PASSWORD_CHANGE_REQUIRED`) on all routes
+ *                                            except `GET /api/auth/me` and `POST /api/auth/logout`
  *
  * When Supabase is NOT configured the API reports 503 — accounts are managed
  * exclusively through Supabase Auth; there is no local/mock sign-in path.
+ */
+
+/**
+ * Extracts the raw JWT string from an HTTP `Authorization: Bearer <token>` header.
+ *
+ * @param {Object} req - Express request object.
+ * @returns {string|null} Trimmed Bearer token, or `null` when absent/malformed.
  */
 const extractToken = (req) => {
   const header = req.headers.authorization || '';
@@ -33,6 +46,11 @@ const extractToken = (req) => {
   return null;
 };
 
+/**
+ * Verifies the caller's Supabase session, loads their authoritative application
+ * profile, enforces barangay assignment integrity for barangay-scoped staff,
+ * checks temporary-password lifecycle constraints, and attaches `req.user`.
+ */
 export const authenticate = asyncHandler(async (req, res, next) => {
   const token = extractToken(req);
   if (!token) throw ApiError.unauthorized('Missing Bearer access token');
@@ -104,6 +122,9 @@ export const authenticate = asyncHandler(async (req, res, next) => {
 
   const mustChangePassword = passwordStatus?.mustChangePassword === true;
   const sessionUser = { ...profileToSessionUser(profile), mustChangePassword };
+
+  // Barangay-scoped staff roles (Health Supervisor and BHW) must hold an active,
+  // approved barangay linked to their assigned municipality before accessing any endpoint.
   if (['health_supervisor', 'bhw'].includes(sessionUser.role)) {
     const assignment = profile.barangay;
     const validAssignment = Boolean(
@@ -142,6 +163,10 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     accessToken: token,
     authMode: 'supabase',
   };
+
+  // Block expired temporary passwords immediately; for active temporary passwords,
+  // restrict the session exclusively to bootstrap (`/api/auth/me`) and sign-out
+  // (`/api/auth/logout`) until a permanent password is set.
   if (passwordStatus?.temporaryPasswordExpired) {
     throw ApiError.forbidden('This temporary password has expired. Contact your administrator for a new one.')
       .withCode('TEMPORARY_PASSWORD_EXPIRED');

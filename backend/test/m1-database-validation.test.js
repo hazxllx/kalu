@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { before, describe, test } from 'node:test';
-import 'dotenv/config';
+import '../src/config/env.js';
+import { assertLocalUrl } from '../src/config/localSafety.js';
 
 const enabled = process.env.RUN_M1_DATABASE_VALIDATION === '1';
 
@@ -12,22 +13,16 @@ describe('M1 database validation (explicit read-only target)', { skip: !enabled 
 
   before(async () => {
     const configuredUrl = String(process.env.SUPABASE_URL || '').trim();
+    assertLocalUrl(configuredUrl, 'M1 validation database');
     const expectedProjectRef = String(process.env.M1_DATABASE_VALIDATION_EXPECTED_PROJECT_REF || '').trim();
     assert.ok(configuredUrl, 'SUPABASE_URL is required for database validation.');
-    assert.ok(expectedProjectRef, 'M1_DATABASE_VALIDATION_EXPECTED_PROJECT_REF is required.');
 
     const host = new URL(configuredUrl).hostname;
     const actualProjectRef = host.split('.')[0];
-    assert.equal(actualProjectRef, expectedProjectRef, 'Configured Supabase target does not match the explicit validation target.');
+    if (expectedProjectRef) assert.equal(actualProjectRef, expectedProjectRef, 'Configured Supabase target does not match the explicit validation target.');
 
     const local = ['localhost', '127.0.0.1', '::1'].includes(host);
-    if (!local) {
-      assert.equal(
-        process.env.M1_DATABASE_VALIDATION_ALLOW_PRODUCTION_READ_ONLY,
-        '1',
-        'A non-local database requires explicit read-only production validation approval.',
-      );
-    }
+    assert.ok(local, 'Database validation is restricted to localhost.');
 
     const [{ getServiceClient }, m1Service] = await Promise.all([
       import('../src/config/supabase.js'),

@@ -1,23 +1,23 @@
 /**
- * Audit Trail service — real, queryable system activity.
+ * Audit Trail Service (`services/auditTrail.service.js`) — real, queryable system activity.
+ *
+ * Fits into KALUSAGAP's backend pipeline:
+ *   `auditTrail.routes -> authenticate -> authorize -> auditTrail.controller -> auditTrail.service -> Supabase service-role client`
  *
  * The Audit Trail page previously rendered only browser-session events
  * (sessionStorage `auditStore` + the localStorage permission matrix), so it
  * showed nothing after a refresh and could never show another user's actions.
  *
- * This service reads the audit tables that the system already writes:
+ * This service queries the three persistent PostgreSQL audit tables written across KALUSAGAP:
+ *   - `public.health_audit_logs`           domain events (record CRUD, clinical/admin decisions)
+ *   - `public.resident_verification_logs`  resident self-registration verification workflow
+ *   - `public.transfer_request_audit_logs` inter-barangay transfer-of-residency workflow
  *
- *   health_audit_logs             domain events (record CRUD, decisions, audits)
- *   resident_verification_logs    resident registration review
- *   transfer_request_audit_logs   transfer-of-residency workflow
+ * All three streams are merged into a single newest-first timeline with actor
+ * identities hydrated from `public.profiles` in one batch query, so approvals,
+ * rejections, and record mutations surface with user, role, module, entity, and timestamp.
  *
- * All three are unioned into one timeline with the actor resolved from
- * `profiles`, so account approvals, rejections, record creation/update and
- * deletion all appear with their user, action, entity and timestamp.
- *
- * The SYSTEM LOG is a different thing and has its own service: it is the
- * request-level runtime log (see systemLogs.service.js). Neither duplicates
- * the other.
+ * Note: The runtime HTTP request log is distinct and lives in `systemLogs.service.js`.
  */
 import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
@@ -51,6 +51,7 @@ const throwOnError = (error, fallback) => {
 
 const nameOf = (profile, fallback = '') => profile?.full_name || profile?.email || fallback || 'System';
 
+/** Normalize a `public.health_audit_logs` row into the unified audit timeline shape. */
 const fromHealthLog = (row, actors) => {
   const actor = actors.get(row.actor_id) || null;
   return {
@@ -68,6 +69,10 @@ const fromHealthLog = (row, actors) => {
   };
 };
 
+/**
+ * Normalize a `public.resident_verification_logs` row into the unified audit timeline shape,
+ * prefixing the action as `RESIDENT_<ACTION>` and formatting the embedded resident's full name.
+ */
 const fromVerificationLog = (row, actors) => {
   const actor = actors.get(row.reviewed_by) || null;
   return {
@@ -90,6 +95,10 @@ const fromVerificationLog = (row, actors) => {
   };
 };
 
+/**
+ * Normalize a `public.transfer_request_audit_logs` row into the unified audit timeline shape,
+ * prefixing the action as `TRANSFER_<ACTION>`.
+ */
 const fromTransferLog = (row, actors) => {
   const actor = actors.get(row.actor_id) || null;
   return {
@@ -108,11 +117,24 @@ const fromTransferLog = (row, actors) => {
 };
 
 /**
- * The merged audit timeline.
+ * Query and merge the unified system audit timeline across `health_audit_logs`,
+ * `resident_verification_logs`, and `transfer_request_audit_logs`.
  *
- * `q` searches the actor name, action and entity; `action` and `module` filter
- * exactly; `from` / `to` are ISO date bounds. Pagination is limit/offset over
- * the merged, newest-first stream.
+ * Over-fetches `size + skip + 200` rows per source table ordered by `created_at DESC`
+ * so post-merge in-memory filtering and `offset`/`limit` pagination remain accurate,
+ * and returns dynamic `facets` (`actions`, `modules`, `sources`) for UI filter dropdowns.
+ *
+ * @param {Object} [options] - Query & pagination parameters
+ * @param {Object} options.user - Authenticated caller (required; throws 401 if absent)
+ * @param {string} [options.q=''] - Free-text substring search across actor, role, action, module, entity, and resident
+ * @param {string} [options.action=''] - Case-insensitive substring filter on `entry.action`
+ * @param {string} [options.module=''] - Case-insensitive substring filter on `entry.module`
+ * @param {string} [options.role=''] - Exact case-insensitive match on `entry.actorRole`
+ * @param {string} [options.from=''] - Inclusive start date (`YYYY-MM-DD`, UTC start-of-day)
+ * @param {string} [options.to=''] - Inclusive end date (`YYYY-MM-DD`, UTC end-of-day)
+ * @param {number} [options.limit=100] - Page size (clamped to 1..200)
+ * @param {number} [options.offset=0] - Zero-based row offset
+ * @returns {Promise<Object>} `{ rows, total, facets }` timeline response
  */
 export const list = async ({ user, q = '', action = '', module: moduleFilter = '', role = '', from = '', to = '', limit = 100, offset = 0 } = {}) => {
   if (!user) throw ApiError.unauthorized();

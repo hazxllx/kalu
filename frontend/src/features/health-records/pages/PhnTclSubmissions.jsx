@@ -20,6 +20,7 @@ import {
 import { reportsApi } from "@/services/api";
 import { useBarangays } from "@/context/BarangaysContext";
 import { usePermissions } from "@/context/PermissionsContext";
+import { useAuth } from "@/context/AuthContext";
 import ReportSnapshotView from "@/features/reports/components/ReportSnapshotView";
 import { formatClinicalDate, formatClinicalDateTime } from "@/lib/dateUtils";
 
@@ -132,12 +133,16 @@ function StatusBadge({ raw }) {
 }
 
 export default function PhnTclSubmissions() {
+  const { user } = useAuth();
   const { can } = usePermissions();
+  if (user?.role !== "phn" || !user.municipalityId || !can("reports.view")) {
+    return <PageHeader crumbs={["Clinical Care", "TCL"]} title="Target Client Lists" subtitle="Submitted documents are unavailable without verified report access and a municipality assignment." />;
+  }
+  return <PhnTclInbox key={`${user.id}:${user.municipalityId}`} user={user} />;
+}
+
+function PhnTclInbox({ user }) {
   const { barangays } = useBarangays();
-  // Reviewing a submission is a recipient/oversight action gated by reports.view
-  // (the same permission the shared Incoming Reports inbox uses). The PHN has
-  // municipality-wide read/review oversight of barangay submissions.
-  const canReview = can("reports.view");
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -169,11 +174,11 @@ export default function PhnTclSubmissions() {
     setLoading(true);
     setError("");
     return reportsApi
-      .list({ box: "incoming" })
-      .then((res) => setRows(res?.rows || res?.records || []))
+      .listAll({ box: "incoming" }, { ownerId: user.id })
+      .then(setRows)
       .catch((err) => setError(err?.message || "We couldn't load submitted TCL documents. Please try again."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [user.id]);
 
   useEffect(() => {
     load();
@@ -193,12 +198,19 @@ export default function PhnTclSubmissions() {
     setDetailError("");
     setDetailContent(null);
     reportsApi
-      .get(detail.id)
-      .then((res) => { if (active) setDetailContent(res?.record || null); })
+      .get(detail.id, { ownerId: user.id })
+      .then(({ record }) => {
+        if (!active) return;
+        if (record?.id !== detail.id || record.status === "Draft") throw new Error("The submitted document was not returned.");
+        setDetailContent(record);
+      })
       .catch((err) => { if (active) setDetailError(err?.message || "Could not open the submitted document."); })
       .finally(() => { if (active) setDetailLoading(false); });
     return () => { active = false; };
-  }, [detail]);
+  }, [detail, user.id]);
+
+  const openedReport = detailContent && detailContent.id === detail?.id ? detailContent : null;
+  const reviewStatus = openedReport?.recipientRole === user.role && openedReport.createdBy !== user.id ? openedReport.status : null;
 
   // Normalize every real submission into the row shape this page renders.
   const submissions = useMemo(
@@ -306,14 +318,15 @@ export default function PhnTclSubmissions() {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));
 
   const act = async (status) => {
-    if (!canReview || !detail) return;
+    if (busy || !(reviewStatus === "Submitted" && status === "Received" ||
+      reviewStatus === "Received" && ["Rejected", "Reviewed"].includes(status))) return;
     if (status === "Rejected" && !remarks.trim()) {
       showToast("A reason is required to return a document.");
       return;
     }
     setBusy(true);
     try {
-      await reportsApi.review(detail.id, { status, remarks: remarks.trim() });
+      await reportsApi.review(detail.id, { status, remarks: remarks.trim() }, { ownerId: user.id });
       showToast(`Document marked ${displayStatus(status)}.`);
       setDetail(null);
       setRemarks("");
@@ -591,7 +604,7 @@ export default function PhnTclSubmissions() {
       {detail && (
         <div className="fixed inset-0 z-[70]">
           <div className="absolute inset-0 bg-black/60" onClick={closeDetail} />
-          <div className="absolute right-0 top-0 flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl dark:bg-card">
+          <div role="dialog" aria-modal="true" aria-label="Submitted TCL document" className="absolute right-0 top-0 flex h-[100dvh] w-full max-w-3xl flex-col bg-white shadow-2xl dark:bg-card">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border px-5 py-4">
               <div className="min-w-0">
                 <p className="truncate text-base font-semibold text-brand-ink">{detail.documentName}</p>
@@ -600,8 +613,8 @@ export default function PhnTclSubmissions() {
               <button onClick={closeDetail} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
 
-            <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
-              <section className="rounded-2xl border border-brand-border bg-white p-4 dark:bg-card">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto break-words p-3 sm:p-5">
+              {openedReport && <section className="rounded-2xl border border-brand-border bg-white p-4 dark:bg-card">
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">Submission Information</p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
@@ -619,16 +632,16 @@ export default function PhnTclSubmissions() {
                   </div>
                   <div>
                     <p className="text-[11px] uppercase tracking-wide text-brand-gray">Status</p>
-                    <div className="mt-1"><StatusBadge raw={detail.status} /></div>
+                    <div className="mt-1"><StatusBadge raw={openedReport.status} /></div>
                   </div>
                 </div>
-                {detail.remarks && (
+                {openedReport.remarks && (
                   <div className="mt-3 border-t border-brand-border pt-3">
                     <p className="text-[11px] uppercase tracking-wide text-brand-gray">Remarks</p>
-                    <p className="mt-0.5 text-sm text-brand-ink">{detail.remarks}</p>
+                    <p className="mt-0.5 text-sm text-brand-ink">{openedReport.remarks}</p>
                   </div>
                 )}
-              </section>
+              </section>}
 
               <section>
                 <h4 className="mb-2 text-sm font-semibold text-brand-ink">Submitted Document</h4>
@@ -639,13 +652,12 @@ export default function PhnTclSubmissions() {
                 ) : detailError ? (
                   <div className="rounded-btn border border-brand-danger/30 bg-brand-danger/5 p-4 text-sm text-brand-danger">{detailError}</div>
                 ) : (
-                  <ReportSnapshotView content={detailContent?.content} />
+                  <ReportSnapshotView content={openedReport?.content} />
                 )}
               </section>
 
-              {/* Review — PHN oversight. Only offered while the document is still
-                  open (not already Reviewed/Returned) and the caller may review. */}
-              {canReview && detail.status !== "Reviewed" && detail.status !== "Rejected" && (
+              {openedReport && openedReport.recipientRole !== user.role && <p className="text-sm text-brand-gray">Read-only oversight. The addressed recipient can review this document.</p>}
+              {["Submitted", "Received"].includes(reviewStatus) && (
                 <section className="rounded-2xl border border-brand-blue/15 bg-brand-light/50 p-4 dark:bg-card">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-gray">PHN Review</p>
                   <label className="text-sm font-medium text-brand-ink">Remarks <span className="text-brand-gray">(required to return)</span></label>
@@ -657,16 +669,16 @@ export default function PhnTclSubmissions() {
                     className="mt-1.5 w-full resize-none rounded-btn border border-brand-border bg-white px-3.5 py-2.5 text-sm outline-none focus:border-brand-blue dark:bg-input"
                   />
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {detail.status === "Submitted" && (
-                      <button
+                     {reviewStatus === "Submitted" && (
+                       <button
                         disabled={busy}
                         onClick={() => act("Received")}
                         className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink hover:border-brand-blue hover:text-brand-blue disabled:opacity-60"
                       >
-                        Mark Under Review
-                      </button>
-                    )}
-                    <button
+                         Mark Received
+                       </button>
+                     )}
+                     {reviewStatus === "Received" && <><button
                       disabled={busy}
                       onClick={() => act("Rejected")}
                       className="rounded-btn border border-brand-danger/30 px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 disabled:opacity-60"
@@ -678,8 +690,8 @@ export default function PhnTclSubmissions() {
                       onClick={() => act("Reviewed")}
                       className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
                     >
-                      Mark Reviewed
-                    </button>
+                       Mark Reviewed
+                     </button></>}
                   </div>
                 </section>
               )}

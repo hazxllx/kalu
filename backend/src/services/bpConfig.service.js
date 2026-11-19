@@ -1,15 +1,17 @@
 /**
- * Blood-pressure configuration service — the ONE place the BP classification
- * thresholds are resolved and (for the System Administrator) edited.
+ * Blood-Pressure Configuration & Classification Service (`services/bpConfig.service.js`).
+ *
+ * Fits into KALUSAGAP's backend pipeline (`bpConfig.routes -> authenticate -> authorize -> bpConfig.controller -> bpConfig.service -> repository / public.bp_threshold_settings`),
+ * acting as the single authoritative resolver and admin editor for BP screening cut-offs.
  *
  * Resolution order:
- *   1. public.bp_threshold_settings (when applied + populated), otherwise
- *   2. the documented defaults in config/bpThresholds.js.
+ *   1. `public.bp_threshold_settings` (when migration is applied and populated), otherwise
+ *   2. Documented clinical screening defaults in `config/bpThresholds.js`.
  *
- * Writes are admin-only, validated (no overlapping/contradictory cut-offs) and
- * recorded in the existing health_audit_logs trail. Classification is screening
- * guidance, never a diagnosis, and the backend is authoritative — a
- * client-supplied classification is recomputed on save.
+ * Writes are restricted to `admin`, validated against overlapping or contradictory
+ * systolic/diastolic cut-offs (`validateThresholdPayload`), and recorded in
+ * `public.health_audit_logs`. Classification is screening guidance rather than a
+ * clinical diagnosis, and the backend always recomputes BP categories server-side.
  */
 import repository from '../repositories/index.js';
 import ApiError from '../utils/apiError.js';
@@ -21,6 +23,7 @@ import {
   validateThresholdPayload,
 } from '../config/bpThresholds.js';
 
+/** Execute an async repository read, returning `fallback` on any storage failure. */
 const safe = async (fn, fallback) => {
   try {
     return await fn();
@@ -29,6 +32,7 @@ const safe = async (fn, fallback) => {
   }
 };
 
+/** Enforce System Administrator (`admin`) role before mutating BP threshold settings. */
 const assertAdmin = (user) => {
   if (user?.role !== 'admin') {
     throw ApiError.forbidden('Only the System Administrator may change the blood-pressure thresholds.');
@@ -36,8 +40,14 @@ const assertAdmin = (user) => {
 };
 
 /**
- * Active thresholds + labels. Falls back to defaults whenever the DB settings
- * are unavailable or invalid, so classification always works.
+ * Resolve active BP screening thresholds, custom category labels, and defaults.
+ *
+ * Falls back gracefully to `DEFAULT_BP_THRESHOLDS` whenever `public.bp_threshold_settings`
+ * is unconfigured or unreachable so clinical vitals classification never breaks.
+ *
+ * @param {Object} [options] - Service options
+ * @param {Object} [options.repo=repository] - Injectable data repository
+ * @returns {Promise<Object>} Active thresholds, category metadata, defaults, and `source` (`'configured'` | `'default'`)
  */
 export const getBpConfig = async ({ repo = repository } = {}) => {
   const row = typeof repo.getBpThresholdSettings === 'function'
@@ -61,7 +71,14 @@ export const getBpConfig = async ({ repo = repository } = {}) => {
   };
 };
 
-/** Classify a reading using the currently-active configuration. */
+/**
+ * Classify a systolic/diastolic blood-pressure reading against the active configuration.
+ *
+ * @param {Object} reading - Blood-pressure reading (`{ systolic, diastolic }`)
+ * @param {Object} [options] - Service options
+ * @param {Object} [options.repo=repository] - Injectable data repository
+ * @returns {Promise<Object>} Resolved BP category, label, severity, and emergency flag
+ */
 export const classifyWithConfig = async (reading, { repo = repository } = {}) => {
   const row = typeof repo.getBpThresholdSettings === 'function'
     ? await safe(() => repo.getBpThresholdSettings(), null)
@@ -69,6 +86,7 @@ export const classifyWithConfig = async (reading, { repo = repository } = {}) =>
   return classify(reading, row, row?.labels || null);
 };
 
+/** Best-effort audit logger recording before/after threshold snapshots in `health_audit_logs`. */
 const audit = async ({ user, action, previous, next }) => {
   if (typeof repository.insertHealthAuditLog !== 'function') return;
   await safe(() => repository.insertHealthAuditLog({
@@ -82,6 +100,19 @@ const audit = async ({ user, action, previous, next }) => {
   }), null);
 };
 
+/**
+ * Validate and persist updated blood-pressure thresholds (System Administrator only).
+ *
+ * Rejects overlapping or non-monotonic cut-offs with `422 Unprocessable Entity`,
+ * preserves existing category labels when `payload.labels` is omitted, logs
+ * `BP_THRESHOLDS_UPDATED` to `health_audit_logs`, and returns the refreshed config.
+ *
+ * @param {Object} [options] - Update parameters
+ * @param {Object} options.user - Authenticated session user (must have `role === 'admin'`)
+ * @param {Object} [options.payload={}] - Proposed threshold cut-offs and optional custom `labels`
+ * @param {Object} [options.repo=repository] - Injectable data repository
+ * @returns {Promise<Object>} Updated BP configuration payload from `getBpConfig`
+ */
 export const updateThresholds = async ({ user, payload = {}, repo = repository } = {}) => {
   assertAdmin(user);
   if (typeof repo.saveBpThresholdSettings !== 'function') {

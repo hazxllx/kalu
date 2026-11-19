@@ -2,10 +2,15 @@
  * Blood-pressure classification configuration — DEFAULT (fallback) numeric
  * cut-offs and the single authoritative classifier used by the backend.
  *
+ * Architectural role: consumed in the `route -> authenticate -> authorize ->
+ * controller -> service -> repository/Supabase` pipeline by the medicine/BP
+ * configuration service (`public.bp_threshold_settings`), consultation/triage
+ * vital-sign processing, and admin threshold validation.
+ *
  * SCREENING GUIDANCE, NOT A DIAGNOSIS. These defaults are the widely used
  * ACC/AHA-style office blood-pressure reference ranges, expressed as
  * configurable numbers so the System Administrator can adjust the cut-offs
- * (public.bp_threshold_settings) without changing code. When the database row
+ * (`public.bp_threshold_settings`) without changing code. When the database row
  * is absent or invalid these defaults apply, so classification always works.
  *
  * The ALGORITHM and its precedence are fixed and safe; only the numbers are
@@ -43,6 +48,13 @@ export const BP_CATEGORIES = Object.freeze({
 /** Physiologically plausible reading bounds (data integrity, not diagnosis). */
 export const BP_READING_BOUNDS = Object.freeze({ min: 40, max: 300 });
 
+/**
+ * Coerce a candidate value to a finite number, returning `null` for blank,
+ * nullish, or non-numeric inputs so callers never treat `""` or `null` as `0`.
+ *
+ * @param {*} value
+ * @returns {number|null}
+ */
 const num = (value) => {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const n = Number(value);
@@ -82,6 +94,10 @@ export const parseBloodPressure = (value) => {
   return { systolic, diastolic };
 };
 
+/**
+ * Resolve the display label for a BP category code, preferring a non-empty
+ * admin-configured override in `labels` before falling back to `BP_CATEGORIES`.
+ */
 const labelFor = (categoryCode, labels) => {
   const override = labels && typeof labels === 'object' ? labels[categoryCode] : null;
   return (typeof override === 'string' && override.trim()) ? override.trim() : BP_CATEGORIES[categoryCode].label;
@@ -129,8 +145,19 @@ export const classifyBloodPressure = (reading, settings = null, labels = null) =
 };
 
 /**
- * Validate an admin threshold payload. Returns normalized integers; throws an
- * array of messages on contradiction so the service can surface a 422.
+ * Validate and normalize an admin BP threshold update payload.
+ *
+ * Ensures every threshold key in `DEFAULT_BP_THRESHOLDS` is a finite number
+ * within `[1, BP_READING_BOUNDS.max]`, rounds values to integers, and checks
+ * strict monotonic ordering across systolic (`Low < Elevated < Stage 1 < Stage 2 < Crisis`)
+ * and diastolic (`Low < Stage 1 < Stage 2 < Crisis`) cut-offs — mirroring the
+ * `public.bp_threshold_settings` database check constraints.
+ *
+ * Does not throw: returns `{ errors, thresholds }`, where `thresholds` is `null`
+ * whenever `errors` is non-empty so the calling service can surface HTTP 422.
+ *
+ * @param {Object} [payload]
+ * @returns {{ errors: string[], thresholds: Object|null }}
  */
 export const validateThresholdPayload = (payload = {}) => {
   const out = {};

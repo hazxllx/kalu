@@ -7,23 +7,33 @@ import * as bpConfigController from '../controllers/bpConfig.controller.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
 /**
- * Blood-pressure threshold configuration — authoritative numeric cut-offs used
- * to classify a recorded reading.
+ * Blood-pressure threshold configuration routes (`/api/bp-config`).
  *
- *   GET /bp-config             active thresholds + labels (admin + clinical read)
- *   PUT /bp-config/thresholds  update the cut-offs (admin)
+ * Request pipeline:
+ *   route -> authenticate -> authorize(roles [, permission]) -> controller -> service -> Supabase
  *
- * Writes are additionally re-checked + audited in the service layer.
+ * Provides the authoritative systolic/diastolic numeric cut-offs and clinical
+ * category labels used across KALUSAGAP consultations and intake forms to
+ * classify recorded blood-pressure readings.
+ *
+ *   GET /api/bp-config             active thresholds + labels (admin + clinical read)
+ *   PUT /api/bp-config/thresholds  update the cut-offs (admin + `system.settings.manage`)
+ *
+ * Writes are additionally validated, re-checked, and audit-logged in the service layer.
  */
 const router = Router();
 
+// Require an authenticated active user profile for all BP configuration operations.
 router.use(authenticate);
 
+// GET /api/bp-config — Retrieve active BP classification thresholds and category labels (`FEATURE_ROLES.medicineCatalogRead`).
 router.get(
   '/',
   authorize(FEATURE_ROLES.medicineCatalogRead),
   asyncHandler(bpConfigController.getConfig),
 );
+
+// PUT /api/bp-config/thresholds — Update systolic/diastolic threshold cut-offs in `req.body` (admin role + `system.settings.manage`).
 router.put(
   '/thresholds',
   authorize(FEATURE_ROLES.medicineCatalog, { permission: 'system.settings.manage' }),

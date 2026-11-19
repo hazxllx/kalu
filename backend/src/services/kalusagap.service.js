@@ -2,13 +2,30 @@ import { getServiceClient } from '../config/supabase.js';
 import ApiError from '../utils/apiError.js';
 import { assignedBarangay } from '../config/scope.js';
 
+/**
+ * Maternal Care & Postpartum Lifecycle Service.
+ *
+ * Architectural layer:
+ *   route -> authenticate -> authorize -> controller -> kalusagap.service -> Supabase
+ *
+ * Drives longitudinal maternal and newborn follow-up care in KALUSAGAP across:
+ *   - `public.maternal_pregnancies`: pregnancy registration, LMP/EDD dating, and active-status tracking;
+ *   - `public.pregnancy_encounters`: sequential prenatal visits, gestational age progression, vitals, and BMI;
+ *   - `public.prenatal_services`: preventive and diagnostic prenatal services (immunization, micronutrient, deworming, lab/infectious screening);
+ *   - `public.delivery_records` & `public.postpartum_follow_ups`: delivery outcome capture and automatic 4-milestone (`24h`, `3d`, `7-14d`, `6wk`) postpartum schedule generation for live births;
+ *   - `public.postpartum_encounters`: maternal/newborn postpartum assessments and milestone completion updates;
+ *   - `public.maternal_care_audit_log` & `public.notifications`: scoped clinical audit logging and resident portal notifications.
+ *
+ * Accepts an injectable `supabase` client option on all data methods for isolated testing.
+ */
 const text = (v) => String(v ?? '').trim();
 const throwOnError = (error, fallback) => {
   if (error) throw Object.assign(new Error(error.message || fallback), { statusCode: 500, details: error });
 };
 
-// Manila timezone offset for date calculations
+// Manila timezone offset (UTC+8) for calendar-date validation against future dates
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
+/** Return a `YYYY-MM-DD` date string in Philippine Standard Time (UTC+8). */
 export const manilaDateString = (d = new Date()) =>
   new Date(d.getTime() + MANILA_OFFSET_MS).toISOString().slice(0, 10);
 
@@ -111,8 +128,13 @@ export const checkExistingPregnancy = async (residentId, { supabase = getService
 };
 
 /**
- * Register a new pregnancy for a resident.
- * Validates data, autofills derived values, and creates the pregnancy record.
+ * Register a new pregnancy in `public.maternal_pregnancies` for a resident.
+ *
+ * Verifies resident existence, rejects duplicate active/lost/transferred
+ * pregnancies (409 Conflict), validates a non-future `YYYY-MM-DD` LMP date and
+ * reliability (`certain` | `uncertain` | `unknown`), derives the 280-day EDD,
+ * writes a `maternal_care_audit_log` entry, and notifies the resident if linked
+ * to an auth account.
  */
 export const registerPregnancy = async (payload = {}, { user, supabase = getServiceClient() } = {}) => {
   if (!user?.id) throw ApiError.unauthorized('User not authenticated');
@@ -193,8 +215,13 @@ export const registerPregnancy = async (payload = {}, { user, supabase = getServ
 // ============================================================================
 
 /**
- * Create a prenatal encounter (visit) for a pregnancy.
- * Automatically calculates gestational age based on encounter date and pregnancy LMP.
+ * Record a sequential prenatal clinical encounter in `public.pregnancy_encounters`.
+ *
+ * Confirms the pregnancy is `active` (409 Conflict otherwise), validates a
+ * non-future encounter date, computes gestational age (`weeks + days / 7`) from
+ * the pregnancy's `lmp_date` and optional BMI from height/weight, increments
+ * `encounter_number`, updates `maternal_pregnancies.current_gestational_age_weeks`,
+ * and logs the action to `maternal_care_audit_log`.
  */
 export const addPrenatalEncounter = async (pregnancyId, payload = {}, { user, supabase = getServiceClient() } = {}) => {
   if (!user?.id) throw ApiError.unauthorized('User not authenticated');
@@ -312,8 +339,13 @@ export const addPrenatalEncounter = async (pregnancyId, payload = {}, { user, su
 // ============================================================================
 
 /**
- * Record a prenatal service (immunization, screening, supplementation, etc.)
- * Prevents duplicate entries for the same service type per pregnancy.
+ * Record a prenatal preventive or diagnostic service in `public.prenatal_services`
+ * (`immunization`, `micronutrient`, `deworming`, `infectious_disease_screening`,
+ * `laboratory_screening`, or `other`).
+ *
+ * Prevents duplicate entries for the same `(pregnancy_id, service_type)` unless
+ * the prior entry was marked `not_applicable` (409 Conflict), validates service
+ * status and optional `YYYY-MM-DD` dates, and writes to `maternal_care_audit_log`.
  */
 export const recordPrenatalService = async (pregnancyId, payload = {}, { user, supabase = getServiceClient() } = {}) => {
   if (!user?.id) throw ApiError.unauthorized('User not authenticated');
@@ -418,7 +450,14 @@ export const recordPrenatalService = async (pregnancyId, payload = {}, { user, s
 // ============================================================================
 
 /**
- * Record delivery outcome and auto-generate postpartum follow-up schedule.
+ * Record delivery outcome (`live_birth`, `stillbirth`, `abortion`, or `ectopic`)
+ * in `public.delivery_records` and transition `maternal_pregnancies.status` to `'delivered'`.
+ *
+ * Rejects repeat deliveries on an already-delivered pregnancy (409 Conflict).
+ * For `live_birth` outcomes, automatically inserts the 4 postpartum follow-up
+ * milestones (`24h` at +1d, `3d` at +3d, `7-14d` at +7d, `6wk` at +42d) into
+ * `public.postpartum_follow_ups`, marks `postpartum_schedule_generated = true`,
+ * audits the event, and sends a resident notification.
  */
 export const recordDelivery = async (pregnancyId, payload = {}, { user, supabase = getServiceClient() } = {}) => {
   if (!user?.id) throw ApiError.unauthorized('User not authenticated');
@@ -549,7 +588,13 @@ export const recordDelivery = async (pregnancyId, payload = {}, { user, supabase
 };
 
 /**
- * Record a postpartum encounter (visit).
+ * Record a sequential maternal/newborn postpartum clinical encounter in
+ * `public.postpartum_encounters`.
+ *
+ * Validates that `encounterDate` is neither in the future nor earlier than
+ * `delivery.delivery_date`, computes `days_postpartum`, increments `encounter_number`,
+ * marks any matching `scheduledMilestone` in `public.postpartum_follow_ups` as
+ * `'completed'`, and writes to `maternal_care_audit_log`.
  */
 export const addPostpartumEncounter = async (deliveryId, payload = {}, { user, supabase = getServiceClient() } = {}) => {
   if (!user?.id) throw ApiError.unauthorized('User not authenticated');
@@ -662,8 +707,10 @@ export const addPostpartumEncounter = async (deliveryId, payload = {}, { user, s
 // ============================================================================
 
 /**
- * Get consolidated maternal care profile for a pregnancy.
- * Returns pregnancy details, encounters, services, delivery info, and postpartum schedule.
+ * Retrieve the consolidated maternal care profile for `pregnancyId`, aggregating
+ * `maternal_pregnancies`, chronological `pregnancy_encounters`, `prenatal_services`,
+ * `delivery_records`, and (once delivered) `postpartum_encounters` and
+ * `postpartum_follow_ups`.
  */
 export const getMaternalProfile = async (pregnancyId, { supabase = getServiceClient() } = {}) => {
   // Get pregnancy
@@ -741,6 +788,10 @@ export const getMaternalProfile = async (pregnancyId, { supabase = getServiceCli
 // AUDIT & NOTIFICATIONS
 // ============================================================================
 
+/**
+ * Append a scoped clinical audit entry to `public.maternal_care_audit_log`
+ * capturing actor identity/role, entity reference, and resident municipality/barangay IDs.
+ */
 const auditMaternalAction = async (supabase, user, action, entityType, entityId, resident) => {
   const { error } = await supabase
     .from('maternal_care_audit_log')
@@ -757,6 +808,11 @@ const auditMaternalAction = async (supabase, user, action, entityType, entityId,
   throwOnError(error, 'Could not write maternal care audit log');
 };
 
+/**
+ * Send an in-app notification (`public.notifications`) to a resident's linked
+ * `auth_user_id` on `pregnancy_registered` or `delivery_recorded` events.
+ * No-op when the resident has no linked portal account.
+ */
 const notifyResident = async (supabase, resident, eventType, record) => {
   if (!resident?.auth_user_id) return;
   

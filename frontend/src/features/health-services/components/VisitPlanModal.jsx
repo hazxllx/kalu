@@ -5,7 +5,7 @@ import { visitPlansApi } from "@/services/api";
 import { formatWindow, formatChip } from "../lib/visitPlanFormat";
 
 /**
- * Compact service Registration modal (max 420px, no inner scroll on mobile).
+ * Compact service registration modal with a scrollable body on short screens.
  *
  * The resident registers by committing to a DAY within the service's actual
  * availability (slot capacity is a BHW concern). The day picker shows only the
@@ -85,11 +85,11 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
       aria-modal="true"
       aria-label={`Register for ${service.name}`}
     >
-      <Card className="flex w-full max-w-[420px] flex-col overflow-hidden">
-        <div className="flex items-start justify-between gap-3 border-b border-brand-border px-5 py-4">
+      <Card className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[420px] flex-col overflow-hidden">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-5 py-4">
           <div className="min-w-0">
-            <h2 className="truncate text-[15px] font-semibold text-brand-ink">{service.name}</h2>
-            <p className="mt-0.5 truncate text-xs text-brand-gray">{service.facilityName}</p>
+            <h2 className="break-words text-[15px] font-semibold text-brand-ink">{service.name}</h2>
+            <p className="mt-0.5 break-words text-xs text-brand-gray">{service.facilityName}</p>
           </div>
           <button
             type="button"
@@ -101,7 +101,7 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
           </button>
         </div>
 
-        <div className="space-y-4 px-5 py-4">
+        <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-4">
           {windowLabel && (
             <div className="flex items-center gap-2 text-[13px] text-brand-gray">
               <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -168,7 +168,7 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
           {formError && <p className="text-[13px] text-brand-danger">{formError}</p>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-brand-border px-5 py-3.5">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-brand-border px-5 py-3.5">
           <button
             type="button"
             onClick={onClose}

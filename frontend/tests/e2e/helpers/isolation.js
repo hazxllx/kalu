@@ -7,11 +7,12 @@
 //
 // Design principle: FAIL CLOSED. `E2E_ISOLATED=1` is treated as a declaration,
 // never as proof. A target is only accepted when every destination (frontend,
-// backend, and Supabase) resolves to a verified-local or an
-// explicitly allowlisted host, and no destination matches a production denylist.
-// A hosted `*.supabase.co` / public target is rejected by default.
+// backend, and Supabase) uses an exact loopback host, and no destination matches
+// a production denylist. Public hosts cannot be approved through an allowlist.
 
-const LOCAL_HOST_RE = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?|.*\.local)$/i;
+import { requireLocalUrl } from '../../../src/lib/localSafety.js';
+
+const LOCAL_HOST_RE = /^(localhost|127\.0\.0\.1|\[::1\])$/i;
 const BUILT_IN_PRODUCTION_REFS = Object.freeze([
   'kalusagap.onrender.com',
   'kalusagap-frontend.onrender.com',
@@ -34,11 +35,9 @@ const splitList = (value) =>
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
-/** A host is isolated when it is loopback/.local or explicitly allowlisted. */
-export function isIsolatedHost(host, allowedHosts = []) {
-  if (!host) return false;
-  if (LOCAL_HOST_RE.test(host)) return true;
-  return allowedHosts.includes(host);
+/** Only exact loopback hosts are isolated, regardless of any legacy allowlist. */
+export function isIsolatedHost(host) {
+  return typeof host === 'string' && LOCAL_HOST_RE.test(host);
 }
 
 /**
@@ -55,7 +54,6 @@ export function evaluateIsolation(env = {}) {
     reasons.push('E2E_ISOLATED must be exactly "1" to opt into write-based tests.');
   }
 
-  const allowed = splitList(env.E2E_ALLOWED_HOSTS);
   const denied = [...BUILT_IN_PRODUCTION_REFS, ...splitList(env.E2E_PRODUCTION_REFS)];
 
   // Both the declared E2E destinations and the frontend's actual Vite targets
@@ -78,11 +76,15 @@ export function evaluateIsolation(env = {}) {
       reasons.push(`${name} is not a valid URL.`);
       continue;
     }
-    if (!isIsolatedHost(host, allowed)) {
+    if (!isIsolatedHost(host)) {
       reasons.push(
         `${name} host "${host}" is not a verified isolated host. ` +
-          'Use a loopback/.local host, or add it to E2E_ALLOWED_HOSTS to approve a dedicated staging host.',
+          'Use localhost, 127.0.0.1 or [::1]; public allowlists are not supported.',
       );
+    } else {
+      try { requireLocalUrl(url, name); } catch {
+        reasons.push(`${name} must use loopback HTTP(S) without credentials, a query or a fragment.`);
+      }
     }
     // Defense in depth: an explicit production denylist always wins.
     const lower = String(url).toLowerCase();
@@ -94,9 +96,7 @@ export function evaluateIsolation(env = {}) {
   const comparableUrl = (value) => {
     try {
       const parsed = new URL(String(value));
-      parsed.hash = '';
-      parsed.search = '';
-      return parsed.toString().replace(/\/+$/, '').toLowerCase();
+      return parsed.toString().replace(/\/+$/, '');
     } catch {
       return null;
     }

@@ -117,8 +117,9 @@ The system serves residents, barangay health workers (BHW), Rural Health Unit (R
 - Node.js 22 or newer
 - npm
 - Git
-- A Supabase account
-- Supabase CLI (`npm install -g supabase`)
+- Docker Desktop running Linux containers (or a compatible local container engine)
+- Supabase CLI compatible with `supabase/config.toml`
+- PostgreSQL `psql` client to load reference geography explicitly
 
 ### Installation
 
@@ -130,30 +131,35 @@ npm run install:all
 
 ### Environment Configuration
 
-**Frontend (`frontend/.env`):**
+Development reads `.env.development`, never the legacy `.env`. Existing
+deployment values are preserved in ignored `.env.production` files. On a fresh
+disposable local stack, run `supabase start`, then `npm run local:configure`.
+The configuration command obtains local keys without printing them.
+
+**Frontend (`frontend/.env.development`):**
 ```env
 VITE_API_URL=http://localhost:5000/api
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<public-anon-key>
+VITE_SUPABASE_URL=http://127.0.0.1:54321
+VITE_SUPABASE_ANON_KEY=<local-anon-JWT>
 VITE_ANALYTICS_ENABLED=false
 ```
 
-**Backend (`backend/.env`):**
+**Backend (`backend/.env.development`):**
 ```env
 PORT=5000
 NODE_ENV=development
 CLIENT_URL=http://localhost:5173
 TRUST_PROXY=loopback
-SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_ANON_KEY=<public-anon-key>
-SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
-SMTP_HOST=<smtp-host>
-SMTP_PORT=587
-SMTP_USER=<email>
-SMTP_PASSWORD=<app-password>
-SMTP_FROM=noreply@kalusagap.local
-USE_LOCAL_FILE_STORE=false
-LOCAL_FILE_STORE_PATH=./data
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_ANON_KEY=<local-anon-JWT>
+SUPABASE_SERVICE_ROLE_KEY=<local-service-role-JWT>
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
+SMTP_HOST=127.0.0.1
+SMTP_PORT=54325
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=noreply@kalusagap.test
+OTP_PEPPER=<generated-by-local-configure>
 ```
 
 **Security Notes:**
@@ -164,13 +170,20 @@ LOCAL_FILE_STORE_PATH=./data
 ### Database Setup
 
 ```bash
-supabase link --project-ref <project-ref>
-supabase migration list --linked
-supabase db push
+supabase migration list --local
+# Review pending SQL before explicitly applying to the disposable local DB:
+npm run local:db:migrate
+# Real reference geography/facilities only; no resident records:
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/seed.sql
 ```
 
-- Migrations are applied in timestamp order. Do not remove or reorder migration history.
-- Do not run `supabase db reset` or `supabase db seed` against production.
+- Initial `supabase start` bootstraps a fresh database using the migration history.
+- The historical chain contains destructive DDL. Use a fresh disposable stack,
+  review pending migrations, and never replay it automatically against populated data.
+- Seeding is disabled by default. `seed.sql` supplies canonical reference data;
+  do not use `seed-dev.sql` or staging data generators for application setup.
+- Never link the development stack to a hosted project or run remote DB commands.
+- See [local setup and migration report](docs/LOCAL_DEVELOPMENT.md) for details.
 
 ---
 

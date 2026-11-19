@@ -1,6 +1,11 @@
 /**
  * KALUSAGAP — rule-based automated document screening configuration.
  *
+ * Architectural role: consumed in the `route -> authenticate -> authorize ->
+ * upload/screening -> controller -> documentScreening.service -> Supabase`
+ * pipeline whenever residents or applicants upload identity, residency, or
+ * transfer documents stored in `public.documents`.
+ *
  * IMPORTANT SCOPE
  * ---------------
  * This configuration powers a DETERMINISTIC pre-screening step only. It does
@@ -234,6 +239,12 @@ const ID_BACK_SUPPORTING = Object.freeze([
   'expiry',
 ]);
 
+/**
+ * Back-side indicator phrases keyed by accepted `governmentIdType`. Back sides
+ * often omit the primary card title and show secondary field labels or issuing
+ * agency text instead, so these lists combine ID-specific markers with common
+ * back-side metadata labels.
+ */
 const BACK_SIDE_INDICATORS_BY_TYPE = Object.freeze({
   philsys: Object.freeze([
     'philsys',
@@ -516,7 +527,21 @@ const GOVERNMENT_ID_TYPE_INDICATORS = Object.freeze({
   other: { strong: GOVERNMENT_ID_STRONG, generic: GOVERNMENT_ID_GENERIC },
 });
 
-/** Export the Postal ID profile variant with supporting terms for the front. */
+/**
+ * Resolve the complete indicator profile (`strong`, optional `supporting`, and
+ * `generic` phrase lists) for a government-ID upload slot.
+ *
+ * - `government_id_back` attaches `ID_BACK_SUPPORTING` alongside type-aware
+ *   back-side indicators so ambiguous back-of-card layouts route to staff review.
+ * - `government_id_front` for `philsys` and `postal_id` attaches their dedicated
+ *   `supporting` phrase lists (`PHILSYS_SUPPORTING` / `POSTAL_ID_SUPPORTING`).
+ * - All other document/ID combinations delegate to `indicatorsForDocumentType`.
+ *
+ * @param {string} documentType - Upload slot key (e.g. `'government_id_front'`, `'government_id_back'`)
+ * @param {string} [governmentIdType] - Selected ID type key (e.g. `'philsys'`, `'postal_id'`)
+ * @param {string} [side] - Optional side hint retained for caller compatibility
+ * @returns {Object} Indicator profile with `strong`, `generic`, and optional `supporting` arrays
+ */
 export const getGovernmentIdProfile = (documentType, governmentIdType, side) => {
   if (documentType === 'government_id_back') {
     return {
@@ -625,6 +650,14 @@ export const DEFAULT_SCREENING_RULE = Object.freeze({
   requireMeaningfulText: false,
 });
 
+/**
+ * Look up the screening execution rule (`{ analyzeImage, requireMeaningfulText }`)
+ * for a given `documentType`, falling back to `DEFAULT_SCREENING_RULE` (image
+ * quality check only, no mandatory OCR indicator match) for unlisted types.
+ *
+ * @param {string} documentType
+ * @returns {{ analyzeImage: boolean, requireMeaningfulText: boolean }}
+ */
 export const ruleForDocumentType = (documentType) =>
   DOCUMENT_SCREENING_RULES[documentType] || DEFAULT_SCREENING_RULE;
 
@@ -659,7 +692,10 @@ export const SCREENING_MIME_TYPES = Object.freeze([
   'image/jpg',
 ]);
 
+/** Maximum upload size accepted by automated screening (10 MB). */
 export const MAX_SCREENING_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+/** Hard wall-clock timeout (ms) for an OCR pass before deferring to `OCR_TIMEOUT` manual review. */
 export const OCR_TIMEOUT_MS = 15000;
 
 export default {

@@ -2,11 +2,16 @@ import ApiError from '../utils/apiError.js';
 import { canTriage, canConsult, RHU_STATIONS, STATION_ASSIGNED_ROLES } from '../config/rhuStations.js';
 
 /**
- * Station authorization middleware factory.
+ * @module middleware/authorizeStation
  *
- * Runs AFTER `authenticate` (which resolves the profile) and, where used, after
- * `authorize(...)`. It enforces the RHU STATION assignment separately from the
- * account's role and barangay assignment:
+ * RHU clinical station authorization middleware factory for KALUSAGAP.
+ * Position in request pipeline:
+ *   `route -> authenticate -> authorize -> authorizeStation -> controller -> service -> repository/Supabase`
+ *
+ * Runs AFTER `authenticate` (which resolves `req.user.rhuStations` from
+ * `profiles.rhu_stations`) and, where used, after `authorize(...)`. It enforces
+ * the RHU STATION assignment separately from the account's role and barangay
+ * assignment:
  *
  *   authorizeStation(RHU_STATIONS.TRIAGE)
  *     -> RHU Personnel must hold the Triage station; Health Supervisor retains
@@ -25,12 +30,23 @@ import { canTriage, canConsult, RHU_STATIONS, STATION_ASSIGNED_ROLES } from '../
  * This is the API-layer boundary; the service layer re-checks the same rule so
  * a handler reached by another path is still protected.
  */
+
+/**
+ * Creates an Express middleware requiring the specified RHU station capability
+ * (`RHU_STATIONS.TRIAGE` or `RHU_STATIONS.CONSULTATION`) for station-assigned roles.
+ *
+ * @param {string} station - Target RHU station identifier from `RHU_STATIONS`.
+ * @returns {Function} Express middleware `(req, res, next)`.
+ */
 const authorizeStation = (station) => (req, res, next) => {
   const user = req.user;
   if (!user) return next(ApiError.unauthorized());
 
+  // Non-station-assigned clinical/supervisory roles (e.g. MHO, PHN) are governed
+  // by `authorize(...)` and bypass per-station filtering.
   if (!STATION_ASSIGNED_ROLES.includes(user.role)) return next();
 
+  // Fail closed (`false`) if an unrecognized station constant is supplied.
   const allowed =
     station === RHU_STATIONS.TRIAGE
       ? canTriage(user)

@@ -1,6 +1,25 @@
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
+import { assertLocalEnvironment } from './localSafety.js';
 
-dotenv.config();
+/**
+ * KALUSAGAP — centralized backend environment & runtime configuration.
+ *
+ * Architectural role: loaded at startup by `app.js`, `server.js`, middleware
+ * (CORS, rate limiting, auth), services (SMTP mail, OTP hashing, personnel
+ * notifications), and `config/supabase.js` across the entire
+ * `route -> authenticate -> authorize -> controller -> service -> repository/Supabase`
+ * stack.
+ */
+// Never load a legacy .env (which may contain deployment credentials) locally.
+const runtimeMode = process.env.NODE_ENV || 'development';
+if (!['development', 'test', 'production'].includes(runtimeMode)) {
+  throw new Error('NODE_ENV must be development, test, or production.');
+}
+dotenv.config({ path: fileURLToPath(new URL(`../../.env.${runtimeMode}`, import.meta.url)) });
+if ((process.env.NODE_ENV || 'development') !== runtimeMode) {
+  throw new Error('Environment files cannot change NODE_ENV.');
+}
 
 const isProduction = (process.env.NODE_ENV || 'development') === 'production';
 const clientUrlValue = process.env.CLIENT_URL || '';
@@ -18,6 +37,8 @@ const PRODUCTION_CLIENT_URLS = Object.freeze([
   'https://kalusagap.vercel.app',
 ]);
 
+// Fail fast on boot in production if mandatory CORS or Supabase credentials are missing,
+// preventing a misconfigured deployment from starting with degraded security or broken auth.
 if (isProduction) {
   const missing = [];
   if (!clientUrlValue && !corsOriginValue) missing.push('CLIENT_URL or CORS_ORIGIN');
@@ -31,19 +52,30 @@ if (isProduction) {
   }
 }
 
+/**
+ * Validate and normalize a strict HTTP(S) browser origin string for CORS.
+ * Rejects wildcards, non-HTTP(S) schemes, embedded credentials, non-root paths,
+ * query strings, and URL fragments so only exact `scheme://host[:port]` origins pass.
+ *
+ * @param {string} value
+ * @returns {string} Canonical `url.origin`
+ */
 const parseHttpOrigin = (value) => {
-  const url = new URL(value);
+  let url;
+  try { url = new URL(value); } catch { throw new Error('Invalid browser origin configuration.'); }
   if (!['http:', 'https:'].includes(url.protocol)
     || url.username
     || url.password
     || (url.pathname && url.pathname !== '/')
     || url.search
     || url.hash) {
-    throw new Error(`Invalid browser origin configuration: ${value}`);
+    throw new Error('Invalid browser origin configuration. Use an HTTP(S) origin without credentials, path, query, or fragment.');
   }
   return url.origin;
 };
 
+// Combine comma-separated `CLIENT_URL` and `CORS_ORIGIN` entries with the
+// environment-appropriate defaults into a deduplicated exact-origin allowlist.
 const configuredClientUrls = [
   ...new Set(
     [
@@ -57,7 +89,15 @@ const configuredClientUrls = [
       .map(parseHttpOrigin),
   ),
 ];
+if (!isProduction) assertLocalEnvironment(process.env);
 
+/**
+ * Coerce `TRUST_PROXY` env string into Express `trust proxy` format:
+ * booleans (`'false'`/`'0'`/`'true'`), numeric hop count, or subnet name (e.g. `'loopback'`).
+ *
+ * @param {string} value
+ * @returns {boolean|number|string}
+ */
 const parseTrustProxy = (value) => {
   if (!value || value === 'false' || value === '0') return false;
   if (value === 'true') return true;
@@ -103,14 +143,17 @@ const env = {
   // The anon key is safe to use for verifying end-user access tokens.
   supabaseAnonKey,
 
-  smtpHost: process.env.SMTP_HOST || '',
-  smtpPort: Number(process.env.SMTP_PORT) || 587,
+  // --- Outbound email, background worker & OTP security --------------------
+  smtpHost: process.env.SMTP_HOST || (isProduction ? '' : '127.0.0.1'),
+  smtpPort: Number(process.env.SMTP_PORT) || (isProduction ? 587 : 54325),
   smtpUser: process.env.SMTP_USER || '',
   smtpPassword: process.env.SMTP_PASSWORD || '',
-  smtpFrom: process.env.SMTP_FROM || '',
+  smtpFrom: process.env.SMTP_FROM || (isProduction ? '' : 'KALUSAGAP Local <noreply@kalusagap.test>'),
+  // Poll cadence for the background personnel notification worker, clamped to [10s, 3600s].
   personnelNotificationIntervalMs: Math.round(Math.min(3600, Math.max(10,
     Number.isFinite(personnelIntervalSeconds) ? personnelIntervalSeconds : 60,
   ))) * 1000,
+  // Server-side secret mixed into one-time verification code hashes.
   otpPepper: process.env.OTP_PEPPER || '',
 
   // --- Local data store ------------------------------------------------------

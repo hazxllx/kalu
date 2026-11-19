@@ -78,10 +78,23 @@ test('activity periods use Manila month boundaries and retain exactly the reques
   assert.deepEqual(lastActivityPeriod(12, new Date('2027-01-31T10:00:00Z')), { from: '2026-02-01', to: '2027-01-31' });
 });
 
+test('selected-period risk totals and summary cannot reuse a different year current classification', () => {
+  const data = fixture();
+  data.reportingRiskDistribution = [{ name: 'Low Risk', value: 1 }, { name: 'Unassessed', value: 3 }];
+  const result = healthTrendScope(data);
+  assert.equal(result.summary.highRiskResidents.value, '0');
+  assert.equal(result.summary.highRiskResidents.change, 'Recorded risk in reporting period');
+  assert.deepEqual(result.riskDistribution, data.reportingRiskDistribution);
+  delete data.reportingRiskDistribution;
+  assert.equal(healthTrendScope(data).summary.highRiskResidents.value, '1');
+});
+
 test('retained chart pages load the real activity adapter, label counts accurately, and do not clip counts at 100', async () => {
   const analytics = await readFile(new URL('../../src/features/analytics/pages/Analytics.jsx', import.meta.url), 'utf8');
   const trends = await readFile(new URL('../../src/features/analytics/pages/HealthTrends.jsx', import.meta.url), 'utf8');
-  assert.match(analytics, /earlyWarning\(lastActivityPeriod\(\)/);
+  assert.match(analytics, /reportingPeriod = useMemo\(\(\) => lastActivityPeriod\(\)/);
+  assert.match(analytics, /earlyWarning\(reportingPeriod, options\)/);
+  assert.match(analytics, /communityMap\(reportingPeriod, options\)/);
   assert.match(analytics, /title="Recorded Immunizations"/);
   assert.match(analytics, /not administered doses or official coverage/);
   assert.match(analytics, /domain=\{\[0, "auto"\]\}/);

@@ -58,6 +58,8 @@ test("profile/record conflict is NOT reported as a duplicate account", () => {
 
 test("rate-limit errors are classified separately", () => {
   assert.equal(classifySignupError({ code: "over_email_send_rate_limit" }), "rate_limited");
+  assert.equal(classifySignupError({ code: "over_request_rate_limit" }), "rate_limited");
+  assert.equal(classifySignupError({ status: 429, message: "For security purposes, you can only request this after 54 seconds." }), "rate_limited");
   assert.equal(classifySignupError({ message: "email rate limit exceeded" }), "rate_limited");
 });
 

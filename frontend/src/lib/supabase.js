@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { publicSupabaseConfigurationError } from '../../../shared/authConnectivity.js';
+import { validateLocalEnvironment } from './localSafety.js';
 
 /**
  * Browser Supabase client (frontend).
@@ -14,6 +15,10 @@ import { publicSupabaseConfigurationError } from '../../../shared/authConnectivi
 const url = String(import.meta.env?.VITE_SUPABASE_URL || '').trim();
 const anonKey = String(import.meta.env?.VITE_SUPABASE_ANON_KEY || '').trim();
 
+if (import.meta.env?.MODE && import.meta.env.MODE !== 'production') {
+  validateLocalEnvironment(import.meta.env);
+}
+
 export const supabaseConfigurationError = publicSupabaseConfigurationError(url, anonKey);
 export const isSupabaseConfigured = !supabaseConfigurationError;
 
@@ -23,7 +28,8 @@ export const supabase = isSupabaseConfigured
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        storageKey: 'kalusagap.auth',
+        storageKey: import.meta.env?.MODE && import.meta.env.MODE !== 'production'
+          ? 'kalusagap.local.auth' : 'kalusagap.auth',
       },
     })
   : null;

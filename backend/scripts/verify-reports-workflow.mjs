@@ -2,17 +2,19 @@
  * Authenticated end-to-end verification of report drafts, submission, RHU
  * retrieval, persistence, and review. This script writes a synthetic QA report.
  *
- * Before running against a hosted Supabase project, explicitly mark it as
- * non-production with KALUSAGAP_DATABASE_ENV=test|development and set
- * REPORTS_E2E_ALLOW_REMOTE=true. Production and unclassified targets are refused.
+ * Only local Supabase and API targets are allowed.
  */
-import 'dotenv/config';
+import '../src/config/env.js';
 import { createClient } from '@supabase/supabase-js';
+import { assertLocalScriptEnvironment, localFetch } from './local-safety.mjs';
+
+assertLocalScriptEnvironment();
 
 const API = process.env.API_URL || 'http://localhost:5000/api';
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
+  global: { fetch: localFetch },
 });
 
 const pass = [];
@@ -28,22 +30,10 @@ const reqEnv = (name) => {
   return value;
 };
 
-const assertNonProduction = () => {
-  const hostname = new URL(SUPABASE_URL).hostname.toLowerCase();
-  const local = ['localhost', '127.0.0.1', '::1'].includes(hostname) || hostname.endsWith('.localhost');
-  if (local) return;
-  const environment = String(process.env.KALUSAGAP_DATABASE_ENV || '').toLowerCase();
-  if (!['test', 'development'].includes(environment) || process.env.REPORTS_E2E_ALLOW_REMOTE !== 'true') {
-    throw new Error(
-      'Refusing to write QA report data to an unclassified/production Supabase target. ' +
-      'For an approved test/development project, set KALUSAGAP_DATABASE_ENV and REPORTS_E2E_ALLOW_REMOTE=true.',
-    );
-  }
-};
-
 async function signIn(email, password) {
   const client = createClient(SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
+    global: { fetch: localFetch },
   });
   const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error) throw new Error(`${email}: ${error.message}`);
@@ -51,11 +41,11 @@ async function signIn(email, password) {
 }
 
 const api = async (token, path, options = {}) => {
-  const response = await fetch(`${API}${path}`, {
+  const response = await localFetch(`${API}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `****** } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -65,7 +55,6 @@ const api = async (token, path, options = {}) => {
 };
 
 const run = async () => {
-  assertNonProduction();
   const supervisorEmail = process.env.REPORTS_SUPERVISOR_EMAIL || 'supervisor@kalusagap.test';
   const rhuEmail = process.env.REPORTS_RHU_EMAIL || 'rhu.personnel@kalusagap.test';
   const supervisorToken = await signIn(supervisorEmail, reqEnv('KALUSAGAP_SUPERVISOR_PASSWORD'));
@@ -207,7 +196,7 @@ const run = async () => {
 
   let networkRejected = false;
   try {
-    await fetch('http://127.0.0.1:1/api/reports');
+    await localFetch('http://127.0.0.1:1/api/reports');
   } catch {
     networkRejected = true;
   }

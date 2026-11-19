@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronDown,
@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import HHBadge from "../components/HHBadge";
+import HouseholdDialog from "../components/HouseholdDialog";
 import { Card } from "@/components/common/Card";
 import { ButtonSelectGroup } from "@/components/system";
 import { useAuth } from "@/context/AuthContext";
@@ -119,20 +120,29 @@ const philhealthLabel = (value) =>
   value === "member" ? "Member" : value === "non-member" ? "Non-member" : "—";
 
 /**
- * @param {{label: string, required?: boolean, error?: string, hint?: string, children: any, className?: string}} props
+ * @param {{label: string, htmlFor?: string, required?: boolean, error?: string, hint?: string, children: any, className?: string}} props
  */
-function Field({ label, required, error, hint, children, className = "" }) {
+function Field({ label, htmlFor, required, error, hint, children, className = "" }) {
+  const generatedId = useId();
+  const isControl = React.isValidElement(children) && typeof children.type === "string" && ["input", "select", "textarea"].includes(children.type);
+  const controlId = htmlFor || (isControl ? children.props.id || generatedId : undefined);
+  const descriptionId = controlId && (error || hint) ? `${controlId}-description` : undefined;
   return (
-    <div className={className}>
-      <label className="mb-1.5 block text-sm font-medium text-brand-ink">
+    <div className={`min-w-0 ${className}`}>
+      <label htmlFor={controlId} className="mb-1.5 block text-sm font-medium text-brand-ink">
         {label}
         {required && <span className="text-red-500"> *</span>}
       </label>
-      {children}
+      {isControl ? React.cloneElement(children, {
+        id: controlId,
+        "aria-required": required || children.props["aria-required"],
+        "aria-invalid": error ? true : children.props["aria-invalid"],
+        "aria-describedby": descriptionId || children.props["aria-describedby"],
+      }) : children}
       {error ? (
-        <p className="mt-1 text-xs text-red-600">{error}</p>
+        <p id={descriptionId} className="mt-1 text-xs text-red-600">{error}</p>
       ) : hint ? (
-        <p className="mt-1 text-xs text-brand-gray">{hint}</p>
+        <p id={descriptionId} className="mt-1 text-xs text-brand-gray">{hint}</p>
       ) : null}
     </div>
   );
@@ -142,7 +152,7 @@ function RadioRow({ name, value, options, onChange }) {
   return (
     <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
       {options.map((o) => (
-        <label key={o} className="flex cursor-pointer items-center gap-2 text-sm text-brand-ink">
+        <label key={o} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-brand-ink">
           <input
             type="radio"
             name={name}
@@ -176,14 +186,6 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
     searched: false,
     error: "",
   });
-
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   useEffect(() => {
     const query = residentSearch.query.trim();
@@ -221,16 +223,8 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
   const inputErr = inputCls("x");
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={isEdit ? "Edit household member" : "Add household member"}
-    >
-      <Card className="max-h-[90vh] w-full max-w-2xl overflow-y-auto">
-        <div onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-start justify-between gap-3 border-b border-brand-border bg-brand-bg/70 px-5 py-4 sm:px-6">
+    <HouseholdDialog label={isEdit ? "Edit household member" : "Add household member"} onClose={onClose}>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-brand-border bg-brand-bg/70 px-4 py-2 sm:px-6">
             <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-gray">
                 Household Member
@@ -242,14 +236,14 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 text-brand-gray transition-colors hover:text-brand-ink"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-btn text-brand-gray hover:bg-brand-bg"
               aria-label="Close"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
 
-          <div className="space-y-5 p-5 sm:p-6">
+          <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere] sm:p-6">
             {!isEdit && (
               <section className="rounded-btn border border-brand-border bg-brand-bg/40 p-4">
                 <label htmlFor="household-resident-search" className="mb-1.5 block text-sm font-medium text-brand-ink">
@@ -355,6 +349,7 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
               <Field label="Sex" required error={errors.sex}>
                 <ButtonSelectGroup
                   ariaLabel="Sex"
+                  variant="compact"
                   options={SEX_OPTIONS}
                   value={draft.sex}
                   onChange={(v) => onChange("sex", v)}
@@ -487,7 +482,7 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
             </div>
           </div>
 
-          <div className="flex flex-col-reverse items-stretch gap-3 border-t border-brand-border px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-brand-border px-4 py-2 sm:px-6 [&>button]:min-h-11">
             <button
               type="button"
               onClick={onClose}
@@ -503,9 +498,7 @@ function MemberFormModal({ draft, errors, isEdit, onChange, onClose, onSubmit })
               {isEdit ? "Save Changes" : "Add Member"}
             </button>
           </div>
-        </div>
-      </Card>
-    </div>
+    </HouseholdDialog>
   );
 }
 
@@ -517,24 +510,17 @@ function Section({ id, index, title, subtitle = "", open, onToggle, right = null
           open ? "border-b border-brand-border" : ""
         }`}
       >
-        <button type="button" onClick={() => onToggle(id)} className="flex flex-1 items-center gap-3 text-left">
+        <button type="button" onClick={() => onToggle(id)} aria-expanded={open} className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-blue text-[11px] font-bold text-white">
             {index}
           </span>
-          <span>
+          <span className="min-w-0 flex-1">
             <span className="block text-sm font-semibold text-brand-ink sm:text-base">{title}</span>
             {subtitle && <span className="block text-xs text-brand-gray">{subtitle}</span>}
           </span>
+          <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-brand-gray transition-transform ${open ? "" : "-rotate-90"}`} />
         </button>
         {right}
-        <button
-          type="button"
-          onClick={() => onToggle(id)}
-          className="shrink-0 text-brand-gray transition-colors hover:text-brand-ink"
-          aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
-        >
-          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "" : "-rotate-90"}`} />
-        </button>
       </div>
       {open && <div className="p-4 sm:p-5 md:p-6">{children}</div>}
     </Card>
@@ -1093,12 +1079,13 @@ export default function AddHouseholdPage() {
             <Field label="Household ID" hint="Assigned automatically on save">
               <input readOnly value="Auto-generated (e.g. HH-001)" className={readOnlyCls} />
             </Field>
-            <Field label="Household Head Name" required error={errors.head}>
+            <Field label="Household Head Name" htmlFor="household-head-name" required error={errors.head}>
               {user?.role === "bhw" ? (
                 <div className="relative">
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-gray" />
                     <input
+                      id="household-head-name"
                       type="text"
                       value={form.head}
                       onFocus={() => setHeadSearchOpen(true)}
@@ -1108,6 +1095,9 @@ export default function AddHouseholdPage() {
                       autoComplete="off"
                       role="combobox"
                       aria-autocomplete="list"
+                      aria-required="true"
+                      aria-invalid={Boolean(errors.head)}
+                      aria-describedby={errors.head ? "household-head-name-description" : undefined}
                       aria-expanded={headSearchOpen && form.head.trim().length >= 2}
                       aria-controls="household-head-results"
                       className={`${inputCls(errors.head)} pl-9`}
@@ -1323,7 +1313,7 @@ export default function AddHouseholdPage() {
                   type="date"
                   value={form.initialVisitDate}
                   onChange={(e) => set("initialVisitDate", e.target.value)}
-                  className={inputCls()}
+                  className={`${inputCls(errors.initialVisitDate)} min-h-11 min-w-0 max-w-full`}
                 />
               </Field>
             </div>
@@ -1534,7 +1524,7 @@ export default function AddHouseholdPage() {
             <button
               type="button"
               onClick={openAddMember}
-              className="inline-flex items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
+               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-btn bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark"
             >
               <Plus className="h-4 w-4" /> Add Member
             </button>
@@ -1570,7 +1560,7 @@ export default function AddHouseholdPage() {
           ) : (
             <>
               {/* Desktop / laptop — readable table */}
-              <div className="hidden overflow-hidden rounded-btn border border-brand-border bg-white lg:block">
+              <div className="hidden overflow-x-auto rounded-btn border border-brand-border bg-white xl:block">
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-brand-border bg-brand-bg text-xs uppercase tracking-wide text-brand-gray">
@@ -1656,7 +1646,7 @@ export default function AddHouseholdPage() {
               </div>
 
               {/* Tablet / mobile — compact member cards */}
-              <div className="space-y-3 lg:hidden">
+              <div className="space-y-3 xl:hidden">
                 {filteredMembers.length === 0 ? (
                   <div className="rounded-btn border border-brand-border bg-white px-4 py-8 text-center text-sm text-brand-gray">
                     No members match your search.
@@ -1665,7 +1655,7 @@ export default function AddHouseholdPage() {
                   filteredMembers.map(({ m, i }) => (
                     <div key={i} className="rounded-btn border border-brand-border bg-white p-4">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                        <div className="min-w-0 [overflow-wrap:anywhere]">
                           <p className="flex items-center gap-2 text-sm font-semibold text-brand-ink">
                             <span className="text-xs font-semibold text-brand-gray">#{i + 1}</span>
                             <span className="truncate">{m.name || "—"}</span>
@@ -1686,7 +1676,7 @@ export default function AddHouseholdPage() {
                             onClick={() => openEditMember(i)}
                             title="Edit member"
                             aria-label={`Edit ${m.name || `member ${i + 1}`}`}
-                            className="flex h-9 w-9 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-brand-blue hover:bg-brand-light hover:text-brand-blue"
+                            className="flex h-11 w-11 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-brand-blue hover:bg-brand-light hover:text-brand-blue"
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
@@ -1695,7 +1685,7 @@ export default function AddHouseholdPage() {
                             onClick={() => removeMember(i)}
                             title="Delete member"
                             aria-label={`Delete ${m.name || `member ${i + 1}`}`}
-                            className="flex h-9 w-9 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                            className="flex h-11 w-11 items-center justify-center rounded-btn border border-brand-border text-brand-gray transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
