@@ -1117,6 +1117,11 @@ export default function TreatmentConsultation() {
                 value={formData.referralRequired}
                 onChange={(val) => setFormData({ ...formData, referralRequired: val })}
               />
+              {formData.referralRequired === "Yes" && (
+                <p role="status" className="sm:col-span-2 rounded-btn border border-brand-blue/20 bg-brand-blue/5 px-3 py-2 text-xs leading-relaxed text-brand-gray dark:bg-brand-blue/10">
+                  Save this consultation first. The referral form will open next with this resident, clinical findings, and vital signs already attached.
+                </p>
+              )}
               {formData.followUpRequired === "Yes" && (
                 <div className="sm:col-span-2">
                   <p className="text-xs text-brand-gray mb-1">Next Visit Date <span className="text-brand-danger">*</span></p>

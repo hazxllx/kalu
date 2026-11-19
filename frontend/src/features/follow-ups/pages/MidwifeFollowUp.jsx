@@ -4,8 +4,9 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { createPortal } from "react-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
-import StatCard from "@/components/common/StatCard";
+import KpiHorizontal from "@/components/common/KpiHorizontal";
 import TablePagination from "@/components/tables/TablePagination";
+import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
 import StatusBadge from "@/components/common/StatusBadge";
 import PriorityBadge from "@/features/follow-ups/components/PriorityBadge";
 import FollowUpStatusBadge, { STATUS_DOTS } from "@/features/follow-ups/components/FollowUpStatusBadge";
@@ -245,6 +246,8 @@ export default function MidwifeFollowUp() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState(statusParam);
   const [priorityFilter, setPriorityFilter] = useState("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [followUpPage, setFollowUpPage] = useState(1);
   const [followUpPageSize, setFollowUpPageSize] = useState(8);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -395,7 +398,17 @@ export default function MidwifeFollowUp() {
   const persistFollowUp = async (id, patch, successMessage) => {
     setSaving(true);
     try {
-      const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: id, record: patch });
+      const current = followUps.find((followUp) => String(followUp.id) === String(id));
+      const expectedRevision = Number(patch.expected_revision ?? current?.revision);
+      const hasRevision = Number.isInteger(expectedRevision) && expectedRevision >= 1;
+      if (!hasRevision && !current?.updated_at && !current?.updatedAt) {
+        throw new Error("This follow-up has no current server revision. Refresh the list and try again.");
+      }
+      const updateRecord = {
+        ...patch,
+        ...(hasRevision ? { expected_revision: expectedRevision } : { expected_updated_at: current.updated_at || current.updatedAt }),
+      };
+      const result = await updateFollowUpOffline({ ownerId: user?.id, followUpId: id, record: updateRecord });
       const record = result?.record || result;
       const updated = mapFollowUpRow(record);
       setFollowUps((prev) => prev.map((f) => (
@@ -459,21 +472,22 @@ export default function MidwifeFollowUp() {
   }, [showScheduleModal]);
 
   const authorizedFollowUps = loadedOwner === user?.id && scopeReady && (!supervisor || canViewFollowUps) ? followUps.filter(inScope) : [];
-  const stats = summarizeFollowUps(authorizedFollowUps);
-  const overdueCount = authorizedFollowUps.filter(isOverdue).length;
+  const dateFilteredFollowUps = authorizedFollowUps.filter((row) => matchesDateRange(row.scheduledDateRaw || row.scheduled_date, dateFrom, dateTo));
+  const stats = summarizeFollowUps(dateFilteredFollowUps);
+  const overdueCount = dateFilteredFollowUps.filter(isOverdue).length;
 
-  const filteredFollowUps = filterFollowUps(authorizedFollowUps, {
+  const filteredFollowUps = filterFollowUps(dateFilteredFollowUps, {
     search: searchQuery,
     status: supervisor && statusFilter === "Overdue" ? "All" : statusFilter,
     priority: priorityFilter,
   }).filter((row) => !supervisor || statusFilter !== "Overdue" || isOverdue(row));
   const pageFollowUps = filteredFollowUps.slice((followUpPage - 1) * followUpPageSize, followUpPage * followUpPageSize);
-  useEffect(() => { setFollowUpPage(1); }, [searchQuery, statusFilter, priorityFilter]);
+  useEffect(() => { setFollowUpPage(1); }, [searchQuery, statusFilter, priorityFilter, dateFrom, dateTo]);
   useEffect(() => {
     setFollowUpPage((page) => Math.min(page, Math.max(1, Math.ceil(filteredFollowUps.length / followUpPageSize))));
   }, [filteredFollowUps.length, followUpPageSize]);
   const filtersActive = Boolean(
-    searchQuery || statusFilter !== "All" || priorityFilter !== "All",
+    searchQuery || statusFilter !== "All" || priorityFilter !== "All" || dateFrom || dateTo,
   );
   const loadErrorMessage = [
     loadError ? `Follow-up records: ${loadError}` : null,
@@ -501,7 +515,6 @@ export default function MidwifeFollowUp() {
     }
     if (
       followUp.status === "Pending" ||
-      (followUp.requires_resident_response && followUp.resident_decision !== "approved") ||
       String(followUp.scheduledDateRaw || "").slice(0, 10) > todayISO()
     ) {
       showToast("This follow-up cannot be recorded as a completed visit yet.");
@@ -528,8 +541,7 @@ export default function MidwifeFollowUp() {
       const context = { followUpStart: { id: followUp.id, residentId: followUp.residentId, residentName: followUp.residentName, scheduledDate: followUp.scheduledDateRaw, purpose: followUp.purpose || "Follow-up" } };
       const purpose = String(followUp.purpose || "").toLowerCase();
       if (/vaccin|immuniz/.test(purpose)) navigate("/app/health_supervisor/immunization", { state: context });
-      else if (/consult|check.?up|maternal|child|chronic|medication/.test(purpose)) navigate("/app/health_supervisor/consultations", { state: context });
-      else navigate("/app/health_supervisor/services", { state: context });
+      else navigate("/app/health_supervisor/consultations", { state: context });
     } catch { /* persistFollowUp displays the save error */ }
   };
 
@@ -715,7 +727,7 @@ export default function MidwifeFollowUp() {
           <div
             ref={menuRef}
             role="menu"
-            className={`fixed z-[60] max-h-[calc(100vh-1rem)] w-48 overflow-y-auto rounded-lg border border-brand-border bg-white py-1 shadow-lg ${supervisor ? "supervisor-menu" : ""}`}
+            className={`fixed z-[60] max-h-[calc(100vh-1rem)] w-56 overflow-y-auto rounded-lg border border-brand-border bg-white py-1 shadow-lg dark:border-border dark:bg-card ${supervisor ? "supervisor-menu" : ""}`}
             style={{
               left: menuPosition?.left ?? 0,
               top: menuPosition?.top ?? 0,
@@ -726,7 +738,7 @@ export default function MidwifeFollowUp() {
                 type="button"
                 role="menuitem"
                 onClick={() => handleActionClick('view', followUp)}
-                className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
               >
                 View Details
               </button>
@@ -735,7 +747,7 @@ export default function MidwifeFollowUp() {
                   type="button"
                   role="menuitem"
                   onClick={() => handleActionClick('edit', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
                 >
                   Edit / Reschedule
                 </button>
@@ -745,7 +757,7 @@ export default function MidwifeFollowUp() {
                   type="button"
                   role="menuitem"
                   onClick={() => handleActionClick('missed', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
                 >
                   Mark Missed
                 </button>
@@ -755,7 +767,7 @@ export default function MidwifeFollowUp() {
                   type="button"
                   role="menuitem"
                   onClick={() => handleActionClick('updateStatus', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
                 >
                   Update Status
                 </button>
@@ -765,7 +777,7 @@ export default function MidwifeFollowUp() {
                   type="button"
                   role="menuitem"
                   onClick={() => handleActionClick('addRemarks', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
                 >
                   Add Remarks
                 </button>
@@ -775,7 +787,7 @@ export default function MidwifeFollowUp() {
                   type="button"
                   role="menuitem"
                   onClick={() => handleActionClick('recordVisit', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
+                  className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg dark:text-foreground dark:hover:bg-hover"
                 >
                   Start Follow-Up
                 </button>
@@ -785,7 +797,7 @@ export default function MidwifeFollowUp() {
                   type="button"
                   role="menuitem"
                   onClick={() => handleActionClick('cancel', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-danger transition-colors hover:bg-brand-danger/5"
+                  className="w-full px-3 py-2 text-left text-sm text-brand-danger transition-colors hover:bg-brand-danger/5 dark:hover:bg-destructive/10"
                 >
                   Cancel Follow-up
                 </button>
@@ -1026,6 +1038,7 @@ export default function MidwifeFollowUp() {
           purpose: scheduleForm.reason.trim(),
           scheduled_date: scheduleForm.date,
           scheduled_time: scheduleForm.time,
+          schedule_change_reason: scheduleForm.scheduleChangeReason.trim(),
           location: scheduleForm.location,
           priority: scheduleForm.priority,
           status: deriveStatus(scheduleForm.date),
@@ -1098,8 +1111,6 @@ export default function MidwifeFollowUp() {
         ) : null}
       />
 
-      {supervisor && canViewFollowUps && <div className="mb-4"><ScheduleRequestsPanel title="Resident follow-up schedule requests" /></div>}
-
       {/* Toast Notification */}
       {toast && (
         <div className="fixed bottom-4 right-4 z-50 flex animate-in slide-in-from-bottom-2 items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 shadow-lg">
@@ -1137,39 +1148,44 @@ export default function MidwifeFollowUp() {
 
        {/* Summary Cards */}
        {supervisor ? (
-        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard variant="ledger" label="LOADED FOLLOW-UPS" value={loading || loadError ? "Unavailable" : stats.total} description={followUpSource?.source === "cache" ? "Saved records on this device" : "Authorized follow-up records"} tone="blue" />
-          <StatCard variant="ledger" label="DUE TODAY" value={loading || loadError ? "Unavailable" : stats.today} description="Scheduled today, Manila time" tone="blue" />
-          <StatCard variant="ledger" label="OVERDUE" value={loading || loadError ? "Unavailable" : overdueCount} description="Past due; closed visits excluded" tone="red" onClick={() => setStatusFilter(statusFilter === "Overdue" ? "All" : "Overdue")} active={statusFilter === "Overdue"} />
-          <StatCard variant="ledger" label="COMPLETED" value={loading || loadError ? "Unavailable" : stats.completed} description="Persisted completed visits" tone="green" />
+        <div className="mb-4 phn-kpi-white">
+          <KpiHorizontal count={4}>
+            <KpiHorizontal.Item label="LOADED FOLLOW-UPS" value={loading || loadError ? "Unavailable" : stats.total} description={dateFrom || dateTo ? "Records in the selected date range" : followUpSource?.source === "cache" ? "Saved records on this device" : "Authorized follow-up records"} tone="blue" />
+            <KpiHorizontal.Item label="DUE TODAY" value={loading || loadError ? "Unavailable" : stats.today} description="Scheduled today, Manila time" tone="blue" />
+            <KpiHorizontal.Item label="OVERDUE" value={loading || loadError ? "Unavailable" : overdueCount} description="Past due; closed visits excluded" tone="red" onClick={() => setStatusFilter(statusFilter === "Overdue" ? "All" : "Overdue")} />
+            <KpiHorizontal.Item label="COMPLETED" value={loading || loadError ? "Unavailable" : stats.completed} description="Persisted completed visits" tone="green" />
+          </KpiHorizontal>
         </div>
        ) : null}
 
+       {supervisor && canViewFollowUps && <div className="mb-4"><ScheduleRequestsPanel title="Resident follow-up schedule requests" /></div>}
+
        {/* Search & Filters */}
-      {supervisor ? <Card className="supervisor-toolbar mb-4 flex flex-wrap items-end gap-3">
-        <label htmlFor="followup-search" className="min-w-[12rem] flex-1 text-caption font-medium text-brand-gray">
+      {supervisor ? <Card className="supervisor-toolbar mb-4 !grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 xl:!items-end">
+        <label htmlFor="followup-search" className="min-w-0 text-caption font-medium text-brand-gray sm:col-span-2 xl:col-span-4">
           Search Follow-ups
-          <div className="supervisor-input mt-1 flex items-center gap-2"><Search className="h-4 w-4 shrink-0" aria-hidden="true" /><input id="followup-search" type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Resident, purpose, personnel or location" className="w-full min-w-0 bg-transparent outline-none" /></div>
+          <div className="supervisor-input mt-1 flex h-10 items-center gap-2"><Search className="h-4 w-4 shrink-0" aria-hidden="true" /><input id="followup-search" type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Resident, purpose, personnel or location" className="w-full min-w-0 bg-transparent outline-none" /></div>
         </label>
-        <label htmlFor="followup-status" className="text-caption font-medium text-brand-gray">Status<select id="followup-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="supervisor-input mt-1 block w-full sm:w-36">{["All", "Overdue", "Pending", ...FOLLOW_UP_STATUS_FILTERS.filter((status) => status !== "All")].map((status) => <option key={status} value={status}>{status === "All" ? "All Status" : status}</option>)}</select></label>
-        <label htmlFor="followup-priority" className="text-caption font-medium text-brand-gray">Priority<select id="followup-priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="supervisor-input mt-1 block w-full sm:w-36">{["All", "High", "Medium", "Low"].map((priority) => <option key={priority} value={priority}>{priority === "All" ? "All priorities" : priority}</option>)}</select></label>
-        {filtersActive && <button type="button" className="supervisor-button is-quiet" onClick={() => { setSearchQuery(""); setStatusFilter("All"); setPriorityFilter("All"); }}>Clear filters</button>}
+        <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="xl:col-span-3" />
+        <label htmlFor="followup-status" className="text-caption font-medium text-brand-gray sm:col-span-1 xl:col-span-2">Status<select id="followup-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="supervisor-input mt-1 block h-10 w-full">{["All", "Overdue", "Pending", ...FOLLOW_UP_STATUS_FILTERS.filter((status) => status !== "All")].map((status) => <option key={status} value={status}>{status === "All" ? "All Status" : status}</option>)}</select></label>
+        <label htmlFor="followup-priority" className="text-caption font-medium text-brand-gray sm:col-span-1 xl:col-span-2">Priority<select id="followup-priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="supervisor-input mt-1 block h-10 w-full">{["All", "High", "Medium", "Low"].map((priority) => <option key={priority} value={priority}>{priority === "All" ? "All priorities" : priority}</option>)}</select></label>
+        {filtersActive && <button type="button" className="supervisor-button is-quiet h-10 sm:col-span-2 xl:col-span-1" onClick={() => { setSearchQuery(""); setStatusFilter("All"); setPriorityFilter("All"); setDateFrom(""); setDateTo(""); }}>Clear filters</button>}
       </Card> : <Card className="p-4 mb-5">
-        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-          <div className="flex items-center gap-2 bg-brand-bg border border-brand-border rounded-btn px-3 py-2 flex-1 max-w-md">
-            <Search className="w-4 h-4 text-brand-gray" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search resident..."
-              className="bg-transparent text-sm outline-none w-full placeholder:text-brand-gray/70"
-            />
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 xl:items-end">
+          <label className="min-w-0 text-sm font-medium text-brand-gray sm:col-span-2 xl:col-span-4">
+            Search
+            <div className="mt-1 flex h-10 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input">
+              <Search className="h-4 w-4 shrink-0 text-brand-gray" />
+              <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search resident..." className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-brand-gray/70" />
+            </div>
+          </label>
+          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="xl:col-span-3" />
+          <div className="grid grid-cols-1 gap-2 sm:col-span-2 sm:grid-cols-2 xl:col-span-5">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue"
+              aria-label="Follow-up status filter"
+              className="h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
             >
               {FOLLOW_UP_STATUS_FILTERS.map((status) => (
                 <option key={status} value={status}>{status}</option>
@@ -1178,7 +1194,8 @@ export default function MidwifeFollowUp() {
             <select
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
-              className="bg-white border border-brand-border rounded-btn px-3 py-2 text-sm outline-none focus:border-brand-blue"
+              aria-label="Follow-up priority filter"
+              className="h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
             >
               <option value="All">All Priorities</option>
               <option value="High">High</option>

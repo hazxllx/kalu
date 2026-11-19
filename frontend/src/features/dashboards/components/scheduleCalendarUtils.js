@@ -155,6 +155,8 @@ export function mapFollowUpEvent(row) {
     residentName: resident || "Resident",
     residentBarangay: row.resident?.barangay ?? row.residentBarangay ?? row.barangay ?? "",
     status: row.status || "",
+    revision: row.revision ?? row.expected_revision ?? null,
+    updatedAt: row.updated_at ?? row.updatedAt ?? null,
     category: "",
     location: row.location || "",
     provider: row.assigned_provider ?? row.provider ?? "",

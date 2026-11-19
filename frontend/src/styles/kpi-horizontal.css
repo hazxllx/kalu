@@ -85,7 +85,10 @@
 /* Interactive KPI (clickable) */
 .kpi-metric-interactive {
   cursor: pointer;
-  border: none;
+  border-right: 1px solid #E2E8F0;
+  border-top: 3px solid #124B86;
+  border-bottom: 0;
+  border-left: 0;
   padding: 1rem 1.25rem;
   background: #FFFFFF;
   color: #12263F;

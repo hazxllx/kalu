@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
+import DateRangeFilter from "@/components/common/DateRangeFilter";
 import {
   Activity,
   CalendarDays,
@@ -81,7 +82,7 @@ const filtersActive = (f) => Boolean(f.from || f.to || f.serviceId || f.type || 
 const selectCls =
   "h-9 w-full rounded-btn border border-brand-border bg-white px-2.5 text-sm text-brand-ink outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-border dark:bg-input";
 
-const compactLabel = "mb-1 block text-[11px] font-medium uppercase tracking-wide text-brand-gray";
+const compactLabel = "mb-1 block text-xs font-medium uppercase tracking-wide text-brand-gray";
 const selectWrapCls = "relative";
 const selectIconCls = "pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-brand-gray";
 
@@ -486,21 +487,7 @@ export default function HealthRecord() {
             <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Clear Filters
           </button>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <div>
-            <label htmlFor="ch-from" className={compactLabel}>From date</label>
-            <div className="relative">
-              <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-brand-gray" aria-hidden="true" />
-              <input id="ch-from" type="date" value={filters.from} max={filters.to || undefined} onChange={setFilter("from")} className={`${selectCls} pl-8`} />
-            </div>
-          </div>
-          <div>
-            <label htmlFor="ch-to" className={compactLabel}>To date</label>
-            <div className="relative">
-              <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-brand-gray" aria-hidden="true" />
-              <input id="ch-to" type="date" value={filters.to} min={filters.from || undefined} onChange={setFilter("to")} className={`${selectCls} pl-8`} />
-            </div>
-          </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <div>
             <label htmlFor="ch-service" className={compactLabel}>Health Service</label>
             <div className={selectWrapCls}>
@@ -637,7 +624,7 @@ export default function HealthRecord() {
                     {consultationFields(c).map((column, columnIndex) => (
                       <div key={columnIndex} className="min-w-0 space-y-2">
                         {column.map(({ label, value, Icon, preserveLines }) => (
-                          <div key={label} className="grid min-w-0 grid-cols-[1rem_7.5rem_minmax(0,1fr)] items-start gap-x-2 text-[13px] leading-5">
+                          <div key={label} className="grid min-w-0 grid-cols-[1rem_7.5rem_minmax(0,1fr)] items-start gap-x-2 text-sm leading-5">
                             <Icon className="mt-0.5 h-3.5 w-3.5 text-brand-blue" aria-hidden="true" />
                             <span className="font-medium text-brand-ink">{label}</span>
                             <span className={`min-w-0 break-words text-brand-gray ${preserveLines ? "whitespace-pre-line" : ""}`}>{dash(value)}</span>
@@ -663,7 +650,7 @@ export default function HealthRecord() {
                           index % 8 === 0 ? "xl:border-l-0 xl:pl-0" : "xl:border-l"
                         }`}
                       >
-                        <p className="flex items-center gap-1.5 truncate text-[11px] text-brand-gray">
+                        <p className="flex items-center gap-1.5 truncate text-xs text-brand-gray">
                           <Icon className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" /> {label}
                         </p>
                         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -671,7 +658,7 @@ export default function HealthRecord() {
                             {value}{unit ? ` ${unit}` : ""}
                           </span>
                           {label === "BMI" && category && bmiBadgeClass(category) && (
-                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ${bmiBadgeClass(category)}`}>
+                            <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${bmiBadgeClass(category)}`}>
                               {category}
                             </span>
                           )}
@@ -704,22 +691,22 @@ export default function HealthRecord() {
         title="My Health Record"
         subtitle="A complete view of your medical history and vitals."
         action={
-          <div className="flex flex-col items-start gap-1 md:items-end">
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end sm:justify-end">
+            <DateRangeFilter
+              from={filters.from}
+              to={filters.to}
+              onFromChange={(value) => setFilters((current) => ({ ...current, from: value }))}
+              onToChange={(value) => setFilters((current) => ({ ...current, to: value }))}
+              className="w-full sm:w-52"
+              portal
+            />
             <button
               onClick={exportHealthRecord}
               disabled={loading || !!error || exporting}
               aria-busy={exporting}
-              className="flex items-center gap-2 rounded-full bg-brand-gold px-4 py-2 text-[13px] font-semibold text-brand-dark transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-brand-gold px-4 text-sm font-semibold text-brand-dark transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {exporting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Generating PDF...
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" /> Export Health Record
-                </>
-              )}
+              {exporting ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating PDF...</> : <><Download className="w-4 h-4" /> Export Health Record</>}
             </button>
             {exportError && <span className="text-xs text-brand-danger">{exportError}</span>}
           </div>
@@ -747,13 +734,13 @@ export default function HealthRecord() {
                 ["Sex", resident?.sex],
               ].map(([label, value]) => (
                 <div key={label} className="min-w-0">
-                  <p className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">{label}</p>
-                  <p className="mt-1.5 truncate text-[13px] text-brand-ink">{dash(value)}</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</p>
+                  <p className="mt-1.5 truncate text-sm text-brand-ink">{dash(value)}</p>
                 </div>
               ))}
               <div>
-                <p className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">Verification</p>
-                <p className="mt-1.5 inline-flex rounded-full border border-brand-border bg-brand-bg px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-ink">
+                <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">Verification</p>
+                <p className="mt-1.5 inline-flex rounded-full border border-brand-border bg-brand-bg px-2.5 py-1 text-xs font-semibold text-brand-ink">
                   {dash(resident?.verificationStatus)}
                 </p>
               </div>
@@ -775,7 +762,7 @@ export default function HealthRecord() {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`-mb-px border-b-2 px-3.5 py-2.5 text-[12px] font-medium transition-colors ${
+                  className={`-mb-px border-b-2 px-3.5 py-3 text-sm font-medium transition-colors ${
                     active
                       ? "border-brand-blue text-brand-blue"
                       : "border-transparent text-brand-gray hover:text-brand-ink"
@@ -790,7 +777,7 @@ export default function HealthRecord() {
           {activeTab === "consultations" ? renderConsultationHistory() : activeTab === "service-history" ? renderHealthServiceHistory() : (
             <>
               <div className="mb-2 flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-brand-gray uppercase tracking-wide">
+                <h3 className="text-base font-semibold text-brand-ink">
                   Latest Vitals{consultations.length ? ` — ${formatDate(consultations[0].date)}` : ""}
                 </h3>
               </div>
@@ -871,9 +858,9 @@ export default function HealthRecord() {
                           item.tone === "green" ? "bg-brand-green" : item.tone === "yellow" ? "bg-brand-gold" : "bg-brand-blue"
                         }`} />
                         <div className="min-w-0 flex-1">
-                          <p className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">{item.type}</p>
-                          <p className="mt-1 text-[13px] leading-relaxed text-brand-ink">{item.detail}</p>
-                          <p className="mt-0.5 font-mono text-[10px] text-brand-gray">{formatDate(item.date)}</p>
+                          <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">{item.type}</p>
+                          <p className="mt-1 text-sm leading-relaxed text-brand-ink">{item.detail}</p>
+                          <p className="mt-0.5 text-xs text-brand-gray">{formatDate(item.date)}</p>
                         </div>
                       </li>
                     ))}

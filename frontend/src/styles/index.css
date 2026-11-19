@@ -1307,6 +1307,7 @@
 }
 .supervisor-shell .referral-monitoring-grid {
   table-layout: fixed;
+  min-width: 1120px;
 }
 .supervisor-shell .referral-monitoring-grid th,
 .supervisor-shell .referral-monitoring-grid td {
@@ -1320,35 +1321,35 @@
   white-space: normal;
 }
 .supervisor-shell .referral-monitoring-grid-supervisor th:nth-child(1),
-.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(1) { width: 16%; }
+.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(1) { width: 14%; }
 .supervisor-shell .referral-monitoring-grid-supervisor th:nth-child(2),
-.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(2) { width: 11%; }
+.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(2) { width: 10%; }
 .supervisor-shell .referral-monitoring-grid-supervisor th:nth-child(3),
-.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(3) { width: 17%; }
+.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(3) { width: 16%; }
 .supervisor-shell .referral-monitoring-grid-supervisor th:nth-child(4),
-.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(4) { width: 17%; }
+.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(4) { width: 16%; }
 .supervisor-shell .referral-monitoring-grid-supervisor th:nth-child(5),
-.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(5) { width: 13%; }
+.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(5) { width: 11%; }
 .supervisor-shell .referral-monitoring-grid-supervisor th:nth-child(6),
 .supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(6) { width: 9%; }
 .supervisor-shell .referral-monitoring-grid-supervisor th:nth-child(7),
-.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(7) { width: 9%; }
+.supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(7) { width: 16%; }
 .supervisor-shell .referral-monitoring-grid-supervisor th:nth-child(8),
 .supervisor-shell .referral-monitoring-grid-supervisor td:nth-child(8) { width: 8%; text-align: center; }
-.supervisor-shell .referral-monitoring-grid-resident th:nth-child(1),
-.supervisor-shell .referral-monitoring-grid-resident td:nth-child(1) { width: 20%; }
-.supervisor-shell .referral-monitoring-grid-resident th:nth-child(2),
-.supervisor-shell .referral-monitoring-grid-resident td:nth-child(2) { width: 22%; }
-.supervisor-shell .referral-monitoring-grid-resident th:nth-child(3),
-.supervisor-shell .referral-monitoring-grid-resident td:nth-child(3) { width: 20%; }
-.supervisor-shell .referral-monitoring-grid-resident th:nth-child(4),
-.supervisor-shell .referral-monitoring-grid-resident td:nth-child(4) { width: 14%; }
-.supervisor-shell .referral-monitoring-grid-resident th:nth-child(5),
-.supervisor-shell .referral-monitoring-grid-resident td:nth-child(5) { width: 12%; }
-.supervisor-shell .referral-monitoring-grid-resident th:nth-child(6),
-.supervisor-shell .referral-monitoring-grid-resident td:nth-child(6) { width: 8%; }
-.supervisor-shell .referral-monitoring-grid-resident th:nth-child(7),
-.supervisor-shell .referral-monitoring-grid-resident td:nth-child(7) { width: 4%; text-align: center; }
+.referral-monitoring-grid-resident th:nth-child(1),
+.referral-monitoring-grid-resident td:nth-child(1) { width: 13%; }
+.referral-monitoring-grid-resident th:nth-child(2),
+.referral-monitoring-grid-resident td:nth-child(2) { width: 19%; }
+.referral-monitoring-grid-resident th:nth-child(3),
+.referral-monitoring-grid-resident td:nth-child(3) { width: 18%; }
+.referral-monitoring-grid-resident th:nth-child(4),
+.referral-monitoring-grid-resident td:nth-child(4) { width: 9%; }
+.referral-monitoring-grid-resident th:nth-child(5),
+.referral-monitoring-grid-resident td:nth-child(5) { width: 8%; }
+.referral-monitoring-grid-resident th:nth-child(6),
+.referral-monitoring-grid-resident td:nth-child(6) { width: 23%; }
+.referral-monitoring-grid-resident th:nth-child(7),
+.referral-monitoring-grid-resident td:nth-child(7) { width: 10%; text-align: center; }
 .follow-up-monitoring-grid {
   table-layout: auto;
   width: 100%;
@@ -1451,7 +1452,9 @@
 .supervisor-shell .ui-risk-overview .bg-brand-blue { background-color: #A87B24; }
 .supervisor-shell .ui-risk-overview .h-2 { height: 0.25rem; border-radius: 2px; }
 .supervisor-menu { border-radius: 4px; border-color: hsl(var(--border)); background: hsl(var(--card)); font-size: 0.8125rem; }
-.supervisor-menu button { min-height: 2.25rem; font-size: 0.8125rem; }
+.supervisor-menu button { min-height: 2.25rem; color: var(--supervisor-ink); font-size: 0.8125rem; }
+.dark .supervisor-menu button { color: hsl(var(--foreground)); }
+.dark .supervisor-menu button:hover { background-color: hsl(var(--hover)); }
 
 .supervisor-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.625rem; }
 .supervisor-section-heading h2 { font-size: 0.9375rem; line-height: 1.375rem; font-weight: 600; color: var(--supervisor-ink); }

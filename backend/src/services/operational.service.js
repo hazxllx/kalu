@@ -81,7 +81,7 @@ const TERMINAL_STATUSES = new Set(['Completed', 'Cancelled', 'Rejected']);
  * illegal transition; a no-op (same status, or none) passes. Exported so it can
  * be unit-tested on its own.
  */
-export const assertFollowUpTransition = (existing = {}, nextStatus, { today = manilaDateString() } = {}) => {
+export const assertFollowUpTransition = (existing = {}, nextStatus, { today = manilaDateString(), now = new Date() } = {}) => {
   const current = text(existing.status) || 'Scheduled';
   const target = text(nextStatus);
   if (!target || target === current) return; // editing other fields / no change
@@ -94,12 +94,26 @@ export const assertFollowUpTransition = (existing = {}, nextStatus, { today = ma
     throw ApiError.conflict('A missed follow-up must be rescheduled before it can be marked Ongoing.');
   }
 
+  if (target === 'Missed') {
+    const scheduledDate = text(existing.scheduled_date);
+    const scheduledTime = text(existing.scheduled_time).slice(0, 5);
+    if (scheduledDate && scheduledDate > today) {
+      throw ApiError.unprocessable(`This follow-up is scheduled for ${scheduledDate}; it cannot be marked Missed before then.`);
+    }
+    if (scheduledDate === today && /^([01]\d|2[0-3]):[0-5]\d$/.test(scheduledTime)) {
+      const scheduledAt = Date.parse(`${scheduledDate}T${scheduledTime}:00+08:00`);
+      if (Number.isFinite(scheduledAt) && now.getTime() < scheduledAt) {
+        throw ApiError.unprocessable('This follow-up cannot be marked Missed before its scheduled time.');
+      }
+    }
+  }
+
   if (target === 'Completed') {
     if (COMPLETE_BLOCKERS.has(current)) {
       throw ApiError.conflict(`A ${current} follow-up cannot be marked Completed.`);
     }
-    if (existing.requires_resident_response && text(existing.resident_decision) !== 'approved') {
-      throw ApiError.conflict("This follow-up is still awaiting the resident's confirmation and cannot be completed.");
+    if (['Reschedule Requested', 'Cancellation Requested'].includes(text(existing.schedule_response_status))) {
+      throw ApiError.conflict("A resident schedule-change request is awaiting staff review. Review it before completing this follow-up.");
     }
     const sched = text(existing.scheduled_date);
     if (sched && sched > today) {
@@ -623,12 +637,9 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     row.client_operation_key = opKey;
   }
 
-  // A follow-up may require the resident to confirm (approve) or reject it
-  // before it becomes an approved/scheduled calendar event. When requested it
-  // is created in the 'Pending' lifecycle status with a pending resident
-  // decision; the resident is notified to respond. The client-supplied
-  // decision fields are never trusted — they are set here from the workflow.
-  let followUpAwaitsResident = false;
+  // Follow-ups are confirmed by default. Residents can still explicitly
+  // confirm attendance or submit schedule-change requests through the separate
+  // schedule-request workflow. Never trust client-supplied response fields.
   if (normalizedKind === 'followups') {
     const consultationId = text(payload.consultation_id);
     delete row.consultation_id;
@@ -644,22 +655,12 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
       }
       row.consultation_id = consultation.id;
     }
-    followUpAwaitsResident = Boolean(row.requiresResidentResponse ?? row.requires_resident_response);
     delete row.requiresResidentResponse;
     delete row.resident_decision;
     delete row.resident_decision_at;
     delete row.resident_decision_reason;
-    if (followUpAwaitsResident) {
-      row.requires_resident_response = true;
-      row.resident_decision = 'pending';
-      row.resident_decision_at = null;
-      row.resident_decision_reason = '';
-      // The appointment exists as a scheduled service; resident response is
-      // represented only by schedule_response_status.
-      row.status = 'Scheduled';
-    } else {
-      row.requires_resident_response = false;
-    }
+    row.requires_resident_response = false;
+    row.schedule_response_status = 'Default Confirmed';
     const initialStatus = text(row.status);
     if (['Completed', 'Missed'].includes(initialStatus)) {
       throw ApiError.unprocessable('A new follow-up cannot be created as Completed or Missed; it must be scheduled first.');
@@ -687,7 +688,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   throwOnError(error, `Could not create ${normalizedKind}`);
   await linkImmunization(data.id, data.status);
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
-  await notifyResident(supabase, resident, normalizedKind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);
+  await notifyResident(supabase, resident, normalizedKind, 'created', data);
   return formatOperationalRecord(normalizedKind, data);
 };
 
@@ -717,7 +718,7 @@ export const update = async ({
   }
   assertStaff(user);
   const precondition = extractExpectedRevision({
-    ifMatch: expectedUpdatedAt,
+    ifMatch: expectedUpdatedAt ?? payload?.expected_updated_at,
     bodyRevision: expectedRevision ?? payload?.expected_revision ?? payload?.expectedRevision ?? payload?.baseRevision,
     isSync,
     allowLegacyTimestamp: normalizedKind === 'followups',
@@ -758,6 +759,7 @@ export const update = async ({
   delete row.client_operation_key;
   delete row.revision;
   delete row.expected_revision;
+  delete row.expected_updated_at;
   delete row.expectedRevision;
   delete row.baseRevision;
   delete row.consultation_id;
@@ -815,6 +817,7 @@ export const update = async ({
   delete row.resident_decision_reason;
   delete row.requires_resident_response;
   delete row.requiresResidentResponse;
+  delete row.schedule_response_status;
   if (normalizedKind === 'maternal') Object.assign(row, validateMaternalRecord(row));
   if (normalizedKind === 'followups' && text(row.status) === 'Completed' && !existing.completed_at) {
     row.completed_at = new Date().toISOString();

@@ -19,7 +19,7 @@ import {
   isCalendarEventInBarangay, mapFollowUpEvent, mapHealthServiceEvent,
   parseCalendarDate, readCalendarRows, stepCalendarDate, toDateKey,
 } from "@/features/dashboards/components/scheduleCalendarUtils";
-import { AgendaView, DayView, MonthView, ScheduleDetailModal, WeekView } from "../components/ScheduleCalendarViews";
+import { DayView, MonthView, ScheduleDetailModal } from "../components/ScheduleCalendarViews";
 import { SHOW_PREVIEW_DEMO, buildPreviewScheduleEvents } from "../lib/scheduleCalendarPreview";
 import { dayLabel, isPastSameDaySchedule, manilaDateKey, monthLabel, weekLabel } from "../lib/scheduleDates";
 import { followUpActionAvailability } from "../lib/followUpActions";
@@ -55,7 +55,7 @@ function ScheduleFormModal({ initial, date, residents, residentsLoading, residen
   const providerList = React.useId();
   const locationList = React.useId();
   const isNew = !initial;
-  const availability = followUpActionAvailability({ ...initial, scheduled_date: form.date }, { canEdit: true, canComplete });
+  const availability = followUpActionAvailability({ ...initial, scheduled_date: form.date, scheduled_time: form.time }, { canEdit: true, canComplete });
   const statuses = FOLLOW_UP_STATUSES.filter((status) => {
     if (status === "Completed") return !isNew && availability.complete;
     if (status === "Missed") return !isNew && availability.missed;
@@ -416,7 +416,7 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
   const period = currentView === "month" || currentView === "agenda" ? monthLabel(cursor) : currentView === "week" ? weekLabel(cursor) : dayLabel(cursor);
   const selectedEvent = selected && isCalendarEventInBarangay(selected, assignedBarangay) &&
     (selected.type === "follow-up" ? canViewFollowUps : canViewServices) ? selected : null;
-  const selectedActions = followUpActionAvailability({ ...selectedEvent, scheduled_date: selectedEvent?.date }, { canEdit, canComplete });
+  const selectedActions = followUpActionAvailability({ ...selectedEvent, scheduled_date: selectedEvent?.date, scheduled_time: selectedEvent?.time }, { canEdit, canComplete });
   const showToast = (message, error = false) => { if (active.current) setToast({ message, error }); };
   const selectDate = (date) => { setCursor(date); setSelectedDay(date); };
   const clearFilters = () => { setSearch(""); setCategoryFilter("all"); setStatusFilter("all"); setProviderFilter("all"); };
@@ -427,16 +427,24 @@ function FollowUpCalendarContent({ user, assignedBarangay }) {
     if (target && (target.type !== "follow-up" || !isCalendarEventInBarangay(target, assignedBarangay))) throw new Error("This follow-up is outside your assigned barangay.");
     if (!target && (!resident || !isCalendarEventInBarangay({ residentBarangay: resident.barangay }, assignedBarangay))) throw new Error("Select an authorized resident before scheduling a follow-up.");
     if (target) {
-      const actions = followUpActionAvailability({ ...target, scheduled_date: record.scheduled_date || target.date }, { canEdit: can("followups.edit"), canComplete: can("followups.complete") });
+      const actions = followUpActionAvailability({ ...target, scheduled_date: record.scheduled_date || target.date, scheduled_time: record.scheduled_time || target.time }, { canEdit: can("followups.edit"), canComplete: can("followups.complete") });
       if (permission === "followups.edit" && !actions.edit) throw new Error("This follow-up is no longer editable.");
       if (record.status === "Completed" && (!can("followups.complete") || !actions.complete)) throw new Error("This follow-up cannot be completed. Verify its date and resident confirmation.");
       if (record.status === "Missed" && (!can("followups.complete") || !actions.missed)) throw new Error("This follow-up cannot be marked missed. Verify its date and resident confirmation.");
+      const revision = Number(target.revision);
+      const hasRevision = Number.isInteger(revision) && revision >= 1;
+      if (!hasRevision && !target.updatedAt) throw new Error("This follow-up has no current server revision. Refresh the calendar and try again.");
     }
     busy.current = true;
     setSaving(true);
     try {
+      const writeRecord = target
+        ? { ...record, ...(Number.isInteger(Number(target.revision)) && Number(target.revision) >= 1
+          ? { expected_revision: Number(target.revision) }
+          : { expected_updated_at: target.updatedAt }) }
+        : record;
       const result = target
-        ? await updateFollowUpOffline({ ownerId: user.id, followUpId: target.id, record })
+        ? await updateFollowUpOffline({ ownerId: user.id, followUpId: target.id, record: writeRecord })
         : await createFollowUpOffline({ ownerId: user.id, record });
       if (!active.current) return null;
       const row = result?.record || result;

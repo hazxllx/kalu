@@ -539,9 +539,9 @@ const followUpPurpose = (payload = {}) =>
  * (non-terminal) follow-up already recorded for this consultation. Exported for
  * unit testing.
  *
- *   wants + none                                 -> 'create'     (new, awaiting resident confirmation)
- *   wants + live, resident already approved      -> 'reschedule' (keep confirmed, move the date)
- *   wants + live, not yet decided                -> 'await'      (assert awaiting-confirmation state)
+ *   wants + none                                 -> 'create'     (new, confirmed by default)
+ *   wants + live, resident schedule active       -> 'reschedule' (keep the response and move the date)
+ *   wants + live, resident change pending       -> 'await'      (do not overwrite the pending request)
  *   not wanted + live follow-up                  -> 'cancel'     (history preserved)
  *   otherwise                                    -> 'noop'
  */
@@ -550,7 +550,9 @@ export const planFollowUpSync = (existing, payload = {}) => {
   const live = existing && !TERMINAL_FOLLOWUP.has(text(existing.status));
   if (wants) {
     if (!live) return { action: 'create' };
-    return { action: text(existing.resident_decision) === 'approved' ? 'reschedule' : 'await' };
+    return ['Reschedule Requested', 'Cancellation Requested'].includes(text(existing.schedule_response_status))
+      ? { action: 'await' }
+      : { action: 'reschedule' };
   }
   if (live) return { action: 'cancel' };
   return { action: 'noop' };
@@ -565,14 +567,9 @@ export const planFollowUpSync = (existing, payload = {}) => {
  * second follow-up system. It is owned by the SAME resident as the consultation
  * (resident_id = visit.residentId).
  *
- * A consultation follow-up REQUIRES the resident to confirm/reject: it lives in
- * the existing "awaiting resident response" state (status 'Pending',
- * requires_resident_response = true, resident_decision 'pending'), which the
- * resident page renders with Confirm/Reject. New rows are created through the
- * existing operational service (audit + "requires your response" notification);
- * a still-undecided existing row is re-asserted into that state (this also
- * upgrades older rows that were created before confirmation was required); a row
- * the resident has already approved is only rescheduled, never reset.
+ * Consultation follow-ups use the same default-confirmed schedule response as
+ * all other follow-ups. Residents can still confirm explicitly or request a
+ * staff-reviewed change through the schedule-request workflow.
  *
  * Edits resolve ONLY follow-ups linked to this visit, never another user's
  * unlinked follow-up with a similar purpose. A stable visit/date operation key
@@ -595,7 +592,7 @@ export const syncConsultationFollowUp = async ({
     const operationKey = `consultation-followup:${visit.id}:${text(payload.nextVisitDate)}`;
     const { data: rows, error } = await supabase
       .from('follow_ups')
-      .select('id, status, resident_decision, consultation_id, client_operation_key, scheduled_date')
+      .select('id, status, resident_decision, schedule_response_status, consultation_id, client_operation_key, scheduled_date')
       .eq('resident_id', visit.residentId)
       .eq('consultation_id', visit.id)
       .order('created_at', { ascending: false });
@@ -608,28 +605,7 @@ export const syncConsultationFollowUp = async ({
     const { action } = planFollowUpSync(existing, payload);
     if (action === 'noop') return;
 
-    if (action === 'await') {
-      // Assert the awaiting-confirmation state so the resident gets Confirm /
-      // Reject. Confirmation columns are resident-owned and not settable through
-      // the staff operational update, so this one field-set is written directly
-      // on the already-resolved own row (ownership: resident_id + created_by).
-      const { error: upErr } = await supabase
-        .from('follow_ups')
-        .update({
-          scheduled_date: text(payload.nextVisitDate),
-          purpose,
-          notes: text(payload.adviceGiven),
-          status: 'Scheduled',
-          consultation_id: visit.id,
-          requires_resident_response: true,
-          resident_decision: 'pending',
-          resident_decision_at: null,
-          resident_decision_reason: '',
-        })
-        .eq('id', existing.id);
-      if (upErr) throw new Error(upErr.message || 'Could not update the follow-up');
-      return;
-    }
+    if (action === 'await') return; // Preserve the resident's pending request for staff review.
 
     if (action === 'reschedule') {
       // Resident already confirmed — keep it confirmed, just move the date.
@@ -661,10 +637,7 @@ export const syncConsultationFollowUp = async ({
         purpose,
         notes: text(payload.adviceGiven),
         assigned_provider: text(user.name) || text(user.email),
-        // Enter the EXISTING "awaiting resident response" workflow: shows on My
-        // Follow-ups as "Action Required" with Confirm/Reject; the resident's
-        // decision moves it to Scheduled (approved) or Cancelled (rejected).
-        requiresResidentResponse: true,
+        requiresResidentResponse: false,
       },
     });
   } catch (err) {

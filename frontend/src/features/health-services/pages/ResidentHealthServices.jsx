@@ -5,6 +5,7 @@ import { Card } from "@/components/common/Card";
 import ErrorState from "@/components/common/ErrorState";
 import { Skeleton } from "@/components/common/Skeleton";
 import TablePagination from "@/components/tables/TablePagination";
+import DateRangeFilter from "@/components/common/DateRangeFilter";
 import { useAuth } from "@/context/AuthContext";
 import { visitPlansApi } from "@/services/api";
 import VisitPlanModal from "../components/VisitPlanModal";
@@ -35,6 +36,8 @@ export default function ResidentHealthServices() {
   const [previewMemo, setPreviewMemo] = useState(null);
   const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [scopeFilter, setScopeFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const showToast = useCallback((message) => {
     setToast(message);
@@ -115,8 +118,13 @@ export default function ResidentHealthServices() {
   const filterServices = useCallback((services = []) => services.filter((service) => {
     if (availabilityFilter === "open" && !availabilityLine(service).open) return false;
     if (availabilityFilter === "closed" && availabilityLine(service).open) return false;
+    if (dateFrom || dateTo) {
+      const startDate = String(service.schedule?.startDate || service.startDate || "").slice(0, 10);
+      const endDate = String(service.schedule?.endDate || service.endDate || startDate).slice(0, 10);
+      if (!startDate || (dateFrom && endDate < dateFrom) || (dateTo && startDate > dateTo)) return false;
+    }
     return true;
-  }), [availabilityFilter]);
+  }), [availabilityFilter, dateFrom, dateTo]);
   const bhcServices = useMemo(() => filterServices(bhc?.services || []), [filterServices, bhc]);
   const rhuServices = useMemo(() => filterServices(rhu?.services || []), [filterServices, rhu]);
   const hasScopeResults = (scopeFilter !== "rhu" && bhcServices.length > 0)
@@ -143,12 +151,12 @@ export default function ResidentHealthServices() {
           <section className="flex flex-col gap-3 rounded-lg border border-brand-border bg-white px-5 py-4 md:flex-row md:items-end md:justify-between">
             <div>
               <h2 className="font-display text-base text-brand-ink">Find a health service</h2>
-              <p className="mt-0.5 text-xs text-brand-gray">Filter by availability and the facility offering the service.</p>
+              <p className="mt-0.5 text-sm text-brand-gray">Filter by availability and the facility offering the service.</p>
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap items-end gap-3">
               <label className="grid gap-1.5 text-xs font-medium text-brand-gray">
                 Availability
-                <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 min-w-[160px] rounded-full border border-brand-border bg-white px-3.5 text-xs text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 min-w-[160px] rounded-full border border-brand-border bg-white px-3.5 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
                   <option value="all">All services</option>
                   <option value="open">Open for registration</option>
                   <option value="closed">Closed for registration</option>
@@ -156,12 +164,13 @@ export default function ResidentHealthServices() {
               </label>
               <label className="grid gap-1.5 text-xs font-medium text-brand-gray">
                 Facility
-                <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 min-w-[180px] rounded-full border border-brand-border bg-white px-3.5 text-xs text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
+                <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 min-w-[180px] rounded-full border border-brand-border bg-white px-3.5 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">
                   <option value="all">All facilities</option>
                   <option value="bhc">Barangay Health Center</option>
                   <option value="rhu">Rural Health Unit (RHU)</option>
                 </select>
               </label>
+              <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="w-full sm:w-52" />
             </div>
           </section>
 
@@ -297,8 +306,8 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPr
   return (
     <section className="flex flex-col gap-3">
       <header>
-        <p className="font-mono text-[10px] uppercase tracking-[0.15em] text-brand-gray">{title}</p>
-        <p className="mt-1 text-[12px] text-brand-gray">{subtitle}</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{title}</p>
+        <p className="mt-1 text-sm text-brand-gray">{subtitle}</p>
       </header>
       {services.length === 0 ? (
         <SectionEmpty />
@@ -335,8 +344,8 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPr
 function SectionEmpty() {
   return (
     <div className="rounded-card border border-dashed border-brand-border bg-brand-bg px-5 py-8 text-center">
-      <p className="text-[13px] font-medium text-brand-ink">No health services available at the moment.</p>
-      <p className="mt-1 text-[13px] text-brand-gray">Please check again later for upcoming services.</p>
+      <p className="text-sm font-medium text-brand-ink">No health services available at the moment.</p>
+      <p className="mt-1 text-sm text-brand-gray">Please check again later for upcoming services.</p>
     </div>
   );
 }
@@ -352,7 +361,7 @@ const STATUS_STYLES = {
 function StatusBadge({ status }) {
   const label = status || "Registered";
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${STATUS_STYLES[label] || STATUS_STYLES.Registered}`}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLES[label] || STATUS_STYLES.Registered}`}>
       {label}
     </span>
   );
@@ -403,14 +412,14 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
         </div>
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-brand-dark via-brand-dark/50 to-transparent" />
-      <span className={`absolute left-3 top-3 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${stateClass}`}>
+      <span className={`absolute left-3 top-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${stateClass}`}>
         {stateLabel}
       </span>
       <div className="absolute inset-x-4 bottom-4 text-left">
-        {service.category && <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-brand-gold">{service.category}</p>}
+        {service.category && <p className="text-xs font-semibold uppercase tracking-wide text-brand-gold">{service.category}</p>}
         <h3 className="mt-1 font-display text-lg leading-snug text-white">{service.name}</h3>
-        <p className="mt-1 truncate font-mono text-[9px] uppercase tracking-[0.08em] text-white/70">{service.facilityName || "Health service"}</p>
-        {serviceSchedule && <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-white/55">{serviceSchedule}</p>}
+        <p className="mt-1 truncate text-xs font-medium uppercase tracking-wide text-white/80">{service.facilityName || "Health service"}</p>
+        {serviceSchedule && <p className="mt-0.5 text-xs text-white/75">{serviceSchedule}</p>}
       </div>
       {service.pubmatUrl && !pubmatFailed && (
         <span className="absolute bottom-3 right-3 rounded-full bg-black/55 p-1.5 text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
@@ -436,14 +445,14 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
 
       <div className="flex flex-1 flex-col p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-brand-border px-2 py-0.5 text-[10px] font-medium text-brand-gray">{serviceType}</span>
-          {registerBy && <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-brand-gray">Register by {registerBy}</span>}
+          <span className="rounded-full border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-gray">{serviceType}</span>
+          {registerBy && <span className="text-xs font-medium text-brand-gray">Register by {registerBy}</span>}
         </div>
         {service.description && (
           <div className="mt-2">
-            <p className={`text-xs leading-relaxed text-brand-gray ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
+            <p className={`text-sm leading-relaxed text-brand-gray ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
             {service.description.length > 180 && (
-              <button type="button" aria-expanded={descriptionExpanded} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="mt-1 inline-flex min-h-7 items-center text-[11px] font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
+              <button type="button" aria-expanded={descriptionExpanded} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="mt-1 inline-flex min-h-8 items-center text-xs font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
                 {descriptionExpanded ? "View less" : "View more"}
               </button>
             )}
@@ -460,7 +469,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
             <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
           </button>
         )}
-        <div className="mt-3 space-y-1.5 text-[11px] text-brand-gray">
+        <div className="mt-3 space-y-1.5 text-xs text-brand-gray">
           {serviceSchedule && (
             <p className="flex items-center gap-1.5">
               <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" aria-hidden="true" />
@@ -504,7 +513,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
                 <button
                   type="button"
                   onClick={onCancel}
-                  className="text-[12px] font-medium text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+                  className="text-xs font-medium text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
                 >
                   Cancel registration
                 </button>
@@ -514,7 +523,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
             <button
               type="button"
               onClick={onRegister}
-              className="w-full rounded-btn bg-brand-blue px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 lg:w-auto"
+              className="w-full rounded-btn bg-brand-blue px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 lg:w-auto"
             >
               Register
             </button>
@@ -525,12 +534,12 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
                 disabled
                 aria-disabled="true"
                 title={avail.text}
-                className="w-full cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 py-2 text-[13px] font-medium text-slate-400 lg:w-auto"
+                className="w-full cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 py-2 text-sm font-medium text-slate-400 lg:w-auto"
               >
                 Registration Closed
               </button>
               {avail.text && (
-                <span className="text-[11px] leading-tight text-slate-400 lg:text-right">{avail.text}</span>
+                <span className="text-xs leading-tight text-slate-400 lg:text-right">{avail.text}</span>
               )}
             </div>
           )}
@@ -550,7 +559,7 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
     >
       <Card className="w-full max-w-[380px] p-4 sm:p-5">
         <h2 className="text-[15px] font-semibold text-brand-ink">Cancel this registration?</h2>
-        <p className="mt-1.5 text-[13px] text-brand-gray">
+        <p className="mt-1.5 text-sm text-brand-gray">
           The health center will be notified.
           {plan?.plannedDate ? ` Your registration for ${formatPlanDate(plan.plannedDate)} will be released.` : ""}
         </p>
@@ -559,7 +568,7 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="rounded-btn px-3.5 py-2 text-[13px] font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60"
+            className="rounded-btn px-3.5 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60"
           >
             Keep registration
           </button>
@@ -567,7 +576,7 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="inline-flex items-center gap-2 rounded-btn bg-brand-danger px-4 py-2 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-btn bg-brand-danger px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
             {busy ? "Cancelling…" : "Cancel registration"}

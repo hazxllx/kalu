@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
+import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
 import { residentFollowUpsApi } from "@/services/api";
 import { ScheduleDetailModal } from "../components/ScheduleCalendarViews";
 import ScheduleStatusBadge from "../components/ScheduleStatusBadge";
@@ -28,6 +29,9 @@ import {
  */
 
 const isActionable = (followUp) => getResidentFollowUpPresentation(followUp).actionable;
+const scheduleResponseLabel = (value) => value === "Default Confirmed" || value === "Awaiting Response"
+  ? "Confirmed by default"
+  : value || "Confirmed by default";
 
 /** Human date for a YYYY-MM-DD value, parsed at LOCAL midnight (no UTC shift). */
 const fmtDate = (d) => {
@@ -48,9 +52,9 @@ const mapToSchedule = (row) => {
     instructions: row.instructions || "",
     purpose: row.purpose || "",
     status: presentation.statusLabel,
-    scheduleResponseStatus: row.scheduleResponseStatus || "Awaiting Response",
+    scheduleResponseStatus: scheduleResponseLabel(row.scheduleResponseStatus),
     statusDetail: presentation.statusDetail,
-    confirmationStatus: row.confirmationStatus || (presentation.awaitingResponse ? "Awaiting Confirmation" : null),
+    confirmationStatus: row.confirmationStatus || (presentation.confirmed ? "Confirmed by default" : null),
     respondedAt: row.respondedAt || "",
     rejectionReason: row.rejectionReason || "",
     requiresResidentResponse: row.requiresResidentResponse,
@@ -66,10 +70,10 @@ function FollowUpStat({ label, value, hint, tone }) {
   }[tone];
 
   return (
-    <div className={`flex min-h-[112px] flex-col gap-1 rounded-lg border border-brand-border border-b-2 bg-white px-4 py-3.5 ${accent}`}>
-      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-brand-gray">{label}</span>
-      <span className="font-display text-2xl leading-none text-brand-ink tabular-nums">{value}</span>
-      <span className="mt-auto pt-1 text-[11px] leading-snug text-brand-gray">{hint}</span>
+    <div className={`flex min-h-[108px] flex-col gap-1 rounded-xl border border-brand-border border-b-2 bg-white px-4 py-3.5 shadow-sm dark:bg-card dark:border-border ${accent}`}>
+      <span className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{label}</span>
+      <span className="font-display text-2xl font-semibold leading-none text-brand-ink tabular-nums">{value}</span>
+      <span className="mt-auto pt-1 text-xs leading-snug text-brand-gray">{hint}</span>
     </div>
   );
 }
@@ -89,6 +93,10 @@ export default function ResidentFollowUps() {
   const [toast, setToast] = useState(null);
   const [followUpPage, setFollowUpPage] = useState(1);
   const [followUpPageSize, setFollowUpPageSize] = useState(8);
+  const [referralPage, setReferralPage] = useState(1);
+  const [referralPageSize, setReferralPageSize] = useState(8);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
 
@@ -109,14 +117,14 @@ export default function ResidentFollowUps() {
   const stats = useMemo(() => summarizeResidentFollowUps(rows), [rows]);
 
   const sorted = useMemo(
-    () => [...rows].sort((a, b) => {
+    () => rows.filter((row) => matchesDateRange(row.scheduledDate, dateFrom, dateTo)).sort((a, b) => {
       const priority = { actionRequired: 0, upcoming: 1, completed: 2, cancelled: 3 };
       const aCategory = getResidentFollowUpPresentation(a).category;
       const bCategory = getResidentFollowUpPresentation(b).category;
       if (aCategory !== bCategory) return priority[aCategory] - priority[bCategory];
       return `${a.scheduledDate}${a.scheduledTime}`.localeCompare(`${b.scheduledDate}${b.scheduledTime}`);
     }),
-    [rows]
+    [rows, dateFrom, dateTo]
   );
   const pageRows = sorted.slice((followUpPage - 1) * followUpPageSize, followUpPage * followUpPageSize);
   useEffect(() => {
@@ -124,6 +132,12 @@ export default function ResidentFollowUps() {
   }, [sorted.length, followUpPageSize]);
 
   const selectedSchedule = selected ? schedules.find((s) => s.id === selected) : null;
+  const sortedReferrals = useMemo(() => referrals.filter((row) => matchesDateRange(row.scheduledAt || row.referralDate, dateFrom, dateTo)).sort((a, b) =>
+    String(b.scheduledAt || b.referralDate || '').localeCompare(String(a.scheduledAt || a.referralDate || '')) || String(b.id).localeCompare(String(a.id))), [referrals, dateFrom, dateTo]);
+  const referralPageRows = sortedReferrals.slice((referralPage - 1) * referralPageSize, referralPage * referralPageSize);
+  useEffect(() => {
+    setReferralPage((page) => Math.min(page, Math.max(1, Math.ceil(sortedReferrals.length / referralPageSize))));
+  }, [sortedReferrals.length, referralPageSize]);
 
   const requestScheduleChange = async ({ targetType, targetId, requestType, proposedSchedule = null, reason = "" }) => {
     setBusy(true);
@@ -150,40 +164,56 @@ export default function ResidentFollowUps() {
       <PageHeader
         crumbs={["Follow-ups"]}
         title="My Follow-ups"
-        subtitle="Review the follow-ups your health team scheduled for you, and respond to appointments that need your attention."
+        subtitle="Your health team has scheduled these appointments. They are treated as confirmed if you do not respond; you can still request a new time or cancellation."
       />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <FollowUpStat label="Action required" value={stats.actionRequired} hint="Awaiting response, overdue or missed" tone="amber" />
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <FollowUpStat label="Action required" value={stats.actionRequired} hint="Pending requests, overdue or missed" tone="amber" />
         <FollowUpStat label="Upcoming" value={stats.upcoming} hint="Future appointments" tone="blue" />
         <FollowUpStat label="Completed" value={stats.completed} hint="Finished visits" tone="green" />
         <FollowUpStat label="Cancelled" value={stats.cancelled} hint="Rejected or cancelled" tone="red" />
       </div>
 
+      <Card className="mb-6 p-3 sm:p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div><h2 className="text-base font-semibold text-brand-ink">Filter your schedule</h2><p className="mt-0.5 text-sm text-brand-gray">Choose dates to narrow both referrals and follow-ups.</p></div>
+          {(dateFrom || dateTo) && <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-blue">Date filter active</span>}
+        </div>
+        <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+      </Card>
+
       <section className="space-y-3">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-brand-gray">Referrals</h2>
-        {referrals.length ? referrals.map((referral) => {
+        <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold text-brand-ink">Referrals</h2><p className="mt-1 text-sm text-brand-gray">Appointments and requests from your care team.</p></div><span className="rounded-full border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-gray dark:bg-card dark:border-border">{sortedReferrals.length} shown · {referrals.length} total</span></div>
+        {sortedReferrals.length ? <>
+        <div className="space-y-3">{referralPageRows.map((referral) => {
           const request = requestByTarget.get(`referral:${referral.canonicalId || referral.id}`);
           const schedule = referral.scheduledAt ? new Date(referral.scheduledAt).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" }) : "Not scheduled";
-          const outside = referral.external || !["rhu", "barangay_health_station"].includes(referral.facilityType);
+          const outside = referral.external || referral.destinationIsHospital
+            || !["rhu", "barangay_health_station"].includes(referral.facilityType)
+            || !referral.facilityMunicipalityId
+            || referral.facilityMunicipalityId !== referral.residentMunicipalityId;
           const open = !["Completed", "Rejected", "Cancelled"].includes(referral.status) && request?.status !== "Pending Approval";
-          return <Card key={referral.id} className="p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          return <Card key={referral.id} className="border-brand-border p-4 shadow-sm dark:border-border">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_15rem] sm:items-start">
               <div className="min-w-0"><p className="font-semibold text-brand-ink">{referral.reason || "Referral"}</p><p className="mt-1 text-sm text-brand-gray">{referral.receivingFacility || "Receiving facility unavailable"} · {schedule}</p>{referral.assignedRecipient && <p className="mt-1 text-xs text-brand-gray">Assigned to {referral.assignedRecipient}</p>}</div>
-              <div className="flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-brand-blue/10 px-2.5 py-1 text-brand-blue">Schedule: {referral.scheduleResponseStatus}</span><span className="rounded-full bg-brand-bg px-2.5 py-1 text-brand-ink">Progress: {referral.status}</span></div>
+              <div className="grid grid-cols-1 gap-2 text-xs">
+                <span className="flex min-h-8 w-full items-center justify-center rounded-full bg-brand-blue/10 px-3 py-1 text-center leading-tight text-brand-blue">Schedule: {scheduleResponseLabel(referral.scheduleResponseStatus)}</span>
+                <span className="flex min-h-8 w-full items-center justify-center rounded-full bg-brand-bg px-3 py-1 text-center leading-tight text-brand-ink dark:bg-muted dark:text-foreground">Progress: {referral.status}</span>
+              </div>
             </div>
             {request?.status === "Pending Approval" && <p className="mt-3 text-xs text-brand-gray">Request pending: {request.request_type} · {request.reason}</p>}
             {outside ? <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">Coordinate schedule changes directly with the receiving facility.</p> : open && <div className="mt-3 flex flex-wrap gap-2 border-t border-brand-border pt-3">
-              <button disabled={busy || referral.scheduleResponseStatus === "Attendance Confirmed"} onClick={() => requestScheduleChange({ targetType: "referral", targetId: referral.canonicalId || referral.id, requestType: "attendance" })} className="rounded-btn bg-brand-blue px-3 py-2 text-xs font-medium text-white disabled:opacity-50">Confirm Attendance</button>
-              <button disabled={busy} onClick={() => { setRescheduleTarget({ targetType: "referral", targetId: referral.canonicalId || referral.id }); setScheduleForm({ dateTime: "", reason: "" }); }} className="rounded-btn border border-brand-border px-3 py-2 text-xs font-medium text-brand-ink disabled:opacity-50">Request Reschedule</button>
-              <button disabled={busy} onClick={() => setRejectTarget({ targetType: "referral", targetId: referral.canonicalId || referral.id, purpose: referral.reason, date: schedule })} className="rounded-btn border border-brand-danger/30 px-3 py-2 text-xs font-medium text-brand-danger disabled:opacity-50">Request Cancellation</button>
+              <button disabled={busy || referral.scheduleResponseStatus === "Attendance Confirmed"} onClick={() => requestScheduleChange({ targetType: "referral", targetId: referral.canonicalId || referral.id, requestType: "attendance" })} className="rounded-btn bg-brand-blue px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Confirm Attendance</button>
+              <button disabled={busy} onClick={() => { setRescheduleTarget({ targetType: "referral", targetId: referral.canonicalId || referral.id }); setScheduleForm({ dateTime: "", reason: "" }); }} className="rounded-btn border border-brand-border px-3 py-2 text-sm font-medium text-brand-ink disabled:opacity-50">Request Reschedule</button>
+              <button disabled={busy} onClick={() => setRejectTarget({ targetType: "referral", targetId: referral.canonicalId || referral.id, purpose: referral.reason, date: schedule })} className="rounded-btn border border-brand-danger/30 px-3 py-2 text-sm font-medium text-brand-danger disabled:opacity-50">Request Cancellation</button>
             </div>}
           </Card>;
-        }) : <Card className="p-5 text-sm text-brand-gray">No referrals are linked to your account.</Card>}
+        })}</div><TablePagination total={sortedReferrals.length} page={referralPage} pageSize={referralPageSize} onPageChange={setReferralPage} onPageSizeChange={(size) => { setReferralPageSize(size); setReferralPage(1); }} className="mt-1" />
+        </> : <Card className="p-5 text-sm text-brand-gray">{referrals.length ? "No referrals match this date range." : "No referrals are linked to your account."}</Card>}
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-brand-gray">Your follow-ups</h2>
+        <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold text-brand-ink">Your follow-ups</h2><p className="mt-1 text-sm text-brand-gray">Scheduled visits and services from your health team.</p></div><span className="rounded-full border border-brand-border bg-white px-3 py-1.5 text-xs font-medium text-brand-gray dark:bg-card dark:border-border">{sorted.length} shown · {rows.length} total</span></div>
 
         {loading ? (
           <div className="py-12 text-center">
@@ -200,8 +230,8 @@ export default function ResidentFollowUps() {
           <>
             <div className="text-center py-12">
               <CalendarDays className="w-10 h-10 text-brand-gray/50 mx-auto mb-3" />
-              <p className="text-sm text-brand-gray">No follow-ups scheduled yet.</p>
-              <p className="mt-1 text-xs text-brand-gray">When your health team schedules a follow-up, it will appear here.</p>
+              <p className="text-sm text-brand-gray">{rows.length ? "No follow-ups match this date range." : "No follow-ups scheduled yet."}</p>
+              {!rows.length && <p className="mt-1 text-xs text-brand-gray">When your health team schedules a follow-up, it will appear here.</p>}
             </div>
             <TablePagination total={0} page={1} pageSize={followUpPageSize} onPageChange={setFollowUpPage} onPageSizeChange={(size) => { setFollowUpPageSize(size); setFollowUpPage(1); }} className="mt-4" />
           </>
@@ -212,13 +242,14 @@ export default function ResidentFollowUps() {
               const presentation = getResidentFollowUpPresentation(f);
               const latestScheduleRequest = requestByTarget.get(`follow_up:${f.id}`);
               const actionable = presentation.actionable && latestScheduleRequest?.status !== "Pending Approval";
+              const isCancelled = presentation.statusLabel === "Cancelled" || f.status === "Cancelled";
               return (
                 <motion.div
                   key={f.id}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: Math.min(i * 0.035, 0.2) }}
-                  className="rounded-lg border border-brand-border bg-white p-4 transition-colors hover:border-brand-blue/30"
+                  className="rounded-lg border border-brand-border bg-white p-4 transition-colors hover:border-brand-blue/30 dark:bg-card"
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -229,7 +260,7 @@ export default function ResidentFollowUps() {
                         <button onClick={() => setSelected(f.id)} className="text-left font-display text-base font-semibold leading-snug text-brand-ink hover:text-brand-blue">
                             {f.purpose || "Follow-up"}
                         </button>
-                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-brand-gray">
+                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-brand-gray">
                           <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-brand-blue/70" />{fmtDate(f.scheduledDate)}</span>
                           {f.scheduledTime && <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-brand-blue/70" />{formatTime(f.scheduledTime)}</span>}
                           {f.location && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-brand-blue/70" />{f.location}</span>}
@@ -239,15 +270,15 @@ export default function ResidentFollowUps() {
                     </div>
                     <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
                       <ScheduleStatusBadge value={presentation.statusLabel} />
-                      <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 text-[11px] font-medium text-brand-blue">Schedule: {f.scheduleResponseStatus || "Awaiting Response"}</span>
-                      <span className="rounded-full bg-brand-bg px-2.5 py-1 text-[11px] font-medium text-brand-ink">Service: {f.status === "Ongoing" ? "In Progress" : f.status || "Scheduled"}</span>
-                      {presentation.statusDetail && <span className="max-w-[220px] text-left text-[11px] leading-snug text-brand-gray sm:text-right">{presentation.statusDetail}</span>}
+                      {!isCancelled && <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-blue">Schedule: {scheduleResponseLabel(f.scheduleResponseStatus)}</span>}
+                      {!isCancelled && <span className="rounded-full bg-brand-bg px-2.5 py-1 text-xs font-medium text-brand-ink">Service: {f.status === "Ongoing" ? "In Progress" : f.status || "Scheduled"}</span>}
+                      {presentation.statusDetail && <span className="max-w-[220px] text-left text-xs leading-snug text-brand-gray sm:text-right">{presentation.statusDetail}</span>}
                     </div>
                   </div>
 
                   {f.instructions && (
                     <div className="mt-4 rounded-md border border-brand-border/70 bg-brand-bg/50 px-3.5 py-3">
-                      <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-brand-gray">Instructions from your care team</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">Instructions from your care team</p>
                       <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-brand-ink">{f.instructions.trim()}</p>
                     </div>
                   )}
@@ -295,7 +326,7 @@ export default function ResidentFollowUps() {
           variant="resident"
           onClose={() => setSelected(null)}
           actions={
-            isActionable(rows.find((r) => r.id === selectedSchedule.id) || {}) ? (
+            isActionable(rows.find((r) => r.id === selectedSchedule.id) || {}) && requestByTarget.get(`follow_up:${selectedSchedule.id}`)?.status !== "Pending Approval" ? (
               <>
                 <button
                   disabled={busy || selectedSchedule.scheduleResponseStatus === "Attendance Confirmed"}

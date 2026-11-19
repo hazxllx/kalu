@@ -39,10 +39,16 @@ const serverPayload = (record = {}) => {
   return payload;
 };
 
-const queueOptions = (opId) => ({
-  headers: { 'Idempotency-Key': idempotencyKeyFor(opId) },
+const queueOptions = (opId, record = {}) => {
+  const headers = { 'Idempotency-Key': idempotencyKeyFor(opId) };
+  const revision = Number(record.expected_revision);
+  if (Number.isInteger(revision) && revision >= 1) headers['If-Match'] = String(revision);
+  else if (record.expected_updated_at) headers['If-Match'] = String(record.expected_updated_at);
+  return {
+  headers,
   offlineMutationType: MUTATION_TIER.SAFE_SYNC,
-});
+  };
+};
 
 const TERMINAL_STATUSES = new Set(['Completed', 'Missed', 'Cancelled', 'Rejected']);
 const assertSafeFollowUpPayload = (record = {}) => {
@@ -127,7 +133,7 @@ export const updateFollowUpOffline = async ({ ownerId, followUpId, record }) => 
   const opId = newId();
   if (isNavigatorOnline()) {
     try {
-      const result = await followUpsApi.update(followUpId, serverPayload(record), queueOptions(opId));
+      const result = await followUpsApi.update(followUpId, serverPayload(record), queueOptions(opId, record));
       return { record: unwrap(result), queued: false, source: 'server' };
     } catch (error) {
       if (!isNetworkFailure(error)) throw error;
@@ -139,6 +145,7 @@ export const updateFollowUpOffline = async ({ ownerId, followUpId, record }) => 
     ownerId,
     serverId: followUpId,
     data: record,
+    baseRevision: Number.isInteger(Number(record.expected_revision)) && Number(record.expected_revision) >= 1 ? Number(record.expected_revision) : null,
     mutationType: MUTATION_TIER.SAFE_SYNC,
     opId,
   });

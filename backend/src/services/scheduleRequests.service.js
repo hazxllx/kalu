@@ -33,6 +33,19 @@ export const submit = async ({ user, targetType, targetId, requestType, proposed
   const { data: target, error } = await supabase.from(table).select('*').eq('id', targetId).maybeSingle();
   throwOnError(error, 'Could not load schedule');
   if (!target || target.resident_id !== resident.id) throw ApiError.notFound('Schedule not found.');
+  if (targetType === 'referral') {
+    const destination = `${target.destination_facility || ''} ${target.external_receiving_facility || ''}`;
+    if (!target.recipient_facility_id || /hospital/i.test(destination)) {
+      throw ApiError.unprocessable('For external facilities and hospitals, please contact the receiving facility directly.');
+    }
+    const { data: facility, error: facilityError } = await supabase.from('facilities')
+      .select('id, type, municipality_id').eq('id', target.recipient_facility_id).maybeSingle();
+    throwOnError(facilityError, 'Could not verify the referral destination');
+    if (!facility || !['rhu', 'barangay_health_station'].includes(facility.type)
+      || facility.municipality_id !== resident.municipality_id) {
+      throw ApiError.unprocessable('Schedule requests are available for RHU and barangay health station referrals within your municipality. Please contact other facilities directly.');
+    }
+  }
   const proposed = requestType === 'reschedule' ? futureDate(proposedSchedule) : null;
   if (requestType === 'reschedule' && !proposed) throw ApiError.unprocessable('Choose a valid future date and time in Manila time.');
   if (requestType !== 'attendance' && !text(reason)) throw ApiError.unprocessable('A reason is required.');

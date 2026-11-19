@@ -467,13 +467,13 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
   const followUps = followUpResult.error ? [] : (followUpResult.data || []).map((row) => ({
     id: row.id, purpose: row.purpose || '', date: row.scheduled_date || '', time: String(row.scheduled_time || '').slice(0, 5),
     facility: row.location || '', assignedPersonnel: row.assigned_provider || '',
-    scheduleResponseStatus: row.schedule_response_status || 'Awaiting Response', serviceProgressStatus: row.status || 'Scheduled',
+    scheduleResponseStatus: row.schedule_response_status || 'Default Confirmed', serviceProgressStatus: row.status || 'Scheduled',
     linkedServiceType: row.linked_service_type || '', linkedServiceId: row.linked_service_id || '',
   }));
   const referrals = referralResult.error ? [] : (referralResult.data || []).map((row) => ({
     id: row.id, reason: row.reason || '', date: row.scheduled_at || row.referral_date || row.created_at || '', facility: row.facility?.name || row.destination_facility || '',
     assignedPersonnel: row.recipient?.full_name || '', facilityType: row.facility?.type || '',
-    scheduleResponseStatus: row.schedule_response_status || 'Awaiting Response', serviceProgressStatus: row.status || 'Pending',
+    scheduleResponseStatus: row.schedule_response_status || 'Default Confirmed', serviceProgressStatus: row.status || 'Pending',
   }));
 
   const result = await repository.listVisits({

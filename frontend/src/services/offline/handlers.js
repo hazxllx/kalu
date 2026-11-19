@@ -99,8 +99,13 @@ export const SYNC_HANDLERS = {
     },
     async update(op) {
       const id = op.targetServerId || op.serverId;
+      const expectedRevision = Number(op.baseRevision);
+      const ifMatch = Number.isInteger(expectedRevision) && expectedRevision >= 1
+        ? String(expectedRevision)
+        : op.payload?.expected_updated_at || null;
       const result = await api.put(`/operational/followups/${id}`, { record: serverPayload(op.payload) }, {
         ...idempotencyHeaders(op),
+        headers: { ...idempotencyHeaders(op).headers, ...(ifMatch ? { 'If-Match': String(ifMatch) } : {}) },
         offlineMutationType: MUTATION_TIER.SAFE_SYNC,
       });
       const record = requireConfirmedRecord(unwrap(result, 'record'), 'follow-up');

@@ -750,7 +750,7 @@ export const toPhnReferral = (row) => {
     workingImpression: row.impression,
     outpatientService: row.destination_service,
     status: row.status,
-    scheduleResponseStatus: row.schedule_response_status || 'Awaiting Response',
+    scheduleResponseStatus: row.schedule_response_status || 'Default Confirmed',
     serviceProgressStatus: row.status,
     version: row.version,
     createdById: row.created_by || legacy.created_by_id || '',

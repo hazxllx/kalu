@@ -1,4 +1,4 @@
-import { manilaDateKey } from "./scheduleDates.js";
+import { isPastSameDaySchedule, manilaDateKey } from "./scheduleDates.js";
 
 const TERMINAL_STATUSES = new Set(["Completed", "Cancelled", "Rejected"]);
 const MISSED_SOURCE_STATUSES = new Set(["Scheduled", "Today", "Upcoming", "Ongoing"]);
@@ -10,11 +10,15 @@ export const followUpActionAvailability = (
 ) => {
   const status = String(followUp?.status || "Scheduled");
   const scheduledDate = String(followUp?.scheduledDateRaw || followUp?.scheduled_date || "").slice(0, 10);
+  const scheduledTime = String(followUp?.scheduledTimeRaw || followUp?.scheduled_time || followUp?.scheduledTime || followUp?.time || "").slice(0, 5);
   const isClosed = TERMINAL_STATUSES.has(status);
-  const isDue = !scheduledDate || scheduledDate <= manilaDateKey(now);
-  const residentApproved =
-    !followUp?.requires_resident_response && !followUp?.requiresResidentResponse ||
-    (followUp?.resident_decision || followUp?.residentDecision) === "approved";
+  const today = manilaDateKey(now);
+  const isDue = !scheduledDate || scheduledDate < today ||
+    (scheduledDate === today && (!scheduledTime || isPastSameDaySchedule(scheduledDate, scheduledTime, now)));
+  const responseStatus = String(followUp?.schedule_response_status || followUp?.scheduleResponseStatus || "");
+  const pendingResidentRequest = ["Reschedule Requested", "Cancellation Requested"].includes(responseStatus);
+  const legacyRejected = (followUp?.resident_decision || followUp?.residentDecision) === "rejected";
+  const residentApproved = !pendingResidentRequest && !legacyRejected;
 
   return {
     view: true,

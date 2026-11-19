@@ -4,6 +4,7 @@ import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
 import TablePagination from "@/components/tables/TablePagination";
+import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
 import ResidentSearchSelect from "@/components/common/ResidentSearchSelect";
 import { useAuth } from "@/context/AuthContext";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
@@ -260,6 +261,8 @@ export default function Immunization() {
   const [detail, setDetail] = useState(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(8);
   const [toast, setToast] = useState(null);
@@ -327,12 +330,13 @@ export default function Immunization() {
     const q = search.trim().toLowerCase();
     return records.filter((r) => {
       if (statusFilter !== "All" && r.status !== statusFilter) return false;
+      if (!matchesDateRange(r.administeredDate, dateFrom, dateTo)) return false;
       if (q && !`${r.residentName} ${r.vaccine}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [records, search, statusFilter]);
+  }, [records, search, statusFilter, dateFrom, dateTo]);
   const pageRecords = filtered.slice((page - 1) * pageSize, page * pageSize);
-  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, dateFrom, dateTo]);
   useEffect(() => {
     setPage((current) => Math.min(current, Math.max(1, Math.ceil(filtered.length / pageSize))));
   }, [filtered.length, pageSize]);
@@ -412,18 +416,24 @@ export default function Immunization() {
       />
 
       <Card className="p-4 mb-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 py-2 sm:max-w-md sm:flex-1">
-            <Search className="h-4 w-4 text-brand-gray" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search resident or vaccine..." className="w-full bg-transparent text-sm outline-none placeholder:text-brand-gray/70" />
-          </div>
-          <div className="flex items-center gap-1">
+        <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 xl:items-end">
+          <label className="min-w-0 text-sm font-medium text-brand-gray sm:col-span-2 xl:col-span-5">
+            Search
+            <div className="mt-1 flex h-10 items-center gap-2 rounded-btn border border-brand-border bg-brand-bg px-3 dark:border-border dark:bg-input">
+              <Search className="h-4 w-4 shrink-0 text-brand-gray" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search resident or vaccine..." className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-brand-gray/70" />
+            </div>
+          </label>
+          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="xl:col-span-3" />
+          <div className="flex flex-wrap items-center gap-1 sm:col-span-2 xl:col-span-4 xl:justify-end">
             {["All", ...STATUSES].map((s) => (
-              <button key={s} onClick={() => setStatusFilter(s)} className={`rounded-btn px-3 py-1.5 text-sm font-medium transition-colors ${statusFilter === s ? "bg-brand-blue text-white" : "text-brand-gray hover:bg-brand-bg"}`}>
+              <button key={s} onClick={() => setStatusFilter(s)} className={`inline-flex h-10 items-center rounded-btn px-3 text-sm font-medium transition-colors ${statusFilter === s ? "bg-brand-blue text-white" : "text-brand-gray hover:bg-brand-bg"}`}>
                 {s}
               </button>
             ))}
           </div>
+        </div>
         </div>
       </Card>
 

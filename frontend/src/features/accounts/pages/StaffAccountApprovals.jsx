@@ -7,6 +7,7 @@ import { DecisionButton, DecisionButtonRow, DECISION_TEXTAREA_CLASS } from "@/fe
 import { SkeletonTable } from "@/components/common/Skeleton";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationPagination from "@/features/verification/components/VerificationPagination";
+import DateRangeFilter, { matchesDateRange } from "@/components/common/DateRangeFilter";
 import { staffAccountsApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 import { legacyApprovalMessage } from "@/features/users/personnelLifecycle";
@@ -125,6 +126,7 @@ export default function StaffAccountApprovals({
   const [status, setStatus] = useState("pending");
   const [query, setQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [category, setCategory] = useState(categories[0]?.key || null);
   const [loading, setLoading] = useState(true);
@@ -195,14 +197,9 @@ export default function StaffAccountApprovals({
           r.id?.toLowerCase().includes(q),
       );
     }
-    if (dateFrom) {
-      const from = new Date(dateFrom);
-      if (!Number.isNaN(from.getTime())) {
-        list = list.filter((r) => r.submittedAt && new Date(r.submittedAt) >= from);
-      }
-    }
+    if (dateFrom || dateTo) list = list.filter((r) => matchesDateRange(r.submittedAt, dateFrom, dateTo));
     return list;
-  }, [rows, activeCategory, query, dateFrom]);
+  }, [rows, activeCategory, query, dateFrom, dateTo]);
   const pageRows = bhwOnly
     ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
     : filtered;
@@ -295,49 +292,42 @@ export default function StaffAccountApprovals({
       )}
 
       <section className="overflow-hidden rounded-card border border-brand-border bg-white dark:border-border dark:bg-card">
-        <div className="flex flex-col gap-2 border-b border-brand-border px-4 py-3 dark:border-border sm:flex-row sm:items-center">
-          <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-input border border-brand-border bg-white px-3 dark:border-border dark:bg-input sm:min-w-[200px]">
-            <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => { setPage(1); setQuery(event.target.value); }}
-              placeholder={bhwOnly ? "Search BHW applicants by name, email, or reference…" : "Search applicants…"}
-              aria-label={bhwOnly ? "Search BHW applicants" : "Search applicants"}
-              className="w-full bg-transparent text-[13px] outline-none placeholder:text-brand-gray/70"
-            />
+        <div className="grid grid-cols-1 gap-3 border-b border-brand-border px-4 py-3 dark:border-border sm:grid-cols-2 xl:grid-cols-12 xl:items-end">
+          <label className="min-w-0 text-sm font-medium text-brand-gray sm:col-span-2 xl:col-span-5">
+            Search
+            <div className="mt-1 flex h-10 items-center gap-2 rounded-input border border-brand-border bg-white px-3 dark:border-border dark:bg-input">
+              <Search className="h-4 w-4 shrink-0 text-brand-gray" aria-hidden="true" />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => { setPage(1); setQuery(event.target.value); }}
+                placeholder={bhwOnly ? "Search BHW applicants by name, email, or reference…" : "Search applicants…"}
+                aria-label={bhwOnly ? "Search BHW applicants" : "Search applicants"}
+                className="w-full min-w-0 bg-transparent text-[13px] outline-none placeholder:text-brand-gray/70"
+              />
+            </div>
           </label>
-          <select
-            value={status}
-            onChange={(event) => { setPage(1); setStatus(event.target.value); }}
-            aria-label="Filter by status"
-            className="h-10 rounded-input border border-brand-border bg-white px-3 text-[13px] outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
-          >
-            {statusOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          <div className="flex items-center gap-2">
-            <label htmlFor="submitted-from" className="sr-only">Submitted on or after</label>
-            <input
-              id="submitted-from"
-              type="date"
-              value={dateFrom}
-              onChange={(event) => { setPage(1); setDateFrom(event.target.value); }}
-              title="Submitted on or after"
-              className="h-10 rounded-input border border-brand-border bg-white px-3 text-[13px] text-brand-ink outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
-            />
-            {dateFrom && (
-              <button
-                type="button"
-                onClick={() => { setPage(1); setDateFrom(""); }}
-                className="rounded-btn px-1.5 py-1 text-xs text-brand-gray underline-offset-2 hover:text-brand-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <span className="text-xs tabular-nums text-brand-gray sm:ml-auto">
+          <DateRangeFilter
+            from={dateFrom}
+            to={dateTo}
+            onFromChange={(value) => { setPage(1); setDateFrom(value); }}
+            onToChange={(value) => { setPage(1); setDateTo(value); }}
+            className="xl:col-span-3"
+          />
+          <label className="min-w-0 text-sm font-medium text-brand-gray sm:col-span-1 xl:col-span-2">
+            Status
+            <select
+              value={status}
+              onChange={(event) => { setPage(1); setStatus(event.target.value); }}
+              aria-label="Filter by status"
+              className="mt-1 h-10 w-full rounded-input border border-brand-border bg-white px-3 text-[13px] outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <span className="self-end pb-2 text-xs tabular-nums text-brand-gray sm:col-span-1 xl:col-span-2 xl:text-right">
             {loading ? "Loading…" : `${filtered.length} record${filtered.length === 1 ? "" : "s"}`}
           </span>
         </div>

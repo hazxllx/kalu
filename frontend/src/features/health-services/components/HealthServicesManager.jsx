@@ -6,6 +6,7 @@ import KpiHorizontal from "@/components/common/KpiHorizontal";
 import StatusBadge from "@/components/common/StatusBadge";
 import ErrorState from "@/components/common/ErrorState";
 import EmptyState from "@/components/common/EmptyState";
+import DateRangeFilter from "@/components/common/DateRangeFilter";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/context/PermissionsContext";
 import { getSupervisorScope, HS_SCOPE } from "@/lib/supervisorScope";
@@ -80,6 +81,14 @@ const deriveStatus = (service, now = new Date()) => {
   if (start && now < start) return STATUS.UPCOMING;
   if (end && now > end) return STATUS.COMPLETED;
   return STATUS.ACTIVE;
+};
+
+const serviceOverlapsDateRange = (service, from, to) => {
+  if (!from && !to) return true;
+  const start = String(service?.schedule?.startDate || "").slice(0, 10);
+  const end = String(service?.schedule?.endDate || start).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return false;
+  return (!to || start <= to) && (!from || end >= from);
 };
 
 const STATUS_BADGE = {
@@ -230,6 +239,8 @@ export default function HealthServicesManager({ subtitle }) {
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [scopeFilter, setScopeFilter] = useState("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState(null);
 
@@ -355,11 +366,12 @@ export default function HealthServicesManager({ subtitle }) {
     );
     return matches.filter((service) => {
       const isBarangay = Boolean(service.barangayId || service.barangay);
-      if (scopeFilter === "Municipality-wide") return !isBarangay;
-      if (scopeFilter === "Barangay-level") return isBarangay;
-      return true;
+      const matchesScope = scopeFilter === "Municipality-wide" ? !isBarangay
+        : scopeFilter === "Barangay-level" ? isBarangay
+        : true;
+      return matchesScope && serviceOverlapsDateRange(service, dateFrom, dateTo);
     });
-  }, [services, search, categoryFilter, statusFilter, scopeFilter]);
+  }, [services, search, categoryFilter, statusFilter, scopeFilter, dateFrom, dateTo]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / SERVICE_PAGE_SIZE));
   const pageServices = filtered.slice((page - 1) * SERVICE_PAGE_SIZE, page * SERVICE_PAGE_SIZE);
   useEffect(() => {
@@ -387,7 +399,7 @@ export default function HealthServicesManager({ subtitle }) {
       if (pubmatUrlRequest.current === requestId) pubmatUrlRequest.current += 1;
     };
   }, [services, page, search, categoryFilter, statusFilter, scopeFilter]);
-  useEffect(() => setPage(1), [search, categoryFilter, statusFilter, scopeFilter]);
+  useEffect(() => setPage(1), [search, categoryFilter, statusFilter, scopeFilter, dateFrom, dateTo]);
   useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
 
   // Defensive dedupe by stable account id (the backend already excludes QA/test
@@ -818,8 +830,8 @@ export default function HealthServicesManager({ subtitle }) {
     }
   };
 
-  const hasFiltersActive = Boolean(search.trim() || categoryFilter !== "All" || statusFilter !== "All" || scopeFilter !== "All");
-  const clearFilters = () => { setSearch(""); setCategoryFilter("All"); setStatusFilter("All"); setScopeFilter("All"); setPage(1); };
+  const hasFiltersActive = Boolean(search.trim() || categoryFilter !== "All" || statusFilter !== "All" || scopeFilter !== "All" || dateFrom || dateTo);
+  const clearFilters = () => { setSearch(""); setCategoryFilter("All"); setStatusFilter("All"); setScopeFilter("All"); setDateFrom(""); setDateTo(""); setPage(1); };
   const categoryOptions = isSupervisor
     ? [["All", "All Categories"], ...[...new Set([...categories, ...services.map((service) => service.category).filter(Boolean)])].map((category) => [category, CATEGORY_LABELS[category] || category])]
     : CATEGORY_FILTERS;
@@ -876,7 +888,7 @@ export default function HealthServicesManager({ subtitle }) {
 
       {/* Search, filters */}
       <Card className={`mb-4 p-3 ${isSupervisor ? "supervisor-toolbar" : ""}`}>
-        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 xl:items-end">
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,4fr)_minmax(12rem,3fr)_repeat(3,minmax(8rem,2fr))] xl:items-end">
           {isSupervisor ? <label htmlFor="health-service-search" className="min-w-0 text-caption font-medium text-brand-gray">
             Search Services
             <div className="supervisor-input mt-1 flex items-center gap-2">
@@ -934,6 +946,7 @@ export default function HealthServicesManager({ subtitle }) {
               ))}
             </select>
           </label>
+          <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
         </div>
 
         <div className="mt-2 flex w-full items-center justify-between gap-3 border-t border-brand-border pt-2 dark:border-border">
