@@ -548,6 +548,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
     throw ApiError.badRequest('Synchronization create requires an Idempotency-Key.').withCode('IDEMPOTENCY_KEY_REQUIRED');
   }
   const resident = await residentFor(supabase, user, payload.residentId || payload.resident_id);
+  const followUpId = normalizedKind === 'immunizations' ? text(payload.followUpId || payload.follow_up_id) : '';
   const row = { ...payload, resident_id: resident.id, created_by: user.id };
   delete row.residentId;
   delete row.consultationId;
@@ -561,6 +562,27 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
   delete row.updated_at;
   delete row.municipality_id;
   delete row.barangay_id;
+  delete row.followUpId;
+  delete row.follow_up_id;
+
+  if (followUpId) {
+    const { data: followUp, error: followUpError } = await supabase.from('follow_ups')
+      .select('id,resident_id,status,linked_service_id').eq('id', followUpId).maybeSingle();
+    throwOnError(followUpError, 'Could not verify the source follow-up');
+    if (!followUp || followUp.resident_id !== resident.id) throw ApiError.unprocessable('The selected follow-up does not belong to this resident.');
+    if (followUp.linked_service_id) throw ApiError.conflict('This follow-up is already linked to a healthcare record.');
+    if (['Completed', 'Cancelled', 'Missed', 'Rejected'].includes(followUp.status)) throw ApiError.conflict('This follow-up is already closed.');
+  }
+
+  const linkImmunization = async (recordId, status) => {
+    if (!followUpId || !recordId) return;
+    const completed = status === 'Completed';
+    const { error } = await supabase.from('follow_ups').update({
+      linked_service_type: 'immunization', linked_service_id: String(recordId),
+      status: completed ? 'Completed' : 'Ongoing', completed_at: completed ? new Date().toISOString() : null,
+    }).eq('id', followUpId).eq('resident_id', resident.id).eq('linked_service_id', '');
+    throwOnError(error, 'Could not link the immunization to its follow-up');
+  };
 
   if (normalizedKind === 'tcl') await normalizeTclWorker({ row, user, resident, supabase });
 
@@ -597,7 +619,7 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
       resident,
       expectedMaternalCaseId: row.maternal_case_id || null,
     });
-    if (existing) return existing;
+    if (existing) { await linkImmunization(existing.id, existing.status); return existing; }
     row.client_operation_key = opKey;
   }
 
@@ -632,7 +654,9 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
       row.resident_decision = 'pending';
       row.resident_decision_at = null;
       row.resident_decision_reason = '';
-      row.status = 'Pending';
+      // The appointment exists as a scheduled service; resident response is
+      // represented only by schedule_response_status.
+      row.status = 'Scheduled';
     } else {
       row.requires_resident_response = false;
     }
@@ -658,9 +682,10 @@ export const create = async ({ user, kind, payload = {}, idempotencyKey = null, 
       resident,
       expectedMaternalCaseId: row.maternal_case_id || null,
     });
-    if (existing) return existing;
+    if (existing) { await linkImmunization(existing.id, existing.status); return existing; }
   }
   throwOnError(error, `Could not create ${normalizedKind}`);
+  await linkImmunization(data.id, data.status);
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_CREATED`, table, data.id, resident);
   await notifyResident(supabase, resident, normalizedKind, followUpAwaitsResident ? 'awaiting_response' : 'created', data);
   return formatOperationalRecord(normalizedKind, data);
@@ -720,6 +745,8 @@ export const update = async ({
     if (expectedMs !== Date.parse(existing.updated_at)) throw ApiError.staleRevision(staleMessage);
   }
   const row = { ...payload };
+  const scheduleChangeReason = text(row.schedule_change_reason);
+  delete row.schedule_change_reason;
   delete row.residentId;
   delete row.resident_id;
   delete row.id;
@@ -776,6 +803,13 @@ export const update = async ({
       row.scheduled_time ?? existing.scheduled_time,
     );
   }
+  const requestedScheduleChange = normalizedKind === 'followups' && (
+    (Object.prototype.hasOwnProperty.call(payload, 'scheduled_date') && text(existing.scheduled_date) !== text(row.scheduled_date ?? existing.scheduled_date))
+    || (Object.prototype.hasOwnProperty.call(payload, 'scheduled_time') && text(existing.scheduled_time).slice(0, 5) !== text(row.scheduled_time ?? existing.scheduled_time).slice(0, 5))
+  );
+  if (requestedScheduleChange && !scheduleChangeReason) {
+    throw ApiError.unprocessable('A reason is required when directly changing a follow-up schedule.');
+  }
   delete row.resident_decision;
   delete row.resident_decision_at;
   delete row.resident_decision_reason;
@@ -787,6 +821,9 @@ export const update = async ({
   }
   if (normalizedKind === 'followups' && Object.prototype.hasOwnProperty.call(payload, 'status')) {
     assertFollowUpTransition(existing, payload.status);
+    if (text(payload.status) === 'Completed' && !existing.linked_service_id && !existing.consultation_id) {
+      throw ApiError.conflict('Complete this follow-up through its linked consultation, immunization, or health-service workflow.');
+    }
   }
   let updateQuery = supabase.from(table).update(row).eq('id', id);
   const hasCas = precondition.expectedRevision !== null || Boolean(precondition.expectedUpdatedAt);
@@ -804,6 +841,19 @@ export const update = async ({
   }
   await audit(supabase, user, `${normalizedKind.toUpperCase()}_UPDATED`, table, id, resident);
 
+  if (normalizedKind === 'immunizations' && ['Completed', 'Missed'].includes(text(data.status))) {
+    const { data: linkedFollowUp, error: linkedFollowUpError } = await supabase.from('follow_ups')
+      .select('id,status').eq('linked_service_type', 'immunization').eq('linked_service_id', String(data.id)).maybeSingle();
+    throwOnError(linkedFollowUpError, 'Could not load the linked follow-up');
+    if (linkedFollowUp && linkedFollowUp.status !== 'Completed' && linkedFollowUp.status !== 'Cancelled') {
+      const completed = text(data.status) === 'Completed';
+      const { error: progressError } = await supabase.from('follow_ups').update({
+        status: completed ? 'Completed' : 'Missed', completed_at: completed ? new Date().toISOString() : null,
+      }).eq('id', linkedFollowUp.id);
+      throwOnError(progressError, 'Could not update follow-up progress');
+    }
+  }
+
   if (normalizedKind === 'followups') {
     const newStatus = text(data.status);
     const dateSent = Object.prototype.hasOwnProperty.call(payload, 'scheduled_date');
@@ -816,6 +866,16 @@ export const update = async ({
     } else if (newStatus === 'Missed' && text(existing.status) !== 'Missed') {
       await notifyResident(supabase, resident, 'followups', 'missed', data);
     } else if (scheduleChanged) {
+      const { error: scheduleAuditError } = await supabase.from('health_audit_logs').insert({
+        actor_id: user.id, action: 'FOLLOWUP_SCHEDULE_CHANGED', entity_type: 'follow_ups', entity_id: id,
+        municipality_id: resident.municipality_id || null, barangay_id: resident.barangay_id || null,
+        metadata: {
+          reason: scheduleChangeReason,
+          from: { date: existing.scheduled_date, time: existing.scheduled_time },
+          to: { date: data.scheduled_date, time: data.scheduled_time },
+        },
+      });
+      throwOnError(scheduleAuditError, 'Could not record follow-up schedule history');
       await notifyResident(supabase, resident, 'followups', 'rescheduled', data);
     }
   }

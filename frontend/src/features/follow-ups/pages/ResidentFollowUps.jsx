@@ -23,10 +23,8 @@ import {
  * ownership from the session, so only the signed-in resident's follow-ups are
  * ever returned (no client-side owner filtering).
  *
- * Confirm / Can't Attend go through the existing secure endpoints
- * (`/resident/follow-ups/:id/approve|reject`); rejection requires a reason,
- * stored on the canonical follow-up. Residents never edit the appointment
- * itself (date/time/location/provider/instructions).
+ * Residents respond through the schedule-request API; they never update the
+ * appointment or service progress directly.
  */
 
 const isActionable = (followUp) => getResidentFollowUpPresentation(followUp).actionable;
@@ -50,6 +48,7 @@ const mapToSchedule = (row) => {
     instructions: row.instructions || "",
     purpose: row.purpose || "",
     status: presentation.statusLabel,
+    scheduleResponseStatus: row.scheduleResponseStatus || "Awaiting Response",
     statusDetail: presentation.statusDetail,
     confirmationStatus: row.confirmationStatus || (presentation.awaitingResponse ? "Awaiting Confirmation" : null),
     respondedAt: row.respondedAt || "",
@@ -77,12 +76,15 @@ function FollowUpStat({ label, value, hint, tone }) {
 
 export default function ResidentFollowUps() {
   const [rows, setRows] = useState([]);
+  const [referrals, setReferrals] = useState([]);
+  const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
   const [selected, setSelected] = useState(null); // follow-up id (detail modal)
-  const [confirmTarget, setConfirmTarget] = useState(null); // follow-up id
   const [rejectTarget, setRejectTarget] = useState(null); // follow-up id
+  const [rescheduleTarget, setRescheduleTarget] = useState(null);
+  const [scheduleForm, setScheduleForm] = useState({ dateTime: "", reason: "" });
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [followUpPage, setFollowUpPage] = useState(1);
@@ -95,7 +97,7 @@ export default function ResidentFollowUps() {
     setLoadError(null);
     return residentFollowUpsApi
       .list()
-      .then((result) => setRows(result?.rows || []))
+      .then((result) => { setRows(result?.rows || []); setReferrals(result?.referrals || []); setRequests(result?.scheduleRequests || []); })
       .catch((err) => setLoadError(err?.message || "Unable to load your follow-ups. Please try again."))
       .finally(() => setLoading(false));
   }, []);
@@ -123,29 +125,25 @@ export default function ResidentFollowUps() {
 
   const selectedSchedule = selected ? schedules.find((s) => s.id === selected) : null;
 
-  const approve = async (id) => {
+  const requestScheduleChange = async ({ targetType, targetId, requestType, proposedSchedule = null, reason = "" }) => {
     setBusy(true);
     try {
-      await residentFollowUpsApi.approve(id);
-      setConfirmTarget(null); setSelected(null);
+      await residentFollowUpsApi.request({ targetType, targetId, requestType, proposedSchedule, reason });
+      setRejectTarget(null); setRescheduleTarget(null); setSelected(null);
       await load();
-      showToast("Follow-up confirmed — see you for your scheduled follow-up.");
-    } catch (err) {
-      showToast(err?.message || "Could not confirm the follow-up.");
-    } finally { setBusy(false); }
+      showToast(requestType === "attendance" ? "Attendance confirmed. Your service is still scheduled." : "Your request was sent to the responsible health team.");
+    } catch (err) { showToast(err?.message || "Could not submit your schedule request."); }
+    finally { setBusy(false); }
   };
 
-  const reject = async (id, reason) => {
-    setBusy(true);
-    try {
-      await residentFollowUpsApi.reject(id, reason);
-      setRejectTarget(null); setSelected(null);
-      await load();
-      showToast("Follow-up rejected — the health team has been notified.");
-    } catch (err) {
-      showToast(err?.message || "Could not reject the follow-up.");
-    } finally { setBusy(false); }
-  };
+  const requestByTarget = useMemo(() => {
+    const latest = new Map();
+    for (const request of requests) {
+      const key = request.referral_id ? `referral:${request.referral_id}` : `follow_up:${request.follow_up_id}`;
+      if (!latest.has(key)) latest.set(key, request);
+    }
+    return latest;
+  }, [requests]);
 
   return (
     <>
@@ -161,6 +159,28 @@ export default function ResidentFollowUps() {
         <FollowUpStat label="Completed" value={stats.completed} hint="Finished visits" tone="green" />
         <FollowUpStat label="Cancelled" value={stats.cancelled} hint="Rejected or cancelled" tone="red" />
       </div>
+
+      <section className="space-y-3">
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-brand-gray">Referrals</h2>
+        {referrals.length ? referrals.map((referral) => {
+          const request = requestByTarget.get(`referral:${referral.canonicalId || referral.id}`);
+          const schedule = referral.scheduledAt ? new Date(referral.scheduledAt).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" }) : "Not scheduled";
+          const outside = referral.external || !["rhu", "barangay_health_station"].includes(referral.facilityType);
+          const open = !["Completed", "Rejected", "Cancelled"].includes(referral.status) && request?.status !== "Pending Approval";
+          return <Card key={referral.id} className="p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0"><p className="font-semibold text-brand-ink">{referral.reason || "Referral"}</p><p className="mt-1 text-sm text-brand-gray">{referral.receivingFacility || "Receiving facility unavailable"} · {schedule}</p>{referral.assignedRecipient && <p className="mt-1 text-xs text-brand-gray">Assigned to {referral.assignedRecipient}</p>}</div>
+              <div className="flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-brand-blue/10 px-2.5 py-1 text-brand-blue">Schedule: {referral.scheduleResponseStatus}</span><span className="rounded-full bg-brand-bg px-2.5 py-1 text-brand-ink">Progress: {referral.status}</span></div>
+            </div>
+            {request?.status === "Pending Approval" && <p className="mt-3 text-xs text-brand-gray">Request pending: {request.request_type} · {request.reason}</p>}
+            {outside ? <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">Coordinate schedule changes directly with the receiving facility.</p> : open && <div className="mt-3 flex flex-wrap gap-2 border-t border-brand-border pt-3">
+              <button disabled={busy || referral.scheduleResponseStatus === "Attendance Confirmed"} onClick={() => requestScheduleChange({ targetType: "referral", targetId: referral.canonicalId || referral.id, requestType: "attendance" })} className="rounded-btn bg-brand-blue px-3 py-2 text-xs font-medium text-white disabled:opacity-50">Confirm Attendance</button>
+              <button disabled={busy} onClick={() => { setRescheduleTarget({ targetType: "referral", targetId: referral.canonicalId || referral.id }); setScheduleForm({ dateTime: "", reason: "" }); }} className="rounded-btn border border-brand-border px-3 py-2 text-xs font-medium text-brand-ink disabled:opacity-50">Request Reschedule</button>
+              <button disabled={busy} onClick={() => setRejectTarget({ targetType: "referral", targetId: referral.canonicalId || referral.id, purpose: referral.reason, date: schedule })} className="rounded-btn border border-brand-danger/30 px-3 py-2 text-xs font-medium text-brand-danger disabled:opacity-50">Request Cancellation</button>
+            </div>}
+          </Card>;
+        }) : <Card className="p-5 text-sm text-brand-gray">No referrals are linked to your account.</Card>}
+      </section>
 
       <section className="flex flex-col gap-3">
         <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-brand-gray">Your follow-ups</h2>
@@ -190,7 +210,8 @@ export default function ResidentFollowUps() {
           <div className="space-y-3">
             {pageRows.map((f, i) => {
               const presentation = getResidentFollowUpPresentation(f);
-              const actionable = presentation.actionable;
+              const latestScheduleRequest = requestByTarget.get(`follow_up:${f.id}`);
+              const actionable = presentation.actionable && latestScheduleRequest?.status !== "Pending Approval";
               return (
                 <motion.div
                   key={f.id}
@@ -218,6 +239,8 @@ export default function ResidentFollowUps() {
                     </div>
                     <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
                       <ScheduleStatusBadge value={presentation.statusLabel} />
+                      <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 text-[11px] font-medium text-brand-blue">Schedule: {f.scheduleResponseStatus || "Awaiting Response"}</span>
+                      <span className="rounded-full bg-brand-bg px-2.5 py-1 text-[11px] font-medium text-brand-ink">Service: {f.status === "Ongoing" ? "In Progress" : f.status || "Scheduled"}</span>
                       {presentation.statusDetail && <span className="max-w-[220px] text-left text-[11px] leading-snug text-brand-gray sm:text-right">{presentation.statusDetail}</span>}
                     </div>
                   </div>
@@ -229,6 +252,8 @@ export default function ResidentFollowUps() {
                     </div>
                   )}
 
+                  {latestScheduleRequest?.status === "Pending Approval" && <p className="mt-3 rounded-btn bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">Schedule request pending staff review: {latestScheduleRequest.reason}</p>}
+
                   {f.confirmationStatus === "Rejected" && f.rejectionReason && (
                     <div className="mt-3 rounded-btn border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
                       <span className="font-medium">You rejected this follow-up:</span> {f.rejectionReason}
@@ -238,19 +263,20 @@ export default function ResidentFollowUps() {
                   {actionable && (
                     <div className="mt-4 flex flex-wrap gap-2 border-t border-brand-border/70 pt-3">
                       <button
-                        disabled={busy}
-                        onClick={() => setConfirmTarget(f.id)}
+                        disabled={busy || f.scheduleResponseStatus === "Attendance Confirmed"}
+                        onClick={() => requestScheduleChange({ targetType: "follow_up", targetId: f.id, requestType: "attendance" })}
                         className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
                       >
-                        <CheckCircle2 className="h-4 w-4" /> Confirm
+                        <CheckCircle2 className="h-4 w-4" /> Confirm Attendance
                       </button>
                       <button
                         disabled={busy}
-                        onClick={() => setRejectTarget(f.id)}
+                        onClick={() => setRejectTarget({ targetType: "follow_up", targetId: f.id, purpose: f.purpose, date: fmtDate(f.scheduledDate) })}
                         className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/40 bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 disabled:opacity-60 dark:bg-card"
                       >
-                        <Ban className="h-4 w-4" /> Can't Attend
+                        <Ban className="h-4 w-4" /> Request Cancellation
                       </button>
+                      <button disabled={busy} onClick={() => { setRescheduleTarget({ targetType: "follow_up", targetId: f.id }); setScheduleForm({ dateTime: "", reason: "" }); }} className="inline-flex items-center gap-1.5 rounded-btn border border-brand-border bg-white px-4 py-2 text-sm font-medium text-brand-ink hover:bg-brand-bg disabled:opacity-60 dark:bg-card">Request Reschedule</button>
                     </div>
                   )}
                 </motion.div>
@@ -272,57 +298,37 @@ export default function ResidentFollowUps() {
             isActionable(rows.find((r) => r.id === selectedSchedule.id) || {}) ? (
               <>
                 <button
-                  onClick={() => { setConfirmTarget(selectedSchedule.id); setSelected(null); }}
+                  disabled={busy || selectedSchedule.scheduleResponseStatus === "Attendance Confirmed"}
+                  onClick={() => requestScheduleChange({ targetType: "follow_up", targetId: selectedSchedule.id, requestType: "attendance" })}
                   className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
                 >
                   <CheckCircle2 className="h-4 w-4" /> Confirm
                 </button>
                 <button
-                  onClick={() => { setRejectTarget(selectedSchedule.id); setSelected(null); }}
+                  disabled={busy}
+                  onClick={() => { setRejectTarget({ targetType: "follow_up", targetId: selectedSchedule.id, purpose: selectedSchedule.purpose, date: selectedSchedule.date }); setSelected(null); }}
                   className="inline-flex items-center gap-1.5 rounded-btn border border-brand-danger/30 bg-white px-4 py-2 text-sm font-medium text-brand-danger hover:bg-brand-danger/5 dark:bg-card"
                 >
-                  <Ban className="h-4 w-4" /> Can't Attend
+                  <Ban className="h-4 w-4" /> Request Cancellation
                 </button>
+                <button disabled={busy} onClick={() => { setRescheduleTarget({ targetType: "follow_up", targetId: selectedSchedule.id }); setScheduleForm({ dateTime: "", reason: "" }); setSelected(null); }} className="rounded-btn border border-brand-border px-4 py-2 text-sm font-medium text-brand-ink">Request Reschedule</button>
               </>
             ) : null
           }
         />
       )}
 
-      {/* Confirm dialog */}
-      {confirmTarget && (() => {
-        const s = schedules.find((x) => x.id === confirmTarget);
-        if (!s) return null;
-        return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
-            <Card className="w-full max-w-md">
-              <div className="p-6">
-                <h3 className="text-lg font-semibold text-brand-ink">Confirm Follow-up</h3>
-                <p className="mt-2 text-sm leading-relaxed text-brand-gray">
-                  Your health team scheduled this follow-up for you. Confirm that you can attend on{" "}
-                  <span className="font-medium text-brand-ink">{fmtDate(s.date)}</span>
-                  {s.time ? <> at <span className="font-medium text-brand-ink">{formatTime(s.time)}</span></> : null}
-                  {s.location ? <> ({s.location})</> : null}?
-                </p>
-                <p className="mt-2 text-xs text-brand-gray">The barangay health team will be notified of your confirmation.</p>
-                <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
-                  <button onClick={() => setConfirmTarget(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-                  <button disabled={busy} onClick={() => approve(s.id)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">
-                    <CheckCircle2 className="h-4 w-4" /> Confirm
-                  </button>
-                </div>
-              </div>
-            </Card>
-          </div>
-        );
-      })()}
-
       {/* Can't-attend modal — reason required */}
       {rejectTarget && (() => {
-        const s = schedules.find((x) => x.id === rejectTarget);
-        if (!s) return null;
-        return <RejectModal schedule={s} busy={busy} onClose={() => setRejectTarget(null)} onSubmit={(reason) => reject(s.id, reason)} />;
+        return <RejectModal schedule={rejectTarget} busy={busy} onClose={() => setRejectTarget(null)} onSubmit={(reason) => requestScheduleChange({ targetType: rejectTarget.targetType || "follow_up", targetId: rejectTarget.targetId || rejectTarget.id, requestType: "cancellation", reason })} />;
       })()}
+      {rescheduleTarget && <RescheduleModal
+        value={scheduleForm}
+        setValue={setScheduleForm}
+        busy={busy}
+        onClose={() => setRescheduleTarget(null)}
+        onSubmit={() => requestScheduleChange({ targetType: rescheduleTarget.targetType || "follow_up", targetId: rescheduleTarget.targetId || rescheduleTarget.id, requestType: "reschedule", proposedSchedule: scheduleForm.dateTime, reason: scheduleForm.reason })}
+      />}
 
       {toast && (
         <div className="fixed bottom-4 right-4 z-[90] flex items-center gap-2 rounded-btn bg-brand-ink px-4 py-3 text-white shadow-lg">
@@ -334,13 +340,13 @@ export default function ResidentFollowUps() {
   );
 }
 
-/** The existing rejection workflow requires a reason before saving Can't Attend. */
+/** Request cancellation while leaving the approved appointment unchanged. */
 function RejectModal({ schedule, busy, onClose, onSubmit }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const canSubmit = reason.trim().length > 0 && !busy;
   const submit = () => {
-    if (!reason.trim()) { setError("Please provide a reason for rejecting this scheduled follow-up."); return; }
+    if (!reason.trim()) { setError("Please provide a cancellation reason."); return; }
     onSubmit(reason.trim());
   };
   return (
@@ -349,21 +355,19 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
         <div className="p-6">
           <div className="mb-1 flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold text-brand-ink">Can't Attend</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">
-                {schedule.purpose || "Follow-up"} · {fmtDate(schedule.date)}{schedule.time ? ` · ${formatTime(schedule.time)}` : ""}
-              </p>
+              <h3 className="text-lg font-semibold text-brand-ink">Request Cancellation</h3>
+              <p className="mt-0.5 text-sm text-brand-gray">{schedule.purpose || "Scheduled service"} · {schedule.date || "Existing schedule"}</p>
             </div>
             <button onClick={onClose} className="text-brand-gray hover:text-brand-ink" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
-          <p className="mt-2 text-sm text-brand-gray">Please tell your health team why you can't attend.</p>
+          <p className="mt-2 text-sm text-brand-gray">Your schedule remains active until the responsible health team reviews and approves this request.</p>
           <div className="mt-4">
             <label className="text-sm font-medium text-brand-ink">Reason <span className="text-brand-danger">*</span></label>
             <textarea
               rows={4}
               value={reason}
               onChange={(e) => { setReason(e.target.value); if (error) setError(""); }}
-              placeholder="Let your health worker know why you can't attend."
+              placeholder="Explain why you are requesting cancellation."
               className={`mt-1.5 w-full resize-none rounded-btn border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-brand-blue dark:bg-input dark:text-foreground ${error ? "border-brand-danger" : "border-slate-200 dark:border-border"}`}
             />
             {error && <p className="mt-1 text-xs text-brand-danger">{error}</p>}
@@ -371,11 +375,28 @@ function RejectModal({ schedule, busy, onClose, onSubmit }) {
           <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
             <button onClick={onClose} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
             <button disabled={!canSubmit} onClick={submit} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-danger px-5 py-2 text-sm font-medium text-white hover:bg-brand-danger/90 disabled:opacity-60 disabled:cursor-not-allowed">
-              <Ban className="h-4 w-4" /> Submit
+              <Ban className="h-4 w-4" /> Send Request
             </button>
           </div>
         </div>
       </Card>
     </div>
   );
+}
+
+function RescheduleModal({ value, setValue, busy, onClose, onSubmit }) {
+  const [error, setError] = useState("");
+  const minDateTime = (() => { const date = new Date(Date.now() + 60_000); return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); })();
+  const submit = () => {
+    if (!value.dateTime || value.dateTime <= minDateTime) { setError("Choose a future date and time."); return; }
+    if (!value.reason.trim()) { setError("A reason is required."); return; }
+    setError(""); onSubmit();
+  };
+  return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"><Card className="w-full max-w-md"><div className="p-6">
+    <div className="flex items-start justify-between gap-3"><div><h3 className="text-lg font-semibold text-brand-ink">Request Reschedule</h3><p className="mt-1 text-sm text-brand-gray">Your current appointment stays active until staff approves the proposed time.</p></div><button onClick={onClose} aria-label="Close"><X className="h-5 w-5" /></button></div>
+    <label className="mt-4 block text-sm font-medium text-brand-ink">Proposed date and time<input type="datetime-local" min={minDateTime} value={value.dateTime} onChange={(event) => setValue((prior) => ({ ...prior, dateTime: event.target.value }))} className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm dark:bg-input" /></label>
+    <label className="mt-4 block text-sm font-medium text-brand-ink">Reason<textarea rows={3} value={value.reason} onChange={(event) => setValue((prior) => ({ ...prior, reason: event.target.value }))} className="mt-1.5 w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm dark:bg-input" /></label>
+    {error && <p className="mt-2 text-xs text-brand-danger">{error}</p>}
+    <div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-btn px-3 py-2 text-sm text-brand-gray">Back</button><button disabled={busy} onClick={submit} className="rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Send Request</button></div>
+  </div></Card></div>;
 }

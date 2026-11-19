@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import KpiHorizontal from "@/components/common/KpiHorizontal";
@@ -199,6 +200,8 @@ const deadlineSummary = (schedule) => {
 };
 
 export default function HealthServicesManager({ subtitle }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { can } = usePermissions();
   const isSupervisor = user?.role === "health_supervisor";
@@ -253,6 +256,7 @@ export default function HealthServicesManager({ subtitle }) {
   const [regTarget, setRegTarget] = useState(null); // the service whose roster is open
   const [regState, setRegState] = useState({ loading: false, error: "", registrations: [], counts: null });
   const [attBusy, setAttBusy] = useState(""); // residentId being updated
+  const [followUpStartRequest, setFollowUpStartRequest] = useState(null);
 
   const showToast = (msg, type = "success") => {
     setToast({ message: msg, type });
@@ -744,6 +748,22 @@ export default function HealthServicesManager({ subtitle }) {
     loadRegistrations(service.id);
   };
 
+  useEffect(() => {
+    const start = location.state?.followUpStart;
+    if (!start?.id || !services.length || loading) return;
+    const purpose = String(start.purpose || "").trim().toLowerCase();
+    const service = services.find((item) => String(item.name || "").trim().toLowerCase() === purpose)
+      || services.find((item) => purpose && (String(item.name || "").toLowerCase().includes(purpose) || purpose.includes(String(item.name || "").toLowerCase())));
+    navigate(location.pathname, { replace: true, state: null });
+    if (!service) {
+      showToast("No matching health service was found. Open the correct service from the catalog to record this follow-up.", "error");
+      return;
+    }
+    setFollowUpStartRequest(start);
+    setRegTarget(service);
+    loadRegistrations(service.id);
+  }, [location.key, location.pathname, location.state, loading, services, navigate, loadRegistrations]);
+
   // Record attendance (attended / absent) against a registration. Reuses the
   // existing health-service attendance endpoints; a new record is created on
   // the first mark, and updated on subsequent changes.
@@ -775,18 +795,20 @@ export default function HealthServicesManager({ subtitle }) {
     setAttBusy(reg.residentId);
     try {
       if (reg.attendance?.id) {
-        await healthServicesApi.updateAttendance(reg.attendance.id, { ...values, status: "attended" });
+        await healthServicesApi.updateAttendance(reg.attendance.id, { ...values, status: "attended", follow_up_id: reg.followUpId || undefined });
       } else {
         await healthServicesApi.createAttendance({
           service_id: regTarget.id,
           resident_id: reg.residentId,
           scheduled_date: reg.plannedDate,
           status: "attended",
+          follow_up_id: reg.followUpId || undefined,
           ...values,
         });
       }
       await loadRegistrations(regTarget.id);
       showToast("Service delivery saved to the resident’s record.");
+      if (reg.followUpId) setFollowUpStartRequest(null);
       return true;
     } catch (err) {
       showToast(err?.message || "The service record could not be saved.", "error");
@@ -1531,7 +1553,8 @@ export default function HealthServicesManager({ subtitle }) {
           onReload={() => loadRegistrations(regTarget.id)}
           onMark={markAttendance}
           onSaveDelivery={saveServiceDelivery}
-          onClose={() => setRegTarget(null)}
+          onClose={() => { setRegTarget(null); setFollowUpStartRequest(null); }}
+          followUpStart={followUpStartRequest}
         />
       )}
     </div>
@@ -1666,13 +1689,25 @@ const formatDateTime = (iso) => {
  * their registration status and timestamp, with attendance marking. Only active
  * (non-cancelled) registrations can be marked attended/missed.
  */
-function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark, onSaveDelivery, onClose, supervisor = false }) {
+function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark, onSaveDelivery, onClose, supervisor = false, followUpStart = null }) {
   const { loading, error, registrations, counts } = state;
   const active = registrations.filter((r) => r.status !== "Cancelled");
   const cancelled = registrations.filter((r) => r.status === "Cancelled");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [deliveryTarget, setDeliveryTarget] = useState(null);
+
+  useEffect(() => {
+    if (!followUpStart?.id || !followUpStart?.residentId || !service) return;
+    setDeliveryTarget({
+      id: `follow-up-${followUpStart.id}`,
+      residentId: followUpStart.residentId,
+      residentName: followUpStart.residentName || "Selected resident",
+      plannedDate: followUpStart.scheduledDate || new Date().toISOString().slice(0, 10),
+      attendance: null,
+      followUpId: followUpStart.id,
+    });
+  }, [followUpStart?.id, followUpStart?.residentId, followUpStart?.residentName, followUpStart?.scheduledDate, service?.id]);
 
   // Filter registrations based on search and status
   const filtered = active.filter((reg) => {
@@ -1696,7 +1731,7 @@ function RegistrationsModal({ service, state, canEdit, attBusy, onReload, onMark
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="truncate text-lg font-semibold text-brand-ink">{service.name}</h3>
-              <p className="mt-0.5 text-sm text-brand-gray">Registered residents and attendance.</p>
+              <p className="mt-0.5 text-sm text-brand-gray">{followUpStart?.id ? "Record service for the selected follow-up resident." : "Registered residents and attendance."}</p>
               {scheduleSummary(service.schedule) && (
                 <p className="mt-1 flex items-center gap-1.5 text-sm text-brand-ink">
                   <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-blue" /> {scheduleSummary(service.schedule)}

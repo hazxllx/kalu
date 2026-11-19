@@ -97,7 +97,7 @@ export const filterFollowUps = (rows = [], { search = "", status = "All", priori
 };
 
 export const isCalendarVisibleFollowUp = (schedule) =>
-  !schedule?.requiresResidentResponse || schedule.confirmationStatus === "Confirmed";
+  !["Completed", "Cancelled", "Missed", "Rejected"].includes(schedule?.status);
 
 /** Local date → "YYYY-MM-DD" key. */
 export const toKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

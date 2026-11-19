@@ -1,7 +1,7 @@
 import { manilaDateKey } from "./scheduleDates.js";
 
 const ACTIVE_STATUSES = new Set(["pending", "scheduled", "today", "upcoming", "ongoing"]);
-const RESPONSE_STATUSES = new Set(["pending", "scheduled"]);
+const RESPONSE_STATUSES = new Set(["pending", "scheduled", "today", "upcoming"]);
 
 const normalized = (value) => String(value || "").trim().toLowerCase();
 const dateKey = (value) => {
@@ -11,16 +11,16 @@ const dateKey = (value) => {
 
 export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
   const status = normalized(row.status);
-  const confirmation = normalized(row.confirmationStatus);
+  const confirmation = normalized(row.scheduleResponseStatus || row.confirmationStatus);
   const scheduledDate = dateKey(row.scheduledDate);
   const today = manilaDateKey(now);
   const active = ACTIVE_STATUSES.has(status);
   const awaitingResponse = Boolean(active && (
-    confirmation === "awaiting confirmation" ||
+    confirmation === "awaiting response" || confirmation === "awaiting confirmation" ||
     (status === "pending" && confirmation !== "confirmed" && confirmation !== "rejected") ||
     (row.requiresResidentResponse && !confirmation)
   ));
-  const confirmed = active && confirmation === "confirmed";
+  const confirmed = active && ["confirmed", "attendance confirmed"].includes(confirmation);
   const overdue = active && Boolean(scheduledDate) && scheduledDate < today;
 
   let statusLabel = "Scheduled";
@@ -68,7 +68,7 @@ export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
     category,
     awaitingResponse,
     overdue,
-    actionable: RESPONSE_STATUSES.has(status) && awaitingResponse,
+    actionable: RESPONSE_STATUSES.has(status) && !["reschedule requested", "cancellation requested", "cancellation approved"].includes(confirmation),
   };
 }
 

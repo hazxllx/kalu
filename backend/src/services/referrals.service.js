@@ -652,6 +652,13 @@ export const update = async ({ user, id, payload = {}, ifMatch = undefined, isSy
     { isSync, ifMatch },
   );
   assertReferralDates(payload, { existing });
+  const scheduleChanged = Object.prototype.hasOwnProperty.call(payload, 'scheduled_at')
+    && !(sameInstant(payload.scheduled_at, existing.scheduled_at)
+      || (!text(payload.scheduled_at) && !text(existing.scheduled_at)));
+  const scheduleChangeReason = text(payload.schedule_change_reason);
+  if (scheduleChanged && !scheduleChangeReason) {
+    throw ApiError.unprocessable('A reason is required when directly changing a referral schedule.');
+  }
   const row = sanitizeWrite(payload);
   if (Object.prototype.hasOwnProperty.call(payload, 'reason') && !row.reason) {
     throw ApiError.unprocessable('Referral reason is required.');
@@ -661,7 +668,16 @@ export const update = async ({ user, id, payload = {}, ifMatch = undefined, isSy
   }
   Object.assign(row, await resolveRecipient(supabase, resident, payload, existing));
   if (row.recipient_personnel_id === user.id) throw ApiError.unprocessable('Select another authorized recipient.');
-  return write({ user, id: existing.id, action: 'update', version, record: row, supabase });
+  const updated = await write({ user, id: existing.id, action: 'update', version, record: row, supabase });
+  if (scheduleChanged) {
+    const { error: auditError } = await supabase.from('health_audit_logs').insert({
+      actor_id: user.id, action: 'REFERRAL_SCHEDULE_CHANGED', entity_type: 'health_referrals', entity_id: existing.id,
+      municipality_id: resident.municipality_id || null, barangay_id: resident.barangay_id || null,
+      metadata: { reason: scheduleChangeReason, from: existing.scheduled_at, to: payload.scheduled_at || null },
+    });
+    throwOnError(auditError, 'Could not record referral schedule history');
+  }
+  return updated;
 };
 
 export const updateStatus = async ({
@@ -734,6 +750,8 @@ export const toPhnReferral = (row) => {
     workingImpression: row.impression,
     outpatientService: row.destination_service,
     status: row.status,
+    scheduleResponseStatus: row.schedule_response_status || 'Awaiting Response',
+    serviceProgressStatus: row.status,
     version: row.version,
     createdById: row.created_by || legacy.created_by_id || '',
     patientSnapshot: originalSnapshots ? legacy.patient_snapshot : camelKeys(row.patient_snapshot || {}),

@@ -31,6 +31,7 @@ import {
   summarizeFollowUps,
 } from "../lib/scheduleDates";
 import { followUpActionAvailability } from "../lib/followUpActions";
+import ScheduleRequestsPanel from "../components/ScheduleRequestsPanel";
 
 const FOLLOW_UP_TYPES = [
   "General Check-up",
@@ -49,6 +50,7 @@ const emptyScheduleForm = (personnel) => ({
   time: "09:00",
   type: "General Check-up",
   reason: "",
+  scheduleChangeReason: "",
   location: "Barangay Health Station",
   priority: "Medium",
   notes: "",
@@ -518,6 +520,19 @@ export default function MidwifeFollowUp() {
     setShowRecordVisitModal(true);
   };
 
+  const handleStartFollowUp = async (followUp) => {
+    if (!canEditFollowUp && !canCompleteFollowUp) { showToast("You do not have permission to start this follow-up."); return; }
+    if (String(followUp.scheduledDateRaw || "").slice(0, 10) > todayISO()) { showToast("This follow-up is scheduled for a future date."); return; }
+    try {
+      await persistFollowUp(followUp.id, { status: "Ongoing" }, "Follow-up started. The service remains In Progress until recorded in its care workflow.");
+      const context = { followUpStart: { id: followUp.id, residentId: followUp.residentId, residentName: followUp.residentName, scheduledDate: followUp.scheduledDateRaw, purpose: followUp.purpose || "Follow-up" } };
+      const purpose = String(followUp.purpose || "").toLowerCase();
+      if (/vaccin|immuniz/.test(purpose)) navigate("/app/health_supervisor/immunization", { state: context });
+      else if (/consult|check.?up|maternal|child|chronic|medication/.test(purpose)) navigate("/app/health_supervisor/consultations", { state: context });
+      else navigate("/app/health_supervisor/services", { state: context });
+    } catch { /* persistFollowUp displays the save error */ }
+  };
+
   const handleUpdateStatus = (followUp) => {
     if (!canUpdateFollowUpStatus) {
       showToast("You do not have permission to update follow-up status.");
@@ -557,21 +572,13 @@ export default function MidwifeFollowUp() {
       time: String(followUp.scheduledTimeRaw || "").slice(0, 5) || "09:00",
       type: followUp.type || "General Check-up",
       reason: followUp.purpose || "",
+      scheduleChangeReason: "",
       location: followUp.location || defaultFollowUpLocation,
       priority: followUp.priority || "Medium",
       notes: followUp.remarks || "",
       personnel: followUp.assignedMidwife || defaultPersonnel,
     });
     setShowScheduleModal(true);
-  };
-
-  const handleCompleteFollowUp = (followUp) => {
-    if (!followUpActionAvailability(followUp, { canComplete: canCompleteFollowUp }).complete) {
-      showToast("This follow-up is not eligible to be completed yet, or you do not have permission.");
-      return;
-    }
-    setSelectedFollowUp(followUp);
-    setStatusConfirmation("Completed");
   };
 
   const handleConfirmableStatus = (followUp, nextStatus) => {
@@ -598,16 +605,13 @@ export default function MidwifeFollowUp() {
         handleEditFollowUp(followUp);
         break;
       case 'recordVisit':
-        handleRecordVisit(followUp);
+        void handleStartFollowUp(followUp);
         break;
       case 'updateStatus':
         handleUpdateStatus(followUp);
         break;
       case 'addRemarks':
         handleAddRemarks(followUp);
-        break;
-      case 'complete':
-        handleCompleteFollowUp(followUp);
         break;
       case 'missed':
         handleConfirmableStatus(followUp, "Missed");
@@ -736,16 +740,6 @@ export default function MidwifeFollowUp() {
                   Edit / Reschedule
                 </button>
               )}
-              {actions.complete && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => handleActionClick('complete', followUp)}
-                  className="w-full px-3 py-2 text-left text-sm text-brand-green transition-colors hover:bg-brand-bg"
-                >
-                  Mark as Completed
-                </button>
-              )}
               {actions.missed && (
                 <button
                   type="button"
@@ -783,7 +777,7 @@ export default function MidwifeFollowUp() {
                   onClick={() => handleActionClick('recordVisit', followUp)}
                   className="w-full px-3 py-2 text-left text-sm text-brand-ink transition-colors hover:bg-brand-bg"
                 >
-                  Record Visit
+                  Start Follow-Up
                 </button>
               )}
               {actions.cancel && (
@@ -994,6 +988,9 @@ export default function MidwifeFollowUp() {
         ? "That time has already passed today. Choose a later time or another date."
         : "",
     reason: touched.reason && !scheduleForm.reason.trim() ? "Please enter the reason for the follow-up." : "",
+    scheduleChangeReason: selectedFollowUp && !scheduleForm.scheduleChangeReason.trim()
+      ? "A reason is required when directly changing the schedule."
+      : "",
   };
 
   const canSchedule =
@@ -1002,7 +999,8 @@ export default function MidwifeFollowUp() {
     !isPastDate(scheduleForm.date) &&
     Boolean(scheduleForm.time) &&
     !isPastSameDaySchedule(scheduleForm.date, scheduleForm.time) &&
-    Boolean(scheduleForm.reason.trim());
+    Boolean(scheduleForm.reason.trim()) &&
+    (!selectedFollowUp || Boolean(scheduleForm.scheduleChangeReason.trim()));
 
   const canSaveSchedule = selectedFollowUp ? canEditFollowUp : canScheduleFollowUp;
 
@@ -1047,6 +1045,7 @@ export default function MidwifeFollowUp() {
         purpose: scheduleForm.reason.trim(),
         scheduled_date: scheduleForm.date,
         scheduled_time: scheduleForm.time,
+        schedule_change_reason: scheduleForm.scheduleChangeReason.trim(),
         location: scheduleForm.location,
         priority: scheduleForm.priority,
         status: deriveStatus(scheduleForm.date),
@@ -1098,6 +1097,8 @@ export default function MidwifeFollowUp() {
           </button>
         ) : null}
       />
+
+      {supervisor && canViewFollowUps && <div className="mb-4"><ScheduleRequestsPanel title="Resident follow-up schedule requests" /></div>}
 
       {/* Toast Notification */}
       {toast && (
@@ -1433,6 +1434,11 @@ export default function MidwifeFollowUp() {
                         <p className="mt-1 text-xs text-red-600">{scheduleErrors.reason}</p>
                       )}
                     </div>
+                    {selectedFollowUp && <div>
+                      <label htmlFor="followup-schedule-change-reason" className="mb-1.5 block text-sm font-medium text-brand-ink">Reason for direct schedule change <span className="text-red-500">*</span></label>
+                      <textarea id="followup-schedule-change-reason" rows={2} value={scheduleForm.scheduleChangeReason} onChange={(e) => setScheduleForm({ ...scheduleForm, scheduleChangeReason: e.target.value })} className={inputCls(scheduleErrors.scheduleChangeReason)} placeholder="Explain why this schedule needs to change" />
+                      {scheduleErrors.scheduleChangeReason && <p className="mt-1 text-xs text-red-600">{scheduleErrors.scheduleChangeReason}</p>}
+                    </div>}
                     <div className="grid gap-3.5 sm:grid-cols-2">
                       <div>
                         <label htmlFor="followup-location" className="mb-1.5 block text-sm font-medium text-brand-ink">Location</label>

@@ -1,4 +1,6 @@
 import * as service from '../services/residentFollowups.service.js';
+import scheduleRequests from '../services/scheduleRequests.service.js';
+import referrals from '../services/referrals.service.js';
 import { sendData } from '../utils/apiResponse.js';
 
 /**
@@ -8,16 +10,33 @@ import { sendData } from '../utils/apiResponse.js';
  * matched against the caller's own resident record.
  */
 
-export const list = async (req, res) =>
-  sendData(res, { rows: await service.listOwn({ user: req.user }) });
+export const list = async (req, res) => {
+  const [rows, referralRows, requests] = await Promise.all([
+    service.listOwn({ user: req.user }),
+    referrals.list({ user: req.user, box: 'all' }),
+    scheduleRequests.listForStaff({ user: req.user }),
+  ]);
+  sendData(res, {
+    rows,
+    referrals: referralRows.map((row) => ({
+      id: row.id, canonicalId: row.id, reason: row.reason || '', receivingFacility: row.destination_facility || '',
+      scheduledAt: row.scheduled_at || null, assignedRecipient: row.recipient?.full_name || '',
+      status: row.status, serviceProgressStatus: row.status,
+      scheduleResponseStatus: row.schedule_response_status || 'Awaiting Response',
+      facilityType: row.recipient_facility?.type || '', registeredFacility: Boolean(row.recipient_facility_id),
+      external: !row.recipient_facility_id,
+    })),
+    scheduleRequests: requests,
+  });
+};
 
 export const get = async (req, res) =>
   sendData(res, { record: await service.getOwn({ user: req.user, id: req.params.id }) });
 
 export const approve = async (req, res) =>
-  sendData(res, { record: await service.approveOwn({ user: req.user, id: req.params.id }) });
+  sendData(res, { request: await scheduleRequests.submit({ user: req.user, targetType: 'follow_up', targetId: req.params.id, requestType: 'attendance' }) });
 
 export const reject = async (req, res) =>
-  sendData(res, { record: await service.rejectOwn({ user: req.user, id: req.params.id, reason: req.body?.reason }) });
+  sendData(res, { request: await scheduleRequests.submit({ user: req.user, targetType: 'follow_up', targetId: req.params.id, requestType: 'cancellation', reason: req.body?.reason }) });
 
 export default { list, get, approve, reject };

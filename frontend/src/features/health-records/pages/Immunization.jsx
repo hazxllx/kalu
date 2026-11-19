@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import StatusBadge from "@/components/common/StatusBadge";
 import { Card } from "@/components/common/Card";
@@ -85,9 +86,9 @@ const EMPTY_FORM = () => ({
   notes: "",
 });
 
-function ImmunizationFormModal({ initial, resident, residents, saving, onClose, onSave, onSelectResident }) {
+function ImmunizationFormModal({ initial, resident, residents, saving, onClose, onSave, onSelectResident, followUpId = "" }) {
   const isEdit = Boolean(initial);
-  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initial ? { ...initial } : EMPTY_FORM()));
+  const [form, setForm] = useState(() => /** @type {Record<string, any>} */ (initial ? { ...initial } : { ...EMPTY_FORM(), followUpId }));
   const [errors, setErrors] = useState(/** @type {Record<string, any>} */ ({}));
   const set = (key) => (value) => {
     setForm((p) => ({ ...p, [key]: value }));
@@ -240,6 +241,8 @@ function ImmunizationFormModal({ initial, resident, residents, saving, onClose, 
 
 export default function Immunization() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { online, lastSyncedAt } = useSyncStatus();
   const scope = getSupervisorScope(user);
   const assignedBarangay = scope && scope.level === HS_SCOPE.BARANGAY ? scope.assignedBarangay : null;
@@ -253,6 +256,7 @@ export default function Immunization() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [selectedResident, setSelectedResident] = useState(null);
+  const [followUpId, setFollowUpId] = useState("");
   const [detail, setDetail] = useState(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -307,6 +311,18 @@ export default function Immunization() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const start = location.state?.followUpStart;
+    if (!start?.id || !start?.residentId || !residents.length) return;
+    const resident = residents.find((item) => item.id === start.residentId);
+    if (!resident) return;
+    setEditing(null);
+    setSelectedResident(resident);
+    setFollowUpId(start.id);
+    setFormOpen(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, navigate, residents]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return records.filter((r) => {
@@ -342,7 +358,7 @@ export default function Immunization() {
         setRecords((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...mapped } : r)));
         showToast("Immunization updated.");
       } else {
-        const result = await immunizationsApi.create({ residentId: selectedResident.id, ...payload });
+        const result = await immunizationsApi.create({ residentId: selectedResident.id, ...payload, followUpId: form.followUpId || undefined });
         const mapped = {
           ...mapRecord(result?.record || result),
           residentName: selectedResident.name,
@@ -354,6 +370,7 @@ export default function Immunization() {
       setFormOpen(false);
       setEditing(null);
       setSelectedResident(null);
+      setFollowUpId("");
     } catch (err) {
       showToast(err?.message || "Could not save the immunization.");
     } finally {
@@ -506,6 +523,7 @@ export default function Immunization() {
         <ImmunizationFormModal
           initial={editing}
           resident={selectedResident}
+          followUpId={followUpId}
           residents={residents}
           saving={saving}
           onClose={() => { setFormOpen(false); setEditing(null); setSelectedResident(null); }}

@@ -126,6 +126,9 @@ export default function HealthRecord() {
   const [consultations, setConsultations] = useState([]);
   const [vaccinations, setVaccinations] = useState([]);
   const [healthServiceRecords, setHealthServiceRecords] = useState([]);
+  const [referrals, setReferrals] = useState([]);
+  const [followUps, setFollowUps] = useState([]);
+  const [historyTypeFilter, setHistoryTypeFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
@@ -179,6 +182,8 @@ export default function HealthRecord() {
         setConsultations(rows);
         setVaccinations(Array.isArray(data?.vaccinations) ? data.vaccinations : []);
         setHealthServiceRecords(Array.isArray(data?.healthServiceRecords) ? data.healthServiceRecords : []);
+        setReferrals(Array.isArray(data?.referrals) ? data.referrals : []);
+        setFollowUps(Array.isArray(data?.followUps) ? data.followUps : []);
         setHistoricalServiceOptions((current) => {
           const known = new Map(current.map((service) => [service.id, service]));
           for (const row of rows) {
@@ -199,6 +204,8 @@ export default function HealthRecord() {
         setConsultations([]);
         setVaccinations([]);
         setHealthServiceRecords([]);
+        setReferrals([]);
+        setFollowUps([]);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -347,6 +354,7 @@ export default function HealthRecord() {
   const recordTimeline = useMemo(() => [
     ...consultations.map((item) => ({
       id: `consultation-${item.id}`,
+      category: "consultations",
       type: "Health consultation",
       date: item.date,
       detail: [item.chiefComplaint, item.diagnosis].filter(Boolean).join(" · ") || "Consultation recorded",
@@ -354,6 +362,7 @@ export default function HealthRecord() {
     })),
     ...healthServiceRecords.map((item) => ({
       id: `service-${item.id}`,
+      category: "consultations",
       type: "Health service",
       date: item.date,
       detail: [item.serviceName, item.serviceProvided].filter(Boolean).join(" · ") || "Health service recorded",
@@ -361,16 +370,32 @@ export default function HealthRecord() {
     })),
     ...vaccinations.map((item, index) => ({
       id: `vaccination-${item.id || `${item.name}-${index}`}`,
+      category: "consultations",
       type: "Vaccination",
       date: item.date,
       detail: [item.name, item.dose].filter(Boolean).join(" · ") || "Vaccination recorded",
       tone: "yellow",
     })),
+    ...referrals.map((item) => ({
+      id: `referral-${item.id}`, category: "referrals", type: "Referral",
+      date: String(item.date || "").slice(0, 10),
+      detail: [item.reason, item.facility, item.assignedPersonnel && `Assigned to ${item.assignedPersonnel}`, `Schedule: ${item.scheduleResponseStatus}`, `Progress: ${item.serviceProgressStatus}`].filter(Boolean).join(" · "),
+      tone: item.serviceProgressStatus === "Completed" ? "green" : "blue",
+    })),
+    ...followUps.map((item) => ({
+      id: `follow-up-${item.id}`, category: "follow-ups", type: "Follow-up",
+      date: item.date,
+      detail: [item.purpose, item.facility, item.assignedPersonnel && `Assigned to ${item.assignedPersonnel}`, `Schedule: ${item.scheduleResponseStatus}`, `Progress: ${item.serviceProgressStatus === "Ongoing" ? "In Progress" : item.serviceProgressStatus}`, item.linkedServiceType && `Linked ${item.linkedServiceType}`].filter(Boolean).join(" · "),
+      tone: item.serviceProgressStatus === "Completed" ? "green" : "blue",
+    })),
   ].filter((item) => item.date).sort((a, b) => String(b.date).localeCompare(String(a.date))), [
     consultations,
     healthServiceRecords,
     vaccinations,
+    referrals,
+    followUps,
   ]);
+  const visibleTimeline = useMemo(() => historyTypeFilter === "all" ? recordTimeline : recordTimeline.filter((item) => item.category === historyTypeFilter), [recordTimeline, historyTypeFilter]);
 
   useEffect(() => {
     setConsultationPage((page) => Math.min(page, consultationPageCount));
@@ -831,14 +856,16 @@ export default function HealthRecord() {
               </div>
 
               <Card className="mt-5 rounded-lg p-5 shadow-none">
-                <div className="mb-4">
-                  <h3 className="font-display text-lg text-brand-ink">Health timeline</h3>
-                  <p className="mt-1 text-xs text-brand-gray">Your recorded health activity, newest first.</p>
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div><h3 className="font-display text-lg text-brand-ink">Health timeline</h3><p className="mt-1 text-xs text-brand-gray">Consultations, referrals, and follow-ups, newest first.</p></div>
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter health timeline">
+                    {[['all','All Records'],['consultations','Consultations'],['referrals','Referrals'],['follow-ups','Follow-Ups']].map(([value,label]) => <button key={value} type="button" onClick={() => setHistoryTypeFilter(value)} aria-pressed={historyTypeFilter === value} className={`rounded-full border px-3 py-1.5 text-xs font-medium ${historyTypeFilter === value ? 'border-brand-blue bg-brand-blue text-white' : 'border-brand-border text-brand-gray hover:text-brand-ink'}`}>{label}</button>)}
+                  </div>
                 </div>
-                {recordTimeline.length ? (
+                {visibleTimeline.length ? (
                   <ol className="relative">
                     <span aria-hidden="true" className="absolute bottom-3 left-[6px] top-3 w-px bg-brand-border" />
-                    {recordTimeline.map((item) => (
+                    {visibleTimeline.map((item) => (
                       <li key={item.id} className="relative flex gap-4 py-3 first:pt-0 last:pb-0">
                         <span className={`relative z-10 mt-1 h-[13px] w-[13px] shrink-0 rounded-full ring-4 ring-white ${
                           item.tone === "green" ? "bg-brand-green" : item.tone === "yellow" ? "bg-brand-gold" : "bg-brand-blue"
@@ -852,7 +879,7 @@ export default function HealthRecord() {
                     ))}
                   </ol>
                 ) : (
-                  <p className="py-2 text-sm text-brand-gray">Nothing recorded yet.</p>
+                  <p className="py-2 text-sm text-brand-gray">{recordTimeline.length ? "No records match this filter." : "Nothing recorded yet."}</p>
                 )}
               </Card>
             </>

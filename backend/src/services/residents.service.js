@@ -406,6 +406,8 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
       consultations: [],
       healthServiceRecords: [],
       vaccinations: [],
+      referrals: [],
+      followUps: [],
     };
   }
 
@@ -454,6 +456,24 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
     provider: row.provider || '',
     status: row.status || 'Due',
     notes: row.notes || '',
+  }));
+
+  const [followUpResult, referralResult] = await Promise.all([
+    supabase.from('follow_ups').select('id,purpose,scheduled_date,scheduled_time,location,assigned_provider,status,schedule_response_status,linked_service_type,linked_service_id')
+      .eq('resident_id', resident.id).order('scheduled_date', { ascending: false }).limit(500),
+    supabase.from('health_referrals').select('id,reason,destination_facility,scheduled_at,referral_date,created_at,status,schedule_response_status,recipient:profiles!recipient_personnel_id(full_name),facility:facilities!recipient_facility_id(name,type)')
+      .eq('resident_id', resident.id).order('referral_date', { ascending: false }).limit(500),
+  ]);
+  const followUps = followUpResult.error ? [] : (followUpResult.data || []).map((row) => ({
+    id: row.id, purpose: row.purpose || '', date: row.scheduled_date || '', time: String(row.scheduled_time || '').slice(0, 5),
+    facility: row.location || '', assignedPersonnel: row.assigned_provider || '',
+    scheduleResponseStatus: row.schedule_response_status || 'Awaiting Response', serviceProgressStatus: row.status || 'Scheduled',
+    linkedServiceType: row.linked_service_type || '', linkedServiceId: row.linked_service_id || '',
+  }));
+  const referrals = referralResult.error ? [] : (referralResult.data || []).map((row) => ({
+    id: row.id, reason: row.reason || '', date: row.scheduled_at || row.referral_date || row.created_at || '', facility: row.facility?.name || row.destination_facility || '',
+    assignedPersonnel: row.recipient?.full_name || '', facilityType: row.facility?.type || '',
+    scheduleResponseStatus: row.schedule_response_status || 'Awaiting Response', serviceProgressStatus: row.status || 'Pending',
   }));
 
   const result = await repository.listVisits({
@@ -544,6 +564,8 @@ export const getOwnHealthRecords = async ({ user, filters = {} } = {}) => {
     riskLevel,
     lastConsultationDate,
     consultations: filteredConsultations,
+    referrals,
+    followUps,
     healthServiceRecords,
     vaccinations,
     total: filteredConsultations.length,

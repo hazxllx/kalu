@@ -136,6 +136,7 @@ const mapRecord = (row) => ({
   referralCategory: row.referral_category || "",
   priority: row.priority || "Medium",
   status: row.status || "Pending",
+  scheduleResponseStatus: row.schedule_response_status || "Awaiting Response",
   referralDate: row.referral_date || "",
   createdAt: row.created_at || "",
   notes: row.notes || "",
@@ -181,6 +182,7 @@ const inputCls = (error) =>
 const EMPTY_FORM = () => ({
   referralDate: todayIso(),
   scheduledAt: "",
+  scheduleChangeReason: "",
   destinationFacility: "",
   recipientPersonnelId: "",
   recipientFacilityId: "",
@@ -233,6 +235,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
       return {
         referralDate: initial.referralDate || todayIso(),
         scheduledAt: toLocalDateTimeInput(initial.scheduledAt),
+        scheduleChangeReason: "",
         destinationFacility: initial.destinationFacility || "",
         recipientPersonnelId: initial.recipientPersonnelId || "",
         recipientFacilityId: initial.recipientFacilityId || "",
@@ -322,6 +325,9 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
     }) : {}),
     ...(!isEdit && !resident ? { resident: "Please select a resident." } : {}),
     ...(!form.reason.trim() ? { reason: "Referral reason is required." } : {}),
+    ...(isEdit && !routingOnly && form.scheduledAt !== toLocalDateTimeInput(initial.scheduledAt) && !form.scheduleChangeReason.trim()
+      ? { scheduleChangeReason: "A reason is required when directly changing the schedule." }
+      : {}),
     ...(!form.externalReceivingEnabled && !selectedReferralRoute(routes, form) ? { recipient: "Select a current receiving facility, role and recipient." } : {}),
     ...(form.externalReceivingEnabled && !form.externalReceivingFacility.trim() ? { externalReceivingFacility: "Enter the outside facility name." } : {}),
     ...(form.externalReceivingEnabled && !form.externalReceivingRole.trim() ? { externalReceivingRole: "Enter the outside receiving role." } : {}),
@@ -539,6 +545,11 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
                 <p className="mt-1 text-xs text-brand-gray">Enter a future schedule in Philippine time.</p>
                 {liveErrors.scheduledAt && <p className="mt-1 text-xs text-brand-danger">{liveErrors.scheduledAt}</p>}
               </div>
+              {isEdit && !routingOnly && form.scheduledAt !== toLocalDateTimeInput(initial.scheduledAt) && <div className="sm:col-span-2">
+                <label className="text-sm font-medium text-brand-ink">Reason for direct schedule change <span className="text-brand-danger">*</span></label>
+                <textarea rows={2} value={form.scheduleChangeReason} onChange={(e) => set("scheduleChangeReason")(e.target.value)} placeholder="Explain why this appointment needs to change" className={inputCls(liveErrors.scheduleChangeReason)} />
+                {liveErrors.scheduleChangeReason && <p className="mt-1 text-xs text-brand-danger">{liveErrors.scheduleChangeReason}</p>}
+              </div>}
               <div>
                 <label className="text-sm font-medium text-brand-ink">Priority</label>
                 <select value={form.priority} onChange={(e) => set("priority")(e.target.value)} className={`${inputCls()} cursor-pointer`}>
@@ -1009,6 +1020,7 @@ export default function HealthReferrals() {
   const toPayload = (form) => ({
     referral_date: form.referralDate || null,
     scheduled_at: form.scheduledAt ? localDateTimeToIso(form.scheduledAt) : null,
+    schedule_change_reason: form.scheduleChangeReason?.trim() || "",
     destination_facility: form.externalReceivingEnabled ? form.externalReceivingFacility.trim() : form.destinationFacility.trim(),
     destination_service: form.destinationService.trim(),
     referral_category: form.referralCategory.trim(),
@@ -1029,7 +1041,6 @@ export default function HealthReferrals() {
     external_receiving_role: form.externalReceivingEnabled ? form.externalReceivingRole.trim() : "",
     external_recipient_name: form.externalReceivingEnabled ? form.externalRecipientName.trim() : "",
     external_recipient_position: form.externalReceivingEnabled ? form.externalRecipientPosition.trim() : "",
-    treatment_visit_id: form.treatmentVisitId || null,
     recipient_personnel_id: form.externalReceivingEnabled ? null : form.recipientPersonnelId,
     recipient_facility_id: form.externalReceivingEnabled ? null : form.recipientFacilityId,
     recipient_role: form.externalReceivingEnabled ? null : form.recipientRole,
@@ -1241,8 +1252,8 @@ export default function HealthReferrals() {
   }, [openActionMenu]);
 
   const columns = isResident
-    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Status", ""]
-    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Status", "Actions"];
+    ? ["Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Schedule / Progress", ""]
+    : ["Resident", "Referral Date", "Reason", "Destination", "Lab Test", "Priority", "Schedule / Progress", "Actions"];
 
   return (
     <>
@@ -1374,7 +1385,7 @@ export default function HealthReferrals() {
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${PRIORITY_COLORS[r.priority] || ""}`}>{r.priority}</span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    <StatusBadge value={referralDisplayStatus(r.status)} className="whitespace-nowrap" />
+                    <div className="flex min-w-[145px] flex-col items-start gap-1"><span className="text-[10px] text-brand-gray">Schedule: {r.scheduleResponseStatus}</span><span className="text-[10px] text-brand-gray">Service progress</span><StatusBadge value={referralDisplayStatus(r.status)} className="whitespace-nowrap" /></div>
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex items-center justify-center">

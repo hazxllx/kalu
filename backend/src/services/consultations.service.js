@@ -619,7 +619,7 @@ export const syncConsultationFollowUp = async ({
           scheduled_date: text(payload.nextVisitDate),
           purpose,
           notes: text(payload.adviceGiven),
-          status: 'Pending',
+          status: 'Scheduled',
           consultation_id: visit.id,
           requires_resident_response: true,
           resident_decision: 'pending',
@@ -902,6 +902,21 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
   // this step, under a database row lock, rather than inserting another visit or
   // silently treating a missing follow-up/notification as completed.
   await repo.completeConsultationOperation({ id: visit.id, creatorId: user.id });
+  if (text(payload.followUpId)) {
+    const { data: followUp, error: followUpError } = await supabase.from('follow_ups')
+      .select('id,resident_id,status,consultation_id,linked_service_id').eq('id', text(payload.followUpId)).maybeSingle();
+    if (followUpError) throw new Error(followUpError.message || 'Could not link the follow-up');
+    if (!followUp || followUp.resident_id !== resident.id) throw ApiError.unprocessable('The selected follow-up does not belong to this resident.');
+    if (followUp.linked_service_id && followUp.linked_service_id !== visit.id) throw ApiError.conflict('This follow-up is already linked to another healthcare record.');
+    if (['Completed', 'Cancelled', 'Missed', 'Rejected'].includes(followUp.status) && followUp.linked_service_id !== visit.id) {
+      throw ApiError.conflict('This follow-up is already closed.');
+    }
+    const { error: linkError } = await supabase.from('follow_ups').update({
+      consultation_id: visit.id, linked_service_type: 'consultation', linked_service_id: visit.id,
+      status: 'Completed', completed_at: new Date().toISOString(),
+    }).eq('id', followUp.id).eq('resident_id', resident.id);
+    if (linkError) throw new Error(linkError.message || 'Could not link the completed consultation to its follow-up');
+  }
   // Recorded health data changed -> recompute + persist the resident's risk
   // (backend-authoritative; best-effort so a save is never blocked by it).
   await persistRisk({ residentId: resident.id });

@@ -421,6 +421,7 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   const recommendations = text(payload.recommendations);
   const followUpRequired = payload.follow_up_required === true;
   const followUpDate = text(payload.follow_up_date) || null;
+  const followUpId = text(payload.follow_up_id || payload.followUpId);
   if (!serviceId) throw ApiError.unprocessable('A service is required.');
   if (!residentId) throw ApiError.unprocessable('A resident is required.');
   if (!attendanceDate(scheduledDate)) throw ApiError.unprocessable('Enter a valid scheduled date.');
@@ -444,6 +445,7 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   if (status === 'attended' && isImmunizationService(service) && !payload.vaccine) {
     throw ApiError.unprocessable('Select the vaccine and record its status before completing this immunization service.');
   }
+  if (followUpId && status !== 'attended') throw ApiError.unprocessable('A follow-up can only be linked after the service is delivered.');
 
   const row = {
     service_id: serviceId,
@@ -477,7 +479,23 @@ export const createHealthServiceAttendance = async ({ user, payload = {}, supaba
   if (status === 'attended' && isImmunizationService(service)) {
     await syncImmunizationForAttendance({ user, attendanceId: data.id, residentId, payload, supabase });
   }
+  if (followUpId) await linkFollowUpAttendance({ user, attendanceId: data.id, followUpId, residentId, supabase });
   return data;
+};
+
+const linkFollowUpAttendance = async ({ user, attendanceId, followUpId, residentId, supabase }) => {
+  const { data: followUp, error } = await supabase.from('follow_ups')
+    .select('id,resident_id,status,linked_service_id').eq('id', followUpId).maybeSingle();
+  throwOnError(error, 'Could not verify the source follow-up');
+  if (!followUp || followUp.resident_id !== residentId) throw ApiError.unprocessable('The selected follow-up does not belong to this resident.');
+  if (followUp.linked_service_id && followUp.linked_service_id !== attendanceId) throw ApiError.conflict('This follow-up is already linked to another healthcare record.');
+  if (['Completed', 'Cancelled', 'Missed', 'Rejected'].includes(followUp.status) && followUp.linked_service_id !== attendanceId) {
+    throw ApiError.conflict('This follow-up is already closed.');
+  }
+  const { error: linkError } = await supabase.rpc('complete_follow_up_from_service_attendance', {
+    p_attendance_id: attendanceId, p_follow_up_id: followUpId, p_actor_id: user.id,
+  });
+  throwOnError(linkError, 'Could not link the delivered service to its follow-up');
 };
 
 export const listAttendanceByService = async ({ user, query = {}, supabase = getServiceClient() }) => {
@@ -639,6 +657,10 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
     if (date && !attendanceDate(date)) throw ApiError.unprocessable('Enter a valid follow-up date.');
     patch.follow_up_date = date;
   }
+  const followUpId = text(payload.follow_up_id || payload.followUpId);
+  if (followUpId && (patch.attendance_status || current.attendance_status) !== 'attended') {
+    throw ApiError.unprocessable('A follow-up can only be linked after the service is delivered.');
+  }
   const willBeAttended = patch.attendance_status || current.attendance_status;
   const resultingServiceProvided = patch.service_provided ?? current.service_provided ?? '';
   const resultingFollowUp = patch.follow_up_required ?? current.follow_up_required ?? false;
@@ -661,6 +683,7 @@ export const updateHealthServiceAttendance = async ({ user, params = {}, payload
   if (isImmunizationService(service) && payload.vaccine) {
     await syncImmunizationForAttendance({ user, attendanceId: data.id, residentId: current.resident_id, payload, supabase });
   }
+  if (followUpId) await linkFollowUpAttendance({ user, attendanceId: data.id, followUpId, residentId: current.resident_id, supabase });
   return data;
 };
 

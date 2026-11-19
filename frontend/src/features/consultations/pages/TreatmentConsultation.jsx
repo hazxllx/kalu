@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import StatCard from "@/components/common/StatCard";
@@ -172,6 +172,7 @@ const emptyForm = (now = new Date()) => ({
   serviceId: "",
   serviceName: "",
   remarks: "",
+  followUpId: "",
 });
 
 /**
@@ -257,6 +258,7 @@ const initialsOf = (name) =>
 export default function TreatmentConsultation() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = usePermissions();
   const canConductConsultation = can("consultation.conduct");
@@ -328,6 +330,18 @@ export default function TreatmentConsultation() {
   const [healthServices, setHealthServices] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [servicesError, setServicesError] = useState("");
+
+  useEffect(() => {
+    const start = location.state?.followUpStart;
+    if (!start?.residentId || !start?.id || !residentOptions.length) return;
+    const resident = residentOptions.find((item) => item.id === start.residentId);
+    if (!resident) return;
+    setSelectedResident(resident);
+    setFormData({ ...emptyForm(), chiefComplaint: start.purpose || "Follow-up consultation", followUpId: start.id });
+    setErrors({});
+    setMode("form");
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, residentOptions, navigate]);
 
   // Read-only BMI, recomputed immediately whenever height or weight changes.
   const bmiDisplay = useMemo(
@@ -544,6 +558,7 @@ export default function TreatmentConsultation() {
     const payload = {
       ...formData,
       residentId: selectedResident.id,
+      followUpId: formData.followUpId || undefined,
     };
     setBusy(true);
     const needsReferral = !editingId && formData.referralRequired === "Yes";

@@ -27,6 +27,11 @@ const CONSULTATION_EMBED = 'consultation:visits!follow_ups_consultation_id_fkey(
 
 /** Confirmation label derived from the stored decision (frontend vocabulary). */
 const confirmationOf = (row) => {
+  if (row.schedule_response_status === 'Attendance Confirmed') return 'Confirmed';
+  if (row.schedule_response_status === 'Reschedule Requested' || row.schedule_response_status === 'Cancellation Requested') return row.schedule_response_status;
+  if (row.schedule_response_status === 'Reschedule Rejected' || row.schedule_response_status === 'Cancellation Rejected') return row.schedule_response_status;
+  if (row.schedule_response_status === 'Reschedule Approved') return row.schedule_response_status;
+  if (row.schedule_response_status === 'Cancellation Approved') return row.schedule_response_status;
   if (row.resident_decision === 'approved') return 'Confirmed';
   if (row.resident_decision === 'rejected') return 'Rejected';
   // Any still-open follow-up scheduled for the resident awaits their response
@@ -53,6 +58,9 @@ const toSafe = (row) => ({
   instructions: row.notes || '',
   requiresResidentResponse: Boolean(row.requires_resident_response),
   confirmationStatus: confirmationOf(row),
+  scheduleResponseStatus: row.schedule_response_status || (row.resident_decision === 'approved' ? 'Attendance Confirmed' : 'Awaiting Response'),
+  serviceProgressStatus: row.status || 'Scheduled',
+  facilityId: row.facility_id || null,
   respondedAt: row.resident_decision_at || '',
   rejectionReason: row.resident_decision === 'rejected' ? (row.resident_decision_reason || '') : '',
   createdAt: row.created_at || '',

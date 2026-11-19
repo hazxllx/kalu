@@ -11,6 +11,7 @@ import { listReferralInboxOffline, getReferralOffline } from "@/services/offline
 import { usePermissions } from "@/context/PermissionsContext";
 import { allowedReferralStatuses, isOpenReferral, REFERRAL_STATUSES, referralRecipientLabel } from "@/features/referrals/lib/referralTrackingActions";
 import ReferralHistory from "@/features/referrals/components/ReferralHistory";
+import ScheduleRequestsPanel from "@/features/follow-ups/components/ScheduleRequestsPanel";
 import { AlertCircle, RefreshCw, Search, Stethoscope } from "lucide-react";
 
 const nameOf = (resident = {}) => [resident.first_name, resident.middle_name, resident.last_name].filter(Boolean).join(" ") || "Unnamed resident";
@@ -157,6 +158,7 @@ export default function IncomingReferrals() {
   return (
     <div className="space-y-5">
       <PageHeader crumbs={["Incoming Referrals"]} title="Assigned Incoming Referrals" subtitle="Only referrals assigned to your current authorized role, station and facility appear here. Accept, reject, progress and complete the same records the sender tracks." />
+      <ScheduleRequestsPanel title="RHU schedule requests" />
       <OfflineCacheNotice
         source={cacheInfo.source}
         cachedAt={cacheInfo.cachedAt}

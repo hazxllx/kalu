@@ -19,6 +19,7 @@ import consultationsRoutes from './consultations.routes.js';
 import operationalRoutes from './operational.routes.js';
 import programFormsRoutes from './programForms.routes.js';
 import residentFollowupsRoutes from './residentFollowups.routes.js';
+import scheduleRequestsRoutes from './scheduleRequests.routes.js';
 import visitPlansRoutes from './visitPlans.routes.js';
 import referralsRoutes from './referrals.routes.js';
 import m1Routes from './m1.routes.js';
@@ -83,6 +84,7 @@ router.use(observabilityRoutes);
 // Resident self-service follow-ups (list/read own + approve/reject). Separate
 // from the staff /operational endpoints; ownership is derived from the session.
 router.use('/resident', residentFollowupsRoutes);
+router.use('/schedule-requests', scheduleRequestsRoutes);
 
 // Resident Health Services directory + "I plan to visit" intent (visit_plans).
 // A read-only, barangay/RHU-scoped service directory with a single lightweight
