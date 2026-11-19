@@ -46,10 +46,25 @@ try {
   });
   const response = await page.goto(env.VITE_APP_BASE_URL, { waitUntil: 'networkidle' });
   assert.match(response.headers()['content-security-policy'], /frame-src 'self' blob:/);
-  await page.getByText('DEVELOPMENT ENVIRONMENT', { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.localCspViolations), []);
-  await page.goto(`${env.VITE_APP_BASE_URL}/login`, { waitUntil: 'networkidle' });
-  await page.getByText('DEVELOPMENT ENVIRONMENT', { exact: true }).waitFor();
+  for (const path of [
+    '/',
+    '/login',
+    '/forgot-password',
+    '/reset-password',
+    '/change-password',
+    '/setup-password',
+    '/register',
+    '/register/new/step-1',
+    '/register/transfer',
+    '/register/personnel',
+    '/registration-success',
+    '/verification-status',
+    '/unauthorized',
+  ]) {
+    await page.goto(`${env.VITE_APP_BASE_URL}${path}`, { waitUntil: 'networkidle' });
+    assert.equal(await page.getByText('DEVELOPMENT ENVIRONMENT', { exact: true }).count(), 0, `${path} must not render a development badge`);
+  }
   assert.equal(await page.evaluate(async () => (await import('/src/lib/supabase.js')).supabase), null);
   assert.deepEqual(errors, []);
   assert.deepEqual(external, [], 'normal app startup must not attempt any external request');

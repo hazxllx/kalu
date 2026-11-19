@@ -16,14 +16,7 @@ import { registerServiceWorker } from '@/lib/pwa'
  * enables offline-first functionality: data can be synced when connectivity
  * is restored, and cached pages/assets are available offline.
  */
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <>
-    {import.meta.env.MODE !== 'production' && (
-      <div className="development-environment" role="status">DEVELOPMENT ENVIRONMENT</div>
-    )}
-    <App />
-  </>
-)
+ReactDOM.createRoot(document.getElementById('root')).render(<App />)
 
 // Register the offline service worker after boot so it never blocks first paint.
 // This enables offline-first functionality and background sync when the user

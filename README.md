@@ -167,6 +167,21 @@ OTP_PEPPER=<generated-by-local-configure>
 - Never expose `SUPABASE_SERVICE_ROLE_KEY` to the frontend or as a `VITE_` variable. It bypasses RLS and must stay server-side.
 - Use separate credentials for staging and production.
 
+### Vercel Authentication
+
+In **Vercel → Project Settings → Environment Variables**, set the following for
+Production, Preview, and Development as applicable:
+
+| Variable | Value |
+| --- | --- |
+| `VITE_API_URL` | The backend API base URL for that environment |
+| `VITE_SUPABASE_URL` | The existing Supabase project's base URL |
+| `VITE_SUPABASE_ANON_KEY` | Its matching public anon or publishable key |
+
+Never set a service-role key or other secret in a `VITE_` variable. Vite embeds
+these values at build time, so redeploy after adding or changing them. The
+dashboard configuration is not available to verify from this repository.
+
 ### Database Setup
 
 ```bash

@@ -180,10 +180,10 @@ npm run dev:backend
 npm run dev:frontend
 ```
 
-5. Open `http://localhost:5173`. Confirm the DEVELOPMENT ENVIRONMENT indicator,
-   then inspect the local health endpoint and local inbox. No production
-   credentials are necessary. If Docker or local Supabase is unavailable, stop
-   here; never substitute a hosted project.
+5. Open `http://localhost:5173` and inspect the local health endpoint and local
+   inbox. No environment badge is rendered. No production credentials are
+   necessary. If Docker or local Supabase is unavailable, stop here; never
+   substitute a hosted project.
 
 The local configuration helper writes ignored `.env.development` files from
 `supabase status --output json`. It keeps the server key exclusively in the
