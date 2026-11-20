@@ -40,6 +40,19 @@ export const toServerPayload = (data = {}) => Object.fromEntries(
 export const requireConfirmedConsultation = (result, op) => {
   const record = result && typeof result === 'object' && 'consultation' in result ? result.consultation : result;
   const payload = op?.payload || {};
+  // The current consultation form sends findings and diagnosis together in
+  // `clinicalFindingsDiagnosis`. Match the API's normalization exactly before
+  // checking the persisted response; comparing against absent legacy fields
+  // falsely rejected successfully saved BHS consultations.
+  const mergedClinicalText = String(payload.clinicalFindingsDiagnosis ?? '').trim();
+  const mergedParts = mergedClinicalText.includes('\n') ? mergedClinicalText.split('\n') : null;
+  const expectedFindings = mergedParts ? mergedParts.slice(0, -1).join('\n').trim() : mergedClinicalText;
+  const expectedDiagnosis = mergedParts ? String(mergedParts[mergedParts.length - 1] ?? '').trim() : '';
+  const expected = {
+    ...payload,
+    findings: payload.clinicalFindingsDiagnosis !== undefined ? expectedFindings : String(payload.findings ?? '').trim(),
+    diagnosis: payload.clinicalFindingsDiagnosis !== undefined ? expectedDiagnosis : String(payload.diagnosis ?? '').trim(),
+  };
   if (!record || typeof record !== 'object' || Array.isArray(record)
     || typeof record.id !== 'string' || !record.id.trim() || /^(LOCAL|DRAFT)-/.test(record.id)
     || record.offline === true || record.resident?.id !== payload.residentId
@@ -51,9 +64,9 @@ export const requireConfirmedConsultation = (result, op) => {
     || record.consultationDate !== payload.consultationDate
     || (record.consultationTime || '') !== (payload.consultationTime || '')
     || !['draft', 'submitted', 'received', 'in_review', 'referred', 'completed'].includes(record.status)
-    || ['chiefComplaint', 'findings', 'diagnosis'].some((field) => typeof record[field] !== 'string' || !record[field].trim())
+    || typeof record.chiefComplaint !== 'string' || !record.chiefComplaint.trim()
     || ['chiefComplaint', 'findings', 'diagnosis', 'treatmentGiven', 'adviceGiven', 'remarks', 'nextVisitDate'].some((field) =>
-      String(record[field] ?? '').trim() !== String(payload[field] ?? '').trim())
+      String(record[field] ?? '').trim() !== String(expected[field] ?? '').trim())
     || Object.entries(payload.consultationDetails || {}).some(([key, value]) => !(key in payload)
       && canonicalJson(record.consultationDetails?.[key]) !== canonicalJson(value))) {
     throw malformed('The server did not confirm this consultation operation. Clinical information remains on this device.');
