@@ -705,7 +705,7 @@ function ReferralFormModal({ initial, draft, resident, residents, barangays = []
 export default function HealthReferrals() {
   const { user } = useAuth();
   const { online, lastSyncedAt } = useSyncStatus();
-  const { can } = usePermissions();
+  const { can, matrixLoadState } = usePermissions();
   const isResident = user?.role === ROLE.RESIDENT || user?.role === ROLE.RESIDENT_LIMITED;
   const isHealthSupervisor = user?.role === ROLE.HEALTH_SUPERVISOR;
   const canRead = can("referrals.view") || can("referrals.history.view");
@@ -797,6 +797,10 @@ export default function HealthReferrals() {
   useEffect(() => {
     const incoming = location.state?.referralDraft;
     if (!incoming) return;
+    // Navigation may arrive before the permission matrix finishes loading.
+    // Do not discard a consultation handoff just because `can()` is still
+    // fail-closed during that brief startup window.
+    if (matrixLoadState?.status === "loading") return;
     if (!canCreate) {
       navigate(location.pathname, { replace: true, state: null });
       return;
@@ -806,7 +810,7 @@ export default function HealthReferrals() {
     setSelectedResident(null);
     setFormOpen(true);
     navigate(location.pathname, { replace: true, state: null });
-  }, [canCreate, location.state, location.pathname, navigate]);
+  }, [canCreate, location.state, location.pathname, navigate, matrixLoadState?.status]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
