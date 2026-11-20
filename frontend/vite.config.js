@@ -7,6 +7,13 @@ import { publicSupabaseConfigurationError } from '../shared/authConnectivity.js'
 import { normalizeApiBaseUrl } from './src/services/api/apiBaseUrl.js'
 import { loadLocalEnvironment, localIsolationPlugin } from './config/localDevelopment.js'
 
+export const productionFrontendEnvironment = (inherited) => {
+  const env = Object.fromEntries(Object.entries(inherited).filter(([name]) => name.startsWith('VITE_')))
+  env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL?.trim() || String(inherited.SUPABASE_URL || '').trim()
+  env.VITE_SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY?.trim() || String(inherited.SUPABASE_ANON_KEY || '').trim()
+  return env
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode, command, isPreview }) => {
   if (isPreview) {
@@ -18,10 +25,13 @@ export default defineConfig(({ mode, command, isPreview }) => {
   const local = mode !== 'production'
   const env = local
     ? loadLocalEnvironment(mode, __dirname)
-    : Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('VITE_')))
+    : productionFrontendEnvironment(process.env)
   const required = [
     'VITE_API_URL',
-    ...(mode === 'production' ? ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] : []),
+    ...(mode === 'production' ? [
+      env.VITE_SUPABASE_URL ? null : 'VITE_SUPABASE_URL or SUPABASE_URL',
+      env.VITE_SUPABASE_ANON_KEY ? null : 'VITE_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY',
+    ].filter(Boolean) : []),
   ]
   const missing = required.filter((key) => !env[key]?.trim())
 
@@ -46,6 +56,12 @@ export default defineConfig(({ mode, command, isPreview }) => {
   return {
   // Deployment builds use hosting-provided variables, never developer .env values.
   envDir: false,
+  ...(!local ? {
+    define: {
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY),
+    },
+  } : {}),
   ...(local ? {
     // Local variables are loaded explicitly and checked above.
     envPrefix: [],

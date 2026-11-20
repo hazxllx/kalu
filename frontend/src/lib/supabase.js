@@ -22,6 +22,10 @@ if (import.meta.env?.MODE && import.meta.env.MODE !== 'production') {
 export const supabaseConfigurationError = publicSupabaseConfigurationError(url, anonKey);
 export const isSupabaseConfigured = !supabaseConfigurationError;
 
+if (!isSupabaseConfigured && import.meta.env?.DEV) {
+  console.warn('Supabase authentication is not configured for this frontend build.');
+}
+
 export const supabase = isSupabaseConfigured
   ? createClient(url, anonKey, {
       auth: {

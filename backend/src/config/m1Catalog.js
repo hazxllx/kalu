@@ -262,32 +262,33 @@ ind('A', 'A3. Deworming (WRA)', 'A3_1',
 // SECTION B — MATERNAL CARE
 // ===========================================================================
 const B1 = 'B1. Prenatal Care';
-ind('B', B1, 'B1_1', 'Pregnant women with at least 4 prenatal check-ups', { ageScheme: 'fp' });
-ind('B', B1, 'B1_2', 'Pregnant women assessed for nutritional status during the first trimester', { ageScheme: 'fp' });
-ind('B', B1, 'B1_2a', 'First-trimester pregnant women with normal BMI', { ageScheme: 'fp' });
-ind('B', B1, 'B1_2b', 'First-trimester pregnant women with low BMI', { ageScheme: 'fp' });
-ind('B', B1, 'B1_2c', 'First-trimester pregnant women with high BMI', { ageScheme: 'fp' });
-ind('B', B1, 'B1_3', 'Pregnant women (first time) given at least 2 doses of Td', { ageScheme: 'fp' });
-ind('B', B1, 'B1_4', 'Pregnant women (second+) given at least 3 doses of Td / Td2 Plus', { ageScheme: 'fp' });
+const BM = (derive) => ({ ageScheme: 'fp', aggregation: 'COUNT_UNIQUE_RESIDENTS', source: 'maternal_records', derive });
+ind('B', B1, 'B1_1', 'Pregnant women with at least 4 prenatal check-ups', BM({ rule: 'prenatal_4plus', age: true }));
+ind('B', B1, 'B1_2', 'Pregnant women assessed for nutritional status during the first trimester', BM({ rule: 'first_trimester_nutrition', age: true }));
+ind('B', B1, 'B1_2a', 'First-trimester pregnant women with normal BMI', BM({ rule: 'first_trimester_nutrition', filter: { field: 'nutritional_bmi', numRange: { min: 18.5, max: 23 } }, age: true }));
+ind('B', B1, 'B1_2b', 'First-trimester pregnant women with low BMI', BM({ rule: 'first_trimester_nutrition', filter: { field: 'nutritional_bmi', numRange: { gt: 0, lt: 18.5 } }, age: true }));
+ind('B', B1, 'B1_2c', 'First-trimester pregnant women with high BMI', BM({ rule: 'first_trimester_nutrition', filter: { field: 'nutritional_bmi', numRange: { min: 23 } }, age: true }));
+ind('B', B1, 'B1_3', 'Pregnant women (first time) given at least 2 doses of Td', BM({ rule: 'td_doses', filter: { field: 'gravida', eq: '1', and: { field: 'td_dose_count', numRange: { min: 2 } } }, age: true }));
+ind('B', B1, 'B1_4', 'Pregnant women (second+) given at least 3 doses of Td / Td2 Plus', BM({ rule: 'td_doses', filter: { field: 'gravida', numRange: { min: 2 }, and: { field: 'td_dose_count', numRange: { min: 3 } } }, age: true }));
 // DERIVED from maternal_records: the maternal case stores the date the
 // iron/folic prenatal supplementation was completed. Counted in the month that
 // date falls in, broken down by the mother's age band.
 ind('B', B1, 'B1_5', 'Pregnant women who completed iron with folic acid supplementation', {
-  ageScheme: 'fp', aggregation: 'COUNT_EVENTS', source: 'maternal_records',
+  ageScheme: 'fp', aggregation: 'COUNT_UNIQUE_RESIDENTS', source: 'maternal_records',
   derive: { dateField: 'iron_folic_completed_date', age: true },
 });
-ind('B', B1, 'B1_6', 'Pregnant women who completed calcium carbonate supplementation', { ageScheme: 'fp' });
-ind('B', B1, 'B1_7', 'Pregnant women given iodine capsules', { ageScheme: 'fp' });
-ind('B', B1, 'B1_8', 'Pregnant women given one dose of deworming tablet', { ageScheme: 'fp' });
-ind('B', B1, 'B1_9', 'Pregnant women screened for syphilis', { ageScheme: 'fp' });
-ind('B', B1, 'B1_10', 'Pregnant women tested positive for syphilis', { ageScheme: 'fp', aggregation: 'COUNT_CASES' });
-ind('B', B1, 'B1_11', 'Pregnant women screened for Hepatitis B', { ageScheme: 'fp' });
-ind('B', B1, 'B1_12', 'Pregnant women tested positive for Hepatitis B', { ageScheme: 'fp', aggregation: 'COUNT_CASES' });
-ind('B', B1, 'B1_13', 'Pregnant women screened for HIV', { ageScheme: 'fp' });
-ind('B', B1, 'B1_14', 'Pregnant women tested for CBC or Hgb/Hct count', { ageScheme: 'fp' });
-ind('B', B1, 'B1_15', 'Pregnant women tested for CBC or Hgb/Hct diagnosed with anemia', { ageScheme: 'fp', aggregation: 'COUNT_CASES' });
-ind('B', B1, 'B1_16', 'Pregnant women screened for gestational diabetes', { ageScheme: 'fp' });
-ind('B', B1, 'B1_17', 'Pregnant women tested positive for gestational diabetes', { ageScheme: 'fp', aggregation: 'COUNT_CASES' });
+ind('B', B1, 'B1_6', 'Pregnant women who completed calcium carbonate supplementation', BM({ rule: 'calcium', age: true }));
+ind('B', B1, 'B1_7', 'Pregnant women given iodine capsules', BM({ dateField: 'iodine_given_date', age: true }));
+ind('B', B1, 'B1_8', 'Pregnant women given one dose of deworming tablet', BM({ dateField: 'deworming_date', age: true }));
+ind('B', B1, 'B1_9', 'Pregnant women screened for syphilis', BM({ dateField: 'syphilis_screen_date', age: true }));
+ind('B', B1, 'B1_10', 'Pregnant women tested positive for syphilis', BM({ dateField: 'syphilis_positive_date', age: true }));
+ind('B', B1, 'B1_11', 'Pregnant women screened for Hepatitis B', BM({ dateField: 'hepb_screen_date', age: true }));
+ind('B', B1, 'B1_12', 'Pregnant women tested positive for Hepatitis B', BM({ dateField: 'hepb_positive_date', age: true }));
+ind('B', B1, 'B1_13', 'Pregnant women screened for HIV', BM({ dateField: 'hiv_screen_date', age: true }));
+ind('B', B1, 'B1_14', 'Pregnant women tested for CBC or Hgb/Hct count', BM({ dateField: 'cbc_screen_date', age: true }));
+ind('B', B1, 'B1_15', 'Pregnant women tested for CBC or Hgb/Hct diagnosed with anemia', BM({ dateField: 'cbc_positive_date', age: true }));
+ind('B', B1, 'B1_16', 'Pregnant women screened for gestational diabetes', BM({ dateField: 'gdm_screen_date', age: true }));
+ind('B', B1, 'B1_17', 'Pregnant women tested positive for gestational diabetes', BM({ dateField: 'gdm_positive_date', age: true }));
 
 const B2 = 'B2. Intrapartum Care and Delivery Outcome';
 // Section B2 is DERIVED from the existing maternal_records delivery data: the
@@ -318,22 +319,22 @@ ind('B', B2, 'B2_26b', 'Deliveries by cesarean section', MR({ dateField: 'delive
 // Full-term / pre-term classification and fetal death / abortion are NOT stored
 // on the maternal case, so they are entered manually (spec: MATERNAL INPUT
 // INDICATORS). Left as the default source and promoted to m1_manual below.
-ind('B', B2, 'B2_27a', 'Full-term births', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_27b', 'Pre-term births', { aggregation: 'COUNT_EVENTS' });
-ind('B', B2, 'B2_27c', 'Fetal deaths', { aggregation: 'COUNT_CASES' });
-ind('B', B2, 'B2_27d', 'Abortion / miscarriage', { aggregation: 'COUNT_CASES' });
+ind('B', B2, 'B2_27a', 'Full-term births', MR({ dateField: 'pregnancy_outcome_date', filter: { field: 'pregnancy_outcome', eq: 'FT' } }));
+ind('B', B2, 'B2_27b', 'Pre-term births', MR({ dateField: 'pregnancy_outcome_date', filter: { field: 'pregnancy_outcome', eq: 'PT' } }));
+ind('B', B2, 'B2_27c', 'Fetal deaths', MR({ dateField: 'pregnancy_outcome_date', filter: { field: 'pregnancy_outcome', eq: 'FD' } }));
+ind('B', B2, 'B2_27d', 'Abortion / miscarriage', MR({ dateField: 'pregnancy_outcome_date', filter: { field: 'pregnancy_outcome', eq: 'AB' } }));
 
 const B3 = 'B3. Postpartum and Newborn Care';
 // B3_28 / B3_30 are DERIVED from maternal_records (postpartum check-up dates and
 // the Vitamin A date). B3_29 (postpartum iron/folic) has no dedicated maternal
 // field distinct from the prenatal one, so it is entered manually.
 ind('B', B3, 'B3_28', 'Postpartum women + newborn who completed at least 2 postpartum check-ups', {
-  ageScheme: 'fp', aggregation: 'COUNT_EVENTS', source: 'maternal_records',
+  ageScheme: 'fp', aggregation: 'COUNT_UNIQUE_RESIDENTS', source: 'maternal_records',
   derive: { rule: 'postpartum_2plus', age: true },
 });
-ind('B', B3, 'B3_29', 'Postpartum women who completed iron with folic acid supplementation', { ageScheme: 'fp' });
+ind('B', B3, 'B3_29', 'Postpartum women who completed iron with folic acid supplementation', BM({ dateField: 'pp_iron_folic_completed_date', age: true }));
 ind('B', B3, 'B3_30', 'Postpartum women with Vitamin A supplementation', {
-  ageScheme: 'fp', aggregation: 'COUNT_EVENTS', source: 'maternal_records',
+  ageScheme: 'fp', aggregation: 'COUNT_UNIQUE_RESIDENTS', source: 'maternal_records',
   derive: { dateField: 'vitamin_a_given_date', age: true },
 });
 

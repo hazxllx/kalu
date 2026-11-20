@@ -485,7 +485,7 @@ export const AuthProvider = ({ children }) => {
 
     try {
       if (!isSupabaseConfigured || !supabase) {
-        const message = `Sign-in is unavailable. ${supabaseConfigurationError || 'Supabase authentication is not configured.'}`;
+        const message = 'Authentication is temporarily unavailable. Please try again later.';
         setAuthError({ message });
         throw new Error(message);
       }

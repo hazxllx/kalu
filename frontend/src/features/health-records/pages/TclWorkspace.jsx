@@ -30,26 +30,26 @@ import HealthProgramDirectory from "../components/HealthProgramDirectory";
  * The directory uses the same compact program-card surface as M1.
  */
 
-// countKey: how to fetch a real record count (null = no count shown).
+// countKey: M1 program id used by the authoritative count endpoint.
 // icon: a small, understated lucide glyph shown in a lightly tinted container.
 const GROUPS = [
   {
     title: "Maternal and Family Health",
     items: [
-      { id: "maternal", name: "Prenatal and Postpartum", icon: HeartPulse, to: "../maternal-tcl", countKey: "maternal", status: "available", requiresRole: "health_supervisor",
+      { id: "maternal", name: "Prenatal and Postpartum", icon: HeartPulse, to: "../maternal-tcl", countKey: "prenatal", status: "available", requiresRole: "health_supervisor",
         desc: "Pregnant and postpartum mothers — LMP/EDC, prenatal check-ups, immunization, laboratory screening, delivery and postpartum care." },
     ],
   },
   {
     title: "Screening and Preventive Care",
     items: [
-      { id: "ncd-risk", name: "NCD Risk Assessment", icon: Activity, to: "../ncd?tab=ncd-risk", countKey: "ncd-risk", status: "available",
+      { id: "ncd-risk", name: "NCD Risk Assessment", icon: Activity, to: "../ncd?tab=ncd-risk", countKey: "ncd", status: "available",
         desc: "Adults 20 y/o and above — smoking, alcohol, overweight/obesity, hypertension and diabetes screening (Part 1)." },
-      { id: "ncd-cervical", name: "Cervical Cancer and Breast Mass Examination", icon: Ribbon, to: "../ncd?tab=ncd-cervical", countKey: "ncd-cervical", status: "available",
+      { id: "ncd-cervical", name: "Cervical Cancer and Breast Mass Examination", icon: Ribbon, to: "../ncd?tab=ncd-cervical", countKey: "cervical", status: "available",
         desc: "VIA / Pap smear results, risk status, and suspicious breast-mass findings (Part 2)." },
-      { id: "ncd-visual", name: "Visual Acuity and PPV", icon: Eye, to: "../ncd?tab=ncd-visual", countKey: "ncd-visual", status: "available",
+      { id: "ncd-visual", name: "Visual Acuity and PPV", icon: Eye, to: "../ncd?tab=ncd-visual", countKey: "visual", status: "available",
         desc: "Senior citizens — eye complaints, visual acuity, pinhole, referral management and PPV immunization (Part 3)." },
-      { id: "oral-health", name: "Oral Health", icon: Smile, to: "../oral-health", countKey: "oral-health", status: "available",
+      { id: "oral-health", name: "Oral Health", icon: Smile, to: "../oral-health", countKey: "oral", status: "available",
         desc: "Individual oral-health client records and services, plus the separate BOHC statistical table." },
     ],
   },
@@ -70,20 +70,20 @@ const GROUPS = [
 ];
 
 const COUNT_FETCHERS = {
-  maternal: ({ ownerId, online }) =>
+  prenatal: ({ ownerId, online }) =>
     listMaternalOffline({ ownerId, fetchFn: () => maternalApi.list(), online }),
-  enrollment: ({ ownerId, online }) =>
-    listTclOffline({ ownerId, fetchFn: () => tclApi.list(), online }),
-  "ncd-risk": ({ ownerId, online }) =>
+  ncd: ({ ownerId, online }) =>
     listProgramFormOffline({ ownerId, kind: "ncd-risk", fetchFn: () => programFormsApi["ncd-risk"].list(), online }),
-  "ncd-cervical": ({ ownerId, online }) =>
+  cervical: ({ ownerId, online }) =>
     listProgramFormOffline({ ownerId, kind: "ncd-cervical", fetchFn: () => programFormsApi["ncd-cervical"].list(), online }),
-  "ncd-visual": ({ ownerId, online }) =>
+  visual: ({ ownerId, online }) =>
     listProgramFormOffline({ ownerId, kind: "ncd-visual", fetchFn: () => programFormsApi["ncd-visual"].list(), online }),
-  "oral-health": ({ ownerId, online }) =>
+  oral: ({ ownerId, online }) =>
     listProgramFormOffline({ ownerId, kind: "oral-health", fetchFn: () => programFormsApi["oral-health"].list(), online }),
   environmental: ({ ownerId, online }) =>
     listProgramFormOffline({ ownerId, kind: "environmental", fetchFn: () => programFormsApi.environmental.list(), online }),
+  enrollment: ({ ownerId, online }) =>
+    listTclOffline({ ownerId, fetchFn: () => tclApi.list(), online }),
 };
 
 export default function TclWorkspace() {
@@ -103,9 +103,10 @@ export default function TclWorkspace() {
       return () => { active = false; };
     }
     setLoading(true);
-    const keys = Object.keys(COUNT_FETCHERS);
     Promise.allSettled(
-      keys.map((k) => COUNT_FETCHERS[k]({ ownerId: user.id, online: () => online })),
+      Object.entries(COUNT_FETCHERS).map(([key, fetchCount]) =>
+        fetchCount({ ownerId: user.id, online: () => online }).then((result) => [key, result]),
+      ),
     ).then((results) => {
       if (!active) return;
       const next = {};
@@ -113,28 +114,24 @@ export default function TclWorkspace() {
       let anyStale = false;
       let hasCachedData = false;
       let latestCachedAt = null;
-      results.forEach((res, i) => {
-        const key = keys[i];
-        if (res.status === "fulfilled") {
-          const { rows = [], source, cachedAt, stale } = res.value || {};
-          if (source === "cache") {
-            anyCache = true;
-            if (stale) anyStale = true;
-            if (Number.isFinite(cachedAt) && (latestCachedAt === null || cachedAt > latestCachedAt)) {
-              latestCachedAt = cachedAt;
-            }
-            // Never report an uncached program as 0 offline — surface "Count unavailable".
-            if (!cachedAt && rows.length === 0) {
-              next[key] = "error";
-            } else {
-              hasCachedData = true;
-              next[key] = rows.length;
-            }
-          } else {
-            next[key] = Array.isArray(rows) ? rows.length : 0;
-          }
-        } else {
+      results.forEach((result, index) => {
+        const key = Object.keys(COUNT_FETCHERS)[index];
+        if (result.status !== "fulfilled") {
           next[key] = "error";
+          return;
+        }
+
+        const [, { rows = [], source, cachedAt, stale }] = result.value;
+        if (source === "cache") {
+          anyCache = true;
+          anyStale ||= Boolean(stale);
+          if (Number.isFinite(cachedAt)) {
+            hasCachedData = true;
+            latestCachedAt = latestCachedAt === null ? cachedAt : Math.max(latestCachedAt, cachedAt);
+          }
+          next[key] = !Number.isFinite(cachedAt) && rows.length === 0 ? "error" : rows.length;
+        } else {
+          next[key] = rows.length;
         }
       });
       setCounts(next);

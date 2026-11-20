@@ -273,21 +273,6 @@ export default function Login() {
                 </p>
               </form>
 
-              {/* Authentication is Supabase-only. If the portal has no Supabase
-                  configuration there is no local fallback to sign in with, so
-                  say so plainly instead of offering a fabricated account. */}
-              {!isSupabaseConfigured && (
-                <div
-                  role="status"
-                  className="mt-5 flex items-start gap-2 rounded-lg border border-brand-gold/40 bg-brand-goldpale/70 px-3 py-2.5 text-[11.5px] leading-relaxed text-brand-amber"
-                >
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                  <span>
-                    Sign-in is unavailable: this deployment has no Supabase authentication
-                    configured. Contact the system administrator.
-                  </span>
-                </div>
-              )}
             </div>
 
             {/* RIGHT — KALUSAGAP visual panel (desktop) */}
