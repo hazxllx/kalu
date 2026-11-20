@@ -100,13 +100,24 @@ export const createResidentAuthUser = async ({
   });
 
   const supabase = getServiceClient();
-
-  const baseUrl =
-    (Array.isArray(env.clientUrls) && env.clientUrls[0]) ||
-    'http://localhost:5173';
-
-  const redirectTo =
-    `${baseUrl.replace(/\/+$/, '')}/reset-password`;
+  // Invitation callbacks must target the configured frontend itself. Using
+  // the first CORS origin can select an API/staging origin, while a localhost
+  // fallback sends deployed residents to an unreachable machine.
+  const configuredClientUrl = String(env.clientUrl || '').trim();
+  let clientOrigin;
+  try {
+    const url = new URL(configuredClientUrl);
+    const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+      || (url.pathname && url.pathname !== '/') || url.search || url.hash
+      || (env.isProduction && (url.protocol !== 'https:' || localHost))) {
+      throw new Error('Invalid frontend origin');
+    }
+    clientOrigin = url.origin;
+  } catch {
+    throw new ApiError(503, 'The resident invitation cannot be sent because the public frontend URL is not configured correctly.');
+  }
+  const redirectTo = `${clientOrigin}/reset-password`;
 
   // Invitation flow: create the auth user WITHOUT a password and email them a
   // one-time invitation link. The resident clicks it, lands on /reset-password

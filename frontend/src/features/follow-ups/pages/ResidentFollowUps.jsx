@@ -349,34 +349,6 @@ export default function ResidentFollowUps() {
         />
       )}
 
-      {/* Confirm dialog */}
-      {confirmTarget && (() => {
-        const s = schedules.find((x) => x.id === confirmTarget);
-        if (!s) return null;
-        return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Confirm Follow-up">
-            <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto break-words">
-              <div className="p-6">
-                <h3 className="text-lg font-semibold text-brand-ink">Confirm Follow-up</h3>
-                <p className="mt-2 text-sm leading-relaxed text-brand-gray">
-                  Your health team scheduled this follow-up for you. Confirm that you can attend on{" "}
-                  <span className="font-medium text-brand-ink">{fmtDate(s.date)}</span>
-                  {s.time ? <> at <span className="font-medium text-brand-ink">{formatTime(s.time)}</span></> : null}
-                  {s.location ? <> ({s.location})</> : null}?
-                </p>
-                <p className="mt-2 text-xs text-brand-gray">The barangay health team will be notified of your confirmation.</p>
-                <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-border">
-                  <button onClick={() => setConfirmTarget(null)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">Cancel</button>
-                  <button disabled={busy} onClick={() => approve(s.id)} className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60">
-                    <CheckCircle2 className="h-4 w-4" /> Confirm
-                  </button>
-                </div>
-              </div>
-            </Card>
-          </div>
-        );
-      })()}
-
       {/* Can't-attend modal — reason required */}
       {rejectTarget && (() => {
         return <RejectModal schedule={rejectTarget} busy={busy} onClose={() => setRejectTarget(null)} onSubmit={(reason) => requestScheduleChange({ targetType: rejectTarget.targetType || "follow_up", targetId: rejectTarget.targetId || rejectTarget.id, requestType: "cancellation", reason })} />;
