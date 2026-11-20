@@ -1,12 +1,10 @@
-import { normalizeRiskDistribution } from './riskLevel.js';
-
 export const metricValue = (value) => Number.isFinite(value) ? value.toLocaleString() : 'Unavailable';
 const activityMetrics = {
   followUpCompletion: { monthly: true, numerator: ['followUps', 'completed'], denominator: ['followUps', 'scheduled'] },
   referralCompletion: { numerator: ['referrals', 'completed'], denominator: ['referrals', 'created'] },
   maternalTrend: { monthly: true, value: ['maternal', 'residents'] },
   seniorTrend: { monthly: true, value: ['consultations', 'senior', 'residents'] },
-  vaccinationCoverage: { value: ['immunizations', 'records'] },
+  vaccinationCoverage: { value: ['immunizations', 'records'], aggregateRange: true },
   childHealthCoverage: { value: ['consultations', 'minor', 'residents'] },
   programParticipation: { value: ['tcl', 'participatingResidents'] },
   programCompliance: { value: ['tcl', 'enrolledResidents'] },
@@ -58,7 +56,7 @@ export const optionalSeries = (data, name, months = 12, knownBarangays = []) => 
   };
   if (!metric.monthly) {
     // Counts are unique within one reported month, not unique across months.
-    const selected = metric.value ? periods.slice(-1) : periods;
+    const selected = metric.value && !metric.aggregateRange ? periods.slice(-1) : periods;
     return names.map((barangay) => ({ name: barangay, month: selected.at(-1), ...measure(barangay, selected) }));
   }
   return periods.map((period) => {
@@ -77,28 +75,25 @@ export const optionalSeries = (data, name, months = 12, knownBarangays = []) => 
 export const lastActivityPeriod = (months = 12, now = new Date()) => {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' })
     .formatToParts(now).map(({ type, value }) => [type, value]));
-  const from = new Date(Date.UTC(Number(parts.year), Number(parts.month) - months, 1)).toISOString().slice(0, 10);
+  const safeMonths = Math.max(1, Math.trunc(Number(months) || 1));
+  // Include the current calendar month plus exactly `months - 1` prior months.
+  // This keeps period totals, month buckets, and chart slicing in agreement.
+  const from = new Date(Date.UTC(Number(parts.year), Number(parts.month) - safeMonths, 1)).toISOString().slice(0, 10);
   return { from, to: `${parts.year}-${parts.month}-${parts.day}` };
 };
 
 export const healthTrendScope = (data, months = 12) => {
   if (!data?.summary || !Array.isArray(data.consultationTrends)) return null;
   const consultationTrends = data.consultationTrends.slice(-months);
-  const last = consultationTrends.at(-1)?.consultations;
-  const previous = consultationTrends.at(-2)?.consultations;
-  const changeAvailable = Number.isFinite(last) && Number.isFinite(previous) && previous > 0;
-  const change = changeAvailable ? `${((last - previous) / previous * 100).toFixed(1)}% vs previous month` : 'No comparable prior month';
   return {
     summary: {
-      consultationsThisMonth: { value: metricValue(data.summary.consultationsThisMonth), change, up: changeAvailable ? last >= previous : null },
-      referralsThisMonth: { value: metricValue(data.summary.referralsThisMonth), change: 'Recorded referrals this month', up: null },
+      consultationsThisMonth: { value: metricValue(data.summary.consultationsThisMonth), change: 'Selected reporting period', up: null },
+      referralsThisMonth: { value: metricValue(data.summary.referralsThisMonth), change: 'Selected reporting period', up: null },
       topCondition: { name: data.summary.topCondition || 'No recorded condition', cases: `${metricValue(data.summary.topConditionCases)} recorded cases` },
-      highRiskResidents: { value: metricValue(Array.isArray(data.reportingRiskDistribution)
-        ? normalizeRiskDistribution(data.reportingRiskDistribution).find((row) => row.name === 'High')?.value ?? 0
-        : data.summary.highRiskResidents), change: data.reportingRiskDistribution ? 'Recorded risk in reporting period' : 'Recorded risk assessments', up: null },
+      highRiskResidents: { value: metricValue(data.summary.highRiskResidents), change: 'Latest recorded assessment per resident', up: null },
     },
     consultationTrends,
-    riskDistribution: data.reportingRiskDistribution ?? data.riskDistribution,
+    riskDistribution: data.riskDistribution,
     barangayOverview: {
       name: data.scope?.barangay || data.barangayOverview?.name || 'Authorized scope',
       residents: `${metricValue(data.summary.residents)} registered residents`,

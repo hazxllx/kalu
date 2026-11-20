@@ -40,6 +40,12 @@ const FILTERS = [
   { id: "overdue", label: "Overdue" }, { id: "pending-referral", label: "Pending Referrals" },
 ];
 const RISK_COLORS = { "Low Risk": "#367B59", "Moderate Risk": "#B18A32", "High Risk": "#B3202C", Unassessed: "#CBD5E1" };
+const OPEN_REFERRAL_STATUSES = new Set(["Pending", "Accepted", "In Progress"]);
+const dateOnly = (value) => String(value || "").slice(0, 10);
+const reportingHighRisk = (overview) => {
+  const rows = overview?.reportingRiskDistribution;
+  return Array.isArray(rows) ? rows.find((row) => row.name === "High Risk")?.value ?? null : null;
+};
 const dateLabel = (value, options = {}) => {
   if (!value) return "Date not recorded";
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? new Date(`${value}T00:00:00+08:00`) : new Date(value);
@@ -102,7 +108,8 @@ export default function HealthSupervisorDashboard() {
     if (!assignedBarangay || !canAnalytics) return null;
     const data = await fetchEarlyWarningData(assignedBarangay, periodRange);
     if (data.scope?.barangay !== assignedBarangay || data.activity?.rows?.some((row) => row.barangay !== assignedBarangay)) throw new Error("The monitoring response is outside your assigned barangay.");
-    return { ...buildBarangayHealthOverview(data, assignedBarangay), riskDistribution: data.riskDistribution };
+    if (!riskDistributionRows(data.reportingRiskDistribution)) throw new Error("Selected-month resident risk data is unavailable. Apply the reporting-period risk migration and reload the API schema.");
+    return { ...buildBarangayHealthOverview(data, assignedBarangay), riskDistribution: data.riskDistribution, reportingRiskDistribution: data.reportingRiskDistribution };
   }, [assignedBarangay, canAnalytics, periodRange]);
   const overview = useAuthorizedData(loadOverview);
   const loadCurrentCases = useCallback(async () => !assignedBarangay || !canAnalytics ? null : requireSupervisorMap(await fetchCommunityMap({ barangay: assignedBarangay }), assignedBarangay), [assignedBarangay, canAnalytics]);
@@ -170,11 +177,19 @@ export default function HealthSupervisorDashboard() {
   const riskTotal = riskRows?.reduce((sum, row) => sum + row.value, 0) || 0;
   const performance = followUpPerformance(followUps.data, periodRange, today);
   const metricValue = (allowed, source, value) => !allowed ? "No access" : source.loading ? "Loading" : source.error ? null : value ?? null;
+  const overdueFollowUpsInPeriod = followUps.data?.filter((row) => {
+    const scheduled = dateOnly(row.scheduled_date || row.scheduledDate);
+    return scheduled >= periodRange.from && scheduled <= periodRange.to && isOverdueFollowUp(row, today);
+  }).length;
+  const pendingReferralsInPeriod = referrals.data?.filter((row) => {
+    const referred = dateOnly(row.referral_date || row.referralDate || row.created_at || row.createdAt);
+    return referred >= periodRange.from && referred <= periodRange.to && OPEN_REFERRAL_STATUSES.has(row.status);
+  }).length;
   const statistics = [
-    { label: "High-Risk Residents", value: metricValue(canAnalytics, overview, overview.data?.metrics.residentRisk.high), description: "Residents requiring priority health attention", tone: "red", href: canResidents ? `${BASE}/residents?risk=High` : null },
-    { label: "Overdue Follow-ups", value: metricValue(canFollowUps, followUps, followUps.data?.filter((row) => isOverdueFollowUp(row, today)).length), description: "Follow-ups past their scheduled due dates", tone: "red", href: canFollowUps ? `${BASE}/followups?status=Overdue` : null },
-    { label: "Pending Referrals", value: metricValue(canAnalytics, overview, overview.data?.metrics.pendingReferrals), description: "Referrals awaiting receiving or action", tone: "amber", href: canOpenReferrals ? `${BASE}/referrals?status=Pending` : null },
-    { label: "Active Health Cases", value: metricValue(canAnalytics, currentCases, currentCases.data?.summary.activeCases), description: "Currently open consultation and TB records", tone: "green", href: canConsultations ? `${BASE}/consultations` : null },
+    { label: "High-Risk Residents", value: metricValue(canAnalytics, overview, reportingHighRisk(overview.data)), description: "Residents assessed as high risk in the selected month", tone: "red", href: canResidents ? `${BASE}/residents?risk=High` : null },
+    { label: "Overdue Follow-ups", value: metricValue(canFollowUps, followUps, overdueFollowUpsInPeriod), description: "Selected-month follow-ups still overdue", tone: "red", href: canFollowUps ? `${BASE}/followups?status=Overdue` : null },
+    { label: "Pending Referrals", value: metricValue(canReferrals, referrals, pendingReferralsInPeriod), description: "Selected-month referrals still awaiting action", tone: "amber", href: canOpenReferrals ? `${BASE}/referrals?status=Pending` : null },
+    { label: "Active Health Cases", value: metricValue(canAnalytics, periodMap, periodMap.data?.summary.activeCases), description: "Open cases recorded in the selected month", tone: "green", href: canConsultations ? `${BASE}/consultations` : null },
   ];
   const intro = { hidden: { opacity: 0, y: reducedMotion ? 0 : 7 }, visible: { opacity: 1, y: 0, transition: { duration: reducedMotion ? 0 : 0.28 } } };
 
@@ -197,7 +212,7 @@ export default function HealthSupervisorDashboard() {
       }
     />
 
-    <motion.section className="hs-statistics" aria-label="Operational statistics" variants={intro}><KpiHorizontal count={4}>{statistics.map((stat) => <KpiHorizontal.Item key={stat.label} label={stat.label.toUpperCase()} value={stat.value} description={stat.description} tone={stat.tone} />)}</KpiHorizontal>{(overview.error || currentCases.error) && <SourceErrors errors={[...(overview.error ? [{ label: "Operational statistics", message: overview.error, retry: overview.refresh }] : []), ...(currentCases.error ? [{ label: "Active cases", message: currentCases.error, retry: currentCases.refresh }] : [])]} />}</motion.section>
+    <motion.section className="hs-statistics" aria-label="Operational statistics" variants={intro}><KpiHorizontal count={4}>{statistics.map((stat) => <KpiHorizontal.Item key={stat.label} label={stat.label.toUpperCase()} value={stat.value} description={stat.description} tone={stat.tone} />)}</KpiHorizontal>{(overview.error || followUps.error || referrals.error || periodMap.error) && <SourceErrors errors={[...(overview.error ? [{ label: "High-risk residents", message: overview.error, retry: overview.refresh }] : []), ...(followUps.error ? [{ label: "Overdue follow-ups", message: followUps.error, retry: followUps.refresh }] : []), ...(referrals.error ? [{ label: "Pending referrals", message: referrals.error, retry: referrals.refresh }] : []), ...(periodMap.error ? [{ label: "Active cases", message: periodMap.error, retry: periodMap.refresh }] : [])]} />}</motion.section>
 
     {!assignedBarangay ? <Card><ErrorState compact title="Barangay assignment unavailable" message="Refresh your account information before opening community records." onRetry={refreshProfile} retryLabel="Refresh Account" /></Card> : <>
       <motion.section className="hs-quick-actions" aria-labelledby="quick-actions-heading" variants={intro}><h2 id="quick-actions-heading" className="hs-eyebrow">Quick Actions</h2><div>

@@ -39,6 +39,12 @@ const SUMMARY_ICONS = [
 
 const CONDITION_PALETTE = ["#0B5CAD", "#2A7DE1", "#F5B400", "#28B463", "#E74C3C", "#5B6472"];
 const SUPERVISOR_CONDITION_PALETTE = ["#0B4A8F", "#457BA3", "#83A8BC", "#A78234", "#586877", "#C2CED9"];
+const formatTrendMonth = (value) => {
+  const date = new Date(`${value}-01T12:00:00`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString("en-PH", { month: "short", year: "2-digit" });
+};
 
 export default function HealthTrends() {
   const { user } = useAuth();
@@ -133,12 +139,12 @@ export default function HealthTrends() {
         ...row,
         color: conditionPalette[index % conditionPalette.length]
       })),
-      riskDistribution: normalizeRiskDistribution(muniEW.reportingRiskDistribution ?? muniEW.riskDistribution).map((row) => ({
+      riskDistribution: normalizeRiskDistribution(muniEW.riskDistribution).map((row) => ({
         ...row,
         color: RISK_PRESENTATION[row.name].color
       }))
     };
-  }, [base, muniEW?.reportingRiskDistribution, muniEW?.riskDistribution, conditionPalette]);
+  }, [base, muniEW?.riskDistribution, conditionPalette]);
 
   if (resource.error) return <><PageHeader crumbs={supervisor ? ["Monitoring", "Health Trends"] : ["Analytics", "Health Trends"]} title="Health Trends" subtitle="Authorized recorded health activity." /><Card className="p-5"><ErrorState compact={supervisor} title="Health trends unavailable" message={resource.error} onRetry={resource.refresh} /></Card></>;
   if (supervisor && !assignedBarangay) return <><PageHeader crumbs={["Monitoring", "Health Trends"]} title="Health Trends" subtitle="Barangay assignment required" /><Card><ErrorState compact title="Health trends unavailable" message="No valid barangay assignment is available for this account. Municipal coverage is not available to an unassigned Health Supervisor." /></Card></>;
@@ -156,12 +162,12 @@ export default function HealthTrends() {
     const participation = serviceEntry("programParticipation");
     const immunizations = serviceEntry("vaccinationCoverage");
     const childConsultations = serviceEntry("childHealthCoverage");
-    const serviceMonth = enrollment?.month || participation?.month || immunizations?.month;
-    const serviceDate = /^\d{4}-\d{2}$/.test(serviceMonth || "") ? new Date(`${serviceMonth}-01T12:00:00`) : null;
-    const serviceMonthLabel = serviceDate && !Number.isNaN(serviceDate.getTime()) ? serviceDate.toLocaleDateString("en-PH", { month: "long", year: "numeric" }) : "Reporting month unavailable";
+    const serviceMonthLabel = (month) => /^\d{4}-\d{2}$/.test(month || "")
+      ? new Date(`${month}-01T12:00:00`).toLocaleDateString("en-PH", { month: "long", year: "numeric" })
+      : "No activity in selected period";
     const cards = [
-      { ...SUMMARY_ICONS[0], label: "Consultations This Month", value: s.summary.consultationsThisMonth.value, change: s.summary.consultationsThisMonth.change, up: s.summary.consultationsThisMonth.up },
-      { ...SUMMARY_ICONS[1], label: "Referrals This Month", value: s.summary.referralsThisMonth.value, change: s.summary.referralsThisMonth.change, up: s.summary.referralsThisMonth.up },
+      { ...SUMMARY_ICONS[0], label: "Consultations in Period", value: s.summary.consultationsThisMonth.value, change: s.summary.consultationsThisMonth.change, up: s.summary.consultationsThisMonth.up },
+      { ...SUMMARY_ICONS[1], label: "Referrals in Period", value: s.summary.referralsThisMonth.value, change: s.summary.referralsThisMonth.change, up: s.summary.referralsThisMonth.up },
       { ...SUMMARY_ICONS[2], label: "Top Condition", value: s.summary.topCondition.name, change: s.summary.topCondition.cases, up: true },
       { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: s.summary.highRiskResidents.value, change: s.summary.highRiskResidents.change, up: s.summary.highRiskResidents.up },
     ];
@@ -271,7 +277,7 @@ export default function HealthTrends() {
         ) : (
         <>
         {supervisor ? <div className="supervisor-metric-grid mb-6">
-          {cards.map((card, index) => <KpiHorizontal.Item key={card.label} label={card.label.toUpperCase()} value={card.value} tone={["blue", "amber", "blue", "red"][index]} description={index === 2 ? `${card.change}; all recorded consultations` : card.change} />)}
+          {cards.map((card, index) => <KpiHorizontal.Item key={card.label} label={card.label.toUpperCase()} value={card.value} tone={["blue", "amber", "blue", "red"][index]} description={index === 2 ? `${card.change} in selected period` : card.change} />)}
         </div> : <KpiHorizontal count={4} className="mb-6">
           {cards.map((c, i) => (
             <KpiHorizontal.Item key={c.label} label={c.label.toUpperCase()} value={c.value} tone={["blue", "amber", "blue", "red"][i]} description="" />
@@ -286,7 +292,7 @@ export default function HealthTrends() {
             {s.consultationTrends.some((row) => row.consultations > 0 || row.referrals > 0) ? <ResponsiveContainer width="100%" height={260}>
               <LineChart data={s.consultationTrends} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                <XAxis dataKey="month" tickFormatter={formatTrendMonth} tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={chartTooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -327,7 +333,7 @@ export default function HealthTrends() {
             {Array.isArray(s.maternalTrend) && s.maternalTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={220}>
               <LineChart data={s.maternalTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                <XAxis dataKey="month" tickFormatter={formatTrendMonth} tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={chartTooltipStyle} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="count" name="Residents" stroke="#0B4A8F" strokeWidth={2} dot={{ r: 3 }} />
@@ -341,7 +347,7 @@ export default function HealthTrends() {
             {Array.isArray(s.seniorTrend) && s.seniorTrend.some((row) => row.count > 0) ? <ResponsiveContainer width="100%" height={220}>
               <LineChart data={s.seniorTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                <XAxis dataKey="month" tickFormatter={formatTrendMonth} tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={chartTooltipStyle} />
                 <Line isAnimationActive={!supervisor} type="monotone" dataKey="count" name="Residents" stroke="#28B463" strokeWidth={2} dot={{ r: 3 }} />
@@ -364,7 +370,7 @@ export default function HealthTrends() {
             </div> : <EmptyState compact title="No scheduled follow-ups in this period" description="A completion percentage requires scheduled follow-ups." />}
           </Card> : <Card className="p-5">
             <h3 className="font-semibold text-brand-ink mb-1">Risk Classification Distribution</h3>
-            <p className="text-xs text-brand-gray mb-3">{muniEW.reportingRiskDistribution ? `Latest consultation per resident in ${activityCaption}` : "Latest recorded consultation per resident"}</p>
+            <p className="text-xs text-brand-gray mb-3">Latest recorded assessment per resident, regardless of the activity date filter</p>
             {s.riskDistribution.some((row) => row.value > 0) ? <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie isAnimationActive={!supervisor} data={s.riskDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
@@ -378,13 +384,13 @@ export default function HealthTrends() {
 
           {supervisor ? <Card className="min-w-0 p-4">
             <h3 className="text-section font-semibold text-brand-ink">Health Service Activity</h3>
-            <p className="mb-3 mt-1 text-caption text-brand-gray">{serviceMonthLabel} | Recorded counts</p>
+            <p className="mb-3 mt-1 text-caption text-brand-gray">Selected reporting period</p>
             <dl className="divide-y divide-brand-border border-y border-brand-border">{[
-              ["TCL enrolled residents", enrollment?.value],
-              ["TCL recorded participants", participation?.value],
-              ["Immunization records", immunizations?.value],
-              ["Children with recorded consultations", childConsultations?.value],
-            ].map(([label, value]) => <div key={label} className="flex items-start justify-between gap-3 py-2.5 text-ui"><dt className="text-brand-gray">{label}</dt><dd className="shrink-0 font-stat font-semibold text-brand-ink">{metricValue(value)}</dd></div>)}</dl>
+              ["TCL enrolled residents", enrollment, false],
+              ["TCL recorded participants", participation, false],
+              ["Immunization records", immunizations, true],
+              ["Children with recorded consultations", childConsultations, false],
+            ].map(([label, entry, periodTotal]) => <div key={label} className="flex items-start justify-between gap-3 py-2.5 text-ui"><dt className="text-brand-gray">{label}<span className="mt-0.5 block text-caption">{periodTotal ? activityCaption : serviceMonthLabel(entry?.month)}</span></dt><dd className="shrink-0 font-stat font-semibold text-brand-ink">{metricValue(entry?.value)}</dd></div>)}</dl>
             {can("services.view") && <Link to="/app/health_supervisor/services" className="mt-3 inline-flex text-ui font-medium text-brand-blue hover:underline">View Health Services</Link>}
           </Card> : <Card className="p-5">
             <h3 className="font-semibold text-brand-ink mb-1">Recorded TCL Enrollments</h3>
@@ -420,7 +426,7 @@ export default function HealthTrends() {
   const disease = (Array.isArray(ew.diseaseDistribution) ? ew.diseaseDistribution : [])
     .filter((x) => (x.value || 0) > 0)
     .map((x, i) => ({ ...x, color: CONDITION_PALETTE[i % CONDITION_PALETTE.length] }));
-  const risk = normalizeRiskDistribution(ew.reportingRiskDistribution ?? ew.riskDistribution)
+  const risk = normalizeRiskDistribution(ew.riskDistribution)
     .map((x) => ({ ...x, color: RISK_PRESENTATION[x.name].color }));
   const mapBarangays = Array.isArray(muniMap?.barangays) ? muniMap.barangays : [];
 
@@ -428,11 +434,10 @@ export default function HealthTrends() {
   const riskHaveData = risk.some((r) => (r.value || 0) > 0);
 
   const summaryCards = [
-    { ...SUMMARY_ICONS[0], label: "Consultations This Month", value: metricValue(sm.consultationsThisMonth), sub: "recorded this month" },
-    { ...SUMMARY_ICONS[1], label: "Referrals This Month", value: metricValue(sm.referralsThisMonth), sub: "created this month" },
+    { ...SUMMARY_ICONS[0], label: "Consultations in Period", value: metricValue(sm.consultationsThisMonth), sub: "recorded in selected period" },
+    { ...SUMMARY_ICONS[1], label: "Referrals in Period", value: metricValue(sm.referralsThisMonth), sub: "created in selected period" },
     { ...SUMMARY_ICONS[2], label: "Top Condition", value: sm.topCondition || "No recorded condition", sub: `${sm.topConditionCases ?? 0} case${(sm.topConditionCases ?? 0) === 1 ? "" : "s"}` },
-    { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: metricValue(ew.reportingRiskDistribution
-      ? risk.find((row) => row.name === 'High')?.value ?? 0 : sm.highRiskResidents), sub: ew.reportingRiskDistribution ? "recorded in reporting period" : "from recorded vitals" },
+    { ...SUMMARY_ICONS[3], label: "High-Risk Residents", value: metricValue(sm.highRiskResidents), sub: "latest recorded assessment per resident" },
   ];
 
   const barangayStatus = (b) => {
@@ -572,7 +577,7 @@ export default function HealthTrends() {
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={trends} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
-                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
+                    <XAxis dataKey="month" tickFormatter={formatTrendMonth} tick={{ fontSize: 11, fill: chartInk }} axisLine={{ stroke: chartGrid }} tickLine={false} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: chartInk }} axisLine={false} tickLine={false} />
                     <Tooltip contentStyle={chartTooltipStyle} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -589,7 +594,7 @@ export default function HealthTrends() {
 
             <Card className="p-6">
               <h3 className="font-semibold text-brand-ink mb-1">Disease Distribution</h3>
-              <p className="text-xs text-brand-gray mb-4">Top reported conditions</p>
+            <p className="text-xs text-brand-gray mb-4">Top reported conditions in {activityCaption}</p>
               {disease.length > 0 ? (
                 <>
                   <ResponsiveContainer width="100%" height={220}>
@@ -641,7 +646,7 @@ export default function HealthTrends() {
 
             <Card className="p-6">
               <h3 className="font-semibold text-brand-ink mb-1">Risk Classification Distribution</h3>
-              <p className="text-xs text-brand-gray mb-4">{ew.reportingRiskDistribution ? `Resident risk in ${activityCaption}` : "Latest recorded municipality-wide resident risk"}</p>
+              <p className="text-xs text-brand-gray mb-4">Latest recorded resident assessment, regardless of the activity date filter</p>
               {riskHaveData ? (
                 <ResponsiveContainer width="100%" height={220}>
                   <PieChart>

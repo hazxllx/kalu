@@ -34,7 +34,7 @@ export function isOpenFollowUp(row) {
 export function isOverdueFollowUp(row, today) {
   if (!isOpenFollowUp(row)) return false;
   if (typeof row.is_overdue === "boolean") return row.is_overdue;
-  const due = String(row.scheduled_date || "").slice(0, 10);
+  const due = String(row.scheduled_date || row.scheduledDate || "").slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(due) && due < today;
 }
 

@@ -75,6 +75,16 @@ const aggregateError = (error) => {
   return Object.assign(new ApiError(503, 'Aggregate analytics could not be loaded.'), { cause: error });
 };
 
+const logAggregateFailure = (kind, error) => {
+  // Keep database details in the backend log for diagnosis. The API response
+  // remains generic so SQL errors and schema details are not exposed to clients.
+  console.error('[analytics] Aggregate RPC failed', {
+    kind,
+    code: error?.code || null,
+    message: error?.message || 'Unknown aggregate RPC failure',
+  });
+};
+
 /**
  * Execute the production `scoped_aggregate_analytics` PostgreSQL RPC for a specific
  * analytics surface (`kind`) and validate that required top-level array/summary keys exist.
@@ -96,9 +106,13 @@ const loadAggregate = async (kind, { actorId, barangay, condition, status, riskL
       p_distinct_residents: distinctResidents === true,
     });
   } catch (error) {
+    logAggregateFailure(kind, error);
     throw aggregateError(error);
   }
-  if (result?.error) throw aggregateError(result.error);
+  if (result?.error) {
+    logAggregateFailure(kind, result.error);
+    throw aggregateError(result.error);
+  }
   const data = result?.data;
   const arrays = {
     'early-warning': ['consultationTrends', 'diseaseDistribution', 'riskDistribution'],
@@ -109,7 +123,9 @@ const loadAggregate = async (kind, { actorId, barangay, condition, status, riskL
   if (!data || typeof data !== 'object' || Array.isArray(data) ||
       !arrays.every((key) => Array.isArray(data[key])) ||
       (kind !== 'community-map-trends' && (!data.summary || typeof data.summary !== 'object'))) {
-    throw aggregateError(new Error('The aggregate RPC returned an invalid payload.'));
+    const error = new Error('The aggregate RPC returned an invalid payload.');
+    logAggregateFailure(kind, error);
+    throw aggregateError(error);
   }
   return data;
 };
@@ -239,10 +255,10 @@ const lastTwelveMonths = (reference) => {
  * In production, delegates to `scoped_aggregate_analytics` (`p_kind = 'early-warning'`).
  * Under the `'file'` repository driver, aggregates scoped visits, referrals, and
  * residents in memory:
- * - Counts current-month consultations and referrals (Asia/Manila calendar).
- * - Classifies `chiefComplaint + findings` into `diseaseDistribution` and picks `topCondition`.
- * - Evaluates each resident's latest visit vitals via `riskFromVitals` (`Low`, `Moderate`, `High`, `Unassessed`).
- * - Builds a 12-month consultation & referral trend series and overall barangay/municipal health status.
+ * - Counts consultations and referrals inside the selected Asia/Manila reporting period.
+ * - Classifies only in-period `chiefComplaint + findings` into `diseaseDistribution` and picks `topCondition`.
+ * - Evaluates each resident's latest in-period vitals via `riskFromVitals` (`Low`, `Moderate`, `High`, `Unassessed`).
+ * - Builds consultation and referral trend rows for the selected period and scope.
  *
  * @param {Object} [params] - Scope and date filter parameters
  * @param {Object} [deps] - Injectable `{ repo, rpc, now }` dependencies for testing
@@ -286,12 +302,27 @@ export const getEarlyWarning = async (
   const scopedVisits = visits.filter((v) => residentIds.has(v.residentId));
   const scopedReferrals = referrals.filter((r) => residentIds.has(r.residentId));
 
+  const nowParts = reportingParts(now);
+  // Date.UTC receives a zero-based month; this gives the current Manila month
+  // plus the preceding eleven months (12 calendar months total).
+  const defaultStart = new Date(Date.UTC(Number(nowParts.year), Number(nowParts.month) - 12, 1));
+  const defaultFrom = `${defaultStart.getUTCFullYear()}-${String(defaultStart.getUTCMonth() + 1).padStart(2, '0')}-01`;
+  const reportingFrom = from || (year ? `${String(year).padStart(4, '0')}-01-01` : defaultFrom);
+  const reportingTo = to || (year
+    ? `${String(year).padStart(4, '0')}-12-31`
+    : `${nowParts.year}-${nowParts.month}-${nowParts.day}`);
+  const reportingBounds = dateRangeTimestamps(reportingFrom, reportingTo);
+  const periodVisits = scopedVisits.filter((visit) =>
+    inDateRange(visit.visitDate || visit.createdAt, reportingBounds.fromTs, reportingBounds.toTs));
+  const periodReferrals = scopedReferrals.filter((referral) =>
+    inDateRange(referral.createdAt, reportingBounds.fromTs, reportingBounds.toTs));
+
   // --- summary --------------------------------------------------------------
-  const consultationsThisMonth = scopedVisits.filter((v) => isSameMonth(v.visitDate || v.createdAt, now)).length;
-  const referralsThisMonth = scopedReferrals.filter((r) => isSameMonth(r.createdAt, now)).length;
+  const consultationsThisMonth = periodVisits.length;
+  const referralsThisMonth = periodReferrals.length;
 
   const conditionCounts = {};
-  scopedVisits.forEach((v) => {
+  periodVisits.forEach((v) => {
     // Classify from the chief complaint AND the recorded findings/diagnosis so
     // the headline reflects the actual recorded condition, not just the complaint.
     const name = classifyCondition(`${v.chiefComplaint || ''} ${v.findings || ''}`);
@@ -304,60 +335,60 @@ export const getEarlyWarning = async (
   // "Others" catch-all), deterministic on ties, "No recorded condition" when empty.
   const topCondition = topConditionFrom(diseaseDistribution);
 
-  // Risk per resident from their most recent visit's vitals.
+  // Current risk always uses each resident's latest recorded assessment, just
+  // like the resident directory. A separate period distribution is retained
+  // for callers that explicitly need historical risk within the selected dates.
   const latestVisitByResident = new Map();
-  scopedVisits.forEach((v) => {
-    const current = latestVisitByResident.get(v.residentId);
-    if (isLaterVisit(v, current)) {
-      latestVisitByResident.set(v.residentId, v);
-    }
+  const latestPeriodVisitByResident = new Map();
+  scopedVisits.forEach((visit) => {
+    const latest = latestVisitByResident.get(visit.residentId);
+    if (isLaterVisit(visit, latest)) latestVisitByResident.set(visit.residentId, visit);
   });
-  const riskCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
+  periodVisits.forEach((visit) => {
+    const latest = latestPeriodVisitByResident.get(visit.residentId);
+    if (isLaterVisit(visit, latest)) latestPeriodVisitByResident.set(visit.residentId, visit);
+  });
+  const currentRiskCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
+  const reportingRiskCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
   scopedResidents.forEach((resident) => {
-    // A visit without assessable vitals is UNASSESSED — never silently counted
-    // as Low (consistent with the resident directory/detail/dashboard, which
-    // report null for the same resident).
-    const level = riskFromVitals(latestVisitByResident.get(resident.id)?.vitals, riskConfig);
-    riskCounts[level || 'Unassessed'] += 1;
+    const currentLevel = riskFromVitals(latestVisitByResident.get(resident.id)?.vitals, riskConfig);
+    currentRiskCounts[currentLevel || 'Unassessed'] += 1;
+    const periodLevel = riskFromVitals(latestPeriodVisitByResident.get(resident.id)?.vitals, riskConfig);
+    reportingRiskCounts[periodLevel || 'Unassessed'] += 1;
   });
   const riskDistribution = [
-    { name: 'Low Risk', value: riskCounts.Low },
-    { name: 'Moderate Risk', value: riskCounts.Moderate },
-    { name: 'High Risk', value: riskCounts.High },
-    { name: 'Unassessed', value: riskCounts.Unassessed },
+    { name: 'Low Risk', value: currentRiskCounts.Low },
+    { name: 'Moderate Risk', value: currentRiskCounts.Moderate },
+    { name: 'High Risk', value: currentRiskCounts.High },
+    { name: 'Unassessed', value: currentRiskCounts.Unassessed },
   ];
-  const reportingFrom = from || (year ? `${String(year).padStart(4, '0')}-01-01` : null);
-  const reportingTo = to || (year ? `${String(year).padStart(4, '0')}-12-31` : null);
-  const reportingBounds = dateRangeTimestamps(reportingFrom, reportingTo);
-  const reportingLatest = new Map();
-  for (const visit of scopedVisits) {
-    if (inDateRange(visit.visitDate || visit.createdAt, reportingBounds.fromTs, reportingBounds.toTs)
-        && isLaterVisit(visit, reportingLatest.get(visit.residentId))) reportingLatest.set(visit.residentId, visit);
-  }
-  const reportingCounts = { Low: 0, Moderate: 0, High: 0, Unassessed: 0 };
-  for (const resident of scopedResidents) {
-    const level = riskFromVitals(reportingLatest.get(resident.id)?.vitals, riskConfig);
-    reportingCounts[level || 'Unassessed'] += 1;
-  }
-  const reportingRiskDistribution = Object.entries(reportingCounts).map(([level, value]) => ({
+  const reportingRiskDistribution = Object.entries(reportingRiskCounts).map(([level, value]) => ({
     name: level === 'Unassessed' ? level : `${level} Risk`, value,
   }));
 
-  // --- 12-month consultation & referral trend -------------------------------
-  const months = lastTwelveMonths(now);
+  // --- selected-period consultation & referral trend -----------------------
+  const [fromYear, fromMonth] = reportingFrom.slice(0, 7).split('-').map(Number);
+  const [toYear, toMonth] = reportingTo.slice(0, 7).split('-').map(Number);
+  const months = [];
+  for (let cursor = new Date(Date.UTC(fromYear, fromMonth - 1, 1));
+    cursor <= new Date(Date.UTC(toYear, toMonth - 1, 1));
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1))) {
+    const month = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`;
+    months.push({ key: month, label: month });
+  }
   const consultationTrends = months.map(({ key, label }) => {
-    const monthVisits = scopedVisits.filter((v) => {
+    const monthVisits = periodVisits.filter((v) => {
       const d = reportingParts(v.visitDate || v.createdAt);
-      return d && `${d.year}-${Number(d.month) - 1}` === key;
+      return d && `${d.year}-${d.month}` === key;
     });
-    const monthReferrals = scopedReferrals.filter((r) => {
+    const monthReferrals = periodReferrals.filter((r) => {
       const d = reportingParts(r.createdAt);
-      return d && `${d.year}-${Number(d.month) - 1}` === key;
+      return d && `${d.year}-${d.month}` === key;
     });
     return { month: label, consultations: monthVisits.length, referrals: monthReferrals.length };
   });
 
-  const status = riskCounts.High > 0 ? 'Needs Attention' : riskCounts.Moderate > 0 ? 'Stable' : 'Healthy';
+  const status = currentRiskCounts.High > 0 ? 'Needs Attention' : currentRiskCounts.Moderate > 0 ? 'Stable' : 'Healthy';
 
   return {
     scope: { barangay },
@@ -366,7 +397,7 @@ export const getEarlyWarning = async (
       referralsThisMonth,
       topCondition: topCondition.name,
       topConditionCases: topCondition.value,
-      highRiskResidents: riskCounts.High,
+      highRiskResidents: currentRiskCounts.High,
       residents: scopedResidents.length,
     },
     status,
