@@ -130,10 +130,10 @@ export default function RegistrationTypeSelection() {
       >
         {/* Branding above the card */}
         <div className="mb-3 flex items-center justify-center gap-3">
-          <GovSeal height={38} eager onDark />
+          <GovSeal height={52} eager />
           <div className="text-left">
-            <p className="font-display text-[16px] font-bold leading-tight tracking-[0.02em] text-white">KALUSAGAP</p>
-            <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/70">Community Health System</p>
+            <p className="font-display text-[20px] font-bold leading-tight tracking-[0.02em] text-white">KALUSAGAP</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">Community Health System</p>
           </div>
         </div>
 

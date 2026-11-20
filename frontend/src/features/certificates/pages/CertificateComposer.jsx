@@ -14,10 +14,10 @@ import {
 } from "lucide-react";
 
 /**
- * Roles authorized to open the composer. PHN/MHO prepare and print official
- * certificates; a Triage-station RHU Personnel may INITIATE a request only
- * (create → 'For Review'), never print/approve/issue. The RHU route is station-
- * gated and the backend enforces the request-only rule.
+ * Roles authorized to open the composer. PHN certificates are issued directly;
+ * MHO certificates can be submitted for review. Triage-station RHU Personnel
+ * may initiate a request only (create → 'For Review'). The backend enforces
+ * the request-only rule.
  */
 const AUTHORIZED_ROLES = ["mho", "phn", "rhu_personnel"];
 
@@ -180,9 +180,10 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
   const { user } = useAuth();
   // A Triage-station RHU Personnel INITIATES a request only: a single create
   // lands the certificate at 'For Review' server-side (they cannot update,
-  // print, or decide). PHN/MHO keep the full prepare → draft → submit → print
-  // flow.
+  // print, or decide). PHN-created certificates are submitted and immediately
+  // issued; MHO-created certificates retain the review flow.
   const isRequester = user?.role === "rhu_personnel";
+  const autoIssueForPhn = user?.role === "phn";
   const { printCertificate, portal, brandingError } = useCertificatePrint();
   const { branding } = useDocumentBranding("medical_certificate");
 
@@ -337,11 +338,9 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
   };
 
   /**
-   * Submit the certificate to the PHN / MHO for review and issuance. The
-   * preparer (RHU Personnel / PHN) never issues a certificate directly: this
-   * saves the document (creating it when needed) and moves it Draft → For
-   * Review. Approval (MHO) and issuance are performed by the reviewer in the
-   * register. The server re-validates both the role and the transition.
+   * Triage submissions become requests for PHN/MHO review. PHN-authored
+   * certificates are approved and issued immediately by the PHN; MHO-authored
+   * certificates retain the review workflow.
    */
   const handleSubmitForReview = async () => {
     if (!validate()) {
@@ -363,13 +362,21 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
         let id = savedId;
         if (id) {
           await medicalCertificatesApi.update(id, writePayload());
+          await medicalCertificatesApi.submitForReview(id);
+          if (autoIssueForPhn) await medicalCertificatesApi.issue(id);
         } else {
           const { record } = await medicalCertificatesApi.create(writePayload());
           id = record.id;
-          setSavedId(id);
+          if (!autoIssueForPhn) {
+            setSavedId(id);
+            await medicalCertificatesApi.submitForReview(id);
+          }
         }
-        await medicalCertificatesApi.submitForReview(id);
-        showToast("Certificate submitted to the PHN/MHO for review and issuance.");
+        if (autoIssueForPhn) {
+          showToast("Certificate approved and issued.");
+        } else {
+          showToast("Certificate submitted to the PHN/MHO for review and issuance.");
+        }
       }
       // Clear the form so the next certificate starts fresh and the submitted
       // one is not accidentally re-submitted or edited here.
@@ -384,7 +391,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
         .then((payload) => setForm((p) => ({ ...p, certificateNumber: payload?.reference || "" })))
         .catch(() => {});
     } catch (err) {
-      showToast(err?.message || "The certificate could not be submitted for review.");
+      showToast(err?.message || (autoIssueForPhn ? "The certificate could not be issued." : "The certificate could not be submitted for review."));
     } finally {
       setSubmitting(false);
     }
@@ -398,7 +405,9 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
         subtitle={
           isRequester
             ? "Initiate a medical certificate request for the PHN / MHO to review and issue."
-            : "Prepare, preview, and submit a medical certificate for authorized review."
+            : autoIssueForPhn
+              ? "Prepare, preview, and issue a medical certificate for your resident."
+              : "Prepare, preview, and submit a medical certificate for authorized review."
         }
         action={
           <Link
@@ -586,7 +595,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                 disabled={submitting}
                 className="inline-flex items-center gap-2 rounded-btn bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {isRequester ? "Submit Request" : "Submit for Review"}
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {isRequester ? "Submit Request" : autoIssueForPhn ? "Approve & Issue Certificate" : "Submit for Review"}
               </button>
             </div>
           </Card>
@@ -594,7 +603,9 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
           <p className="text-center text-xs text-brand-gray">
             {isRequester
               ? "Submitting creates a medical certificate request for the PHN / MHO to review, approve, and issue. You cannot approve or issue certificates."
-              : "Submitting sends the certificate for PHN / MHO review. Draft previews are not official; only an authorized reviewer can approve and issue the official certificate."}
+              : autoIssueForPhn
+                ? "Submitting approves and issues this certificate immediately. Triage requests remain pending for PHN / MHO review."
+                : "Submitting sends the certificate for PHN / MHO review. Draft previews are not official; only an authorized reviewer can approve and issue the official certificate."}
           </p>
         </>
       )}
@@ -623,7 +634,7 @@ function ComposerContent({ base, roleLabel, residents, residentsError, purposes 
                   disabled={submitting}
                   className="inline-flex items-center gap-1.5 rounded-btn bg-brand-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-60"
                 >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {isRequester ? "Submit Request" : "Submit for Review"}
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {isRequester ? "Submit Request" : autoIssueForPhn ? "Approve & Issue Certificate" : "Submit for Review"}
                 </button>
                 <button onClick={() => setPreviewOpen(false)} className="rounded-btn px-4 py-2 text-sm font-medium text-brand-gray hover:bg-brand-bg dark:hover:bg-hover">
                   Close Preview

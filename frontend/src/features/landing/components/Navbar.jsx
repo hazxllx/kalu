@@ -29,15 +29,15 @@ export default function Navbar() {
           scrolled ? "border-brand-border bg-white shadow-sheet" : "border-brand-border/70 bg-white"
         }`}
       >
-        <div className="mx-auto flex h-[76px] max-w-content items-center justify-between gap-4 px-5 md:px-8">
+        <div className="mx-auto flex h-[80px] max-w-content items-center justify-between gap-4 px-5 md:px-8">
           {/* Agency mark */}
           <Link to="/" className="flex shrink-0 items-center gap-3">
-            <GovSeal height={34} eager className="hidden sm:block" />
+            <GovSeal height={44} eager className="hidden sm:block" />
             <div className="leading-tight">
-              <p className="font-display text-[17px] font-bold tracking-[0.04em] text-brand-dark">
+              <p className="font-display text-[18px] font-bold tracking-[0.04em] text-brand-dark sm:text-[20px]">
                 KALUSAGAP
               </p>
-              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-gov text-brand-blue">
+              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-gov text-brand-blue sm:text-[11px]">
                 Community Health System
               </p>
             </div>

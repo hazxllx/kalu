@@ -7,7 +7,7 @@ export default function PersonnelRegistration() {
   return (
     <div className="min-h-dvh gov-navy-panel flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-xl rounded-2xl bg-white p-6 sm:p-9 shadow-2xl">
-        <div className="flex items-center gap-3"><GovSeal height={42} eager /><span className="font-display text-xl font-bold text-brand-dark">KALUSAGAP</span></div>
+        <div className="flex items-center gap-3"><GovSeal height={52} eager /><span className="font-display text-xl font-bold text-brand-dark">KALUSAGAP</span></div>
         <div className="mt-6 flex items-center gap-2 text-brand-blue"><ShieldCheck className="h-5 w-5" /><span className="text-xs font-semibold uppercase tracking-wider">Personnel Access</span></div>
         <h1 className="mt-2 font-display text-2xl font-bold text-brand-dark">Accounts Are Administrator-Provisioned</h1>
         <p className="mt-3 text-sm leading-relaxed text-brand-gray">Public registration is for residents. Health personnel cannot create an account or choose their own role, barangay or facility here.</p>

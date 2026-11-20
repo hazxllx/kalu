@@ -8,8 +8,9 @@ import { LOGO_URL } from "@/lib/brand";
  * stretched, or skewed. Callers control the rendered height only; the width
  * follows from the artwork.
  *
- * On navy panels, `onDark` sets the mark on a plain white plate so the navy
- * lettering stays legible. The plate is rectangular at every size.
+ * The artwork keeps its transparent background on both light and dark panels.
+ * `onDark` remains accepted for existing callers but no longer adds a white
+ * plate behind the logo.
  */
 
 /** Intrinsic ratio of src/assets/images/logo.png (500 x 500, square). */
@@ -19,7 +20,6 @@ export default function GovSeal({
   height = 40,
   className = "",
   eager = false,
-  onDark = false,
 }) {
   const image = (
     <img
@@ -29,16 +29,10 @@ export default function GovSeal({
       height={height}
       loading={eager ? "eager" : "lazy"}
       decoding="async"
-      className={`block w-auto object-contain ${onDark ? "" : `shrink-0 ${className}`}`}
+      className={`block w-auto shrink-0 object-contain ${className}`}
       style={{ height }}
     />
   );
 
-  if (!onDark) return image;
-
-  return (
-    <span className={`inline-flex shrink-0 items-center bg-white px-2.5 py-1.5 ${className}`}>
-      {image}
-    </span>
-  );
+  return image;
 }

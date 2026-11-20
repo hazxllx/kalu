@@ -489,12 +489,12 @@ export function RegistrationShell({ children, footer = undefined }) {
         className="relative flex w-full max-w-3xl flex-col"
       >
         <div className="mb-3 flex items-center justify-center gap-3 sm:mb-4">
-          <GovSeal height={40} eager onDark />
+          <GovSeal height={52} eager />
           <div className="text-left">
-            <p className="font-display text-[16px] font-bold leading-tight tracking-[0.02em] text-white">
+            <p className="font-display text-[20px] font-bold leading-tight tracking-[0.02em] text-white">
               KALUSAGAP
             </p>
-            <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/60">
+            <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">
               Community Health System
             </p>
           </div>

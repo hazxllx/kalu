@@ -28,7 +28,7 @@ export default function RegistrationSuccess() {
     <div className="min-h-screen bg-paper">
       <div className="mx-auto max-w-2xl px-5 py-10 md:px-8 md:py-14">
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-          <AgencyMark align="center" sealSize={44} />
+          <AgencyMark align="center" sealSize={52} />
 
           <div className="gov-sheet mt-7 bg-white">
             <div className="border-b border-brand-border bg-brand-paper px-8 py-6">

@@ -12,10 +12,10 @@ export function AgencyMark({ sealSize = 40, align = "left" }) {
     <div className={`flex items-center gap-3.5 ${isCenter ? "justify-center text-center" : ""}`}>
       <GovSeal height={sealSize} eager className="shrink-0" />
       <div className={isCenter ? "text-left" : ""}>
-        <p className="font-display text-[16px] font-bold leading-tight tracking-[0.03em] text-brand-dark">
+        <p className="font-display text-[20px] font-bold leading-tight tracking-[0.03em] text-brand-dark">
           KALUSAGAP
         </p>
-        <p className="mt-0.5 text-[10px] font-medium uppercase leading-tight tracking-[0.14em] text-brand-gray">
+        <p className="mt-0.5 text-[11px] font-medium uppercase leading-tight tracking-[0.14em] text-brand-gray">
           Community Health System
         </p>
       </div>

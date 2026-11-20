@@ -460,6 +460,7 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   const resident = await residentInScope(supabase, user, payload.residentId ?? payload.resident_id);
 
   const row = sanitizeWrite(payload);
+  const isPhnDirectIssue = user?.role === ROLES.PHN;
 
   if (isTriageRequest) {
     // Triage INITIATES a request only. It can never be a decision: the status is
@@ -472,12 +473,25 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
   } else {
     if (!row.findings) throw ApiError.unprocessable('Clinical findings are required.');
     // The authorized signatory is resolved server-side from the preparer's
-    // profile (the MHO signatory is re-stamped at approval/issue time).
+    // profile. A PHN-issued certificate records its approval and issuance at
+    // creation; MHO-prepared certificates remain drafts for review.
     const signatory = await resolveSignatory(supabase, user);
     row.medical_officer = signatory.fullName || user?.name || '';
     row.license_number = signatory.licenseNumber || '';
     if (!row.medical_officer) throw ApiError.unprocessable('The medical officer name is required.');
-    row.status = CERT_STATUS.DRAFT;
+    if (isPhnDirectIssue) {
+      const issuedAt = new Date().toISOString();
+      row.status = CERT_STATUS.ISSUED;
+      row.reviewed_by = user.id;
+      row.reviewed_at = issuedAt;
+      row.review_remarks = '';
+      row.issued_by = user.id;
+      row.issued_at = issuedAt;
+      row.date_issued = issuedAt.slice(0, 10);
+      row.signatory_position = signatory.position || 'Public Health Nurse';
+    } else {
+      row.status = CERT_STATUS.DRAFT;
+    }
   }
   row.resident_id = resident.id;
   row.created_by = user.id;
@@ -492,12 +506,28 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
     row.status,
     null,
     row.status,
-    isTriageRequest ? 'Certificate request submitted for review' : 'Certificate created',
+    isTriageRequest
+      ? 'Certificate request submitted for review'
+      : isPhnDirectIssue
+        ? 'Approved and Issued by PHN'
+        : 'Certificate created',
   );
   await writeAudit(supabase, user, 'MEDICAL_CERTIFICATE_CREATED', created.id, created, {
     reference: created.reference_no,
     request: isTriageRequest || undefined,
+    autoIssued: isPhnDirectIssue || undefined,
   });
+  if (isPhnDirectIssue) {
+    const notification = notificationFor(CERT_STATUS.ISSUED);
+    if (notification) {
+      await notifyResident({
+        recipientAuthUserId: created.resident?.auth_user_id,
+        ...notification,
+        relatedType: TABLE,
+        relatedId: created.id,
+      });
+    }
+  }
   const certificate = await hydrateCertificateProfiles(supabase, created);
   return toCertificate(certificate, await loadAudit(supabase, created.id));
 };
