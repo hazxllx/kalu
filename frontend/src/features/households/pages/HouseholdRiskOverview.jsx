@@ -18,11 +18,11 @@ import {
 } from "lucide-react";
 
 const levelTone = {
-  [RISK_LEVELS.STABLE]: { chip: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", color: "#10b981" },
-  [RISK_LEVELS.MONITOR]: { chip: "bg-amber-50 text-amber-700", dot: "bg-amber-500", color: "#f59e0b" },
-  [RISK_LEVELS.INTERVENTION]: { chip: "bg-orange-50 text-orange-700", dot: "bg-orange-500", color: "#f97316" },
-  [RISK_LEVELS.PRIORITY]: { chip: "bg-rose-50 text-rose-700", dot: "bg-rose-500", color: "#ef4444" },
-  [RISK_LEVELS.UNASSESSED]: { chip: "bg-slate-100 text-slate-600", dot: "bg-slate-400", color: "#94a3b8" },
+  [RISK_LEVELS.STABLE]: { chip: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300", dot: "bg-emerald-500", color: "#10b981" },
+  [RISK_LEVELS.MONITOR]: { chip: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300", dot: "bg-amber-500", color: "#f59e0b" },
+  [RISK_LEVELS.INTERVENTION]: { chip: "bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300", dot: "bg-orange-500", color: "#f97316" },
+  [RISK_LEVELS.PRIORITY]: { chip: "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300", dot: "bg-rose-500", color: "#ef4444" },
+  [RISK_LEVELS.UNASSESSED]: { chip: "bg-brand-bg text-brand-gray dark:bg-hover dark:text-muted-foreground", dot: "bg-brand-gray", color: "#94a3b8" },
 };
 
 const levelOrder = [RISK_LEVELS.PRIORITY, RISK_LEVELS.INTERVENTION, RISK_LEVELS.MONITOR, RISK_LEVELS.STABLE, RISK_LEVELS.UNASSESSED];
@@ -34,6 +34,8 @@ const countKey = {
   [RISK_LEVELS.UNASSESSED]: "unassessed",
 };
 const clusterLabel = (level) => RISK_LEVEL_LABELS[level] || RISK_LEVEL_LABELS[RISK_LEVELS.UNASSESSED];
+const filterControl = "h-10 w-full min-w-0 rounded-btn border border-brand-border bg-white px-3 text-sm text-brand-ink outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:bg-card";
+const filterLabel = "grid min-w-0 gap-1.5 text-xs font-medium text-brand-gray";
 
 const formatDate = (iso) => formatShortDate(iso) || "—";
 
@@ -53,6 +55,10 @@ function householdDetailPath(id) {
 export default function HouseholdRiskOverview() {
   const { can } = usePermissions();
   const canViewWorkflow = can("followups.view");
+  const routeRole = typeof window !== "undefined"
+    ? window.location.pathname.split("/").filter(Boolean)[1]
+    : "phn";
+  const isBarangayScoped = routeRole === "health_supervisor";
   const [phase, setPhase] = useState("loading");
   const [loadError, setLoadError] = useState("");
   const [clusters, setClusters] = useState([]);
@@ -91,15 +97,6 @@ export default function HouseholdRiskOverview() {
   const [followUpFilter, setFollowUpFilter] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [appliedFilters, setAppliedFilters] = useState({
-    query: "",
-    barangayFilter: "All",
-    levelFilter: "all",
-    indicatorFilter: "all",
-    followUpFilter: "all",
-    startDate: "",
-    endDate: "",
-  });
   const [followUpFor, setFollowUpFor] = useState(null);
   const [toast, setToast] = useState(null);
 
@@ -115,22 +112,24 @@ export default function HouseholdRiskOverview() {
   }, [clusters]);
 
   const filtered = useMemo(() => {
-    const q = appliedFilters.query.trim().toLowerCase();
+    const q = query.trim().toLowerCase();
     return clusters.filter((h) => {
-      if (appliedFilters.barangayFilter !== "All" && h.barangay !== appliedFilters.barangayFilter) return false;
-      if (appliedFilters.levelFilter !== "all" && h.risk?.level !== appliedFilters.levelFilter) return false;
-      if (appliedFilters.followUpFilter !== "all") {
+      if (barangayFilter !== "All" && h.barangay !== barangayFilter) return false;
+      if (levelFilter !== "all" && h.risk?.level !== levelFilter) return false;
+      if (followUpFilter !== "all") {
         const status = String(h.workflowStatus || "").toLowerCase();
-        if (appliedFilters.followUpFilter === "required" && !["follow-up scheduled", "intervention initiated", "monitoring"].some((s) => status.includes(s.split(" ")[0]))) return false;
-        if (appliedFilters.followUpFilter === "scheduled" && status !== "follow-up scheduled") return false;
-        if (appliedFilters.followUpFilter === "overdue" && !status.includes("overdue")) return false;
-        if (appliedFilters.followUpFilter === "resolved" && status !== "resolved") return false;
+        if (followUpFilter === "required" && !["follow-up scheduled", "intervention initiated", "monitoring"].some((s) => status.includes(s.split(" ")[0]))) return false;
+        if (followUpFilter === "scheduled" && status !== "follow-up scheduled") return false;
+        if (followUpFilter === "overdue" && !status.includes("overdue")) return false;
+        if (followUpFilter === "resolved" && status !== "resolved") return false;
       }
-      if (appliedFilters.indicatorFilter !== "all" && !(h.environmentalRisk?.factors || []).includes(appliedFilters.indicatorFilter)) return false;
-      if (appliedFilters.startDate || appliedFilters.endDate) {
+      if (indicatorFilter !== "all" && !(h.environmentalRisk?.factors || []).includes(indicatorFilter)) return false;
+      if (startDate || endDate) {
         const last = h.lastHouseholdVisit || h.lastAssessment || "";
-        if (last && appliedFilters.startDate && last < appliedFilters.startDate) return false;
-        if (last && appliedFilters.endDate && last > appliedFilters.endDate) return false;
+        if (!last) return false;
+        const visitDate = String(last).slice(0, 10);
+        if (startDate && visitDate < startDate) return false;
+        if (endDate && visitDate > endDate) return false;
       }
       if (q) {
         const hay = `${h.head} ${h.id} ${h.barangay} ${h.surname || ""}`.toLowerCase();
@@ -138,11 +137,11 @@ export default function HouseholdRiskOverview() {
       }
       return true;
     });
-  }, [clusters, appliedFilters]);
+  }, [clusters, query, barangayFilter, levelFilter, followUpFilter, indicatorFilter, startDate, endDate]);
 
   const counts = useMemo(() => {
-    const c = { total: clusters.length, priority: 0, intervention: 0, monitor: 0, stable: 0, unassessed: 0 };
-    clusters.forEach((h) => {
+    const c = { total: filtered.length, priority: 0, intervention: 0, monitor: 0, stable: 0, unassessed: 0 };
+    filtered.forEach((h) => {
       if (h.risk?.level === RISK_LEVELS.PRIORITY) c.priority += 1;
       else if (h.risk?.level === RISK_LEVELS.INTERVENTION) c.intervention += 1;
       else if (h.risk?.level === RISK_LEVELS.MONITOR) c.monitor += 1;
@@ -150,18 +149,18 @@ export default function HouseholdRiskOverview() {
       else c.unassessed += 1;
     });
     return c;
-  }, [clusters]);
+  }, [filtered]);
 
   const openFollowUps = useMemo(() => {
-    return clusters.filter((h) => {
+    return filtered.filter((h) => {
       const status = String(h.workflowStatus || "").toLowerCase();
       return status && status !== "resolved" && status !== "not started";
     }).length;
-  }, [clusters]);
+  }, [filtered]);
 
   const byBarangay = useMemo(() => {
     const map = {};
-    clusters.forEach((h) => {
+    filtered.forEach((h) => {
       const b = h.barangay || "Unassigned";
       if (!map[b]) map[b] = { priority: 0, intervention: 0, monitor: 0, stable: 0, unassessed: 0, total: 0 };
       map[b].total += 1;
@@ -172,15 +171,15 @@ export default function HouseholdRiskOverview() {
       else map[b].unassessed += 1;
     });
     return Object.entries(map).sort((a, b) => b[1].priority - a[1].priority);
-  }, [clusters]);
+  }, [filtered]);
 
   const indicatorBreakdown = useMemo(() => {
     const map = {};
-    clusters.forEach((h) => (h.environmentalRisk?.factors || []).forEach((factor) => {
+    filtered.forEach((h) => new Set(h.environmentalRisk?.factors || []).forEach((factor) => {
       map[factor] = (map[factor] || 0) + 1;
     }));
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  }, [clusters]);
+  }, [filtered]);
 
   const visiblePriorityList = useMemo(
     () => filtered
@@ -188,18 +187,6 @@ export default function HouseholdRiskOverview() {
       .sort((a, b) => levelOrder.indexOf(a.risk.level) - levelOrder.indexOf(b.risk.level)),
     [filtered]
   );
-
-  const maxIndicatorCount = indicatorBreakdown.length ? indicatorBreakdown[0][1] : 1;
-
-  const applyFilters = () => setAppliedFilters({
-    query,
-    barangayFilter,
-    levelFilter,
-    indicatorFilter,
-    followUpFilter,
-    startDate,
-    endDate,
-  });
 
   const clearFilters = () => {
     setQuery("");
@@ -209,15 +196,6 @@ export default function HouseholdRiskOverview() {
     setFollowUpFilter("all");
     setStartDate("");
     setEndDate("");
-    setAppliedFilters({
-      query: "",
-      barangayFilter: "All",
-      levelFilter: "all",
-      indicatorFilter: "all",
-      followUpFilter: "all",
-      startDate: "",
-      endDate: "",
-    });
   };
 
   // Pagination
@@ -226,7 +204,7 @@ export default function HouseholdRiskOverview() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [appliedFilters]);
+  }, [query, barangayFilter, levelFilter, indicatorFilter, followUpFilter, startDate, endDate]);
 
   if (phase === "loading") {
     return (
@@ -236,15 +214,15 @@ export default function HouseholdRiskOverview() {
           title="Household Risk Overview"
           subtitle="Monitor household health risks, review risk classifications, and identify households requiring attention."
           meta={
-            <span className="text-[10px] font-semibold uppercase tracking-gov text-white/70">
+            <span className="text-xs font-semibold uppercase tracking-gov text-white/70">
               Loading...
             </span>
           }
         />
         <div className="space-y-6">
-          <div className="h-32 animate-pulse rounded-[20px] bg-slate-100" />
-          <div className="h-16 animate-pulse rounded-[20px] bg-slate-100" />
-          <div className="h-96 animate-pulse rounded-[20px] bg-slate-100" />
+          <div className="h-32 animate-pulse rounded-card bg-brand-bg dark:bg-hover" />
+          <div className="h-16 animate-pulse rounded-card bg-brand-bg dark:bg-hover" />
+          <div className="h-96 animate-pulse rounded-card bg-brand-bg dark:bg-hover" />
         </div>
       </>
     );
@@ -258,17 +236,17 @@ export default function HouseholdRiskOverview() {
           title="Household Risk Overview"
           subtitle="Monitor household health risks, review risk classifications, and identify households requiring attention."
           meta={
-            <span className="text-[10px] font-semibold uppercase tracking-gov text-white/70">
+            <span className="text-xs font-semibold uppercase tracking-gov text-white/70">
               {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
             </span>
           }
         />
-        <div className="rounded-[20px] border border-blue-100 bg-white p-12 text-center">
+        <div className="rounded-card border border-brand-border bg-white p-8 text-center shadow-sm dark:bg-card sm:p-12">
           <div className="mx-auto flex h-16 w-16 items-center justify-center">
             <AlertTriangle className="h-12 w-12 text-rose-500" />
           </div>
-          <h3 className="mt-4 font-display text-xl font-medium text-slate-900">Unable to Load Household Risk Data</h3>
-          <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+          <h3 className="mt-4 text-lg font-semibold tracking-tight text-brand-ink">Unable to Load Household Risk Data</h3>
+          <p className="mx-auto mt-2 max-w-md text-sm text-brand-gray">
             {loadError || "We couldn&apos;t retrieve the latest household risk information."}
           </p>
           <button onClick={() => load()} className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white transition-colors hover:bg-blue-700">
@@ -288,7 +266,7 @@ export default function HouseholdRiskOverview() {
         title="Household Risk Overview"
         subtitle="Monitor household health risks, review risk classifications, and identify households requiring attention."
         meta={
-          <span className="text-[10px] font-semibold uppercase tracking-gov text-white/70">
+          <span className="text-xs font-semibold uppercase tracking-gov text-white/70">
             {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
           </span>
         }
@@ -302,174 +280,98 @@ export default function HouseholdRiskOverview() {
               label="HOUSEHOLDS MONITORED"
               value={counts.total}
               tone="blue"
-              description="Registered households in the registry"
+              description="Households matching current filters"
             />
             <KpiHorizontal.Item
               label="PRIORITY"
               value={counts.priority}
               tone="red"
-              description="Households with an explicit Priority cluster assignment"
+              description="Matching households with Priority assignment"
             />
             <KpiHorizontal.Item
               label="INTERVENTION"
               value={counts.intervention}
               tone="amber"
-              description="Households with an explicit Intervention cluster assignment"
+              description="Matching households with Intervention assignment"
             />
             <KpiHorizontal.Item
               label="OPEN FOLLOW-UPS"
               value={openFollowUps}
               tone="amber"
-              description="Households with an unfinished follow-up plan"
+              description="Matching households with an unfinished plan"
             />
           </KpiHorizontal>
         </div>
 
 
 
-        {/* Filters - Single Row */}
-        <div className="mb-6 overflow-hidden rounded-[20px] border border-blue-100 bg-white p-4">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-2">
-            {/* Search Input */}
-            <div className="relative w-full lg:w-[220px] xl:w-[260px]">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search household ID or name"
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              />
+        <section aria-label="Filter household risk data" className="mb-6 rounded-card border border-brand-border bg-white p-4 shadow-sm dark:bg-card sm:p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-brand-ink">Filter households</h2>
+              <p className="mt-0.5 text-xs text-brand-gray">Metrics and lists update as filters change.</p>
             </div>
-
-            {/* Barangay Dropdown */}
-            <div className="w-full lg:w-[140px]">
-              <select
-                value={barangayFilter}
-                onChange={(e) => setBarangayFilter(e.target.value)}
-                className="h-9 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 pr-8 text-sm text-slate-900 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                style={{
-                  backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")",
-                  backgroundPosition: "right 0.5rem center",
-                  backgroundRepeat: "no-repeat",
-                  backgroundSize: "1.25rem 1.25rem",
-                }}
-              >
-                <option value="All">All Barangays</option>
-                {liveBarangays.map((b) => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
+            <button type="button" onClick={clearFilters} className="inline-flex h-9 items-center rounded-btn px-3 text-sm font-medium text-brand-blue transition hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/30">
+              Clear filters
+            </button>
+          </div>
+          <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 ${isBarangayScoped ? "2xl:grid-cols-7" : "2xl:grid-cols-8"}`}>
+            <label className={`${filterLabel} sm:col-span-2 lg:col-span-3 2xl:col-span-2`}>
+              <span className="min-h-5 leading-5">Search</span>
+              <span className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-gray" />
+                <input aria-label="Search household ID or name" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Household ID, head, or barangay" className={`${filterControl} pl-10 placeholder:text-brand-gray/70`} />
+              </span>
+            </label>
+            {!isBarangayScoped && (
+              <label className={filterLabel}><span className="min-h-5 leading-5">Barangay</span>
+                <select aria-label="Filter by barangay" value={barangayFilter} onChange={(e) => setBarangayFilter(e.target.value)} className={filterControl}>
+                  <option value="All">All barangays</option>
+                  {liveBarangays.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </label>
+            )}
+            <label className={filterLabel}><span className="min-h-5 leading-5">Cluster</span>
+              <select aria-label="Filter by cluster assignment" value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className={filterControl}>
+                <option value="all">All clusters</option>
+                {levelOrder.map((level) => <option key={level} value={level}>{RISK_LEVEL_LABELS[level]}</option>)}
               </select>
-            </div>
-
-            {/* Risk Level Dropdown */}
-            <div className="w-full lg:w-[135px]">
-              <select
-                value={levelFilter}
-                onChange={(e) => setLevelFilter(e.target.value)}
-                className="h-9 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 pr-8 text-sm text-slate-900 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                style={{
-                  backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")",
-                  backgroundPosition: "right 0.5rem center",
-                  backgroundRepeat: "no-repeat",
-                  backgroundSize: "1.25rem 1.25rem",
-                }}
-              >
-                <option value="all">All Risk Levels</option>
-                {levelOrder.map((l) => (
-                  <option key={l} value={l}>{RISK_LEVEL_LABELS[l]}</option>
-                ))}
+            </label>
+            <label className={filterLabel}><span className="min-h-5 leading-5">Indicator</span>
+              <select aria-label="Filter by environmental indicator" value={indicatorFilter} onChange={(e) => setIndicatorFilter(e.target.value)} className={filterControl}>
+                <option value="all">All indicators</option>
+                {indicatorOptions.map((factor) => <option key={factor} value={factor}>{factor}</option>)}
               </select>
-            </div>
-
-            {/* Indicators Dropdown */}
-            <div className="w-full lg:w-[135px]">
-              <select
-                value={indicatorFilter}
-                onChange={(e) => setIndicatorFilter(e.target.value)}
-                className="h-9 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 pr-8 text-sm text-slate-900 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                style={{
-                  backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")",
-                  backgroundPosition: "right 0.5rem center",
-                  backgroundRepeat: "no-repeat",
-                  backgroundSize: "1.25rem 1.25rem",
-                }}
-              >
-                <option value="all">All Indicators</option>
-                {indicatorOptions.map((k) => {
-                  return <option key={k} value={k}>{k}</option>;
-                })}
-              </select>
-            </div>
-
-            {/* Follow-up Status Dropdown */}
-            <div className="w-full lg:w-[130px]">
-              <select
-                value={followUpFilter}
-                onChange={(e) => setFollowUpFilter(e.target.value)}
-                className="h-9 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 pr-8 text-sm text-slate-900 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                style={{
-                  backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")",
-                  backgroundPosition: "right 0.5rem center",
-                  backgroundRepeat: "no-repeat",
-                  backgroundSize: "1.25rem 1.25rem",
-                }}
-              >
-                <option value="all">All Follow-up</option>
+            </label>
+            <label className={filterLabel}><span className="min-h-5 leading-5">Follow-up</span>
+              <select aria-label="Filter by follow-up status" value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className={filterControl}>
+                <option value="all">All statuses</option>
                 <option value="required">Required</option>
                 <option value="scheduled">Scheduled</option>
                 <option value="overdue">Overdue</option>
                 <option value="resolved">Resolved</option>
               </select>
-            </div>
-
-            {/* Date From */}
-            <div className="w-full lg:w-[130px]">
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-
-            {/* Date To */}
-            <div className="w-full lg:w-[130px]">
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-
-            {/* Clear Filters */}
-            <button
-              onClick={clearFilters}
-              className="inline-flex h-9 items-center px-3 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 lg:ml-auto"
-            >
-              Clear
-            </button>
-
-            {/* Apply Filters */}
-            <button
-              onClick={applyFilters}
-              className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-              Apply
-            </button>
+            </label>
+            <label className={`${filterLabel} 2xl:col-span-1`}><span className="min-h-5 leading-5">Visit from</span>
+              <input aria-label="Visit date from" type="date" value={startDate} max={endDate || undefined} onChange={(e) => setStartDate(e.target.value)} className={`${filterControl} px-2`} />
+            </label>
+            <label className={`${filterLabel} 2xl:col-span-1`}><span className="min-h-5 leading-5">Visit to</span>
+              <input aria-label="Visit date to" type="date" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} className={`${filterControl} px-2`} />
+            </label>
           </div>
-        </div>
+          <p className="mt-3 text-xs text-brand-gray" aria-live="polite">Showing <span className="font-semibold text-brand-ink">{filtered.length}</span> of {clusters.length} households</p>
+        </section>
 
         {/* Priority Households */}
-        <div id="priority-section" className="mb-6 rounded-[20px] border border-blue-100 bg-white p-6">
+        <div id="priority-section" className="mb-6 rounded-card border border-brand-border bg-white p-4 shadow-sm dark:bg-card sm:p-6">
           <div className="mb-5 flex items-end justify-between">
             <div>
-              <h2 className="font-display text-2xl font-medium text-slate-900">Priority and Intervention households</h2>
-              <p className="mt-1 text-sm text-slate-600">Households with one of these explicit cluster assignments</p>
+              <h2 className="text-lg font-semibold tracking-tight text-brand-ink">Priority and Intervention households</h2>
+              <p className="mt-1 text-sm text-brand-gray">Households with one of these explicit cluster assignments</p>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-sm text-slate-600">
-                <span className="font-semibold text-slate-900">{visiblePriorityList.length}</span> households
+              <span className="text-sm text-brand-gray">
+                <span className="font-semibold text-brand-ink">{visiblePriorityList.length}</span> households
               </span>
               <button
                 onClick={() => document.getElementById("records-section")?.scrollIntoView({ behavior: "smooth" })}
@@ -482,8 +384,8 @@ export default function HouseholdRiskOverview() {
 
           {visiblePriorityList.length === 0 ? (
             <div className="py-12 text-center">
-                <p className="text-sm font-medium text-slate-900">No Priority or Intervention cluster assignments are recorded.</p>
-                <p className="mt-1 text-sm text-slate-600">
+                <p className="text-sm font-medium text-brand-ink">No Priority or Intervention cluster assignments are recorded.</p>
+                <p className="mt-1 text-sm text-brand-gray">
                   {noData ? "Household cluster assignments will appear here when recorded." : "This list does not infer cluster assignments from environmental risk."}
               </p>
             </div>
@@ -491,14 +393,14 @@ export default function HouseholdRiskOverview() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px]">
                 <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50">
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">ID</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Head of Household</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Barangay</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Cluster Assignment</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Environmental Indicators</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Follow-up</th>
-                    <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Actions</th>
+                  <tr className="border-b border-brand-border bg-brand-bg dark:bg-hover">
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Head of Household</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Barangay</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Cluster Assignment</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Environmental Indicators</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Follow-up</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -506,10 +408,10 @@ export default function HouseholdRiskOverview() {
                     const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.UNASSESSED];
                     const indicators = (h.environmentalRisk?.factors || []).join(", ");
                     return (
-                      <tr key={h.id} className="transition-colors hover:bg-slate-50">
-                        <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{h.id}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-slate-900">{h.head || "—"}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{h.barangay || "—"}</td>
+                      <tr key={h.id} className="transition-colors hover:bg-brand-bg dark:bg-hover">
+                        <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-brand-gray">{h.id}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-brand-ink">{h.head || "—"}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-brand-gray">{h.barangay || "—"}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${tone.chip}`}>
                             <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
@@ -517,11 +419,11 @@ export default function HouseholdRiskOverview() {
                           </span>
                         </td>
                         <td className="max-w-xs px-4 py-3">
-                          <div className="truncate text-sm text-slate-700" title={indicators}>
+                          <div className="truncate text-sm text-brand-ink" title={indicators}>
                             {indicators || "No environmental indicators recorded"}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm text-slate-600">{h.workflowStatus || "—"}</td>
+                        <td className="px-4 py-3 text-sm text-brand-gray">{h.workflowStatus || "—"}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-right">
                           <div className="inline-flex items-center gap-2">
                             <Link
@@ -551,12 +453,12 @@ export default function HouseholdRiskOverview() {
         {/* Analytics Section */}
         <div id="overview-section" className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
           {/* Household Risk Distribution */}
-          <div className="rounded-[20px] border border-blue-100 bg-white p-6">
-            <h2 className="font-display text-xl font-medium text-slate-900">Household risk distribution</h2>
-            <p className="mt-1 text-sm text-slate-600">Household counts across current risk classifications</p>
+          <div className="rounded-card border border-brand-border bg-white p-4 shadow-sm dark:bg-card sm:p-6">
+            <h2 className="text-lg font-semibold tracking-tight text-brand-ink">Household risk distribution</h2>
+            <p className="mt-1 text-sm text-brand-gray">Risk classifications among {counts.total} matching households</p>
 
             {counts.total === 0 ? (
-              <p className="py-10 text-center text-sm text-slate-600">No distribution data available.</p>
+              <p className="py-10 text-center text-sm text-brand-gray">No distribution data available.</p>
             ) : (
               <div className="mt-6 space-y-4">
                 {levelOrder.map((level) => {
@@ -568,14 +470,14 @@ export default function HouseholdRiskOverview() {
                       <div className="mb-2 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
-                          <span className="text-sm font-medium text-slate-900">{RISK_LEVEL_LABELS[level]}</span>
+                          <span className="text-sm font-medium text-brand-ink">{RISK_LEVEL_LABELS[level]}</span>
                         </div>
                         <div className="flex items-baseline gap-2">
-                          <span className="text-sm font-semibold text-slate-900">{value}</span>
-                          <span className="text-xs text-slate-500">({percentage}%)</span>
+                          <span className="text-sm font-semibold text-brand-ink">{value}</span>
+                          <span className="text-xs text-brand-gray">({percentage}%)</span>
                         </div>
                       </div>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-brand-bg dark:bg-hover">
                         <div
                           className="h-full rounded-full"
                           style={{ width: `${percentage}%`, backgroundColor: tone.color }}
@@ -589,23 +491,23 @@ export default function HouseholdRiskOverview() {
           </div>
 
           {/* Top Household Risk Indicators */}
-          <div className="rounded-[20px] border border-blue-100 bg-white p-6">
-            <h2 className="font-display text-xl font-medium text-slate-900">Top household risk indicators</h2>
-            <p className="mt-1 text-sm text-slate-600">Most frequently recorded indicators across households</p>
+          <div className="rounded-card border border-brand-border bg-white p-4 shadow-sm dark:bg-card sm:p-6">
+            <h2 className="text-lg font-semibold tracking-tight text-brand-ink">Top household risk indicators</h2>
+            <p className="mt-1 text-sm text-brand-gray">Households with each indicator in the current filtered set</p>
 
             {indicatorBreakdown.length === 0 ? (
-              <p className="py-10 text-center text-sm text-slate-600">No risk indicators recorded yet.</p>
+              <p className="py-10 text-center text-sm text-brand-gray">No risk indicators recorded yet.</p>
             ) : (
               <div className="mt-6 space-y-4">
                 {indicatorBreakdown.map(([label, val]) => {
-                  const percentage = Math.round((val / maxIndicatorCount) * 100);
+                  const percentage = counts.total ? Math.round((val / counts.total) * 100) : 0;
                   return (
                     <div key={label}>
                       <div className="mb-2 flex items-center justify-between">
-                        <span className="text-sm font-medium text-slate-900">{label}</span>
-                        <span className="text-sm font-semibold text-slate-900">{val}</span>
+                        <span className="text-sm font-medium text-brand-ink">{label}</span>
+                        <span className="text-sm font-semibold text-brand-ink">{val} <span className="font-normal text-brand-gray">({percentage}%)</span></span>
                       </div>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-brand-bg dark:bg-hover">
                         <div
                           className="h-full rounded-full bg-blue-600"
                           style={{ width: `${percentage}%` }}
@@ -620,57 +522,56 @@ export default function HouseholdRiskOverview() {
         </div>
 
         {/* Risk by Barangay */}
-        <div id="barangays-section" className="mb-6 rounded-[20px] border border-blue-100 bg-white p-6">
-          <h2 className="font-display text-xl font-medium text-slate-900">Risk by barangay</h2>
-          <p className="mt-1 text-sm text-slate-600">Risk distribution comparison across all barangays</p>
+        <div id="barangays-section" className="mb-6 rounded-card border border-brand-border bg-white p-4 shadow-sm dark:bg-card sm:p-6">
+          <h2 className="text-lg font-semibold tracking-tight text-brand-ink">Risk by barangay</h2>
+          <p className="mt-1 text-sm text-brand-gray">Risk distribution among households matching the current filters</p>
 
           <div className="mt-6 overflow-x-auto">
             <table className="w-full min-w-[640px]">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50">
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Barangay</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Priority</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Intervention</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Monitor</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Stable</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Unassigned</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Total</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Action</th>
+                <tr className="border-b border-brand-border bg-brand-bg dark:bg-hover">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Barangay</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Priority</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Intervention</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Monitor</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Stable</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Unassigned</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Total</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {byBarangay.map(([name, c]) => (
-                  <tr key={name} className="transition-colors hover:bg-slate-50">
-                    <td className="px-4 py-3 text-sm font-medium text-slate-900">{name}</td>
+                  <tr key={name} className="transition-colors hover:bg-brand-bg dark:bg-hover">
+                    <td className="px-4 py-3 text-sm font-medium text-brand-ink">{name}</td>
                     <td className="px-4 py-3 text-right">
-                      <span className={`text-sm font-semibold ${c.priority > 0 ? "text-rose-600" : "text-slate-400"}`}>
+                      <span className={`text-sm font-semibold ${c.priority > 0 ? "text-rose-600" : "text-brand-gray"}`}>
                         {c.priority}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className={`text-sm font-semibold ${c.intervention > 0 ? "text-orange-600" : "text-slate-400"}`}>
+                      <span className={`text-sm font-semibold ${c.intervention > 0 ? "text-orange-600" : "text-brand-gray"}`}>
                         {c.intervention}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className={`text-sm font-semibold ${c.monitor > 0 ? "text-blue-600" : "text-slate-400"}`}>
+                      <span className={`text-sm font-semibold ${c.monitor > 0 ? "text-blue-600" : "text-brand-gray"}`}>
                         {c.monitor}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className={`text-sm font-semibold ${c.stable > 0 ? "text-emerald-600" : "text-slate-400"}`}>
+                      <span className={`text-sm font-semibold ${c.stable > 0 ? "text-emerald-600" : "text-brand-gray"}`}>
                         {c.stable}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className="text-sm font-semibold text-slate-500">{c.unassessed}</span>
+                      <span className="text-sm font-semibold text-brand-gray">{c.unassessed}</span>
                     </td>
-                    <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900">{c.total}</td>
+                    <td className="px-4 py-3 text-right text-sm font-semibold text-brand-ink">{c.total}</td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => {
                           setBarangayFilter(name);
-                          setAppliedFilters((current) => ({ ...current, barangayFilter: name }));
                           window.scrollTo({ top: 0, behavior: "smooth" });
                         }}
                         className="text-sm font-medium text-blue-600 hover:text-blue-700"
@@ -682,7 +583,7 @@ export default function HouseholdRiskOverview() {
                 ))}
                 {byBarangay.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-600">
+                    <td colSpan={8} className="px-4 py-10 text-center text-sm text-brand-gray">
                       No barangay data available.
                     </td>
                   </tr>
@@ -693,47 +594,47 @@ export default function HouseholdRiskOverview() {
         </div>
 
         {/* All Household Records */}
-        <div id="records-section" className="rounded-[20px] border border-blue-100 bg-white p-6">
+        <div id="records-section" className="rounded-card border border-brand-border bg-white p-4 shadow-sm dark:bg-card sm:p-6">
           <div className="mb-5 flex items-end justify-between">
             <div>
-              <h2 className="font-display text-xl font-medium text-slate-900">All household records</h2>
-              <p className="mt-1 text-sm text-slate-600">Complete registry of monitored households</p>
+              <h2 className="text-lg font-semibold tracking-tight text-brand-ink">All household records</h2>
+              <p className="mt-1 text-sm text-brand-gray">Complete registry of monitored households</p>
             </div>
-            <span className="text-sm font-semibold text-slate-900">{filtered.length} households</span>
+            <span className="text-sm font-semibold text-brand-ink">{filtered.length} households</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px]">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50">
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Household</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Barangay</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Risk Level</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Indicators</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Last Visit</th>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">Follow-up</th>
-                  <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500">Action</th>
+                <tr className="border-b border-brand-border bg-brand-bg dark:bg-hover">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Household</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Barangay</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Risk Level</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Indicators</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Last Visit</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-brand-gray">Follow-up</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-brand-gray">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {paginatedData.map((h) => {
                   const tone = levelTone[h.risk?.level] || levelTone[RISK_LEVELS.UNASSESSED];
                   return (
-                    <tr key={h.id} className="transition-colors hover:bg-slate-50">
+                    <tr key={h.id} className="transition-colors hover:bg-brand-bg dark:bg-hover">
                       <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-slate-900">{h.head} Household</div>
-                        <div className="mt-0.5 font-mono text-xs text-slate-500">{h.id}</div>
+                        <div className="text-sm font-medium text-brand-ink">{h.head} Household</div>
+                        <div className="mt-0.5 font-mono text-xs text-brand-gray">{h.id}</div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-600">{h.barangay}</td>
+                      <td className="px-4 py-3 text-sm text-brand-gray">{h.barangay}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${tone.chip}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
                           {clusterLabel(h.risk?.level)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-900">{h.environmentalRisk?.factors?.length ?? 0}</td>
-                      <td className="px-4 py-3 text-sm text-slate-600">{daysAgo(h.lastHouseholdVisit)}</td>
-                      <td className="px-4 py-3 text-sm text-slate-600">{h.workflowStatus || "—"}</td>
+                      <td className="px-4 py-3 text-sm text-brand-ink">{h.environmentalRisk?.factors?.length ?? 0}</td>
+                      <td className="px-4 py-3 text-sm text-brand-gray">{daysAgo(h.lastHouseholdVisit)}</td>
+                      <td className="px-4 py-3 text-sm text-brand-gray">{h.workflowStatus || "—"}</td>
                       <td className="px-4 py-3 text-right">
                         <Link
                           to={householdDetailPath(h.id)}
@@ -750,10 +651,10 @@ export default function HouseholdRiskOverview() {
           </div>
 
           {filtered.length === 0 && !noData && (
-            <p className="px-4 py-10 text-center text-sm text-slate-600">No households match your filters.</p>
+            <p className="px-4 py-10 text-center text-sm text-brand-gray">No households match your filters.</p>
           )}
           {filtered.length === 0 && noData && (
-            <p className="px-4 py-10 text-center text-sm text-slate-600">No household risk data recorded yet.</p>
+            <p className="px-4 py-10 text-center text-sm text-brand-gray">No household risk data recorded yet.</p>
           )}
 
           {/* Pagination */}
@@ -773,8 +674,8 @@ export default function HouseholdRiskOverview() {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-4 right-4 z-50 rounded-lg border border-blue-100 bg-white px-4 py-3 shadow-lg">
-          <span className="text-sm text-slate-900">{toast}</span>
+        <div className="fixed bottom-4 right-4 z-50 rounded-card border border-brand-border bg-white px-4 py-3 shadow-lg dark:bg-card">
+          <span className="text-sm text-brand-ink">{toast}</span>
         </div>
       )}
 

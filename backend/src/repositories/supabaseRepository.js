@@ -647,6 +647,9 @@ const verificationLogFromRow = (row) => ({
 // fields. Keep migration-dependent columns out of this projection so analytics
 // remains readable while the live database is behind those optional migrations.
 const RESIDENT_OPTIONAL_COLUMNS = new Set([
+  // Age is derived from birth_date in application responses; some deployed
+  // residents schemas do not persist it as a database column.
+  'age',
   'risk_score',
   'risk_level',
   'risk_factors',

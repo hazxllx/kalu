@@ -382,6 +382,13 @@ export const NAV = {
       group: "Monitoring",
 children: [
         {
+          label: "Household Risk Overview",
+          icon: "Home",
+          path: "/app/health_supervisor/households/risk-overview",
+          activePaths: ["/app/health_supervisor/households"],
+          permission: "households.view",
+        },
+        {
           label: "Schedule Calendar",
           icon: "CalendarDays",
           path: "/app/health_supervisor/followup-calendar",

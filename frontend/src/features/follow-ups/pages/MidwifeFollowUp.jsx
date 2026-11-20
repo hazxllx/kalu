@@ -1174,10 +1174,9 @@ export default function MidwifeFollowUp() {
           <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="xl:col-span-3" />
           <div className="grid grid-cols-1 gap-2 sm:col-span-2 sm:grid-cols-2 xl:col-span-5">
             <select
-              aria-label="Follow-up status"
+              aria-label="Follow-up status filter"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              aria-label="Follow-up status filter"
               className="h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
             >
               {FOLLOW_UP_STATUS_FILTERS.map((status) => (
@@ -1185,10 +1184,9 @@ export default function MidwifeFollowUp() {
               ))}
             </select>
             <select
-              aria-label="Follow-up priority"
+              aria-label="Follow-up priority filter"
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
-              aria-label="Follow-up priority filter"
               className="h-10 w-full rounded-btn border border-brand-border bg-white px-3 text-sm outline-none focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
             >
               <option value="All">All Priorities</option>
