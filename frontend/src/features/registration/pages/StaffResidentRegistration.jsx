@@ -1,4 +1,4 @@
-﻿import React, { useState, useCallback } from "react";
+﻿import React, { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Loader2 } from "lucide-react";
 import { residentsApi } from "@/services/api";
@@ -15,6 +15,7 @@ import {
 import { BARANGAYS } from "@/lib/barangays";
 import { ButtonSelectGroup } from "@/components/system";
 import SearchableSelect from "@/components/common/SearchableSelect";
+import { useAuth } from "@/context/AuthContext";
 
 const labelClass = "block text-sm font-medium text-brand-ink mb-1.5";
 const inputClass = (error) => `w-full rounded-btn border ${error ? "border-brand-danger" : "border-brand-border"} bg-white px-3 py-2 text-sm placeholder:text-brand-gray focus:outline-none focus:ring-1 focus:ring-brand-blue`;
@@ -33,9 +34,11 @@ const errorClass = "text-xs text-brand-danger mt-1";
  */
 export default function StaffResidentRegistration({ isOpen = true, onClose, onSuccess }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState(null);
+  const [barangayOptions, setBarangayOptions] = useState(BARANGAYS);
   
   // Form state matching PHN modal structure
   const [form, setForm] = useState({
@@ -55,6 +58,31 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
     createAccount: false,
     email: "",
   });
+
+  const assignedBarangay = ["health_supervisor", "bhw"].includes(user?.role)
+    ? String(user?.assignedBarangay || user?.barangay || "").trim()
+    : "";
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let active = true;
+    const loadBarangays = async () => {
+      try {
+        const result = await residentsApi.directoryFilters();
+        if (!active) return;
+        const names = result?.barangays?.map((item) => item.name).filter(Boolean);
+        if (names?.length) setBarangayOptions(names);
+      } catch {
+        // The server still enforces municipality scope; keep the approved offline list for continuity.
+      }
+    };
+    void loadBarangays();
+    return () => { active = false; };
+  }, [isOpen, user?.id]);
+
+  useEffect(() => {
+    if (assignedBarangay) setForm((prev) => ({ ...prev, barangay: assignedBarangay }));
+  }, [assignedBarangay]);
 
   // Helpers
   const set = (field) => (value) => setForm((prev) => ({ ...prev, [field]: value }));
@@ -77,8 +105,17 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
   };
 
   const onContactChange = (e) => {
-    const val = e.target.value.replace(/\D/g, "").slice(0, 11);
+    const val = e.target.value.replace(/\D/g, "");
     set("contact")(val);
+  };
+
+  const onContactPaste = (e) => {
+    const pasted = e.clipboardData.getData("text");
+    const digits = pasted.replace(/\D/g, "");
+    if (digits.length > 11) {
+      e.preventDefault();
+      setErrors((prev) => ({ ...prev, contact: "Contact number must be exactly 11 digits and start with 09." }));
+    }
   };
 
   // Validation
@@ -226,10 +263,9 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                  </div>
                  <div>
                    <label className={labelClass}>Age</label>
-                   <input
-                     type="text"
-                     value={form.age}
-                     onChange={() => {}}
+                    <input
+                      type="text"
+                      value={form.age}
                      placeholder="Auto-calculated"
                      readOnly
                      className={inputClass(false)}
@@ -274,12 +310,15 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                  <div>
                    <label className={labelClass}>Contact Number</label>
-                   <input
-                     type="tel"
-                     value={form.contact}
-                     onChange={onContactChange}
-                     placeholder="e.g. 09171234567"
-                     maxLength="11"
+                    <input
+                      type="tel"
+                      value={form.contact}
+                      onChange={onContactChange}
+                      onPaste={onContactPaste}
+                      placeholder="e.g. 09171234567"
+                      maxLength={11}
+                      inputMode="numeric"
+                      autoComplete="tel-national"
                      className={inputClass(Boolean(errors.contact))}
                    />
                    {errors.contact && <p className={errorClass}>{errors.contact}</p>}
@@ -288,9 +327,10 @@ export default function StaffResidentRegistration({ isOpen = true, onClose, onSu
                    <label className={labelClass}>Barangay *</label>
                    <SearchableSelect
                      required
-                     value={form.barangay}
-                     onChange={set("barangay")}
-                     options={BARANGAYS}
+                      value={form.barangay}
+                      onChange={set("barangay")}
+                      options={assignedBarangay ? [assignedBarangay] : barangayOptions}
+                      disabled={Boolean(assignedBarangay)}
                      placeholder="Search barangay..."
                      emptyText="No barangay found."
                      error={errors.barangay}

@@ -8,8 +8,7 @@ import {
   isEmail,
   isFutureDateOnly,
   isValidPersonName,
-  isPhonePH,
-  normalizePhone,
+  isStrictMobile,
   normalizeEmail,
   toZone,
   invalid,
@@ -57,9 +56,9 @@ export const registrationDateReference = (now = new Date()) => {
 
 // Accept common PH formatting, but persist one canonical 09XXXXXXXXX value.
 export const normalizeRegistrationMobile = (value) => {
-  const normalized = normalizePhone(value);
-  if (!isPhonePH(normalized)) return null;
-  return normalized.startsWith('+63') ? `0${normalized.slice(3)}` : normalized;
+  const normalized = text(value);
+  if (!isStrictMobile(normalized)) return null;
+  return normalized;
 };
 
 /**

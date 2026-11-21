@@ -4,6 +4,18 @@ import { toVisit, fromVisit } from '../src/services/consultations.service.js';
 
 const user = { id: 'u1', role: 'health_supervisor', name: 'HS One' };
 
+test('multiline clinical findings never infer a diagnosis from the last line', async () => {
+  const visit = toVisit({ clinicalFindingsDiagnosis: 'Alert and oriented\nChest clear', bloodPressure: '120 / 80' }, user, 'R1');
+  assert.equal(visit.consultationDetails.findings, 'Alert and oriented\nChest clear');
+  assert.equal(visit.consultationDetails.diagnosis, '');
+  assert.equal(visit.vitals.bp, '120/80');
+  const result = await fromVisit({ ...visit, resident: {} }, null);
+  assert.equal(result.diagnosis, '');
+  assert.equal(result.findings, 'Alert and oriented\nChest clear');
+  const explicit = toVisit({ clinicalFindingsDiagnosis: 'Chest clear\nDiagnosis: Recorded assessment' }, user, 'R1');
+  assert.equal(explicit.consultationDetails.diagnosis, 'Recorded assessment');
+});
+
 test('consultation metadata retains recorded zone and responsible personnel separately from the recorder', async () => {
   const client = {
     from() {

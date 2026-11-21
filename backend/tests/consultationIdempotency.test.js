@@ -180,6 +180,49 @@ test('clinical delimiters, exact date/time, medications, resident and authoritat
   assert.equal(toVisit({ consultationDate: PAYLOAD.consultationDate, pulseRate: '', height: '', weight: '' }, USER, PAYLOAD.residentId).vitals.hr, null);
 });
 
+test('consultations save and reload with either or both clinical text fields empty', async () => {
+  const { findings, diagnosis, treatmentGiven, remarks, followUpRequired, nextVisitDate, referralRequired, ...base } = PAYLOAD;
+  const cases = [
+    [{ clinicalFindingsDiagnosis: '', treatmentGiven }, '', '', treatmentGiven],
+    [{ findings, treatmentGiven: '' }, findings, '', ''],
+    [{ clinicalFindingsDiagnosis: '', treatmentGiven: '' }, '', '', ''],
+    [{ clinicalFindingsDiagnosis: null, treatmentGiven: null }, '', '', ''],
+    [{}, '', '', ''],
+    [{ clinicalFindingsDiagnosis: `Diagnosis: ${diagnosis}` }, '', diagnosis, ''],
+  ];
+  for (const [index, [fields, expectedFindings, expectedDiagnosis, expectedTreatment]] of cases.entries()) {
+    const clientOperationKey = `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${index}`;
+    const saved = await create(input({ payload: { ...base, ...fields, clientOperationKey } }));
+    const loaded = await get({ ...input(), id: saved.id });
+    assert.equal(loaded.findings, expectedFindings);
+    assert.equal(loaded.diagnosis, expectedDiagnosis);
+    assert.equal(loaded.treatmentGiven, expectedTreatment);
+    assert.equal(loaded.followUpRequired, 'No');
+    assert.equal(loaded.referralRequired, 'No');
+    assert.equal(loaded.remarks, '');
+    assert.equal(loaded.medications[0].genericName, PAYLOAD.medications[0].genericName);
+  }
+  assert.equal(store.data.visits.length, cases.length);
+  assert.equal(store.data.followUps?.length ?? 0, 0);
+});
+
+test('editing through the simplified form preserves historical follow-up, referral and remarks', async () => {
+  const saved = await create(input());
+  const { followUpRequired, nextVisitDate, referralRequired, remarks, findings, diagnosis, ...base } = PAYLOAD;
+  const updated = await update(edit({
+    payload: { ...base, consultationDate: '2026-11-13', clinicalFindingsDiagnosis: '', treatmentGiven: null },
+    syncFollowUp: () => assert.fail('Updating other fields must not reschedule an existing follow-up'),
+  }));
+  assert.equal(updated.findings, '');
+  assert.equal(updated.treatmentGiven, '');
+  const loaded = await get({ ...input(), id: saved.id });
+  assert.equal(loaded.followUpRequired, followUpRequired);
+  assert.equal(loaded.nextVisitDate, nextVisitDate);
+  assert.equal(loaded.referralRequired, referralRequired);
+  assert.equal(loaded.remarks, remarks);
+  assert.equal(loaded.followUps[0].scheduled_date, nextVisitDate);
+});
+
 test('original keys and resident cannot be reassigned on update; every existing workflow status remains intact', async () => {
   await create(input());
   for (const status of ['draft', 'submitted', 'received', 'in_review', 'referred', 'completed']) {

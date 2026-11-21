@@ -108,55 +108,19 @@ export const updateRolePermissions = async ({ user, role, permissions, supabase 
   if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) {
     throw ApiError.badRequest('A permissions map is required.');
   }
-
-  // Current values so we only audit actual changes.
-  const { data: current, error: readError } = await supabase
-    .from(TABLE)
-    .select('permission_id, granted')
-    .eq('role', role);
-  throwOnError(readError, 'Could not load current permissions');
-  const previous = new Map((current || []).map((r) => [r.permission_id, Boolean(r.granted)]));
-
-  const now = new Date().toISOString();
-  const rows = Object.entries(permissions).map(([permission_id, granted]) => ({
-    role,
-    permission_id,
-    granted: Boolean(granted),
-    updated_by: user.id,
-    updated_at: now,
-  }));
-
-  if (rows.length) {
-    const { error: upsertError } = await supabase
-      .from(TABLE)
-      .upsert(rows, { onConflict: 'role,permission_id' });
-    throwOnError(upsertError, 'Could not save role permissions');
+  if (Object.values(permissions).some((granted) => typeof granted !== 'boolean')) {
+    throw ApiError.badRequest('Permission values must be true or false.');
+  }
+  if (role === ROLES.ADMIN && permissions['accounts.roles.manage'] === false) {
+    throw ApiError.conflict('The administrator role must retain permission management access.');
   }
 
-  // Audit only the permissions whose value actually changed.
-  const auditRows = rows
-    .filter((r) => previous.get(r.permission_id) !== r.granted)
-    .map((r) => ({
-      actor_id: user.id,
-      action: r.granted ? 'permission.grant' : 'permission.revoke',
-      entity_type: 'role_permissions',
-      entity_id: role,
-      metadata: {
-        role,
-        permissionId: r.permission_id,
-        previousValue: previous.get(r.permission_id) ?? null,
-        newValue: r.granted,
-      },
-    }));
-  if (auditRows.length) {
-    const { error: auditError } = await supabase.from('health_audit_logs').insert(auditRows);
-    // Auditing must not lose the change; surface a failure rather than silently drop it.
-    throwOnError(auditError, 'Could not record the permission-change audit entry');
-  }
-
-  const result = {};
-  for (const r of rows) result[r.permission_id] = r.granted;
-  return { role, permissions: result, changed: auditRows.length };
+  const { data, error } = await supabase.rpc('admin_save_role_permissions', {
+    p_actor_id: user.id, p_role: role, p_permissions: permissions,
+  });
+  if (error?.code === '42501') throw ApiError.forbidden('You do not have permission to manage role permissions.');
+  throwOnError(error, 'Could not save role permissions and audit records');
+  return data;
 };
 
 export default { getPermissionMatrix, updateRolePermissions };

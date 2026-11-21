@@ -96,8 +96,11 @@ export const filterFollowUps = (rows = [], { search = "", status = "All", priori
   });
 };
 
-export const isCalendarVisibleFollowUp = (schedule) =>
-  !["Completed", "Cancelled", "Missed", "Rejected"].includes(schedule?.status);
+export const isCalendarVisibleFollowUp = (schedule) => {
+  if (["Completed", "Cancelled", "Missed", "Rejected"].includes(schedule?.status)) return false;
+  if (!schedule?.requiresResidentResponse) return true;
+  return schedule.confirmationStatus === "Confirmed";
+};
 
 /** Local date → "YYYY-MM-DD" key. */
 export const toKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

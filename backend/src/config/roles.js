@@ -86,6 +86,7 @@ export const FEATURE_ROLES = Object.freeze({
   triage: [ROLES.RHU_PERSONNEL, ROLES.HEALTH_SUPERVISOR],
   referrals: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN, ROLES.MHO, ROLES.RHU_PERSONNEL],
   followUps: [ROLES.HEALTH_SUPERVISOR, ROLES.PHN],
+  calendarActivities: [ROLES.HEALTH_SUPERVISOR],
 
   // Resident -> RHU -> PHN submission workflow.
   //

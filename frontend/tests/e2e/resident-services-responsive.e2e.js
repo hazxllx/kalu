@@ -33,10 +33,21 @@ test.beforeAll(async () => {
     '@/context/AuthContext': `export const useAuth = () => ({ user: { id: 'synthetic-resident', name: 'Synthetic Resident', role: 'resident', barangay: 'Synthetic Barangay' } });`,
     '@/services/api': `
       let row = ${JSON.stringify(followUp)};
+      let scheduleRequests = [];
       export const residentFollowUpsApi = {
-        list: async () => ({ rows: [row] }),
-        approve: async id => { window.approved = id; row = { ...row, confirmationStatus: 'Confirmed' }; },
-        reject: async (id, reason) => { window.rejected = { id, reason }; row = { ...row, confirmationStatus: 'Rejected', rejectionReason: reason }; },
+        list: async () => {
+          if (window.failFirstFollowUpLoad && !window.followUpLoadFailedOnce) {
+            window.followUpLoadFailedOnce = true;
+            throw Error('Synthetic API outage');
+          }
+          return { rows: window.emptyFollowUps ? [] : [row], referrals: [], scheduleRequests };
+        },
+        request: async request => {
+          window.scheduleRequest = request;
+          scheduleRequests = [{ follow_up_id: request.targetId, request_type: request.requestType, status: 'Pending Approval', reason: request.reason }];
+          row = { ...row, scheduleResponseStatus: request.requestType === 'attendance' ? 'Attendance Confirmed' : 'Cancellation Requested', confirmationStatus: request.requestType === 'attendance' ? 'Confirmed' : 'Cancellation Requested' };
+          return scheduleRequests[0];
+        },
       };
       export const visitPlansApi = {
         directory: async () => ({ facilities: [{ type: 'BHC', name: 'Synthetic Barangay', services: [${JSON.stringify(service)}] }] }),
@@ -66,12 +77,16 @@ test.beforeAll(async () => {
   css = styles.css;
 });
 
-async function mount(page, screen) {
+async function mount(page, screen, { failFirstFollowUpLoad = false, emptyFollowUps = false } = {}) {
   await page.route('**/*', route => route.abort());
   await page.setContent('<div class="lg:pl-72"><main class="app-main px-3 py-5 md:px-8"><div id="root"></div></main></div>');
   await page.addStyleTag({ content: css });
   await page.addScriptTag({ content: script });
-  await page.evaluate(screen => window.mount(screen), screen);
+  await page.evaluate(({ screen: target, failFirstFollowUpLoad: shouldFail, empty }) => {
+    window.failFirstFollowUpLoad = shouldFail;
+    window.emptyFollowUps = empty;
+    window.mount(target);
+  }, { screen, failFirstFollowUpLoad, empty: emptyFollowUps });
 }
 
 async function fits(page, locator) {
@@ -98,6 +113,8 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await expect(page.getByRole('dialog')).toBeVisible();
       await fits(page, page.getByRole('dialog').locator('.relative'));
       await page.getByRole('button', { name: 'Close image preview' }).click();
+      await expect(page.getByRole('button', { name: /View memorandum/ })).toBeHidden();
+      await page.getByRole('button', { name: 'View details', exact: true }).click();
       await page.getByRole('button', { name: /View memorandum/ }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await page.keyboard.press('Escape');
@@ -108,8 +125,11 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await page.getByLabel('Facility', { exact: true }).selectOption('rhu');
       await expect(page.getByText('No services match these filters.')).toBeVisible();
       await page.getByLabel('Facility', { exact: true }).selectOption('bhc');
-      await page.getByRole('button', { name: 'View more' }).click();
-      await expect(page.getByRole('button', { name: 'View less' })).toBeVisible();
+      await page.getByRole('button', { name: 'View details', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Show less', exact: true })).toBeVisible();
+      await fits(page);
+      await page.getByRole('button', { name: 'Show less', exact: true }).click();
+      await expect(page.getByRole('button', { name: /View memorandum/ })).toBeHidden();
       await page.getByRole('button', { name: 'Register', exact: true }).click();
       let dialog = page.getByRole('dialog');
       await expect(dialog.getByRole('button', { name: 'Confirm Registration' })).toBeEnabled();
@@ -137,40 +157,60 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await fits(page);
     });
 
-    test('reminder details, close, required reason and submission', async ({ page }) => {
+    test('follow-up details, close, cancellation reason and schedule request', async ({ page }) => {
+      const pageErrors = [];
+      page.on('pageerror', error => pageErrors.push(error.message));
       await mount(page, 'reminders');
       await page.getByRole('button', { name: purpose }).click();
       const dialog = page.getByRole('dialog', { name: 'Follow-up Details' });
       await expect(dialog).toContainText(followUp.instructions);
+      await expect(dialog).toContainText(followUp.location);
+      await expect(dialog).toContainText('9:00 AM');
       await fits(page, dialog.locator('.ui-card'));
       await dialog.getByRole('button', { name: 'Close', exact: true }).first().click();
       await expect(dialog).toHaveCount(0);
-      await page.getByRole('button', { name: "Can't Attend", exact: true }).click();
-      const reject = page.getByRole('dialog', { name: "Can't Attend", exact: true });
-      await expect(reject.getByRole('button', { name: 'Submit' })).toBeDisabled();
-      await reject.getByLabel('Reason').fill('Synthetic scheduling conflict');
-      await reject.getByRole('button', { name: 'Submit' }).click();
-      await expect(reject).toHaveCount(0);
-      expect(await page.evaluate(() => window.rejected)).toEqual({ id: followUp.id, reason: 'Synthetic scheduling conflict' });
-      await expect(page.getByText('You rejected this follow-up:')).toBeVisible();
+      await page.getByRole('button', { name: 'Request Cancellation', exact: true }).click();
+      const cancellation = page.getByRole('dialog', { name: 'Request Cancellation', exact: true });
+      await expect(cancellation.getByRole('button', { name: 'Send Request' })).toBeDisabled();
+      await cancellation.getByLabel('Reason').fill('Synthetic scheduling conflict');
+      await cancellation.getByRole('button', { name: 'Send Request' }).click();
+      await expect(cancellation).toHaveCount(0);
+      expect(await page.evaluate(() => window.scheduleRequest)).toEqual({
+        targetType: 'follow_up', targetId: followUp.id, requestType: 'cancellation',
+        proposedSchedule: null, reason: 'Synthetic scheduling conflict',
+      });
+      await expect(page.getByText(/Schedule request pending staff review/)).toBeVisible();
+      expect(pageErrors).toEqual([]);
       await fits(page);
     });
 
-    test('reminder confirmation executes its original action', async ({ page }) => {
+    test('attendance confirmation submits through the schedule-request workflow', async ({ page }) => {
+      const pageErrors = [];
+      page.on('pageerror', error => pageErrors.push(error.message));
       await mount(page, 'reminders');
-      await page.getByRole('button', { name: 'Confirm', exact: true }).click();
-      const dialog = page.getByRole('dialog', { name: 'Confirm Follow-up' });
-      await fits(page, dialog.locator('.ui-card'));
-      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-      await page.getByRole('button', { name: 'Confirm', exact: true }).click();
-      await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
-      await expect(dialog).toHaveCount(0);
-      expect(await page.evaluate(() => window.approved)).toBe(followUp.id);
+      await page.getByRole('button', { name: 'Confirm Attendance', exact: true }).click();
+      expect(await page.evaluate(() => window.scheduleRequest)).toEqual({
+        targetType: 'follow_up', targetId: followUp.id, requestType: 'attendance',
+        proposedSchedule: null, reason: '',
+      });
       await expect(page.getByText('Confirmed', { exact: true })).toBeVisible();
+      expect(pageErrors).toEqual([]);
       await fits(page);
     });
   });
 }
+
+test('follow-ups show a friendly retry state and a real empty state', async ({ page }) => {
+  await mount(page, 'reminders', { failFirstFollowUpLoad: true });
+  await expect(page.getByText("We couldn't load your follow-ups. Check your connection and try again.")).toBeVisible();
+  await page.getByRole('button', { name: 'Try Again' }).click();
+  await expect(page.getByRole('button', { name: purpose })).toBeVisible();
+});
+
+test('follow-ups show a clear empty state when the API returns no records', async ({ page }) => {
+  await mount(page, 'reminders', { emptyFollowUps: true });
+  await expect(page.getByText('No follow-ups scheduled yet.')).toBeVisible();
+});
 
 test('registration footer stays reachable with a reduced mobile viewport height', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 440 });

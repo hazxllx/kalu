@@ -32,6 +32,8 @@ public; everything else requires authentication.
   follow-up validation.
 - `/api/operational` — follow-ups, TCL, maternal records, immunizations, and
   notifications (staff writes, per-recipient notification reads).
+- `/api/calendar-activities` — Health Supervisor personal calendar activities
+  (private CRUD, optionally linked to a resident in the caller's barangay).
 - `/api/resident` — resident self-service follow-ups (list/read own,
   approve/reject); ownership is derived from the session.
 - `/api/referrals` — referral coordination (`health_referrals`), barangay-scoped.

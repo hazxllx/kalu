@@ -16,11 +16,13 @@ import verificationsRoutes from './verifications.routes.js';
 import documentsRoutes from './documents.routes.js';
 import transferRoutes from './transfer.routes.js';
 import consultationsRoutes from './consultations.routes.js';
+import laboratoryRoutes from './laboratory.routes.js';
 import operationalRoutes from './operational.routes.js';
 import programFormsRoutes from './programForms.routes.js';
 import residentFollowupsRoutes from './residentFollowups.routes.js';
 import scheduleRequestsRoutes from './scheduleRequests.routes.js';
 import visitPlansRoutes from './visitPlans.routes.js';
+import calendarActivitiesRoutes from './calendarActivities.routes.js';
 import referralsRoutes from './referrals.routes.js';
 import m1Routes from './m1.routes.js';
 import usersRoutes from './users.routes.js';
@@ -35,6 +37,7 @@ import guardianLinksRoutes from './guardianLinks.routes.js';
 import documentBrandingRoutes from './documentBranding.routes.js';
 import medicinesRoutes from './medicines.routes.js';
 import bpConfigRoutes from './bpConfig.routes.js';
+import clinicalAssessmentProtocolRoutes from './clinicalAssessmentProtocol.routes.js';
 import createResourceRouter from '../utils/resourceRouter.js';
 
 /**
@@ -66,6 +69,7 @@ router.use('/registration', registrationRoutes);
 router.use('/consultations', consultationsRoutes);
 // Compatibility path shares the real visit controller/service and permissions.
 router.use('/health-records', consultationsRoutes);
+router.use('/lab-results', laboratoryRoutes);
 
 // Operational staff workflows — follow-ups, notifications, and daily task coordination (`/api/operational`).
 router.use('/operational', operationalRoutes);
@@ -97,6 +101,7 @@ router.use('/schedule-requests', scheduleRequestsRoutes);
 // intent action — NOT the staff appointment system. Ownership + scope derived
 // from the session; a soft signal notifies the barangay health worker.
 router.use('/resident', visitPlansRoutes);
+router.use('/calendar-activities', calendarActivitiesRoutes);
 
 // Referral coordination — real Supabase-backed workflow (health_referrals):
 // scoped sender coordination and current-assignee decisions/history; no hard
@@ -138,6 +143,7 @@ router.use('/roles', rolesRoutes);
 // roles; written only by the System Administrator, audited, and propagated to
 // resident records on every change.
 router.use('/risk-config', riskConfigRoutes);
+router.use('/clinical-assessment-protocol', clinicalAssessmentProtocolRoutes);
 
 // Medicine catalog (generic-first, admin-managed) + blood-pressure threshold
 // configuration. Catalog + thresholds are read by clinical roles for the

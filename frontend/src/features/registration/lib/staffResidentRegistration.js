@@ -22,10 +22,17 @@ export function calcStaffRegistrationAge(dob, now = new Date()) {
   ) {
     return '';
   }
-  let age = now.getUTCFullYear() - year;
+  const todayParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const today = (type) => Number(todayParts.find((part) => part.type === type)?.value);
+  let age = today('year') - year;
   if (
-    now.getUTCMonth() < month - 1
-    || (now.getUTCMonth() === month - 1 && now.getUTCDate() < day)
+    today('month') < month
+    || (today('month') === month && today('day') < day)
   ) {
     age -= 1;
   }

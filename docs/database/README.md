@@ -63,6 +63,12 @@ appear in a `VITE_` variable.
 - The Express API verifies the Supabase JWT, loads the profile, and enforces the
   role and barangay scope in middleware. It uses the service-role client for
   trusted writes; RLS remains the defense for any direct user-token access.
+- Calendar activity requests use a user-scoped Supabase client so the owner-only
+  table policies apply to API reads and writes as well.
+- `calendar_activities` is private to its creating Health Supervisor: RLS checks
+  the active session, role, owner, and active barangay assignment. Optional
+  resident links must remain within that barangay; linked residents do not gain
+  access to activity notes.
 - Public registration can insert an account application only in the `pending`
   state; reads and decisions are staff-only, so self-approval is not possible.
 - Uploaded documents live in a private storage bucket and are reached only

@@ -149,11 +149,6 @@ export default function RegistrationTypeSelection() {
               <h1 className="mt-1.5 font-display text-[20px] font-bold text-brand-dark md:text-[22px]">
                 Select the applicable registration form
               </h1>
-              <p className="mt-1 text-[12.5px] leading-relaxed text-brand-gray">
-                 Resident registration only. Choose the form that best matches your circumstances.
-              </p>
-              <p className="mt-2 text-xs text-brand-gray">Health personnel accounts are provisioned by administrators. <Link to="/register/personnel" className="font-medium text-brand-blue underline">Personnel access process</Link></p>
-
               {/* Option cards */}
               <div className="mt-3.5 space-y-2">
                 {options.map((opt) => {

@@ -36,3 +36,15 @@ test('P0-4: MidwifeFollowUp has no undefined STATUS_COLORS or PRIORITY_COLORS re
   assert.match(src, /<FollowUpStatusBadge\s+value=\{selectedFollowUp\.status\}\s*\/>/);
   assert.match(src, /STATUS_DOTS\[status\]/);
 });
+
+test('resident follow-ups render without the removed confirmation dialog references', () => {
+  const src = fs.readFileSync(
+    path.resolve('src/features/follow-ups/pages/ResidentFollowUps.jsx'),
+    'utf8',
+  );
+
+  assert.doesNotMatch(src, /\bconfirmTarget\b|\bsetConfirmTarget\b/);
+  assert.doesNotMatch(src, /\bapprove\(s\.id\)/);
+  assert.match(src, /residentFollowUpsApi\s*\.\s*list\(\)/);
+  assert.match(src, /onClick=\{load\}[^>]*>Try Again<\/button>/);
+});

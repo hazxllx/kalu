@@ -15,7 +15,9 @@ export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
   const scheduledDate = dateKey(row.scheduledDate);
   const today = manilaDateKey(now);
   const active = ACTIVE_STATUSES.has(status);
-  const defaultConfirmed = ["default confirmed", "awaiting response", "awaiting confirmation"].includes(confirmation);
+  const overdue = active && Boolean(scheduledDate) && scheduledDate < today;
+  const defaultConfirmed = ["default confirmed", "awaiting response"].includes(confirmation);
+  const residentResponseRequired = active && !overdue && confirmation === "awaiting confirmation";
   const pendingScheduleReview = Boolean(active && (
     confirmation === "reschedule requested" || confirmation === "cancellation requested"
   ));
@@ -23,7 +25,6 @@ export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
     "confirmed", "attendance confirmed", "confirmed by default", "reschedule approved",
     "reschedule rejected", "cancellation rejected",
   ].includes(confirmation));
-  const overdue = active && Boolean(scheduledDate) && scheduledDate < today;
 
   let statusLabel = "Scheduled";
   let statusDetail = "";
@@ -41,13 +42,18 @@ export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
   } else if (status === "missed") {
     statusLabel = "Missed";
     statusDetail = "Attendance was not recorded";
+  } else if (residentResponseRequired) {
+    statusLabel = "Awaiting Response";
+    statusDetail = "Please confirm whether you can attend";
   } else if (overdue) {
     statusLabel = "Overdue";
     statusDetail = pendingScheduleReview
       ? "A schedule change request is awaiting staff review"
-      : confirmed
-        ? "Confirmed · attendance not recorded"
-        : "Appointment date passed";
+      : confirmation === "awaiting confirmation"
+        ? "Awaiting resident confirmation · attendance not recorded"
+        : confirmed
+          ? "Confirmed · attendance not recorded"
+          : "Appointment date passed";
   } else if (pendingScheduleReview) {
     statusLabel = confirmation === "reschedule requested" ? "Reschedule Requested" : "Cancellation Requested";
   } else if (confirmed) {
@@ -57,7 +63,7 @@ export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
   }
 
   if (category !== "completed" && category !== "cancelled") {
-    category = pendingScheduleReview || overdue || status === "missed"
+    category = pendingScheduleReview || residentResponseRequired || overdue || status === "missed"
       ? "actionRequired"
       : scheduledDate && scheduledDate >= today && ACTIVE_STATUSES.has(status)
         ? "upcoming"
@@ -69,8 +75,9 @@ export function getResidentFollowUpPresentation(row = {}, now = new Date()) {
     statusDetail,
     category,
     pendingScheduleReview,
+    awaitingResponse: residentResponseRequired,
     overdue,
-    actionable: RESPONSE_STATUSES.has(status) && !["reschedule requested", "cancellation requested", "cancellation approved"].includes(confirmation),
+    actionable: RESPONSE_STATUSES.has(status) && !overdue && !["reschedule requested", "cancellation requested", "cancellation approved"].includes(confirmation),
   };
 }
 

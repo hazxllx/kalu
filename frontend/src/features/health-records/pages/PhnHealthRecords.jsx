@@ -23,6 +23,8 @@ import PhnCheckupWorkbench from "@/features/consultations/components/PhnCheckupW
 import { Search, Plus, Eye, Edit2, Trash2, X, ClipboardCheck, MoreVertical } from "lucide-react";
 import { formatStatusLabel, getStatusColor, formatRiskLabel, getRiskColor } from "@/lib/statusFormatter";
 import TablePagination from "@/components/tables/TablePagination";
+import LabResultsPanel from "@/features/health-records/components/LabResultsPanel";
+import { consultationRiskLevel } from "@/features/consultations/lib/consultationRisk";
 
 const inputCls = "w-full rounded-btn border border-brand-border bg-white px-3 py-2 text-sm outline-none focus:border-brand-blue focus:border-2";
 const fieldNames = {
@@ -278,7 +280,7 @@ export default function PhnHealthRecords() {
                 {pageRecords.map((record) => {
                   const resident = record.resident || {};
                   const initials = (resident.name || "??").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase();
-                  const riskLevel = record.riskLevel || "low";
+                  const riskLevel = consultationRiskLevel(record);
                   const isMenuOpen = openMenuId === record.id;
                   
                   return (
@@ -434,6 +436,7 @@ export default function PhnHealthRecords() {
       <div className="mt-4 space-y-2">{(viewing.medications || []).map((medication, index) => <p key={index} className="rounded-btn border border-brand-border p-3 text-sm">{Object.entries(medication).filter(([name, item]) => !["medicineId", "custom", "source"].includes(name) && item !== null && item !== "").map(([name, item]) => `${name}: ${String(item)}`).join(" · ")}</p>)}</div>
       <h3 className="mt-6 mb-3 text-sm font-semibold">Clinical History / Workflow</h3><p className="text-xs text-brand-gray">Originally recorded: {viewing.recordedAt || "Not recorded"} · Last server update: {viewing.updatedAt || "Not recorded"} · Attending personnel: {viewing.attendingPersonnel?.fullName || "Not recorded"}</p>
       {viewing.consultationDetails && <details className="mt-3 rounded-btn border border-brand-border p-3"><summary className="cursor-pointer text-sm font-medium">Full Retained Clinical Details</summary><pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs">{JSON.stringify(viewing.consultationDetails, null, 2)}</pre></details>}
+      <LabResultsPanel residentId={viewing.resident?.id || viewing.residentId} consultationId={viewing.offline ? undefined : viewing.id} compact />
       {patientsByVisit.has(String(viewing.id)) && <button onClick={() => { setCheckup(patientsByVisit.get(String(viewing.id))); setViewing(null); }} className="mt-4 rounded-btn bg-brand-blue px-4 py-2 text-sm text-white">Open Linked PHN Check-up</button>}
     </Modal>}
     {policy && <Modal title="Clinical Record Retention" onClose={() => setPolicy(false)}><p className="text-sm text-brand-gray">Clinical records cannot be deleted from this page. Corrections must be saved against the existing server visit so the recorded history is retained. No record has been removed.</p></Modal>}

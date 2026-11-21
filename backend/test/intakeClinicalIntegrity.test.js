@@ -16,6 +16,17 @@ test('triage vital validation accepts omitted optional observations and returns 
   });
 });
 
+test('severe BP triage warnings are symptom-aware and never delay emergency care', () => {
+  for (const reading of ['185/125', '181/80', '150/121']) {
+    const context = { chiefComplaint: 'Chest pain' };
+    const server = triageReviewWarnings({ bp: reading }, context);
+    const client = reviewFlags({ ...emptyVitals(), bloodPressure: reading }, context);
+    assert.match(server[0].message, /immediate emergency evaluation/i);
+    assert.match(client[0], /do not delay emergency care/i);
+    assert.match(triageReviewWarnings({ bp: reading })[0].message, /prompt clinical evaluation/i);
+  }
+});
+
 test('triage hand-off checks demographics and current visit fields with stable field keys', () => {
   const errors = validateSubmissionForSubmit({ firstName: '', lastName: '', sex: '', age: null, barangay: '' }, {
     visitDate: 'bad-date', chiefComplaint: '', vitals: { bloodSugar: 0 },

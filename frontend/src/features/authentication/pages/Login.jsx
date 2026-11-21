@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ShieldCheck, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { homeForRole, landingFor } from "@/lib/roles";
 import GovSeal from "@/components/branding/GovSeal";
@@ -255,10 +255,7 @@ export default function Login() {
                       {submitting || isSigningIn ? "Signing in…" : "Checking session…"}
                     </>
                   ) : (
-                    <>
-                      Sign In
-                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                    </>
+                    "Sign In"
                   )}
                 </button>
 

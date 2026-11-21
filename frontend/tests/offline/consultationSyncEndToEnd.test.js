@@ -10,6 +10,7 @@ import { saveConsultationOffline, submitConsultationDraft } from '../../src/serv
 import { create as createOnServer } from '../../../backend/src/services/consultations.service.js';
 import fileRepository from '../../../backend/src/repositories/fileRepository.js';
 import store from '../../../backend/src/repositories/fileStore.js';
+import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
 
 // Actual frontend queue -> actual backend consultation service -> real file
 // visit CRUD and completion. File persistence is disabled; every row is synthetic.
@@ -31,7 +32,7 @@ const supabase = { from() { const query = { select() { return query; }, eq() { r
 const server = async (user, data, options) => {
   try {
     return { consultation: await createOnServer({ user, payload: data, idempotencyKey: options.headers['Idempotency-Key'],
-      repo: fileRepository, supabase, classifyBp: async () => ({ code: 'normal', label: 'Normal' }), persistRisk: async () => {} }) };
+      repo: fileRepository, supabase, classifyBp: classifyBloodPressure, persistRisk: async () => {} }) };
   } catch (error) { throw Object.assign(error, { status: error.statusCode }); }
 };
 
@@ -80,6 +81,21 @@ test('lost real backend create response replays ONE visit/follow-up and preserve
   assert.deepEqual(retry.record.consultationDetails.physicalExam, DATA.consultationDetails.physicalExam);
   assert.equal(retry.record.medications[0].instructions, DATA.medications[0].instructions);
   assert.equal((await getDraft(lost.localId, USER.id)).status, 'synced');
+});
+
+test('a consultation with both optional fields empty syncs through the real backend', async () => {
+  const create = (data, options) => server(USER, data, options);
+  const payload = { residentId: DATA.residentId, consultationDate: DATA.consultationDate,
+    chiefComplaint: DATA.chiefComplaint, clinicalFindingsDiagnosis: '', treatmentGiven: '' };
+  const queued = await saveConsultationOffline({ ownerId: USER.id, payload, create, online: () => false });
+  assert.equal(queued.source, 'local');
+  const synced = await submitConsultationDraft({ ownerId: USER.id, localId: queued.localId, create, online: () => true });
+  assert.equal(synced.source, 'server');
+  assert.equal(synced.record.findings, '');
+  assert.equal(synced.record.treatmentGiven, '');
+  assert.equal((await getDraft(queued.localId, USER.id)).status, 'synced');
+  assert.equal(store.data.visits.length, 1);
+  assert.equal(store.data.followUps?.length ?? 0, 0);
 });
 
 test('an actual backend scope rejection retains the clinical queue and never starts side effects', async () => {

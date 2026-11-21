@@ -65,6 +65,17 @@ test('personnel list sends exact filters and pagination through real Supabase qu
   });
 });
 
+test('the Resident directory filter includes pending resident identities', async () => {
+  await withTransport(async (url) => {
+    assert.equal(url.searchParams.get('role'), 'in.(resident,resident-limited)');
+    return respond([rawProfile({ role: 'resident-limited', status: 'pending_verification', personnel_account: null })], { count: 1 });
+  }, async () => {
+    const result = await repository.listProfiles({ role: 'resident' });
+    assert.equal(result.total, 1);
+    assert.equal(result.rows[0].role, 'resident-limited');
+  });
+});
+
 test('each lifecycle state is filtered in SQL before any rows are paginated', async () => {
   for (const [lifecycleState, expected] of [
     ['pending', { 'personnel_account.approval_status': 'eq.pending' }],
@@ -98,6 +109,20 @@ test('summary exact counts retain personnel and approval filters on every head-o
     assert.equal(result.total, 25); assert.equal(result.pendingApproval, 25);
     assert.equal(result.approved, 0); assert.equal(result.rejected, 0); assert.equal(result.awaitingSetup, 0); assert.equal(result.suspended, 0);
   });
+});
+
+test('resident verification and registration status updates cannot reactivate administratively disabled accounts', async () => {
+  for (const status of ['active', 'pending_verification']) {
+    await withTransport(async (url, request) => {
+      assert.equal(request.method, 'PATCH');
+      assert.equal(url.pathname, '/rest/v1/profiles');
+      assert.equal(url.searchParams.get('id'), `eq.${TARGET}`);
+      assert.equal(url.searchParams.get('role'), 'in.(resident,resident-limited)');
+      assert.equal(url.searchParams.get('status'), 'neq.disabled');
+      assert.deepEqual(JSON.parse(request.body), { status });
+      return respond([]);
+    }, async () => assert.equal(await repository.setProfileStatus(TARGET, status), null));
+  }
 });
 
 test('account history allowlists notifications and strips nested audit credential data', async () => {
@@ -163,12 +188,16 @@ test('silent custom-id Auth creation recovers the reserved identity using actual
   });
 });
 
-test('real Supabase token lookup and admin password update do not demote the singleton before setup RPC', async () => {
+test('verified own-password update uses the caller bearer and anon key without demoting the singleton before setup RPC', async () => {
   const paths = [];
   await withTransport(async (url, request) => {
     paths.push(url.pathname);
     if (url.pathname === '/auth/v1/user') {
       assert.equal(request.headers.get('authorization'), 'Bearer owner-token');
+      if (request.method === 'PUT') {
+        assert.equal(request.headers.get('apikey'), process.env.SUPABASE_ANON_KEY);
+        assert.deepEqual(JSON.parse(request.body), { password: PASSWORD });
+      } else assert.equal(request.method, 'GET');
       return respond({ id: TARGET, email: EMAIL, email_confirmed_at: '2026-10-31T09:00:00Z', app_metadata: { personnel_managed: true } });
     }
     assert.equal(request.headers.get('authorization'), `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`);
@@ -176,16 +205,12 @@ test('real Supabase token lookup and admin password update do not demote the sin
       assert.equal(url.searchParams.get('id'), `eq.${TARGET}`);
       return respond(rawProfile());
     }
-    if (url.pathname === `/auth/v1/admin/users/${TARGET}`) {
-      assert.equal(request.method, 'PUT'); assert.deepEqual(JSON.parse(request.body), { password: PASSWORD });
-      return respond({ id: TARGET, email: EMAIL });
-    }
     assert.equal(url.pathname, '/rest/v1/rpc/complete_personnel_account_setup');
     assert.deepEqual(JSON.parse(request.body), { p_target_id: TARGET });
     return respond(rawProfile({ status: 'active', personnel_account: { approval_status: 'approved', activation_requested: true, setup_required: false, setup_completed_at: '2026-10-31T10:00:00Z', version: 2 } }));
   }, async () => {
     const result = await setupPersonnelPassword({ accessToken: 'owner-token', password: PASSWORD });
     assert.equal(result.passwordSaved, true); assert.equal(result.setupComplete, true); assert.equal(result.active, true);
-    assert.deepEqual(paths, ['/auth/v1/user', '/rest/v1/profiles', `/auth/v1/admin/users/${TARGET}`, '/rest/v1/rpc/complete_personnel_account_setup']);
+    assert.deepEqual(paths, ['/auth/v1/user', '/rest/v1/profiles', '/auth/v1/user', '/rest/v1/rpc/complete_personnel_account_setup']);
   });
 });

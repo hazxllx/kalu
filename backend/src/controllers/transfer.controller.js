@@ -18,6 +18,7 @@ export const startTransfer = async (req, res) => sendCreated(res, await transfer
 export const uploadDocument = async (req, res) => sendCreated(res, { document: await transferService.uploadDocument({ user: req.user, requestId: req.params.id, file: req.file, documentType: req.body?.documentType }) });
 export const removeDocument = async (req, res) => sendData(res, await transferService.removeDocument({ user: req.user, requestId: req.params.id, documentId: req.params.documentId }));
 export const getMine = async (req, res) => sendData(res, { transfer: await transferService.getMine({ user: req.user }) });
+export const getOwnDetail = async (req, res) => sendData(res, { transfer: await transferService.getMine({ user: req.user, requestId: req.params.id }) });
 export const submit = async (req, res) => sendData(res, { transfer: await transferService.submit({ user: req.user, requestId: req.params.id }) });
 export const cancel = async (req, res) => sendData(res, { transfer: await transferService.cancel({ user: req.user, requestId: req.params.id }) });
 export const listQueue = async (req, res) => sendData(res, await transferService.listQueue({ user: req.user, status: req.query.status || 'pending' }));
@@ -26,4 +27,4 @@ export const approve = async (req, res) => sendData(res, { transfer: await trans
 export const reject = async (req, res) => sendData(res, { transfer: await transferService.reject({ user: req.user, requestId: req.params.id, reason: req.body?.reason }) });
 export const requestResubmission = async (req, res) => sendData(res, { transfer: await transferService.requestResubmission({ user: req.user, requestId: req.params.id, instructions: req.body?.instructions }) });
 
-export default { getContext, startTransfer, uploadDocument, removeDocument, getMine, submit, cancel, listQueue, getForReview, approve, reject, requestResubmission };
+export default { getContext, startTransfer, uploadDocument, removeDocument, getMine, getOwnDetail, submit, cancel, listQueue, getForReview, approve, reject, requestResubmission };

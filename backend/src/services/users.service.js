@@ -331,6 +331,7 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
   const existing = await repository.getProfileById(id);
   if (!existing) throw ApiError.notFound('User account not found');
 
+  const isResident = [ROLES.RESIDENT, ROLES.RESIDENT_LIMITED].includes(existing.role);
   const fields = {};
   const errors = [];
 
@@ -355,7 +356,7 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
   }
 
   let nextStatus = existing.status;
-  if (patch.status !== undefined && patch.status !== null && String(patch.status).trim() !== existing.status) {
+  if (patch.status !== undefined && patch.status !== null && String(patch.status).trim() !== '') {
     try {
       nextStatus = accountStatus(patch.status, existing.status, true);
       fields.status = nextStatus;
@@ -366,7 +367,7 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
 
   if (errors.length) throw ApiError.unprocessable('Please correct the highlighted fields.', errors);
 
-  if ((nextRole === ROLES.RESIDENT) !== (existing.role === ROLES.RESIDENT)) {
+  if ([ROLES.RESIDENT, ROLES.RESIDENT_LIMITED].includes(nextRole) !== isResident) {
     throw ApiError.unprocessable('Resident accounts and staff roles must use their existing registration and linking workflows.');
   }
   if (actorId && actorId === id && (nextRole !== ROLES.ADMIN || nextStatus !== 'active')) {
@@ -402,7 +403,7 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
     ? existing.facilityId
     : (patch.facilityId ? String(patch.facilityId).trim() : null);
   if (nextRole !== existing.role) {
-    if (!BARANGAY_SCOPED_ROLES.includes(nextRole)) requestedBarangay = null;
+    if (!BARANGAY_SCOPED_ROLES.includes(nextRole) && !isResident) requestedBarangay = null;
     if (nextRole !== ROLES.RHU_PERSONNEL) requestedFacility = null;
     if (nextRole === ROLES.ADMIN) requestedMunicipality = null;
   }
@@ -412,11 +413,11 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
     || requestedFacility !== existing.facilityId;
   const assignment = assignmentChanged
     ? await makeProfileAssignment({
-      role: nextRole,
+      role: nextRole === ROLES.RESIDENT_LIMITED ? ROLES.RESIDENT : nextRole,
       municipalityId: requestedMunicipality,
       barangayId: requestedBarangay,
       facilityId: requestedFacility,
-      allowResident: existing.role === ROLES.RESIDENT,
+      allowResident: isResident,
     })
     : {
       municipality_id: existing.municipalityId,
@@ -430,7 +431,8 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
     position: fields.position ?? existing.position,
     license_no: fields.license_no ?? existing.licenseNo,
     role: nextRole,
-    status: nextStatus,
+    ...(fields.status !== undefined ? { status: nextStatus } : {}),
+    ...(!isResident ? { expected_version: existing.lifecycleVersion } : {}),
     rhu_stations: existing.rhuStations ?? [],
     ...assignment,
   };
@@ -443,11 +445,11 @@ export const updateUser = async ({ id, actorId = null, patch = {} } = {}) => {
     profile.rhu_stations = makeStationAssignment(nextRole, requestedStations);
   }
   if (patch.suspensionReason !== undefined) profile.suspension_reason = normalizeOptionalText(patch.suspensionReason);
-  if (existing.role !== ROLES.RESIDENT && nextStatus === 'active'
+  if (!isResident && nextStatus === 'active'
       && nextStatus !== existing.status && existing.approvalStatus !== 'approved') {
     throw ApiError.conflict('Approve this account before requesting activation.');
   }
-  const updated = existing.role === ROLES.RESIDENT
+  const updated = isResident
     ? await repository.updateAdminAccountProfile({ id, actorId, profile })
     : await repository.updatePersonnelAccountProfile({ id, actorId, profile, operationId: patch.operationId ?? randomUUID() });
   if (!updated) throw ApiError.notFound('User account not found');

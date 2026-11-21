@@ -5,7 +5,7 @@ import { AlertTriangle, Bell, CheckCheck, ChevronRight } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import { Card } from "@/components/common/Card";
 import EmptyState from "@/components/common/EmptyState";
-import { ICONS, CATEGORIES } from "@/services/local/notificationData";
+import { CATEGORIES } from "@/services/local/notificationData";
 import { notificationsApi } from "@/services/api";
 import { notifyUnreadChanged } from "@/services/notifications/unreadBus";
 import { useAuth } from "@/context/AuthContext";
@@ -70,22 +70,21 @@ const destinationFor = (notification, role) => {
   }
   // Residency transfer requests. Staff reviewers deep-link to the Resident
   // Transfer Requests queue, pre-opening the specific request; a resident is
-  // taken to their dashboard, where the transfer status banner shows the
-  // decision and any resubmission instructions (no sensitive detail in-feed).
-  if (["transfer_request", "transfer_request_resubmitted"].includes(notification.relatedType)) {
+  // taken to their profile history, including the exact historical request.
+  if (["transfer_request", "transfer_request_resubmitted", "transfer_request_approved"].includes(notification.relatedType)) {
     const id = notification.relatedId ? `?request=${encodeURIComponent(notification.relatedId)}` : "";
     if (["health_supervisor", "phn", "mho", "admin"].includes(role)) {
       return `/app/${role}/transfer-requests${id}`;
     }
-    if (role === "resident") return "/app/resident/dashboard";
+    if (["resident", "resident-limited"].includes(role)) return `/app/resident/profile${id}#submitted-requests`;
   }
   return null;
 };
 
 /** Short, role-aware label for a notification's deep-link action button. */
 const actionLabelFor = (notification, role) => {
-  if (["transfer_request", "transfer_request_resubmitted"].includes(notification?.relatedType)) {
-    return role === "resident" ? "View transfer status" : "Open transfer request";
+  if (["transfer_request", "transfer_request_resubmitted", "transfer_request_approved"].includes(notification?.relatedType)) {
+    return ["resident", "resident-limited"].includes(role) ? "View submitted request" : "Open transfer request";
   }
   return "View My Health Records";
 };
@@ -225,10 +224,6 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
   const getCategoryColor = (notification) => hasPriority(notification)
     ? "border border-[#FECACA] bg-[#FEF2F2] text-[#DC2626] dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
     : CATEGORIES[notification.category]?.color || "bg-slate-100 text-slate-700 dark:bg-slate-700/50 dark:text-slate-200";
-  const getCategoryIcon = (category) => {
-    const iconName = CATEGORIES[category]?.icon || "Bell";
-    return ICONS[iconName] || Bell;
-  };
   function getCategoryLabel(category) {
     return CATEGORIES[category]?.label || category
       .split(/[_-]+/)
@@ -371,7 +366,6 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                     </h4>
                     <ul className="divide-y divide-brand-border">
                       {items.map((n, i) => {
-                        const CategoryIcon = getCategoryIcon(n.category);
                         const priority = hasPriority(n) ? n.priority : "";
                         const destination = destinationFor(n, role);
                         const navigates = Boolean(destination);
@@ -405,11 +399,6 @@ export default function NotificationsPage({ crumbs = ["Notifications"] }) {
                                 }
                               } : undefined}
                             >
-                              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${getCategoryColor(n)}`}>
-                                {priority
-                                  ? <AlertTriangle className="h-4 w-4" strokeWidth={1.8} />
-                                  : <CategoryIcon className="h-4 w-4" strokeWidth={1.8} />}
-                              </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="flex-1 min-w-0">

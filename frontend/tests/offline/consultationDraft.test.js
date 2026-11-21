@@ -21,6 +21,7 @@ import {
 } from '../../src/services/offline/consultationOfflineService.js';
 import { OfflineActionRequiredError } from '../../src/services/offline/mutationPolicy.js';
 import { getOperation } from '../../src/services/offline/outbox.js';
+import { classifyBloodPressure } from '../../../shared/bloodPressure.js';
 
 const OWNER = 'phn-user-1';
 
@@ -39,6 +40,16 @@ const resetAll = async () => {
 };
 
 beforeEach(resetAll);
+
+test('invalid BP cannot be queued as a valid offline consultation', async () => {
+  for (const bloodPressure of ['120/', '120', '120/80bad', '120/201', '80/120', [], 0]) {
+    await assert.rejects(saveConsultationOffline({ ownerId: OWNER, payload: { bloodPressure },
+      create: async () => assert.fail('Invalid BP reached the API'), online: () => false }),
+    (error) => error.status === 422 && Boolean(error.payload.error.errors.bloodPressure));
+  }
+  assert.equal(await db.outbox.count(), 0);
+  assert.equal(await db.drafts.count(), 0);
+});
 
 const CONSULT = {
   residentId: 'RES-0001',
@@ -69,7 +80,7 @@ const recordingCreate = (impl) => {
   const fn = async (data) => {
     calls.push(data);
     const result = impl ? await impl(data, calls.length) : { consultation: { id: 'SUB-000001', ...data } };
-    return result?.consultation ? { consultation: { status: 'completed', createdAt: new Date().toISOString(), consultationEffectsCompletedAt: new Date().toISOString(),
+    return result?.consultation ? { consultation: { status: 'completed', vitals: { bp: data.bloodPressure }, bloodPressureClassification: classifyBloodPressure(data.bloodPressure), createdAt: new Date().toISOString(), consultationEffectsCompletedAt: new Date().toISOString(),
       resident: { id: data.residentId }, ...result.consultation } } : result;
   };
   fn.calls = calls;
@@ -229,6 +240,23 @@ test('drafts and reads are isolated to the owner on a shared device', async () =
   const mine = await listConsultationDrafts(OWNER);
   assert.equal(mine.length, 1);
   assert.equal(mine[0].diagnosis, 'Viral URI');
+});
+
+test('offline resident history filters cached rows and pending work without mixing patients', async () => {
+  const serverRows = [
+    { id: 'old', resident: { id: CONSULT.residentId }, consultationDate: '2026-10-01', status: 'completed', serviceId: 'service-a' },
+    { id: 'recent', resident: { id: CONSULT.residentId }, consultationDate: '2026-10-10', status: 'completed', serviceId: 'service-a' },
+    { id: 'other', resident: { id: 'RES-OTHER' }, consultationDate: '2026-10-10', status: 'completed', serviceId: 'service-a' },
+  ];
+  await listConsultationsOffline({ ownerId: OWNER, online, fetchList: async () => ({ rows: serverRows }) });
+  await saveConsultationOffline({ ownerId: OWNER, payload: CONSULT, create: recordingCreate(), online: offline });
+  await saveConsultationOffline({ ownerId: OWNER, payload: { ...CONSULT, residentId: 'RES-OTHER' }, create: recordingCreate(), online: offline });
+  const own = await listConsultationsOffline({ ownerId: OWNER, online: offline, params: { residentId: CONSULT.residentId } });
+  assert.equal(own.length, 3);
+  assert.ok(own.every((row) => (row.resident?.id ?? row.residentId) === CONSULT.residentId));
+  const filtered = await listConsultationsOffline({ ownerId: OWNER, online: offline,
+    params: { resident_id: CONSULT.residentId, from: '2026-10-05', to: '2026-10-10', status: 'completed', serviceId: 'service-a' } });
+  assert.deepEqual(filtered.map((row) => row.id), ['recent']);
 });
 
 test('toServerPayload strips local-only markers', () => {

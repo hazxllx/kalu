@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -55,7 +56,7 @@ const fixture = (options = {}) => {
     },
     profile: { id: ACCOUNT_ID, email: EMAIL, full_name: 'Nurse Example', role: 'phn', status: 'active', ...options.profile },
     authUser: { id: ACCOUNT_ID, email: EMAIL, email_confirmed_at: '2026-10-30T10:00:00Z', ...options.authUser },
-    events: [], queries: [], rpcCalls: [], authReads: [], links: [], messages: [], logs: [],
+      events: [], queries: [], rpcCalls: [], authReads: [], links: [], messages: [], logs: [], recoveryProofs: [],
   };
   const logger = Object.fromEntries(['info', 'warn', 'error'].map((level) => [level, (...args) => state.logs.push([level, ...args])]));
   const supabase = {
@@ -115,6 +116,15 @@ const fixture = (options = {}) => {
         return { data: rows.map((job) => ({ ...job })), error: null };
       }
       const job = state.jobs.find((row) => row.id === args.p_notification_id);
+      if (name === 'register_personnel_invitation_recovery') {
+        state.events.push('recovery:register');
+        state.recoveryProofs.push(args);
+        return { data: options.recoveryProofError ? null : options.recoveryProofResult ?? true, error: options.recoveryProofError || null };
+      }
+      if (name === 'prepare_personnel_notification_link') {
+        state.events.push('link:prepare');
+        return { data: options.prepareResult ?? true, error: options.prepareError || null };
+      }
       if (name === 'begin_personnel_notification_send') {
         state.events.push('begin');
         if (options.onBegin) await options.onBegin(state);
@@ -257,6 +267,7 @@ test('an unconfirmed setup-required identity gets an expiring invite, never crea
   await f.run();
   assert.deepEqual(f.state.links, [{ type: 'invite', email: EMAIL, options: { redirectTo: 'https://app.example.test/reset-password' } }]);
   assert(f.state.events.indexOf('auth:read') < f.state.events.indexOf('auth:link'));
+  assert(f.state.events.indexOf('link:prepare') < f.state.events.indexOf('auth:link'));
   assert(f.state.events.indexOf('auth:link') < f.state.events.indexOf('begin'));
   const setupLink = new URL(f.state.messages[0].text.match(/Set Your Password: (\S+)/)[1]);
   assert.equal(setupLink.pathname, '/reset-password');
@@ -274,6 +285,57 @@ test('a confirmed new setup-required identity gets recovery only after actual Au
   assert.equal(f.state.links[0].type, 'recovery');
   assert.match(f.state.messages[0].text, /Access has not been enabled/);
   assert.doesNotMatch(f.state.messages[0].text, /account is active/);
+});
+
+test('expired temporary-password account invitation sends an email-bound recovery token without clearing its expiry', async () => {
+  const f = fixture({
+    eventType: 'invitation',
+    account: {
+      setup_required: true, must_change_password: true,
+      temporary_password_expires_at: '2020-01-01T00:00:00.000Z',
+    },
+    profile: { status: 'disabled' },
+  });
+  const result = await f.run();
+  const link = new URL(f.state.messages[0].text.match(/Set Your Password: (\S+)/)[1]);
+  const recoverySecret = link.searchParams.get('recovery_secret');
+  assert.equal(result.mailServerAccepted, 1);
+  assert.equal(f.state.jobs[0].status, 'sent');
+  assert.equal(link.searchParams.get('type'), 'recovery');
+  assert.equal(link.searchParams.get('token_hash'), TOKEN);
+  assert.match(recoverySecret, /^[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(recoverySecret, TOKEN);
+  assert.deepEqual(f.state.recoveryProofs, [{
+    p_notification_id: JOB_ID,
+    p_claim_token: f.state.jobs[0].claim_token,
+    p_token_digest: createHash('sha256').update(recoverySecret).digest('hex'),
+  }]);
+  assert(f.state.events.indexOf('recovery:register') < f.state.events.indexOf('begin'));
+  assert(f.state.events.indexOf('link:prepare') < f.state.events.indexOf('auth:link'));
+  assert.doesNotMatch(f.state.messages[0].text, /Temporary password:|account is ready\./);
+  assert.equal(f.state.links[0].type, 'recovery');
+});
+
+test('temporary-password recovery invitation is not sent unless its proof was persisted', async () => {
+  const f = fixture({
+    eventType: 'invitation',
+    account: { setup_required: true, must_change_password: true },
+    recoveryProofResult: false,
+  });
+  await f.run();
+  assert.equal(f.state.jobs[0].status, 'failed');
+  assert.equal(f.state.jobs[0].last_error_code, 'NOTIFICATION_RECOVERY_PROOF_FAILED');
+  assert.equal(f.state.messages.length, 0);
+  assert(!f.state.events.includes('begin'));
+});
+
+test('cancelled invitation jobs do not rotate a newer Auth token after link reservation fails', async () => {
+  const f = fixture({ eventType: 'invitation', prepareResult: false });
+  await f.run();
+  assert.equal(f.state.links.length, 0);
+  assert.equal(f.state.messages.length, 0);
+  assert(f.state.events.includes('link:prepare'));
+  assert(!f.state.events.includes('begin'));
 });
 
 test('general administrative accounts using the same lifecycle receive their secure setup invitation', async () => {

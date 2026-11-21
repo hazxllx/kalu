@@ -467,6 +467,46 @@ test('listWithOfflineFallback rejects when ownerId is missing', async () => {
   );
 });
 
+test('consultation service cache is owner-bound and never falls back after HTTP 403', async () => {
+  const services = [{ id: 'service-a', name: 'Health Service A', active: true }];
+  const onlineResult = await listWithOfflineFallback({
+    ownerId: OWNER,
+    entity: 'consultationHealthService',
+    fetchFn: async () => ({ rows: services }),
+    online: () => true,
+  });
+  assert.deepEqual(onlineResult.rows, services);
+  const stored = await db.records.get([OWNER, 'consultationHealthService', 'service-a']);
+  assert.ok(stored);
+  assert.equal(JSON.stringify(stored).includes(services[0].name), false);
+
+  const otherOwnerResult = await listWithOfflineFallback({
+    ownerId: OTHER_OWNER,
+    entity: 'consultationHealthService',
+    online: () => false,
+  });
+  assert.deepEqual(otherOwnerResult.rows, []);
+
+  resetCachedKey();
+  const offlineOwnerResult = await listWithOfflineFallback({
+    ownerId: OWNER,
+    entity: 'consultationHealthService',
+    online: () => false,
+  });
+  assert.equal(offlineOwnerResult.source, 'cache');
+  assert.deepEqual(offlineOwnerResult.rows, services);
+
+  await assert.rejects(
+    listWithOfflineFallback({
+      ownerId: OWNER,
+      entity: 'consultationHealthService',
+      fetchFn: async () => { throw Object.assign(new Error('Forbidden'), { status: 403 }); },
+      online: () => true,
+    }),
+    { status: 403 },
+  );
+});
+
 test('getWithOfflineFallback rejects when ownerId is missing', async () => {
   await assert.rejects(
     () => getWithOfflineFallback({ ownerId: null, entity: 'referral', id: 'REF-1', fetchFn: async () => ({}), online: () => true }),

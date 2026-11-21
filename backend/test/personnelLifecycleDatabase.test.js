@@ -12,6 +12,10 @@ const migrations = new URL('../../supabase/migrations/', import.meta.url);
 const candidate = '20261101010000_health_personnel_account_management.sql';
 const temporaryPasswordMigration = '20261117000000_admin_temporary_personnel_password.sql';
 const temporaryPasswordEmailMigration = '20261117150000_temporary_password_email_and_pili_scope.sql';
+const deactivationIntentMigration = '20261120130500_personnel_deactivation_intent.sql';
+const identityGuardsMigration = '20261120131000_account_management_identity_guards.sql';
+const sessionFenceMigration = '20261120132500_personnel_session_fence.sql';
+const verificationAccountMigration = '20261120133500_resident_verification_account_status.sql';
 const TEMPORARY_PASSWORD_CIPHERTEXT = 'v1.test-encrypted-temporary-credential';
 const ids = Object.fromEntries(['municipality', 'otherMunicipality', 'barangay', 'otherBarangay', 'legacyBarangay', 'facility']
   .map((name) => [name, randomUUID()]));
@@ -28,13 +32,15 @@ const transition = (id, action, options = {}) => rpc('admin_transition_personnel
   id, options.actorId || existing.admin, action, options.reason || '', options.activate ?? true,
   options.operationId || randomUUID(),
 ]);
-const asClient = async (id, role, run) => {
+const asClient = async (id, role, run, claims = {}) => {
   await query("select set_config('request.jwt.claim.sub', $1, false), set_config('request.jwt.claim.role', $2, false)", [id || '', role]);
+  await query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify({ sub: id, role, iat: Math.floor(Date.now() / 1000) + 2, ...claims })]);
   await db.exec(`set role ${role}`);
   try { return await run(); }
   finally {
     await db.exec('reset role');
     await query("select set_config('request.jwt.claim.sub', '', false), set_config('request.jwt.claim.role', 'service_role', false)");
+    await query("select set_config('request.jwt.claims', '', false)");
   }
 };
 const createAuthIdentity = async (id, email, managed = false, confirmed = false, metadata = {}) => {
@@ -157,6 +163,10 @@ before(async () => {
   await db.exec(await readFile(new URL(candidate, migrations), 'utf8'));
   await db.exec(await readFile(new URL(temporaryPasswordMigration, migrations), 'utf8'));
   await db.exec(await readFile(new URL(temporaryPasswordEmailMigration, migrations), 'utf8'));
+  await db.exec(await readFile(new URL(deactivationIntentMigration, migrations), 'utf8'));
+  await db.exec(await readFile(new URL(identityGuardsMigration, migrations), 'utf8'));
+  await db.exec(await readFile(new URL(sessionFenceMigration, migrations), 'utf8'));
+  await db.exec(await readFile(new URL(verificationAccountMigration, migrations), 'utf8'));
 }, { timeout: 120000 });
 after(async () => { await db.close(); });
 
@@ -172,6 +182,100 @@ test('migration preserves existing Auth identities, profiles, assignments, and c
   assert.equal((await profile(existing.legacySupervisor)).barangay_id, ids.legacyBarangay);
 });
 
+test('authenticated administrators cannot directly self-grant permissions while service-role writes remain available', async () => {
+  await asClient(null, 'service_role', async () => {
+    await query("insert into public.role_permissions(role,permission_id,granted) values ('admin','accounts.roles.manage',false)");
+  });
+  try {
+    await asClient(existing.admin, 'authenticated', async () => {
+      await assert.rejects(() => query("update public.role_permissions set granted = true where role = 'admin' and permission_id = 'accounts.roles.manage'"), (error) => error.code === '42501');
+      await assert.rejects(() => query("insert into public.role_permissions(role,permission_id,granted) values ('admin','accounts.edit',true)"), (error) => error.code === '42501');
+      await assert.rejects(() => query("delete from public.role_permissions where role = 'admin'"), (error) => error.code === '42501');
+      await assert.rejects(() => query('truncate public.role_permissions'), (error) => error.code === '42501');
+    });
+    assert.equal((await query("select granted from public.role_permissions where role = 'admin' and permission_id = 'accounts.roles.manage'"))[0].granted, false);
+    await asClient(null, 'service_role', async () => {
+      await query("update public.role_permissions set granted = true where role = 'admin' and permission_id = 'accounts.roles.manage'");
+    });
+    assert.equal((await query("select granted from public.role_permissions where role = 'admin' and permission_id = 'accounts.roles.manage'"))[0].granted, true);
+  } finally {
+    await asClient(null, 'service_role', () => query("delete from public.role_permissions where role = 'admin'"));
+  }
+});
+
+test('permission changes enforce authority, strict values, and transactional audit persistence', async () => {
+  const permission = 'accounts.test.atomic';
+  const save = (value) => rpc('admin_save_role_permissions', [existing.admin, 'phn', JSON.stringify({ [permission]: value })]);
+  try {
+    await assert.rejects(() => asClient(existing.admin, 'authenticated', () => save(true)), (error) => error.code === '42501');
+    await assert.rejects(() => save('false'), (error) => error.code === '22023');
+    await assert.rejects(() => rpc('admin_save_role_permissions', [existing.admin, 'admin', JSON.stringify({ 'accounts.roles.manage': false })]), (error) => error.code === '23514');
+    const granted = await save(true);
+    assert.equal(granted.changed, 1);
+    const revoked = await save(false);
+    assert.equal(revoked.permissions[permission], false);
+    assert.equal((await save(false)).changed, 0);
+    const audits = await query("select action,metadata from public.health_audit_logs where entity_type = 'role_permissions' and metadata->>'permissionId' = $1 order by created_at,id", [permission]);
+    assert.equal(audits.length, 2);
+    assert.ok(audits.some((row) => row.action === 'permission.revoke' && row.metadata.newValue === false));
+    await db.exec(`create function public.test_reject_permission_audit() returns trigger language plpgsql as $$
+      begin if new.entity_type = 'role_permissions' then raise exception 'Audit unavailable'; end if; return new; end; $$;
+      create trigger test_reject_permission_audit before insert on public.health_audit_logs
+        for each row execute function public.test_reject_permission_audit();`);
+    try {
+      await assert.rejects(() => save(true), /Audit unavailable/);
+      assert.equal((await query('select granted from public.role_permissions where role = $1 and permission_id = $2', ['phn', permission]))[0].granted, false);
+    } finally {
+      await db.exec('drop trigger test_reject_permission_audit on public.health_audit_logs; drop function public.test_reject_permission_audit();');
+    }
+    await query("insert into public.role_permissions(role,permission_id,granted) values ('admin','accounts.roles.manage',false)");
+    try { await assert.rejects(() => save(true), (error) => error.code === '42501'); }
+    finally { await query("delete from public.role_permissions where role = 'admin' and permission_id = 'accounts.roles.manage'"); }
+  } finally {
+    await query('delete from public.role_permissions where role = $1 and permission_id = $2', ['phn', permission]);
+  }
+});
+
+test('authenticated self edits preserve Auth identity while name and contact edits and trusted service writes remain allowed', async () => {
+  for (const id of [existing.admin, existing.resident]) {
+    const before = await profile(id);
+    await asClient(id, 'authenticated', async () => {
+      await assert.rejects(() => query('update public.profiles set email = $2 where id = $1', [id, 'forged@example.test']), (error) => error.code === '42501');
+      await assert.rejects(() => query('update public.profiles set id = $2 where id = $1', [id, randomUUID()]), (error) => error.code === '42501');
+      await query('update public.profiles set full_name = $2, contact = $3 where id = $1', [id, 'Updated Profile Name', '09180000000']);
+    });
+    const updated = await profile(id);
+    assert.equal(updated.email, before.email);
+    assert.equal(updated.full_name, 'Updated Profile Name');
+    assert.equal(updated.contact, '09180000000');
+    await asClient(null, 'service_role', async () => {
+      await query('update public.profiles set email = $2 where id = $1', [id, 'trusted@example.test']);
+    });
+    assert.equal((await profile(id)).email, 'trusted@example.test');
+    await query('update public.profiles set email = $2 where id = $1', [id, before.email]);
+  }
+});
+
+test('resident and resident-limited pending profiles edit through the resident RPC without a personnel record or staff conversion', async () => {
+  for (const role of ['resident', 'resident-limited']) {
+    const id = await existingAccount(role, 'pending_verification', { barangayId: ids.barangay });
+    const previous = await profile(id);
+    assert.equal(previous.personnel_account, null);
+    const updated = await rpc('admin_update_profile', [id, existing.admin, JSON.stringify(profileInput(previous, {
+      full_name: 'Edited Pending Resident', contact: '09171234567',
+    }))]);
+    assert.equal(updated.role, role);
+    assert.equal(updated.status, 'pending_verification');
+    assert.equal(updated.full_name, 'Edited Pending Resident');
+    assert.equal(updated.contact, '09171234567');
+    for (const staffRole of ['phn', 'admin']) {
+      await assert.rejects(() => rpc('admin_update_profile', [id, existing.admin, JSON.stringify(profileInput(updated, { role: staffRole }))]),
+        (error) => error.code === '22023' && /resident accounts/i.test(error.message));
+    }
+    assert.equal((await profile(id)).role, role);
+  }
+});
+
 test('public Auth metadata cannot assign a staff role and both public intake tables reject client inserts', async () => {
   const id = randomUUID();
   await createAuthIdentity(id, `${id}@example.test`, false, false, { role: 'admin', status: 'active' });
@@ -183,6 +287,32 @@ test('public Auth metadata cannot assign a staff role and both public intake tab
   await asClient(id, 'authenticated', async () => {
     await assert.rejects(() => query("update public.profiles set role = 'admin' where id = $1", [id]), (error) => error.code === '42501' || /administrator/.test(error.message));
   });
+});
+
+test('unrelated resident edits preserve a concurrent administrator disable', async () => {
+  const id = await existingAccount('resident', 'active', { barangayId: ids.barangay });
+  const { status, ...snapshot } = profileInput(await profile(id));
+  await rpc('admin_update_profile', [id, existing.admin, JSON.stringify({ ...snapshot, status: 'disabled' })]);
+  const updated = await rpc('admin_update_profile', [id, existing.admin,
+    JSON.stringify({ ...snapshot, full_name: 'Updated Resident Contact' })]);
+  assert.equal(updated.status, 'disabled');
+  assert.equal(updated.full_name, 'Updated Resident Contact');
+});
+
+test('resident verification updates account access transactionally while preserving explicit disables', async () => {
+  const id = await existingAccount('resident-limited', 'pending_verification', { barangayId: ids.barangay });
+  await query('insert into public.residents(id,health_record_no,auth_user_id,barangay_id,last_name,first_name,verification_status) values ($1,$2,$3,$4,$5,$6,$7)',
+    [`RES-${randomUUID()}`, `HR-${randomUUID()}`, id, ids.barangay, 'Verified', 'Resident', 'pending']);
+  await asClient(id, 'authenticated', async () => {
+    assert.deepEqual(await query("update public.residents set verification_status = 'approved' where auth_user_id = $1 returning id", [id]), []);
+  });
+  assert.equal((await profile(id)).status, 'pending_verification');
+  await query("update public.residents set verification_status = 'approved' where auth_user_id = $1", [id]);
+  assert.equal((await profile(id)).status, 'active');
+  assert.equal((await profile(id)).role, 'resident');
+  await query("update public.profiles set status = 'disabled' where id = $1", [id]);
+  await query("update public.residents set verification_status = 'rejected' where auth_user_id = $1", [id]);
+  assert.equal((await profile(id)).status, 'disabled');
 });
 
 test('all client roles are denied administrative RPC execution and outbox reads even with a forged actor UUID', async () => {
@@ -280,6 +410,10 @@ test('trusted password completion clears the gate only after approval and creati
   await asClient(active.id, 'authenticated', async () => {
     assert.equal((await query('select public.personnel_session_is_usable() as usable'))[0].usable, true);
   });
+  await asClient(active.id, 'authenticated', async () => {
+    assert.equal((await query('select public.personnel_session_is_usable() as usable'))[0].usable, false);
+    assert.deepEqual(await query("select id from public.visits where id = 'SUB-000001'"), []);
+  }, { iat: Number(completed.personnel_account.credential_valid_after) - 1 });
   const changeAudit = await audit(active.id, 'ACCOUNT_TEMPORARY_PASSWORD_CHANGED');
   assert.equal(changeAudit.length, 1);
   assert.equal(changeAudit[0].actor_id, active.id);
@@ -362,6 +496,69 @@ test('approval may withhold activation after verified setup, then reactivate wit
   assert.equal(reactivated.id, created.id);
 });
 
+test('explicit disable clears awaiting-setup activation intent and blocks both setup completion paths until reactivated', async () => {
+  for (const mustChangePassword of [false, true]) {
+    const created = await managedAccount({ must_change_password: mustChangePassword });
+    const operationId = randomUUID();
+    const input = profileInput(created.account, { status: 'disabled', suspension_reason: 'Await administrator review' });
+    const suspended = await rpc('admin_update_personnel_account', [created.id, existing.admin, JSON.stringify(input), operationId]);
+    assert.equal(suspended.status, 'disabled');
+    assert.equal(suspended.personnel_account.activation_requested, false);
+    assert.equal(suspended.personnel_account.setup_required, true);
+    assert.equal(suspended.personnel_account.approval_status, 'approved');
+    assert.ok(suspended.personnel_account.suspended_at);
+    assert.equal(suspended.personnel_account.suspended_by, existing.admin);
+    assert.equal(suspended.personnel_account.suspension_reason, input.suspension_reason);
+    const jobs = await notifications(created.id);
+    await rpc('admin_update_personnel_account', [created.id, existing.admin, JSON.stringify(input), operationId]);
+    await edit(created.id, input);
+    assert.equal((await audit(created.id, 'ACCOUNT_SUSPENDED')).length, 1);
+    assert.deepEqual(await notifications(created.id), jobs);
+    await confirmEmail(created.id);
+    const completion = mustChangePassword ? 'complete_temporary_personnel_password_change' : 'complete_personnel_account_setup';
+    await assert.rejects(() => rpc(completion, [created.id]), (error) => error.code === '42501');
+    assert.equal((await profile(created.id)).status, 'disabled');
+    assert.equal((await audit(created.id, 'ACCOUNT_ACTIVATED')).length, 0);
+    await edit(created.id, profileInput(suspended, { status: 'active' }));
+    const complete = await rpc(completion, [created.id]);
+    assert.equal(complete.status, 'active');
+    assert.equal(complete.personnel_account.setup_required, false);
+  }
+});
+
+test('profile-only edits preserve activation intent and an already withheld disable remains a lifecycle no-op', async () => {
+  const created = await managedAccount();
+  const jobs = await notifications(created.id);
+  const { status, ...input } = profileInput(created.account, { contact: '09171234567' });
+  const updated = await edit(created.id, input);
+  assert.equal(updated.personnel_account.activation_requested, true);
+  assert.equal(updated.personnel_account.suspended_at, null);
+  assert.deepEqual(await notifications(created.id), jobs);
+  await confirmEmail(created.id);
+  assert.equal((await rpc('complete_personnel_account_setup', [created.id])).status, 'active');
+
+  const withheld = await managedAccount({ activation_requested: false });
+  const disabled = await edit(withheld.id, profileInput(withheld.account, { status: 'disabled' }));
+  assert.equal(disabled.personnel_account.activation_requested, false);
+  assert.equal(disabled.personnel_account.suspended_at, null);
+  assert.equal((await audit(withheld.id, 'ACCOUNT_SUSPENDED')).length, 0);
+});
+
+test('same-raw-status deactivation requires activation permission and denial preserves the original intent', async () => {
+  const created = await managedAccount();
+  await query("insert into public.role_permissions(role,permission_id,granted) values ('admin','accounts.edit',true),('admin','accounts.deactivate',false)");
+  try {
+    await assert.rejects(() => edit(created.id, profileInput(created.account, { status: 'disabled' })), (error) => error.code === '42501');
+    const unchanged = await profile(created.id);
+    assert.equal(unchanged.personnel_account.activation_requested, true);
+    assert.equal(unchanged.personnel_account.suspended_at, null);
+    assert.equal((await audit(created.id, 'ACCOUNT_SUSPENDED')).length, 0);
+    const { status, ...input } = profileInput(created.account, { contact: '09171234567' });
+    const updated = await edit(created.id, input);
+    assert.equal(updated.personnel_account.activation_requested, true);
+  } finally { await query("delete from public.role_permissions where role = 'admin'"); }
+});
+
 test('suspension revokes owner/creator and storage RLS access while preserving records and resident self-service', async () => {
   await asClient(existing.phn, 'authenticated', async () => {
     assert.equal((await query("select id from public.visits where id = 'SUB-000001'")).length, 1);
@@ -392,6 +589,49 @@ test('pending personnel can be edited without silently approving or activating t
   assert.equal(updated.status, 'pending_verification');
   assert.equal(updated.personnel_account.approval_status, 'pending');
   assert.equal((await notifications(created.id)).length, 0);
+});
+
+test('stale personnel snapshots cannot overwrite another administrator assignment and refreshed edits remain idempotent', async () => {
+  const created = await managedAccount({ role: 'bhw', barangay_id: ids.barangay, facility_id: null, rhu_stations: [] });
+  const { status, ...snapshot } = profileInput(created.account, { expected_version: created.account.personnel_account.version });
+  const otherAdmin = await existingAccount('admin', 'active', { municipalityId: null });
+  const changed = await rpc('admin_update_personnel_account', [created.id, otherAdmin,
+    JSON.stringify({ ...snapshot, barangay_id: ids.otherBarangay }), randomUUID()]);
+  assert.equal(changed.barangay_id, ids.otherBarangay);
+  assert.equal(changed.personnel_account.version, snapshot.expected_version + 1);
+  const staleOperation = randomUUID();
+  const stale = { ...snapshot, full_name: 'Stale Contact Edit' };
+  const auditsBefore = await query('select * from public.health_audit_logs where entity_id = $1 order by id', [created.id]);
+  const jobsBefore = await notifications(created.id);
+  await assert.rejects(() => rpc('admin_update_personnel_account', [created.id, existing.admin, JSON.stringify(stale), staleOperation]),
+    (error) => error.code === '40001');
+  assert.equal((await profile(created.id)).barangay_id, ids.otherBarangay);
+  assert.equal((await profile(created.id)).full_name, changed.full_name);
+  assert.deepEqual(await query('select * from public.health_audit_logs where entity_id = $1 order by id', [created.id]), auditsBefore);
+  assert.deepEqual(await notifications(created.id), jobsBefore);
+  assert.equal((await query('select id from public.personnel_account_operations where id = $1', [staleOperation])).length, 0);
+  const refreshed = { ...stale, barangay_id: changed.barangay_id, expected_version: changed.personnel_account.version };
+  const saved = await rpc('admin_update_personnel_account', [created.id, existing.admin, JSON.stringify(refreshed), staleOperation]);
+  assert.equal(saved.full_name, 'Stale Contact Edit');
+  assert.equal(saved.barangay_id, ids.otherBarangay);
+  const replay = await rpc('admin_update_personnel_account', [created.id, existing.admin, JSON.stringify(refreshed), staleOperation]);
+  assert.equal(replay.personnel_account.version, saved.personnel_account.version);
+  const rereadReplay = await rpc('admin_update_personnel_account', [created.id, existing.admin,
+    JSON.stringify({ ...refreshed, expected_version: saved.personnel_account.version }), staleOperation]);
+  assert.equal(rereadReplay.personnel_account.version, saved.personnel_account.version,
+    'an API retry rereads the current lifecycle version without creating a different edit');
+});
+
+test('a lifecycle suspension also invalidates a previously read personnel profile version', async () => {
+  const created = await managedAccount();
+  const { status, ...snapshot } = profileInput(created.account, { expected_version: created.account.personnel_account.version });
+  const suspended = await transition(created.id, 'suspend', { reason: 'Concurrent administrator review' });
+  await assert.rejects(() => edit(created.id, { ...snapshot, full_name: 'Stale Edit' }), (error) => error.code === '40001');
+  const current = await profile(created.id);
+  assert.equal(current.full_name, created.account.full_name);
+  assert.equal(current.personnel_account.version, suspended.personnel_account.version);
+  assert.equal(current.personnel_account.activation_requested, false);
+  assert.equal(current.status, 'disabled');
 });
 
 test('unrelated edits preserve unchanged legacy assignments, stations, and their audit attribution', async () => {
@@ -599,7 +839,8 @@ test('assignment edits also require the configured role/assignment-management pe
   await query("insert into public.role_permissions(role,permission_id,granted) values ('admin','accounts.edit',true),('admin','accounts.roles.manage',false)");
   try {
     await assert.rejects(() => edit(created.id, profileInput(created.account, { barangay_id: ids.otherBarangay })), (error) => error.code === '42501');
-    const contact = await edit(created.id, profileInput(created.account, { contact: '09171234567' }));
+    const { status, ...input } = profileInput(created.account, { contact: '09171234567' });
+    const contact = await edit(created.id, input);
     assert.equal(contact.barangay_id, ids.barangay);
     assert.equal(contact.contact, '09171234567');
   } finally { await query("delete from public.role_permissions where role = 'admin'"); }

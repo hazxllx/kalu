@@ -26,6 +26,7 @@ import { SUBMISSION_STATUS } from '../config/facility.js';
 import { assignedBarangay, withinFacilityScope } from '../config/scope.js';
 import { canTriage } from '../config/rhuStations.js';
 import { requestFingerprint } from '../middleware/idempotency.js';
+import { classifyBloodPressure, parseBloodPressure } from '../../../shared/bloodPressure.js';
 
 const INTAKE_ROLES = ['bhw', 'rhu_personnel', 'health_supervisor'];
 
@@ -192,13 +193,14 @@ const triageSnapshot = (resident, visit, user, submittedAt) => ({
     age: ageAtVisit(resident, visit.visitDate), sex: resident.sex || '', barangay: resident.barangay || resident.registeredBarangay || '',
   },
   vitals: visit.vitals,
+  bloodPressureClassification: visit.bpClassification,
   chiefComplaint: visit.chiefComplaint,
   clinicalHistory: visit.clinicalHistory,
   visitDate: visit.visitDate,
   recordedBy: user.id,
   recordedByName: user.name || '',
   submittedAt,
-  triageWarnings: triageReviewWarnings(visit.vitals),
+  triageWarnings: triageReviewWarnings(visit.vitals, visit),
 });
 
 /**
@@ -237,6 +239,7 @@ const normalizeVisit = (visit = {}) => ({
   treatmentGiven: String(visit.treatmentGiven ?? '').trim(),
   recommendation: String(visit.recommendation ?? '').trim(),
   vitals: normalizeVitals(visit.vitals || {}),
+  bpClassification: classifyBloodPressure(visit.vitals?.bp, visit),
 });
 
 /**
@@ -252,7 +255,7 @@ export const validateVitals = (vitals = {}) => {
   if (has(vitals.bp)) {
     const match = String(vitals.bp).match(/^\s*(\d{2,3})\s*\/\s*(\d{2,3})\s*$/);
     if (!match) error('vitals.bp', 'Enter blood pressure as systolic/diastolic, for example 120/80.');
-    else if (+match[1] < 40 || +match[1] > 300 || +match[2] < 20 || +match[2] > 200 || +match[1] <= +match[2]) {
+    else if (!parseBloodPressure(vitals.bp)) {
       error('vitals.bp', 'Enter a plausible systolic/diastolic reading (40-300/20-200 mmHg, systolic greater than diastolic).');
     }
   }
@@ -318,10 +321,11 @@ export const validateSubmissionForSubmit = (resident, visit) => {
 };
 
 /** Non-diagnostic prompts to verify unusual values; recorded observations are never changed. */
-export const triageReviewWarnings = (vitals = {}) => {
+export const triageReviewWarnings = (vitals = {}, context = {}) => {
   const warnings = [];
-  const bp = String(vitals.bp || '').match(/^\s*(\d{2,3})\s*\/\s*(\d{2,3})\s*$/);
-  if (bp && (+bp[1] >= 180 || +bp[2] >= 120 || +bp[1] < 90)) warnings.push({ field: 'vitals.bp', message: 'Blood pressure needs clinical review; verify the reading and recorded units.' });
+  const bp = classifyBloodPressure(vitals.bp, context);
+  if (bp?.referralEvaluationRequired) warnings.push({ field: 'vitals.bp', message: bp.message });
+  else if (bp && (bp.systolic >= 180 || bp.diastolic >= 120 || bp.systolic < 90)) warnings.push({ field: 'vitals.bp', message: 'Blood pressure needs clinical review; verify the reading and recorded units.' });
   const checks = [
     ['hr', (n) => n < 40 || n > 180, 'Unusual heart rate; verify the measurement.'],
     ['rr', (n) => n < 8 || n > 40, 'Unusual respiratory rate; verify the measurement.'],
@@ -467,6 +471,11 @@ export const createSubmission = async ({ residentId = null, resident = null, vis
     const demographicErrors = validateSubmissionForSubmit(demographics, { ...normalizeVisit(visit), chiefComplaint: 'Draft' });
     const patientErrors = Object.fromEntries(Object.entries(demographicErrors).filter(([field]) => field.startsWith('resident.')));
     if (Object.keys(patientErrors).length) throw ApiError.badRequest('Please correct the patient information.', patientErrors);
+    if (demographics.cellphoneNo && !/^09\d{9}$/.test(demographics.cellphoneNo)) {
+      throw ApiError.unprocessable('Please correct the patient information.', {
+        cellphoneNo: 'Contact number must be exactly 11 digits and start with 09 (e.g. 09171234567).',
+      });
+    }
     // A barangay-scoped caller cannot create a resident outside their assigned
     // barangay. The barangay is forced to the session's scope; a mismatching
     // client-supplied barangay is rejected rather than silently overwritten.
@@ -614,7 +623,7 @@ export const submitSubmission = async ({ id, user }) => {
   return {
     submission: updated,
     locked: true,
-    warnings: triageReviewWarnings(normalized.vitals),
+    warnings: triageReviewWarnings(normalized.vitals, normalized),
     message:
       'Submission successful. The record has been transferred to the Public Health Nurse queue and is no longer editable.',
   };

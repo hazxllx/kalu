@@ -12,8 +12,8 @@ test("public registration offers only new and transferring residents", () => {
   assert.match(chooser, /to: "\/register\/new\/step-1"/);
   assert.match(chooser, /to: "\/register\/transfer"/);
   assert.doesNotMatch(chooser, /key:\s*"personnel"|FORM C/);
-  assert.match(chooser, /accounts are provisioned by administrators/);
-  assert.match(chooser, /to="\/register\/personnel"[^>]*>Personnel access process/);
+  assert.doesNotMatch(chooser, /Resident registration only|Choose the form that best matches your circumstances|accounts are provisioned by administrators|Personnel access process/);
+  assert.doesNotMatch(chooser, /\/register\/personnel/);
 });
 
 test("Hero notice offers resident-only registration and identifies personnel accounts as internal", () => {
@@ -98,7 +98,7 @@ test("new personnel creation uses fixed location and generated password without 
 });
 
 test("history consumes canonical API camel-case events and refreshes the real account", () => {
-  assert.match(management, /usersApi.history\(target.id\), usersApi.get\(target.id\)/);
+  assert.match(management, /Promise\.allSettled\(\[usersApi.history\(target.id\), usersApi.get\(target.id\)\]\)/);
   assert.match(management, /formatTimestamp\(entry.createdAt\)/);
   assert.match(management, /entry.eventType/);
   assert.match(management, /entry.sentAt/);
@@ -115,7 +115,7 @@ test("password setup keeps the existing reset route and verified bearer-only own
   assert.match(authContext, /PASSWORD_LINK_PATHS = \['\/reset-password', '\/setup-password'\]/);
   const authApi = source("services/api/authApi.js");
   assert.match(authApi, /personnelSetupStatus: \(token\) => api.get\('\/auth\/personnel\/setup-status'/);
-  assert.match(authApi, /personnelPasswordSetup: \(password, token\) => api.post\('\/auth\/personnel\/password-setup', \{ password \}/);
+  assert.match(authApi, /personnelPasswordSetup: \(password, token, recoverySecret\) => api.post\('\/auth\/personnel\/password-setup'/);
   assert.match(authApi, /Authorization: `Bearer \$\{token\}`/);
   const reset = source("features/authentication/pages/ResetPassword.jsx");
   assert.match(reset, /const outcome = await saveResetPassword/);

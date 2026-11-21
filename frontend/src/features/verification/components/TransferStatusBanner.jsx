@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BadgeCheck, Clock, FileText, RotateCcw, ShieldAlert } from "lucide-react";
+import { ArrowRight, Clock, FileText, RotateCcw, ShieldAlert } from "lucide-react";
 import { Card } from "@/components/common/Card";
 import { api } from "@/services/api";
 
@@ -23,13 +23,6 @@ const META = {
     chip: "border-brand-gold/40 bg-brand-gold/15 text-brand-dark",
     message: "Your residency transfer request is currently being reviewed by the health office.",
     Icon: Clock,
-  },
-  transfer_approved: {
-    label: "Transfer Approved",
-    heading: "Your residency transfer has been approved",
-    chip: "border-brand-green/25 bg-brand-green/10 text-brand-green",
-    message: "Your residency transfer has been approved. Your current barangay has been updated and your existing health record remains associated with your account.",
-    Icon: BadgeCheck,
   },
   transfer_resubmission: {
     label: "Corrections Needed",

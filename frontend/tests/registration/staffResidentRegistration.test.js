@@ -84,6 +84,14 @@ test('P0-1: validateStaffResidentForm accepts valid inputs and flags invalid fie
   assert.match(invalid.email, /valid email/i);
 });
 
+test('contact number remains optional but requires exactly 11 digits beginning with 09', () => {
+  const base = { firstName: 'Maria', lastName: 'Reyes', dob: '1995-05-10', gender: 'Female', civilStatus: 'Single', barangay: 'San Jose' };
+  assert.deepEqual(validateStaffResidentForm({ ...base, contact: '' }), {});
+  for (const contact of ['0917123456', '091712345678', '08171234567', '9171234567', '09AB1234567']) {
+    assert.match(validateStaffResidentForm({ ...base, contact }).contact, /11 digits/);
+  }
+});
+
 test('P0-1: buildStaffResidentPayload builds canonical resident create payload with houseNo and zone', () => {
   const payload = buildStaffResidentPayload({
     firstName: ' Maria ',
@@ -115,6 +123,8 @@ test('P0-1: StaffResidentRegistration defaults isOpen=true, handles route close,
   );
   assert.match(src, /isOpen\s*=\s*true/);
   assert.match(src, /residentsApi\.create\(\{\s*resident:\s*payload\s*\}\)/);
+  assert.match(src, /disabled=\{Boolean\(assignedBarangay\)\}/);
+  assert.doesNotMatch(src, /Age.*Optional/);
   assert.doesNotMatch(src, /residentsApi\.createResident/);
   assert.doesNotMatch(src, /Card\s*\}/);
 });

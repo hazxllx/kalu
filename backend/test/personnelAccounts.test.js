@@ -305,6 +305,89 @@ test('new or changed RHU assignment validates stations while station-only change
   });
 });
 
+test('explicit disable reaches personnel SQL even when awaiting setup already has raw disabled status', async () => {
+  const awaitingSetup = profile();
+  let saved = awaitingSetup;
+  const calls = [];
+  await withMethods(repository, {
+    getProfileById: async () => saved,
+    updatePersonnelAccountProfile: async (args) => {
+      calls.push(args);
+      saved = profile({ activationRequested: false, suspendedAt: '2026-11-20T13:00:00Z' });
+      return saved;
+    },
+  }, async () => {
+    const result = await users.updateUser({ id: TARGET, actorId: ACTOR, patch: { status: ' disabled ', operationId: OPERATION } });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].profile.status, 'disabled');
+    assert.equal(calls[0].actorId, ACTOR);
+    assert.equal(calls[0].operationId, OPERATION);
+    assert.equal(result.activationRequested, false);
+    assert.equal(result.status, 'disabled');
+  });
+});
+
+test('personnel profile edits without a status omit lifecycle intent from the SQL payload', async () => {
+  const awaitingSetup = profile();
+  await withMethods(repository, {
+    getProfileById: async () => awaitingSetup,
+    updatePersonnelAccountProfile: async ({ profile: input }) => {
+      assert.equal(Object.hasOwn(input, 'status'), false);
+      assert.equal(input.contact, '09180000000');
+      return awaitingSetup;
+    },
+  }, async () => {
+    const result = await users.updateUser({ id: TARGET, actorId: ACTOR, patch: { contact: '09180000000' } });
+    assert.equal(result.activationRequested, true);
+  });
+});
+
+test('both resident roles use the resident RPC for pending details and assignment edits and cannot become staff', async () => {
+  for (const role of ['resident', 'resident-limited']) {
+    const resident = profile({ role, status: 'pending_verification', barangayId: BARANGAY, lifecycleVersion: null });
+    const calls = [];
+    await withMethods(repository, {
+      getProfileById: async () => resident,
+      getAccountAssignmentOptions: async () => options(),
+      updatePersonnelAccountProfile: async () => { throw new Error('residents must not use the personnel lifecycle RPC'); },
+      updateAdminAccountProfile: async (args) => { calls.push(args); return resident; },
+    }, async () => {
+      await users.updateUser({ id: TARGET, actorId: ACTOR, patch: { fullName: 'Updated Resident', contact: '09180000000' } });
+      assert.equal(calls[0].profile.role, role);
+      assert.equal(Object.hasOwn(calls[0].profile, 'status'), false,
+        'an unrelated resident edit must not overwrite a concurrent administrator disable');
+      assert.equal(calls[0].profile.full_name, 'Updated Resident');
+      assert.equal(calls[0].profile.contact, '09180000000');
+      assert.equal(Object.hasOwn(calls[0].profile, 'expected_version'), false);
+      await users.updateUser({ id: TARGET, actorId: ACTOR, patch: { barangayId: null } });
+      assert.equal(calls[1].profile.barangay_id, null);
+      for (const staffRole of ['phn', 'admin']) {
+        await assert.rejects(() => users.updateUser({ id: TARGET, actorId: ACTOR, patch: { role: staffRole } }),
+          (error) => error.statusCode === 422 && /resident accounts/i.test(error.message));
+      }
+      assert.equal(calls.length, 2);
+    });
+  }
+});
+
+test('personnel edits use the pre-read lifecycle version and surface concurrent-state conflicts without retrying', async () => {
+  const existing = profile({ lifecycleVersion: 7 });
+  let writes = 0;
+  await withMethods(repository, {
+    getProfileById: async () => existing,
+    updatePersonnelAccountProfile: async ({ profile: input }) => {
+      writes += 1;
+      assert.equal(input.expected_version, 7, 'the client must not override the server snapshot version');
+      throw Object.assign(new Error('The account state changed. Refresh the account.'), { statusCode: 409 });
+    },
+  }, async () => {
+    await assert.rejects(() => users.updateUser({
+      id: TARGET, actorId: ACTOR, patch: { contact: '09180000000', expected_version: 99 },
+    }), (error) => error.statusCode === 409);
+    assert.equal(writes, 1);
+  });
+});
+
 test('pending or rejected personnel cannot be activated through generic profile edits', async () => {
   for (const approvalStatus of ['pending', 'rejected']) {
     await withMethods(repository, { getProfileById: async () => profile({ approvalStatus }) }, async () => {
@@ -448,6 +531,7 @@ const withSetup = async ({
   completionError = null,
   temporaryCompletion = profile({ mustChangePassword: false, setupRequired: false, status: 'active', passwordChangedAt: '2026-10-31T10:00:00Z' }),
   temporaryCompletionError = null,
+  temporaryClaim = '99999999-9999-4999-8999-999999999999',
 } = {}, run) => {
   const calls = [];
   const client = getServiceClient();
@@ -456,11 +540,20 @@ const withSetup = async ({
     updateUser: async () => { throw new Error('must not mutate singleton user session'); },
     signInWithPassword: async () => { throw new Error('must not sign in singleton'); },
   }, () => withMethods(client.auth.admin, {
-    updateUserById: async (id, input) => { calls.push(['password', id, input]); return { data: { user: { id } }, error: updateError }; },
+    updateUserById: async (id, input) => { calls.push(['adminPassword', id, input]); return { data: { user: { id } }, error: updateError }; },
   }, () => withMethods(repository, {
+    updatePersonnelOwnPassword: async ({ password }) => {
+      calls.push(['password', TARGET, { password }]);
+      return { data: { user: { id: TARGET } }, error: updateError };
+    },
     getPersonnelSetupAccount: async (id) => { calls.push(['account', id]); return account; },
+    beginPersonnelTemporaryPasswordChange: async (input) => { calls.push(['temporaryBegin', input]); return temporaryClaim; },
+    releasePersonnelTemporaryPasswordChange: async (input) => { calls.push(['temporaryRelease', input]); return true; },
+    beginPersonnelInvitationRecovery: async (input) => { calls.push(['recoveryBegin', input]); return '88888888-8888-4888-8888-888888888888'; },
+    completePersonnelInvitationRecovery: async (input) => { calls.push(['recoveryComplete', input]); return completion; },
+    getPersonnelInvitationRecoveryOwner: async (digest) => { calls.push(['recoveryOwner', digest]); return TARGET; },
     completePersonnelAccountSetup: async (id) => { calls.push(['complete', id]); if (completionError) throw completionError; return completion; },
-    completeTemporaryPasswordChange: async (id) => { calls.push(['temporaryComplete', id]); if (temporaryCompletionError) throw temporaryCompletionError; return temporaryCompletion; },
+    completeClaimedTemporaryPasswordChange: async (input) => { calls.push(['temporaryComplete', input.id, input.claimId]); if (temporaryCompletionError) throw temporaryCompletionError; return temporaryCompletion; },
   }, () => run(calls))));
 };
 
@@ -518,12 +611,11 @@ test('temporary password change updates Auth first and clears the requirement on
       approvalStatus: 'approved',
       activationRequested: true,
     });
-    assert.deepEqual(calls, [
-      ['verify', 'owner-token'],
-      ['account', TARGET],
-      ['password', TARGET, { password: PASSWORD }],
-      ['temporaryComplete', TARGET],
-    ]);
+    assert.deepEqual(calls.map(([kind]) => kind), ['verify', 'account', 'temporaryBegin', 'password', 'temporaryComplete']);
+    assert.equal(calls[2][1].id, TARGET);
+    assert.match(calls[2][1].passwordDigest, /^[0-9a-f]{64}$/);
+    assert.deepEqual(calls[3], ['password', TARGET, { password: PASSWORD }]);
+    assert.deepEqual(calls[4], ['temporaryComplete', TARGET, '99999999-9999-4999-8999-999999999999']);
   });
 });
 
@@ -623,7 +715,7 @@ test('admin shape preserves raw historical stations and strips outbox credential
 
 test('account RPC error mapping is safe, explicit and never exposes SQL/Auth details', async () => {
   const client = getServiceClient();
-  for (const [code, status] of [['42501', 403], ['P0002', 404], ['23505', 409], ['23514', 409], ['22023', 422], ['PGRST202', 503]]) {
+  for (const [code, status] of [['42501', 403], ['P0002', 404], ['23505', 409], ['40001', 409], ['23514', 409], ['22023', 422], ['PGRST202', 503]]) {
     await withMethods(client, { rpc: async () => ({ data: null, error: { code, message: 'TOKEN SECRET', details: PASSWORD } }) }, async () => {
       await assert.rejects(() => repository.reservePersonnelAccount({ actorId: ACTOR, operationId: OPERATION, profile: {} }),
         (error) => error.statusCode === status && !JSON.stringify(error).includes(PASSWORD) && !error.message.includes('SECRET'));

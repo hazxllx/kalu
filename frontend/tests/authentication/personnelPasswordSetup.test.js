@@ -54,6 +54,33 @@ test("personnel setup uses the server own-account password endpoint, never updat
   assert.match(result.message, /approved account is active/);
 });
 
+test("temporary-password recovery carries the secret from the verified email link through existing setup", async () => {
+  const deps = dependencies();
+  const recoverySecret = "supabase-one-time-email-token-hash";
+  await saveResetPassword({
+    ...deps,
+    session: session(),
+    password: "ValidPassword1!",
+    setupStatus: setup({ mustChangePassword: true }),
+    recoverySecret,
+  });
+  assert.deepEqual(deps.calls, [["personnel", "ValidPassword1!", "isolated-session-token", recoverySecret]]);
+});
+
+test("password-saved recovery retry can finalize with the same email secret after Auth revokes the bearer", async () => {
+  const deps = dependencies();
+  const recoverySecret = "supabase-one-time-email-token-hash";
+  await saveResetPassword({
+    ...deps,
+    session: { ...session(), access_token: null },
+    password: "ValidPassword1!",
+    setupStatus: setup({ mustChangePassword: true }),
+    passwordPreviouslySaved: true,
+    recoverySecret,
+  });
+  assert.deepEqual(deps.calls, [["personnel", "ValidPassword1!", null, recoverySecret]]);
+});
+
 test("existing completed personnel and resident resets keep their ordinary Supabase password flow", async () => {
   for (const managed of [false, true]) {
     const deps = dependencies();

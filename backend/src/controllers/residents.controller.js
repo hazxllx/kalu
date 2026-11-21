@@ -173,4 +173,10 @@ export const getMyHealthRecords = async (req, res) => {
   sendData(res, data);
 };
 
+export const getStaffHealthHistory = async (req, res) => {
+  res.set('Cache-Control', 'no-store, private');
+  const data = await residentsService.getStaffHealthHistory({ user: req.user, residentId: req.params.id });
+  sendData(res, data);
+};
+
 export default { listResidents, createResident, getResident, createResidentAccount, updateResident, updateMyProfile, getMyHealthRecords };

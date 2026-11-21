@@ -8,6 +8,7 @@ import { cacheRecord, listCachedRecords } from './records.js';
 import { isNavigatorOnline } from './connectivity.js';
 import { classifySyncError, SYNC_ERROR } from './errors.js';
 import { MUTATION_TIER, OfflineActionRequiredError } from './mutationPolicy.js';
+import { parseBloodPressure } from '../../../../shared/bloodPressure.js';
 
 /**
  * Additive, authorized consultation creates are SAFE_SYNC. The draft and its
@@ -21,6 +22,13 @@ const LEGACY_ENTITY = 'consultationDraft';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isNetworkFailure = (error) => classifySyncError(error).code === SYNC_ERROR.NETWORK;
 const malformed = (message) => Object.assign(new Error(message), { code: SYNC_ERROR.MALFORMED });
+const validateBloodPressure = (payload) => {
+  const reading = payload?.bloodPressure;
+  if (reading != null && (typeof reading !== 'string' || (reading.trim() && !parseBloodPressure(reading)))) {
+    throw Object.assign(malformed('Enter a complete, valid systolic/diastolic reading (e.g. 120/80).'),
+      { status: 422, payload: { error: { errors: { bloodPressure: 'Enter a complete, valid systolic/diastolic reading (e.g. 120/80).' } } } });
+  }
+};
 const conflict = (message) => Object.assign(new Error(message), { status: 409, code: SYNC_ERROR.CONFLICT });
 const validTimestamp = (value) => typeof value === 'string'
   && /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
@@ -53,6 +61,10 @@ export const requireConfirmedConsultation = (result, op) => {
     findings: payload.clinicalFindingsDiagnosis !== undefined ? expectedFindings : String(payload.findings ?? '').trim(),
     diagnosis: payload.clinicalFindingsDiagnosis !== undefined ? expectedDiagnosis : String(payload.diagnosis ?? '').trim(),
   };
+  const expectedBp = parseBloodPressure(payload.bloodPressure);
+  const savedBp = parseBloodPressure(record?.vitals?.bp);
+  const snapshotBp = parseBloodPressure(record?.bloodPressureClassification);
+  const sameBp = (left, right) => left?.systolic === right?.systolic && left?.diastolic === right?.diastolic;
   if (!record || typeof record !== 'object' || Array.isArray(record)
     || typeof record.id !== 'string' || !record.id.trim() || /^(LOCAL|DRAFT)-/.test(record.id)
     || record.offline === true || record.resident?.id !== payload.residentId
@@ -64,6 +76,7 @@ export const requireConfirmedConsultation = (result, op) => {
     || record.consultationDate !== payload.consultationDate
     || (record.consultationTime || '') !== (payload.consultationTime || '')
     || !['draft', 'submitted', 'received', 'in_review', 'referred', 'completed'].includes(record.status)
+    || !sameBp(expectedBp, savedBp) || (expectedBp && !sameBp(expectedBp, snapshotBp))
     || typeof record.chiefComplaint !== 'string' || !record.chiefComplaint.trim()
     || ['chiefComplaint', 'findings', 'diagnosis', 'treatmentGiven', 'adviceGiven', 'remarks', 'nextVisitDate'].some((field) =>
       String(record[field] ?? '').trim() !== String(expected[field] ?? '').trim())
@@ -77,6 +90,7 @@ export const requireConfirmedConsultation = (result, op) => {
 /** Shared by the foreground save and the registered reconnect handler. */
 export const createConsultationSyncHandler = (create) => {
   const handler = async (op, context = {}) => {
+    validateBloodPressure(op?.payload);
     if (!op?.ownerId || !UUID.test(op.payload?.clientOperationKey || '')
       || op.idempotencyKey !== op.payload.clientOperationKey || !validTimestamp(op.payload.recordedAt)) {
       throw malformed('The queued consultation has no valid original operation identity or recording timestamp.');
@@ -234,6 +248,7 @@ const refreshQueue = async (start = false) => {
 export const saveConsultationOffline = async ({ ownerId, payload, localId = null, create, online = isNavigatorOnline }) => {
   if (!ownerId) throw new Error('A signed-in user is required.');
   if (typeof create !== 'function') throw new Error('A consultation create function is required.');
+  validateBloodPressure(payload);
   const queued = await persistConsultationCreate({ ownerId, payload, localId });
   await refreshQueue();
   if (online()) return submitConsultationDraft({ ownerId, localId: queued.localId, create, online });
@@ -333,7 +348,19 @@ export const listConsultationsOffline = async ({ ownerId, params, fetchList, onl
   const pendingKeys = new Set(drafts.map((draft) => draft.clientOperationKey).filter(Boolean));
   // A lost response may already be visible on the server. Keep its pending
   // confirmation row, but never infer synced from a list response.
-  return [...drafts, ...rows.filter((row) => !pendingKeys.has(row.clientOperationKey))];
+  const residentId = params?.residentId ?? params?.resident_id;
+  const serviceId = params?.serviceId ?? params?.service_id;
+  const search = String(params?.q || '').trim().toLowerCase();
+  return [...drafts, ...rows.filter((row) => !pendingKeys.has(row.clientOperationKey))].filter((row) => {
+    const date = row.consultationDate || String(row.visitDate || '').slice(0, 10);
+    return (!residentId || (row.resident?.id ?? row.residentId) === residentId)
+      && (!serviceId || (row.serviceId ?? row.healthServiceId) === serviceId)
+      && (!params?.status || row.status === params.status)
+      && (!params?.from || date >= params.from)
+      && (!params?.to || date <= params.to)
+      && (!search || [row.id, row.resident?.name, row.resident?.firstName, row.resident?.lastName,
+        row.chiefComplaint, row.diagnosis].filter(Boolean).join(' ').toLowerCase().includes(search));
+  });
 };
 
 /** Cache only the authorized VERIFIED selector, not a general resident list. */

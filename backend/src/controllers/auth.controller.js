@@ -101,7 +101,9 @@ export const personnelSetupStatus = async (req, res) => {
  * the Bearer token and `req.body.password` via `authService.setupPersonnelPassword`.
  */
 export const personnelPasswordSetup = async (req, res) => {
-  sendData(res, await authService.setupPersonnelPassword({ accessToken: bearerToken(req), password: req.body.password }));
+  sendData(res, await authService.setupPersonnelPassword({
+    accessToken: bearerToken(req), password: req.body.password, recoverySecret: req.body.recoverySecret,
+  }));
 };
 
 /**

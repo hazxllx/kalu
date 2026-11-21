@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import ApiError from '../utils/apiError.js';
 import repository from '../repositories/index.js';
 import { assignedBarangay } from '../config/scope.js';
@@ -8,8 +9,9 @@ import { notifyResidentOnce } from './notifications.service.js';
 import { computeBMI } from '../utils/bmi.js';
 import { normalizeMedications } from './medicines.service.js';
 import { classifyWithConfig } from './bpConfig.service.js';
-import { classifyBloodPressure as classifyBpWithThresholds } from '../config/bpThresholds.js';
+import { classifyBloodPressure as classifyBpWithThresholds, parseBloodPressure } from '../config/bpThresholds.js';
 import { requestFingerprint } from '../middleware/idempotency.js';
+import { buildEncounterAssessment, encounterBloodPressureContext, validateClinicalIndicators } from './clinicalAssessment.service.js';
 
 /**
  * KALUSAGAP — Clinical Consultations Service (`consultations.service.js`).
@@ -59,11 +61,16 @@ export const CONSULTATION_STATUSES = Object.freeze([
 ]);
 
 /** Validate + normalize the consultation list filter parameters. */
-export const parseListFilters = ({ from, to, serviceId, status } = {}) => {
+export const parseListFilters = ({ from, to, serviceId, residentId, status } = {}) => {
   const dateIsDateOnly = (v) =>
     typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00`));
   const filters = {};
   const errors = [];
+  if (residentId !== undefined && residentId !== null && residentId !== '') {
+    if (typeof residentId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(residentId.trim())) {
+      errors.push('The selected resident is not valid.');
+    } else filters.residentId = residentId.trim();
+  }
   if (from !== undefined && from !== null && String(from).trim() !== '') {
     if (!dateIsDateOnly(from)) errors.push('The start date must be a valid date (YYYY-MM-DD).');
     else filters.from = String(from).trim();
@@ -122,13 +129,7 @@ const present = (value) => value !== undefined && value !== null && String(value
  * @returns {string|null} Category label or `null`.
  */
 export const classifyBloodPressure = (bloodPressure) => {
-  // Single source of truth: delegate to the authoritative, admin-configurable
-  // classifier (config/bpThresholds.js) and return its human label (or null).
-  // The previous hardcoded thresholds here diverged from the authoritative
-  // table (wrong crisis/stage boundaries) and had NO hypotension band, so a
-  // valid low reading like "85/55" was mislabelled "Normal". Delegating removes
-  // that divergence while preserving the string shape of
-  // `vitals.bloodPressureCategory`.
+  // Retain the legacy label-only API using the shared reference classifier.
   const result = classifyBpWithThresholds(bloodPressure);
   return result ? result.label : null;
 };
@@ -159,7 +160,9 @@ const validateVitalsByField = (payload = {}) => {
   check('weight', 'Weight (kg)', 1, 400);
   check('oxygenSaturation', 'Oxygen saturation (%)', 50, 100);
 
-  if (present(payload.bloodPressure)) {
+  if (payload.bloodPressure != null && typeof payload.bloodPressure !== 'string') {
+    errors.bloodPressure = 'Blood pressure must be in the form systolic/diastolic (e.g. 120/80).';
+  } else if (present(payload.bloodPressure)) {
     const m = text(payload.bloodPressure).match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/);
     if (!m) {
       errors.bloodPressure = 'Blood pressure must be in the form systolic/diastolic (e.g. 120/80).';
@@ -167,7 +170,7 @@ const validateVitalsByField = (payload = {}) => {
       const sys = Number(m[1]);
       const dia = Number(m[2]);
       if (!inRange(sys, 40, 300)) errors.bloodPressure = 'Systolic blood pressure must be between 40 and 300.';
-      else if (!inRange(dia, 40, 300)) errors.bloodPressure = 'Diastolic blood pressure must be between 40 and 300.';
+      else if (!inRange(dia, 20, 200)) errors.bloodPressure = 'Diastolic blood pressure must be between 20 and 200.';
       else if (sys <= dia) errors.bloodPressure = 'Systolic blood pressure must be greater than diastolic.';
     }
   }
@@ -221,6 +224,13 @@ export const validateFollowUp = (payload = {}) => {
  */
 const assertStaff = (user) => {
   if (!STAFF_ROLES.has(user?.role)) throw ApiError.forbidden('You are not authorized to manage consultations.');
+};
+
+const assertHistoryScope = (user) => {
+  assertStaff(user);
+  if (!user.municipalityId || (user.role === 'health_supervisor' && !user.barangayId && !assignedBarangay(user))) {
+    throw ApiError.forbidden('Your account has no assigned consultation history scope.');
+  }
 };
 
 /**
@@ -396,21 +406,19 @@ const CLINICAL_TEXT_FIELDS = [
  * Returns an object with normalized findings and diagnosis.
  */
 const normalizeClinicalFindings = (payload = {}) => {
-  // New merged field takes priority
-  if (payload.clinicalFindingsDiagnosis) {
+  if (payload.clinicalFindingsDiagnosis !== undefined) {
     const merged = text(payload.clinicalFindingsDiagnosis);
-    // Try to split if diagnosis marker exists (for safety with mixed input)
-    if (merged.includes('\n')) {
-      const parts = merged.split('\n');
+    const marker = /^[ \t]*Diagnosis:[ \t]*/im.exec(merged);
+    if (marker) {
       return {
-        findings: parts.slice(0, -1).join('\n'),
-        diagnosis: parts[parts.length - 1],
+        findings: merged.slice(0, marker.index).trim(),
+        diagnosis: merged.slice(marker.index + marker[0].length).trim(),
       };
     }
     // No newline, treat entire content as findings with no separate diagnosis
     return {
       findings: merged,
-      diagnosis: '',
+      diagnosis: text(payload.diagnosis),
     };
   }
   // Fallback to legacy separate fields
@@ -429,6 +437,7 @@ const normalizeClinicalFindings = (payload = {}) => {
  */
 const clinicalDetails = (payload) => {
   const { findings, diagnosis } = normalizeClinicalFindings(payload);
+  const bp = parseBloodPressure(payload.bloodPressure);
   return ({
     ...(payload.consultationDetails || {}),
     ...Object.fromEntries(CLINICAL_TEXT_FIELDS.map((field) => {
@@ -437,10 +446,35 @@ const clinicalDetails = (payload) => {
       return [field, text(payload[field])];
     })),
     followUpRequired: text(payload.nextVisitDate) ? 'Yes' : 'No',
+    clinicalIndicators: validateClinicalIndicators(payload.clinicalIndicators !== undefined
+      ? payload.clinicalIndicators : payload.consultationDetails?.clinicalIndicators),
+    bloodPressureSystolic: bp?.systolic ?? null,
+    bloodPressureDiastolic: bp?.diastolic ?? null,
   });
 };
 
 const numericVital = (value) => present(value) ? Number(value) : null;
+const VITAL_FIELDS = {
+  bloodPressure: 'bp', temperature: 'temperature', pulseRate: 'hr', respiratoryRate: 'rr',
+  height: 'heightCm', weight: 'weightKg', oxygenSaturation: 'o2sat',
+};
+
+const ENCOUNTER_RISK_LEVELS = new Map(Object.entries({
+  low: 'Low', medium: 'Moderate', moderate: 'Moderate', high: 'High',
+}));
+const encounterRiskLevel = (assessment) => ENCOUNTER_RISK_LEVELS.get(
+  String(assessment?.level ?? assessment?.riskLevel ?? assessment?.risk_level ?? '').trim().toLowerCase().replace(/\s+risk$/, ''),
+) || 'Unassessed';
+const savedEncounterAssessment = (details) => details.clinicalAssessment ?? details.clinical_assessment
+  ?? details.riskAssessment ?? details.risk_assessment
+  ?? (Array.isArray(details.clinicalAssessmentHistory) ? details.clinicalAssessmentHistory.at(-1) : null)
+  ?? (details.riskLevel != null || details.risk_level != null ? { level: details.riskLevel ?? details.risk_level } : null);
+
+const bpContext = (payload) => encounterBloodPressureContext({ chiefComplaint: payload.chiefComplaint,
+  findings: payload.clinicalFindingsDiagnosis ?? [normalizeClinicalFindings(payload).findings,
+    normalizeClinicalFindings(payload).diagnosis].filter(Boolean).join('\n'),
+  clinicalIndicators: payload.clinicalIndicators !== undefined
+    ? payload.clinicalIndicators : payload.consultationDetails?.clinicalIndicators });
 
 /**
  * Transform a validated consultation payload into a `visits` repository write object.
@@ -459,6 +493,8 @@ const numericVital = (value) => present(value) ? Number(value) : null;
  */
 export const toVisit = (payload = {}, user, residentId, extra = {}) => {
   const { findings, diagnosis } = normalizeClinicalFindings(payload);
+  const bp = parseBloodPressure(payload.bloodPressure);
+  const context = bpContext(payload);
   return ({
     residentId,
     recordedById: user.id,
@@ -494,9 +530,11 @@ export const toVisit = (payload = {}, user, residentId, extra = {}) => {
     // Blood-pressure classification SNAPSHOT recorded at the time of the
     // consultation. Preserved historically: a later threshold change does not
     // alter it (it is only recomputed when the consultation itself is saved).
-    bpClassification: extra.bpClassification ?? null,
+    bpClassification: extra.bpClassification ?? classifyBpWithThresholds(payload.bloodPressure, context),
     vitals: {
-      bp: text(payload.bloodPressure),
+      bp: bp ? `${bp.systolic}/${bp.diastolic}` : '',
+      systolic: bp?.systolic ?? null,
+      diastolic: bp?.diastolic ?? null,
       temperature: numericVital(payload.temperature),
       hr: numericVital(payload.pulseRate),
       rr: numericVital(payload.respiratoryRate),
@@ -536,10 +574,19 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
   const findings = text(visit.findings);
   const diagnosisMarker = '\nDiagnosis: ';
   const [findingsText, diagnosis] = findings.includes(diagnosisMarker)
-    ? findings.split(diagnosisMarker)
+    ? [findings.slice(0, findings.indexOf(diagnosisMarker)), findings.slice(findings.indexOf(diagnosisMarker) + diagnosisMarker.length)]
     : [findings, visit.phn?.assessment || ''];
+  const clinicalFindings = details.findings ?? findingsText;
+  const clinicalDiagnosis = details.diagnosis ?? text(diagnosis);
+  const nextVisitDate = details.nextVisitDate ?? (visit.recommendation?.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || '');
+  const followUpRequired = details.followUpRequired ?? (nextVisitDate ? 'Yes' : 'No');
+  const clinicalAssessment = savedEncounterAssessment(details);
 
-  let attendingPersonnel = null;
+  let attendingPersonnel = visit.recordedById || visit.recordedByName ? {
+    id: visit.recordedById || null,
+    fullName: visit.recordedByName || '',
+    position: visit.recordedByRole || '',
+  } : null;
   let facilityName = null;
 
   if (visit.recordedById && supabase) {
@@ -553,7 +600,7 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
       if (profile) {
         attendingPersonnel = {
           id: profile.id,
-          fullName: profile.full_name || '',
+          fullName: visit.recordedByName || profile.full_name || '',
           position: profile.position || '',
         };
         facilityName = profile.facilities?.name || null;
@@ -586,7 +633,8 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
   // empty/invalid reading (the classifier returns null).
   const bloodPressureClassification = (visit.bpClassification && typeof visit.bpClassification === 'object')
     ? visit.bpClassification
-    : classifyBpWithThresholds(visit.vitals?.bp);
+    : classifyBpWithThresholds(visit.vitals?.bp, { chiefComplaint: visit.chiefComplaint,
+      findings: visit.findings ?? details.findings });
 
   return {
     id: visit.id,
@@ -608,20 +656,24 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
     serviceId: visit.healthServiceId || null,
     serviceName: visit.healthServiceName || '',
     chiefComplaint: visit.chiefComplaint || '',
-    findings: details.findings ?? findingsText,
-    diagnosis: details.diagnosis ?? text(diagnosis),
+    findings: clinicalFindings,
+    diagnosis: clinicalDiagnosis,
     treatmentGiven: details.treatmentGiven ?? treatmentText,
     medicationPrescribed: details.medicationPrescribed || medicationPrescribed,
     medications,
     adviceGiven: details.adviceGiven ?? (visit.recommendation || ''),
     remarks: details.remarks ?? (visit.clinicalHistory || visit.phn?.notes || ''),
-    followUpRequired: details.followUpRequired ?? (visit.recommendation?.includes('Next visit:') ? 'Yes' : 'No'),
-    nextVisitDate: details.nextVisitDate ?? (visit.recommendation?.match(/Next visit:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || ''),
-    referralRequired: visit.referralRequired ? 'Yes' : 'No',
+    followUpRequired,
+    nextVisitDate,
+    referralRequired: visit.referralRequired || visit.referralId || visit.referrals?.length ? 'Yes' : 'No',
+    clinicalAssessment,
+    riskLevel: encounterRiskLevel(clinicalAssessment),
     bloodPressureClassification,
     vitals: {
       ...(visit.vitals || {}),
-      bloodPressureCategory: classifyBloodPressure(visit.vitals?.bp),
+      systolic: parseBloodPressure(visit.vitals?.bp)?.systolic ?? null,
+      diastolic: parseBloodPressure(visit.vitals?.bp)?.diastolic ?? null,
+      bloodPressureCategory: bloodPressureClassification?.label ?? null,
     },
     status: visit.status,
     createdAt: visit.createdAt,
@@ -634,7 +686,32 @@ export const fromVisit = async (visit, supabase = serviceClientFor()) => {
     attendingPersonnel: attendingPersonnel,
     responsiblePersonnelId: visit.responsiblePersonnelId || null,
     responsiblePersonnelName: visit.responsiblePersonnelName || visit.phn?.personnel || '',
+    consultingPersonnel: visit.phn?.personnel || visit.responsiblePersonnelName || visit.recordedByName || '',
+    recordedById: visit.recordedById || null,
+    recordedByName: visit.recordedByName || '',
+    recordedByRole: visit.recordedByRole || '',
+    assessment: visit.phn?.assessment || '',
+    outcome: visit.status || '',
+    completedAt: visit.completedAt || null,
+    facilityId: visit.facilityId || null,
+    referralId: visit.referralId || null,
+    fromReferral: Boolean(visit.referralId),
+    followUps: visit.followUps || [],
+    referrals: visit.referrals || [],
   };
+};
+
+/** Attach only canonical records linked to both this encounter and its resident. */
+export const withHistoryLinks = async (visits, repo = repository) => {
+  if (!visits.length || !repo.listVisitHistoryLinks) return visits;
+  const { followUps, referrals } = await repo.listVisitHistoryLinks(visits.map((visit) => visit.id),
+    visits.map((visit) => visit.referralId).filter(Boolean));
+  return visits.map((visit) => ({
+    ...visit,
+    followUps: followUps.filter((row) => row.consultation_id === visit.id && row.resident_id === visit.residentId),
+    referrals: referrals.filter((row) => (row.treatment_visit_id === visit.id || row.id === visit.referralId)
+      && row.resident_id === visit.residentId),
+  }));
 };
 
 const TERMINAL_FOLLOWUP = new Set(['Completed', 'Cancelled', 'Rejected']);
@@ -829,15 +906,19 @@ export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0
     const result = await repo.listVisits({
       q: text(q),
       ...filters,
+      statuses: filters.statuses || ['completed'],
       residentId: resident.id,
+      orderBy: 'clinicalDate',
       limit: pageSize,
       offset: pageOffset,
     });
-    return { rows: await Promise.all(result.rows.map((v) => fromVisit(v, supabase))), total: result.total };
+    const visits = await withHistoryLinks(result.rows, repo);
+    return { rows: await Promise.all(visits.map((v) => fromVisit(v, supabase))), total: result.total };
   }
 
-  assertStaff(user);
-  const result = await repo.listVisits({ q: text(q), ...filters, limit: pageSize, offset: pageOffset,
+  assertHistoryScope(user);
+  const result = await repo.listVisits({ q: text(q), ...filters, limit: pageSize, offset: pageOffset, orderBy: 'clinicalDate',
+    statuses: filters.statuses || (filters.residentId ? ['completed'] : null),
     municipalityId: user.municipalityId,
     barangayId: user.role === 'health_supervisor' ? user.barangayId : null,
     barangay: assignedBarangay(user) });
@@ -845,7 +926,8 @@ export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0
   for (const visit of result.rows) {
     try { assertResidentScope(user, visit.resident); filtered.push(visit); } catch {}
   }
-  return { rows: await Promise.all(filtered.map((v) => fromVisit(v, supabase))),
+  const visits = await withHistoryLinks(filtered, repo);
+  return { rows: await Promise.all(visits.map((v) => fromVisit(v, supabase))),
     total: filtered.length === result.rows.length ? result.total : filtered.length };
 };
 
@@ -858,7 +940,7 @@ export const list = async ({ user, q = '', filters = {}, limit = 200, offset = 0
  */
 export const get = async ({ user, id, repo = repository, supabase = serviceClientFor(repo) }) => {
   const isResidentSelf = user?.role === 'resident';
-  if (!isResidentSelf) assertStaff(user);
+  if (!isResidentSelf) assertHistoryScope(user);
   const visit = await repo.getVisit(id);
   if (!visit) throw ApiError.notFound('Consultation not found.');
   if (isResidentSelf) {
@@ -867,12 +949,13 @@ export const get = async ({ user, id, repo = repository, supabase = serviceClien
   } else {
     assertResidentScope(user, visit.resident);
   }
-  return fromVisit(visit, supabase);
+  const [linkedVisit] = await withHistoryLinks([visit], repo);
+  return fromVisit(linkedVisit, supabase);
 };
 
 /**
  * Validate required clinical consultation fields, date/time/ISO-timestamp formats,
- * vitals ranges, findings/diagnosis presence, and follow-up date consistency.
+ * vitals ranges, and follow-up date consistency for callers that supply follow-up fields.
  *
  * @param {Object} [payload] - Consultation submission payload.
  * @param {Object} [options] - Validation options (`requireResident`: require `residentId` on create).
@@ -897,12 +980,6 @@ const consultationFieldErrors = (payload = {}, { requireResident = false } = {})
     errors.recordedAt = 'The original recording timestamp is invalid.';
   }
   required('chiefComplaint', 'Chief complaint is required.');
-  // Accept either the merged field or the legacy separate fields
-  const hasMergedField = present(payload.clinicalFindingsDiagnosis);
-  const hasSeparateFields = present(payload.findings) || present(payload.diagnosis);
-  if (!hasMergedField && !hasSeparateFields) {
-    errors.clinicalFindingsDiagnosis = 'Clinical findings and diagnosis are required.';
-  }
   if (payload.consultationDetails !== undefined && (!payload.consultationDetails
     || typeof payload.consultationDetails !== 'object' || Array.isArray(payload.consultationDetails))) {
     errors.consultationDetails = 'Additional clinical details must be a JSON object.';
@@ -1017,13 +1094,15 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
       throw ApiError.conflict('This legacy draft cannot be safely distinguished from a pre-upgrade visit. Review existing records before recording another visit. Clinical information remains on this device.');
     }
     const ids = await repo.nextSubmissionId();
-    const bpClassification = await classifyBp(cleanPayload.bloodPressure);
+    const bpClassification = await classifyBp(cleanPayload.bloodPressure, { context: bpContext(cleanPayload) });
+    const encounter = toVisit(cleanPayload, user, resident.id, {
+      bpClassification, healthServiceId: healthService.id, healthServiceName: healthService.name,
+    });
+    encounter.consultationDetails = await buildEncounterAssessment({ visit: encounter, resident, user, supabase });
     try {
       visit = await repo.insertVisit({
         id: ids.id,
-        ...toVisit(cleanPayload, user, resident.id, {
-          bpClassification, healthServiceId: healthService.id, healthServiceName: healthService.name,
-        }),
+        ...encounter,
         clientOperationKey: key,
         clientOperationPayloadHash: hash,
       });
@@ -1060,7 +1139,8 @@ export const create = async ({ user, payload = {}, idempotencyKey = null, repo =
   if (!completed?.consultationEffectsCompletedAt) {
     throw new ApiError(503, 'The consultation completion could not be confirmed. Retry the original operation.');
   }
-  return fromVisit(completed, supabase);
+  const [linkedVisit] = await withHistoryLinks([completed], repo);
+  return fromVisit(linkedVisit, supabase);
 };
 
 /**
@@ -1091,45 +1171,80 @@ export const update = async ({ user, id, payload = {}, repo = repository, supaba
   if (visit.clientOperationKey && !visit.consultationEffectsCompletedAt) {
     throw ApiError.conflict('This consultation is still being completed. Retry its original create operation first.');
   }
-  const fieldErrors = consultationFieldErrors(payload);
-  const { errors: followUpErrors, normalized } = validateFollowUp(payload);
+  const existing = await fromVisit(visit, null);
+  const cleanPayload = {
+    ...Object.fromEntries(CLINICAL_TEXT_FIELDS.map((field) => [field, existing[field]])),
+    ...Object.fromEntries(Object.entries(VITAL_FIELDS).map(([field, key]) => [field, existing.vitals[key]])),
+    medications: existing.medications,
+    ...payload,
+    residentId: visit.residentId,
+  };
+  const updatesFollowUp = payload.followUpRequired !== undefined || payload.nextVisitDate !== undefined;
+  if (!updatesFollowUp) delete cleanPayload.nextVisitDate;
+  else if (payload.nextVisitDate === undefined) cleanPayload.nextVisitDate = existing.nextVisitDate;
+  const fieldErrors = consultationFieldErrors(cleanPayload);
   if (Object.keys(fieldErrors).length) {
     throw ApiError.unprocessable('Please correct the consultation fields shown below.', fieldErrors);
   }
-  const cleanPayload = { ...payload, nextVisitDate: normalized.nextVisitDate, residentId: visit.residentId,
-    consultationDetails: { ...visit.consultationDetails, ...payload.consultationDetails } };
+  cleanPayload.nextVisitDate = updatesFollowUp ? validateFollowUp(cleanPayload).normalized.nextVisitDate : existing.nextVisitDate;
+  cleanPayload.referralRequired = payload.referralRequired ?? (visit.referralRequired ? 'Yes' : 'No');
+  cleanPayload.consultationDetails = { ...visit.consultationDetails, ...payload.consultationDetails };
+  delete cleanPayload.consultationDetails.clinicalAssessment;
+  delete cleanPayload.consultationDetails.clinicalAssessmentHistory;
   // Validate the (possibly changed) health service. `existingServiceId` keeps an
   // association with a since-deactivated service valid when the editor leaves it
   // untouched, while a NEWLY selected inactive service is rejected.
   const healthService = await resolveConsultationService({
     user,
-    serviceId: payload.serviceId ?? payload.service_id,
+    serviceId: payload.serviceId ?? payload.service_id ?? visit.healthServiceId,
     existingServiceId: visit.healthServiceId,
     supabase,
   });
-  const bpClassification = await classifyBp(cleanPayload.bloodPressure);
+  const encounter = toVisit(cleanPayload, user, visit.residentId, {
+    healthServiceId: healthService.id,
+    healthServiceName: healthService.id === visit.healthServiceId ? visit.healthServiceName || healthService.name : healthService.name,
+    status: visit.status || 'completed', recordedAt: visit.recordedAt || visit.createdAt,
+  });
+  const previous = visit.consultationDetails || {};
+  if (!updatesFollowUp) encounter.consultationDetails.followUpRequired = existing.followUpRequired;
+  if (encounter.consultationDetails.consultationDate === existing.consultationDate
+    && encounter.consultationDetails.consultationTime === existing.consultationTime) encounter.visitDate = visit.visitDate;
+  const clinicalChanged = ['chiefComplaint', 'findings', 'diagnosis', 'consultationDate', 'followUpRequired']
+    .some((field) => text(encounter.consultationDetails[field]) !== text(existing[field]))
+    || Object.values(VITAL_FIELDS).some((key) => String(encounter.vitals[key] ?? '') !== String(existing.vitals[key] ?? ''))
+    || !isDeepStrictEqual(encounter.consultationDetails.clinicalIndicators, previous.clinicalIndicators || {});
+  encounter.bpClassification = clinicalChanged || !visit.bpClassification
+    ? await classifyBp(cleanPayload.bloodPressure, { context: bpContext(cleanPayload) })
+    : visit.bpClassification;
+  const previousAssessment = savedEncounterAssessment(previous);
+  if (clinicalChanged || encounterRiskLevel(previousAssessment) === 'Unassessed') {
+    const evaluated = await buildEncounterAssessment({ visit: encounter, resident: visit.resident, user, supabase, previous });
+    if (clinicalChanged || !previousAssessment || encounterRiskLevel(evaluated.clinicalAssessment) !== 'Unassessed') {
+      encounter.consultationDetails = evaluated;
+    }
+  }
+  if (!encounter.consultationDetails.clinicalAssessment) {
+    encounter.consultationDetails.clinicalAssessment = previousAssessment;
+    if (previous.clinicalAssessmentHistory) encounter.consultationDetails.clinicalAssessmentHistory = previous.clinicalAssessmentHistory;
+  }
   // Preserve the existing visit status (draft / in_review / referred / etc.) —
   // only a NEW consultation defaults to 'completed'. This stops an update from
   // clobbering a status the workflow (e.g. intake) set on the row.
   const updated = await repo.updateVisit(id, {
-    ...toVisit(cleanPayload, user, visit.residentId, {
-      bpClassification,
-      healthServiceId: healthService.id,
-      healthServiceName: healthService.id === visit.healthServiceId ? visit.healthServiceName || healthService.name : healthService.name,
-      status: visit.status || 'completed',
-      recordedAt: visit.recordedAt || visit.createdAt,
-    }),
+    ...encounter,
     recordedById: visit.recordedById,
     recordedByRole: visit.recordedByRole,
     recordedByName: visit.recordedByName,
-  });
-  await syncFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
+  }, { expectedUpdatedAt: visit.updatedAt });
+  if (!updated) throw ApiError.conflict('This consultation changed while you were editing it. Reopen it and try again.');
+  if (updatesFollowUp) await syncFollowUp({ user, visit: updated, payload: cleanPayload, supabase });
   // Recorded health data changed -> recompute + persist the resident's risk.
   await persistRisk({ residentId: visit.residentId });
   // Only after the consultation is persisted. Idempotent per visit id, so
   // editing an existing consultation does not create a duplicate notification.
   await notify({ residentId: visit.residentId, visit: updated });
-  return fromVisit(updated, supabase);
+  const [linkedVisit] = await withHistoryLinks([updated], repo);
+  return fromVisit(linkedVisit, supabase);
 };
 
 export default { list, get, create, update };

@@ -94,6 +94,19 @@ export const fetchConditions = async () => {
   return aggregatePayload(payload, ['conditions']).conditions;
 };
 
+export const fetchRecentBarangayActivities = async () => {
+  const payload = await api.get('/analytics/recent-activities');
+  return aggregatePayload(payload, ['activities']);
+};
+
+export const fetchBarangayBoundaries = async () => {
+  const payload = await api.get('/analytics/barangay-boundaries');
+  if (payload?.type !== 'FeatureCollection' || !Array.isArray(payload.features)) {
+    throw new Error('Verified barangay boundaries are unavailable.');
+  }
+  return payload;
+};
+
 /**
  * Privacy-preserving household aggregates, scoped from the session on the
  * SERVER. The API returns totals at valid stored barangay reference points;

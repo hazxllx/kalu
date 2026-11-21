@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import VerificationBadge from "@/features/verification/components/VerificationBadge";
 import VerificationBanner from "@/features/verification/components/VerificationBanner";
-import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
+import SubmittedRequests from "@/features/settings/components/SubmittedRequests";
 import OfficialLogosSection from "@/features/settings/components/OfficialLogosSection";
 import { fetchMyVerification } from "@/services/api/verificationsApi";
 import { residentsApi, authApi } from "@/services/api";
@@ -293,7 +293,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
             <VerificationBanner showVerificationMethod />
           </section>
         )}
-        {isResident && isProfileRoute && <TransferStatusBanner />}
+        {isResident && isProfileRoute && <SubmittedRequests />}
 
         {isResident && isProfileRoute && (
           <Card className="rounded-lg px-5 py-5 shadow-none">
@@ -622,7 +622,7 @@ export default function SettingsPage({ roleKey = "resident" }) {
                 return fields.map((f) => (
                   <div key={f.label} className="bg-brand-bg rounded-btn p-4">
                     <div className="flex items-center gap-1.5 mb-1">
-                      <f.icon className="w-3.5 h-3.5 text-brand-gray" strokeWidth={1.8} />
+                      {!isResident && <f.icon className="w-3.5 h-3.5 text-brand-gray" strokeWidth={1.8} />}
                       <p className="text-[11px] text-brand-gray uppercase tracking-wide">{f.label}</p>
                     </div>
                     {loading ? (

@@ -36,6 +36,8 @@ const BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_URL, import.meta.en
  * @property {Record<string, any>} [params]
  * @property {RequestCredentials} [credentials]
  * @property {AbortSignal} [signal]
+ * @property {RequestCache} [cache]
+ * @property {'blob'} [responseType]
  * @property {'SAFE_SYNC'|'OFFLINE_DRAFT'|'ONLINE_ONLY'} [offlineMutationType]
  * @property {string} [ownerId] Authenticated account whose queued operation this request belongs to.
  * @property {string} [dedupeKey] Optional caller-supplied scope key for GET deduplication.
@@ -114,7 +116,7 @@ function createTimeoutController(timeoutMs, existingSignal) {
  */
 async function request(
   path,
-  { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, timeout = 30000, signal, dedupeKey, ...rest } = {},
+  { method = 'GET', body, headers = {}, params, offlineMutationType, ownerId = null, timeout = 30000, signal, dedupeKey, responseType, ...rest } = {},
 ) {
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase());
   const mutationType = offlineMutationType || MUTATION_TIER.ONLINE_ONLY;
@@ -176,7 +178,9 @@ async function request(
     }
 
   const isJson = response.headers.get('content-type')?.includes('application/json');
-  const payload = isJson ? await response.json() : await response.text();
+  const payload = responseType === 'blob' && response.ok
+    ? await response.blob()
+    : isJson ? await response.json() : await response.text();
   // A late response must never populate the next account's UI/cache after a
   // sign-out or switch, even when the original request committed successfully.
   if (ownerGuard) assertCurrentOwner(ownerGuard);
