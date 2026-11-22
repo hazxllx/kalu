@@ -215,6 +215,10 @@ const LimitedResidentDashboard = appPage(
     )
 );
 
+const PendingResidentLockedFeature = appPage(
+  () => import('@/features/dashboards/pages/PendingResidentLockedFeature')
+);
+
 const BHWDashboard = appPage(
   () =>
     import(
@@ -812,11 +816,11 @@ const AppRoutes = () => (
         />
         <Route
           path="follow-ups"
-          element={<ResidentFollowUps />}
+          element={<PendingResidentLockedFeature />}
         />
         <Route
           path="followups"
-          element={<ResidentFollowUps />}
+          element={<Navigate to="../follow-ups" replace />}
         />
         {/* Consolidated into "Follow-ups & Schedule"; keep the old path as a redirect. */}
         <Route
@@ -827,7 +831,7 @@ const AppRoutes = () => (
         />
         <Route
           path="services"
-          element={<ResidentHealthServices />}
+          element={<ResidentHealthServices barangayOnly />}
         />
         <Route
           path="profile"

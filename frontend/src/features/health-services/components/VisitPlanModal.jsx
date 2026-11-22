@@ -86,41 +86,41 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
       aria-label={`Register for ${service.name}`}
     >
       <Card className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[420px] flex-col overflow-hidden">
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border px-4 py-4 dark:border-border sm:px-5">
           <div className="min-w-0">
-            <h2 className="break-words text-[15px] font-semibold text-brand-ink">{service.name}</h2>
-            <p className="mt-0.5 break-words text-xs text-brand-gray">{service.facilityName}</p>
+            <h2 className="break-words text-[15px] font-semibold text-brand-ink dark:text-foreground">{service.name}</h2>
+            <p className="mt-0.5 break-words text-xs text-brand-gray dark:text-muted-foreground">{service.facilityName}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-btn p-1.5 text-brand-gray transition-colors hover:bg-brand-bg"
+            className="rounded-btn p-1.5 text-brand-gray transition-colors hover:bg-brand-bg dark:text-muted-foreground dark:hover:bg-hover"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
           {windowLabel && (
-            <div className="flex items-center gap-2 text-[13px] text-brand-gray">
+            <div className="flex items-center gap-2 text-[13px] text-brand-gray dark:text-muted-foreground">
               <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span>{windowLabel}</span>
             </div>
           )}
 
           <div>
-            <p className="mb-2 flex items-center gap-2 text-[13px] font-medium text-brand-ink">
+              <p className="mb-2 flex items-center gap-2 text-[13px] font-medium text-brand-ink dark:text-foreground">
               <CalendarDays className="h-3.5 w-3.5 shrink-0 text-brand-gray" aria-hidden="true" />
               Choose a day
             </p>
 
             {loading ? (
-              <p className="text-[13px] text-brand-gray">Loading available days…</p>
+              <p className="text-[13px] text-brand-gray dark:text-muted-foreground">Loading available days…</p>
             ) : loadError ? (
               <p className="text-[13px] text-brand-danger">{loadError}</p>
             ) : dates.length === 0 ? (
-              <p className="rounded-card border border-brand-border bg-brand-bg px-3 py-2.5 text-[13px] text-brand-gray">
+              <p className="rounded-card border border-brand-border bg-brand-bg px-3 py-2.5 text-[13px] text-brand-gray dark:border-border dark:bg-input dark:text-muted-foreground">
                 No open days in the next two weeks. Please check back later.
               </p>
             ) : (
@@ -137,7 +137,7 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
                       className={`rounded-card border px-2 py-2 text-center transition-colors ${
                         active
                           ? "border-brand-blue bg-brand-blue text-white"
-                          : "border-brand-border bg-white text-brand-ink hover:bg-brand-bg"
+                          : "border-brand-border bg-white text-brand-ink hover:bg-brand-bg dark:border-border dark:bg-input dark:text-foreground dark:hover:bg-hover"
                       }`}
                     >
                       <span className="block text-[11px] font-medium uppercase tracking-wide opacity-80">{chip.top}</span>
@@ -150,7 +150,7 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
           </div>
 
           <div>
-            <label htmlFor="visit-note" className="mb-1.5 block text-[13px] font-medium text-brand-ink">
+            <label htmlFor="visit-note" className="mb-1.5 block text-[13px] font-medium text-brand-ink dark:text-foreground">
               Note <span className="font-normal text-brand-gray">(optional)</span>
             </label>
             <textarea
@@ -160,19 +160,19 @@ export default function VisitPlanModal({ service, open, onClose, onConfirmed, sh
               rows={2}
               maxLength={140}
               placeholder="e.g. Bringing my child"
-              className="w-full resize-none rounded-card border border-brand-border bg-white px-3 py-2 text-[13px] outline-none transition-colors focus:border-brand-blue"
+              className="w-full resize-none rounded-card border border-brand-border bg-white px-3 py-2 text-[13px] text-brand-ink outline-none transition-colors focus:border-brand-blue dark:border-border dark:bg-input dark:text-foreground"
             />
-            <p className="mt-1 text-right text-[11px] text-slate-400">{note.length}/140</p>
+            <p className="mt-1 text-right text-[11px] text-slate-400 dark:text-muted-foreground">{note.length}/140</p>
           </div>
 
           {formError && <p className="text-[13px] text-brand-danger">{formError}</p>}
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-brand-border px-5 py-3.5">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-brand-border px-4 py-3.5 dark:border-border sm:px-5">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-btn px-3.5 py-2 text-[13px] font-medium text-brand-gray transition-colors hover:bg-brand-bg"
+            className="rounded-btn px-3.5 py-2 text-[13px] font-medium text-brand-gray transition-colors hover:bg-brand-bg dark:text-muted-foreground dark:hover:bg-hover"
           >
             Cancel
           </button>

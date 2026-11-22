@@ -23,7 +23,7 @@ import { availabilityLine, formatWeekdays, formatWindow, formatPlanDate, formatS
  * endpoint). All service and registration data comes from the backend — nothing
  * is hardcoded or fabricated.
  */
-export default function ResidentHealthServices() {
+export default function ResidentHealthServices({ barangayOnly = false }) {
   const { user } = useAuth();
   const [state, setState] = useState("loading"); // loading | error | ready
   const [facilities, setFacilities] = useState([]);
@@ -51,14 +51,15 @@ export default function ResidentHealthServices() {
     visitPlansApi
       .directory()
       .then((res) => {
-        setFacilities(res?.facilities || []);
+        const groups = res?.facilities || [];
+        setFacilities(barangayOnly ? groups.filter((facility) => facility.type === "BHC") : groups);
         setState("ready");
       })
       .catch((err) => {
         setErrorMsg(err?.message || "We couldn't load the health services. Please try again.");
         setState("error");
       });
-  }, []);
+  }, [barangayOnly]);
 
   useEffect(() => {
     load();
@@ -140,7 +141,7 @@ export default function ResidentHealthServices() {
       <PageHeader
         crumbs={["Dashboard", "Health Services"]}
         title="Health Services"
-        subtitle="Explore health services offered by your Barangay Health Center and Rural Health Unit. Register for available services and keep track of your participation."
+        subtitle={barangayOnly ? "Browse the health services offered by your Barangay Health Center." : "Explore health services offered by your Barangay Health Center and Rural Health Unit. Register for available services and keep track of your participation."}
       />
 
       {state === "loading" && <DirectorySkeleton />}
@@ -153,41 +154,41 @@ export default function ResidentHealthServices() {
 
       {state === "ready" && (
         <div className="space-y-5">
-          <section className="flex flex-col flex-wrap gap-3 rounded-lg border border-brand-border bg-white px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
+          <section className="flex flex-col flex-wrap gap-3 rounded-lg border border-brand-border bg-white px-4 py-4 dark:bg-card sm:px-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h2 className="font-display text-base text-brand-ink">Find a health service</h2>
-              <p className="mt-0.5 text-sm text-brand-gray">Filter by availability and the facility offering the service.</p>
+              <h2 className="font-display text-base text-brand-ink dark:text-foreground">{barangayOnly ? "Services in your barangay" : "Find a health service"}</h2>
+              <p className="mt-0.5 text-sm text-brand-gray dark:text-muted-foreground">{barangayOnly ? "Browse programs and services offered by your Barangay Health Center." : "Filter by availability and the facility offering the service."}</p>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
-              <label className="grid min-w-0 flex-1 gap-1.5 text-xs font-medium text-brand-gray sm:flex-none">
+            <div className={`grid grid-cols-1 gap-3 ${barangayOnly ? "sm:grid-cols-2" : "sm:flex sm:flex-wrap"}`}>
+              <label className="grid min-w-0 flex-1 gap-1.5 text-xs font-medium text-brand-gray dark:text-muted-foreground sm:flex-none">
                 Availability
-                <select aria-label="Availability" value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 w-full min-w-0 rounded-full border border-brand-border bg-white px-3.5 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 sm:min-w-[160px]">
+                <select aria-label="Availability" value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="min-h-10 w-full min-w-0 rounded-full border border-brand-border bg-white px-3.5 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-input dark:text-foreground sm:min-w-[160px]">
                   <option value="all">All services</option>
                   <option value="open">Open for registration</option>
                   <option value="closed">Closed for registration</option>
                 </select>
               </label>
-              <label className="grid min-w-0 flex-1 gap-1.5 text-xs font-medium text-brand-gray sm:flex-none">
+              {!barangayOnly && <label className="grid min-w-0 flex-1 gap-1.5 text-xs font-medium text-brand-gray dark:text-muted-foreground sm:flex-none">
                 Facility
-                <select aria-label="Facility" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 w-full min-w-0 rounded-full border border-brand-border bg-white px-3.5 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 sm:min-w-[180px]">
+                <select aria-label="Facility" value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} className="min-h-10 w-full min-w-0 rounded-full border border-brand-border bg-white px-3.5 text-sm text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 dark:bg-input dark:text-foreground sm:min-w-[180px]">
                   <option value="all">All facilities</option>
                   <option value="bhc">Barangay Health Center</option>
                   <option value="rhu">Rural Health Unit (RHU)</option>
                 </select>
-              </label>
+              </label>}
               <DateRangeFilter from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} className="w-full sm:w-52" />
             </div>
           </section>
 
           {!hasScopeResults && (
-            <div className="rounded-card border border-dashed border-brand-border bg-white px-5 py-8 text-center">
-              <p className="text-sm font-medium text-brand-ink">No services match these filters.</p>
-              <p className="mt-1 text-xs text-brand-gray">Try another availability or facility scope.</p>
+            <div className="rounded-card border border-dashed border-brand-border bg-white px-5 py-8 text-center dark:bg-card">
+              <p className="text-sm font-medium text-brand-ink dark:text-foreground">{barangayOnly && !bhcServices.length ? "No health services are currently listed for your barangay." : "No services match these filters."}</p>
+              <p className="mt-1 text-xs text-brand-gray dark:text-muted-foreground">{barangayOnly ? "Check again later for new programs from your Barangay Health Center." : "Try another availability or facility scope."}</p>
             </div>
           )}
 
           {/* Barangay Health Center */}
-          {scopeFilter !== "rhu" && <FacilitySection
+          {(barangayOnly || scopeFilter !== "rhu") && <FacilitySection
             title={`Barangay Health Center${barangayName ? ` — ${barangayName}` : ""}`}
             subtitle="Health services organized by your barangay for the community."
             services={bhcServices}
@@ -198,7 +199,7 @@ export default function ResidentHealthServices() {
           />}
 
           {/* Rural Health Unit */}
-          {scopeFilter !== "bhc" && <FacilitySection
+          {!barangayOnly && scopeFilter !== "bhc" && <FacilitySection
             title="Rural Health Unit (RHU)"
             subtitle="Health services provided by the Rural Health Unit for nearby barangays."
             services={rhuServices}
@@ -226,17 +227,17 @@ export default function ResidentHealthServices() {
           aria-label={`${previewPubmat.name} publication material`}
           onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewPubmat(null); }}
         >
-          <div className="relative flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-card bg-white shadow-2xl">
+          <div className="relative flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-card bg-white shadow-2xl dark:bg-card">
             <div className="flex items-center justify-between gap-4 border-b border-brand-border px-4 py-3 sm:px-5">
               <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold text-brand-ink">{previewPubmat.name}</h2>
-                <p className="text-xs text-brand-gray">Publication material</p>
+                <h2 className="truncate text-sm font-semibold text-brand-ink dark:text-foreground">{previewPubmat.name}</h2>
+                <p className="text-xs text-brand-gray dark:text-muted-foreground">Publication material</p>
               </div>
-              <button type="button" onClick={() => setPreviewPubmat(null)} className="rounded-full p-2 text-brand-gray hover:bg-brand-bg hover:text-brand-ink" aria-label="Close image preview">
+              <button type="button" onClick={() => setPreviewPubmat(null)} className="rounded-full p-2 text-brand-gray hover:bg-brand-bg hover:text-brand-ink dark:text-muted-foreground dark:hover:bg-hover" aria-label="Close image preview">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100 p-3 sm:p-6">
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100 p-3 dark:bg-background sm:p-6">
               <img src={previewPubmat.url} alt={`${previewPubmat.name} publication material enlarged`} className="max-h-[75vh] max-w-full rounded object-contain" />
             </div>
           </div>
@@ -251,13 +252,13 @@ export default function ResidentHealthServices() {
           aria-label={`${previewMemo.name} memorandum`}
           onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewMemo(null); }}
         >
-          <div className="flex h-[86vh] max-h-[1100px] w-[94vw] max-w-[640px] flex-col overflow-hidden rounded-card bg-white shadow-2xl">
+          <div className="flex h-[86vh] max-h-[1100px] w-[94vw] max-w-[640px] flex-col overflow-hidden rounded-card bg-white shadow-2xl dark:bg-card">
             <div className="flex items-center justify-between gap-4 border-b border-brand-border px-4 py-3 sm:px-5">
               <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold text-brand-ink">{previewMemo.name}</h2>
-                <p className="truncate text-xs text-brand-gray">{previewMemo.filename || "Memorandum"}</p>
+                <h2 className="truncate text-sm font-semibold text-brand-ink dark:text-foreground">{previewMemo.name}</h2>
+                <p className="truncate text-xs text-brand-gray dark:text-muted-foreground">{previewMemo.filename || "Memorandum"}</p>
               </div>
-              <button type="button" onClick={() => setPreviewMemo(null)} className="rounded-full p-2 text-brand-gray hover:bg-brand-bg hover:text-brand-ink" aria-label="Close memorandum">
+              <button type="button" onClick={() => setPreviewMemo(null)} className="rounded-full p-2 text-brand-gray hover:bg-brand-bg hover:text-brand-ink dark:text-muted-foreground dark:hover:bg-hover" aria-label="Close memorandum">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -265,13 +266,13 @@ export default function ResidentHealthServices() {
               <iframe
                 title={`${previewMemo.name} memorandum`}
                 src={`${previewMemo.url}#toolbar=0&navpanes=0&scrollbar=0`}
-                className="min-h-0 w-full flex-1 bg-slate-100"
+                className="min-h-0 w-full flex-1 bg-slate-100 dark:bg-background"
               />
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
                 <FileText className="h-10 w-10 text-brand-blue" aria-hidden="true" />
-                <p className="text-sm font-semibold text-brand-ink">This memorandum can’t be previewed in the portal.</p>
-                <p className="max-w-sm text-xs text-brand-gray">Please ask the health center to provide the memorandum as a PDF for in-page viewing.</p>
+                <p className="text-sm font-semibold text-brand-ink dark:text-foreground">This memorandum can’t be previewed in the portal.</p>
+                <p className="max-w-sm text-xs text-brand-gray dark:text-muted-foreground">Please ask the health center to provide the memorandum as a PDF for in-page viewing.</p>
               </div>
             )}
           </div>
@@ -311,8 +312,8 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPr
   return (
     <section className="flex flex-col gap-3">
       <header>
-        <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{title}</p>
-        <p className="mt-1 text-sm text-brand-gray">{subtitle}</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray dark:text-muted-foreground">{title}</p>
+        <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">{subtitle}</p>
       </header>
       {services.length === 0 ? (
         <SectionEmpty />
@@ -349,8 +350,8 @@ function FacilitySection({ title, subtitle, services, onRegister, onCancel, onPr
 function SectionEmpty() {
   return (
     <div className="rounded-card border border-dashed border-brand-border bg-brand-bg px-5 py-8 text-center">
-      <p className="text-sm font-medium text-brand-ink">No health services available at the moment.</p>
-      <p className="mt-1 text-sm text-brand-gray">Please check again later for upcoming services.</p>
+      <p className="text-sm font-medium text-brand-ink dark:text-foreground">No health services available at the moment.</p>
+      <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Please check again later for upcoming services.</p>
     </div>
   );
 }
@@ -435,7 +436,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
   );
 
   return (
-    <article className="group flex min-w-0 flex-col overflow-hidden break-words rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40 [overflow-wrap:anywhere]">
+    <article className="group flex min-w-0 flex-col overflow-hidden break-words rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40 [overflow-wrap:anywhere] dark:bg-card">
       {service.pubmatUrl && !pubmatFailed ? (
         <button
           type="button"
@@ -450,8 +451,8 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
 
       <div className="flex flex-1 flex-col p-4">
         <div className="flex flex-wrap items-center gap-2">
-          {serviceType && <span className="rounded-full border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-gray">{serviceType}</span>}
-          {registerBy && <span className="text-xs font-medium text-brand-gray">Register by {registerBy}</span>}
+        {serviceType && <span className="rounded-full border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-gray dark:border-border dark:text-muted-foreground">{serviceType}</span>}
+        {registerBy && <span className="text-xs font-medium text-brand-gray dark:text-muted-foreground">Register by {registerBy}</span>}
           {service.schedule?.registrationCapacity != null && (
             <span className={`text-xs font-medium ${service.registrationFull ? "text-brand-danger" : "text-brand-gray"}`}>
               {service.registrationFull ? "Registration full" : `${service.registrationRemaining} place${service.registrationRemaining === 1 ? "" : "s"} left`}
@@ -460,7 +461,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
         </div>
         {service.description && (
           <div className="mt-2">
-            <p className={`whitespace-pre-line text-sm leading-relaxed text-brand-gray ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
+            <p className={`whitespace-pre-line text-sm leading-relaxed text-brand-gray dark:text-muted-foreground ${descriptionExpanded ? "" : "line-clamp-3"}`}>{service.description}</p>
           </div>
         )}
         <button type="button" aria-expanded={descriptionExpanded} aria-controls={detailsId} onClick={() => setDescriptionExpanded((expanded) => !expanded)} className="mt-2 inline-flex min-h-8 self-start items-center text-sm font-semibold text-brand-blue underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none">
@@ -477,7 +478,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
             <span className="truncate">View memorandum{service.memo.filename ? ` · ${service.memo.filename}` : ""}</span>
           </button>
         )}
-        <div className="mt-3 space-y-2 text-sm leading-relaxed text-brand-gray">
+        <div className="mt-3 space-y-2 text-sm leading-relaxed text-brand-gray dark:text-muted-foreground">
           {serviceSchedule && (
             <p className="flex items-center gap-1.5">
               <span><span className="font-medium text-brand-ink">Schedule: </span>{serviceSchedule}</span>
@@ -559,8 +560,8 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
       aria-label="Cancel registration"
     >
       <Card className="max-h-[calc(100dvh-2rem)] w-full max-w-[380px] overflow-y-auto p-4 sm:p-5">
-        <h2 className="text-[15px] font-semibold text-brand-ink">Cancel this registration?</h2>
-        <p className="mt-1.5 text-sm text-brand-gray">
+        <h2 className="text-[15px] font-semibold text-brand-ink dark:text-foreground">Cancel this registration?</h2>
+        <p className="mt-1.5 text-sm text-brand-gray dark:text-muted-foreground">
           The health center will be notified.
           {plan?.plannedDate ? ` Your registration for ${formatPlanDate(plan.plannedDate)} will be released.` : ""}
         </p>
@@ -569,7 +570,7 @@ function CancelRegistrationDialog({ plan, busy, onCancel, onConfirm }) {
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="rounded-btn px-3.5 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60"
+            className="rounded-btn px-3.5 py-2 text-sm font-medium text-brand-gray transition-colors hover:bg-brand-bg disabled:opacity-60 dark:text-muted-foreground dark:hover:bg-hover"
           >
             Keep registration
           </button>

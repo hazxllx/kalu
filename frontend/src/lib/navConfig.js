@@ -50,7 +50,8 @@ export const NAV = {
     {
       label: "Follow-ups",
       icon: "CalendarClock",
-      path: "/app/resident-limited/follow-ups",
+      path: "#",
+      locked: true,
     },
     {
       label: "Notifications",
