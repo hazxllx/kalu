@@ -452,6 +452,11 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
         <div className="flex flex-wrap items-center gap-2">
           {serviceType && <span className="rounded-full border border-brand-border px-2.5 py-1 text-xs font-medium text-brand-gray">{serviceType}</span>}
           {registerBy && <span className="text-xs font-medium text-brand-gray">Register by {registerBy}</span>}
+          {service.schedule?.registrationCapacity != null && (
+            <span className={`text-xs font-medium ${service.registrationFull ? "text-brand-danger" : "text-brand-gray"}`}>
+              {service.registrationFull ? "Registration full" : `${service.registrationRemaining} place${service.registrationRemaining === 1 ? "" : "s"} left`}
+            </span>
+          )}
         </div>
         {service.description && (
           <div className="mt-2">
@@ -515,7 +520,7 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
                 </button>
               )}
             </div>
-          ) : avail.open ? (
+          ) : avail.open && !service.registrationFull ? (
             <button
               type="button"
               onClick={onRegister}
@@ -529,13 +534,13 @@ function ServiceCard({ service, onRegister, onCancel, onPreviewPubmat, onPreview
                 type="button"
                 disabled
                 aria-disabled="true"
-                title={avail.text}
+                title={service.registrationFull ? "Maximum registration capacity reached." : avail.text}
                 className="w-full cursor-not-allowed rounded-btn border border-brand-border bg-brand-bg px-4 py-2 text-sm font-medium text-slate-400 lg:w-auto"
               >
-                Registration Closed
+                {service.registrationFull ? "Capacity Reached" : "Registration Closed"}
               </button>
-              {avail.text && (
-                <span className="text-xs leading-tight text-slate-400 lg:text-right">{avail.text}</span>
+              {(service.registrationFull || avail.text) && (
+                <span className="text-xs leading-tight text-slate-400 lg:text-right">{service.registrationFull ? "This service has reached its resident registration limit." : avail.text}</span>
               )}
             </div>
           )}

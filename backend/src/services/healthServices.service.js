@@ -215,6 +215,7 @@ const toService = (row) => {
       endDate: row.end_date || null,
       endTime: hhmm(row.end_time),
       registrationDeadline: row.registration_deadline || null,
+      registrationCapacity: row.registration_capacity ?? null,
     },
     active: row.active !== false,
     createdBy: row.created_by || null,
@@ -1110,6 +1111,7 @@ export const create = async ({ user, payload = {}, supabase = getServiceClient()
     end_date: endDate,
     end_time: text(payload.endTime || payload.end_time) || null,
     registration_deadline: text(payload.registrationDeadline || payload.registration_deadline) || null,
+    registration_capacity: payload.registrationCapacity ?? payload.registration_capacity ?? null,
     active: payload.active === false ? false : true,
     created_by: user.id,
   };
@@ -1180,6 +1182,10 @@ export const update = async ({ user, serviceId, payload = {}, supabase = getServ
   }
   if (has('registrationDeadline') || has('registration_deadline')) {
     row.registration_deadline = text(payload.registrationDeadline || payload.registration_deadline) || null;
+  }
+  if (has('registrationCapacity') || has('registration_capacity')) {
+    const rawCapacity = payload.registrationCapacity ?? payload.registration_capacity;
+    row.registration_capacity = rawCapacity === '' || rawCapacity == null ? null : Number(rawCapacity);
   }
 
   // Facility / coverage: only re-derive the scope when a coverage field was

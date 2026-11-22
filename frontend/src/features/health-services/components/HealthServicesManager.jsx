@@ -477,6 +477,7 @@ export default function HealthServicesManager({ subtitle }) {
     endTime: "",
     registrationDeadlineDate: "",
     registrationDeadlineTime: "",
+    registrationCapacity: "",
     personnelIds: [],
     active: true,
     memoFile: null,
@@ -522,6 +523,7 @@ export default function HealthServicesManager({ subtitle }) {
       endTime: sched.endTime || "",
       registrationDeadlineDate: deadline ? deadline.slice(0, 10) : "",
       registrationDeadlineTime: deadline ? deadline.slice(11, 16) : "",
+      registrationCapacity: service.schedule?.registrationCapacity == null ? "" : String(service.schedule.registrationCapacity),
       personnelIds: (service.assignedPersonnel || []).map((p) => p.id),
       active: service.active !== false,
       memoFilename: service.attachments?.memo?.filename || "",
@@ -559,6 +561,13 @@ export default function HealthServicesManager({ subtitle }) {
     const isEdit = Boolean(editingId);
     if (isEdit ? !canEdit : !canCreate) return;
     if (!form.name.trim()) { setFormError("A service name is required."); return; }
+    if (form.registrationCapacity !== "") {
+      const capacity = Number(form.registrationCapacity);
+      if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1000000) {
+        setFormError("Maximum resident registrations must be a whole number from 1 to 1,000,000.");
+        return;
+      }
+    }
     if (isSupervisor && (form.municipalityWide || (!form.facilityId && !form.facilityName.trim()))) {
       setFormError("Select or enter a facility in your assigned barangay. RHU and municipality-wide services are managed by PHN.");
       return;
@@ -590,6 +599,7 @@ export default function HealthServicesManager({ subtitle }) {
       registrationDeadline: form.registrationDeadlineDate && form.registrationDeadlineTime
         ? `${form.registrationDeadlineDate}T${form.registrationDeadlineTime}`
         : null,
+      registrationCapacity: form.registrationCapacity === "" ? null : Number(form.registrationCapacity),
       personnelIds: form.personnelIds,
     };
     try {
@@ -1261,6 +1271,22 @@ export default function HealthServicesManager({ subtitle }) {
                       {(typingErrors.registrationDeadlineDate || typingErrors.registrationDeadlineTime || scheduleErrors.registrationDeadline)
                         ? <p className="mt-1 text-xs text-brand-danger">{typingErrors.registrationDeadlineDate || typingErrors.registrationDeadlineTime || scheduleErrors.registrationDeadline}</p>
                         : <p className="mt-1 text-xs text-brand-gray">Last date and time residents may register. Must not be after the start.</p>}
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label htmlFor="registration-capacity" className="text-sm font-medium text-brand-ink">Maximum resident registrations <span className="text-brand-gray">(optional)</span></label>
+                      <input
+                        id="registration-capacity"
+                        type="number"
+                        min="1"
+                        max="1000000"
+                        step="1"
+                        inputMode="numeric"
+                        value={form.registrationCapacity}
+                        onChange={(event) => setForm((f) => ({ ...f, registrationCapacity: event.target.value }))}
+                        className={`${inputCls(false)} mt-1 h-11 w-full`}
+                        placeholder="Leave blank for no limit"
+                      />
+                      <p className="mt-1 text-xs text-brand-gray">When the limit is reached, new resident registrations are closed. Cancelled registrations do not count.</p>
                     </div>
                   </div>
                 </section>

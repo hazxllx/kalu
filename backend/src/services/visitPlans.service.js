@@ -312,7 +312,14 @@ const toServiceView = (service, resident, scheduleRows, blackoutDates, facilityN
       endDate: service.end_date || null,
       endTime: hhmm(service.end_time),
       registrationDeadline: service.registration_deadline || null,
+      registrationCapacity: service.registration_capacity ?? null,
     },
+    registrationCount: service.registration_count ?? 0,
+    registrationRemaining: service.registration_capacity == null
+      ? null
+      : Math.max(0, service.registration_capacity - (service.registration_count ?? 0)),
+    registrationFull: service.registration_capacity != null
+      && (service.registration_count ?? 0) >= service.registration_capacity,
     hasUpcoming: availability.open,
     // Server-authoritative availability result. The resident UI renders this
     // directly instead of re-deriving open/closed from the weekday summary, so a
@@ -343,7 +350,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
 
   const { data: services, error } = await supabase
     .from(SERVICE_TABLE)
-    .select('id, name, description, category, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline')
+    .select('id, name, description, category, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline, registration_capacity')
     .eq('municipality_id', resident.municipality_id)
     .eq('active', true)
     .order('name');
@@ -353,6 +360,17 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
   if (inScope.length === 0) return { facilities: [] };
 
   const ids = inScope.map((s) => s.id);
+  const registrationCounts = await Promise.all(inScope.filter((service) => service.registration_capacity != null).map(async (service) => {
+    const { count, error } = await supabase
+      .from(PLAN_TABLE)
+      .select('id', { count: 'exact', head: true })
+      .eq('service_id', service.id)
+      .eq('status', 'Planned');
+    throwOnError(error, 'Could not load service registration capacity');
+    return [service.id, count || 0];
+  }));
+  const registrationCountByService = new Map(registrationCounts);
+  for (const service of inScope) service.registration_count = registrationCountByService.get(service.id) || 0;
   // Attachments are looked up only for services already restricted to this
   // resident's municipality/barangay. Return short-lived signed URLs so the
   // resident UI can view private Storage files without exposing object paths.
@@ -487,7 +505,7 @@ export const listDirectory = async ({ user, supabase = getServiceClient(), now =
 const loadScopedService = async (supabase, resident, serviceId) => {
   const { data, error } = await supabase
     .from(SERVICE_TABLE)
-    .select('id, name, description, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline')
+    .select('id, name, description, municipality_id, barangay_id, active, visit_policy, start_date, start_time, end_date, end_time, registration_deadline, registration_capacity')
     .eq('id', serviceId)
     .maybeSingle();
   throwOnError(error, 'Could not load the service');
@@ -496,6 +514,16 @@ const loadScopedService = async (supabase, resident, serviceId) => {
     throw ApiError.forbidden('This service is not offered at your barangay health center or RHU.');
   }
   return data;
+};
+
+const activeRegistrationCount = async (supabase, serviceId) => {
+  const { count, error } = await supabase
+    .from(PLAN_TABLE)
+    .select('id', { count: 'exact', head: true })
+    .eq('service_id', serviceId)
+    .eq('status', 'Planned');
+  throwOnError(error, 'Could not check service registration capacity');
+  return count || 0;
 };
 
 /**
@@ -507,6 +535,10 @@ const loadScopedService = async (supabase, resident, serviceId) => {
 export const serviceAvailability = async ({ user, serviceId, from, to, supabase = getServiceClient(), now = new Date() }) => {
   const resident = await ownResident(supabase, user);
   const service = await loadScopedService(supabase, resident, serviceId);
+  const registrationCount = service.registration_capacity == null
+    ? 0
+    : await activeRegistrationCount(supabase, service.id);
+  const registrationFull = service.registration_capacity != null && registrationCount >= service.registration_capacity;
 
   // A dated (one-time / date-range) service is selectable on its own configured
   // day(s), independent of the recurring two-week horizon, so an event further
@@ -543,7 +575,11 @@ export const serviceAvailability = async ({ user, serviceId, from, to, supabase 
       dates,
       unavailableDates: [...blackoutDates],
       availability,
-      available: availability.open && dates.length > 0,
+      registrationCapacity: service.registration_capacity ?? null,
+      registrationCount,
+      registrationRemaining: service.registration_capacity == null ? null : Math.max(0, service.registration_capacity - registrationCount),
+      registrationFull,
+      available: availability.open && dates.length > 0 && !registrationFull,
     };
   }
 
@@ -584,7 +620,11 @@ export const serviceAvailability = async ({ user, serviceId, from, to, supabase 
     dates,
     unavailableDates: [...blackoutDates],
     availability: evaluateAvailability(service, schedules, blackoutDates, now),
-    available: dates.length > 0,
+    registrationCapacity: service.registration_capacity ?? null,
+    registrationCount,
+    registrationRemaining: service.registration_capacity == null ? null : Math.max(0, service.registration_capacity - registrationCount),
+    registrationFull,
+    available: dates.length > 0 && !registrationFull,
   };
 };
 
@@ -704,6 +744,9 @@ export const createPlan = async ({ user, serviceId, plannedDate, note = '', supa
     })
     .select('*')
     .single();
+  if (error?.message?.includes('HEALTH_SERVICE_REGISTRATION_CAPACITY_REACHED')) {
+    throw ApiError.conflict('This health service has reached its maximum resident registration capacity.');
+  }
   throwOnError(error, 'Could not save your visit plan');
 
   await notifyBarangayHealthWorker(supabase, resident, { serviceName: service.name, plannedDate: iso }).catch(() => {});

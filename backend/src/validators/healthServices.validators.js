@@ -81,6 +81,17 @@ export const createServiceValidator = (input = {}) => {
   const endDateRaw = text(input?.endDate || input?.end_date);
   const endTime = text(input?.endTime || input?.end_time);
   const registrationDeadline = text(input?.registrationDeadline || input?.registration_deadline);
+  const registrationCapacityRaw = input?.registrationCapacity ?? input?.registration_capacity;
+  const registrationCapacityText = text(registrationCapacityRaw);
+  let registrationCapacity = null;
+  if (registrationCapacityText !== '') {
+    const parsedCapacity = Number(registrationCapacityText);
+    if (!Number.isSafeInteger(parsedCapacity) || parsedCapacity < 1 || parsedCapacity > 1000000) {
+      errors.registrationCapacity = 'Enter a whole number from 1 to 1,000,000.';
+    } else {
+      registrationCapacity = parsedCapacity;
+    }
+  }
 
   if (!startDate) errors.startDate = 'A start date is required.';
   else if (!isDateOnly(startDate)) errors.startDate = 'Enter a valid start date.';
@@ -122,6 +133,7 @@ export const createServiceValidator = (input = {}) => {
     endDate,
     endTime,
     registrationDeadline: registrationDeadline || null,
+    registrationCapacity,
     active: input?.active === false ? false : true,
   });
 };
@@ -141,7 +153,7 @@ const CONTENT_KEYS = [
   'personnelIds',
   'startDate', 'start_date', 'startTime', 'start_time',
   'endDate', 'end_date', 'endTime', 'end_time',
-  'registrationDeadline', 'registration_deadline',
+  'registrationDeadline', 'registration_deadline', 'registrationCapacity', 'registration_capacity',
 ];
 
 const hasActiveFlag = (input) =>
