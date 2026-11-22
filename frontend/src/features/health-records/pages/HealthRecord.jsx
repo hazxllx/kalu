@@ -26,7 +26,7 @@ function ServiceRecordDetail({ label, value }) {
   return (
     <div className="min-w-0">
       <p className="text-xs font-medium uppercase tracking-wide text-brand-gray">{label}</p>
-      <p className="mt-1 whitespace-pre-line break-words text-brand-ink">{value}</p>
+      <p className="mt-1 whitespace-pre-line break-words text-sm text-brand-ink">{value}</p>
     </div>
   );
 }
@@ -406,7 +406,7 @@ export default function HealthRecord() {
     <section aria-labelledby="health-service-history-title">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="health-service-history-title" className="text-lg font-semibold text-brand-ink">Health Service History</h2>
+          <h2 id="health-service-history-title" className="text-lg font-semibold leading-6 text-brand-ink">Health Service History</h2>
           <p className="mt-1 text-sm text-brand-gray">Services delivered to you through health programs and scheduled services.</p>
         </div>
         <p className="text-sm text-brand-gray">{healthServiceRecords.length} completed service{healthServiceRecords.length === 1 ? "" : "s"}</p>
@@ -420,7 +420,7 @@ export default function HealthRecord() {
               <Card key={record.id} className="overflow-hidden p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-brand-border pb-3 dark:border-border">
                   <div>
-                    <h3 className="font-semibold text-brand-ink">{record.serviceName}</h3>
+                    <h3 className="text-base font-semibold leading-5 text-brand-ink">{record.serviceName}</h3>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-brand-gray">
                       {record.serviceCategory && <span className="rounded-full bg-brand-bg px-2.5 py-1">{record.serviceCategory}</span>}
                       <span>{formatDate(record.date)}</span>
@@ -721,8 +721,8 @@ export default function HealthRecord() {
                 ["Sex", resident?.sex],
               ].map(([label, value]) => (
                 <div key={label} className="min-w-0">
-                  <p className="font-mono text-[9px] uppercase tracking-[0.13em] text-brand-gray">{label}</p>
-                  <p className="mt-1.5 min-w-0 break-words text-[13px] text-brand-ink">{dash(value)}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-brand-gray">{label}</p>
+                  <p className="mt-1.5 min-w-0 break-words text-sm font-medium text-brand-ink">{dash(value)}</p>
                 </div>
               ))}
               <div>
@@ -764,7 +764,7 @@ export default function HealthRecord() {
           {activeTab === "consultations" ? renderConsultationHistory() : activeTab === "service-history" ? renderHealthServiceHistory() : (
             <>
               <div className="mb-2 flex items-center gap-2">
-                <h3 className="text-base font-semibold text-brand-ink">
+                <h3 className="text-lg font-semibold leading-6 text-brand-ink">
                   Latest Vitals{latestRecord?.consultations?.length ? ` — ${formatDate(latestRecord.consultations[0].date)}` : ""}
                 </h3>
               </div>
@@ -774,9 +774,9 @@ export default function HealthRecord() {
                 ) : (
                   latestVitals.map((v) => (
                     <Card key={v.label} className="rounded-lg p-4 shadow-none">
-                      <p className="text-xs text-brand-gray">{v.label}</p>
-                      <p className="font-stat font-bold text-brand-ink text-lg">
-                        {v.value} {v.unit && <span className="text-xs font-normal text-brand-gray">{v.unit}</span>}
+                      <p className="text-sm text-brand-gray">{v.label}</p>
+                      <p className="font-sans text-lg font-bold text-brand-ink">
+                        {v.value} {v.unit && <span className="text-sm font-normal text-brand-gray">{v.unit}</span>}
                       </p>
                     </Card>
                   ))
@@ -785,7 +785,7 @@ export default function HealthRecord() {
 
               <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
                 <Card className="rounded-lg p-5 shadow-none">
-                  <h3 className="font-semibold text-brand-ink mb-4">Medical History & Allergies</h3>
+                  <h3 className="mb-4 text-base font-semibold leading-5 text-brand-ink">Medical History & Allergies</h3>
                   <div className="space-y-3 text-sm">
                     <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Chronic Conditions</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.chronicConditions || "—"}</span></div>
                     <div className="flex justify-between border-b border-brand-border pb-3"><span className="text-brand-gray">Allergies</span><span className="text-brand-ink font-medium">{MEDICAL_HISTORY.allergies || "—"}</span></div>
@@ -797,7 +797,7 @@ export default function HealthRecord() {
                 </Card>
 
                 <Card className="rounded-lg p-5 shadow-none">
-                  <h3 className="font-semibold text-brand-ink mb-4">Vaccinations</h3>
+                  <h3 className="mb-4 text-base font-semibold leading-5 text-brand-ink">Vaccinations</h3>
                   <div className="space-y-3">
                     {!latestRecord?.vaccinations?.length ? (
                       <p className="text-sm text-brand-gray">No vaccinations recorded yet.</p>
@@ -819,7 +819,7 @@ export default function HealthRecord() {
 
               <Card className="mt-5 rounded-lg p-5 shadow-none">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                  <div><h3 className="font-display text-lg text-brand-ink">Health timeline</h3><p className="mt-1 text-xs text-brand-gray">Consultations, referrals, and follow-ups, newest first.</p></div>
+                  <div><h3 className="text-lg font-semibold leading-6 text-brand-ink">Health timeline</h3><p className="mt-1 text-sm text-brand-gray">Consultations, referrals, and follow-ups, newest first.</p></div>
                   <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter health timeline">
                     {[['all','All Records'],['consultations','Consultations'],['referrals','Referrals'],['follow-ups','Follow-Ups']].map(([value,label]) => <button key={value} type="button" onClick={() => setHistoryTypeFilter(value)} aria-pressed={historyTypeFilter === value} className={`rounded-full border px-3 py-1.5 text-xs font-medium ${historyTypeFilter === value ? 'border-brand-blue bg-brand-blue text-white' : 'border-brand-border text-brand-gray hover:text-brand-ink'}`}>{label}</button>)}
                   </div>

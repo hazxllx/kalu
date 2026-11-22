@@ -1,15 +1,18 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   ArrowRight, Bell, CalendarClock, CheckCircle2, FileHeart, Lock,
-  Settings, ShieldCheck, Stethoscope, UserRound,
+  Settings, ShieldCheck, UserRound,
 } from "lucide-react";
 import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import { useAuth } from "@/context/AuthContext";
+import { visitPlansApi } from "@/services/api";
+import ResidentServiceCard from "@/features/dashboards/components/ResidentServiceCard";
+
+const HEALTH_SERVICES_PATH = "/app/resident-limited/services";
 
 const AVAILABLE = [
-  { icon: Stethoscope, label: "Barangay health services", desc: "See programs and services offered by your Barangay Health Center.", path: "/app/resident-limited/services", tone: "bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-300" },
   { icon: Bell, label: "Notifications", desc: "Read community updates and account notices.", path: "/app/resident-limited/announcements", tone: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
   { icon: UserRound, label: "My profile", desc: "Review your information and update your contact number.", path: "/app/resident-limited/profile", tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" },
   { icon: Settings, label: "Settings", desc: "Manage your password and display preferences.", path: "/app/resident-limited/settings", tone: "bg-slate-100 text-slate-700 dark:bg-slate-700/50 dark:text-slate-200" },
@@ -29,6 +32,26 @@ const cardMotion = (index) => ({
 export default function LimitedResidentDashboard() {
   const { user } = useAuth();
   const first = (user?.name || "Resident").trim().split(/\s+/)[0];
+  const [servicesState, setServicesState] = useState("loading");
+  const [services, setServices] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    visitPlansApi.directory()
+      .then((result) => {
+        if (!active) return;
+        const barangayServices = (result?.facilities || [])
+          .filter((facility) => facility.type === "BHC")
+          .flatMap((facility) => (facility.services || []).map((service) => ({
+            ...service,
+            facilityName: service.facilityName || facility.name,
+          })));
+        setServices(barangayServices);
+        setServicesState("ready");
+      })
+      .catch(() => active && setServicesState("error"));
+    return () => { active = false; };
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-[1120px] space-y-5 sm:space-y-6">
@@ -49,6 +72,33 @@ export default function LimitedResidentDashboard() {
 
       <TransferStatusBanner />
 
+      <section aria-labelledby="pending-services-title" className="rounded-2xl border border-brand-border bg-white p-4 shadow-sm dark:bg-card sm:p-5 lg:p-6">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-blue dark:text-blue-300">From your barangay</p>
+            <h2 id="pending-services-title" className="mt-1 text-base font-semibold text-brand-ink dark:text-foreground sm:text-lg">Health services</h2>
+            <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Browse services offered by your Barangay Health Center.</p>
+          </div>
+          <Link to={HEALTH_SERVICES_PATH} className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-brand-border px-3 py-2 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:text-blue-300 dark:hover:bg-blue-400/10">
+            View more <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </div>
+
+        {servicesState === "loading" ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Loading health services">
+            {[0, 1, 2].map((item) => <div key={item} className="flex gap-3 rounded-xl border border-brand-border p-3 dark:border-border"><div className="h-[76px] w-[60px] shrink-0 animate-pulse rounded-lg bg-brand-bg dark:bg-muted" /><div className="flex-1 space-y-2 py-1"><div className="h-4 w-3/4 animate-pulse rounded bg-brand-bg dark:bg-muted" /><div className="h-3 w-1/2 animate-pulse rounded bg-brand-bg dark:bg-muted" /></div></div>)}
+          </div>
+        ) : servicesState === "error" ? (
+          <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">Health services could not be loaded. Open the directory to try again.</p>
+        ) : services.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-brand-border px-4 py-6 text-center text-sm text-brand-gray dark:border-border dark:text-muted-foreground">No health services are currently listed for your barangay.</p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {services.slice(0, 3).map((service) => <ResidentServiceCard key={service.id} service={service} to={HEALTH_SERVICES_PATH} />)}
+          </div>
+        )}
+      </section>
+
       <section aria-labelledby="available-title">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -56,7 +106,7 @@ export default function LimitedResidentDashboard() {
             <p className="mt-0.5 text-sm text-brand-gray dark:text-muted-foreground">Your active account features.</p>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 sm:gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 sm:gap-4">
           {AVAILABLE.map((item, index) => (
             <motion.div key={item.label} {...cardMotion(index)}>
               <Link to={item.path} className="group flex h-full min-h-[158px] flex-col rounded-xl border border-brand-border bg-white p-4 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-brand-blue/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:bg-card dark:hover:border-brand-blue/60 sm:p-5">

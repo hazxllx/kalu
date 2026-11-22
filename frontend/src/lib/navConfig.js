@@ -48,7 +48,15 @@ export const NAV = {
       path: "/app/resident-limited/services",
     },
     {
-      label: "Follow-ups",
+      // Pending residents can see where these features will be, but they stay
+      // locked until the account is verified.
+      label: "Health Records",
+      icon: "FileHeart",
+      path: "#",
+      locked: true,
+    },
+    {
+      label: "Follow-up",
       icon: "CalendarClock",
       path: "#",
       locked: true,
@@ -65,19 +73,13 @@ export const NAV = {
       label: "Profile",
       icon: "User",
       path: "/app/resident-limited/profile",
+      group: "Account",
     },
     {
       label: "Settings",
       icon: "Settings",
       path: "/app/resident-limited/settings",
-    },
-    {
-      // Consultation history is consolidated into "My Health Records" (a tab
-      // inside that page). Unlocks once the resident is verified.
-      label: "My Health Records",
-      icon: "FileHeart",
-      path: "#",
-      locked: true,
+      group: "Account",
     },
   ],
 

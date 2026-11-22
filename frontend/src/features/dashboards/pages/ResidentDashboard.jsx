@@ -4,9 +4,9 @@ import { ArrowRight } from "lucide-react";
 import PageHeader from "@/components/common/PageHeader";
 import TransferStatusBanner from "@/features/verification/components/TransferStatusBanner";
 import ResidentHealthSnapshot from "@/features/dashboards/components/ResidentHealthSnapshot";
+import ResidentServiceCard from "@/features/dashboards/components/ResidentServiceCard";
 import { residentsApi, residentFollowUpsApi, referralsApi, visitPlansApi } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
-import { availabilityLine, formatServiceSchedule, formatWeekdays, formatWindow, formatDeadline } from "@/features/health-services/lib/visitPlanFormat";
 import { manilaDateKey } from "@/features/follow-ups/lib/scheduleDates";
 import { getResidentFollowUpPresentation } from "@/features/follow-ups/lib/residentFollowUpPresentation";
 
@@ -23,52 +23,6 @@ const todayIso = () => manilaDateKey();
 // truth for registration. Dashboard cards deep-link here so the resident can see
 // requirements, schedule and deadline, then register.
 const HEALTH_SERVICES_PATH = "/app/resident/health-services";
-
-const STATE_STYLES = {
-  Registered: "bg-brand-blue/10 text-brand-blue",
-  Attended: "bg-brand-green/10 text-brand-green",
-  Missed: "bg-brand-danger/10 text-brand-danger",
-  Cancelled: "bg-slate-100 text-slate-500",
-  Available: "bg-brand-green/10 text-brand-green",
-  Upcoming: "bg-brand-yellow/15 text-[#B07E00]",
-  Closed: "bg-slate-100 text-slate-500",
-};
-
-/**
- * Derive the resident-facing state of one service from the authoritative backend
- * fields only. A resident's own plan status wins; otherwise the server's
- * `availability` result decides open/closed. "Upcoming" is shown when the service
- * is open but its configured start date is still in the future. Nothing here is
- * inferred from the service name, and capacity/"Full" is never fabricated (the
- * visit-plan model tracks no capacity).
- */
-const deriveServiceState = (svc) => {
-  const planStatus = svc?.plan?.status || null;
-  if (planStatus) {
-    return { label: planStatus, tone: STATE_STYLES[planStatus] || STATE_STYLES.Registered, note: "" };
-  }
-  const avail = availabilityLine(svc);
-  if (avail.open) {
-    const start = svc?.schedule?.startDate;
-    const upcoming = start && start > todayIso();
-    return {
-      label: upcoming ? "Upcoming" : "Available",
-      tone: upcoming ? STATE_STYLES.Upcoming : STATE_STYLES.Available,
-      note: avail.text,
-    };
-  }
-  return { label: "Closed", tone: STATE_STYLES.Closed, note: avail.text };
-};
-
-/** One-line schedule summary from the real configured fields, or "". */
-const scheduleSummary = (svc) => {
-  const dated = formatServiceSchedule(svc?.schedule);
-  if (dated) return dated;
-  const days = formatWeekdays(svc?.weekdays || []);
-  const window = formatWindow(svc?.windowStart, svc?.windowEnd);
-  if (days && window) return `${days} · ${window}`;
-  return days || window || "";
-};
 
 export default function ResidentDashboard() {
   const { user } = useAuth();
@@ -191,7 +145,7 @@ export default function ResidentDashboard() {
   }, [health, followUps, referrals]);
 
   return (
-    <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
+    <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 sm:gap-6">
       <PageHeader
         crumbs={["Dashboard"]}
         title={`Welcome back, ${first}`}
@@ -216,99 +170,51 @@ export default function ResidentDashboard() {
 
       <TransferStatusBanner />
 
-      <section className="flex flex-col gap-4">
+      <section aria-labelledby="resident-services-title" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-brand-gray">Ongoing health services</p>
-            <h2 className="mt-1.5 font-display text-xl leading-tight text-brand-ink sm:text-2xl">Services available to your barangay</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-gray dark:text-muted-foreground">Ongoing health services</p>
+            <h2 id="resident-services-title" className="mt-1 font-display text-lg font-semibold leading-tight text-brand-ink dark:text-foreground sm:text-xl">Services available to your barangay</h2>
           </div>
           {services && services.length > 0 && (
             <Link
               to={HEALTH_SERVICES_PATH}
-              className="hidden sm:inline-flex items-center gap-1 text-sm font-medium text-brand-blue hover:underline shrink-0"
+              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-brand-border px-3 py-2 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue dark:border-border dark:text-blue-300 dark:hover:bg-blue-400/10"
             >
-              View all <ArrowRight className="w-4 h-4" strokeWidth={1.8} />
+              View all <ArrowRight className="h-4 w-4" strokeWidth={1.8} />
             </Link>
           )}
         </div>
 
         {loading && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
             {[0, 1, 2].map((item) => <div key={item} className="aspect-[4/5] animate-pulse rounded-lg bg-brand-light" />)}
           </div>
         )}
 
         {!loading && servicesError && (
-          <p className="rounded-lg border border-brand-border bg-white px-5 py-6 text-center text-sm text-brand-gray">
+          <p className="rounded-lg border border-brand-border bg-white px-5 py-6 text-center text-sm text-brand-gray dark:border-border dark:bg-card dark:text-muted-foreground">
             We couldn't load your health services right now. Please refresh to try again.
           </p>
         )}
 
         {!loading && !servicesError && services && services.length === 0 && (
-          <div className="rounded-lg border border-dashed border-brand-border bg-white px-5 py-8 text-center">
-            <p className="text-sm font-medium text-brand-ink">
+          <div className="rounded-lg border border-dashed border-brand-border bg-white px-5 py-8 text-center dark:border-border dark:bg-card">
+            <p className="text-sm font-medium text-brand-ink dark:text-foreground">
               No health services are currently available for your barangay.
             </p>
-            <p className="mt-1 text-sm text-brand-gray">Please check again later for upcoming services.</p>
+            <p className="mt-1 text-sm text-brand-gray dark:text-muted-foreground">Please check again later for upcoming services.</p>
           </div>
         )}
 
         {!loading && !servicesError && services && services.length > 0 && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
             {services.map((service) => (
-              <ResidentServicePoster key={service.id} service={service} />
+              <ResidentServiceCard key={service.id} service={service} to={HEALTH_SERVICES_PATH} />
             ))}
           </div>
         )}
       </section>
     </div>
-  );
-}
-
-function ResidentServicePoster({ service }) {
-  const state = deriveServiceState(service);
-  const schedule = scheduleSummary(service);
-  const deadline = formatDeadline(service?.schedule?.registrationDeadline);
-
-  return (
-    <Link
-      to={HEALTH_SERVICES_PATH}
-      className="group block overflow-hidden rounded-lg border border-brand-border bg-white transition-colors hover:border-brand-blue/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
-    >
-      <div className="relative aspect-[4/5] overflow-hidden bg-brand-dark">
-        {service.pubmatUrl ? (
-          <img
-            src={service.pubmatUrl}
-            alt={`${service.name} service poster`}
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-          />
-        ) : (
-          <div className="grid h-full place-items-center bg-gradient-to-br from-brand-blue to-brand-dark">
-          </div>
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-brand-dark via-brand-dark/45 to-transparent" />
-        <span className={`absolute left-3 top-3 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${state.tone}`}>
-          {state.label}
-        </span>
-        <div className="absolute inset-x-4 bottom-4">
-          {service.category && <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-brand-gold">{service.category}</p>}
-          <h3 className="mt-1 font-display text-lg leading-snug text-white">{service.name}</h3>
-          <p className="mt-1 truncate font-mono text-[9px] uppercase tracking-[0.08em] text-white/70">{service.facilityName}</p>
-          {schedule && <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-white/55">{schedule}</p>}
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-brand-gray">
-        <span className="inline-flex min-w-0 items-center gap-1.5">
-          <span className="truncate">{service.facilityName || "Health service"}</span>
-        </span>
-        {deadline && (
-          <span className="inline-flex items-center gap-1.5">
-            <span>Register by {deadline}</span>
-          </span>
-        )}
-        {!schedule && !deadline && state.note && <span>{state.note}</span>}
-      </div>
-    </Link>
   );
 }

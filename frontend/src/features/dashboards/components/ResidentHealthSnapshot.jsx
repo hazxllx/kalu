@@ -23,10 +23,10 @@ function CompactMetric({ label, value, unit, title }) {
   const hasValue = value !== null && value !== undefined && value !== "";
   return (
     <div className="min-w-0" title={title}>
-      <span className="block truncate font-mono text-[10px] uppercase tracking-[0.1em] text-sky-100/65">{label}</span>
-      <span className="mt-1 block truncate font-mono text-base font-medium leading-none text-white">
+      <span className="block truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-sky-100/65">{label}</span>
+      <span className="mt-1 block truncate text-base font-semibold leading-none text-white">
         {hasValue ? value : "—"}
-        {unit && hasValue && <span className="ml-1 text-[10px] font-normal text-sky-100/60">{unit}</span>}
+        {unit && hasValue && <span className="ml-1 text-xs font-normal text-sky-100/60">{unit}</span>}
       </span>
     </div>
   );
@@ -75,17 +75,17 @@ export default function ResidentHealthSnapshot({
       <div className="relative flex flex-col gap-3 p-3 sm:p-4">
         <header className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-mono text-[9px] uppercase tracking-[0.15em] text-sky-100/60">Resident health</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-100/60">Resident health</p>
             <h2 className="mt-0.5 font-display text-lg leading-tight text-white sm:text-xl">Health snapshot</h2>
           </div>
-          <span className="hidden shrink-0 font-mono text-[9px] uppercase tracking-[0.1em] text-sky-100/50 sm:block">
+          <span className="hidden shrink-0 text-[11px] font-medium tracking-wide text-sky-100/60 sm:block">
             Personal health record
           </span>
         </header>
 
         <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(290px,0.9fr)] sm:items-center sm:px-4">
           <div className="min-w-0">
-            <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-sky-100/60">
+            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-sky-100/65">
               {loading
                 ? "Latest visit · loading"
                 : healthError
@@ -113,12 +113,12 @@ export default function ResidentHealthSnapshot({
 
         <section aria-labelledby="resident-recent-activity" className="px-0.5">
           <header className="mb-1.5 flex items-center justify-between gap-3">
-            <h3 id="resident-recent-activity" className="font-mono text-[10px] uppercase tracking-[0.13em] text-white/75">
+            <h3 id="resident-recent-activity" className="text-[11px] font-semibold uppercase tracking-[0.1em] text-white/75">
               Recent health activity
             </h3>
             <Link
               to="/app/resident/record"
-              className="shrink-0 text-[11px] font-medium text-brand-gold transition-colors hover:text-white"
+              className="shrink-0 text-xs font-semibold text-brand-gold transition-colors hover:text-white"
             >
               View full history <span aria-hidden="true">→</span>
             </Link>
@@ -133,14 +133,14 @@ export default function ResidentHealthSnapshot({
                   key={`${item.type}-${item.date}-${index}`}
                   className="grid grid-cols-[112px_minmax(0,1fr)_auto] items-center gap-2 border-t border-white/10 py-2 sm:grid-cols-[148px_minmax(0,1fr)_auto] sm:gap-3"
                 >
-                  <span className={`inline-flex min-w-0 items-center gap-1.5 truncate font-mono text-[10px] uppercase tracking-[0.08em] ${tone.label}`}>
+                  <span className={`inline-flex min-w-0 items-center gap-1.5 truncate text-[11px] font-medium uppercase tracking-[0.04em] ${tone.label}`}>
                     <i className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
                     {item.type}
                   </span>
                   <span className="min-w-0 truncate text-xs text-white/90">
                     {[item.title, item.desc].filter(Boolean).join(" · ") || "Activity recorded"}
                   </span>
-                  <time dateTime={String(item.date).slice(0, 10)} className="whitespace-nowrap text-right font-mono text-[10px] text-sky-100/55">
+                  <time dateTime={String(item.date).slice(0, 10)} className="whitespace-nowrap text-right text-[11px] text-sky-100/60">
                     {formatShortDate(item.date)}
                   </time>
                 </li>
